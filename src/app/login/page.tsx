@@ -134,7 +134,7 @@ export default function LoginPage() {
 
         <div className="relative min-h-[280px] flex-1 overflow-hidden rounded-xl lg:min-h-[640px]">
           <Image
-            src="/leaf.png"
+            src="/leaf.jpg"
             alt=""
             fill
             priority

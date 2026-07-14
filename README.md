@@ -54,7 +54,7 @@ git config --global core.autocrlf input
 ### 4. Get the code
 
 ```bash
-git clone <REPO_URL>
+git clone https://github.com/bashirbobboi/180Connect.git
 cd 180Connect
 npm install
 ```

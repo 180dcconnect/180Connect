@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 
-export default function LoginPage() {
+export default function LoginPage() {  
   return (
     <main className="flex flex-1 items-center justify-center bg-[#f1f2f4] p-4 sm:p-8">
       <div className="flex w-full max-w-6xl flex-col gap-6 rounded-2xl bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_12px_40px_rgba(0,0,0,0.06)] lg:flex-row lg:p-5">

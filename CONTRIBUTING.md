@@ -127,7 +127,7 @@ A pull request (PR) is how you ask for your branch to be merged into `dev`. Open
 3. **Check the base branch** at the top: it must read `base: dev`. GitHub often defaults it to `main` — change it if so.
 4. The description is pre-filled from our template. Fill in each section and tick the checklist.
 5. Click **Create pull request**.
-6. On the right, under **Reviewers**, request a teammate (not yourself — GitHub won't let you approve your own PR anyway).
+6. On the right, under **Reviewers**, request a teammate (not yourself — our process requires an approval from someone other than the author).
 
 Now the review starts. A few rules for what makes a good PR:
 

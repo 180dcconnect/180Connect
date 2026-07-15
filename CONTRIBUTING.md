@@ -90,6 +90,17 @@ Not `updated stuff` or `changes`. If the *why* isn't obvious from the subject li
 
 ## Pull requests
 
+A pull request (PR) is how you ask for your branch to be merged into `dev`. Opening one, step by step:
+
+1. Push your branch (`git push -u origin <branch>`, as above).
+2. Go to the repo on [github.com](https://github.com/bashirbobboi/180Connect). A yellow banner **"Compare & pull request"** appears for the branch you just pushed — click it. (No banner? Open the **Pull requests** tab → **New pull request**.)
+3. **Check the base branch** at the top: it must read `base: dev`. GitHub often defaults it to `main` — change it if so.
+4. The description is pre-filled from our template. Fill in each section and tick the checklist.
+5. Click **Create pull request**.
+6. On the right, under **Reviewers**, request a teammate (not yourself — GitHub won't let you approve your own PR anyway).
+
+Now the review starts. A few rules for what makes a good PR:
+
 Keep them small — one feature or one fix. A PR that touches thirty files is a PR nobody reviews properly.
 
 In the description, say what changed and how to check it. If it's a UI change, attach a screenshot.

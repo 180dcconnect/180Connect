@@ -56,12 +56,14 @@ git push -u origin feature/F001-client-profile
 
 Open the pull request **into `dev`** — GitHub sometimes defaults the base to `main`, so check it. Ask someone to review. Once approved it gets squash-merged and the branch is deleted automatically.
 
-If `dev` has moved on while you were working, rebase onto it before asking for review:
+If `dev` has moved on while you were working, merge it into your branch before asking for review:
 
 ```bash
 git fetch origin
-git rebase origin/dev
+git merge origin/dev
 ```
+
+This keeps you current with `dev` without rewriting your history, so a normal `git push` works and you never need to force-push.
 
 ## Commits
 
@@ -79,6 +81,10 @@ Not `updated stuff` or `changes`. If the *why* isn't obvious from the subject li
 Keep them small — one feature or one fix. A PR that touches thirty files is a PR nobody reviews properly.
 
 In the description, say what changed and how to check it. If it's a UI change, attach a screenshot.
+
+Link the issue you're closing (e.g. `Closes #123`), and note which of the issue's acceptance criteria you've addressed.
+
+Before you open it, check your work against the **Definition of Done**, which lives in its own doc (backlog item **F240**) — that's the bar a reviewer holds you to.
 
 ## Reviewing
 

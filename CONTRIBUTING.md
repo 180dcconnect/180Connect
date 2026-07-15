@@ -52,7 +52,16 @@ git fetch origin
 git checkout feature/F001-client-profile
 ```
 
-Work, commit, and before you push:
+Make your changes, then save them as a **commit** — a labelled snapshot of your work:
+
+```bash
+git add -A                          # stage every file you changed
+git commit -m "add client profile page"
+```
+
+Commit as often as you like; each one is a checkpoint you can go back to. See [Commits](#commits) below for how to word the message.
+
+Before you push, run the three checks:
 
 ```bash
 npm run lint
@@ -60,7 +69,9 @@ npx tsc --noEmit
 npm run build      # catches errors the dev server tolerates
 ```
 
-Then:
+If any of them reports an error, fix it before pushing — don't open a PR on red. A teammate can't review code that doesn't build.
+
+Then send your branch up to GitHub:
 
 ```bash
 git push -u origin feature/F001-client-profile
@@ -76,6 +87,25 @@ git merge origin/dev
 ```
 
 This keeps you current with `dev` without rewriting your history, so a normal `git push` works and you never need to force-push.
+
+**If the merge reports a conflict**, it means you and someone else changed the same lines. Git pauses and marks the spots in your files like this:
+
+```
+<<<<<<< HEAD
+your version
+=======
+their version
+>>>>>>> origin/dev
+```
+
+Edit each marked file to the version you want, delete the `<<<<<<<`, `=======`, and `>>>>>>>` marker lines, then:
+
+```bash
+git add -A
+git commit             # finishes the merge
+```
+
+Not sure which version is right? **Ask in the team chat before guessing** — and never run `git push --force` to make a conflict "go away." That overwrites other people's work. Nothing you do in a normal merge is unrecoverable as long as you don't force-push.
 
 ## Commits
 

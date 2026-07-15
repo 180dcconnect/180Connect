@@ -104,6 +104,10 @@ Someone is waiting on you, so pick reviews up quickly. Pull the branch and actua
 
 Say what needs to change and why. "This breaks when the email is empty" is a review comment; "I don't like this" is not.
 
+When you get feedback, push the fixes to the **same branch** — the PR updates itself — then re-request review from the same person. Don't open a new PR.
+
+Once you have the one approval, **the author merges** (squash into `dev`) and confirms the branch is deleted. The reviewer approves; they don't merge for you.
+
 ## Releases
 
 Once a week, `dev` is merged into `main` and tagged (`v0.1`, `v0.2`, …). Only the project lead does this merge.

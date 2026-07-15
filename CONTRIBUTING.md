@@ -40,6 +40,18 @@ git pull
 git checkout -b feature/F001-client-profile
 ```
 
+Prefer starting from the issue? You can create the branch straight from a GitHub issue or Project card — **Development → Create a branch**. It links the branch to the issue, so your PR closes it automatically. Fix two things in the dialog before confirming:
+
+- **Change the source from `main` to `dev`** — it defaults to `main`.
+- **Rename** to match convention: `feature/F001-…`, not the auto-generated `123-…`.
+
+Then check it out locally and carry on as normal:
+
+```bash
+git fetch origin
+git checkout feature/F001-client-profile
+```
+
 Work, commit, and before you push:
 
 ```bash

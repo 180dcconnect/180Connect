@@ -1,6 +1,6 @@
 <!--
 Base branch should be `dev`, not `main`. GitHub sometimes defaults to `main` — check it.
-New to the project? Read CONTRIBUTING.md first: ../CONTRIBUTING.md
+New to the project? Read CONTRIBUTING.md first: /CONTRIBUTING.md
 -->
 
 ## What changed

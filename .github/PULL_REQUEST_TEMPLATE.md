@@ -17,4 +17,4 @@ New to the project? Read CONTRIBUTING.md first: /CONTRIBUTING.md
 - [ ] Branch named `feature/`, `fix/`, or `chore/` (+ backlog ID where it maps to one)
 - [ ] `npm run lint`, `npx tsc --noEmit`, and `npm run build` all pass
 - [ ] PR is small — one feature or one fix
-- [ ] Followed [CONTRIBUTING.md](../CONTRIBUTING.md)
+- [ ] Followed [CONTRIBUTING.md](/CONTRIBUTING.md)

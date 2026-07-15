@@ -137,7 +137,7 @@ In the description, say what changed and how to check it. If it's a UI change, a
 
 Link the issue you're closing (e.g. `Closes #123`), and note which of the issue's acceptance criteria you've addressed.
 
-Before you open it, check your work against the **Definition of Done**, which lives in its own doc (backlog item **F240**) — that's the bar a reviewer holds you to.
+Before you open it, check your work against the **Definition of Done** checklist (backlog item **F240**) — that's the bar a reviewer holds you to.
 
 ## Reviewing
 

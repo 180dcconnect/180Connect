@@ -1,0 +1,4 @@
+# Synthetic credential — NOT REAL. Verifies .github/workflows/secret-scan.yml
+# detects leaks. This branch and its PR are deleted immediately after the check.
+aws_access_key_id = AKIA2E0A8F3B244C9986
+aws_secret_access_key = wJalrXUtnFEMI9K7MDENGbPxRfiCYzEXAMPLEKEY9

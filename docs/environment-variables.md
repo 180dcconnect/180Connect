@@ -308,6 +308,56 @@ const supabase = createClient(supabaseUrl, serviceKey);
 
 ---
 
+## Startup Validation (`src/lib/env.ts`)
+
+Environment variables are validated once, on server startup, before any request
+is handled. `src/instrumentation.ts` calls `assertEnv()`; if a required variable
+is missing or malformed the server stops with every problem listed at once:
+
+```
+Environment is not configured correctly (1 problem):
+  - NEXT_PUBLIC_APP_URL is required but not set
+
+Copy .env.example to .env.local and fill in the values.
+See docs/environment-variables.md for what each variable is and where to get it.
+```
+
+This is deliberate. The alternative — `undefined` flowing into a fetch URL or a
+database client — produces a confusing failure much further from the cause.
+
+Error messages report the variable **name** and what is wrong with it. They
+never include the value, so a malformed secret cannot leak into a log or a
+deployment output.
+
+### The three places a variable exists
+
+| Place | What it is | Committed? |
+| --- | --- | --- |
+| `src/lib/env.ts` | The schema — single source of truth for what exists, what is required, and what counts as a valid value | Yes |
+| `.env.example` | The documented list, with a comment per variable and where to get the value | Yes (no real values) |
+| `.env.local` | Your actual local values | **No** — gitignored |
+
+Adding a variable means editing the first two. If you only edit `.env.local`,
+it works on your machine and nowhere else.
+
+### Marking a variable required
+
+Variables for features that have not been built yet are declared with
+`required: false`, so the app still starts. When you merge the feature that
+consumes one, flip it to `required: true` in `src/lib/env.ts` and move it under
+the required heading in `.env.example` — in the same pull request, so nobody
+deploys the feature without its configuration.
+
+### Reading `NEXT_PUBLIC_` variables
+
+Because `NEXT_PUBLIC_` variables are substituted textually at build time, they
+must be read with static property access — `process.env.NEXT_PUBLIC_APP_URL`.
+A dynamic lookup like `process.env[name]` is not replaced and reads as
+`undefined` in the browser. This is why the `env` object at the bottom of
+`src/lib/env.ts` spells each one out rather than looping over the schema.
+
+---
+
 ## Related Files
 
 - [Staging Environment Setup](staging-environment-setup.md) — Architecture & migration workflow

@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { LoginForm } from "./login-form";
 
 export default function LoginPage() {
   return (
@@ -26,50 +27,7 @@ export default function LoginPage() {
               Enter your details to log in.
             </p>
 
-            <form className="mt-8 flex flex-col gap-4">
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="email" className="text-xs font-bold">
-                  Email address
-                </label>
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  placeholder="Enter your email address"
-                  className="h-10 rounded-lg border border-black/10 bg-[#fafafa] px-3 text-sm outline-none transition-colors placeholder:text-foreground/35 focus-visible:border-brand focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-brand/20"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-baseline justify-between">
-                  <label htmlFor="password" className="text-xs font-bold">
-                    Password
-                  </label>
-                  <Link
-                    href="/forgot-password"
-                    className="text-xs text-foreground/50 underline-offset-4 hover:text-brand hover:underline"
-                  >
-                    Forgot password?
-                  </Link>
-                </div>
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  autoComplete="current-password"
-                  placeholder="Enter your password"
-                  className="h-10 rounded-lg border border-black/10 bg-[#fafafa] px-3 text-sm outline-none transition-colors placeholder:text-foreground/35 focus-visible:border-brand focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-brand/20"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="mt-2 h-10 rounded-full bg-brand text-sm font-bold text-white transition-colors hover:bg-brand-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-              >
-                Log in
-              </button>
-            </form>
+            <LoginForm />
 
             <div className="my-6 flex items-center gap-3">
               <span className="h-px flex-1 bg-black/10" />

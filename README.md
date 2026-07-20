@@ -68,7 +68,8 @@ Secrets (API keys, database URLs) live in a file called `.env.local`, which is *
 ```bash
 # .env.local
 NEXT_PUBLIC_SUPABASE_URL=...
-NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
+AUTH_ALLOWED_EMAIL_DOMAIN=180dc.org
 ```
 
 Never paste these into a chat channel, a commit, or a screenshot.

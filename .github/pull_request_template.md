@@ -1,0 +1,11 @@
+## Definition of Done
+- [ ] Works end-to-end in staging as part of the full flow — not tested as an isolated component.
+- [ ] Reviewed and approved by someone who did not write it.
+- [ ] Demonstrated live during the sprint demo.
+- [ ] Any database writes follow the approved schema.
+- [ ] Any schema change includes a migration and an updated data model / data dictionary.
+- [ ] Any outreach feature proves that sending is impossible without explicit human approval.
+- [ ] Every failure is visible and recorded in ERROR_LOG.
+- [ ] Every new external API call writes to API_HEALTH_LOGS.
+- [ ] Tests cover the main success path and important failure / permission paths.
+- [ ] User-facing errors are clear and do not expose stack traces or secrets.

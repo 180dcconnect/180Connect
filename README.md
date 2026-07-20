@@ -73,6 +73,29 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 
 Never paste these into a chat channel, a commit, or a screenshot.
 
+For detailed environment setup (including staging), see [Environment Variables Configuration](docs/environment-variables.md).
+
+### 5a. Staging Environment & Deployment
+
+180 Connect uses a three-environment setup: local development, staging (for testing), and production.
+
+- **Local (`npm run dev`):** Points to shared dev Supabase project; safe for any testing
+- **Staging (Vercel PR previews):** Also points to dev Supabase; created automatically when you open a pull request
+- **Production (Vercel main branch):** Points to production Supabase; real client data
+
+**Your workflow:**
+1. Create a feature branch and make changes
+2. If you changed the database schema, run `supabase db pull` and commit the migration
+3. Push to GitHub and open a PR
+4. Vercel creates a preview deployment automatically (watch for the comment on your PR)
+5. Test your changes in the preview
+6. Merge to main → Vercel deploys to production
+
+**Getting help?** See:
+- [Staging Environment Setup](docs/staging-environment-setup.md) — comprehensive architecture & migration workflow
+- [Staging Workflow Quick Reference](docs/staging-workflow-quick-ref.md) — quick day-to-day guide
+- [Staging Implementation Checklist](docs/staging-implementation-checklist.md) — setup tasks for team leads
+
 ### 6. Run it
 
 ```bash

@@ -68,10 +68,16 @@ Secrets (API keys, database URLs) live in a file called `.env.local`, which is *
 ```bash
 # .env.local
 NEXT_PUBLIC_SUPABASE_URL=...
-NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
+AUTH_ALLOWED_EMAIL_DOMAIN=180dc.org
 ```
 
 Never paste these into a chat channel, a commit, or a screenshot.
+
+For login access, an administrator must set the Supabase user's protected app
+metadata to `{"account_status":"approved"}`. New or unapproved users should
+not have that value; they will be signed out and shown the pending-activation
+message. Do not put approval state in user metadata because users can edit it.
 
 ### 6. Run it
 

@@ -82,6 +82,21 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     description:
       "Shared secret the scheduled-send route handler checks before doing any work, so the endpoint cannot be triggered by anyone who finds the URL. Not yet consumed — see Q-02 in docs/open-questions.md.",
   },
+  {
+    name: "NEXT_PUBLIC_SENTRY_DSN",
+    required: false,
+    secret: false,
+    description:
+      "Sentry Data Source Name — where captured errors are sent (F226). Public by design: a DSN only permits writing events, so it is safe in the browser bundle. Leave unset to log errors to the platform console instead of Sentry.",
+    validate: isAbsoluteHttpUrl,
+  },
+  {
+    name: "SENTRY_ENVIRONMENT",
+    required: false,
+    secret: false,
+    description:
+      "Environment tag applied to captured errors — 'staging' or 'production' (F226). Optional: falls back to Vercel's VERCEL_ENV so staging (preview) and production are distinguished automatically.",
+  },
 ];
 
 export type EnvProblem = {

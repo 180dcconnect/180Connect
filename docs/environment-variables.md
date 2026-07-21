@@ -179,7 +179,8 @@ SENTRY_DSN=<redacted>
 | `OPENAI_API_KEY` | test-key | prod-key | Only server-side | **SENSITIVE:** Never expose |
 | `CRON_SECRET` | shared-secret | shared-secret | Only server-side | **SENSITIVE:** Auth for `/api/cron/*` routes |
 | `NEXT_PUBLIC_POSTHOG_KEY` | dev-key | prod-key | Always | Public analytics key |
-| `SENTRY_DSN` | dev-dsn | prod-dsn | Always | Public error reporting endpoint |
+| `NEXT_PUBLIC_SENTRY_DSN` | dev-dsn | prod-dsn | Always | Public error reporting endpoint — where captured errors are sent (F226). Unset ⇒ errors log to the platform console instead |
+| `SENTRY_ENVIRONMENT` | `staging` | `production` | Only server-side | Environment tag on captured errors (F226). Optional — falls back to `VERCEL_ENV` |
 
 ### How to Set in Vercel
 

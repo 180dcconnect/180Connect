@@ -16,7 +16,9 @@ Supabase CLI native migrations. Plain SQL under `supabase/migrations/`, applied 
 - Migration files live in `supabase/migrations/`, never edited after they've been applied to a shared environment. Fix-forward with a new migration.
 - Table names `UPPER_SNAKE`; field names `lower_snake`.
 - Every new table includes `id uuid` primary key (default `gen_random_uuid()`) and `created_at timestamptz not null default now()`.
-- Row-Level Security: per the migration sequence, RLS policies land at **step 15 (`enable_rls_policies`, F224)**. _Open point for the Wednesday call: SOP §7 wording says enable RLS in the same migration as the table — reconcile with the sequence before create_users lands._
+- **Row-Level Security: enable RLS and add its policies in the same migration that creates the table** (SOP §7). A table is never committed with RLS left off "for later" — that would leave a window where the table is readable by anyone.
+  - Sequence step 15 (`enable_rls_policies`, F224) is **retained as a verification pass, not the place RLS is introduced**. By the time it runs, every table should already have RLS on. Step 15 cross-checks that against the Security Controls Register (Data Model tab 12) and catches anything missed.
+  - _Decision: Bashir (Project Leader), 21 Jul 2026 — resolves the SOP §7 vs sequence-step-15 wording conflict._
 - Never make an untracked manual change to a live database.
 - Do not rename or drop a shared field without agreement on the Wednesday call.
 

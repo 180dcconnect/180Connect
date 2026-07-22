@@ -171,7 +171,9 @@ SENTRY_DSN=<redacted>
 | Variable | Value (Dev/Preview) | Value (Production) | When Revealed | Notes |
 |---|---|---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | cgbfhhdeapasniudyyds.supabase.co | prod-project.supabase.co | Always | Public, safe to expose |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | dev-key | prod-key | Always | Public anon key, limited permissions |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | dev-key | prod-key | Always | Public publishable key, limited permissions. Preferred over the anon key |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | dev-key | prod-key | Always | Legacy name for the publishable key; read as a fallback. Set one or the other |
+| `AUTH_ALLOWED_EMAIL_DOMAIN` | `180dc.org` | `180dc.org` | Only server-side | Email domain users must sign in from. Optional — defaults to `180dc.org` |
 | `SUPABASE_SERVICE_ROLE_KEY` | dev-key | prod-key | Only server-side | **SENSITIVE:** Never expose to browser |
 | `NEXT_PUBLIC_ENV` | `staging` | `production` | Always | Tells app which environment it's in |
 | `GMAIL_CLIENT_ID` | dev-id | prod-id | Always | Public OAuth client ID |

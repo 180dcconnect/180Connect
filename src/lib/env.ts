@@ -44,6 +44,15 @@ function isAbsoluteHttpUrl(value: string): string | null {
   return null;
 }
 
+function isBareDomain(value: string): string | null {
+  // A leading "@" is tolerated by src/app/login/actions.ts, so accept it here too.
+  const domain = value.replace(/^@/, "");
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(domain)) {
+    return "must be a bare domain, for example 180dc.org";
+  }
+  return null;
+}
+
 export const SCHEMA: readonly EnvVarSpec[] = [
   {
     name: "NEXT_PUBLIC_APP_URL",
@@ -55,18 +64,33 @@ export const SCHEMA: readonly EnvVarSpec[] = [
   },
   {
     name: "NEXT_PUBLIC_SUPABASE_URL",
+    required: true,
+    secret: false,
+    description:
+      "Supabase project URL for this environment. Read by `src/lib/supabase/server.ts`.",
+    validate: isAbsoluteHttpUrl,
+  },
+  {
+    name: "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
     required: false,
     secret: false,
     description:
-      "Supabase project URL for this environment. Not yet consumed — becomes required when the database client lands (F223).",
-    validate: isAbsoluteHttpUrl,
+      "Supabase publishable key. Safe to expose to the browser; access is still constrained by row-level security. Required unless NEXT_PUBLIC_SUPABASE_ANON_KEY is set instead — see `requireOneSupabaseKey`.",
   },
   {
     name: "NEXT_PUBLIC_SUPABASE_ANON_KEY",
     required: false,
     secret: false,
     description:
-      "Supabase anonymous/publishable key. Safe to expose to the browser; access is still constrained by row-level security. Not yet consumed — becomes required with F223.",
+      "Legacy name for the publishable key, read as a fallback by `src/lib/supabase/server.ts`. Prefer NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.",
+  },
+  {
+    name: "AUTH_ALLOWED_EMAIL_DOMAIN",
+    required: false,
+    secret: false,
+    description:
+      "Email domain users must sign in from. Server-only — never prefix with NEXT_PUBLIC_. Defaults to 180dc.org in `src/app/login/actions.ts` when unset.",
+    validate: isBareDomain,
   },
   {
     name: "SUPABASE_SERVICE_ROLE_KEY",
@@ -134,7 +158,33 @@ export function collectEnvProblems(
     }
   }
 
+  problems.push(...requireOneSupabaseKey(source));
+
   return problems;
+}
+
+/**
+ * The Supabase client accepts either key name, so neither can be marked
+ * `required` on its own — that would reject a valid environment that sets only
+ * the other. This checks the pair instead.
+ */
+function requireOneSupabaseKey(
+  source: Record<string, string | undefined>,
+): EnvProblem[] {
+  if (
+    source.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ||
+    source.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim()
+  ) {
+    return [];
+  }
+
+  return [
+    {
+      name: "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+      problem:
+        "is required but not set (or set NEXT_PUBLIC_SUPABASE_ANON_KEY instead)",
+    },
+  ];
 }
 
 /** Builds the startup error message. Never includes any variable's value. */

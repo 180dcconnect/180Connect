@@ -16,6 +16,8 @@ function validEnv(): Record<string, string | undefined> {
       source[spec.name] = "http://localhost:3000";
     }
   }
+  // Neither Supabase key is `required` on its own — one of the pair must be set.
+  source.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
   return source;
 }
 
@@ -88,11 +90,51 @@ describe("collectEnvProblems", () => {
       NEXT_PUBLIC_SUPABASE_URL: "not-a-url",
     });
 
-    assert.equal(problems.length, 2);
     assert.deepEqual(
       problems.map((problem) => problem.name).sort(),
-      ["NEXT_PUBLIC_APP_URL", "NEXT_PUBLIC_SUPABASE_URL"],
+      [
+        "NEXT_PUBLIC_APP_URL",
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+        "NEXT_PUBLIC_SUPABASE_URL",
+      ],
     );
+  });
+
+  it("accepts the legacy anon key in place of the publishable key", () => {
+    const source = validEnv();
+    delete source.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+    source.NEXT_PUBLIC_SUPABASE_ANON_KEY = "sb_anon_test";
+
+    assert.deepEqual(collectEnvProblems(source), []);
+  });
+
+  it("reports when neither Supabase key is set", () => {
+    const source = validEnv();
+    delete source.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
+    const problems = collectEnvProblems(source);
+    assert.equal(problems.length, 1);
+    assert.equal(problems[0].name, "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
+    assert.match(problems[0].problem, /NEXT_PUBLIC_SUPABASE_ANON_KEY instead/);
+  });
+
+  it("rejects an email domain that is not a bare domain", () => {
+    const problems = collectEnvProblems({
+      ...validEnv(),
+      AUTH_ALLOWED_EMAIL_DOMAIN: "https://180dc.org",
+    });
+
+    assert.equal(problems.length, 1);
+    assert.equal(problems[0].name, "AUTH_ALLOWED_EMAIL_DOMAIN");
+  });
+
+  it("accepts an email domain with the leading @ the login action tolerates", () => {
+    const problems = collectEnvProblems({
+      ...validEnv(),
+      AUTH_ALLOWED_EMAIL_DOMAIN: "@180dc.org",
+    });
+
+    assert.deepEqual(problems, []);
   });
 });
 

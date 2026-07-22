@@ -1,3 +1,24 @@
+## Schema change approval record
+
+<!--
+Required by SOP §7 whenever this PR adds or changes a migration, table, view,
+function or policy. Delete this whole section if the PR touches no schema.
+See supabase/MIGRATIONS.md for the workflow.
+-->
+
+- [ ] This PR changes the database schema (if unticked, delete this section)
+
+| Field | Entry |
+| :---- | :---- |
+| Story / PR | |
+| Affected tables | List every table, view, function or policy changed |
+| Migration | Filename + sequence step number (Data Model tab 11) |
+| Compatibility | Impact on other streams, jobs and dashboards |
+| Data migration | Backfill or transformation required |
+| Security | RLS enabled + policies added in the same migration? Service-role behaviour |
+| Documentation | Data Model + tab 02 Data Dictionary updated (Y/N) |
+| Reversibility | Paired `supabase/rollback/*.down.sql`, or `-- IRREVERSIBLE: <reason>` header |
+
 ## Definition of Done
 - [ ] Works end-to-end in staging as part of the full flow — not tested as an isolated component.
 - [ ] Reviewed and approved by someone who did not write it.

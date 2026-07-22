@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { requireApprovedUser } from "@/lib/auth/require-approved-user";
+import { logSecurityEvent } from "@/lib/log-security-event";
 import { logout } from "./actions";
 
 export default async function DashboardPage() {
@@ -13,7 +15,16 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
-  if (!user || user.app_metadata.account_status !== "approved") {
+  if (!user) {
+    redirect("/login");
+  }
+
+  const permission = requireApprovedUser(user);
+  if (!permission.ok) {
+    logSecurityEvent("permission.denied", {
+      route: "/dashboard",
+      reason: permission.reason,
+    });
     redirect("/login");
   }
 

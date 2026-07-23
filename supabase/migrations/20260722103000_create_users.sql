@@ -96,20 +96,60 @@ as $$
   );
 $$;
 
+-- Answers "is the current user active?" — same SECURITY DEFINER trick as is_admin to
+-- avoid the policy-on-users recursion. This is what makes deactivation bite at the
+-- database layer: PRD §4.2 says a deactivated account cannot act, and gating every
+-- policy on this means it stops reading and writing the instant is_active flips,
+-- without waiting for the JWT to expire.
+create or replace function public.is_active_user()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.users
+    where id = auth.uid() and is_active
+  );
+$$;
+
+-- Column privileges — REVOKE before GRANT.
+-- Supabase ships `alter default privileges in schema public grant all on tables to
+-- anon, authenticated, service_role`, so this table is born with full SELECT/INSERT/
+-- UPDATE/DELETE on every column already granted to anon and authenticated. Without
+-- the revoke, the row policies below still let a user update their *own* row — and
+-- nothing stops that update from being `set role = 'admin'`. Verified against staging
+-- on 22 Jul 2026: a CAM escalated to admin through exactly this gap.
+--
+-- anon is granted nothing: public self-sign-up is prohibited (PRD §4.2).
+-- authenticated may read the directory and edit one column of their profile. role and
+-- is_active are granted to nobody — a role change goes through the admin RPC (F012),
+-- which runs SECURITY DEFINER and re-checks is_admin() itself. This cannot be narrowed
+-- to "admins only" with a column grant, because column privileges attach to the
+-- `authenticated` Postgres role that every signed-in user shares.
+-- service_role keeps its default grants, which is how the seed and the auth trigger work.
+revoke all on public.users from anon, authenticated;
+grant select on public.users to authenticated;
+grant update (full_name) on public.users to authenticated;
+
 -- RLS is enabled and its policies added in the same migration that creates the
 -- table (SOP §7). Sequence step 15 (F224) verifies this, it does not introduce it.
 alter table public.users enable row level security;
 
--- The team is visible to the team: CAMs need to see who owns which organisation.
-create policy users_select_authenticated on public.users
+-- The team is visible to the active team: CAMs need to see who owns which
+-- organisation. A deactivated user reads nothing (PRD §4.2).
+create policy users_select_active on public.users
   for select to authenticated
-  using (true);
+  using (public.is_active_user());
 
--- A user maintains their own profile; admins maintain anyone's.
+-- A user maintains their own profile; admins maintain anyone's. The column grant
+-- above is what confines this to full_name; this policy governs which *rows* are in
+-- reach. Both the actor being active and the row check are required.
 create policy users_update_self_or_admin on public.users
   for update to authenticated
-  using (id = auth.uid() or public.is_admin())
-  with check (id = auth.uid() or public.is_admin());
+  using (public.is_active_user() and (id = auth.uid() or public.is_admin()))
+  with check (public.is_active_user() and (id = auth.uid() or public.is_admin()));
 
 -- No insert or delete policy: rows arrive via the auth trigger, and removal happens
 -- through auth.users. The service role bypasses RLS, which is how seeding works.

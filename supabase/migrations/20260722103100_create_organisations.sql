@@ -86,25 +86,54 @@ create trigger organisations_set_updated_at
   before update on public.organisations
   for each row execute function public.set_updated_at();
 
+-- Column privileges — REVOKE before GRANT (see the create_users migration for why:
+-- Supabase's default grant-all leaves anon and authenticated with full column access
+-- until this runs). anon gets nothing. authenticated works the pipeline; the row
+-- policies below decide which rows each statement reaches.
+revoke all on public.organisations from anon, authenticated;
+grant select, insert, update, delete on public.organisations to authenticated;
+
 -- RLS enabled with its policies in the creating migration (SOP §7).
 alter table public.organisations enable row level security;
 
 -- The pipeline is shared: every active user can see every organisation, which is what
 -- makes the team pipeline view and ownership handover possible.
-create policy organisations_select_authenticated on public.organisations
+create policy organisations_select_active on public.organisations
   for select to authenticated
-  using (true);
+  using (public.is_active_user());
 
-create policy organisations_insert_authenticated on public.organisations
+-- Canonical records are created by admins only (permission matrix §3.2). A CAM who
+-- wants a new organisation in the system routes it through the suggestion / manual-
+-- entry flow, not a direct insert. (Was `with check (true)`, which let any
+-- authenticated user — viewers included — write canonical rows.)
+create policy organisations_insert_admin on public.organisations
   for insert to authenticated
-  with check (true);
+  with check (public.is_admin());
 
--- Anyone on the team may update an unowned organisation or one they own; admins may
--- update any. This is what lets a CAM claim an organisation by setting owner_id.
+-- Update rows. USING allows a CAM to target an unowned organisation (to claim it) or
+-- one they already own; admins may target any row. WITH CHECK governs the resulting
+-- row: a non-admin's update must leave owner_id equal to themselves, so a CAM editing
+-- an unowned organisation is forced to claim it in the same statement and can never
+-- hand one to another user or seize an already-owned one — reassignment stays
+-- admin-only (matrix §2).
+--
+-- coalesce(..., false) is load-bearing: on an unowned row owner_id is null, and
+-- `null = auth.uid()` is NULL, not false — a WITH CHECK passes on anything that is not
+-- FALSE, so without the coalesce a CAM could edit a canonical field on an unowned
+-- organisation and leave it unowned. Verified against staging, 23 Jul 2026.
+--
+-- KNOWN GAP, tracked to F224: once a CAM owns an organisation they can still edit its
+-- canonical columns (legal_name, etc.), which the matrix reserves for admins. Column
+-- privileges cannot express "admins only" here — authenticated is one shared Postgres
+-- role — so closing it needs the canonical-edit RPC / column-guard trigger from F224.
+-- Left open deliberately: that RPC does not exist yet, and it is a narrower hole than
+-- the unowned-edit one this policy closes.
 create policy organisations_update_owner_or_admin on public.organisations
   for update to authenticated
-  using (owner_id is null or owner_id = auth.uid() or public.is_admin())
-  with check (owner_id is null or owner_id = auth.uid() or public.is_admin());
+  using (public.is_active_user()
+         and (owner_id is null or owner_id = auth.uid() or public.is_admin()))
+  with check (public.is_active_user()
+              and (coalesce(owner_id = auth.uid(), false) or public.is_admin()));
 
 -- Deletion is destructive and rare — admins only. The seed script deletes its own
 -- rows through the service role, which bypasses RLS.

@@ -7,6 +7,9 @@
 drop trigger if exists on_auth_user_created on auth.users;
 drop function if exists public.handle_new_auth_user ();
 drop function if exists public.is_admin ();
+-- is_active_user is used by policies on public.organisations too; roll back that
+-- table first (its down script runs before this one) or this drop fails.
+drop function if exists public.is_active_user ();
 
 drop trigger if exists users_set_updated_at on public.users;
 drop table if exists public.users;

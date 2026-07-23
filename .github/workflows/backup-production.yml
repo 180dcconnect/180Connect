@@ -1,0 +1,92 @@
+# Nightly backup of the production database to Vercel Blob storage.
+# Story: F225 (#220) — Database Backups. See docs/F225-database-backups.md.
+#
+# Three separate dumps (roles, schema, data) because a single `supabase db
+# dump` does not capture all three — see docs/F225-database-backups.md
+# section 2. Restoring them back is roles -> schema -> data, in that order.
+name: Backup production database
+
+on:
+  schedule:
+    - cron: '0 3 * * *' # 03:00 UTC daily
+  # Manual re-run button in the Actions tab, for testing without waiting for 3am.
+  workflow_dispatch:
+
+# Never let two backup runs race against the same database.
+concurrency:
+  group: supabase-backup-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  # Not a secret: a project ref is public in the project URL. Same pattern as
+  # STAGING_REF in migrations.yml.
+  PROD_REF: ${{ vars.SUPABASE_PROD_REF }}
+
+jobs:
+  backup:
+    name: dump 180connect-production -> Vercel Blob
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel
+
+      # If the production project has auto-paused from inactivity (free
+      # plan), this is the step that fails. A failed step fails the job,
+      # which GitHub emails to everyone watching the repo by default — that
+      # email IS the "fail visibly" requirement. Do not wrap this in `|| true`
+      # or similar; a swallowed failure here is a backup that silently never
+      # happened.
+      - name: Dump roles, schema, and data
+        id: dump
+        run: |
+          set -e
+          DATE=$(date +%Y%m%d)
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+          mkdir -p dumps
+          DB_URL="postgresql://postgres:${SUPABASE_PROD_DB_PASSWORD}@db.${PROD_REF}.supabase.co:5432/postgres"
+
+          supabase db dump --db-url "$DB_URL" --role-only -f "dumps/roles_$DATE.sql"
+          supabase db dump --db-url "$DB_URL" -f "dumps/schema_$DATE.sql"
+          supabase db dump --db-url "$DB_URL" --data-only -f "dumps/data_$DATE.sql"
+        env:
+          SUPABASE_PROD_DB_PASSWORD: ${{ secrets.SUPABASE_PROD_DB_PASSWORD }}
+
+      - name: Upload dumps to Vercel Blob
+        run: |
+          set -e
+          DATE="${{ steps.dump.outputs.date }}"
+          for f in dumps/*.sql; do
+            name=$(basename "$f")
+            vercel blob put "$f" \
+              --access private \
+              --pathname "backups/$DATE/$name" \
+              --rw-token "$BLOB_READ_WRITE_TOKEN"
+          done
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+
+      # Vercel Blob has no built-in lifecycle/auto-expiry (unlike R2 or S3),
+      # so retention (R8) is this script, not a platform setting. Filenames
+      # are deterministic (backups/<date>/<name>_<date>.sql), so we can
+      # compute the path to delete directly instead of listing and parsing.
+      # `|| true` on each delete: pruning a date that was never backed up, or
+      # was already pruned, must not fail the whole run.
+      - name: Delete backups older than 30 days
+        run: |
+          PRUNE_DATE=$(date -d '31 days ago' +%Y%m%d)
+          for name in roles schema data; do
+            vercel blob del "backups/$PRUNE_DATE/${name}_$PRUNE_DATE.sql" \
+              --rw-token "$BLOB_READ_WRITE_TOKEN" || true
+          done
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}

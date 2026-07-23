@@ -45,29 +45,43 @@ supabase login
 
 ### 2. Taking a manual backup
 
+**One `supabase db dump` is not enough.** The CLI splits a database into three separate concerns, and a plain `db dump` only captures one of them (schema). Roles (database users/permissions) and data (the actual rows) each need their own dump, or a restore looks like it worked but comes back missing users or every row in every table. 
+
 ```bash
-supabase db dump --db-url "<connection-string>" -f backup_$(date +%Y%m%d).sql
+DATE=$(date +%Y%m%d)
+
+# 1. Roles — database users and their permissions. Must be restored FIRST,
+#    since schema objects (e.g. RLS policies) can reference roles that don't
+#    exist yet otherwise.
+supabase db dump --db-url "<connection-string>" --role-only -f "roles_$DATE.sql"
+
+# 2. Schema — table structures, RLS policies, functions. No row data.
+supabase db dump --db-url "<connection-string>" -f "schema_$DATE.sql"
+
+# 3. Data — every row, no table structure. Restored last, once 1 and 2 exist.
+supabase db dump --db-url "<connection-string>" --data-only -f "data_$DATE.sql"
 ```
 
 - `--db-url` points at the project's Postgres connection string (**never** commit this — it contains the database password; keep it in `.env.local` or pass it interactively, same rule as any other secret).
-- `-f backup_$(date +%Y%m%d).sql` writes the dump to a file named with today's date, e.g. `backup_20260718.sql`. `$(date +%Y%m%d)` is shell command substitution: it runs `date`, formats it as YYYYMMDD, and drops the result into the filename.
-- The output is a plain-text SQL file that can recreate the schema and data by being run back through `psql` or `supabase db reset` against an empty database.
+- `$(date +%Y%m%d)` is shell command substitution: it runs `date`, formats it as YYYYMMDD, and drops the result into the filename, e.g. `schema_20260723.sql`.
+- All three are plain-text SQL files. Restoring means replaying them back through `psql`, in the order **roles → schema → data** — see [section 4](#4-restore-process).
 
 ### 3. Automating it
 
-A manual step that depends on someone remembering to run it is not a backup strategy. Proposed: a scheduled **GitHub Action** (runs on GitHub's infrastructure, not ours) that:
+A manual step that depends on someone remembering to run it is not a backup strategy. Implemented as `.github/workflows/backup-production.yml`, following the same pattern as the existing `migrations.yml` (F232) — a GitHub Action that:
 
-1. Triggers on a cron schedule (e.g. daily at 03:00 UTC).
-2. Checks out the repo, installs the Supabase CLI.
-3. Runs `supabase db dump` using the project's connection string, stored as a **GitHub Actions secret** (`SUPABASE_DB_URL`) — never in the workflow file itself.
-4. Uploads the resulting `.sql` file as a build artifact, or pushes it to a private, non-public storage location (e.g. a private S3 bucket or a separate private repo) — **not** the main `180Connect` repo, to avoid bloating it with daily binary-ish diffs and to keep production data away from a repo the whole team can clone.
-5. Optionally deletes dumps older than a set retention window (e.g. 30 days) to bound storage cost.
+1. Triggers on a cron schedule (daily at 03:00 UTC) and on `workflow_dispatch` (a manual "Run workflow" button in GitHub's Actions tab, used to test it on demand instead of waiting for 3am).
+2. Checks out the repo, installs the Supabase CLI (same `supabase/setup-cli` step as `migrations.yml`).
+3. **Connects and fails loudly if it can't** — the free-plan production project auto-pauses after inactivity, so the first step is a connectivity check that fails the whole run (not a silent skip) if the database doesn't respond. A failed GitHub Actions run emails everyone watching the repo by default, which is the "fail visibly" requirement satisfied without any new infrastructure.
+4. Runs all three dumps from section 2 (roles, schema, data) using the project's DB password, stored as a **GitHub Actions secret** (`SUPABASE_DB_PASSWORD`) — never in the workflow file itself.
+5. Uploads all three files to Vercel Blob using a `BLOB_READ_WRITE_TOKEN` secret, under a path prefixed with the date.
+6. Deletes blobs older than 30 days (Vercel Blob has no automatic lifecycle/expiry, unlike R2 or S3, so this is a script step rather than a platform setting).
 
-This needs an actual owner and a place to land the files decided before it's built — flagging as a follow-up rather than building it speculatively in this PR (this doc is the design/decision, not yet the implementation).
+See [`docs/backup-setup.md`](backup-setup.md) for the exact secrets to create and where to get each value from.
 
-#### Storage destination options
+#### Storage destination options considered
 
-Where step 4 above actually puts the `.sql` dump. Each candidate scored against R1–R9 above.
+Where the dump ends up. Each candidate scored against R1–R9. Kept as the record of why Solution F was picked over the others (see [Decision](#decision-23-jul-2026)), not an open menu.
 
 **Solution A: GitHub Actions build artifact**
 
@@ -165,12 +179,30 @@ Where step 4 above actually puts the `.sql` dump. Each candidate scored against 
 ## Other options considered and set aside
 Google Cloud Storage, Wasabi, and iDrive e2 were also looked at. None meaningfully differ from Solutions C-E — all are S3-compatible object storage with a free tier, a new-processor problem, and no structural advantage over Cloudflare R2. Google Cloud Storage is also a separate Google product from the Gmail OAuth scopes already in use, so despite Google already being a listed processor, using it still means documenting a new relationship rather than extending an existing one the way Vercel Blob does.
 
+## Decision (23 Jul 2026)
+
+**Solution F — Vercel Blob storage — chosen.** Vercel Blob was picked because it reuses a processor relationship the project already has (Vercel hosts the app), which keeps the GDPR paperwork (R7) to "add a line to an existing processor record" rather than starting a new vendor assessment from zero.
+
+# Additional Requirements Pertaining to Solution F
+
+1. **R4 must be genuinely tested, not assumed.** A restore has to actually be run and verified — see [section 4](#4-restore-process). Flagged specifically because a single `supabase db dump` does **not** capture everything needed to recreate the database — see the note in section 2.
+2. **Retention (R8) is a script, not a platform feature.** Vercel Blob has no built-in auto-expiry (unlike R2/S3), so the workflow deletes old dumps itself — see section 3.
+3. **Fail visibly, per the project's own SOP.** The free-plan production project auto-pauses after inactivity. If the nightly job can't connect because of that, it must not just silently do nothing — it has to fail the GitHub Actions run loudly, in line with "errors propagate to the UI and `ERROR_LOG`, nothing fails silently."
+
+The comparison table is kept as the record of why F was chosen over the others, not as a menu still open for debate.
+
 ### 4. Restore process (Free plan)
 
-1. Provision a fresh Supabase project (or use an empty local Postgres instance for a dry run).
-2. Restore with:
+Order matters: **roles, then schema, then data.** Restoring data before the schema exists fails (no tables to insert into); restoring schema before roles exist can fail if a policy references a role that doesn't exist yet.
+
+1. Provision a target: a fresh Supabase project, or an empty local Postgres instance (`supabase start`) for a dry run.
+2. Restore in order:
    ```bash
-   psql "<target-db-url>" -f backup_20260718.sql
+   psql "<target-db-url>" -f roles_20260723.sql
+   psql "<target-db-url>" -f schema_20260723.sql
+   psql "<target-db-url>" -f data_20260723.sql
    ```
 3. Verify row counts / spot-check key tables against what's expected.
 4. Update any environment variables (`NEXT_PUBLIC_SUPABASE_URL`, etc.) if the restore target is a new project rather than the original.
+
+**Restore test log (R4):** see [Restore test results](#restore-test-results) at the bottom of this doc.

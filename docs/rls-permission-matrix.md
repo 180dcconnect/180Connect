@@ -341,8 +341,10 @@ and the advisor re-run. Status as of the 23 Jul staging run:
 | `rls_policy_always_true` | `organisations` INSERT was `with check (true)` | Tightened to `with check (app.is_admin())` — canonical records are admin-created (§3.2). **Resolved.** |
 | `0028` / `0029` (SECURITY DEFINER exposed) | `is_admin`, `is_active_user`, `handle_new_auth_user` were in `public`, callable as REST RPCs by anon/authenticated | Moved to the `app` schema, which PostgREST does not expose. Policies still call them; `authenticated` keeps `EXECUTE` (a plain `REVOKE` would break policy evaluation — verified `42501`). **Resolved.** |
 | `0011` (function search_path) | `set_updated_at` had an unpinned `search_path` | Pinned to `''` under F233. **Resolved.** |
-| `auth_leaked_password_protection` | HaveIBeenPwned check disabled | **Manual, not a migration.** Enable in Dashboard → Authentication → Providers → Password. Owner: Bashir (Supabase access). Until then, an accepted, documented exception. |
+| `auth_leaked_password_protection` | HaveIBeenPwned check disabled | **Accepted exception — Pro-plan feature.** Attempting to enable it on the free plan returns *"available on Pro Plans and up."* Revisit if the project upgrades (tracked with D-01 / Q-01 in `docs/open-questions.md`, the same plan decision). |
 
 After the moves, a staging advisor run reported only
-`auth_leaked_password_protection`. Re-run the advisor after the migrations apply to
-each environment (it reads the live database), and after enabling the password check.
+`auth_leaked_password_protection`, which the free plan cannot switch on. That leaves the
+advisor at **zero actionable findings** on the current plan. Re-run it after the
+migrations apply to each environment (it reads the live database), and after any plan
+upgrade.

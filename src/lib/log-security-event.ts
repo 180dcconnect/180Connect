@@ -17,5 +17,5 @@ export type SecurityEvent =
 export type SecurityEventMeta = Record<string, string | number | boolean | undefined>;
 
 export function logSecurityEvent(event: SecurityEvent, meta: SecurityEventMeta = {}): void {
-  console.error(`[security] ${event}`, { event, ...meta });
+  console.error(`[security] ${event}`, { ...meta, event });
 }

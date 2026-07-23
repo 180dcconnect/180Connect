@@ -91,6 +91,9 @@ describe("boundedInt", () => {
     assert.equal(schema.parse(5), 5);
   });
 
+  it("coerces a numeric string", () => {
+    assert.equal(schema.parse("5"), 5);
+  });
   it("rejects a value below the minimum", () => {
     assert.throws(() => schema.parse(0));
   });

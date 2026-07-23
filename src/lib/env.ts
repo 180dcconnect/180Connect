@@ -76,6 +76,13 @@ export const SCHEMA: readonly EnvVarSpec[] = [
       "Supabase service-role key. Bypasses row-level security — server-side only, never prefixed with NEXT_PUBLIC_. Not yet consumed — becomes required with F223.",
   },
   {
+    name: "SUPABASE_DB_URL",
+    required: false,
+    secret: true,
+    description:
+      "Postgres connection string for the database the seed script writes to (F233). Used only by `npm run seed`, never by the app, so it stays optional — the script validates it itself and refuses to run against production.",
+  },
+  {
     name: "CRON_SECRET",
     required: false,
     secret: true,

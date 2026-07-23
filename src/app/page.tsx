@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { logout } from "@/app/actions/auth";
 
 export default function Home() {
   return (
@@ -12,6 +13,17 @@ export default function Home() {
       >
         Login
       </Link>
+
+      {/* Temporary logout button — for testing F006 only.
+          Will move to a real nav/dashboard once F001 (login) exists. */}
+      <form action={logout}>
+        <button
+          type="submit"
+          className="inline-flex h-11 items-center rounded-full border border-black/10 px-6 text-sm font-bold transition-colors hover:bg-[#fafafa]"
+        >
+          Log out
+        </button>
+      </form>
     </main>
   );
 }

@@ -24,6 +24,7 @@ describe("logSecurityEvent", () => {
     try {
       logSecurityEvent("permission.denied");
 
+      assert.equal(errorMock.mock.calls.length, 1);
       const [, meta] = errorMock.mock.calls[0].arguments as [string, Record<string, unknown>];
       assert.deepEqual(meta, { event: "permission.denied" });
     } finally {

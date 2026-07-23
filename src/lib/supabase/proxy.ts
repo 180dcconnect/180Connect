@@ -5,7 +5,8 @@ import {
   INACTIVITY_TIMEOUT_MS,
   isSessionExpired,
 } from "./session-expiry";
-
+import { logSecurityEvent } from "@/lib/log-security-event";
+import { reportError } from "@/lib/error-logging";
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -46,7 +47,22 @@ export async function updateSession(request: NextRequest) {
       // Too much idle time has passed. Sign out server-side so the
       // token is genuinely invalidated, not just ignored client-side —
       // satisfies "cannot be reused even if replayed."
-      await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut();
+
+      // Log the expiry event per F007 + codebase convention (F222's
+      // logSecurityEvent, same pattern used for other auth failures).
+      // NOTE: "authentication.login_failed" is the closest existing
+      // SecurityEvent type — none of the three current options exactly
+      // describe a session timing out. Flagging for review; may warrant
+      // its own event type (e.g. "session.expired") in a future PR.
+      logSecurityEvent("authentication.login_failed", {
+        reason: "session_expired",
+        userId: user.id,
+      });
+
+      if (error) {
+        await reportError(error, { component: "session-expiry" });
+      }
 
       const expiredUrl = new URL("/login", request.url);
       expiredUrl.searchParams.set("reason", "expired");

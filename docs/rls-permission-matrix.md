@@ -17,12 +17,15 @@ Postgres (`public.users`, not `"USERS"`) — the Data Model name is documentatio
 lower name is the identifier. The matrix tables below keep the Data Model names for
 traceability; SQL uses the lower names.
 
-**Helpers.** Base role checks come from `create_users` (F233): `public.is_admin()` and
-`public.is_active_user()`, each a `SECURITY DEFINER` lookup against `public.users`.
-The richer predicates — `app.is_cam()`, `app.can_write()`, `app.owns_organisation()`,
-`app.organisation_is_unowned()`, `app.can_contact_organisation()` — come from
-`create_rls_helpers` (F224) and live in the `app` schema, which is not exposed through
-PostgREST.
+**Helpers.** All RLS helpers live in the `app` schema, which is **not** in PostgREST's
+exposed schema list — so none is reachable as a REST RPC (this is what keeps security
+advisors 0028 / 0029 clean; see §7). Base role checks come from `create_users` (F233):
+`app.is_admin()` and `app.is_active_user()`, each a `SECURITY DEFINER` lookup against
+`public.users`. The richer predicates — `app.is_cam()`, `app.can_write()`,
+`app.owns_organisation()`, `app.organisation_is_unowned()`,
+`app.can_contact_organisation()` — come from `create_rls_helpers` (F224). Every one is
+`SECURITY DEFINER` with `set search_path = ''`; `authenticated` is granted `EXECUTE`
+(policies need it), `anon` is not.
 
 ---
 
@@ -37,7 +40,7 @@ PostgREST.
 | anonymous | `anon` | **No access to any table.** Public self-sign-up is prohibited (PRD §4.2) |
 
 `USERS.is_active = false` revokes everything. Every policy is `AND`ed with
-`public.is_active_user()`. A deactivated account can read nothing and write nothing,
+`app.is_active_user()`. A deactivated account can read nothing and write nothing,
 even with a still-valid JWT — this is what satisfies PRD §4.2 "cannot refresh tokens,
 send messages, or execute background actions".
 
@@ -108,7 +111,7 @@ exposed, and a grant without a policy exposes every row.
 including admins — Postgres column privileges attach to the Postgres role
 (`authenticated`), which every signed-in user shares, so there is no way to grant the
 column to admins alone. An admin changing a role therefore goes through the
-`SECURITY DEFINER` RPC (F012), which re-checks `public.is_admin()` itself. A direct
+`SECURITY DEFINER` RPC (F012), which re-checks `app.is_admin()` itself. A direct
 `UPDATE ... set role` returns `42501` for every caller. That is the intended result,
 not a bug to route around.
 
@@ -324,3 +327,22 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    matrix specifies it; someone must own it.
 5. **`SCOUT_PRIORITY_SCORE`** appears on tab 09 without fields and is not in the
    migration sequence. Excluded from this matrix until defined.
+
+---
+
+## 7. Security advisor resolutions
+
+The Supabase security advisor flagged the first RLS-carrying tables (`users`,
+`organisations`, F233 #261). AC4 requires each item resolved or explicitly accepted,
+and the advisor re-run. Status as of the 23 Jul staging run:
+
+| Advisor | Finding | Resolution |
+|---|---|---|
+| `rls_policy_always_true` | `organisations` INSERT was `with check (true)` | Tightened to `with check (app.is_admin())` — canonical records are admin-created (§3.2). **Resolved.** |
+| `0028` / `0029` (SECURITY DEFINER exposed) | `is_admin`, `is_active_user`, `handle_new_auth_user` were in `public`, callable as REST RPCs by anon/authenticated | Moved to the `app` schema, which PostgREST does not expose. Policies still call them; `authenticated` keeps `EXECUTE` (a plain `REVOKE` would break policy evaluation — verified `42501`). **Resolved.** |
+| `0011` (function search_path) | `set_updated_at` had an unpinned `search_path` | Pinned to `''` under F233. **Resolved.** |
+| `auth_leaked_password_protection` | HaveIBeenPwned check disabled | **Manual, not a migration.** Enable in Dashboard → Authentication → Providers → Password. Owner: Bashir (Supabase access). Until then, an accepted, documented exception. |
+
+After the moves, a staging advisor run reported only
+`auth_leaked_password_protection`. Re-run the advisor after the migrations apply to
+each environment (it reads the live database), and after enabling the password check.

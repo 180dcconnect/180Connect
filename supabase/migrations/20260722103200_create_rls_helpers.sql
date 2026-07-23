@@ -2,8 +2,8 @@
 -- Sequence step 3a/17 (runs after create_organisations; Data Model tab 11)
 -- Story: F224 (#219) — Row-Level Security
 -- Purpose: the extra RLS predicates the per-table policies are built from, beyond the
---   base role checks. create_users (F233) already provides public.is_admin() and
---   public.is_active_user(); this migration adds the CAM and ownership predicates that
+--   base role checks. create_users (F233) already provides app.is_admin() and
+--   app.is_active_user(); this migration adds the CAM and ownership predicates that
 --   the outreach, notes and tag policies need, defined once so 30+ table migrations do
 --   not each re-implement them.
 -- Spec: docs/rls-permission-matrix.md
@@ -14,10 +14,11 @@
 -- create_organisations (steps 2-3) build their policies on their own base helpers;
 -- the first consumer of anything here is the notes table (step 4).
 --
--- Naming: base helpers live in `public` (public.is_admin / public.is_active_user,
--- from F233). These richer predicates live in a dedicated `app` schema that is not
--- exposed through PostgREST, so they can never be called as REST RPCs. They build on
--- the public base rather than duplicating the role lookup.
+-- Naming: the `app` schema is created by create_users (F233), which now also holds
+-- app.is_admin / app.is_active_user — kept out of `public` so PostgREST cannot expose
+-- them as REST RPCs (security advisors 0028 / 0029). This migration adds more
+-- predicates to the same schema. They build on the base rather than duplicating the
+-- role lookup, and are equally unexposed.
 --
 -- WHY SECURITY DEFINER: a predicate that reads public.users or public.organisations
 --   from inside a policy on those same tables would recurse under RLS. Running as the
@@ -33,8 +34,8 @@
 create schema if not exists app;
 
 comment on schema app is
-  'RLS helper predicates (F224). Not exposed via PostgREST. Build on public.is_admin '
-  'and public.is_active_user from create_users.';
+  'RLS helper predicates. Not exposed via PostgREST. app.is_admin / app.is_active_user '
+  'come from create_users (F233); the CAM and ownership predicates here from F224.';
 
 -- ---------------------------------------------------------------------------
 -- Role predicates
@@ -109,7 +110,7 @@ language sql
 stable
 set search_path = ''
 as $$
-  select public.is_admin()
+  select app.is_admin()
       or (
         app.is_cam()
         and (

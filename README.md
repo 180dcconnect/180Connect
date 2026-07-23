@@ -69,7 +69,9 @@ Secrets (API keys, database URLs) live in a file called `.env.local`, which is *
 # .env.local
 NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
+NEXT_PUBLIC_APP_URL=http://localhost:3000
 AUTH_ALLOWED_EMAIL_DOMAIN=180dc.org
+PASSWORD_RESET_WINDOW_SECONDS=3600
 ```
 
 Never paste these into a chat channel, a commit, or a screenshot.
@@ -101,6 +103,17 @@ For detailed environment setup (including staging), see [Environment Variables C
 - [Staging Environment Setup](docs/staging-environment-setup.md) — comprehensive architecture & migration workflow
 - [Staging Workflow Quick Reference](docs/staging-workflow-quick-ref.md) — quick day-to-day guide
 - [Staging Implementation Checklist](docs/staging-implementation-checklist.md) — setup tasks for team leads
+
+For password reset, add `NEXT_PUBLIC_APP_URL/auth/recovery` to Supabase Auth's
+allowed redirect URLs. For links that work across browsers/devices, set the
+recovery email template link to:
+
+```text
+{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery
+```
+
+Set the Supabase recovery OTP expiry to the same number of seconds as
+`PASSWORD_RESET_WINDOW_SECONDS` (one hour by default).
 
 ### 6. Run it
 

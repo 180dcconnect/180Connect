@@ -2,7 +2,12 @@ import Image from "next/image";
 import Link from "next/link";
 import { LoginForm } from "./login-form";
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ "password-reset"?: string }>;
+}) {
+  const passwordReset = (await searchParams)["password-reset"] === "success";
   return (
     <main className="flex flex-1 items-center justify-center bg-[#f1f2f4] p-4 sm:p-8">
       <div className="flex w-full max-w-6xl flex-col gap-6 rounded-2xl bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_12px_40px_rgba(0,0,0,0.06)] lg:flex-row lg:p-5">
@@ -26,6 +31,12 @@ export default function LoginPage() {
             <p className="mt-1.5 text-center text-sm text-foreground/55">
               Enter your details to log in.
             </p>
+
+            {passwordReset && (
+              <div role="status" className="mt-6 rounded-lg border border-green-200 bg-green-50 px-3 py-2.5 text-xs text-green-900">
+                Password updated. Log in with your new password.
+              </div>
+            )}
 
             <LoginForm />
 

@@ -1,7 +1,7 @@
 # RLS Permission Matrix
 
 **Story:** F224 — Row-Level Security. **Owner:** Bashir. **Reviewer:** Ben.
-**Status:** draft for review. **Last updated:** 21 July 2026.
+**Status:** draft for review. **Last updated:** 23 July 2026.
 
 This document is the **Security Controls Register** referenced by step 15 of the
 Supabase migration sequence (Data Model tab 11). Tab 12 was never created; this file
@@ -11,6 +11,18 @@ It translates the PRD's capability matrix (§4.3) into what Postgres can actuall
 enforce: **table × operation × role × predicate**. Every table migration must
 implement its row of this document in the same migration that creates the table
 (SOP §7).
+
+**Naming.** Tables are `UPPER_SNAKE` in the Data Model but unquoted `lower_snake` in
+Postgres (`public.users`, not `"USERS"`) — the Data Model name is documentation, the
+lower name is the identifier. The matrix tables below keep the Data Model names for
+traceability; SQL uses the lower names.
+
+**Helpers.** Base role checks come from `create_users` (F233): `public.is_admin()` and
+`public.is_active_user()`, each a `SECURITY DEFINER` lookup against `public.users`.
+The richer predicates — `app.is_cam()`, `app.can_write()`, `app.owns_organisation()`,
+`app.organisation_is_unowned()`, `app.can_contact_organisation()` — come from
+`create_rls_helpers` (F224) and live in the `app` schema, which is not exposed through
+PostgREST.
 
 ---
 
@@ -25,7 +37,7 @@ implement its row of this document in the same migration that creates the table
 | anonymous | `anon` | **No access to any table.** Public self-sign-up is prohibited (PRD §4.2) |
 
 `USERS.is_active = false` revokes everything. Every policy is `AND`ed with
-`app.is_active_user()`. A deactivated account can read nothing and write nothing,
+`public.is_active_user()`. A deactivated account can read nothing and write nothing,
 even with a still-valid JWT — this is what satisfies PRD §4.2 "cannot refresh tokens,
 send messages, or execute background actions".
 
@@ -39,18 +51,20 @@ includes `anon`.
 This is the part that does not survive translation from §4.3. Recording it so
 reviewers do not assume the matrix alone is sufficient.
 
-| §4.3 capability | Why RLS alone fails | Mechanism |
-|---|---|---|
-| CAM may edit own profile but **not** their own `role` | RLS is row-level; it cannot allow a row UPDATE while forbidding one column | `REVOKE` (see §2.1) then column `GRANT` — `grant update (full_name) on "USERS" to authenticated` — plus a trigger guard. Role is never granted to `authenticated`; only an admin RPC writes it |
-| "Send to an unowned organisation → **becomes owner**" | Requires a conditional write to `ORGANISATIONS.owner_id`, which CAMs otherwise cannot touch | `SECURITY DEFINER` RPC `claim_organisation(org_id)`. Asserts `owner_id is null`, sets it to `auth.uid()`, writes audit row. Atomic — closes the two-CAM race |
-| "Override pipeline stage — **reason required**" | Postgres cannot require a justification string as a condition of an UPDATE | `SECURITY DEFINER` RPC `override_outreach_status(org_id, status, reason)`. `reason` is `not null` and lands in the audit log |
-| "Reassign ownership: admin only" | Same column-level problem as above | Admin-only RPC `assign_organisation_owner(org_id, user_id)` |
-| Audit entries are immutable | RLS controls who writes, not whether a row can later change | `AUDIT_LOG` gets **no** UPDATE or DELETE policy for any role. Append-only by omission |
+| §4.3 capability | Why RLS alone fails | Mechanism | Status |
+|---|---|---|---|
+| CAM may edit own profile but **not** their own `role` | RLS is row-level; it cannot allow a row UPDATE while forbidding one column | `REVOKE` (§2.1) then column `GRANT` — `grant update (full_name) on public.users to authenticated`. `role`/`is_active` granted to nobody; an admin role change goes through an RPC (F012) | **shipped** in create_users (F233); F012 RPC still to build |
+| CAM claims an **unowned** organisation | Needs a write to `ORGANISATIONS.owner_id`, otherwise off-limits | Handled **in the UPDATE policy**, not an RPC: a CAM may target an unowned row and its `WITH CHECK` forces the new `owner_id` to be themselves. `claim_organisation(org_id)` as a `SECURITY DEFINER` RPC remains a future enhancement (F162) for atomic race-safety + an audit row | policy **shipped** in create_organisations (F233); RPC deferred to F162 |
+| "Override pipeline stage — **reason required**" | Postgres cannot require a justification string as a condition of an UPDATE | `SECURITY DEFINER` RPC `override_outreach_status(org_id, status, reason)`. `reason` is `not null` and lands in the audit log | to build (F224) |
+| "Reassign ownership: admin only" | Same column-level problem | Currently the org UPDATE policy allows an admin to set any `owner_id`; a dedicated `assign_organisation_owner` RPC (with audit) is the future form | admin path **shipped**; RPC deferred |
+| Audit entries are immutable | RLS controls who writes, not whether a row can later change | `AUDIT_LOG` gets **no** UPDATE or DELETE policy for any role. Append-only by omission | needs the table (§6) |
 
-**Rule that follows:** where a capability needs a condition, a reason, or a
-single-column write, it is an RPC, not a policy. The RPC is `SECURITY DEFINER`
-with `set search_path = ''`, and it re-checks the caller's role itself, because
-`SECURITY DEFINER` bypasses the RLS that would otherwise protect it.
+**Rule that follows:** where a capability needs a *condition*, a *reason string*, or a
+cross-user write, prefer an RPC over widening a policy. An RPC is `SECURITY DEFINER`
+with `set search_path = ''` and re-checks the caller's role itself, because
+`SECURITY DEFINER` bypasses the RLS that would otherwise protect it. The one place a
+policy carries the logic directly is the unowned-claim above, where the `WITH CHECK`
+can express "new owner must be me" without an RPC — see §3.2.
 
 ### 2.1 Grants: revoke before you grant
 
@@ -69,35 +83,40 @@ and removes nothing — the broad grant is still there, and the narrow one reads
 restriction while being a no-op.
 
 This was confirmed against staging on 22 Jul 2026: with policies in place exactly as
-specified in §3.1, a CAM ran `update "USERS" set role = 'admin' where id = <self>` and
-**succeeded**. The row policy allowed it (it is the CAM's own row) and nothing else
+specified in §3.1, a CAM ran `update public.users set role = 'admin' where id = <self>`
+and **succeeded**. The row policy allowed it (it is the CAM's own row) and nothing else
 stood in the way. Every subsequent check in that test session then passed for the wrong
-reason, because the attacker was an admin by then.
+reason, because the attacker was an admin by then. `create_users` and
+`create_organisations` (F233) now open their security blocks with the revoke; the CI
+coverage gate (§5, `scripts/verify-rls-coverage.sql`) fails any table that ships
+without it.
 
 The required opening of every table's security block:
 
 ```sql
-revoke all on public."TABLE_NAME" from anon, authenticated;
-alter table public."TABLE_NAME" enable row level security;
+revoke all on public.<table> from anon, authenticated;
+alter table public.<table> enable row level security;
 -- then grant back only what the matrix allows, and only then write policies
-grant select on public."TABLE_NAME" to authenticated;
+grant select on public.<table> to authenticated;
 ```
 
 RLS filters **rows**. Table and column privileges decide whether the statement is
 allowed to run at all. Both are needed: a policy without a revoke leaves columns
 exposed, and a grant without a policy exposes every row.
 
-**Corollary for `USERS.role` and `USERS.is_active`:** these are granted to nobody,
+**Corollary for `users.role` and `users.is_active`:** these are granted to nobody,
 including admins — Postgres column privileges attach to the Postgres role
 (`authenticated`), which every signed-in user shares, so there is no way to grant the
 column to admins alone. An admin changing a role therefore goes through the
-`SECURITY DEFINER` RPC (F012), which re-checks `app.is_admin()` itself. A direct
+`SECURITY DEFINER` RPC (F012), which re-checks `public.is_admin()` itself. A direct
 `UPDATE ... set role` returns `42501` for every caller. That is the intended result,
 not a bug to route around.
 
-A trigger backs this up (`app.guard_privileged_user_columns`). Belt and braces: a
-future migration that re-grants a column by accident still fails closed, and the
-failure names the column.
+The column grant is the whole control here — verified sufficient against staging. A
+belt-and-braces trigger guard on `role`/`is_active` was considered and left out:
+create_users relies on the grant alone, and the coverage gate catches a forgotten
+revoke, so the trigger earned its keep less than the extra moving part cost. Revisit if
+a table ever needs a column granted for one purpose but protected for another.
 
 ---
 
@@ -124,9 +143,17 @@ Everyone authorised reads canonical data (§4.3 "View canonical organisations": 
 three roles yes). Writes to canonical records are admin-only; CAMs go through the
 suggestion flow (F077).
 
+**Known gap (tracked in §6).** The shipped `ORGANISATIONS` UPDATE policy lets a CAM who
+owns a row also edit its *canonical* columns (`legal_name`, etc.), which this table
+reserves for admins. Column privileges cannot separate "edit ownership" from "edit
+canonical fields" — `authenticated` is one shared Postgres role — so closing it needs a
+canonical-edit RPC or column-guard trigger (F224). The narrower unowned-org hole (a CAM
+editing a row they do not own) *is* closed: the `WITH CHECK` uses
+`coalesce(owner_id = auth.uid(), false)`, so a null owner no longer slips through.
+
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `ORGANISATIONS` | all roles | admin | admin (+ CAM via RPC for ownership/stage) | admin |
+| `ORGANISATIONS` | all roles | admin | admin any row; CAM may claim an unowned row (WITH CHECK pins new `owner_id` to self) or edit one they own | admin |
 | `ORGANISATION_IDENTIFIERS` | all roles | admin | admin | admin |
 | `CONTACTS` | all roles | admin, cam | admin, cam | admin |
 | `FINANCIAL_PERIODS` | all roles | admin | admin | admin |
@@ -263,11 +290,12 @@ RLS, so a suite written against it proves nothing.
 | 4 | misuse attempt | CAM updates own `USERS.role` to `'admin'` → `42501`, **and** the stored role is unchanged |
 | 4a | misuse attempt | `authenticated` holds no `UPDATE` on `USERS.role`; still holds it on `full_name` |
 | 4b | coverage gate | `anon` holds no table privilege on any table in `public` (the missing-`REVOKE` check, §2.1) |
-| 5 | misuse attempt | CAM updates `ORGANISATIONS.owner_id` directly → `42501` |
-| 6 | sensitive data check | CAM `select * from "RAW_SOURCE_RECORDS"` → **0 rows** |
-| 7 | sensitive data check | CAM `select * from "CAM_ACTIVITY_SUMMARY"` → only own rows |
-| 8 | sensitive data check | CAM `select * from "SCORING_WEIGHTS"` → 0 rows |
-| 9 | permission failure | Deactivated user (`is_active = false`) reads `ORGANISATIONS` → 0 rows |
+| 5 | normal action | CAM claims an **unowned** org (sets `owner_id` to self) → succeeds |
+| 5a | misuse attempt | CAM sets an org's `owner_id` to **another** user → `42501` (reassignment is admin-only) |
+| 6 | sensitive data check | CAM `select * from raw_source_records` → **0 rows** |
+| 7 | sensitive data check | CAM `select * from cam_activity_summary` → only own rows |
+| 8 | sensitive data check | CAM `select * from scoring_weights` → 0 rows |
+| 9 | permission failure | Deactivated user (`is_active = false`) reads `organisations` → 0 rows |
 | 10 | log entry created | Test 3 produces exactly one `AUDIT_LOG` row |
 | 11 | bypass attempt | Direct PostgREST call with `anon` key against every table → 0 rows / `42501` |
 | 12 | coverage gate | No table in `public` has `rowsecurity = false` or zero policies |

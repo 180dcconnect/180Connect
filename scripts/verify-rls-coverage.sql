@@ -13,7 +13,7 @@
 -- Escape hatch: a table may opt out with a comment beginning 'RLS-EXEMPT:' and a
 -- reason. It shows up in the diff, so the exemption is reviewed like any other
 -- change rather than being silently absent.
---   comment on table public."SOME_TABLE" is 'RLS-EXEMPT: reference data, no rows are user-specific';
+--   comment on table public.some_table is 'RLS-EXEMPT: reference data, no rows are user-specific';
 
 \set ON_ERROR_STOP on
 
@@ -104,7 +104,7 @@ begin
   end if;
 
   if v_anon_grants is not null then
-    raise exception E'RLS coverage gate failed.\nThe anon role holds table privileges on: %\nSupabase grants ALL on new public tables to anon and authenticated by default. Start the table''s security block with `revoke all on public."TABLE" from anon, authenticated;` and grant back only what docs/rls-permission-matrix.md allows.', v_anon_grants;
+    raise exception E'RLS coverage gate failed.\nThe anon role holds table privileges on: %\nSupabase grants ALL on new public tables to anon and authenticated by default. Start the table''s security block with `revoke all on public.<table> from anon, authenticated;` and grant back only what docs/rls-permission-matrix.md allows.', v_anon_grants;
   end if;
 
   if v_bad_views is not null then

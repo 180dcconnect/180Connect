@@ -1,4 +1,4 @@
--- RLS behaviour tests — F224 (#224)
+-- RLS behaviour tests — F224 (#219)
 -- Spec: docs/rls-permission-matrix.md §5. Run by `supabase test db` (pg_prove).
 --
 -- These tests run as real end-user roles, never as service_role. service_role
@@ -9,8 +9,12 @@
 -- report as skipped rather than failing the build, so this file can be merged
 -- ahead of the schema it describes and goes green as each table arrives.
 --
--- Everything runs inside one transaction and is rolled back; fixtures never
--- persist.
+-- Naming: tables are lower_snake in Postgres (public.users), UPPER_SNAKE only in the
+-- Data Model. Base role helpers are public.is_admin / public.is_active_user
+-- (create_users, F233); the CAM and ownership predicates are app.* (create_rls_helpers,
+-- F224).
+--
+-- Everything runs inside one transaction and is rolled back; fixtures never persist.
 
 begin;
 
@@ -45,7 +49,8 @@ $$;
 -- the role under test can hide the very bugs it exists to catch. `reset role` and
 -- set_config are both in pg_catalog and need no grant.
 
--- True when every named table exists, so a test group can skip cleanly.
+-- True when every named table exists, so a test group can skip cleanly. Names are
+-- lower_snake to match the actual tables (to_regclass quotes via %I).
 create or replace function tests.tables_exist(variadic p_tables text[])
 returns boolean language plpgsql stable as $$
 declare t text;
@@ -93,7 +98,10 @@ declare
   v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
   v_backdated  timestamptz := timestamptz '2000-01-01';
 begin
-  -- USERS.id references auth.users; seed the auth side first.
+  -- public.users.id references auth.users; seed the auth side first. create_users
+  -- has an on-insert trigger that mirrors auth.users into public.users, so the
+  -- public.users insert is written ON CONFLICT DO UPDATE to set the role and the
+  -- backdated timestamps the trigger's default row would not carry.
   insert into auth.users (id, instance_id, aud, role, email)
   values
     (v_admin,       '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'admin@test.local'),
@@ -102,61 +110,68 @@ begin
     (v_deactivated, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'gone@test.local')
   on conflict (id) do nothing;
 
-  -- Timestamps are backdated on purpose. app.set_updated_at() uses now(), which is
+  -- Timestamps are backdated on purpose. public.set_updated_at() uses now(), which is
   -- transaction time, so a row created and updated in this same transaction would
   -- come out with updated_at = created_at and the trigger test could never fail.
-  insert into public."USERS" (id, email, full_name, role, is_active, created_at, updated_at)
+  insert into public.users (id, email, full_name, role, is_active, created_at, updated_at)
   values
     (v_admin,       'admin@test.local', 'Test Admin',       'admin', true,  v_backdated, v_backdated),
     (v_cam_a,       'cam-a@test.local', 'Test CAM A',       'cam',   true,  v_backdated, v_backdated),
     (v_cam_b,       'cam-b@test.local', 'Test CAM B',       'cam',   true,  v_backdated, v_backdated),
     (v_deactivated, 'gone@test.local',  'Deactivated User', 'cam',   false, v_backdated, v_backdated)
-  on conflict (id) do nothing;
+  on conflict (id) do update
+    set role = excluded.role,
+        is_active = excluded.is_active,
+        full_name = excluded.full_name,
+        created_at = excluded.created_at,
+        updated_at = excluded.updated_at;
 
-  if tests.tables_exist('ORGANISATIONS') then
-    insert into public."ORGANISATIONS" (id, legal_name, country_code, owner_id)
+  if tests.tables_exist('organisations') then
+    insert into public.organisations (id, legal_name, entry_method, organisation_type, owner_id)
     values
-      ('00000000-0000-4000-b000-000000000001', 'Unowned Org Ltd',   'GB', null),
-      ('00000000-0000-4000-b000-000000000002', 'CAM A Org Ltd',     'GB', v_cam_a),
-      ('00000000-0000-4000-b000-000000000003', 'CAM B Org Ltd',     'GB', v_cam_b)
+      ('00000000-0000-4000-b000-000000000001', 'Unowned Org Ltd', 'manual', 'other', null),
+      ('00000000-0000-4000-b000-000000000002', 'CAM A Org Ltd',   'manual', 'other', v_cam_a),
+      ('00000000-0000-4000-b000-000000000003', 'CAM B Org Ltd',   'manual', 'other', v_cam_b)
     on conflict (id) do nothing;
   end if;
 end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- Tests 1-5, 9: identity, ownership, deactivation
+-- Core: identity, ownership, deactivation
 -- ---------------------------------------------------------------------------
 
 create or replace function tests.suite_core()
 returns setof text language plpgsql as $$
 declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
   v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
   v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
   v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
   v_org_unowned uuid := '00000000-0000-4000-b000-000000000001';
   v_org_cam_b   uuid := '00000000-0000-4000-b000-000000000003';
   v_count       bigint;
+  v_ok          boolean;
 begin
-  if not tests.tables_exist('USERS') then
+  if not tests.tables_exist('users') then
     return next skip(1, 'step 2 create_users not yet migrated');
     return;
   end if;
 
   perform tests.seed();
 
-  -- Helper library sanity: the role lookup must survive being called from a
-  -- policy on the very table it reads.
+  -- Helper sanity: the CAM predicate must resolve from inside an impersonated
+  -- session without recursing on the users policy that reads users.
   perform tests.login_as(v_cam_a);
-  select 1 into v_count where app.current_user_role() = 'cam';
+  v_ok := app.is_cam();
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
-  return next ok(v_count = 1, 'app.current_user_role() resolves CAM without recursing on USERS');
+  return next ok(v_ok, 'app.is_cam() resolves for a CAM without recursing on users');
 
   -- Test 4 (misuse): a CAM may not promote themselves.
   return next is(
     tests.sqlstate_of(v_cam_a, format(
-      'update public."USERS" set role = ''admin'' where id = %L', v_cam_a)),
+      'update public.users set role = ''admin'' where id = %L', v_cam_a)),
     '42501',
     'CAM cannot escalate own role to admin'
   );
@@ -166,42 +181,51 @@ begin
   -- succeeded, every later check in the run passed while the "CAM" was an admin. A
   -- suite that only inspects SQLSTATE cannot tell those two worlds apart.
   select count(*) into v_count
-    from public."USERS" where id = v_cam_a and role = 'admin';
+    from public.users where id = v_cam_a and role = 'admin';
   return next is(v_count, 0::bigint,
     'CAM role is genuinely unchanged after the escalation attempt');
 
   -- The grant that makes the above hold. Checked directly so the suite reports the
   -- cause, not just the symptom, if a future migration forgets the REVOKE.
   return next ok(
-    not has_column_privilege('authenticated', 'public."USERS"', 'role', 'UPDATE'),
-    'authenticated holds no UPDATE privilege on USERS.role'
+    not has_column_privilege('authenticated', 'public.users', 'role', 'UPDATE'),
+    'authenticated holds no UPDATE privilege on users.role'
   );
   return next ok(
-    has_column_privilege('authenticated', 'public."USERS"', 'full_name', 'UPDATE'),
-    'authenticated can still update USERS.full_name (profile editing works)'
+    has_column_privilege('authenticated', 'public.users', 'full_name', 'UPDATE'),
+    'authenticated can still update users.full_name (profile editing works)'
   );
 
-  -- Test 9 (permission failure): deactivation revokes access immediately, without
-  -- waiting for the JWT to expire.
-  if tests.tables_exist('ORGANISATIONS') then
+  if tests.tables_exist('organisations') then
+    -- Test 9 (permission failure): deactivation revokes access immediately, without
+    -- waiting for the JWT to expire.
     perform tests.login_as(v_deactivated);
-    select count(*) into v_count from public."ORGANISATIONS";
+    select count(*) into v_count from public.organisations;
     execute 'reset role';
     perform set_config('request.jwt.claims', null, true);
     return next is(v_count, 0::bigint,
       'deactivated user reads no organisations despite a valid token');
 
-    -- Test 5 (misuse): ownership is not a field a CAM can write directly.
+    -- Ownership (F233 model): a CAM claims an unowned organisation by setting
+    -- owner_id to themselves. This is allowed.
     return next is(
       tests.sqlstate_of(v_cam_a, format(
-        'update public."ORGANISATIONS" set owner_id = %L where id = %L', v_cam_a, v_org_unowned)),
-      '42501',
-      'CAM cannot claim an organisation by writing owner_id (must use claim_organisation RPC)'
+        'update public.organisations set owner_id = %L where id = %L', v_cam_a, v_org_unowned)),
+      null,
+      'CAM can claim an unowned organisation by setting owner_id to themselves'
     );
 
-    -- Shared read: every authorised role sees canonical data (PRD 4.3, F019).
+    -- ...but may not hand one to another user. Reassignment is admin-only (matrix §2).
+    return next is(
+      tests.sqlstate_of(v_cam_a, format(
+        'update public.organisations set owner_id = %L where id = %L', v_cam_b, v_org_unowned)),
+      '42501',
+      'CAM cannot assign an organisation to another user'
+    );
+
+    -- Shared read: every active role sees canonical data (PRD 4.3, F019).
     perform tests.login_as(v_cam_a);
-    select count(*) into v_count from public."ORGANISATIONS";
+    select count(*) into v_count from public.organisations;
     execute 'reset role';
     perform set_config('request.jwt.claims', null, true);
     return next ok(v_count >= 3, 'CAM reads all canonical organisations including those owned by others');
@@ -209,11 +233,11 @@ begin
     return next skip(3, 'step 3 create_organisations not yet migrated');
   end if;
 
-  -- Test 1 (normal action): notes are shared, any CAM may write one on any org.
-  if tests.tables_exist('NOTES', 'ORGANISATIONS') then
+  -- Notes are shared: any CAM may write one on any org (F019).
+  if tests.tables_exist('notes', 'organisations') then
     return next is(
       tests.sqlstate_of(v_cam_a, format(
-        'insert into public."NOTES" (organisation_id, author_id, content) values (%L, %L, ''test note'')',
+        'insert into public.notes (organisation_id, author_id, content) values (%L, %L, ''test note'')',
         v_org_cam_b, v_cam_a)),
       null,
       'CAM can note an organisation owned by another CAM (shared visibility)'
@@ -223,10 +247,10 @@ begin
   end if;
 
   -- Tests 2 and 3: the F018 contact permission rule, the core of this story.
-  if tests.tables_exist('OUTREACH_MESSAGES', 'ORGANISATIONS') then
+  if tests.tables_exist('outreach_messages', 'organisations') then
     return next is(
       tests.sqlstate_of(v_cam_a, format(
-        'insert into public."OUTREACH_MESSAGES" (organisation_id, sent_by_user_id, subject, body, send_status)
+        'insert into public.outreach_messages (organisation_id, sent_by_user_id, subject, body, send_status)
          values (%L, %L, ''s'', ''b'', ''draft'')', v_org_unowned, v_cam_a)),
       null,
       'CAM can send to an unowned organisation'
@@ -234,7 +258,7 @@ begin
 
     return next is(
       tests.sqlstate_of(v_cam_a, format(
-        'insert into public."OUTREACH_MESSAGES" (organisation_id, sent_by_user_id, subject, body, send_status)
+        'insert into public.outreach_messages (organisation_id, sent_by_user_id, subject, body, send_status)
          values (%L, %L, ''s'', ''b'', ''draft'')', v_org_cam_b, v_cam_a)),
       '42501',
       'CAM cannot send to an organisation owned by another CAM'
@@ -243,7 +267,7 @@ begin
     -- Impersonation guard: the WITH CHECK must pin sent_by_user_id to the caller.
     return next is(
       tests.sqlstate_of(v_cam_a, format(
-        'insert into public."OUTREACH_MESSAGES" (organisation_id, sent_by_user_id, subject, body, send_status)
+        'insert into public.outreach_messages (organisation_id, sent_by_user_id, subject, body, send_status)
          values (%L, %L, ''s'', ''b'', ''draft'')', v_org_unowned, v_cam_b)),
       '42501',
       'CAM cannot attribute an outreach message to another user'
@@ -255,7 +279,7 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- Tests 6-8: sensitive data must be invisible, not merely un-writable
+-- Sensitive data must be invisible, not merely un-writable
 -- ---------------------------------------------------------------------------
 -- A blocked SELECT returns zero rows and raises nothing. These assert row
 -- counts; asserting an error here would silently never fire.
@@ -267,17 +291,17 @@ declare
   v_cam_b uuid := '00000000-0000-4000-a000-000000000003';
   v_count bigint;
 begin
-  if not tests.tables_exist('USERS') then
+  if not tests.tables_exist('users') then
     return next skip(1, 'step 2 create_users not yet migrated');
     return;
   end if;
 
   perform tests.seed();
 
-  -- Test 6: raw third-party payloads are admin-only (PRD 4.3).
-  if tests.tables_exist('RAW_SOURCE_RECORDS') then
+  -- Raw third-party payloads are admin-only (PRD 4.3).
+  if tests.tables_exist('raw_source_records') then
     perform tests.login_as(v_cam_a);
-    select count(*) into v_count from public."RAW_SOURCE_RECORDS";
+    select count(*) into v_count from public.raw_source_records;
     execute 'reset role';
     perform set_config('request.jwt.claims', null, true);
     return next is(v_count, 0::bigint, 'CAM sees zero raw source records');
@@ -285,11 +309,10 @@ begin
     return next skip(1, 'step 6 create_ingestion not yet migrated');
   end if;
 
-  -- Test 8: scoring weights are admin-only — a CAM who can read them can game
-  -- the priority queue.
-  if tests.tables_exist('SCORING_WEIGHTS') then
+  -- Scoring weights are admin-only — a CAM who can read them can game the queue.
+  if tests.tables_exist('scoring_weights') then
     perform tests.login_as(v_cam_a);
-    select count(*) into v_count from public."SCORING_WEIGHTS";
+    select count(*) into v_count from public.scoring_weights;
     execute 'reset role';
     perform set_config('request.jwt.claims', null, true);
     return next is(v_count, 0::bigint, 'CAM sees zero scoring weights');
@@ -297,15 +320,15 @@ begin
     return next skip(1, 'step 8 create_model_config not yet migrated');
   end if;
 
-  -- Test 7: one CAM must not see another CAM's performance numbers.
-  if tests.tables_exist('CAM_ACTIVITY_SUMMARY') then
-    insert into public."CAM_ACTIVITY_SUMMARY" (user_id, week_start)
+  -- One CAM must not see another CAM's performance numbers.
+  if tests.tables_exist('cam_activity_summary') then
+    insert into public.cam_activity_summary (user_id, week_start)
     values (v_cam_a, date '2026-07-20'), (v_cam_b, date '2026-07-20')
     on conflict do nothing;
 
     perform tests.login_as(v_cam_a);
     select count(*) into v_count
-      from public."CAM_ACTIVITY_SUMMARY"
+      from public.cam_activity_summary
      where user_id <> v_cam_a;
     execute 'reset role';
     perform set_config('request.jwt.claims', null, true);
@@ -317,29 +340,29 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- Test 10: a blocked write leaves an audit trail
+-- Audit log is append-only
 -- ---------------------------------------------------------------------------
 
 create or replace function tests.suite_audit()
 returns setof text language plpgsql as $$
 begin
-  if not tests.tables_exist('AUDIT_LOG') then
-    return next skip(2, 'AUDIT_LOG not in the Data Model yet — see docs/rls-permission-matrix.md §6.1');
+  if not tests.tables_exist('audit_log') then
+    return next skip(2, 'audit_log not in the Data Model yet — see docs/rls-permission-matrix.md §6');
     return;
   end if;
 
   -- Append-only by omission: no UPDATE or DELETE policy may exist for any role.
   return next is(
     (select count(*)::int from pg_policies
-      where schemaname = 'public' and tablename = 'AUDIT_LOG'
+      where schemaname = 'public' and tablename = 'audit_log'
         and cmd in ('UPDATE', 'DELETE')),
     0,
-    'AUDIT_LOG has no UPDATE or DELETE policy — an editable audit trail is not one'
+    'audit_log has no UPDATE or DELETE policy — an editable audit trail is not one'
   );
 
   return next is(
     tests.sqlstate_of('00000000-0000-4000-a000-000000000002',
-      'delete from public."AUDIT_LOG"'),
+      'delete from public.audit_log'),
     '42501',
     'CAM cannot delete audit entries'
   );
@@ -372,7 +395,7 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- USERS table controls (sequence step 2)
+-- users table controls (sequence step 2)
 -- ---------------------------------------------------------------------------
 
 create or replace function tests.suite_users()
@@ -383,7 +406,7 @@ declare
   v_name  text;
   v_when  timestamptz;
 begin
-  if not tests.tables_exist('USERS') then
+  if not tests.tables_exist('users') then
     return next skip(6, 'step 2 create_users not yet migrated');
     return;
   end if;
@@ -394,22 +417,22 @@ begin
   -- is_active can also set someone else's.
   return next is(
     tests.sqlstate_of(v_cam_a, format(
-      'update public."USERS" set is_active = false where id = %L', v_cam_a)),
+      'update public.users set is_active = false where id = %L', v_cam_a)),
     '42501',
     'CAM cannot change is_active'
   );
 
-  -- Accounts come from the invite flow (F008) running as service_role.
+  -- Accounts come from the auth trigger / invite flow (F008); a client cannot insert.
   return next is(
     tests.sqlstate_of(v_cam_a,
-      'insert into public."USERS" (id, email, role) values (gen_random_uuid(), ''x@test.local'', ''admin'')'),
+      'insert into public.users (id, email, role) values (gen_random_uuid(), ''x@test.local'', ''admin'')'),
     '42501',
     'CAM cannot create a user account'
   );
 
   return next is(
     tests.sqlstate_of(v_cam_a, format(
-      'delete from public."USERS" where id = %L', v_admin)),
+      'delete from public.users where id = %L', v_admin)),
     '42501',
     'CAM cannot delete a user (deactivate, never delete)'
   );
@@ -418,23 +441,23 @@ begin
   -- than raises. Asserting the error alone would pass whether or not the write
   -- landed, so assert the value.
   perform tests.sqlstate_of(v_cam_a, format(
-    'update public."USERS" set full_name = ''Hacked'' where id = %L', v_admin));
-  select full_name into v_name from public."USERS" where id = v_admin;
+    'update public.users set full_name = ''Hacked'' where id = %L', v_admin));
+  select full_name into v_name from public.users where id = v_admin;
   return next is(v_name, 'Test Admin',
     'CAM cannot rename another user (blocked silently by USING, row unchanged)');
 
   -- anon reaches nothing. This is the REVOKE from matrix §2.1, not a policy.
   return next ok(
-    not has_table_privilege('anon', 'public."USERS"', 'SELECT'),
-    'anon holds no SELECT privilege on USERS'
+    not has_table_privilege('anon', 'public.users', 'SELECT'),
+    'anon holds no SELECT privilege on users'
   );
 
   -- updated_at maintenance.
   perform tests.sqlstate_of(v_cam_a, format(
-    'update public."USERS" set full_name = ''Renamed'' where id = %L', v_cam_a));
-  select updated_at into v_when from public."USERS" where id = v_cam_a;
+    'update public.users set full_name = ''Renamed'' where id = %L', v_cam_a));
+  select updated_at into v_when from public.users where id = v_cam_a;
   return next ok(v_when > timestamptz '2000-01-01',
-    'app.set_updated_at() stamps updated_at on write');
+    'public.set_updated_at() stamps updated_at on write');
 end;
 $$;
 

@@ -23,15 +23,19 @@ KEY="${2:?usage: verify-anon-lockout.sh <supabase-url> <anon-key>}"
 # Every table in the migration sequence. Tables that do not exist yet return 404
 # and are reported as pending, not as a pass — a typo in a table name must never
 # read as a clean result.
+#
+# Names are lower_snake: PostgREST exposes tables under their real Postgres name,
+# and these are created unquoted (public.users, not "USERS"). The Data Model writes
+# them UPPER_SNAKE, but that is documentation, not the identifier.
 TABLES=(
-  USERS ORGANISATIONS ORGANISATION_IDENTIFIERS CONTACTS FINANCIAL_PERIODS
-  GRANTS ENRICHMENT_RESULTS NOTES TAGS ORG_TAGS
-  INGESTION_RUNS RAW_SOURCE_RECORDS DATA_QUALITY_EVENTS ENTITY_MATCH_CANDIDATES
-  MANUAL_ENTRY_RECORDS MODEL_VERSIONS SCORING_WEIGHTS FEATURE_DEFINITIONS
-  AGENT_PROMPTS AGENT_RUNS LATEST_SCORES EMAIL_PERFORMANCE_LIBRARY
-  OUTREACH_MESSAGES AI_GENERATIONS SEND_EVENTS REPLY_EVENTS OUTCOMES
-  API_HEALTH_LOGS INGESTION_SUMMARY COST_TRACKING ERROR_LOG
-  CAM_ACTIVITY_SUMMARY PIPELINE_METRICS SECTOR_PERFORMANCE AUDIT_LOG
+  users organisations organisation_identifiers contacts financial_periods
+  grants enrichment_results notes tags org_tags
+  ingestion_runs raw_source_records data_quality_events entity_match_candidates
+  manual_entry_records model_versions scoring_weights feature_definitions
+  agent_prompts agent_runs latest_scores email_performance_library
+  outreach_messages ai_generations send_events reply_events outcomes
+  api_health_logs ingestion_summary cost_tracking error_log
+  cam_activity_summary pipeline_metrics sector_performance audit_log
 )
 
 leaked=()

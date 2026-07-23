@@ -11,7 +11,7 @@ drop function if exists public.is_admin ();
 drop trigger if exists users_set_updated_at on public.users;
 drop table if exists public.users;
 
--- set_updated_at is shared with later tables; only drop it if nothing else uses it.
+-- set_updated_at is shared with later tables; only drop it after rolling back any tables that depend on it.
 drop function if exists public.set_updated_at ();
 
 drop type if exists public.user_role;

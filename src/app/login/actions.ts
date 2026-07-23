@@ -5,7 +5,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireApprovedUser, permissionFailureMessage } from "@/lib/auth/require-approved-user";
 import { logSecurityEvent } from "@/lib/log-security-event";
-import { safeValidate } from "@/lib/validation";
+import { emailField, safeValidate } from "@/lib/validation";
 
 const allowedDomain = (process.env.AUTH_ALLOWED_EMAIL_DOMAIN ?? "180dc.org")
   .trim()
@@ -13,14 +13,10 @@ const allowedDomain = (process.env.AUTH_ALLOWED_EMAIL_DOMAIN ?? "180dc.org")
   .replace(/^@/, "");
 
 const loginSchema = z.object({
-  email: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .email("Enter a valid email address.")
-    .refine((email) => email.endsWith(`@${allowedDomain}`), {
-      message: `Use your @${allowedDomain} email address.`,
-    }),
+  email: emailField("Enter a valid email address.").refine(
+    (email) => email.endsWith(`@${allowedDomain}`),
+    { message: `Use your @${allowedDomain} email address.` },
+  ),
   password: z.string().min(1, "Enter your password.").max(256),
 });
 

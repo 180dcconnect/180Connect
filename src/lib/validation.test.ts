@@ -105,4 +105,15 @@ describe("boundedInt", () => {
   it("rejects a non-integer", () => {
     assert.throws(() => schema.parse(1.5));
   });
+
+  it("rejects an empty or whitespace-only string instead of coercing to 0", () => {
+    // Range includes 0, so a naive Number("") === 0 would wrongly pass here.
+    const zeroAllowed = boundedInt(0, 10);
+    assert.throws(() => zeroAllowed.parse(""));
+    assert.throws(() => zeroAllowed.parse("   "));
+  });
+
+  it("rejects a non-numeric string", () => {
+    assert.throws(() => schema.parse("abc"));
+  });
 });

@@ -27,7 +27,7 @@ export function safeValidate<T>(
   const parsed = schema.safeParse(input);
 
   if (!parsed.success) {
-    return { success: false, fieldErrors: parsed.error.flatten().fieldErrors };
+    return { success: false, fieldErrors: z.flattenError(parsed.error).fieldErrors };
   }
 
   return { success: true, data: parsed.data };
@@ -44,25 +44,32 @@ export function nonEmptyTrimmed(max: number, requiredMessage = "This field is re
 
 /** Trimmed, lowercased email address. */
 export function emailField(message = "Enter a valid email address.") {
-  return z.string().trim().toLowerCase().email(message);
+  return z.string().trim().toLowerCase().pipe(z.email(message));
 }
 
 /** Absolute http:// or https:// URL. */
 export function urlField(message = "Enter a valid URL.") {
-  return z
-    .string()
-    .trim()
-    .url(message)
-    .refine((value) => value.startsWith("http://") || value.startsWith("https://"), {
-      message,
-    });
+  return z.string().trim().pipe(z.url({ protocol: /^https?$/, message }));
 }
 
-/** Whole number within an inclusive range. */
+/**
+ * Whole number within an inclusive range.
+ *
+ * Coerces numeric strings ("5" -> 5) but rejects empty/whitespace-only strings
+ * rather than letting `Number("")` slip through as 0.
+ */
 export function boundedInt(min: number, max: number, message?: string) {
-  return z.coerce
-    .number()
-    .int(message ?? `Must be a whole number between ${min} and ${max}.`)
-    .min(min, message ?? `Must be at least ${min}.`)
-    .max(max, message ?? `Must be at most ${max}.`);
+  return z.preprocess(
+    (value) =>
+      typeof value === "string"
+        ? value.trim() === ""
+          ? NaN
+          : Number(value)
+        : value,
+    z
+      .number()
+      .int(message ?? `Must be a whole number between ${min} and ${max}.`)
+      .min(min, message ?? `Must be at least ${min}.`)
+      .max(max, message ?? `Must be at most ${max}.`),
+  );
 }

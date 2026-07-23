@@ -1,7 +1,7 @@
 # RLS Permission Matrix
 
 **Story:** F224 — Row-Level Security. **Owner:** Bashir. **Reviewer:** Ben.
-**Status:** draft for review. **Last updated:** 23 July 2026.
+**Status:** approved by Ben (23 July 2026). **Last updated:** 23 July 2026.
 
 This document is the **Security Controls Register** referenced by step 15 of the
 Supabase migration sequence (Data Model tab 11). Tab 12 was never created; this file
@@ -279,7 +279,15 @@ created" therefore applies to blocked **writes** only.
 
 The app-layer contract: any `42501` from Supabase is caught, written to `AUDIT_LOG`
 (actor, table, operation, target id, timestamp), and surfaced as a blocked-action
-message. That handler is F221's dependency on this story.
+message.
+
+**Scope boundary.** F224 owns this *contract* — the clean `42501`, the human-readable
+RPC messages, the `AUDIT_LOG` table, and this mapping table. It does **not** own the
+UI rendering: catching a `PostgrestError` in `src/` and turning it into a toast/banner
+belongs to whichever story has the screen. **F012** (Edit User Role) is the first
+consumer and owns the reusable `42501 → message` helper; later write-features reuse it.
+This keeps F224 a database-layer story and avoids shipping a handler with no calling
+surface. (Audit-log *viewing* is F221.)
 
 ---
 
@@ -330,6 +338,10 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    matrix specifies it; someone must own it.
 5. **`SCOUT_PRIORITY_SCORE`** appears on tab 09 without fields and is not in the
    migration sequence. Excluded from this matrix until defined.
+6. **`set_user_active` RPC — owned by F011, not built.** `is_active` has the same
+   column-grant lockout as `role`, so deactivation needs the same self-authorising,
+   audited SECURITY DEFINER RPC as `set_user_role` (F012). Until it exists, no one can
+   deactivate a user. Build it in F011 (Deactivate Account), mirroring `set_user_role`.
 
 ---
 

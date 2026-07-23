@@ -462,11 +462,65 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Role-change RPC (F012) + audit trail
+-- ---------------------------------------------------------------------------
+-- The write-path the matrix reserves for an admin RPC. Also the concrete
+-- "log entry created" testing note: a successful change writes one audit row.
+
+create or replace function tests.suite_role_rpc()
+returns setof text language plpgsql as $$
+declare
+  v_admin uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b uuid := '00000000-0000-4000-a000-000000000003';
+  v_role  text;
+  v_count bigint;
+begin
+  if to_regprocedure('public.set_user_role(uuid, public.user_role)') is null then
+    return next skip(4, 'set_user_role RPC not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Admin promotes a CAM, and exactly one audit row records the transition.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_user_role(%L, ''admin'')', v_cam_b)),
+    null,
+    'admin can change another user''s role via the RPC'
+  );
+  select role::text into v_role from public.users where id = v_cam_b;
+  return next is(v_role, 'admin', 'the role change actually landed');
+
+  if tests.tables_exist('audit_log') then
+    select count(*) into v_count
+      from public.audit_log
+     where action = 'role_changed' and target_id = v_cam_b;
+    return next is(v_count, 1::bigint,
+      'the role change wrote exactly one audit_log row (log entry created)');
+  else
+    return next skip(1, 'audit_log not yet migrated');
+  end if;
+
+  -- A CAM cannot call it, even though EXECUTE is granted to authenticated — the
+  -- body self-checks is_admin().
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.set_user_role(%L, ''admin'')', v_cam_a)),
+    '42501',
+    'CAM calling the role RPC is refused inside the SECURITY DEFINER body'
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 
 select * from tests.suite_core();
 select * from tests.suite_users();
 select * from tests.suite_sensitive();
 select * from tests.suite_audit();
+select * from tests.suite_role_rpc();
 select * from tests.suite_views();
 
 select * from finish();

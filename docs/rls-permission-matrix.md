@@ -137,8 +137,11 @@ a table ever needs a column granted for one purpose but protected for another.
 | `USERS` | UPDATE | all rows | own row, granted columns only | own row, granted columns only |
 | `USERS` | DELETE | — (deactivate, never delete) | — | — |
 
-`role` and `is_active` are writable only through the admin RPC (F012) — by nobody
-directly, admins included. See §2.1.
+`role` is writable only through `public.set_user_role(user_id, role)` (F012) — a
+SECURITY DEFINER RPC that self-checks `app.is_admin()`, refuses a self-change, and
+writes an `audit_log` row (PRD §4.2). Nobody writes `role` directly, admins included.
+`is_active` will need the same treatment (a `set_user_active` RPC, F011) — same
+column-grant lockout, not yet built. See §2.1 and §7.
 
 ### 3.2 Canonical organisation data — shared read, admin write
 
@@ -341,10 +344,10 @@ and the advisor re-run. Status as of the 23 Jul staging run:
 | `rls_policy_always_true` | `organisations` INSERT was `with check (true)` | Tightened to `with check (app.is_admin())` — canonical records are admin-created (§3.2). **Resolved.** |
 | `0028` / `0029` (SECURITY DEFINER exposed) | `is_admin`, `is_active_user`, `handle_new_auth_user` were in `public`, callable as REST RPCs by anon/authenticated | Moved to the `app` schema, which PostgREST does not expose. Policies still call them; `authenticated` keeps `EXECUTE` (a plain `REVOKE` would break policy evaluation — verified `42501`). **Resolved.** |
 | `0011` (function search_path) | `set_updated_at` had an unpinned `search_path` | Pinned to `''` under F233. **Resolved.** |
+| `0029` on `set_user_role` | The F012 role-change RPC is SECURITY DEFINER and callable by `authenticated` via REST | **Accepted, intentional.** It *must* be REST-callable (the admin UI calls `/rest/v1/rpc/set_user_role`) and it self-authorises: the first thing its body does is re-check `app.is_admin()` and raise `42501` otherwise. This is the strong posture — a direct REST call by a non-admin is rejected *by the database*, not by app code. Moving it to `app` or switching to SECURITY INVOKER would defeat its purpose (INVOKER cannot write `users.role`, which is granted to no one). anon has no EXECUTE. |
 | `auth_leaked_password_protection` | HaveIBeenPwned check disabled | **Accepted exception — Pro-plan feature.** Attempting to enable it on the free plan returns *"available on Pro Plans and up."* Revisit if the project upgrades (tracked with D-01 / Q-01 in `docs/open-questions.md`, the same plan decision). |
 
-After the moves, a staging advisor run reported only
-`auth_leaked_password_protection`, which the free plan cannot switch on. That leaves the
-advisor at **zero actionable findings** on the current plan. Re-run it after the
-migrations apply to each environment (it reads the live database), and after any plan
-upgrade.
+After the fixes, a staging advisor run reports two WARN items — the intentional
+`set_user_role` RPC and the Pro-only password check — and **nothing else fixable**.
+Both are accepted and documented above. Re-run the advisor after the migrations apply
+to each environment (it reads the live database), and after any plan upgrade.

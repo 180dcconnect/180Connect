@@ -100,7 +100,7 @@ alter table public.organisations enable row level security;
 -- makes the team pipeline view and ownership handover possible.
 create policy organisations_select_active on public.organisations
   for select to authenticated
-  using (public.is_active_user());
+  using (app.is_active_user());
 
 -- Canonical records are created by admins only (permission matrix §3.2). A CAM who
 -- wants a new organisation in the system routes it through the suggestion / manual-
@@ -108,7 +108,7 @@ create policy organisations_select_active on public.organisations
 -- authenticated user — viewers included — write canonical rows.)
 create policy organisations_insert_admin on public.organisations
   for insert to authenticated
-  with check (public.is_admin());
+  with check (app.is_admin());
 
 -- Update rows. USING allows a CAM to target an unowned organisation (to claim it) or
 -- one they already own; admins may target any row. WITH CHECK governs the resulting
@@ -130,13 +130,13 @@ create policy organisations_insert_admin on public.organisations
 -- the unowned-edit one this policy closes.
 create policy organisations_update_owner_or_admin on public.organisations
   for update to authenticated
-  using (public.is_active_user()
-         and (owner_id is null or owner_id = auth.uid() or public.is_admin()))
-  with check (public.is_active_user()
-              and (coalesce(owner_id = auth.uid(), false) or public.is_admin()));
+  using (app.is_active_user()
+         and (owner_id is null or owner_id = auth.uid() or app.is_admin()))
+  with check (app.is_active_user()
+              and (coalesce(owner_id = auth.uid(), false) or app.is_admin()));
 
 -- Deletion is destructive and rare — admins only. The seed script deletes its own
 -- rows through the service role, which bypasses RLS.
 create policy organisations_delete_admin on public.organisations
   for delete to authenticated
-  using (public.is_admin());
+  using (app.is_admin());

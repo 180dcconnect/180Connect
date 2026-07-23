@@ -1,11 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-
-// PLACEHOLDER VALUE — F007's ticket has an open question on the actual
-// timeout policy ("Session timeout policy"). Using 30 minutes as a
-// reasonable default until that decision is made. Flag for review.
-const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
-const ACTIVITY_COOKIE_NAME = "last_activity";
+import {
+  ACTIVITY_COOKIE_NAME,
+  INACTIVITY_TIMEOUT_MS,
+  isSessionExpired,
+} from "./session-expiry";
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -43,7 +42,7 @@ export async function updateSession(request: NextRequest) {
       : null;
     const now = Date.now();
 
-    if (lastActivity && now - lastActivity > INACTIVITY_TIMEOUT_MS) {
+    if (isSessionExpired(lastActivity, now, INACTIVITY_TIMEOUT_MS)) {
       // Too much idle time has passed. Sign out server-side so the
       // token is genuinely invalidated, not just ignored client-side —
       // satisfies "cannot be reused even if replayed."
@@ -53,8 +52,6 @@ export async function updateSession(request: NextRequest) {
       expiredUrl.searchParams.set("reason", "expired");
       const expiredResponse = NextResponse.redirect(expiredUrl);
 
-      // Clear the activity cookie too, so a stale timestamp doesn't
-      // linger after the session ends.
       expiredResponse.cookies.delete(ACTIVITY_COOKIE_NAME);
       return expiredResponse;
     }
@@ -67,5 +64,6 @@ export async function updateSession(request: NextRequest) {
       path: "/",
     });
   }
+
   return response;
 }

@@ -3,6 +3,9 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { requireApprovedUser, permissionFailureMessage } from "@/lib/auth/require-approved-user";
+import { logSecurityEvent } from "@/lib/log-security-event";
+import { emailField, safeValidate } from "@/lib/validation";
 
 const allowedDomain = (process.env.AUTH_ALLOWED_EMAIL_DOMAIN ?? "180dc.org")
   .trim()
@@ -10,14 +13,10 @@ const allowedDomain = (process.env.AUTH_ALLOWED_EMAIL_DOMAIN ?? "180dc.org")
   .replace(/^@/, "");
 
 const loginSchema = z.object({
-  email: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .email("Enter a valid email address.")
-    .refine((email) => email.endsWith(`@${allowedDomain}`), {
-      message: `Use your @${allowedDomain} email address.`,
-    }),
+  email: emailField("Enter a valid email address.").refine(
+    (email) => email.endsWith(`@${allowedDomain}`),
+    { message: `Use your @${allowedDomain} email address.` },
+  ),
   password: z.string().min(1, "Enter your password.").max(256),
 });
 
@@ -33,25 +32,32 @@ export async function login(
   formData: FormData,
 ): Promise<LoginState> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
-  const parsed = loginSchema.safeParse({
+  const result = safeValidate(loginSchema, {
     email,
     password: formData.get("password"),
   });
 
-  if (!parsed.success) {
+  if (!result.success) {
+    logSecurityEvent("validation.rejected", {
+      form: "login",
+      fields: Object.keys(result.fieldErrors).join(","),
+    });
     return {
       status: "error",
       message: "Check the highlighted fields and try again.",
-      fieldErrors: parsed.error.flatten().fieldErrors,
+      fieldErrors: result.fieldErrors,
       email,
     };
   }
 
   try {
     const supabase = await createClient();
-    const { data, error } = await supabase.auth.signInWithPassword(parsed.data);
+    const { data, error } = await supabase.auth.signInWithPassword(result.data);
 
     if (error || !data.user) {
+      logSecurityEvent("authentication.login_failed", {
+        cause: error?.message ?? "no user returned",
+      });
       return {
         status: "error",
         message: "Invalid email or password.",
@@ -59,17 +65,21 @@ export async function login(
       };
     }
 
-    if (data.user.app_metadata.account_status !== "approved") {
+    const permission = requireApprovedUser(data.user);
+    if (!permission.ok) {
       await supabase.auth.signOut();
+      logSecurityEvent("permission.denied", {
+        form: "login",
+        reason: permission.reason,
+      });
       return {
         status: "pending",
-        message: "Your account is pending activation by an administrator.",
+        message: permissionFailureMessage(permission.reason),
         email,
       };
     }
   } catch (error) {
-    console.error("Login service error", {
-      event: "authentication.login_failed",
+    logSecurityEvent("authentication.login_failed", {
       cause: error instanceof Error ? error.message : "Unknown error",
     });
     return {

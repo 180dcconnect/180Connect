@@ -76,6 +76,13 @@ NEXT_PUBLIC_LOG_LEVEL=debug
 NEXT_PUBLIC_ENABLE_AI_BOOKLETS=true
 NEXT_PUBLIC_ENABLE_SCHEDULED_SENDS=true
 
+# Seed scripts only — Postgres connection string for the DB `npm run seed` /
+# `npm run seed:clear` write to (F233). The app never reads this. Use the SESSION
+# POOLER string (dashboard -> Connect -> Session pooler): it is IPv4 and works
+# everywhere; the direct db.<ref> string is IPv6-only. Refuses the production
+# project. See docs/seed-data.md.
+SUPABASE_DB_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
 # Cron/scheduled jobs (shared secret)
 CRON_SECRET=local-dev-secret-12345
 

@@ -88,7 +88,7 @@ CRON_SECRET=local-dev-secret-12345
 
 # Analytics (optional; can be blank locally)
 NEXT_PUBLIC_POSTHOG_KEY=
-SENTRY_DSN=
+NEXT_PUBLIC_SENTRY_DSN=
 ```
 
 ---
@@ -131,7 +131,7 @@ CRON_SECRET=<shared-secret>
 
 # Analytics
 NEXT_PUBLIC_POSTHOG_KEY=<redacted>
-SENTRY_DSN=<redacted>
+NEXT_PUBLIC_SENTRY_DSN=<redacted>
 ```
 
 ---
@@ -174,7 +174,7 @@ CRON_SECRET=<shared-secret>
 
 # Analytics
 NEXT_PUBLIC_POSTHOG_KEY=<redacted>
-SENTRY_DSN=<redacted>
+NEXT_PUBLIC_SENTRY_DSN=<redacted>
 ```
 
 ---
@@ -201,6 +201,14 @@ SENTRY_DSN=<redacted>
 | `NEXT_PUBLIC_POSTHOG_KEY` | dev-key | prod-key | Always | Public analytics key |
 | `NEXT_PUBLIC_SENTRY_DSN` | dev-dsn | prod-dsn | Always | Public error reporting endpoint — where captured errors are sent (F226). Unset ⇒ errors log to the platform console instead |
 | `SENTRY_ENVIRONMENT` | `staging` | `production` | Only server-side | Environment tag on captured errors (F226). Optional — falls back to `VERCEL_ENV` |
+| `SUPABASE_DB_URL` | session-pooler string | not set | Only server-side | **SENSITIVE:** Read by `npm run seed` / `npm run seed:clear` only, never by the app. Use the session pooler string, not the IPv6-only direct one. The scripts refuse to run against production ([docs](seed-data.md)) |
+
+> The authoritative list is `SCHEMA` in [`src/lib/env.ts`](../src/lib/env.ts),
+> mirrored into [`.env.example`](../.env.example) — startup validation is driven
+> from it, so a variable missing there is not checked no matter what this table
+> says. `NEXT_PUBLIC_ENV`, `GMAIL_*`, `OPENAI_API_KEY` and
+> `NEXT_PUBLIC_POSTHOG_KEY` above are planned, not yet declared in the schema
+> and not yet read by any code.
 
 ### How to Set in Vercel
 

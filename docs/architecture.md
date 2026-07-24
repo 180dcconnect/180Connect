@@ -3,17 +3,21 @@
 How the pieces of 180Connect fit together. Read this once, after Setup in the
 [README](../README.md), before touching auth, routing, or error handling.
 
-## This is a modified Next.js
+## This is Next.js 16, and it moved things
 
-`AGENTS.md` (repo root) says it plainly: this fork renames and changes some
-conventions from stock Next.js. The one that trips people up most:
+Stock upstream Next.js — `next@16.2.10`, no fork. But 16 renamed and changed
+enough that older tutorials, Stack Overflow answers, and AI assistants will
+confidently tell you the wrong thing. The rename that trips people up most:
 
 **`src/proxy.ts` replaces `middleware.ts`.** There is no `middleware.ts` in
 this project — request-level interception (session refresh, redirects) lives
-in `src/proxy.ts` instead. Before writing code that touches routing, proxy, or
-Server Actions, skim the relevant guide under
-`node_modules/next/dist/docs/01-app/`, since the on-disk docs match this
-fork's behaviour, not necessarily what you remember from stock Next.js.
+in `src/proxy.ts` instead, exporting a `proxy()` function rather than
+`middleware()`.
+
+`AGENTS.md` (repo root) makes the general rule: before writing code that
+touches routing, the proxy, or Server Actions, skim the relevant guide under
+`node_modules/next/dist/docs/01-app/`. Those docs ship with the pinned version,
+so they describe the version we actually run.
 
 ## Routing and mutations
 
@@ -50,10 +54,24 @@ fork's behaviour, not necessarily what you remember from stock Next.js.
   centralised in `src/lib/auth/require-approved-user.ts`
   (`requireApprovedUser`, `permissionFailureMessage`) rather than duplicated
   per caller. Both `login/actions.ts` and `dashboard/page.tsx` use it.
-- **Full RBAC/RLS is not built yet.** There are no roles beyond
-  approved/not-approved, and no row-level security policies in application
-  code today — those land with F224. `requireApprovedUser` is the one
-  permission primitive that exists in the meantime.
+- **Roles and RLS live in the database, not in application code** (F224).
+  `public.users.role` is a `public.user_role` enum — `'cam' | 'admin' |
+  'viewer'` — and every table enables row-level security with its policies
+  declared in the same migration that creates it (SOP §7). Policies are built
+  from `SECURITY DEFINER` predicates in the `app` schema: `app.is_admin()`,
+  `app.is_active_user()`, `app.is_cam()`, `app.can_write()`,
+  `app.owns_organisation()`, `app.organisation_is_unowned()`,
+  `app.can_contact_organisation()`. They live in `app` rather than `public` so
+  PostgREST cannot expose them as REST RPCs.
+- **The authoritative spec is
+  [`docs/rls-permission-matrix.md`](rls-permission-matrix.md)** — read it
+  before adding a table, and add the matching policies in the creating
+  migration. Role changes go through the `public.set_user_role` admin RPC, not
+  a direct update.
+- **`requireApprovedUser` is not the authorisation layer.** It gates access to
+  the app; RLS decides what a user can see and do once inside. The service-role
+  key bypasses RLS entirely, which is how the seed script works — never read it
+  from a client component.
 
 ## Validation
 
@@ -83,17 +101,36 @@ Two related but distinct logging paths:
 - **`src/lib/log-security-event.ts`** — for expected security-relevant
   rejections: validation failures, permission denials, failed logins. A
   lighter, purpose-built structured log (`logSecurityEvent`), not routed
-  through the scrubbing/Sentry pipeline above. It's a stand-in until the
-  `ERROR_LOG` table and F221 audit logs exist — swap its body then, callers
+  through the scrubbing/Sentry pipeline above. It still writes to the console
+  only — swap its body when the `ERROR_LOG` table (F226) lands, callers
   shouldn't need to change.
+
+A third, separate thing: **`public.audit_log`** is a database table, not an
+application logger. It is the append-only trail for privileged actions — role
+changes, deactivations — written by `SECURITY DEFINER` RPCs such as
+`public.set_user_role`, readable by admins only, with no insert/update/delete
+policy at all. Application code never writes to it directly. Spec:
+[`docs/rls-permission-matrix.md`](rls-permission-matrix.md) §3.8.
 
 ## Data and migrations
 
-No ORM. Postgres schema lives entirely in `supabase/migrations/` (plain SQL,
-Supabase CLI), with a paired rollback in `supabase/rollback/` for every
-migration. Conventions, review requirements, and the local/staging workflow
-are documented in full in [`supabase/MIGRATIONS.md`](../supabase/MIGRATIONS.md)
-— read that before writing or reviewing a schema change.
+No ORM. Postgres, plain SQL, Supabase CLI.
+
+**The schema's source of truth is the Data Model spreadsheet, not this repo**
+(SOP §7). A readable markdown projection lives in
+[`docs/data-model/`](data-model/) — `04-entities.md` has the core tables,
+`02-data-dictionary.md` the field definitions, `11-supasbase-migration-sequence.md`
+the migration order. Those files are generated: edit the spreadsheet and run
+`npm run export:data-model`, never hand-edit them.
+
+Migrations live in `supabase/migrations/`, each with a paired rollback in
+`supabase/rollback/`. Conventions, review requirements, and the local/staging
+workflow are in [`supabase/MIGRATIONS.md`](../supabase/MIGRATIONS.md) — read
+that before writing or reviewing a schema change.
+
+For local development, `npm run seed` loads 50 fake organisations spread across
+the pipeline; every row carries `is_seed = true` and the script refuses to run
+against production. See [`docs/seed-data.md`](seed-data.md).
 
 ## Environment variables
 
@@ -113,10 +150,13 @@ variable is, where to get its value, and how local/staging/production differ.
 | `env.ts` | Environment variable schema and startup validation |
 | `supabase/server.ts` | Server-side Supabase client (Server Components/Actions) |
 | `supabase/proxy.ts` | Session-refresh Supabase client, used by `src/proxy.ts` |
+| `seed/config.ts`, `seed/fixtures.ts` | Fake-data generation for `npm run seed` |
 
 ## Where to go next
 
-- Contributing rules, branch model, commit style, PR process:
-  [`CONTRIBUTING.md`](../CONTRIBUTING.md).
-- What "done" means before you ask for review:
-  [`.github/pull_request_template.md`](../.github/pull_request_template.md).
+- Contributing rules, branch model, commit style, PR process, and the
+  Definition of Done: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+- Who can read and write what: [`docs/rls-permission-matrix.md`](rls-permission-matrix.md).
+- Table and field definitions: [`docs/data-model/`](data-model/).
+- Handling credentials: [`docs/secrets.md`](secrets.md).
+- Decisions still open, and why: [`docs/open-questions.md`](open-questions.md).

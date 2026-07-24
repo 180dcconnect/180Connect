@@ -231,15 +231,18 @@ produce the scores are not readable by CAMs — knowing the weights makes them g
 
 §4.3: team analytics — admin full, CAM limited/personal, viewer read-only if authorised.
 
-The viewer row below departs from that wording deliberately. `CAM_ACTIVITY_SUMMARY` is
-per-CAM performance data, closer to staff evaluation than to client data, so viewers are
-denied it while keeping team-wide analytics (`PIPELINE_METRICS`, `SECTOR_PERFORMANCE`).
-PRD §4.3's "if authorised" is not implemented and is not planned — there is no per-user
-analytics authorisation flag. Decision: Project Leader, 24 Jul 2026 (open-questions Q-05).
+The viewer reads `CAM_ACTIVITY_SUMMARY` in full, which follows §4.3 rather than departing
+from it: a viewer is 180DC branch leadership (open-questions Q-05), and per-CAM throughput
+is the substance of the oversight they exist to do. "If authorised" is read as satisfied by
+holding the role — there is no per-user analytics flag, and none is planned.
+
+Note what this means, since it is the one place a viewer sees something a CAM cannot: a
+viewer reads **every** CAM's numbers, while a CAM still reads only their own. Read-only
+does not mean sees-less-than-everyone. Decision: Project Leader, 24 Jul 2026 (Q-05).
 
 | Table | SELECT | Write |
 |---|---|---|
-| `CAM_ACTIVITY_SUMMARY` | admin: all. cam: `user_id = auth.uid()`. viewer: — | service role only |
+| `CAM_ACTIVITY_SUMMARY` | admin: all. cam: `user_id = auth.uid()`. viewer: all | service role only |
 | `PIPELINE_METRICS` | all roles | service role only |
 | `SECTOR_PERFORMANCE` | all roles | service role only |
 | `API_HEALTH_LOGS` | admin | service role only |
@@ -248,7 +251,9 @@ analytics authorisation flag. Decision: Project Leader, 24 Jul 2026 (open-questi
 | `ERROR_LOG` | admin | service role only |
 
 `CAM_ACTIVITY_SUMMARY` is the second "sensitive data check": CAM A must not see
-CAM B's conversion numbers.
+CAM B's conversion numbers. The check is on the **CAM** predicate specifically —
+`user_id = auth.uid()` — not on "non-admins see only their own row". Admins and
+viewers both read every row; only the CAM path is scoped.
 
 ### 3.8 Audit log
 
@@ -352,11 +357,12 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    The viewer's *read* scope was settled separately by the Project Leader on
    24 Jul 2026 — recorded as Q-05 in [`docs/open-questions.md`](open-questions.md).
    A viewer is 180DC branch leadership, internal only; they read the full
-   communication timeline (§3.3, §3.4, unchanged); and they do **not** read
-   `CAM_ACTIVITY_SUMMARY` (§3.7, unchanged). That last one resolves a real
-   contradiction — PRD §4.3 says "viewer read-only if authorised" — in favour of
-   this matrix. Both rows shipped correct; they are now decisions rather than
-   inherited assumptions.
+   communication timeline (§3.3, §3.4, unchanged); and they **do** read
+   `CAM_ACTIVITY_SUMMARY` in full — §3.7 was changed from `viewer: —` to
+   `viewer: all` to match. That last one settles a contradiction the matrix had
+   carried against PRD §4.3 ("viewer read-only if authorised"), in favour of the
+   PRD: branch leadership doing oversight needs per-CAM throughput, and holding
+   the role is what "authorised" means.
 5. **`SCOUT_PRIORITY_SCORE`** appears on tab 09 without fields and is not in the
    migration sequence. Excluded from this matrix until defined.
 6. **`set_user_active` RPC — owned by F011, not built.** `is_active` has the same

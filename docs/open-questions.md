@@ -84,9 +84,11 @@ Raised by F258 (#268), which implemented the `viewer` role. `viewer` had sat in 
 
 **Communication timeline:** viewers read it in full — sent emails, replies, notes. Already the shipped behaviour (matrix §3.3, §3.4: SELECT to all roles). Had viewers been external this would have needed new policies on `NOTES`, `OUTREACH_MESSAGES` and `REPLY_EVENTS` plus a matrix rewrite.
 
-**`CAM_ACTIVITY_SUMMARY`:** viewers **cannot** read it. This resolves a direct contradiction — matrix §3.7 denies it, PRD §4.3 says "viewer read-only if authorised" — in favour of the matrix. Note the deliberate tension: branch leadership does oversight but does not get per-CAM performance data, because per-person activity is closer to staff evaluation than to client data. Team-wide analytics (`PIPELINE_METRICS`, `SECTOR_PERFORMANCE`) remain readable. The table does not exist yet, so this costs nothing to hold to.
+**`CAM_ACTIVITY_SUMMARY`:** viewers **can** read it, in full. This resolves a direct contradiction — matrix §3.7 denied it, PRD §4.3 says "viewer read-only if authorised" — in favour of the PRD. It follows from the first answer: if a viewer is branch leadership, per-CAM throughput is the substance of the oversight the role exists to do, and withholding it would leave the role unable to do its job. The matrix §3.7 row was changed from `viewer: —` to `viewer: all`.
 
-**Consequence for the PRD:** §4.3's "if authorised" wording is not implemented and will not be — there is no per-user authorisation flag for analytics, and adding one is not planned. Treat this as an accepted deviation.
+Worth stating plainly, because it is the one place a viewer sees something a CAM cannot: **a viewer reads every CAM's numbers, while a CAM reads only their own.** Read-only is not the same as sees-less-than-everyone, and the `user_id = auth.uid()` scoping on that table is a CAM rule specifically, not a general "non-admins see only themselves" rule. Anyone writing the policy for sequence step 13 should read it that way.
+
+**Consequence for the PRD:** §4.3's "if authorised" is treated as satisfied by holding the Viewer role. There is no per-user analytics authorisation flag, and none is planned — the role *is* the authorisation. This is an interpretation of the PRD, not a deviation from it.
 
 **Owner:** Project Leader. **Decided:** 24 Jul 2026. Recorded in `docs/rls-permission-matrix.md` §6.
 

@@ -52,7 +52,12 @@ export async function login(
 
   try {
     const supabase = await createClient();
-    const { data, error } = await supabase.auth.signInWithPassword(result.data);
+    const { data, error } = await supabase.auth.signInWithPassword({
+      ...result.data,
+      options: {
+        captchaToken: String(formData.get("cf-turnstile-response") ?? ""),
+      },
+    });
 
     if (error || !data.user) {
       logSecurityEvent("authentication.login_failed", {

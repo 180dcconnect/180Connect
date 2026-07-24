@@ -3,8 +3,15 @@
 import Link from "next/link";
 import { useActionState } from "react";
 import { login, type LoginState } from "./actions";
+import Script from "next/script";
 
 const initialLoginState: LoginState = { status: "idle" };
+
+// Cloudflare Turnstile site key — public, safe to expose in the browser.
+// Falls back to Cloudflare's official "always pass" test key so local dev
+// and CI never get blocked (see docs/open-questions.md for the F003 decision).
+const TURNSTILE_SITE_KEY =
+  process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "1x00000000000000000000AA";
 
 const inputClass =
   "h-10 rounded-lg border border-black/10 bg-[#fafafa] px-3 text-sm outline-none transition-colors placeholder:text-foreground/35 focus-visible:border-brand focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-brand/20 aria-invalid:border-red-500 aria-invalid:ring-2 aria-invalid:ring-red-500/20";
@@ -82,7 +89,14 @@ export function LoginForm() {
           </p>
         )}
       </div>
-
+      
+      <Script
+        src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+        async
+        defer
+      />
+      <div className="cf-turnstile" data-sitekey={TURNSTILE_SITE_KEY} />
+      
       <button
         type="submit"
         disabled={pending}

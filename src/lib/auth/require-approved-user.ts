@@ -9,7 +9,13 @@
 
 import type { User } from "@supabase/supabase-js";
 
-export type PermissionFailureReason = "unauthenticated" | "not_approved";
+export type PermissionFailureReason =
+  | "unauthenticated"
+  | "not_approved"
+  // F258: the account is fine, the role is not — a viewer attempted a write.
+  // Raised by requireWriteAccess() in ./roles.ts, which shares this union so
+  // callers handle one result shape and one message function.
+  | "read_only";
 
 export type PermissionResult =
   | { ok: true }
@@ -37,5 +43,9 @@ export function permissionFailureMessage(reason: PermissionFailureReason): strin
       return "You must be logged in to do that.";
     case "not_approved":
       return "Your account is pending activation by an administrator.";
+    case "read_only":
+      // Says which role would be needed, not what the record is. F258 AC4 wants a
+      // blocked viewer to understand why rather than see a bare failure.
+      return "Your account has read-only access. Ask an administrator if you need to make changes.";
   }
 }

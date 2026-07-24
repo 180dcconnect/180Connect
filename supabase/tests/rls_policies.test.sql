@@ -86,7 +86,7 @@ $$;
 -- ---------------------------------------------------------------------------
 -- Fixtures
 -- ---------------------------------------------------------------------------
--- Four identities and three organisations, enough to express every ownership
+-- Five identities and three organisations, enough to express every ownership
 -- case in the matrix: unowned, owned by self, owned by someone else.
 
 create or replace function tests.seed()
@@ -96,6 +96,7 @@ declare
   v_cam_a      uuid := '00000000-0000-4000-a000-000000000002';
   v_cam_b      uuid := '00000000-0000-4000-a000-000000000003';
   v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer     uuid := '00000000-0000-4000-a000-000000000005';  -- F258
   v_backdated  timestamptz := timestamptz '2000-01-01';
 begin
   -- public.users.id references auth.users; seed the auth side first. create_users
@@ -107,7 +108,8 @@ begin
     (v_admin,       '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'admin@test.local'),
     (v_cam_a,       '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'cam-a@test.local'),
     (v_cam_b,       '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'cam-b@test.local'),
-    (v_deactivated, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'gone@test.local')
+    (v_deactivated, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'gone@test.local'),
+    (v_viewer,      '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'viewer@test.local')
   on conflict (id) do nothing;
 
   -- Timestamps are backdated on purpose. public.set_updated_at() uses now(), which is
@@ -118,7 +120,8 @@ begin
     (v_admin,       'admin@test.local', 'Test Admin',       'admin', true,  v_backdated, v_backdated),
     (v_cam_a,       'cam-a@test.local', 'Test CAM A',       'cam',   true,  v_backdated, v_backdated),
     (v_cam_b,       'cam-b@test.local', 'Test CAM B',       'cam',   true,  v_backdated, v_backdated),
-    (v_deactivated, 'gone@test.local',  'Deactivated User', 'cam',   false, v_backdated, v_backdated)
+    (v_deactivated, 'gone@test.local',  'Deactivated User', 'cam',   false, v_backdated, v_backdated),
+    (v_viewer,      'viewer@test.local','Test Viewer',      'viewer',true,  v_backdated, v_backdated)
   on conflict (id) do update
     set role = excluded.role,
         is_active = excluded.is_active,
@@ -515,8 +518,116 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Viewer is read-only — F258 (#268)
+-- ---------------------------------------------------------------------------
+-- Matrix §1: viewer = read-only. §3.2: ORGANISATIONS UPDATE is "admin any row;
+-- CAM may claim an unowned row" — viewer appears in neither.
+--
+-- These assert *state*, not SQLSTATE, and that is the whole point. A row excluded
+-- by a policy's USING clause is invisible to the UPDATE: it matches nothing, zero
+-- rows change, and nothing is raised. A suite that only asserted `42501` here would
+-- pass against a database where the viewer silently rewrote the row and would pass
+-- just as happily against one where they did not — it cannot tell the two apart.
+-- INSERT is the exception: there is no row to filter, so the WITH CHECK fires and
+-- does raise.
+--
+-- The fixture is local to this suite. The shared 'Unowned Org Ltd' stops being
+-- unowned partway through suite_core (a CAM claims it, correctly), and every suite
+-- runs in one uncommitted transaction with no reset in between.
+
+create or replace function tests.suite_viewer()
+returns setof text language plpgsql as $$
+declare
+  v_viewer  uuid := '00000000-0000-4000-a000-000000000005';
+  v_cam_a   uuid := '00000000-0000-4000-a000-000000000002';
+  v_org     uuid := '00000000-0000-4000-b000-000000000004';
+  v_owner   uuid;
+  v_name    text;
+  v_count   bigint;
+  v_is_viewer boolean;
+begin
+  if not tests.tables_exist('users') then
+    return next skip(1, 'step 2 create_users not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- The predicate resolves without recursing on public.users, same as is_cam.
+  perform tests.login_as(v_viewer);
+  v_is_viewer := app.is_viewer();
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_is_viewer, 'app.is_viewer() resolves for a viewer');
+
+  perform tests.login_as(v_cam_a);
+  v_is_viewer := app.is_viewer();
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(not v_is_viewer, 'app.is_viewer() is false for a CAM');
+
+  if not tests.tables_exist('organisations') then
+    return next skip(6, 'step 3 create_organisations not yet migrated');
+    return;
+  end if;
+
+  insert into public.organisations (id, legal_name, entry_method, organisation_type, owner_id)
+  values (v_org, 'Viewer Fixture Ltd', 'manual', 'other', null)
+  on conflict (id) do update set owner_id = null, legal_name = 'Viewer Fixture Ltd';
+
+  -- Read-only still means read: shared canonical visibility is not what F258 takes
+  -- away (matrix §3.2, all roles SELECT).
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.organisations;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_count >= 3, 'viewer reads canonical organisations');
+
+  -- The escalation this story closes. Before the fix the USING clause tested only
+  -- ownership, so `owner_id is null` admitted a viewer, and the WITH CHECK was then
+  -- satisfied by the viewer naming themselves as the new owner.
+  perform tests.sqlstate_of(v_viewer, format(
+    'update public.organisations set owner_id = %L where id = %L', v_viewer, v_org));
+  select owner_id into v_owner from public.organisations where id = v_org;
+  return next is(v_owner, null::uuid,
+    'viewer cannot claim an unowned organisation (F258: the escalation is closed)');
+
+  -- ...and cannot edit canonical data on it either, owned or not.
+  perform tests.sqlstate_of(v_viewer, format(
+    'update public.organisations set legal_name = ''Viewer Was Here'' where id = %L', v_org));
+  select legal_name into v_name from public.organisations where id = v_org;
+  return next is(v_name, 'Viewer Fixture Ltd',
+    'viewer cannot edit an organisation''s canonical fields');
+
+  -- INSERT does raise: no existing row for USING to hide, so the WITH CHECK runs.
+  return next is(
+    tests.sqlstate_of(v_viewer,
+      'insert into public.organisations (legal_name, entry_method, organisation_type)
+       values (''Viewer Insert Ltd'', ''manual'', ''other'')'),
+    '42501',
+    'viewer cannot create an organisation'
+  );
+
+  perform tests.sqlstate_of(v_viewer, format(
+    'delete from public.organisations where id = %L', v_org));
+  select count(*) into v_count from public.organisations where id = v_org;
+  return next is(v_count, 1::bigint, 'viewer cannot delete an organisation');
+
+  -- Regression guard on the same policy: narrowing it to admin-or-CAM must not have
+  -- taken the CAM's claim path with it. suite_core covers the happy path on the
+  -- shared fixture; this re-checks it on a row whose state this suite controls.
+  perform tests.sqlstate_of(v_cam_a, format(
+    'update public.organisations set owner_id = %L where id = %L', v_cam_a, v_org));
+  select owner_id into v_owner from public.organisations where id = v_org;
+  return next is(v_owner, v_cam_a,
+    'CAM can still claim an unowned organisation after the viewer lockout');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 
 select * from tests.suite_core();
+select * from tests.suite_viewer();
 select * from tests.suite_users();
 select * from tests.suite_sensitive();
 select * from tests.suite_audit();

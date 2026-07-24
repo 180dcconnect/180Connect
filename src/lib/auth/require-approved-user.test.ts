@@ -36,15 +36,21 @@ describe("requireApprovedUser", () => {
 });
 
 describe("permissionFailureMessage", () => {
+  const reasons = ["unauthenticated", "not_approved", "read_only"] as const;
+
   it("gives a distinct message per reason", () => {
-    assert.notEqual(
-      permissionFailureMessage("unauthenticated"),
-      permissionFailureMessage("not_approved"),
-    );
+    const messages = reasons.map(permissionFailureMessage);
+    assert.equal(new Set(messages).size, reasons.length);
   });
 
   it("does not reveal whether a resource exists", () => {
-    assert.doesNotMatch(permissionFailureMessage("not_approved"), /exist|found/i);
-    assert.doesNotMatch(permissionFailureMessage("unauthenticated"), /exist|found/i);
+    for (const reason of reasons) {
+      assert.doesNotMatch(permissionFailureMessage(reason), /exist|found/i);
+    }
+  });
+
+  it("tells a read-only user what would fix it (F258 AC4)", () => {
+    assert.match(permissionFailureMessage("read_only"), /read-only/i);
+    assert.match(permissionFailureMessage("read_only"), /administrator/i);
   });
 });

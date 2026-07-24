@@ -35,7 +35,7 @@ advisors 0028 / 0029 clean; see §7). Base role checks come from `create_users` 
 |---|---|---|
 | `admin` | `authenticated` + `USERS.role = 'admin'` | Full authorised management access |
 | `cam` | `authenticated` + `USERS.role = 'cam'` | Shared read, ownership-scoped write |
-| `viewer` | `authenticated` + `USERS.role = 'viewer'` | Read-only |
+| `viewer` | `authenticated` + `USERS.role = 'viewer'` | Read-only. `app.is_viewer()`; write denial comes from failing `app.can_write()` (F258) |
 | service role | `service_role` | Background jobs. **Bypasses RLS entirely.** Server-side only |
 | anonymous | `anon` | **No access to any table.** Public self-sign-up is prohibited (PRD §4.2) |
 
@@ -333,9 +333,16 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    to changing canonical data does not exist, and 3.2 has no row for it.
 3. **No suppression table.** §4.3 has "Lift suppression: Admin, reason required".
    Nothing in the Data Model records a suppression.
-4. **Viewer role has no story.** F016 covers admin, F017 covers CAM. `viewer` exists
-   in the `USERS.role` enum and throughout §4.3, but no story implements it. The
-   matrix specifies it; someone must own it.
+4. ~~**Viewer role has no story.**~~ **RESOLVED — F258 (#268) owns it**, raised
+   24 Jul 2026. The story also closed a live escalation this question had been
+   hiding: `organisations_update_owner_or_admin` tested ownership and admin but
+   never the role, so an active viewer passed `USING` on any row with
+   `owner_id is null` and passed `WITH CHECK` by naming themselves the new owner —
+   a read-only account could claim and rewrite any unowned organisation, which is
+   every organisation the seed creates. Fixed in
+   `20260724100000_viewer_role_write_lockout.sql`; `app.is_viewer()` added
+   alongside. Remaining viewer scope questions (analytics access, timeline
+   visibility) are tracked on the issue, not here.
 5. **`SCOUT_PRIORITY_SCORE`** appears on tab 09 without fields and is not in the
    migration sequence. Excluded from this matrix until defined.
 6. **`set_user_active` RPC — owned by F011, not built.** `is_active` has the same

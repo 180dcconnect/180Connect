@@ -40,7 +40,28 @@ git pull
 git checkout -b feature/F001-client-profile
 ```
 
-Work, commit, and before you push:
+Prefer starting from the issue? You can create the branch straight from a GitHub issue or Project card — **Development → Create a branch**. It links the branch to the issue, so your PR closes it automatically. Fix two things in the dialog before confirming:
+
+- **Change the source from `main` to `dev`** — it defaults to `main`.
+- **Rename** to match convention: `feature/F001-…`, not the auto-generated `123-…`.
+
+Then check it out locally and carry on as normal:
+
+```bash
+git fetch origin
+git checkout feature/F001-client-profile
+```
+
+Make your changes, then save them as a **commit** — a labelled snapshot of your work:
+
+```bash
+git add -A                          # stage every file you changed
+git commit -m "add client profile page"
+```
+
+Commit as often as you like; each one is a checkpoint you can go back to. See [Commits](#commits) below for how to word the message.
+
+Before you push, run the three checks:
 
 ```bash
 npm run lint
@@ -48,7 +69,9 @@ npx tsc --noEmit
 npm run build      # catches errors the dev server tolerates
 ```
 
-Then:
+If any of them reports an error, fix it before pushing — don't open a PR on red. A teammate can't review code that doesn't build.
+
+Then send your branch up to GitHub:
 
 ```bash
 git push -u origin feature/F001-client-profile
@@ -56,12 +79,33 @@ git push -u origin feature/F001-client-profile
 
 Open the pull request **into `dev`** — GitHub sometimes defaults the base to `main`, so check it. Ask someone to review. Once approved it gets squash-merged and the branch is deleted automatically.
 
-If `dev` has moved on while you were working, rebase onto it before asking for review:
+If `dev` has moved on while you were working, merge it into your branch before asking for review:
 
 ```bash
 git fetch origin
-git rebase origin/dev
+git merge origin/dev
 ```
+
+This keeps you current with `dev` without rewriting your history, so a normal `git push` works and you never need to force-push.
+
+**If the merge reports a conflict**, it means you and someone else changed the same lines. Git pauses and marks the spots in your files like this:
+
+```
+<<<<<<< HEAD
+your version
+=======
+their version
+>>>>>>> origin/dev
+```
+
+Edit each marked file to the version you want, delete the `<<<<<<<`, `=======`, and `>>>>>>>` marker lines, then:
+
+```bash
+git add -A
+git commit             # finishes the merge
+```
+
+Not sure which version is right? **Ask in the team chat before guessing** — and never run `git push --force` to make a conflict "go away." That overwrites other people's work. Nothing you do in a normal merge is unrecoverable as long as you don't force-push.
 
 ## Commits
 
@@ -76,15 +120,34 @@ Not `updated stuff` or `changes`. If the *why* isn't obvious from the subject li
 
 ## Pull requests
 
+A pull request (PR) is how you ask for your branch to be merged into `dev`. Opening one, step by step:
+
+1. Push your branch (`git push -u origin <branch>`, as above).
+2. Go to the repo on [github.com](https://github.com/bashirbobboi/180Connect). A yellow banner **"Compare & pull request"** appears for the branch you just pushed — click it. (No banner? Open the **Pull requests** tab → **New pull request**.)
+3. **Check the base branch** at the top: it must read `base: dev`. GitHub often defaults it to `main` — change it if so.
+4. The description is pre-filled from our template. Fill in each section and tick the checklist.
+5. Click **Create pull request**.
+6. On the right, under **Reviewers**, request a teammate (not yourself — our process requires an approval from someone other than the author).
+
+Now the review starts. A few rules for what makes a good PR:
+
 Keep them small — one feature or one fix. A PR that touches thirty files is a PR nobody reviews properly.
 
 In the description, say what changed and how to check it. If it's a UI change, attach a screenshot.
+
+Link the issue you're closing (e.g. `Closes #123`), and note which of the issue's acceptance criteria you've addressed.
+
+Before you open it, check your work against the **Definition of Done** checklist (backlog item **F240**) — that's the bar a reviewer holds you to.
 
 ## Reviewing
 
 Someone is waiting on you, so pick reviews up quickly. Pull the branch and actually run it — reading the diff catches typos, running the code catches bugs.
 
 Say what needs to change and why. "This breaks when the email is empty" is a review comment; "I don't like this" is not.
+
+When you get feedback, push the fixes to the **same branch** — the PR updates itself — then re-request review from the same person. Don't open a new PR.
+
+Once you have the one approval, **the author merges** (squash into `dev`) and confirms the branch is deleted. The reviewer approves; they don't merge for you.
 
 ## Releases
 

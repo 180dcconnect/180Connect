@@ -231,6 +231,12 @@ produce the scores are not readable by CAMs — knowing the weights makes them g
 
 §4.3: team analytics — admin full, CAM limited/personal, viewer read-only if authorised.
 
+The viewer row below departs from that wording deliberately. `CAM_ACTIVITY_SUMMARY` is
+per-CAM performance data, closer to staff evaluation than to client data, so viewers are
+denied it while keeping team-wide analytics (`PIPELINE_METRICS`, `SECTOR_PERFORMANCE`).
+PRD §4.3's "if authorised" is not implemented and is not planned — there is no per-user
+analytics authorisation flag. Decision: Project Leader, 24 Jul 2026 (open-questions Q-05).
+
 | Table | SELECT | Write |
 |---|---|---|
 | `CAM_ACTIVITY_SUMMARY` | admin: all. cam: `user_id = auth.uid()`. viewer: — | service role only |
@@ -341,8 +347,16 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    a read-only account could claim and rewrite any unowned organisation, which is
    every organisation the seed creates. Fixed in
    `20260724100000_viewer_role_write_lockout.sql`; `app.is_viewer()` added
-   alongside. Remaining viewer scope questions (analytics access, timeline
-   visibility) are tracked on the issue, not here.
+   alongside.
+
+   The viewer's *read* scope was settled separately by the Project Leader on
+   24 Jul 2026 — recorded as Q-05 in [`docs/open-questions.md`](open-questions.md).
+   A viewer is 180DC branch leadership, internal only; they read the full
+   communication timeline (§3.3, §3.4, unchanged); and they do **not** read
+   `CAM_ACTIVITY_SUMMARY` (§3.7, unchanged). That last one resolves a real
+   contradiction — PRD §4.3 says "viewer read-only if authorised" — in favour of
+   this matrix. Both rows shipped correct; they are now decisions rather than
+   inherited assumptions.
 5. **`SCOUT_PRIORITY_SCORE`** appears on tab 09 without fields and is not in the
    migration sequence. Excluded from this matrix until defined.
 6. **`set_user_active` RPC — owned by F011, not built.** `is_active` has the same

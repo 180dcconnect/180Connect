@@ -2,7 +2,7 @@
 
 Decisions that are **not resolved in code** and need a human call, plus places where we have knowingly departed from the PRD. Raise these at the next team meeting.
 
-Last updated: 14 July 2026 (Week 1, Foundations).
+Last updated: 24 July 2026 (Q-05 resolved).
 
 ---
 
@@ -75,6 +75,20 @@ PRD §22 leaves this open. Whatever we pick sits behind our own `LlmProvider` in
 The existing Supabase project is called **"Development"** (`cgbfhhdeapasniudyyds`, eu-west-2, org `180Connect`), and it is currently empty. Given D-02, it needs to be explicit which environment it *is*, so it does not silently become both dev and production.
 
 **Owner:** Project Leader. **Decide by:** before the first migration is applied.
+
+### Q-05 — Viewer role scope — **RESOLVED 24 Jul 2026**
+
+Raised by F258 (#268), which implemented the `viewer` role. `viewer` had sat in the `USERS.role` enum and throughout PRD §4.3 since the start with no story owning it, so nobody had ever decided what a viewer *is*. Three questions blocked pinning down its read scope. All three were answered by the Project Leader on 24 Jul 2026; all three resolve to **internal-only**, which is why the scope shipped in F258 needed no change.
+
+**Who gets the role:** 180DC branch leadership — non-operational oversight. Explicitly **not** external stakeholders, and **not** onboarding CAMs (a new CAM is invited as a CAM). This is the answer that makes the other two cheap: every viewer is internal, so viewers may safely see what CAMs see.
+
+**Communication timeline:** viewers read it in full — sent emails, replies, notes. Already the shipped behaviour (matrix §3.3, §3.4: SELECT to all roles). Had viewers been external this would have needed new policies on `NOTES`, `OUTREACH_MESSAGES` and `REPLY_EVENTS` plus a matrix rewrite.
+
+**`CAM_ACTIVITY_SUMMARY`:** viewers **cannot** read it. This resolves a direct contradiction — matrix §3.7 denies it, PRD §4.3 says "viewer read-only if authorised" — in favour of the matrix. Note the deliberate tension: branch leadership does oversight but does not get per-CAM performance data, because per-person activity is closer to staff evaluation than to client data. Team-wide analytics (`PIPELINE_METRICS`, `SECTOR_PERFORMANCE`) remain readable. The table does not exist yet, so this costs nothing to hold to.
+
+**Consequence for the PRD:** §4.3's "if authorised" wording is not implemented and will not be — there is no per-user authorisation flag for analytics, and adding one is not planned. Treat this as an accepted deviation.
+
+**Owner:** Project Leader. **Decided:** 24 Jul 2026. Recorded in `docs/rls-permission-matrix.md` §6.
 
 ---
 

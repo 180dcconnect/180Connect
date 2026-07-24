@@ -69,7 +69,7 @@ Secrets (API keys, database URLs) live in a file called `.env.local`, which is *
 cp .env.example .env.local
 ```
 
-`.env.example` is the authoritative, up-to-date list of every variable the app reads, which one are required, and where to get each value — see it directly rather than a copy of it here, so this README can't drift out of sync with it.
+`.env.example` is the authoritative, up-to-date list of every variable the app reads, which ones are required, and where to get each value — see it directly rather than a copy of it here, so this README can't drift out of sync with it.
 
 Never paste real values into a chat channel, a commit, or a screenshot.
 

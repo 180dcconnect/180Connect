@@ -28,13 +28,21 @@ These are conscious departures. They are recorded here so they are not mistaken 
 
 **PRD says:** §9.2 requires development, staging, and production with separate databases, and pull-request preview deploys connected to staging data, never production.
 
-**We are doing:** Development and production only. No staging.
+**We are doing:** Development and production only, using free Supabase plan intelligently. Dev/preview share one Supabase project (safe for testing), production is separate.
 
-**Consequence:** Preview deployments have nowhere safe to point. Either they point at production data (which §9.2 explicitly prohibits) or at a developer's database. With six developers on two teams, there is also no shared integration environment before production.
+**Resolution:** Implemented a staging-first architecture that:
+- Uses free plan's 2-project limit: `180connect-dev-preview` (local dev + Vercel previews) and `180connect-prod` (production)
+- Ensures all PR previews point to dev database (safe to test)
+- All migrations are Git-based, so schema is deterministic across all environments
+- See [Staging Environment Setup](staging-environment-setup.md) for complete architecture
 
-**To resolve:** The free Supabase plan allows two active projects per organisation, so a staging project is *possible* without upgrading — but it consumes the second slot, and the free-tier pausing makes it unreliable as a shared environment. Realistically this is the same decision as D-01: upgrade, or accept the gap.
+**Documentation created:**
+- `docs/staging-environment-setup.md` — comprehensive guide
+- `docs/staging-workflow-quick-ref.md` — developer quick reference
+- `docs/staging-implementation-checklist.md` — setup checklist
+- `docs/environment-variables.md` — technical specification
 
-**Owner:** Project Leader. **Decide by:** before the first pull request that touches the database.
+**Owner:** Mohammed (Component Owner F229). **Status:** Implemented (F229).
 
 ---
 

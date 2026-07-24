@@ -1,0 +1,53 @@
+# Applies database migrations to the staging Supabase project.
+# Story: F232 (#227) — Database Migration Management. See supabase/MIGRATIONS.md.
+#
+# Staging only. Production is NEVER auto-applied — it goes through the release
+# process per SOP §7: prod schema changes stay deliberate, reviewed and human-triggered.
+name: Apply migrations (staging)
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'supabase/migrations/**'
+  # Manual re-run, e.g. after fixing a failed apply.
+  workflow_dispatch:
+
+# Never let two applies race against the same database.
+concurrency:
+  group: supabase-migrations-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  # Not a secret: a project ref is public in the project URL. Held as a repo
+  # variable so environment refs are never hardcoded in the workflow.
+  STAGING_REF: ${{ vars.SUPABASE_STAGING_REF }}
+
+jobs:
+  apply:
+    name: db push -> 180connect-staging
+    runs-on: ubuntu-latest
+    # No `environment:` set — the repo has no "staging" environment and it could not
+    # be created via the API. Add one in Settings > Environments if you later want
+    # env-scoped secrets or a required-reviewer gate on staging applies.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link staging and show pending migrations
+        run: |
+          supabase link --project-ref "$STAGING_REF"
+          supabase migration list
+
+      - name: Apply migrations
+        run: supabase db push
+
+      - name: Confirm local and remote are in sync
+        run: supabase migration list

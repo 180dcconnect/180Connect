@@ -2,6 +2,8 @@
 
 Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4
 
+> **New here?** This README gets you set up. Before your first pull request, read **[CONTRIBUTING.md](CONTRIBUTING.md)** — branching, PRs, reviews, and releases.
+
 ## Setup
 
 Follow these once, in order. Works on both Windows and macOS. Anywhere you see a `$` command, type it into your terminal (Git Bash on Windows, Terminal on macOS) without the `$`.
@@ -67,6 +69,10 @@ Secrets (API keys, database URLs) live in a file called `.env.local`, which is *
 
 ```bash
 cp .env.example .env.local
+# .env.local
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
+AUTH_ALLOWED_EMAIL_DOMAIN=180dc.org
 ```
 
 `.env.example` lists every variable the app knows about, with a comment saying what it is and where to get it. It contains no real values, so it is safe to commit.
@@ -106,6 +112,34 @@ If a secret does not work in a client component, the fix is to move the code to 
 
 A [secret scan](.github/workflows/secret-scan.yml) runs on every pull request and will fail the check if it finds a credential. If you think you have committed one, say so straight away — the key gets rotated in Supabase and Vercel, and nothing bad happens. Staying quiet is what turns it into an incident.
 
+For login access, an administrator must set the Supabase user's protected app
+metadata to `{"account_status":"approved"}`. New or unapproved users should
+not have that value; they will be signed out and shown the pending-activation
+message. Do not put approval state in user metadata because users can edit it.
+
+For detailed environment setup (including staging), see [Environment Variables Configuration](docs/environment-variables.md).
+
+### 5a. Staging Environment & Deployment
+
+180 Connect uses a three-environment setup: local development, staging (for testing), and production.
+
+- **Local (`npm run dev`):** Points to shared dev Supabase project; safe for any testing
+- **Staging (Vercel PR previews):** Also points to dev Supabase; created automatically when you open a pull request
+- **Production (Vercel main branch):** Points to production Supabase; real client data
+
+**Your workflow:**
+1. Create a feature branch and make changes
+2. If you changed the database schema, run `supabase db pull` and commit the migration
+3. Push to GitHub and open a PR
+4. Vercel creates a preview deployment automatically (watch for the comment on your PR)
+5. Test your changes in the preview
+6. Merge to main → Vercel deploys to production
+
+**Getting help?** See:
+- [Staging Environment Setup](docs/staging-environment-setup.md) — comprehensive architecture & migration workflow
+- [Staging Workflow Quick Reference](docs/staging-workflow-quick-ref.md) — quick day-to-day guide
+- [Staging Implementation Checklist](docs/staging-implementation-checklist.md) — setup tasks for team leads
+
 ### 6. Run it
 
 ```bash
@@ -139,20 +173,9 @@ In the App Router, a folder under `src/app/` becomes a URL, and the `page.tsx` i
 
 ## Day-to-day Git
 
-Never commit straight to `main`. Branch, push, open a pull request.
+Branch from `dev`, never commit straight to `main` or `dev`, open a pull request into `dev`.
 
-```bash
-git checkout main
-git pull                          # get everyone else's latest work
-git checkout -b your-name/feature # branch for your task
-# ...make changes...
-npm run build                     # make sure it still builds
-git add -A
-git commit -m "add signup form"
-git push -u origin your-name/feature
-```
-
-Then open a pull request on GitHub and ask for a review.
+The full branching model, naming rules, PR process, and review expectations live in **[CONTRIBUTING.md](CONTRIBUTING.md)** — read it before your first PR.
 
 ## Troubleshooting
 

@@ -63,16 +63,15 @@ npm install
 
 ### 5. Environment variables
 
-Secrets (API keys, database URLs) live in a file called `.env.local`, which is **never committed to Git**. Ask the team lead for the current values, then create the file in the project root:
+Secrets (API keys, database URLs) live in a file called `.env.local`, which is **never committed to Git**. Copy the template and fill in real values — ask the team lead for them:
 
 ```bash
-# .env.local
-NEXT_PUBLIC_SUPABASE_URL=...
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
-AUTH_ALLOWED_EMAIL_DOMAIN=180dc.org
+cp .env.example .env.local
 ```
 
-Never paste these into a chat channel, a commit, or a screenshot.
+`.env.example` is the authoritative, up-to-date list of every variable the app reads, which one are required, and where to get each value — see it directly rather than a copy of it here, so this README can't drift out of sync with it.
+
+Never paste real values into a chat channel, a commit, or a screenshot.
 
 For login access, an administrator must set the Supabase user's protected app
 metadata to `{"account_status":"approved"}`. New or unapproved users should
@@ -91,7 +90,7 @@ For detailed environment setup (including staging), see [Environment Variables C
 
 **Your workflow:**
 1. Create a feature branch and make changes
-2. If you changed the database schema, run `supabase db pull` and commit the migration
+2. If you changed the database schema, write the migration with `supabase migration new <name>` (see [supabase/MIGRATIONS.md](supabase/MIGRATIONS.md) for the full workflow) and commit it
 3. Push to GitHub and open a PR
 4. Vercel creates a preview deployment automatically (watch for the comment on your PR)
 5. Test your changes in the preview
@@ -101,6 +100,7 @@ For detailed environment setup (including staging), see [Environment Variables C
 - [Staging Environment Setup](docs/staging-environment-setup.md) — comprehensive architecture & migration workflow
 - [Staging Workflow Quick Reference](docs/staging-workflow-quick-ref.md) — quick day-to-day guide
 - [Staging Implementation Checklist](docs/staging-implementation-checklist.md) — setup tasks for team leads
+- [Database Migrations](supabase/MIGRATIONS.md) — schema change workflow, conventions, rollback
 
 ### 6. Run it
 
@@ -133,22 +133,14 @@ public/         static files served as-is (images, icons)
 
 In the App Router, a folder under `src/app/` becomes a URL, and the `page.tsx` inside it is what renders. `src/app/about/page.tsx` → `/about`.
 
-## Day-to-day Git
+For how auth, validation, error logging, and the database fit together, see [Architecture](docs/architecture.md).
 
-Never commit straight to `main`. Branch, push, open a pull request.
+## Contributing
 
-```bash
-git checkout main
-git pull                          # get everyone else's latest work
-git checkout -b your-name/feature # branch for your task
-# ...make changes...
-npm run build                     # make sure it still builds
-git add -A
-git commit -m "add signup form"
-git push -u origin your-name/feature
-```
-
-Then open a pull request on GitHub and ask for a review.
+Branch model, commit style, and the pull request process live in
+[CONTRIBUTING.md](CONTRIBUTING.md) — read it before your first PR. What
+"done" means for a piece of work is the Definition of Done in the
+[pull request template](.github/pull_request_template.md).
 
 ## Troubleshooting
 

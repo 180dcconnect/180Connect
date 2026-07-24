@@ -49,6 +49,10 @@ Project Root/
 ### Example
 
 ```bash
+# Absolute base URL this deployment is served from. Required — the server
+# will not start without it (src/lib/env.ts).
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
 # Supabase (Development/Preview Project)
 # From: Supabase Dashboard → Project → API → Copy values
 NEXT_PUBLIC_SUPABASE_URL=https://cgbfhhdeapasniudyyds.supabase.co
@@ -91,6 +95,9 @@ SENTRY_DSN=
 ### Example
 
 ```bash
+# Absolute base URL this deployment is served from. Required.
+NEXT_PUBLIC_APP_URL=https://<staging-url>
+
 # Supabase (Dev/Preview Project — shared with local dev)
 NEXT_PUBLIC_SUPABASE_URL=https://cgbfhhdeapasniudyyds.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<redacted>
@@ -131,6 +138,9 @@ SENTRY_DSN=<redacted>
 ### Example
 
 ```bash
+# Absolute base URL this deployment is served from. Required.
+NEXT_PUBLIC_APP_URL=https://180connect.vercel.app
+
 # Supabase (Production Project)
 NEXT_PUBLIC_SUPABASE_URL=https://<prod-project-id>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<redacted>
@@ -170,6 +180,7 @@ SENTRY_DSN=<redacted>
 
 | Variable | Value (Dev/Preview) | Value (Production) | When Revealed | Notes |
 |---|---|---|---|---|
+| `NEXT_PUBLIC_APP_URL` | Vercel preview URL | `https://180connect.vercel.app` | Always | **Required** — server refuses to start without it |
 | `NEXT_PUBLIC_SUPABASE_URL` | cgbfhhdeapasniudyyds.supabase.co | prod-project.supabase.co | Always | Public, safe to expose |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | dev-key | prod-key | Always | Public publishable key, limited permissions. Preferred over the anon key |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | dev-key | prod-key | Always | Legacy name for the publishable key; read as a fallback. Set one or the other |

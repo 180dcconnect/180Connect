@@ -49,6 +49,10 @@ Project Root/
 ### Example
 
 ```bash
+# Absolute base URL this deployment is served from. Required — the server
+# will not start without it (src/lib/env.ts).
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
 # Supabase (Development/Preview Project)
 # From: Supabase Dashboard → Project → API → Copy values
 NEXT_PUBLIC_SUPABASE_URL=https://cgbfhhdeapasniudyyds.supabase.co
@@ -84,7 +88,7 @@ CRON_SECRET=local-dev-secret-12345
 
 # Analytics (optional; can be blank locally)
 NEXT_PUBLIC_POSTHOG_KEY=
-SENTRY_DSN=
+NEXT_PUBLIC_SENTRY_DSN=
 ```
 
 ---
@@ -98,6 +102,9 @@ SENTRY_DSN=
 ### Example
 
 ```bash
+# Absolute base URL this deployment is served from. Required.
+NEXT_PUBLIC_APP_URL=https://<staging-url>
+
 # Supabase (Dev/Preview Project — shared with local dev)
 NEXT_PUBLIC_SUPABASE_URL=https://cgbfhhdeapasniudyyds.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<redacted>
@@ -124,7 +131,7 @@ CRON_SECRET=<shared-secret>
 
 # Analytics
 NEXT_PUBLIC_POSTHOG_KEY=<redacted>
-SENTRY_DSN=<redacted>
+NEXT_PUBLIC_SENTRY_DSN=<redacted>
 ```
 
 ---
@@ -138,6 +145,9 @@ SENTRY_DSN=<redacted>
 ### Example
 
 ```bash
+# Absolute base URL this deployment is served from. Required.
+NEXT_PUBLIC_APP_URL=https://180connect.vercel.app
+
 # Supabase (Production Project)
 NEXT_PUBLIC_SUPABASE_URL=https://<prod-project-id>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<redacted>
@@ -164,7 +174,7 @@ CRON_SECRET=<shared-secret>
 
 # Analytics
 NEXT_PUBLIC_POSTHOG_KEY=<redacted>
-SENTRY_DSN=<redacted>
+NEXT_PUBLIC_SENTRY_DSN=<redacted>
 ```
 
 ---
@@ -177,6 +187,7 @@ SENTRY_DSN=<redacted>
 
 | Variable | Value (Dev/Preview) | Value (Production) | When Revealed | Notes |
 |---|---|---|---|---|
+| `NEXT_PUBLIC_APP_URL` | Vercel preview URL | `https://180connect.vercel.app` | Always | **Required** — server refuses to start without it |
 | `NEXT_PUBLIC_SUPABASE_URL` | cgbfhhdeapasniudyyds.supabase.co | prod-project.supabase.co | Always | Public, safe to expose |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | dev-key | prod-key | Always | Public publishable key, limited permissions. Preferred over the anon key |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | dev-key | prod-key | Always | Legacy name for the publishable key; read as a fallback. Set one or the other |
@@ -190,6 +201,14 @@ SENTRY_DSN=<redacted>
 | `NEXT_PUBLIC_POSTHOG_KEY` | dev-key | prod-key | Always | Public analytics key |
 | `NEXT_PUBLIC_SENTRY_DSN` | dev-dsn | prod-dsn | Always | Public error reporting endpoint — where captured errors are sent (F226). Unset ⇒ errors log to the platform console instead |
 | `SENTRY_ENVIRONMENT` | `staging` | `production` | Only server-side | Environment tag on captured errors (F226). Optional — falls back to `VERCEL_ENV` |
+| `SUPABASE_DB_URL` | session-pooler string | not set | Only server-side | **SENSITIVE:** Read by `npm run seed` / `npm run seed:clear` only, never by the app. Use the session pooler string, not the IPv6-only direct one. The scripts refuse to run against production ([docs](seed-data.md)) |
+
+> The authoritative list is `SCHEMA` in [`src/lib/env.ts`](../src/lib/env.ts),
+> mirrored into [`.env.example`](../.env.example) — startup validation is driven
+> from it, so a variable missing there is not checked no matter what this table
+> says. `NEXT_PUBLIC_ENV`, `GMAIL_*`, `OPENAI_API_KEY` and
+> `NEXT_PUBLIC_POSTHOG_KEY` above are planned, not yet declared in the schema
+> and not yet read by any code.
 
 ### How to Set in Vercel
 

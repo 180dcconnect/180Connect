@@ -112,6 +112,20 @@ Open http://localhost:3000. Edit `src/app/page.tsx` and the page updates on save
 
 Stop the server with `Ctrl + C`.
 
+### 7. Load test data
+
+You don't need — and shouldn't use — real client records to develop against. Apply
+the migrations, then load 50 fake organisations spread across every pipeline stage:
+
+```bash
+supabase db push     # or `supabase migration up` against the local stack
+npm run seed
+```
+
+Every seeded row carries `is_seed = true`, so it can be found and removed at any
+time, and the script refuses to run against production. Full details, including the
+failure cases, are in [docs/seed-data.md](docs/seed-data.md).
+
 ## Commands
 
 | Command | What it does |
@@ -120,6 +134,9 @@ Stop the server with `Ctrl + C`.
 | `npm run build` | Production build — run this before pushing to catch errors the dev server tolerates |
 | `npm start` | Serve the production build locally |
 | `npm run lint` | Run ESLint |
+| `npm test` | Run the unit tests |
+| `npm run seed` | Load fake test data into the database ([docs](docs/seed-data.md)) |
+| `npm run seed:clear` | Remove all fake test data (`is_seed` rows) |
 
 ## Project layout
 

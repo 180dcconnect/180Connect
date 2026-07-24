@@ -63,6 +63,7 @@ Production `db push` happens only through the release process, never ad hoc.
 supabase init      # already committed; skip if supabase/ exists
 supabase start     # local stack
 supabase migration up   # or `supabase db reset` to replay all
+npm run seed       # fake test data — see docs/seed-data.md (F233)
 ```
 
 ## Schema change approval record (SOP §7 — paste into the PR)

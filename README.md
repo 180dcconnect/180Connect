@@ -2,6 +2,8 @@
 
 Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4
 
+> **New here?** This README gets you set up. Before your first pull request, read **[CONTRIBUTING.md](CONTRIBUTING.md)** — branching, PRs, reviews, and releases.
+
 ## Setup
 
 Follow these once, in order. Works on both Windows and macOS. Anywhere you see a `$` command, type it into your terminal (Git Bash on Windows, Terminal on macOS) without the `$`.
@@ -135,20 +137,9 @@ In the App Router, a folder under `src/app/` becomes a URL, and the `page.tsx` i
 
 ## Day-to-day Git
 
-Never commit straight to `main`. Branch, push, open a pull request.
+Branch from `dev`, never commit straight to `main` or `dev`, open a pull request into `dev`.
 
-```bash
-git checkout main
-git pull                          # get everyone else's latest work
-git checkout -b your-name/feature # branch for your task
-# ...make changes...
-npm run build                     # make sure it still builds
-git add -A
-git commit -m "add signup form"
-git push -u origin your-name/feature
-```
-
-Then open a pull request on GitHub and ask for a review.
+The full branching model, naming rules, PR process, and review expectations live in **[CONTRIBUTING.md](CONTRIBUTING.md)** — read it before your first PR.
 
 ## Troubleshooting
 

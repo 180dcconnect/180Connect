@@ -53,6 +53,16 @@ function isBareDomain(value: string): string | null {
   return null;
 }
 
+function isTurnstileSiteKey(value: string): string | null {
+  // Real keys are `0x…`; Cloudflare's documented test keys are `1x…`, `2x…`
+  // and `3x…`. Anything else is a copy-paste error — most likely the *secret*
+  // key, which must never reach the browser bundle.
+  if (!/^[0-3]x[A-Za-z0-9_-]+$/.test(value)) {
+    return "must be a Cloudflare Turnstile site key, for example 1x00000000000000000000AA";
+  }
+  return null;
+}
+
 export const SCHEMA: readonly EnvVarSpec[] = [
   {
     name: "NEXT_PUBLIC_APP_URL",
@@ -91,6 +101,14 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     description:
       "Email domain users must sign in from. Server-only — never prefix with NEXT_PUBLIC_. Defaults to 180dc.org in `src/app/login/actions.ts` when unset.",
     validate: isBareDomain,
+  },
+  {
+    name: "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
+    required: true,
+    secret: false,
+    description:
+      "Cloudflare Turnstile site key for the login CAPTCHA (F003). Public by design — it identifies the widget, and only the paired secret held by Supabase can validate a token. Cloudflare's always-pass test key 1x00000000000000000000AA is the right value for local development and CI.",
+    validate: isTurnstileSiteKey,
   },
   {
     name: "SUPABASE_SERVICE_ROLE_KEY",

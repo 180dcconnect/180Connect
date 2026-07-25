@@ -85,6 +85,7 @@ PRD §22 leaves the CAPTCHA provider open. Supabase Auth's built-in CAPTCHA supp
 **Important:** enabling CAPTCHA in Supabase applies to **every** auth action (login, password reset, invites, sign-up), not just login. The Turnstile widget must be added to each form that calls a Supabase auth method, not only `src/app/login/login-form.tsx`.
 
 **Owner:** Component Owner F003. **Status:** Decided and implemented for login (F003); password reset (F004) and invites (F008) still need the same widget added.
+
 ---
 
 ## Known code debt

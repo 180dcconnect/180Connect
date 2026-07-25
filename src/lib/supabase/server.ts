@@ -1,28 +1,39 @@
-// This file creates a Supabase client for use on the SERVER
-// (i.e. inside server actions, like our logout function)
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+import "server-only";
+
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
+
+function getSupabaseConfig() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key =
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !key) {
+    throw new Error("Supabase environment variables are not configured.");
+  }
+
+  return { url, key };
+}
 
 export async function createClient() {
-    // Gets access to the browser's cookies, since that's where
-    // the user's login session is stored
-  const cookieStore = await cookies()
+  const { url, key } = getSupabaseConfig();
+  const cookieStore = await cookies();
 
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-    {
-      cookies: {
-        // Reads all current cookies (used to check if a session exists)
-        getAll: () => cookieStore.getAll(),
-        // Writes/updates cookies (used when logging in or out,
-        // so the session cookie gets created or cleared properly)
-        setAll: (cookiesToSet) => {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options)
-          )
-        },
+  return createServerClient(url, key, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
       },
-    }
-  )
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options),
+          );
+        } catch {
+          // Server Components cannot write cookies. src/proxy.ts refreshes them.
+        }
+      },
+    },
+  });
 }

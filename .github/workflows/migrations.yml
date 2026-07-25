@@ -1,0 +1,122 @@
+# Verifies and applies database migrations.
+# Stories: F232 (#227) — Database Migration Management, F224 (#224) — Row-Level Security.
+# See supabase/MIGRATIONS.md and docs/rls-permission-matrix.md.
+#
+# Staging only. Production is NEVER auto-applied — it goes through the release
+# process per SOP §7: prod schema changes stay deliberate, reviewed and human-triggered.
+name: Database migrations
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'supabase/**'
+      - 'scripts/verify-rls-coverage.sql'
+      - 'scripts/verify-anon-lockout.sh'
+      - '.github/workflows/migrations.yml'
+  pull_request:
+    paths:
+      - 'supabase/**'
+      - 'scripts/verify-rls-coverage.sql'
+      - 'scripts/verify-anon-lockout.sh'
+      - '.github/workflows/migrations.yml'
+  # Manual re-run, e.g. after fixing a failed apply.
+  workflow_dispatch:
+
+# Never let two applies race against the same database.
+concurrency:
+  group: supabase-migrations-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  # Not a secret: a project ref is public in the project URL. Held as a repo
+  # variable so environment refs are never hardcoded in the workflow.
+  STAGING_REF: ${{ vars.SUPABASE_STAGING_REF }}
+  LOCAL_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+jobs:
+  # Runs on every PR, before anything touches staging. The local stack replays all
+  # migrations from an empty database, so this also proves the migration sequence
+  # still applies cleanly from scratch — not only that today's diff applies on top
+  # of whatever staging happens to contain.
+  verify:
+    name: Verify migrations and RLS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # Studio, realtime, storage and the rest are not exercised by these tests and
+      # cost roughly a minute of startup each.
+      - name: Start local stack (db + auth)
+        run: |
+          supabase start \
+            -x studio,realtime,storage-api,imgproxy,edge-runtime,logflare,vector,supavisor,mailpit
+
+      - name: Show applied migrations
+        run: supabase migration list --local
+
+      # pgTAP behaviour tests: policies enforce the permission matrix for real
+      # admin and CAM identities. Tests for tables that have not been migrated yet
+      # report as skipped.
+      - name: RLS behaviour tests
+        run: supabase test db
+
+      # Sequence step 15: no table ships without RLS and policies.
+      - name: RLS coverage gate
+        run: psql "$LOCAL_DB_URL" -v ON_ERROR_STOP=1 -f scripts/verify-rls-coverage.sql
+
+      # The application-bypass check: hit PostgREST directly with the public anon
+      # key and confirm it reaches nothing.
+      - name: Anonymous lockout probe
+        run: |
+          ANON_KEY="$(supabase status -o json | jq -r '.ANON_KEY')"
+          scripts/verify-anon-lockout.sh "http://127.0.0.1:54321" "$ANON_KEY"
+
+      - name: Stop local stack
+        if: always()
+        run: supabase stop --no-backup
+
+  apply:
+    name: db push -> 180connect-staging
+    runs-on: ubuntu-latest
+    # Staging is only ever written from dev, and only after verify passes. A PR
+    # that fails the RLS gate cannot reach the shared database.
+    if: github.event_name != 'pull_request'
+    needs: verify
+    # No `environment:` set — the repo has no "staging" environment and it could not
+    # be created via the API. Add one in Settings > Environments if you later want
+    # env-scoped secrets or a required-reviewer gate on staging applies.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link staging and show pending migrations
+        run: |
+          supabase link --project-ref "$STAGING_REF"
+          supabase migration list
+
+      - name: Apply migrations
+        run: supabase db push
+
+      - name: Confirm local and remote are in sync
+        run: supabase migration list
+
+      # Same probe against the real staging API. The local run proves the policies
+      # are correct; this proves they actually reached staging.
+      - name: Anonymous lockout probe (staging)
+        if: vars.SUPABASE_STAGING_URL != '' && vars.SUPABASE_STAGING_ANON_KEY != ''
+        run: |
+          scripts/verify-anon-lockout.sh \
+            "${{ vars.SUPABASE_STAGING_URL }}" \
+            "${{ vars.SUPABASE_STAGING_ANON_KEY }}"

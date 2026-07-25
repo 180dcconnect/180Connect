@@ -50,17 +50,39 @@ export async function login(
     };
   }
 
+  const captchaToken = String(formData.get("cf-turnstile-response") ?? "");
+  if (!captchaToken) {
+    // The widget has not finished, or the user submitted before it ran. Saying
+    // so beats a round trip that comes back as "invalid email or password".
+    logSecurityEvent("authentication.login_failed", { cause: "missing captcha token" });
+    return {
+      status: "error",
+      message: "Complete the CAPTCHA check, then try again.",
+      email,
+    };
+  }
+
   try {
     const supabase = await createClient();
-    const { data, error } = await supabase.auth.signInWithPassword(result.data);
+    const { data, error } = await supabase.auth.signInWithPassword({
+      ...result.data,
+      options: { captchaToken },
+    });
 
     if (error || !data.user) {
       logSecurityEvent("authentication.login_failed", {
         cause: error?.message ?? "no user returned",
       });
+      // A CAPTCHA rejection is not a credentials problem, and telling the user
+      // their password is wrong when it is not sends them round a loop they
+      // cannot escape. Credentials stay deliberately vague either way — the
+      // message never reveals whether the email exists.
+      const isCaptchaFailure = /captcha/i.test(error?.message ?? "");
       return {
         status: "error",
-        message: "Invalid email or password.",
+        message: isCaptchaFailure
+          ? "CAPTCHA check failed. Please try again."
+          : "Invalid email or password.",
         email,
       };
     }

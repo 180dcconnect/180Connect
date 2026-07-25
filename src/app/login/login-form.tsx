@@ -1,10 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import { login, type LoginState } from "./actions";
+import Script from "next/script";
 
 const initialLoginState: LoginState = { status: "idle" };
+
+// Cloudflare Turnstile site key — public by design: it identifies the widget,
+// and only the paired secret (held by Supabase) can validate a token. Read as
+// a static property so Next inlines it into the browser bundle; there is no
+// fallback on purpose, because a wrong-but-present key fails in confusing ways.
+// `src/lib/env.ts` requires it, so a missing key stops the server at startup.
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+
+/** The subset of the Turnstile browser API this component calls. */
+declare global {
+  interface Window {
+    turnstile?: { reset: (widget?: string | HTMLElement) => void };
+  }
+}
 
 const inputClass =
   "h-10 rounded-lg border border-black/10 bg-[#fafafa] px-3 text-sm outline-none transition-colors placeholder:text-foreground/35 focus-visible:border-brand focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-brand/20 aria-invalid:border-red-500 aria-invalid:ring-2 aria-invalid:ring-red-500/20";
@@ -13,6 +28,15 @@ export function LoginForm() {
   const [state, formAction, pending] = useActionState(login, initialLoginState);
   const emailError = state.fieldErrors?.email?.[0];
   const passwordError = state.fieldErrors?.password?.[0];
+
+  // A Turnstile token is single-use. Without this, a second attempt after any
+  // failed one — wrong password, unapproved account, a validation error —
+  // resubmits the spent token, and Supabase rejects it as a CAPTCHA failure no
+  // matter what the user types. Reset the widget whenever an attempt comes back.
+  useEffect(() => {
+    if (state.status === "idle") return;
+    window.turnstile?.reset();
+  }, [state]);
 
   return (
     <form action={formAction} className="mt-8 flex flex-col gap-4" noValidate>
@@ -82,6 +106,13 @@ export function LoginForm() {
           </p>
         )}
       </div>
+
+      <Script
+        src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+        async
+        defer
+      />
+      <div className="cf-turnstile" data-sitekey={TURNSTILE_SITE_KEY} />
 
       <button
         type="submit"

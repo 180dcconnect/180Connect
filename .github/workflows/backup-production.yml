@@ -1,9 +1,14 @@
 # Nightly backup of the production database to Vercel Blob storage.
 # Story: F225 (#220) — Database Backups. See docs/F225-database-backups.md.
 #
-# Three separate dumps (roles, schema, data) because a single `supabase db
-# dump` does not capture all three — see docs/F225-database-backups.md
-# section 2. Restoring them back is roles -> schema -> data, in that order.
+# Three separate dumps (roles, schema, data) because a single dump command
+# does not capture all three — see docs/F225-database-backups.md section 2.
+# Restoring them back is roles -> schema -> data, in that order.
+#
+# Uses pg_dump/pg_dumpall directly rather than `supabase db dump`: the
+# Supabase CLI's dump command requires Docker even for a remote database,
+# which ubuntu-latest runners don't need pg_dump/pg_dumpall to already have
+# (they ship with PostgreSQL client tools preinstalled).
 name: Backup production database
 
 on:
@@ -21,7 +26,6 @@ permissions:
   contents: read
 
 env:
-  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
   # Not a secret: a project ref is public in the project URL. Same pattern as
   # STAGING_REF in migrations.yml.
   PROD_REF: ${{ vars.SUPABASE_PROD_REF }}
@@ -32,10 +36,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: supabase/setup-cli@v1
-        with:
-          version: latest
 
       - name: Install Vercel CLI
         run: npm install -g vercel
@@ -55,9 +55,9 @@ jobs:
           mkdir -p dumps
           DB_URL="postgresql://postgres:${SUPABASE_PROD_DB_PASSWORD}@db.${PROD_REF}.supabase.co:5432/postgres"
 
-          supabase db dump --db-url "$DB_URL" --role-only -f "dumps/roles_$DATE.sql"
-          supabase db dump --db-url "$DB_URL" -f "dumps/schema_$DATE.sql"
-          supabase db dump --db-url "$DB_URL" --data-only -f "dumps/data_$DATE.sql"
+          pg_dumpall --roles-only --dbname="$DB_URL" -f "dumps/roles_$DATE.sql"
+          pg_dump --schema-only --dbname="$DB_URL" -f "dumps/schema_$DATE.sql"
+          pg_dump --data-only --dbname="$DB_URL" -f "dumps/data_$DATE.sql"
         env:
           SUPABASE_PROD_DB_PASSWORD: ${{ secrets.SUPABASE_PROD_DB_PASSWORD }}
 

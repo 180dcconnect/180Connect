@@ -32,38 +32,43 @@ Pulled from `180_Connect_Complete_PRD.md` so every candidate below is scored aga
 
 ## Recommended Free-tier Workaround
 
-Since Supabase gives us no native backup mechanism on Free, back up manually using the **Supabase CLI**'s logical dump command, on a schedule, to storage outside Supabase itself.
+Since Supabase gives us no native backup mechanism on Free, back up manually using **`pg_dump`/`pg_dumpall`** — the plain PostgreSQL tools, not the Supabase CLI — on a schedule, to storage outside Supabase itself.
+
+**Why `pg_dump`/`pg_dumpall` and not `supabase db dump`:** the Supabase CLI's `db dump` shells out to Docker even when dumping a remote database, which makes it a poor fit for a lightweight scheduled job and an extra thing to install on every machine that needs to run a restore test. `pg_dump`/`pg_dumpall` are the underlying tools the CLI itself wraps, need no Docker, and are already present on GitHub's `ubuntu-latest` runners — so the automated workflow (section 3) doesn't need to install anything beyond what the runner ships with. Found this out by trying to run the CLI version locally and hitting a Docker-not-installed error (23 Jul 2026) — recorded here so nobody re-discovers it the hard way.
 
 ### 1. One-off setup
 
+Local machine only needs the PostgreSQL client tools (`pg_dump`, `pg_dumpall`, `psql`) — not a running Postgres server. On Windows, via Chocolatey (already installed on this machine):
+
 ```bash
-npm install -g supabase
-supabase login
+choco install postgresql --params '/Password:localtestonly' -y
 ```
 
-`npm install -g` installs a command globally on your machine (not into this project's `node_modules`), so it's available from any terminal. `supabase login` opens a browser to authenticate the CLI against your Supabase account — same idea as `git`'s credential setup, just for Supabase.
+This installs a full local PostgreSQL server as a side effect (Chocolatey doesn't offer a client-only package on Windows) — that's fine, we don't use the server part, only the `pg_dump`/`pg_dumpall`/`psql` command-line tools it brings. The `--params '/Password:...'` sets a password for the *local* server instance Chocolatey starts; it has nothing to do with the production database password.
 
 ### 2. Taking a manual backup
 
-**One `supabase db dump` is not enough.** The CLI splits a database into three separate concerns, and a plain `db dump` only captures one of them (schema). Roles (database users/permissions) and data (the actual rows) each need their own dump, or a restore looks like it worked but comes back missing users or every row in every table. 
+**One dump command is not enough.** A database splits into three separate concerns, and a plain schema dump only captures one of them. Roles (database users/permissions) and data (the actual rows) each need their own dump, or a restore looks like it worked but comes back missing users or every row in every table.
 
 ```bash
 DATE=$(date +%Y%m%d)
 
-# 1. Roles — database users and their permissions. Must be restored FIRST,
-#    since schema objects (e.g. RLS policies) can reference roles that don't
+# 1. Roles — database users and their permissions. Roles are cluster-wide,
+#    not per-database, which is why this uses pg_dumpall (cluster level),
+#    not pg_dump (single-database level). Must be restored FIRST, since
+#    schema objects (e.g. RLS policies) can reference roles that don't
 #    exist yet otherwise.
-supabase db dump --db-url "<connection-string>" --role-only -f "roles_$DATE.sql"
+pg_dumpall --roles-only --dbname="<connection-string>" -f "roles_$DATE.sql"
 
 # 2. Schema — table structures, RLS policies, functions. No row data.
-supabase db dump --db-url "<connection-string>" -f "schema_$DATE.sql"
+pg_dump --schema-only --dbname="<connection-string>" -f "schema_$DATE.sql"
 
 # 3. Data — every row, no table structure. Restored last, once 1 and 2 exist.
-supabase db dump --db-url "<connection-string>" --data-only -f "data_$DATE.sql"
+pg_dump --data-only --dbname="<connection-string>" -f "data_$DATE.sql"
 ```
 
-- `--db-url` points at the project's Postgres connection string (**never** commit this — it contains the database password; keep it in `.env.local` or pass it interactively, same rule as any other secret).
-- `$(date +%Y%m%d)` is shell command substitution: it runs `date`, formats it as YYYYMMDD, and drops the result into the filename, e.g. `schema_20260723.sql`.
+- `--dbname` here takes a full connection string (`postgresql://user:password@host:port/database`), not just a database name — Postgres tools accept either.
+- `$(date +%Y%m%d)` is shell command substitution: it runs `date`, formats it as YYYYMMDD, and drops the result into the filename, e.g. `schema_20260723.sql`. Note the `%` — `date +20260723` (no `%`) just echoes that literal text back instead of computing anything, a mistake worth knowing about since it silently "works" today and silently breaks tomorrow.
 - All three are plain-text SQL files. Restoring means replaying them back through `psql`, in the order **roles → schema → data** — see [section 4](#4-restore-process).
 
 ### 3. Automating it
@@ -71,7 +76,7 @@ supabase db dump --db-url "<connection-string>" --data-only -f "data_$DATE.sql"
 A manual step that depends on someone remembering to run it is not a backup strategy. Implemented as `.github/workflows/backup-production.yml`, following the same pattern as the existing `migrations.yml` (F232) — a GitHub Action that:
 
 1. Triggers on a cron schedule (daily at 03:00 UTC) and on `workflow_dispatch` (a manual "Run workflow" button in GitHub's Actions tab, used to test it on demand instead of waiting for 3am).
-2. Checks out the repo, installs the Supabase CLI (same `supabase/setup-cli` step as `migrations.yml`).
+2. Checks out the repo. No CLI install step needed — `pg_dump`/`pg_dumpall` are already present on GitHub's `ubuntu-latest` runners.
 3. **Connects and fails loudly if it can't** — the free-plan production project auto-pauses after inactivity, so the first step is a connectivity check that fails the whole run (not a silent skip) if the database doesn't respond. A failed GitHub Actions run emails everyone watching the repo by default, which is the "fail visibly" requirement satisfied without any new infrastructure.
 4. Runs all three dumps from section 2 (roles, schema, data) using the project's DB password, stored as a **GitHub Actions secret** (`SUPABASE_DB_PASSWORD`) — never in the workflow file itself.
 5. Uploads all three files to Vercel Blob using a `BLOB_READ_WRITE_TOKEN` secret, under a path prefixed with the date.

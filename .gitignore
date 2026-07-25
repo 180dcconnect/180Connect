@@ -36,6 +36,10 @@ yarn-error.log*
 # needs, so it is committed on purpose.
 !.env.example
 
+# local database dump/restore testing (F225) — real backups contain real
+# personal data and must never be committed, even for a "quick test"
+/dumps/
+
 # vercel
 .vercel
 

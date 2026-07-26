@@ -2,6 +2,8 @@
 
 Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4
 
+> **New here?** This README gets you set up. Before your first pull request, read **[CONTRIBUTING.md](CONTRIBUTING.md)** — branching, PRs, reviews, and releases.
+
 ## Setup
 
 Follow these once, in order. Works on both Windows and macOS. Anywhere you see a `$` command, type it into your terminal (Git Bash on Windows, Terminal on macOS) without the `$`.
@@ -54,7 +56,7 @@ git config --global core.autocrlf input
 ### 4. Get the code
 
 ```bash
-git clone https://github.com/bashirbobboi/180Connect.git
+git clone https://github.com/180dcconnect/180Connect.git
 cd 180Connect
 npm install
 ```
@@ -63,18 +65,48 @@ npm install
 
 ### 5. Environment variables
 
-Secrets (API keys, database URLs) live in a file called `.env.local`, which is **never committed to Git**. Ask the team lead for the current values, then create the file in the project root:
+Secrets (API keys, database URLs) live in a file called `.env.local`, which is **never committed to Git**. Start from the template:
 
 ```bash
-# .env.local
-NEXT_PUBLIC_SUPABASE_URL=...
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-AUTH_ALLOWED_EMAIL_DOMAIN=180dc.org
-PASSWORD_RESET_WINDOW_SECONDS=3600
+cp .env.example .env.local
 ```
 
-Never paste these into a chat channel, a commit, or a screenshot.
+`.env.example` is the authoritative list of every variable the app reads — which ones are required, and where to get each value. It is deliberately not duplicated here, so this README cannot drift out of sync with it. It contains no real values, so it is safe to commit.
+
+Now fill it in from Supabase:
+
+1. Ask the Project Manager for an invite to the Supabase organisation, then accept it.
+2. Open the **Development** project at https://supabase.com/dashboard.
+3. Go to **Project Settings → API Keys**.
+4. Copy the **Project URL** into `NEXT_PUBLIC_SUPABASE_URL`.
+5. Copy the **publishable key** — it starts with `sb_publishable_` — into `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
+
+Note what did *not* happen there: nobody sent you a key. You were given access to the store and took the value yourself. That is the rule — if you are ever waiting on someone to paste a credential at you, the real fix is an invite.
+
+> The dashboard also shows a **legacy anon key**, a long string starting `eyJ`. It still works, but Supabase is phasing it out. Use the `sb_publishable_` one.
+>
+> On the same page there is a **secret key** (`sb_secret_…`, previously called `service_role`). It bypasses every row-level security rule in the database. Do not put it in `.env.local` unless a task specifically tells you to, and never give it a `NEXT_PUBLIC_` prefix.
+
+#### What the `NEXT_PUBLIC_` prefix means
+
+This one catches people out, so read it before you add a variable of your own.
+
+| Prefix | Where it can be read | Use for |
+| --- | --- | --- |
+| `NEXT_PUBLIC_…` | Baked into the JavaScript sent to the browser. **Anyone can read it in devtools.** | Values that are public by nature — the app's URL, the Supabase publishable key |
+| no prefix | Server only — route handlers, server components | Everything secret |
+
+If a secret does not work in a client component, the fix is to move the code to the server. Adding `NEXT_PUBLIC_` publishes it to every visitor.
+
+`docs/environment-variables.md` has the full detail, including what happens when a variable is missing.
+
+#### Never do this
+
+- Paste a key into Slack, Discord, WhatsApp, email, a Jira ticket, or a screenshot
+- Commit a key, even to a branch you plan to delete — the history keeps it
+- Hardcode a key in a `.ts` file "just to test it"
+
+A [secret scan](.github/workflows/secret-scan.yml) runs on every pull request and will fail the check if it finds a credential. If you think you have committed one, say so straight away — the key gets rotated in Supabase and Vercel, and nothing bad happens. Staying quiet is what turns it into an incident.
 
 For login access, an administrator must set the Supabase user's protected app
 metadata to `{"account_status":"approved"}`. New or unapproved users should
@@ -93,7 +125,7 @@ For detailed environment setup (including staging), see [Environment Variables C
 
 **Your workflow:**
 1. Create a feature branch and make changes
-2. If you changed the database schema, run `supabase db pull` and commit the migration
+2. If you changed the database schema, write the migration with `supabase migration new <name>` (see [supabase/MIGRATIONS.md](supabase/MIGRATIONS.md) for the full workflow) and commit it
 3. Push to GitHub and open a PR
 4. Vercel creates a preview deployment automatically (watch for the comment on your PR)
 5. Test your changes in the preview
@@ -103,6 +135,7 @@ For detailed environment setup (including staging), see [Environment Variables C
 - [Staging Environment Setup](docs/staging-environment-setup.md) — comprehensive architecture & migration workflow
 - [Staging Workflow Quick Reference](docs/staging-workflow-quick-ref.md) — quick day-to-day guide
 - [Staging Implementation Checklist](docs/staging-implementation-checklist.md) — setup tasks for team leads
+- [Database Migrations](supabase/MIGRATIONS.md) — schema change workflow, conventions, rollback
 
 For password reset, add `NEXT_PUBLIC_APP_URL/auth/recovery` to Supabase Auth's
 allowed redirect URLs. For links that work across browsers/devices, set the
@@ -125,6 +158,20 @@ Open http://localhost:3000. Edit `src/app/page.tsx` and the page updates on save
 
 Stop the server with `Ctrl + C`.
 
+### 7. Load test data
+
+You don't need — and shouldn't use — real client records to develop against. Apply
+the migrations, then load 50 fake organisations spread across every pipeline stage:
+
+```bash
+supabase db push     # or `supabase migration up` against the local stack
+npm run seed
+```
+
+Every seeded row carries `is_seed = true`, so it can be found and removed at any
+time, and the script refuses to run against production. Full details, including the
+failure cases, are in [docs/seed-data.md](docs/seed-data.md).
+
 ## Commands
 
 | Command | What it does |
@@ -133,6 +180,9 @@ Stop the server with `Ctrl + C`.
 | `npm run build` | Production build — run this before pushing to catch errors the dev server tolerates |
 | `npm start` | Serve the production build locally |
 | `npm run lint` | Run ESLint |
+| `npm test` | Run the unit tests |
+| `npm run seed` | Load fake test data into the database ([docs](docs/seed-data.md)) |
+| `npm run seed:clear` | Remove all fake test data (`is_seed` rows) |
 
 ## Project layout
 
@@ -146,22 +196,17 @@ public/         static files served as-is (images, icons)
 
 In the App Router, a folder under `src/app/` becomes a URL, and the `page.tsx` inside it is what renders. `src/app/about/page.tsx` → `/about`.
 
-## Day-to-day Git
+For how auth, validation, error logging, and the database fit together, see [Architecture](docs/architecture.md).
 
-Never commit straight to `main`. Branch, push, open a pull request.
+## Contributing
 
-```bash
-git checkout main
-git pull                          # get everyone else's latest work
-git checkout -b your-name/feature # branch for your task
-# ...make changes...
-npm run build                     # make sure it still builds
-git add -A
-git commit -m "add signup form"
-git push -u origin your-name/feature
-```
+Branch from `dev`, never commit straight to `main` or `dev`, open a pull request into `dev`.
 
-Then open a pull request on GitHub and ask for a review.
+The full branching model, naming rules, commit style, PR process, and review
+expectations live in **[CONTRIBUTING.md](CONTRIBUTING.md)** — read it before your
+first PR. What "done" means for a piece of work is the Definition of Done —
+see [Pull requests](CONTRIBUTING.md#pull-requests) for the bar a reviewer holds
+you to.
 
 ## Troubleshooting
 

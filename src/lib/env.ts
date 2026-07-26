@@ -45,10 +45,20 @@ function isAbsoluteHttpUrl(value: string): string | null {
 }
 
 function isBareDomain(value: string): string | null {
-  // A leading "@" is tolerated by src/app/login/actions.ts, so accept it here too.
+  // A leading "@" is tolerated by src/lib/auth/login.ts, so accept it here too.
   const domain = value.replace(/^@/, "");
   if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(domain)) {
     return "must be a bare domain, for example 180dc.org";
+  }
+  return null;
+}
+
+function isTurnstileSiteKey(value: string): string | null {
+  // Real keys are `0x…`; Cloudflare's documented test keys are `1x…`, `2x…`
+  // and `3x…`. Anything else is a copy-paste error — most likely the *secret*
+  // key, which must never reach the browser bundle.
+  if (!/^[0-3]x[A-Za-z0-9_-]+$/.test(value)) {
+    return "must be a Cloudflare Turnstile site key, for example 1x00000000000000000000AA";
   }
   return null;
 }
@@ -89,8 +99,27 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     required: false,
     secret: false,
     description:
-      "Email domain users must sign in from. Server-only — never prefix with NEXT_PUBLIC_. Defaults to 180dc.org in `src/app/login/actions.ts` when unset.",
+      "Email domain users must sign in from. Server-only — never prefix with NEXT_PUBLIC_. Defaults to 180dc.org in `src/lib/auth/login.ts` when unset.",
     validate: isBareDomain,
+  },
+  {
+    name: "PASSWORD_RESET_WINDOW_SECONDS",
+    required: false,
+    secret: false,
+    description:
+      "Password-recovery link lifetime in seconds. Optional and defaults to 3600; keep it aligned with the recovery OTP expiry configured in Supabase Auth.",
+    validate: (value) =>
+      /^\d+$/.test(value) && Number(value) > 0
+        ? null
+        : "must be a positive whole number of seconds",
+  },
+  {
+    name: "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
+    required: true,
+    secret: false,
+    description:
+      "Cloudflare Turnstile site key for the login CAPTCHA (F003). Public by design — it identifies the widget, and only the paired secret held by Supabase can validate a token. Cloudflare's always-pass test key 1x00000000000000000000AA is the right value for local development and CI.",
+    validate: isTurnstileSiteKey,
   },
   {
     name: "SUPABASE_SERVICE_ROLE_KEY",
@@ -98,6 +127,22 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     secret: true,
     description:
       "Supabase service-role key. Bypasses row-level security — server-side only, never prefixed with NEXT_PUBLIC_. Not yet consumed — becomes required with F223.",
+  },
+  {
+    name: "SESSION_ACTIVITY_SECRET",
+    required: false,
+    secret: true,
+    description:
+      "Key used to HMAC-sign the inactivity record that drives session expiry (F007). Server-only — never prefixed with NEXT_PUBLIC_. Optional: without it sessions still expire, but the timestamp is unsigned and a replayed session could forge a fresh one, so staging and production should set it. Any long random string works, for example `openssl rand -base64 32`. Changing it expires every open session once.",
+    validate: (value) =>
+      value.length < 32 ? "must be at least 32 characters of random data" : null,
+  },
+  {
+    name: "SUPABASE_DB_URL",
+    required: false,
+    secret: true,
+    description:
+      "Postgres connection string for the database the seed script writes to (F233). Used only by `npm run seed`, never by the app, so it stays optional — the script validates it itself and refuses to run against production.",
   },
   {
     name: "CRON_SECRET",

@@ -11,6 +11,7 @@ import {
   RESET_REQUEST_MESSAGE,
   signRecoveryMarker,
 } from "./password-reset.ts";
+import { PASSWORD_RULES } from "./password-rules.ts";
 
 const SECRET = "test-secret-at-least-32-characters-long!!";
 const USER = "11111111-1111-4111-8111-111111111111";
@@ -40,6 +41,46 @@ describe("validation", () => {
     assert.equal(passwordSchema.safeParse("ALLUPPERCASE123").success, false);
     assert.equal(passwordSchema.safeParse("NoDigitsInHere").success, false);
     assert.equal(passwordSchema.safeParse("A-secure-password-123").success, true);
+  });
+
+  // The reset form renders its checklist from PASSWORD_RULES and the schema is
+  // built from the same list. These pin the two together: a rule that stops
+  // being enforced, or one the checklist shows but nothing checks, fails here.
+  it("enforces exactly the rules the checklist shows", () => {
+    // Each fails only the rule at the same index, satisfying the other three.
+    const failing: Record<string, string> = {
+      length: "Ab1",
+      lowercase: "A-SECURE-PASSWORD-123",
+      uppercase: "a-secure-password-123",
+      number: "A-secure-password-abc",
+    };
+
+    for (const rule of PASSWORD_RULES) {
+      const value = failing[rule.id];
+      assert.ok(value, `no fixture for rule ${rule.id}`);
+      assert.equal(rule.test(value), false, `${rule.id}.test should fail`);
+
+      const result = passwordSchema.safeParse(value);
+      assert.equal(result.success, false, `${rule.id} should be rejected`);
+      assert.ok(
+        result.error?.issues.some((issue) => issue.message === rule.message),
+        `${rule.id} should report its own message`,
+      );
+    }
+  });
+
+  it("reports every unmet rule at once, not just the first", () => {
+    const result = passwordSchema.safeParse("abc");
+    assert.equal(result.success, false);
+    // Too short, no uppercase, no digit — three of the four.
+    assert.equal(result.error?.issues.length, 3);
+  });
+
+  it("accepts a password meeting every rule", () => {
+    assert.equal(passwordSchema.safeParse("A-secure-password-123").success, true);
+    for (const rule of PASSWORD_RULES) {
+      assert.equal(rule.test("A-secure-password-123"), true, rule.id);
+    }
   });
 
   it("blames the confirmation field when the two do not match", () => {

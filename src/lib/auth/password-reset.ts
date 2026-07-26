@@ -28,6 +28,7 @@ import { z } from "zod";
 
 import { signValue, timingSafeEqual } from "../hmac.ts";
 import { emailField } from "../validation.ts";
+import { MAX_PASSWORD_LENGTH, PASSWORD_RULES } from "./password-rules.ts";
 
 /**
  * Shown whether or not the address belongs to an account. Telling the two apart
@@ -52,16 +53,23 @@ export const DEFAULT_RECOVERY_WINDOW_SECONDS = 3600;
 export const emailSchema = emailField().pipe(z.string().max(254));
 
 /**
- * Password rules for the new password. Deliberately stricter than "whatever
- * Supabase accepts" — this is the one moment the app gets to raise the floor.
+ * The new password must satisfy every rule in `PASSWORD_RULES` — deliberately
+ * stricter than "whatever Supabase accepts", since this is the one moment the
+ * app gets to raise the floor.
+ *
+ * `superRefine` rather than a chain of `.refine`s: a chain stops at the first
+ * failure, and the form shows the user everything still missing at once.
  */
 export const passwordSchema = z
   .string()
-  .min(12, "Use at least 12 characters.")
-  .max(256, "Password is too long.")
-  .regex(/[a-z]/, "Include a lowercase letter.")
-  .regex(/[A-Z]/, "Include an uppercase letter.")
-  .regex(/[0-9]/, "Include a number.");
+  .max(MAX_PASSWORD_LENGTH, "Password is too long.")
+  .superRefine((value, ctx) => {
+    for (const rule of PASSWORD_RULES) {
+      if (!rule.test(value)) {
+        ctx.addIssue({ code: "custom", message: rule.message });
+      }
+    }
+  });
 
 export const newPasswordSchema = z
   .object({

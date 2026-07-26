@@ -7,15 +7,22 @@ import {
   attemptLogin,
   normalizeEmail,
   SERVICE_UNAVAILABLE_MESSAGE,
-  type LoginState,
 } from "@/lib/auth/login";
+import type { LoginState } from "@/lib/auth/login";
 import {
   ACTIVITY_COOKIE_NAME,
   activityCookieOptions,
   activitySecret,
   signActivity,
 } from "@/lib/supabase/session-expiry";
+import { RECOVERY_COOKIE_NAME } from "@/lib/auth/password-reset";
 import { logSecurityEvent } from "@/lib/log-security-event";
+
+// No `export type { LoginState }` here on purpose. A "use server" module may
+// only export async functions, and Turbopack turns a type re-export into a
+// runtime one — which blows up on the client as "LoginState is not defined",
+// intermittently, because it depends on how the module was last rebuilt.
+// Consumers import the type from `@/lib/auth/login`, where it is declared.
 
 export async function login(
   _previousState: LoginState,
@@ -44,6 +51,13 @@ export async function login(
       await signActivity(Date.now(), activitySecret()),
       activityCookieOptions(),
     );
+
+    // Signing in ends any password reset that was in flight (F004). An
+    // abandoned reset leaves its marker behind for up to an hour, and the
+    // session guard confines every session carrying one to /reset-password —
+    // so without this, a user who gave up on the reset and logged in normally
+    // would be bounced straight back to the form they walked away from.
+    cookieStore.delete(RECOVERY_COOKIE_NAME);
   } catch (error) {
     // Reachable when the Supabase client cannot be built (missing environment
     // variables) or the activity cookie cannot be written. `attemptLogin`

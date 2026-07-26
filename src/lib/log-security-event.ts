@@ -12,7 +12,8 @@
 export type SecurityEvent =
   | "validation.rejected"
   | "permission.denied"
-  | "authentication.login_failed";
+  | "authentication.login_failed"
+  | "session.expired";
 
 export type SecurityEventMeta = Record<string, string | number | boolean | undefined>;
 

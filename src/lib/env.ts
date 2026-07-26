@@ -45,7 +45,7 @@ function isAbsoluteHttpUrl(value: string): string | null {
 }
 
 function isBareDomain(value: string): string | null {
-  // A leading "@" is tolerated by src/app/login/actions.ts, so accept it here too.
+  // A leading "@" is tolerated by src/lib/auth/login.ts, so accept it here too.
   const domain = value.replace(/^@/, "");
   if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(domain)) {
     return "must be a bare domain, for example 180dc.org";
@@ -116,6 +116,15 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     secret: true,
     description:
       "Supabase service-role key. Bypasses row-level security — server-side only, never prefixed with NEXT_PUBLIC_. Not yet consumed — becomes required with F223.",
+  },
+  {
+    name: "SESSION_ACTIVITY_SECRET",
+    required: false,
+    secret: true,
+    description:
+      "Key used to HMAC-sign the inactivity record that drives session expiry (F007). Server-only — never prefixed with NEXT_PUBLIC_. Optional: without it sessions still expire, but the timestamp is unsigned and a replayed session could forge a fresh one, so staging and production should set it. Any long random string works, for example `openssl rand -base64 32`. Changing it expires every open session once.",
+    validate: (value) =>
+      value.length < 32 ? "must be at least 32 characters of random data" : null,
   },
   {
     name: "SUPABASE_DB_URL",

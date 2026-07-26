@@ -200,6 +200,7 @@ NEXT_PUBLIC_SENTRY_DSN=<redacted>
 | `GMAIL_CLIENT_SECRET` | dev-secret | prod-secret | Only server-side | **SENSITIVE:** Never expose |
 | `OPENAI_API_KEY` | test-key | prod-key | Only server-side | **SENSITIVE:** Never expose |
 | `CRON_SECRET` | shared-secret | shared-secret | Only server-side | **SENSITIVE:** Auth for `/api/cron/*` routes |
+| `SESSION_ACTIVITY_SECRET` | random 32+ chars | random 32+ chars | Only server-side | **SENSITIVE:** Signs the inactivity record behind session expiry (F007). Optional — unset means sessions still expire after 30 idle minutes but the record is unsigned and forgeable, so set it everywhere hosted. `openssl rand -base64 32`. Rotating it signs every open session out once |
 | `NEXT_PUBLIC_POSTHOG_KEY` | dev-key | prod-key | Always | Public analytics key |
 | `NEXT_PUBLIC_SENTRY_DSN` | dev-dsn | prod-dsn | Always | Public error reporting endpoint — where captured errors are sent (F226). Unset ⇒ errors log to the platform console instead |
 | `SENTRY_ENVIRONMENT` | `staging` | `production` | Only server-side | Environment tag on captured errors (F226). Optional — falls back to `VERCEL_ENV` |

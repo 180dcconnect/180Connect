@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useActionState, useState } from "react";
 import { PasswordInput } from "@/components/password-input";
 import { PASSWORD_RULES } from "@/lib/auth/password-rules";
-import { setNewPassword, type ResetPasswordState } from "./actions";
+import type { ResetPasswordState } from "@/lib/auth/password-reset";
+import { setNewPassword } from "./actions";
 
 const initialState: ResetPasswordState = { status: "idle" };
 

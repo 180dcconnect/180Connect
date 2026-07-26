@@ -9,15 +9,10 @@ import {
   readRecoveryMarker,
   RESET_LINK_ERROR,
 } from "@/lib/auth/password-reset";
+import type { ResetPasswordState } from "@/lib/auth/password-reset";
 import { signOutAndReport } from "@/lib/auth/sign-out";
 import { createClient } from "@/lib/supabase/server";
 import { safeValidate } from "@/lib/validation";
-
-export type ResetPasswordState = {
-  status: "idle" | "error";
-  message?: string;
-  fieldErrors?: { password?: string[]; confirmPassword?: string[] };
-};
 
 export async function setNewPassword(
   _previousState: ResetPasswordState,

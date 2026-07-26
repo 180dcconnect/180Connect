@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useActionState, useCallback, useEffect, useState } from "react";
-import { login, type LoginState } from "./actions";
+import type { LoginState } from "@/lib/auth/login";
+import { login } from "./actions";
 import {
   CAPTCHA_HINT_ID,
   TurnstileChallenge,

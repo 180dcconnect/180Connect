@@ -6,7 +6,8 @@ import {
   CAPTCHA_HINT_ID,
   TurnstileChallenge,
 } from "@/components/turnstile-challenge";
-import { requestPasswordReset, type ForgotPasswordState } from "./actions";
+import type { ForgotPasswordState } from "@/lib/auth/password-reset";
+import { requestPasswordReset } from "./actions";
 
 const initialState: ForgotPasswordState = { status: "idle" };
 

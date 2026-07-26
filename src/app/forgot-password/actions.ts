@@ -2,16 +2,10 @@
 
 import { headers } from "next/headers";
 import { emailSchema, RESET_REQUEST_MESSAGE } from "@/lib/auth/password-reset";
+import type { ForgotPasswordState } from "@/lib/auth/password-reset";
 import { logAuthApiHealth, logAuthError } from "@/lib/auth/observability";
 import { createClient } from "@/lib/supabase/server";
 import { safeValidate } from "@/lib/validation";
-
-export type ForgotPasswordState = {
-  status: "idle" | "success" | "error";
-  message?: string;
-  fieldErrors?: { email?: string[] };
-  email?: string;
-};
 
 /**
  * Where the emailed link should land.

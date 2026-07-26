@@ -7,8 +7,8 @@ import {
   attemptLogin,
   normalizeEmail,
   SERVICE_UNAVAILABLE_MESSAGE,
-  type LoginState,
 } from "@/lib/auth/login";
+import type { LoginState } from "@/lib/auth/login";
 import {
   ACTIVITY_COOKIE_NAME,
   activityCookieOptions,
@@ -18,7 +18,11 @@ import {
 import { RECOVERY_COOKIE_NAME } from "@/lib/auth/password-reset";
 import { logSecurityEvent } from "@/lib/log-security-event";
 
-export type { LoginState };
+// No `export type { LoginState }` here on purpose. A "use server" module may
+// only export async functions, and Turbopack turns a type re-export into a
+// runtime one — which blows up on the client as "LoginState is not defined",
+// intermittently, because it depends on how the module was last rebuilt.
+// Consumers import the type from `@/lib/auth/login`, where it is declared.
 
 export async function login(
   _previousState: LoginState,

@@ -44,6 +44,26 @@ export const RESET_REQUEST_MESSAGE =
 export const RESET_LINK_ERROR =
   "This password reset link has expired or has already been used. Request a new link to continue.";
 
+/**
+ * Form state for the two reset screens.
+ *
+ * Declared here rather than in the Server Actions that produce them: a
+ * "use server" module may only export async functions, and a type exported
+ * from one can be emitted as a runtime export that fails on the client.
+ */
+export type ForgotPasswordState = {
+  status: "idle" | "success" | "error";
+  message?: string;
+  fieldErrors?: { email?: string[] };
+  email?: string;
+};
+
+export type ResetPasswordState = {
+  status: "idle" | "error";
+  message?: string;
+  fieldErrors?: { password?: string[]; confirmPassword?: string[] };
+};
+
 /** Cookie marking a session as being mid-recovery. */
 export const RECOVERY_COOKIE_NAME = "180connect-password-recovery";
 

@@ -99,7 +99,7 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     required: false,
     secret: false,
     description:
-      "Email domain users must sign in from. Server-only — never prefix with NEXT_PUBLIC_. Defaults to 180dc.org in `src/app/login/actions.ts` when unset.",
+      "Email domain users must sign in from. Server-only — never prefix with NEXT_PUBLIC_. Defaults to 180dc.org in `src/lib/auth/login.ts` when unset.",
     validate: isBareDomain,
   },
   {

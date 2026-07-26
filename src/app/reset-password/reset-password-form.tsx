@@ -8,7 +8,6 @@ const initialState: ResetPasswordState = { status: "idle" };
 
 export function ResetPasswordForm({ linkError }: { linkError?: string }) {
   const [state, action, pending] = useActionState(setNewPassword, initialState);
-  const message = linkError || state.message;
 
   if (linkError) {
     return (
@@ -23,7 +22,7 @@ export function ResetPasswordForm({ linkError }: { linkError?: string }) {
 
   return (
     <form action={action} className="mt-8 flex flex-col gap-4" noValidate>
-      {message && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">{message}</div>}
+      {state.message && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">{state.message}</div>}
       <div className="flex flex-col gap-1.5">
         <label htmlFor="password" className="text-xs font-bold">New password</label>
         <input id="password" name="password" type="password" autoComplete="new-password" aria-invalid={Boolean(state.fieldErrors?.password)} className="h-10 rounded-lg border border-black/10 bg-[#fafafa] px-3 text-sm outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/20 aria-invalid:border-red-500" required />

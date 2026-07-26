@@ -24,6 +24,10 @@
  * The logic below is pure and framework-free; the proxy owns the cookie I/O.
  */
 
+// Relative, extension-qualified import: this module is unit-tested by
+// `node --test`, which resolves neither the `@/` alias nor bare .ts specifiers.
+import { signValue, timingSafeEqual } from "../hmac.ts";
+
 /**
  * How long a session may sit idle before it is ended.
  *
@@ -68,19 +72,6 @@ export function activitySecret(
   return source.SESSION_ACTIVITY_SECRET?.trim() || null;
 }
 
-async function sign(message: string, secret: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(message));
-  return Buffer.from(signature).toString("base64url");
-}
-
 /**
  * Builds the cookie value recording activity at `timestamp`.
  *
@@ -93,7 +84,7 @@ export async function signActivity(
 ): Promise<string> {
   const value = String(timestamp);
   if (!secret) return value;
-  return `${value}.${await sign(value, secret)}`;
+  return `${value}.${await signValue(value, secret)}`;
 }
 
 /**
@@ -123,23 +114,10 @@ export async function readActivity(
   }
 
   if (!signaturePart) return null;
-  const expected = await sign(timestampPart, secret);
+  const expected = await signValue(timestampPart, secret);
   if (!timingSafeEqual(signaturePart, expected)) return null;
 
   return timestamp;
-}
-
-/**
- * Compares two strings without leaking, through timing, how much of a forged
- * signature was correct.
- */
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let mismatch = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return mismatch === 0;
 }
 
 /** Cookie attributes shared by the proxy and the login action. */

@@ -133,7 +133,7 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     required: false,
     secret: true,
     description:
-      "Key used to HMAC-sign the inactivity record that drives session expiry (F007). Server-only — never prefixed with NEXT_PUBLIC_. Optional: without it sessions still expire, but the timestamp is unsigned and a replayed session could forge a fresh one, so staging and production should set it. Any long random string works, for example `openssl rand -base64 32`. Changing it expires every open session once.",
+      "Key used to HMAC-sign the inactivity record that drives session expiry (F007) and the password-recovery marker (F004). Server-only — never prefixed with NEXT_PUBLIC_. Optional locally, but staging and production must set it: without it the inactivity timestamp is unsigned and a replayed session could forge a fresh one, and password reset refuses to run at all rather than trust a marker any session holder could forge. Any long random string works, for example `openssl rand -base64 32`. Changing it expires every open session once.",
     validate: (value) =>
       value.length < 32 ? "must be at least 32 characters of random data" : null,
   },

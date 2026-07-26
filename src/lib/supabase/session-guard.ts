@@ -15,6 +15,11 @@
 // Relative, extension-qualified imports: this module is unit-tested by
 // `node --test`, which resolves neither the `@/` alias nor bare .ts specifiers.
 // Same convention as `src/lib/auth/sign-out.ts`.
+import {
+  isRecoveryAllowedPath,
+  readRecoveryMarker,
+  RECOVERY_COOKIE_NAME,
+} from "../auth/password-reset.ts";
 import { signOutAndReport, type SignOutClient } from "../auth/sign-out.ts";
 import { SESSION_EXPIRED } from "../auth/signed-out-notice.ts";
 import { logSecurityEvent } from "../log-security-event.ts";
@@ -47,7 +52,12 @@ export type GuardOutcome =
   | {
       action: "pass";
       /** Why nothing was done — surfaced for tests and future logging. */
-      reason: "signed-out" | "auth-route" | "background";
+      reason: "signed-out" | "auth-route" | "background" | "recovery";
+    }
+  | {
+      action: "confine";
+      /** Relative URL a mid-recovery session is held at. */
+      redirectTo: string;
     }
   | {
       action: "refresh";
@@ -113,6 +123,35 @@ export async function decideSessionAction(
 
   // Nothing to expire for a logged-out visitor, and /login must stay reachable.
   if (!user) return { action: "pass", reason: "signed-out" };
+
+  // A session that arrived through a password-reset link (F004) is handled
+  // before anything else, because it is not an ordinary signed-in session and
+  // both of the branches below get it wrong.
+  //
+  // It must not reach the app: verifying a recovery link necessarily mints a
+  // real session — the only way `updateUser` can set a password — so without
+  // this, clicking the emailed link and then navigating to /dashboard is a way
+  // in with no password and no CAPTCHA. It confines rather than expires.
+  //
+  // Nor can it be left to the inactivity rules: a recovery session never passed
+  // through the login action, so it has no activity record, and expiry fails
+  // closed. It would be signed out on its very first request and the reset
+  // could never complete. Its lifetime is bounded by the marker cookie and by
+  // the Supabase link expiry instead.
+  const recoveryUserId = await readRecoveryMarker(
+    request.cookies.get(RECOVERY_COOKIE_NAME)?.value,
+  );
+  if (recoveryUserId !== null && recoveryUserId === user.id) {
+    if (isRecoveryAllowedPath(request.pathname)) {
+      return { action: "pass", reason: "recovery" };
+    }
+    logSecurityEvent("session.recovery_confined", {
+      userId: user.id,
+      pathname: request.pathname,
+    });
+    return { action: "confine", redirectTo: "/reset-password" };
+  }
+
   if (isAuthRoute(request)) return { action: "pass", reason: "auth-route" };
 
   const secret = activitySecret();

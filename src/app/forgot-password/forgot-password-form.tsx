@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useCallback, useEffect, useState } from "react";
 import {
-  requestPasswordReset,
-  type ForgotPasswordState,
-} from "./actions";
+  CAPTCHA_HINT_ID,
+  TurnstileChallenge,
+} from "@/components/turnstile-challenge";
+import { requestPasswordReset, type ForgotPasswordState } from "./actions";
 
 const initialState: ForgotPasswordState = { status: "idle" };
 
@@ -15,6 +16,29 @@ export function ForgotPasswordForm() {
     initialState,
   );
   const emailError = state.fieldErrors?.email?.[0];
+
+  // This form makes the server send mail, so it is CAPTCHA-gated exactly as
+  // login is (F003). The server checks the token again regardless.
+  const [solved, setSolved] = useState(false);
+
+  // A Turnstile token is single-use, so a second attempt after a failed one
+  // would resubmit a spent token and be rejected no matter what was typed.
+  useEffect(() => {
+    if (state.status === "idle") return;
+    window.turnstile?.reset();
+  }, [state]);
+
+  const onSubmit = useCallback(
+    (event: React.FormEvent<HTMLFormElement>) => {
+      // The button is disabled, but Enter inside a text field still submits.
+      if (!solved) {
+        event.preventDefault();
+        return;
+      }
+      setSolved(false);
+    },
+    [solved],
+  );
 
   if (state.status === "success") {
     return (
@@ -33,7 +57,7 @@ export function ForgotPasswordForm() {
   }
 
   return (
-    <form action={action} className="mt-8 flex flex-col gap-4" noValidate>
+    <form action={action} onSubmit={onSubmit} className="mt-8 flex flex-col gap-4" noValidate>
       {state.message && (
         <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-xs text-red-700">
           {state.message}
@@ -55,10 +79,19 @@ export function ForgotPasswordForm() {
         />
         {emailError && <p id="email-error" className="text-xs text-red-700">{emailError}</p>}
       </div>
+
+      <TurnstileChallenge
+        solved={solved}
+        onSolvedChange={setSolved}
+        action="send reset instructions"
+        gerund="sending reset instructions"
+      />
+
       <button
         type="submit"
-        disabled={pending}
-        className="mt-2 h-10 rounded-full bg-brand text-sm font-bold text-white hover:bg-brand-hover disabled:cursor-wait disabled:opacity-60"
+        disabled={pending || !solved}
+        aria-describedby={solved ? undefined : CAPTCHA_HINT_ID}
+        className="mt-2 h-10 rounded-full bg-brand text-sm font-bold text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
       >
         {pending ? "Sending..." : "Send reset instructions"}
       </button>
@@ -68,4 +101,3 @@ export function ForgotPasswordForm() {
     </form>
   );
 }
-

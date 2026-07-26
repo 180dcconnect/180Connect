@@ -17,8 +17,6 @@ import {
 } from "@/lib/supabase/session-expiry";
 import { logSecurityEvent } from "@/lib/log-security-event";
 
-export type { LoginState };
-
 export async function login(
   _previousState: LoginState,
   formData: FormData,

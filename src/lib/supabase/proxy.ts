@@ -1,6 +1,15 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { carryCookiesToRedirect, decideSessionAction } from "./session-guard";
+
+/**
+ * Refreshes the Supabase session on every request, and enforces the F007
+ * inactivity timeout.
+ *
+ * The decisions live in `./session-guard` — this file only carries them out,
+ * because `next/server` cannot be imported by the test runner.
+ */
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -25,7 +34,33 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  // getUser verifies the token with Supabase and refreshes it when necessary.
-  await supabase.auth.getUser();
+  // The guard calls getUser — which verifies the token with Supabase and
+  // refreshes it when necessary — then decides what the session has earned.
+  const outcome = await decideSessionAction(
+    {
+      pathname: request.nextUrl.pathname,
+      headers: request.headers,
+      cookies: { get: (name) => request.cookies.get(name) },
+    },
+    supabase,
+  );
+
+  if (outcome.action === "refresh") {
+    const { name, value, options } = outcome.cookie;
+    response.cookies.set(name, value, options);
+    return response;
+  }
+
+  if (outcome.action === "expire") {
+    const expiredResponse = NextResponse.redirect(
+      new URL(outcome.redirectTo, request.url),
+    );
+    // `response` holds the cookie deletions Supabase made while signing out.
+    // Carrying them across is what actually removes the session from the
+    // browser — see `carryCookiesToRedirect`.
+    carryCookiesToRedirect(response, expiredResponse);
+    return expiredResponse;
+  }
+
   return response;
 }

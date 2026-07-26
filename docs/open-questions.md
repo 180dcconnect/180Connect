@@ -76,6 +76,16 @@ The existing Supabase project is called **"Development"** (`cgbfhhdeapasniudyyds
 
 **Owner:** Project Leader. **Decide by:** before the first migration is applied.
 
+### Q-05 — CAPTCHA provider (RESOLVED)
+
+PRD §22 leaves the CAPTCHA provider open. Supabase Auth's built-in CAPTCHA support only integrates with **hCaptcha** or **Cloudflare Turnstile** — Supabase does not run its own CAPTCHA, it verifies whichever provider's token is passed to it.
+
+**Decision: Cloudflare Turnstile.** Free with no limits, usually invisible to the user, no cookies (relevant given the PRD's data-minimisation requirements in §15), and Cloudflare provides fixed test keys so local development and CI are never blocked.
+
+**Important:** enabling CAPTCHA in Supabase applies to **every** auth action (login, password reset, invites, sign-up), not just login. The Turnstile widget must be added to each form that calls a Supabase auth method, not only `src/app/login/login-form.tsx`.
+
+**Owner:** Component Owner F003. **Status:** Decided and implemented for login (F003); password reset (F004) and invites (F008) still need the same widget added.
+
 ---
 
 ## Known code debt

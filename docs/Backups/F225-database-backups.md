@@ -34,55 +34,100 @@ Pulled from `180_Connect_Complete_PRD.md` so every candidate below is scored aga
 
 Since Supabase gives us no native backup mechanism on Free, back up manually using **`pg_dump`/`pg_dumpall`** — the plain PostgreSQL tools, not the Supabase CLI — on a schedule, to storage outside Supabase itself.
 
-**Why `pg_dump`/`pg_dumpall` and not `supabase db dump`:** the Supabase CLI's `db dump` shells out to Docker even when dumping a remote database, which makes it a poor fit for a lightweight scheduled job and an extra thing to install on every machine that needs to run a restore test. `pg_dump`/`pg_dumpall` are the underlying tools the CLI itself wraps, need no Docker, and are already present on GitHub's `ubuntu-latest` runners — so the automated workflow (section 3) doesn't need to install anything beyond what the runner ships with. Found this out by trying to run the CLI version locally and hitting a Docker-not-installed error (23 Jul 2026) — recorded here so nobody re-discovers it the hard way.
+**Why `pg_dump`/`pg_dumpall` and not `supabase db dump`:** the Supabase CLI's `db dump` shells out to Docker even when dumping a remote database, which makes it a poor fit for a lightweight scheduled job and an extra thing to install on every machine that needs to run a restore test. `pg_dump`/`pg_dumpall` are the underlying tools the CLI itself wraps and need no Docker. Found this out by trying to run the CLI version locally and hitting a Docker-not-installed error (23 Jul 2026) — recorded here so nobody re-discovers it the hard way.
+
+### 0. Two connection facts that decide everything below
+
+Both were found by checking the live production project, and both silently break a backup job that ignores them.
+
+**The client must be PostgreSQL 17, not whatever is already installed.** `180connect-production` runs PostgreSQL 17.6. `pg_dump` refuses to dump a server newer than itself — it exits with `server version: 17.6; pg_dump version: 16.x ... aborting because of version mismatch`. GitHub's `ubuntu-latest` runner ships the PostgreSQL **16** client, so the workflow installs `postgresql-client-17` from the PostgreSQL APT repository first. Same applies locally: a Postgres 16 install on your own machine cannot dump production either.
+
+**Use the session-mode pooler, not the direct connection.** `db.<ref>.supabase.co` has no A record — it resolves to IPv6 only, unless the paid IPv4 add-on is enabled:
+
+```
+$ dig +short A    db.tugfhwiqvwrpvawpjwmd.supabase.co   # (nothing)
+$ dig +short AAAA db.tugfhwiqvwrpvawpjwmd.supabase.co
+2a05:d018:1b65:3000:...
+```
+
+GitHub-hosted runners have no IPv6, so a direct connection from CI cannot work at all. The connection therefore goes through Supavisor, the pooler, in **session mode** on port **5432** — transaction mode (port 6543) does not support `pg_dump`. That changes the shape of the credentials:
+
+| | Direct (unusable from CI) | Session pooler (what we use) |
+|---|---|---|
+| Host | `db.<ref>.supabase.co` | `aws-<n>-<region>.pooler.supabase.com` |
+| Port | 5432 | 5432 |
+| Username | `postgres` | `postgres.<ref>` |
+
+The exact host is copied from the Supabase dashboard (**Connect → Session pooler**) and stored as the repository variable `SUPABASE_PROD_POOLER_HOST` — see [`backup-setup.md`](backup-setup.md).
 
 ### 1. One-off setup
 
-Local machine only needs the PostgreSQL client tools (`pg_dump`, `pg_dumpall`, `psql`) — not a running Postgres server. On Windows, via Chocolatey (already installed on this machine):
+Local machine only needs the PostgreSQL **17** client tools (`pg_dump`, `pg_dumpall`, `psql`) — not a running Postgres server, but the major version does have to match production (see section 0). On Windows, via Chocolatey (already installed on this machine):
 
 ```bash
-choco install postgresql --params '/Password:localtestonly' -y
+choco install postgresql17 --params '/Password:localtestonly' -y
 ```
 
 This installs a full local PostgreSQL server as a side effect (Chocolatey doesn't offer a client-only package on Windows) — that's fine, we don't use the server part, only the `pg_dump`/`pg_dumpall`/`psql` command-line tools it brings. The `--params '/Password:...'` sets a password for the *local* server instance Chocolatey starts; it has nothing to do with the production database password.
+
+Check what you actually got before trusting it — Chocolatey and Homebrew both happily leave an older `pg_dump` first on `PATH`:
+
+```bash
+pg_dump --version   # must report 17.x
+```
 
 ### 2. Taking a manual backup
 
 **One dump command is not enough.** A database splits into three separate concerns, and a plain schema dump only captures one of them. Roles (database users/permissions) and data (the actual rows) each need their own dump, or a restore looks like it worked but comes back missing users or every row in every table.
 
 ```bash
-DATE=$(date +%Y%m%d)
+DATE=$(date -u +%Y%m%d)
+
+# Connection details come from the environment rather than a URL — see the
+# note on PGPASSWORD below.
+export PGHOST="aws-<n>-eu-west-1.pooler.supabase.com"
+export PGPORT=5432
+export PGDATABASE=postgres
+export PGUSER="postgres.tugfhwiqvwrpvawpjwmd"
+read -rs PGPASSWORD && export PGPASSWORD   # paste the password, it won't echo
 
 # 1. Roles — database users and their permissions. Roles are cluster-wide,
 #    not per-database, which is why this uses pg_dumpall (cluster level),
 #    not pg_dump (single-database level). Must be restored FIRST, since
 #    schema objects (e.g. RLS policies) can reference roles that don't
 #    exist yet otherwise.
-pg_dumpall --roles-only --dbname="<connection-string>" -f "roles_$DATE.sql"
+pg_dumpall --roles-only -f "roles_$DATE.sql"
 
 # 2. Schema — table structures, RLS policies, functions. No row data.
-pg_dump --schema-only --dbname="<connection-string>" -f "schema_$DATE.sql"
+pg_dump --schema-only --no-owner --no-privileges \
+  --schema=public -f "schema_$DATE.sql"
 
 # 3. Data — every row, no table structure. Restored last, once 1 and 2 exist.
-pg_dump --data-only --dbname="<connection-string>" -f "data_$DATE.sql"
+pg_dump --data-only --no-owner --no-privileges \
+  --schema=public --schema=auth -f "data_$DATE.sql"
 ```
 
-- `--dbname` here takes a full connection string (`postgresql://user:password@host:port/database`), not just a database name — Postgres tools accept either.
-- `$(date +%Y%m%d)` is shell command substitution: it runs `date`, formats it as YYYYMMDD, and drops the result into the filename, e.g. `schema_20260723.sql`. Note the `%` — `date +20260723` (no `%`) just echoes that literal text back instead of computing anything, a mistake worth knowing about since it silently "works" today and silently breaks tomorrow.
+- **`PGPASSWORD` instead of a connection URL.** `postgresql://user:PASSWORD@host/db` breaks if the password contains `@ / # ? :` — the URL parser splits on them and the resulting error names the wrong host, so it reads like a networking problem rather than a quoting bug. Passing credentials through the standard `PG*` environment variables sidesteps that entirely. (**Never** commit the password; it belongs in `.env.local` or a GitHub Actions secret, same rule as any other secret.)
+- **`--no-owner --no-privileges`.** The `postgres` role on Supabase is not a superuser, so it cannot restore `ALTER ... OWNER TO supabase_admin` statements. Dumping them guarantees a restore that errors on almost every object.
+- **`--schema=public` on the schema dump.** A bare `pg_dump --schema-only` also dumps Supabase's own managed schemas (`auth`, `storage`, `realtime`, `extensions`, `vault`, `graphql`). Those already exist in any project you restore into, so the restore collides with itself. Everything this project owns lives in `public` — verified against `supabase/migrations/`, which creates no other schema.
+- **`--schema=auth` on the *data* dump only.** Rows in `auth.users` are the user accounts. The schema is Supabase's to manage, but losing every login is not an acceptable restore, so the rows come along.
+- `$(date -u +%Y%m%d)` is shell command substitution: it runs `date`, formats it as YYYYMMDD, and drops the result into the filename, e.g. `schema_20260723.sql`. `-u` for UTC, so a dump taken at 00:30 BST doesn't land under yesterday's date. Note the `%` — `date +20260723` (no `%`) just echoes that literal text back instead of computing anything, a mistake worth knowing about since it silently "works" today and silently breaks tomorrow.
 - All three are plain-text SQL files. Restoring means replaying them back through `psql`, in the order **roles → schema → data** — see [section 4](#4-restore-process).
+
+**What these files contain.** `data_*.sql` includes every row of `auth.users` — email addresses and password hashes — alongside the organisation and contact data in `public`. `roles_*.sql` includes role password hashes. These dumps are the most sensitive artefacts the project produces, which is what makes the Blob store's private access (R9) load-bearing rather than a nicety: anyone who can read the store can read the whole database.
 
 ### 3. Automating it
 
 A manual step that depends on someone remembering to run it is not a backup strategy. Implemented as `.github/workflows/backup-production.yml`, following the same pattern as the existing `migrations.yml` (F232) — a GitHub Action that:
 
 1. Triggers on a cron schedule (daily at 03:00 UTC) and on `workflow_dispatch` (a manual "Run workflow" button in GitHub's Actions tab, used to test it on demand instead of waiting for 3am).
-2. Checks out the repo. No CLI install step needed — `pg_dump`/`pg_dumpall` are already present on GitHub's `ubuntu-latest` runners.
-3. **Connects and fails loudly if it can't** — the free-plan production project auto-pauses after inactivity, so the first step is a connectivity check that fails the whole run (not a silent skip) if the database doesn't respond. A failed GitHub Actions run emails everyone watching the repo by default, which is the "fail visibly" requirement satisfied without any new infrastructure.
-4. Runs all three dumps from section 2 (roles, schema, data) using the project's DB password, stored as a **GitHub Actions secret** (`SUPABASE_DB_PASSWORD`) — never in the workflow file itself.
-5. Uploads all three files to Vercel Blob using a `BLOB_READ_WRITE_TOKEN` secret, under a path prefixed with the date.
-6. Deletes blobs older than 30 days (Vercel Blob has no automatic lifecycle/expiry, unlike R2 or S3, so this is a script step rather than a platform setting).
+2. Checks out the repo, then installs `postgresql-client-17` (the runner's own client is version 16, which cannot dump a 17 server — section 0) and a pinned `vercel@57`. The CLI is pinned deliberately: an unpinned nightly job picks up whatever was published that day, including breaking changes to `vercel blob` flags.
+3. Runs all three dumps from section 2 (roles, schema, data), connecting through the session pooler with `PGUSER`/`PGPASSWORD`. The password is a **GitHub Actions secret** (`SUPABASE_PROD_DB_PASSWORD`) — never in the workflow file itself.
+4. **Fails loudly rather than silently producing nothing.** The free-plan production project auto-pauses after inactivity; if that happens the dump step fails, and a failed step fails the job, which GitHub emails to everyone watching the repo by default. That email is the "fail visibly" requirement, satisfied without new infrastructure. The dump commands are deliberately *not* wrapped in `|| true`. The step also rejects any dump file under 1KB, because a truncated or empty dump that uploads cleanly is worse than a failure — it looks like a backup.
+5. Uploads all three files to Vercel Blob using a `BLOB_READ_WRITE_TOKEN` secret, under a path prefixed with the date, with `--access private` and `--allow-overwrite` (so a manual re-run on the same day replaces the day's files instead of erroring).
+6. Deletes blobs older than 30 days (Vercel Blob has no automatic lifecycle/expiry, unlike R2 or S3, so this is a script step rather than a platform setting). The prune sweeps a *window* — every date from 31 to 180 days ago — not just the single day that has fallen out of retention. If it only pruned one day, any run the job missed would leave that day's dumps behind permanently, and personal data outliving its documented retention period is precisely what R8 exists to prevent. The 180-day window is the honest limit: if the workflow is dead longer than that, older dumps need pruning by hand.
 
-See [`docs/backup-setup.md`](backup-setup.md) for the exact secrets to create and where to get each value from.
+See [`backup-setup.md`](backup-setup.md) for the exact secrets and variables to create and where to get each value from.
 
 #### Storage destination options considered
 
@@ -190,7 +235,7 @@ Google Cloud Storage, Wasabi, and iDrive e2 were also looked at. None meaningful
 
 # Additional Requirements Pertaining to Solution F
 
-1. **R4 must be genuinely tested, not assumed.** A restore has to actually be run and verified — see [section 4](#4-restore-process). Flagged specifically because a single `supabase db dump` does **not** capture everything needed to recreate the database — see the note in section 2.
+1. **R4 must be genuinely tested, not assumed.** A restore has to actually be run and verified — see [section 4](#4-restore-process). Flagged specifically because a single dump command does **not** capture everything needed to recreate the database — see the note in section 2.
 2. **Retention (R8) is a script, not a platform feature.** Vercel Blob has no built-in auto-expiry (unlike R2/S3), so the workflow deletes old dumps itself — see section 3.
 3. **Fail visibly, per the project's own SOP.** The free-plan production project auto-pauses after inactivity. If the nightly job can't connect because of that, it must not just silently do nothing — it has to fail the GitHub Actions run loudly, in line with "errors propagate to the UI and `ERROR_LOG`, nothing fails silently."
 
@@ -203,11 +248,25 @@ Order matters: **roles, then schema, then data.** Restoring data before the sche
 1. Provision a target: a fresh Supabase project, or an empty local Postgres instance (`supabase start`) for a dry run.
 2. Restore in order:
    ```bash
-   psql "<target-db-url>" -f roles_20260723.sql
-   psql "<target-db-url>" -f schema_20260723.sql
-   psql "<target-db-url>" -f data_20260723.sql
+   psql "<target-db-url>" -v ON_ERROR_STOP=1 -f roles_20260723.sql
+   psql "<target-db-url>" -v ON_ERROR_STOP=1 -f schema_20260723.sql
+   psql "<target-db-url>" -v ON_ERROR_STOP=1 -f data_20260723.sql
    ```
-3. Verify row counts / spot-check key tables against what's expected.
+
+   **`-v ON_ERROR_STOP=1` is not optional.** By default `psql` prints an error, carries on to the next statement, and exits 0. A restore that dropped half the tables therefore *looks* like it succeeded. Since the entire point of R4 is proving a restore works, a silent partial restore is the exact failure this test exists to catch.
+
+   Two expected-and-fine exceptions when restoring into a **fresh Supabase project** (rather than empty Postgres): the roles file will fail on roles Supabase already creates (`postgres`, `authenticator`, `anon`, …), and `data_*.sql` will conflict on the `auth.users` rows Supabase seeds. Read the error, confirm it is that and not something else, then re-run the affected file without `ON_ERROR_STOP` — never skip straight to running everything without it.
+3. Verify row counts / spot-check key tables against what's expected. Compare against the source:
+   ```sql
+   select relname, n_live_tup from pg_stat_user_tables
+   where schemaname = 'public' order by relname;
+   ```
+   Run it on both databases and diff. `n_live_tup` is an estimate, so follow up with an exact `count(*)` on the two or three tables that matter most (`ORGANISATIONS`, `CONTACTS`, `USERS`).
 4. Update any environment variables (`NEXT_PUBLIC_SUPABASE_URL`, etc.) if the restore target is a new project rather than the original.
+5. Record the result in the restore test log below — date, who ran it, target, row counts checked, anything that went wrong. An unrecorded restore test does not satisfy R4.
+
+### Restore test results
+
+_Not yet run._ This section is R4 and the story is not done until it has an entry.
 
 **Restore test log (R4):** see [Restore test results](#restore-test-results) at the bottom of this doc.

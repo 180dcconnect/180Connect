@@ -1,14 +1,12 @@
 # Nightly backup of the production database to Vercel Blob storage.
-# Story: F225 (#220) — Database Backups. See docs/F225-database-backups.md.
+# Story: F225 (#220) — Database Backups. See docs/Backups/F225-database-backups.md.
 #
-# Three separate dumps (roles, schema, data) because a single dump command
-# does not capture all three — see docs/F225-database-backups.md section 2.
+# Three separate dumps (roles, schema, data) because a single dump command does
+# not capture all three — see docs/Backups/F225-database-backups.md section 2.
 # Restoring them back is roles -> schema -> data, in that order.
 #
-# Uses pg_dump/pg_dumpall directly rather than `supabase db dump`: the
-# Supabase CLI's dump command requires Docker even for a remote database,
-# which ubuntu-latest runners don't need pg_dump/pg_dumpall to already have
-# (they ship with PostgreSQL client tools preinstalled).
+# Uses pg_dump/pg_dumpall directly rather than `supabase db dump`, because the
+# Supabase CLI's dump command shells out to Docker even for a remote database.
 name: Backup production database
 
 on:
@@ -26,9 +24,22 @@ permissions:
   contents: read
 
 env:
-  # Not a secret: a project ref is public in the project URL. Same pattern as
-  # STAGING_REF in migrations.yml.
+  # Neither of these is a secret: the project ref is public in the project URL,
+  # and the pooler host is the shared Supavisor endpoint for the region. Same
+  # pattern as STAGING_REF in migrations.yml.
   PROD_REF: ${{ vars.SUPABASE_PROD_REF }}
+  # The direct connection (db.<ref>.supabase.co) is IPv6-only unless the paid
+  # IPv4 add-on is enabled, and GitHub-hosted runners have no IPv6 — so this
+  # must be the *session mode* pooler host (port 5432, not 6543; transaction
+  # mode does not support pg_dump).
+  PGHOST: ${{ vars.SUPABASE_PROD_POOLER_HOST }}
+  PGPORT: '5432'
+  PGDATABASE: postgres
+  # Retention: delete dumps older than 30 days (R8).
+  RETENTION_DAYS: '30'
+  # How far back the prune step sweeps. Anything older than this is only
+  # reachable by hand — see the prune step's comment.
+  PRUNE_WINDOW_DAYS: '180'
 
 jobs:
   backup:
@@ -37,56 +48,118 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Vercel CLI
-        run: npm install -g vercel
+      # ubuntu-latest ships the PostgreSQL 16 client, and production runs
+      # PostgreSQL 17. pg_dump refuses to dump a server newer than itself
+      # ("aborting because of server version mismatch"), so install the
+      # matching major version from the PostgreSQL APT repository.
+      - name: Install PostgreSQL 17 client
+        run: |
+          set -euo pipefail
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /usr/share/keyrings/pgdg.gpg
+          echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          pg_dump --version
 
-      # If the production project has auto-paused from inactivity (free
-      # plan), this is the step that fails. A failed step fails the job,
-      # which GitHub emails to everyone watching the repo by default — that
-      # email IS the "fail visibly" requirement. Do not wrap this in `|| true`
-      # or similar; a swallowed failure here is a backup that silently never
-      # happened.
+      # Pinned: an unpinned `npm install -g vercel` means every nightly run
+      # picks up whatever was published that day, including breaking flag
+      # changes to `vercel blob`.
+      - name: Install Vercel CLI
+        run: npm install -g vercel@57
+
+      # If the production project has auto-paused from inactivity (free plan),
+      # this is the step that fails. A failed step fails the job, which GitHub
+      # emails to everyone watching the repo by default — that email IS the
+      # "fail visibly" requirement. Do not wrap this in `|| true` or similar;
+      # a swallowed failure here is a backup that silently never happened.
+      #
+      # --no-owner/--no-privileges: the `postgres` role on Supabase is not a
+      # superuser, so a restore cannot reassign ownership to supabase_admin.
+      # Dumping those statements guarantees a noisy, half-failed restore.
+      #
+      # --schema=public: everything this project owns lives in public. Dumping
+      # Supabase's managed schemas (auth, storage, realtime, extensions, vault,
+      # graphql) would collide with the copies that already exist in whatever
+      # project we restore into. Auth *rows* are still captured below, because
+      # losing every user account is not an acceptable restore.
       - name: Dump roles, schema, and data
         id: dump
         run: |
-          set -e
-          DATE=$(date +%Y%m%d)
+          set -euo pipefail
+          DATE=$(date -u +%Y%m%d)
           echo "date=$DATE" >> "$GITHUB_OUTPUT"
           mkdir -p dumps
-          DB_URL="postgresql://postgres:${SUPABASE_PROD_DB_PASSWORD}@db.${PROD_REF}.supabase.co:5432/postgres"
 
-          pg_dumpall --roles-only --dbname="$DB_URL" -f "dumps/roles_$DATE.sql"
-          pg_dump --schema-only --dbname="$DB_URL" -f "dumps/schema_$DATE.sql"
-          pg_dump --data-only --dbname="$DB_URL" -f "dumps/data_$DATE.sql"
+          pg_dumpall --roles-only -f "dumps/roles_$DATE.sql"
+
+          pg_dump --schema-only --no-owner --no-privileges \
+            --schema=public -f "dumps/schema_$DATE.sql"
+
+          pg_dump --data-only --no-owner --no-privileges \
+            --schema=public --schema=auth -f "dumps/data_$DATE.sql"
+
+          # A dump that "succeeded" but produced an empty file is worse than a
+          # failure, because it looks like a backup. pg_dump writes a header
+          # even for an empty database, so anything under 1KB is broken.
+          for f in dumps/*.sql; do
+            size=$(wc -c < "$f")
+            echo "$f: $size bytes"
+            if [ "$size" -lt 1024 ]; then
+              echo "::error::$f is only $size bytes — refusing to upload a truncated backup"
+              exit 1
+            fi
+          done
         env:
-          SUPABASE_PROD_DB_PASSWORD: ${{ secrets.SUPABASE_PROD_DB_PASSWORD }}
+          # Passed out of band rather than interpolated into a connection URL:
+          # a password containing @ / # ? or : silently corrupts a URL, and the
+          # failure then looks like a wrong host rather than a quoting bug.
+          PGUSER: postgres.${{ vars.SUPABASE_PROD_REF }}
+          PGPASSWORD: ${{ secrets.SUPABASE_PROD_DB_PASSWORD }}
 
+      # --allow-overwrite: without it, a second run on the same date (a manual
+      # re-run after a failure, most likely) fails on an already-existing path.
       - name: Upload dumps to Vercel Blob
         run: |
-          set -e
+          set -euo pipefail
           DATE="${{ steps.dump.outputs.date }}"
           for f in dumps/*.sql; do
             name=$(basename "$f")
             vercel blob put "$f" \
               --access private \
+              --allow-overwrite true \
               --pathname "backups/$DATE/$name" \
               --rw-token "$BLOB_READ_WRITE_TOKEN"
           done
         env:
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
 
-      # Vercel Blob has no built-in lifecycle/auto-expiry (unlike R2 or S3),
-      # so retention (R8) is this script, not a platform setting. Filenames
-      # are deterministic (backups/<date>/<name>_<date>.sql), so we can
-      # compute the path to delete directly instead of listing and parsing.
-      # `|| true` on each delete: pruning a date that was never backed up, or
-      # was already pruned, must not fail the whole run.
+      # Vercel Blob has no built-in lifecycle/auto-expiry (unlike R2 or S3), so
+      # retention (R8) is this script, not a platform setting.
+      #
+      # Filenames are deterministic (backups/<date>/<name>_<date>.sql), so the
+      # paths to delete can be computed rather than listed and parsed. This
+      # sweeps every date from RETENTION_DAYS to PRUNE_WINDOW_DAYS ago, not just
+      # the single day that fell out of retention: if the job is down for a
+      # week, a single-day prune leaves those seven days behind permanently,
+      # and personal data outliving its documented retention period is exactly
+      # what R8 exists to prevent. Deletes are batched into one call because
+      # Vercel Blob's delete is idempotent — unknown paths are a no-op.
+      #
+      # Bound worth knowing: if this workflow is dead for longer than
+      # PRUNE_WINDOW_DAYS, dumps older than that window need pruning by hand.
       - name: Delete backups older than 30 days
         run: |
-          PRUNE_DATE=$(date -d '31 days ago' +%Y%m%d)
-          for name in roles schema data; do
-            vercel blob del "backups/$PRUNE_DATE/${name}_$PRUNE_DATE.sql" \
-              --rw-token "$BLOB_READ_WRITE_TOKEN" || true
+          set -euo pipefail
+          paths=()
+          for (( d=RETENTION_DAYS+1; d<=PRUNE_WINDOW_DAYS; d++ )); do
+            PRUNE_DATE=$(date -u -d "$d days ago" +%Y%m%d)
+            for name in roles schema data; do
+              paths+=("backups/$PRUNE_DATE/${name}_$PRUNE_DATE.sql")
+            done
           done
+          echo "Pruning ${#paths[@]} candidate paths (${RETENTION_DAYS}-${PRUNE_WINDOW_DAYS} days old)"
+          vercel blob del "${paths[@]}" --rw-token "$BLOB_READ_WRITE_TOKEN"
         env:
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}

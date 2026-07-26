@@ -56,7 +56,7 @@ git config --global core.autocrlf input
 ### 4. Get the code
 
 ```bash
-git clone https://github.com/bashirbobboi/180Connect.git
+git clone https://github.com/180dcconnect/180Connect.git
 cd 180Connect
 npm install
 ```
@@ -69,13 +69,9 @@ Secrets (API keys, database URLs) live in a file called `.env.local`, which is *
 
 ```bash
 cp .env.example .env.local
-# .env.local
-NEXT_PUBLIC_SUPABASE_URL=...
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
-AUTH_ALLOWED_EMAIL_DOMAIN=180dc.org
 ```
 
-`.env.example` lists every variable the app knows about, with a comment saying what it is and where to get it. It contains no real values, so it is safe to commit.
+`.env.example` is the authoritative list of every variable the app reads — which ones are required, and where to get each value. It is deliberately not duplicated here, so this README cannot drift out of sync with it. It contains no real values, so it is safe to commit.
 
 Now fill it in from Supabase:
 
@@ -83,7 +79,7 @@ Now fill it in from Supabase:
 2. Open the **Development** project at https://supabase.com/dashboard.
 3. Go to **Project Settings → API Keys**.
 4. Copy the **Project URL** into `NEXT_PUBLIC_SUPABASE_URL`.
-5. Copy the **publishable key** — it starts with `sb_publishable_` — into `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+5. Copy the **publishable key** — it starts with `sb_publishable_` — into `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
 
 Note what did *not* happen there: nobody sent you a key. You were given access to the store and took the value yourself. That is the rule — if you are ever waiting on someone to paste a credential at you, the real fix is an invite.
 
@@ -129,7 +125,7 @@ For detailed environment setup (including staging), see [Environment Variables C
 
 **Your workflow:**
 1. Create a feature branch and make changes
-2. If you changed the database schema, run `supabase db pull` and commit the migration
+2. If you changed the database schema, write the migration with `supabase migration new <name>` (see [supabase/MIGRATIONS.md](supabase/MIGRATIONS.md) for the full workflow) and commit it
 3. Push to GitHub and open a PR
 4. Vercel creates a preview deployment automatically (watch for the comment on your PR)
 5. Test your changes in the preview
@@ -139,6 +135,18 @@ For detailed environment setup (including staging), see [Environment Variables C
 - [Staging Environment Setup](docs/staging-environment-setup.md) — comprehensive architecture & migration workflow
 - [Staging Workflow Quick Reference](docs/staging-workflow-quick-ref.md) — quick day-to-day guide
 - [Staging Implementation Checklist](docs/staging-implementation-checklist.md) — setup tasks for team leads
+- [Database Migrations](supabase/MIGRATIONS.md) — schema change workflow, conventions, rollback
+
+For password reset, add `NEXT_PUBLIC_APP_URL/auth/recovery` to Supabase Auth's
+allowed redirect URLs. For links that work across browsers/devices, set the
+recovery email template link to:
+
+```text
+{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery
+```
+
+Set the Supabase recovery OTP expiry to the same number of seconds as
+`PASSWORD_RESET_WINDOW_SECONDS` (one hour by default).
 
 ### 6. Run it
 
@@ -150,6 +158,20 @@ Open http://localhost:3000. Edit `src/app/page.tsx` and the page updates on save
 
 Stop the server with `Ctrl + C`.
 
+### 7. Load test data
+
+You don't need — and shouldn't use — real client records to develop against. Apply
+the migrations, then load 50 fake organisations spread across every pipeline stage:
+
+```bash
+supabase db push     # or `supabase migration up` against the local stack
+npm run seed
+```
+
+Every seeded row carries `is_seed = true`, so it can be found and removed at any
+time, and the script refuses to run against production. Full details, including the
+failure cases, are in [docs/seed-data.md](docs/seed-data.md).
+
 ## Commands
 
 | Command | What it does |
@@ -158,6 +180,9 @@ Stop the server with `Ctrl + C`.
 | `npm run build` | Production build — run this before pushing to catch errors the dev server tolerates |
 | `npm start` | Serve the production build locally |
 | `npm run lint` | Run ESLint |
+| `npm test` | Run the unit tests |
+| `npm run seed` | Load fake test data into the database ([docs](docs/seed-data.md)) |
+| `npm run seed:clear` | Remove all fake test data (`is_seed` rows) |
 
 ## Project layout
 
@@ -171,11 +196,17 @@ public/         static files served as-is (images, icons)
 
 In the App Router, a folder under `src/app/` becomes a URL, and the `page.tsx` inside it is what renders. `src/app/about/page.tsx` → `/about`.
 
-## Day-to-day Git
+For how auth, validation, error logging, and the database fit together, see [Architecture](docs/architecture.md).
+
+## Contributing
 
 Branch from `dev`, never commit straight to `main` or `dev`, open a pull request into `dev`.
 
-The full branching model, naming rules, PR process, and review expectations live in **[CONTRIBUTING.md](CONTRIBUTING.md)** — read it before your first PR.
+The full branching model, naming rules, commit style, PR process, and review
+expectations live in **[CONTRIBUTING.md](CONTRIBUTING.md)** — read it before your
+first PR. What "done" means for a piece of work is the Definition of Done —
+see [Pull requests](CONTRIBUTING.md#pull-requests) for the bar a reviewer holds
+you to.
 
 ## Troubleshooting
 

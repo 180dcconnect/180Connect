@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { User } from "@supabase/supabase-js";
-import { authorizeUserProfile, hasPermission } from "./permissions.ts";
+import {
+  authorizeUserProfile,
+  canChangeRole,
+  hasPermission,
+} from "./permissions.ts";
 
 function approvedUser(): User {
   return {
@@ -27,8 +31,25 @@ describe("role permission matrix", () => {
       "platform-settings:manage",
     ] as const) {
       assert.equal(hasPermission("cam", permission), false);
+      assert.equal(hasPermission("viewer", permission), false);
       assert.equal(hasPermission("admin", permission), true);
     }
+  });
+
+  it("keeps viewers read-only", () => {
+    assert.equal(hasPermission("viewer", "client:view"), true);
+    assert.equal(hasPermission("viewer", "client:edit"), false);
+    assert.equal(hasPermission("viewer", "client:contact"), false);
+  });
+});
+
+describe("role-change safety", () => {
+  it("blocks an administrator changing their own role", () => {
+    assert.equal(canChangeRole("admin-id", "admin-id").ok, false);
+  });
+
+  it("allows an administrator to target another user", () => {
+    assert.deepEqual(canChangeRole("admin-id", "cam-id"), { ok: true });
   });
 });
 

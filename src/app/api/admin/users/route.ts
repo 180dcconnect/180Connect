@@ -1,16 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
+import { canChangeRole } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
 
 const updateUserSchema = z.object({
   userId: z.uuid(),
-  role: z.enum(["cam", "admin"]).optional(),
-  isActive: z.boolean().optional(),
-}).refine((value) => value.role !== undefined || value.isActive !== undefined, {
-  message: "Provide a role or active status to update.",
+  role: z.enum(["cam", "admin", "viewer"]),
 });
 
 function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
@@ -27,7 +25,7 @@ export async function GET() {
 
   const supabase = await createClient();
   const { data, error } = await supabase
-    .from("USERS")
+    .from("users")
     .select("id, email, full_name, role, is_active, last_seen_at, created_at")
     .order("full_name", { ascending: true });
 
@@ -63,40 +61,48 @@ export async function PATCH(request: Request) {
       fieldCount: parsed.error.issues.length,
     });
     return NextResponse.json(
-      { error: "Choose a valid role or account status." },
+      { error: "Choose a valid CAM, Admin, or Viewer role." },
       { status: 400 },
     );
   }
 
-  if (
-    parsed.data.userId === authorization.actor.id &&
-    (parsed.data.isActive === false || parsed.data.role === "cam")
-  ) {
+  const roleChange = canChangeRole(
+    authorization.actor.id,
+    parsed.data.userId,
+  );
+  if (!roleChange.ok) {
     return NextResponse.json(
-      { error: "You cannot remove access from your own administrator account." },
+      { error: roleChange.message },
       { status: 400 },
     );
   }
-
-  const changes = {
-    ...(parsed.data.role ? { role: parsed.data.role } : {}),
-    ...(parsed.data.isActive !== undefined
-      ? { is_active: parsed.data.isActive }
-      : {}),
-    updated_at: new Date().toISOString(),
-  };
 
   const supabase = await createClient();
+  const { error: roleError } = await supabase.rpc("set_user_role", {
+    p_user_id: parsed.data.userId,
+    p_new_role: parsed.data.role,
+  });
+
+  if (roleError) {
+    await reportError(roleError, {
+      operation: "admin.users.set_role",
+      targetUserId: parsed.data.userId,
+    });
+    return NextResponse.json(
+      { error: "The role change was blocked. Refresh and try again." },
+      { status: roleError.code === "42501" ? 403 : 500 },
+    );
+  }
+
   const { data, error } = await supabase
-    .from("USERS")
-    .update(changes)
-    .eq("id", parsed.data.userId)
+    .from("users")
     .select("id, email, full_name, role, is_active")
+    .eq("id", parsed.data.userId)
     .single();
 
   if (error) {
     await reportError(error, {
-      operation: "admin.users.update",
+      operation: "admin.users.read_updated_role",
       targetUserId: parsed.data.userId,
     });
     return NextResponse.json(
@@ -104,12 +110,6 @@ export async function PATCH(request: Request) {
       { status: 500 },
     );
   }
-
-  console.info("[audit] admin.user_updated", {
-    actorUserId: authorization.actor.id,
-    targetUserId: parsed.data.userId,
-    changedFields: Object.keys(changes).filter((key) => key !== "updated_at"),
-  });
 
   return NextResponse.json({ user: data });
 }

@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 
-type TeamUser = {
+export type TeamUser = {
   id: string;
   email: string;
   full_name: string | null;
-  role: "cam" | "admin";
+  role: "cam" | "admin" | "viewer";
   is_active: boolean;
 };
 
@@ -23,7 +23,7 @@ export function UserManagementTable({
 
   async function updateUser(
     userId: string,
-    change: { role?: TeamUser["role"]; isActive?: boolean },
+    role: TeamUser["role"],
   ) {
     setSavingId(userId);
     setMessage("");
@@ -31,7 +31,7 @@ export function UserManagementTable({
       const response = await fetch("/api/admin/users", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, ...change }),
+        body: JSON.stringify({ userId, role }),
       });
       const result = await response.json();
       if (!response.ok) {
@@ -76,23 +76,19 @@ export function UserManagementTable({
                     className="rounded-lg border border-black/15 bg-white px-3 py-2"
                     disabled={savingId === user.id || user.id === currentUserId}
                     onChange={(event) =>
-                      updateUser(user.id, { role: event.target.value as TeamUser["role"] })
+                      updateUser(user.id, event.target.value as TeamUser["role"])
                     }
                     value={user.role}
                   >
                     <option value="cam">CAM</option>
                     <option value="admin">Admin</option>
+                    <option value="viewer">Viewer</option>
                   </select>
                 </td>
                 <td className="p-3">
-                  <button
-                    className="rounded-full border border-black/15 px-4 py-2 font-bold disabled:opacity-50"
-                    disabled={savingId === user.id || user.id === currentUserId}
-                    onClick={() => updateUser(user.id, { isActive: !user.is_active })}
-                    type="button"
-                  >
-                    {user.is_active ? "Deactivate" : "Activate"}
-                  </button>
+                  <span className={user.is_active ? "font-bold text-brand" : "font-bold text-red-700"}>
+                    {user.is_active ? "Active" : "Inactive"}
+                  </span>
                 </td>
               </tr>
             ))}

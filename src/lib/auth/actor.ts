@@ -32,7 +32,7 @@ export async function getCurrentActor(
   if (!user) return { ok: false, reason: "unauthenticated" };
 
   const { data, error } = await supabase
-    .from("USERS")
+    .from("users")
     .select("id, full_name, role, is_active")
     .eq("id", user.id)
     .maybeSingle<UserProfile>();

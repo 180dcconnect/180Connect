@@ -1,4 +1,4 @@
-export const ROLES = ["cam", "admin"] as const;
+export const ROLES = ["cam", "admin", "viewer"] as const;
 
 export type AppRole = (typeof ROLES)[number];
 
@@ -41,6 +41,7 @@ export type AuthorizedProfileResult =
 const ROLE_PERMISSIONS: Record<AppRole, ReadonlySet<Permission>> = {
   cam: new Set(["client:view", "client:edit", "client:contact"]),
   admin: new Set(PERMISSIONS),
+  viewer: new Set(["client:view"]),
 };
 
 export function isAppRole(value: unknown): value is AppRole {
@@ -74,4 +75,17 @@ export function authorizeUserProfile(
     return { ok: false, reason: "forbidden" };
   }
   return { ok: true, role: profile.role };
+}
+
+export function canChangeRole(
+  actorId: string,
+  targetUserId: string,
+): { ok: true } | { ok: false; message: string } {
+  if (actorId === targetUserId) {
+    return {
+      ok: false,
+      message: "You cannot change your own administrator role.",
+    };
+  }
+  return { ok: true };
 }

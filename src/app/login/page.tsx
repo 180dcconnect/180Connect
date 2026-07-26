@@ -1,14 +1,14 @@
 import Image from "next/image";
 import Link from "next/link";
 import { LoginForm } from "./login-form";
+import { signedOutNotice } from "@/lib/auth/signed-out-notice";
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ reason?: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const { reason } = await searchParams;
-  const sessionExpired = reason === "expired";
+  const notice = signedOutNotice((await searchParams).signed_out);
 
   return (
     <main className="flex flex-1 items-center justify-center bg-[#f1f2f4] p-4 sm:p-8">
@@ -34,12 +34,19 @@ export default async function LoginPage({
               Enter your details to log in.
             </p>
 
-            {sessionExpired && (
-              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs font-medium text-amber-800">
-                Your session has expired. Please log in again.
+            {notice && (
+              <div
+                role="status"
+                className={`mt-6 rounded-lg border px-3 py-2.5 text-xs leading-relaxed ${
+                  notice.tone === "success"
+                    ? "border-brand/30 bg-brand/5 text-foreground/80"
+                    : "border-amber-300 bg-amber-50 text-amber-900"
+                }`}
+              >
+                {notice.message}
               </div>
             )}
-            
+
             <LoginForm />
 
             <div className="my-6 flex items-center gap-3">

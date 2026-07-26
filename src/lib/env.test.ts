@@ -18,6 +18,8 @@ function validEnv(): Record<string, string | undefined> {
   }
   // Neither Supabase key is `required` on its own — one of the pair must be set.
   source.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
+  // Required, but a URL is not a valid value for it: Cloudflare's test site key.
+  source.NEXT_PUBLIC_TURNSTILE_SITE_KEY = "1x00000000000000000000AA";
   return source;
 }
 
@@ -75,6 +77,31 @@ describe("collectEnvProblems", () => {
     assert.match(problems[0].problem, /absolute http/);
   });
 
+  it("accepts Cloudflare's test and live Turnstile site keys", () => {
+    for (const key of ["1x00000000000000000000AA", "0x4AAAAAAADummyLiveKey"]) {
+      assert.deepEqual(
+        collectEnvProblems({ ...validEnv(), NEXT_PUBLIC_TURNSTILE_SITE_KEY: key }),
+        [],
+        `expected ${key} to be accepted`,
+      );
+    }
+  });
+
+  it("rejects a value that is not shaped like a Turnstile site key", () => {
+    // Catches the mis-pastes that would otherwise reach the browser bundle and
+    // fail there: a whole `NAME=value` line, or the wrong credential entirely.
+    for (const value of ["not-a-site-key", "NAME=0x4AAA", "9xAAAA"]) {
+      const problems = collectEnvProblems({
+        ...validEnv(),
+        NEXT_PUBLIC_TURNSTILE_SITE_KEY: value,
+      });
+
+      assert.equal(problems.length, 1, `expected ${value} to be rejected`);
+      assert.equal(problems[0].name, "NEXT_PUBLIC_TURNSTILE_SITE_KEY");
+      assert.match(problems[0].problem, /Turnstile site key/);
+    }
+  });
+
   it("validates an optional variable that is set", () => {
     const problems = collectEnvProblems({
       ...validEnv(),
@@ -96,6 +123,7 @@ describe("collectEnvProblems", () => {
         "NEXT_PUBLIC_APP_URL",
         "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
         "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
       ],
     );
   });

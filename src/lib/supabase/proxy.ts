@@ -51,6 +51,19 @@ export async function updateSession(request: NextRequest) {
     return response;
   }
 
+  // A mid-recovery session is held at the reset page rather than signed out —
+  // signing it out would make completing the reset impossible. The redirect
+  // carries `response`'s cookies so any token Supabase refreshed above survives.
+  if (outcome.action === "confine") {
+    const confinedResponse = NextResponse.redirect(
+      new URL(outcome.redirectTo, request.url),
+    );
+    for (const cookie of response.cookies.getAll()) {
+      confinedResponse.cookies.set(cookie);
+    }
+    return confinedResponse;
+  }
+
   if (outcome.action === "expire") {
     const expiredResponse = NextResponse.redirect(
       new URL(outcome.redirectTo, request.url),

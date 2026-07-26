@@ -6,6 +6,10 @@ import { beforeEach, describe, it, mock } from "node:test";
 import { NextResponse } from "next/server.js";
 
 import {
+  RECOVERY_COOKIE_NAME,
+  signRecoveryMarker,
+} from "../auth/password-reset.ts";
+import {
   ACTIVITY_COOKIE_NAME,
   INACTIVITY_TIMEOUT_MS,
   signActivity,
@@ -30,19 +34,22 @@ function makeRequest({
   pathname = "/dashboard",
   headers = {},
   activity,
+  recovery,
 }: {
   pathname?: string;
   headers?: Record<string, string>;
   activity?: string;
+  recovery?: string;
 } = {}): GuardRequest {
+  const jar: Record<string, string | undefined> = {
+    [ACTIVITY_COOKIE_NAME]: activity,
+    [RECOVERY_COOKIE_NAME]: recovery,
+  };
   return {
     pathname,
     headers: { get: (name) => headers[name.toLowerCase()] ?? null },
     cookies: {
-      get: (name) =>
-        name === ACTIVITY_COOKIE_NAME && activity !== undefined
-          ? { value: activity }
-          : undefined,
+      get: (name) => (jar[name] === undefined ? undefined : { value: jar[name] }),
     },
   };
 }
@@ -91,6 +98,77 @@ describe("decideSessionAction", () => {
 
     assert.deepEqual(outcome, { action: "pass", reason: "auth-route" });
     assert.equal(signOut.mock.callCount(), 0);
+  });
+
+  // A recovery link necessarily mints a real session — it is the only way
+  // `updateUser` can set a password — so these two decide whether that session
+  // is a password reset or a free pass into the app.
+  describe("a session mid password reset (F004)", () => {
+    it("is confined to the reset flow rather than let into the app", async () => {
+      const { client, signOut } = makeClient();
+      const outcome = await decideSessionAction(
+        makeRequest({
+          pathname: "/dashboard",
+          recovery: await signRecoveryMarker(USER.id, SECRET),
+        }),
+        client,
+      );
+
+      assert.deepEqual(outcome, { action: "confine", redirectTo: "/reset-password" });
+      // Confined, not signed out: the reset still has to be completable.
+      assert.equal(signOut.mock.callCount(), 0);
+    });
+
+    it("reaches the reset page and the ways out of it", async () => {
+      const recovery = await signRecoveryMarker(USER.id, SECRET);
+      for (const pathname of ["/reset-password", "/forgot-password", "/login"]) {
+        const { client } = makeClient();
+        const outcome = await decideSessionAction(
+          makeRequest({ pathname, recovery }),
+          client,
+        );
+        assert.deepEqual(outcome, { action: "pass", reason: "recovery" }, pathname);
+      }
+    });
+
+    // It never passed through the login action, so it has no activity record,
+    // and expiry fails closed. Without the recovery branch it would be signed
+    // out on its very first request and the reset could never complete.
+    it("is not expired for having no activity record", async () => {
+      const { client, signOut } = makeClient();
+      const outcome = await decideSessionAction(
+        makeRequest({
+          pathname: "/reset-password",
+          activity: undefined,
+          recovery: await signRecoveryMarker(USER.id, SECRET),
+        }),
+        client,
+      );
+
+      assert.equal(outcome.action, "pass");
+      assert.equal(signOut.mock.callCount(), 0);
+    });
+
+    it("ignores a marker that names someone else", async () => {
+      const { client } = makeClient();
+      const outcome = await decideSessionAction(
+        makeRequest({
+          pathname: "/dashboard",
+          activity: await activityAgedBy(0, Date.now()),
+          recovery: await signRecoveryMarker(
+            "99999999-9999-4999-8999-999999999999",
+            SECRET,
+          ),
+        }),
+        client,
+      );
+
+      assert.equal(outcome.action, "refresh");
+    });
+
+    // Forged and unsigned markers are rejected by `readRecoveryMarker`, which
+    // owns that decision and is tested against it directly in
+    // `src/lib/auth/password-reset.test.ts`.
   });
 
   it("refreshes the window for an active user", async () => {

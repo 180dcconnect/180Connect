@@ -137,6 +137,17 @@ For detailed environment setup (including staging), see [Environment Variables C
 - [Staging Implementation Checklist](docs/staging-implementation-checklist.md) — setup tasks for team leads
 - [Database Migrations](supabase/MIGRATIONS.md) — schema change workflow, conventions, rollback
 
+For password reset, add `NEXT_PUBLIC_APP_URL/auth/recovery` to Supabase Auth's
+allowed redirect URLs. For links that work across browsers/devices, set the
+recovery email template link to:
+
+```text
+{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery
+```
+
+Set the Supabase recovery OTP expiry to the same number of seconds as
+`PASSWORD_RESET_WINDOW_SECONDS` (one hour by default).
+
 ### 6. Run it
 
 ```bash

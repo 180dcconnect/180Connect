@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { useActionState, useCallback, useEffect, useState } from "react";
-import type { LoginState } from "@/lib/auth/login";
-import { login } from "./actions";
+import { login, type LoginState } from "./actions";
 import Script from "next/script";
 
 const initialLoginState: LoginState = { status: "idle" };

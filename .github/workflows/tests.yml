@@ -1,0 +1,48 @@
+# Runs the unit tests, the linter and the TypeScript compiler on every pull
+# request. Nothing here touches Supabase or the network, so it needs no secrets
+# and no environment variables — see AGENTS.md for what is worth unit testing.
+#
+# This repository is on a free plan, so there is no branch protection and a red
+# check does not physically block a merge. Treat a failure as "do not merge"
+# by convention until the plan changes.
+
+name: Tests
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: unit tests, lint, typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the version the team develops on. Bump this and the local
+          # toolchain together, never one on its own.
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Each step runs even if an earlier one failed, so a single push reports
+      # every problem at once rather than one per round-trip.
+      - name: Unit tests
+        run: npm test
+
+      - name: Lint
+        if: ${{ !cancelled() }}
+        run: npm run lint
+
+      - name: Typecheck
+        if: ${{ !cancelled() }}
+        run: npx tsc --noEmit

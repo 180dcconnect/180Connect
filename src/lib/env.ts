@@ -45,7 +45,7 @@ function isAbsoluteHttpUrl(value: string): string | null {
 }
 
 function isBareDomain(value: string): string | null {
-  // A leading "@" is tolerated by src/app/login/actions.ts, so accept it here too.
+  // A leading "@" is tolerated by src/lib/auth/login.ts, so accept it here too.
   const domain = value.replace(/^@/, "");
   if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(domain)) {
     return "must be a bare domain, for example 180dc.org";
@@ -99,7 +99,7 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     required: false,
     secret: false,
     description:
-      "Email domain users must sign in from. Server-only — never prefix with NEXT_PUBLIC_. Defaults to 180dc.org in `src/app/login/actions.ts` when unset.",
+      "Email domain users must sign in from. Server-only — never prefix with NEXT_PUBLIC_. Defaults to 180dc.org in `src/lib/auth/login.ts` when unset.",
     validate: isBareDomain,
   },
   {

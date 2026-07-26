@@ -3,7 +3,7 @@
  *
  * Every Server Action/route handler that does anything sensitive should call
  * this instead of checking `account_status` inline — it was previously
- * duplicated in `src/app/login/actions.ts` and `src/app/dashboard/page.tsx`.
+ * duplicated in the login action and `src/app/dashboard/page.tsx`.
  * Full RBAC/RLS is out of scope here and lands with F224.
  */
 

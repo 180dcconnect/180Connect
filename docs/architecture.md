@@ -79,7 +79,7 @@ so they describe the version we actually run.
 Zod's `safeParse` and returns per-field errors instead of throwing, plus
 reusable field types (`emailField`, `urlField`, `nonEmptyTrimmed`,
 `boundedInt`). Every form/Server Action should validate through this module —
-see `src/app/login/actions.ts` for the reference usage — rather than calling
+see `src/lib/auth/login.ts` for the reference usage — rather than calling
 Zod directly, so error shape and messaging stay consistent as more forms are
 added.
 

@@ -7,8 +7,8 @@ import {
   attemptLogin,
   normalizeEmail,
   SERVICE_UNAVAILABLE_MESSAGE,
-  type LoginState,
 } from "@/lib/auth/login";
+import type { LoginState } from "@/lib/auth/login";
 import {
   ACTIVITY_COOKIE_NAME,
   activityCookieOptions,
@@ -16,8 +16,6 @@ import {
   signActivity,
 } from "@/lib/supabase/session-expiry";
 import { logSecurityEvent } from "@/lib/log-security-event";
-
-export type { LoginState };
 
 export async function login(
   _previousState: LoginState,

@@ -19,6 +19,8 @@ export type SignedOutNotice = {
 export const SIGNED_OUT = "1";
 /** The marker it appends when the sign-out could not be confirmed. */
 export const SIGNED_OUT_FAILED = "error";
+/** The marker the proxy appends when a session was ended for inactivity (F007). */
+export const SESSION_EXPIRED = "expired";
 
 export function signedOutNotice(
   value: string | string[] | undefined,
@@ -28,6 +30,14 @@ export function signedOutNotice(
 
   if (marker === SIGNED_OUT) {
     return { tone: "success", message: "You have been signed out." };
+  }
+
+  if (marker === SESSION_EXPIRED) {
+    return {
+      tone: "warning",
+      message:
+        "Your session expired after a period of inactivity. Please log in again.",
+    };
   }
 
   if (marker === SIGNED_OUT_FAILED) {

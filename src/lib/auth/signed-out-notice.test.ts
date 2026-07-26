@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  SESSION_EXPIRED,
   SIGNED_OUT,
   SIGNED_OUT_FAILED,
   signedOutNotice,
@@ -18,6 +19,13 @@ describe("signedOutNotice", () => {
     const notice = signedOutNotice(SIGNED_OUT_FAILED);
     assert.equal(notice?.tone, "warning");
     assert.match(notice!.message, /shared computer/i);
+  });
+
+  it("explains an inactivity expiry", () => {
+    const notice = signedOutNotice(SESSION_EXPIRED);
+    assert.equal(notice?.tone, "warning");
+    assert.match(notice!.message, /expired/i);
+    assert.match(notice!.message, /inactivity/i);
   });
 
   it("shows nothing when the parameter is absent", () => {

@@ -1,12 +1,40 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+
+import { signOutAndReport } from "@/lib/auth/sign-out";
+import { SESSION_EXPIRED } from "@/lib/auth/signed-out-notice";
+import { logSecurityEvent } from "@/lib/log-security-event";
 import {
   ACTIVITY_COOKIE_NAME,
-  INACTIVITY_TIMEOUT_MS,
+  activityCookieOptions,
+  activitySecret,
   isSessionExpired,
+  readActivity,
+  signActivity,
 } from "./session-expiry";
-import { logSecurityEvent } from "@/lib/log-security-event";
-import { reportError } from "@/lib/error-logging";
+
+/**
+ * Requests that must not renew the inactivity window (F007).
+ *
+ * A page left open in a background tab still talks to the server: Next
+ * prefetches links and refetches route payloads on its own. Counting those as
+ * "activity" would mean an abandoned laptop never times out, so only requests
+ * the user actually caused keep a session alive.
+ */
+function isBackgroundRequest(request: NextRequest): boolean {
+  const headers = request.headers;
+  return (
+    headers.get("next-router-prefetch") === "1" ||
+    headers.get("purpose") === "prefetch" ||
+    headers.get("x-purpose") === "preview"
+  );
+}
+
+/** /login is where expiry sends people; expiring them again would loop. */
+function isAuthRoute(request: NextRequest): boolean {
+  return request.nextUrl.pathname.startsWith("/login");
+}
+
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -32,53 +60,57 @@ export async function updateSession(request: NextRequest) {
   });
 
   // getUser verifies the token with Supabase and refreshes it when necessary.
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  // Only check inactivity if there's actually a logged-in user.
-  // Logged-out visitors have nothing to expire.
-  if (user) {
-    const lastActivityCookie = request.cookies.get(ACTIVITY_COOKIE_NAME);
-    const lastActivity = lastActivityCookie
-      ? parseInt(lastActivityCookie.value, 10)
-      : null;
-    const now = Date.now();
+  // Nothing to expire for a logged-out visitor, and /login must stay reachable.
+  if (!user || isAuthRoute(request)) return response;
 
-    if (isSessionExpired(lastActivity, now, INACTIVITY_TIMEOUT_MS)) {
-      // Too much idle time has passed. Sign out server-side so the
-      // token is genuinely invalidated, not just ignored client-side —
-      // satisfies "cannot be reused even if replayed."
-      const { error } = await supabase.auth.signOut();
+  const secret = activitySecret();
+  const lastActivity = await readActivity(
+    request.cookies.get(ACTIVITY_COOKIE_NAME)?.value,
+    secret,
+  );
+  const now = Date.now();
 
-      // Log the expiry event per F007 + codebase convention (F222's
-      // logSecurityEvent, same pattern used for other auth failures).
-      // NOTE: "authentication.login_failed" is the closest existing
-      // SecurityEvent type — none of the three current options exactly
-      // describe a session timing out. Flagging for review; may warrant
-      // its own event type (e.g. "session.expired") in a future PR.
-      logSecurityEvent("authentication.login_failed", {
-        reason: "session_expired",
-        userId: user.id,
-      });
+  if (isSessionExpired(lastActivity, now)) {
+    // Sign out server-side so the refresh token is genuinely revoked rather
+    // than merely ignored here — a session left alive on the Supabase side can
+    // still be replayed. `signOutAndReport` (F006) gives a failed sign-out a
+    // durable record and never throws, so the redirect below always happens.
+    await signOutAndReport(supabase);
 
-      if (error) {
-        await reportError(error, { component: "session-expiry" });
-      }
-
-      const expiredUrl = new URL("/login", request.url);
-      expiredUrl.searchParams.set("reason", "expired");
-      const expiredResponse = NextResponse.redirect(expiredUrl);
-
-      expiredResponse.cookies.delete(ACTIVITY_COOKIE_NAME);
-      return expiredResponse;
-    }
-
-    // Still active — refresh the "last activity" timestamp on every
-    // request, so the timeout resets while the user keeps using the app.
-    response.cookies.set(ACTIVITY_COOKIE_NAME, now.toString(), {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
+    logSecurityEvent("session.expired", {
+      userId: user.id,
+      hadActivityRecord: lastActivity !== null,
+      idleMs: lastActivity === null ? undefined : now - lastActivity,
     });
+
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("signed_out", SESSION_EXPIRED);
+    const expiredResponse = NextResponse.redirect(loginUrl);
+
+    // `signOut` cleared the Supabase auth cookies on `response`, which this
+    // redirect replaces. Copying them across is what actually removes the
+    // session from the browser — without it the cookies survive the redirect
+    // and the very next request looks signed in again.
+    for (const cookie of response.cookies.getAll()) {
+      expiredResponse.cookies.set(cookie);
+    }
+    expiredResponse.cookies.delete(ACTIVITY_COOKIE_NAME);
+
+    return expiredResponse;
+  }
+
+  // Still active: push the idle window out. Background traffic is excluded so
+  // the window tracks the user, not the framework.
+  if (!isBackgroundRequest(request)) {
+    response.cookies.set(
+      ACTIVITY_COOKIE_NAME,
+      await signActivity(now, secret),
+      activityCookieOptions(),
+    );
   }
 
   return response;

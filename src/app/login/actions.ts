@@ -1,8 +1,15 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import {
+  ACTIVITY_COOKIE_NAME,
+  activityCookieOptions,
+  activitySecret,
+  signActivity,
+} from "@/lib/supabase/session-expiry";
 import { requireApprovedUser, permissionFailureMessage } from "@/lib/auth/require-approved-user";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { emailField, safeValidate } from "@/lib/validation";
@@ -100,6 +107,16 @@ export async function login(
         email,
       };
     }
+
+    // Start the inactivity window (F007). Expiry fails closed, so a session
+    // that never gets this first record is expired on its very next request —
+    // signing in is where the record has to come from.
+    const cookieStore = await cookies();
+    cookieStore.set(
+      ACTIVITY_COOKIE_NAME,
+      await signActivity(Date.now(), activitySecret()),
+      activityCookieOptions(),
+    );
   } catch (error) {
     logSecurityEvent("authentication.login_failed", {
       cause: error instanceof Error ? error.message : "Unknown error",

@@ -2,13 +2,11 @@
 
 import Link from "next/link";
 import { useActionState, useState } from "react";
+import { PasswordInput } from "@/components/password-input";
 import { PASSWORD_RULES } from "@/lib/auth/password-rules";
 import { setNewPassword, type ResetPasswordState } from "./actions";
 
 const initialState: ResetPasswordState = { status: "idle" };
-
-const inputClass =
-  "h-10 rounded-lg border border-black/10 bg-[#fafafa] px-3 text-sm outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/20 aria-invalid:border-red-500";
 
 /**
  * Live checklist of the password rules.
@@ -73,16 +71,13 @@ export function ResetPasswordForm({ linkError }: { linkError?: string }) {
 
       <div className="flex flex-col gap-1.5">
         <label htmlFor="password" className="text-xs font-bold">New password</label>
-        <input
+        <PasswordInput
           id="password"
           name="password"
-          type="password"
-          autoComplete="new-password"
           value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          aria-invalid={Boolean(state.fieldErrors?.password)}
-          aria-describedby="password-requirements"
-          className={inputClass}
+          onChange={setPassword}
+          invalid={Boolean(state.fieldErrors?.password)}
+          describedBy="password-requirements"
           required
         />
       </div>
@@ -98,13 +93,10 @@ export function ResetPasswordForm({ linkError }: { linkError?: string }) {
 
       <div className="flex flex-col gap-1.5">
         <label htmlFor="confirmPassword" className="text-xs font-bold">Confirm new password</label>
-        <input
+        <PasswordInput
           id="confirmPassword"
           name="confirmPassword"
-          type="password"
-          autoComplete="new-password"
-          aria-invalid={Boolean(state.fieldErrors?.confirmPassword)}
-          className={inputClass}
+          invalid={Boolean(state.fieldErrors?.confirmPassword)}
           required
         />
         {state.fieldErrors?.confirmPassword?.[0] && <p className="text-xs text-red-700">{state.fieldErrors.confirmPassword[0]}</p>}

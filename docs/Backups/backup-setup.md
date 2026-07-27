@@ -72,10 +72,10 @@ Watch the run. If the "Dump roles, schema, and data" step fails, work down this 
 
 ## 7. Verify the upload
 
-Vercel dashboard → project → **Storage** → the Blob store → browse to `backups/<today's date>/` and confirm three files: `roles_*.sql`, `schema_*.sql`, `data_*.sql`. All three should be well over 1KB — the workflow fails the run rather than uploading anything smaller.
+Vercel dashboard → project → **Storage** → the Blob store → browse to `backups/<today's date>/` and confirm four files: `roles_*.sql`, `schema_*.sql`, `authdata_*.sql`, `data_*.sql`. All four should be well over 1KB — the workflow fails the run rather than uploading anything smaller.
 
 ## 8. Run the restore test (R4)
 
-Setup isn't finished when the upload works. The story's actual requirement is a *proven* restore — download the three files, follow section 4 of [F225-database-backups.md](F225-database-backups.md) against a throwaway Supabase project, and record the result in that document's restore test log.
+Setup isn't finished when the upload works. The story's actual requirement is a *proven* restore — download the four files, follow section 4 of [F225-database-backups.md](F225-database-backups.md) against a throwaway Supabase project, and record the result in that document's restore test log.
 
 Delete the throwaway project afterwards. It will contain a full copy of production's personal data, including `auth.users`.

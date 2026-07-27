@@ -1,9 +1,11 @@
 # Nightly backup of the production database to Vercel Blob storage.
 # Story: F225 (#220) — Database Backups. See docs/Backups/F225-database-backups.md.
 #
-# Three separate dumps (roles, schema, data) because a single dump command does
-# not capture all three — see docs/Backups/F225-database-backups.md section 2.
-# Restoring them back is roles -> schema -> data, in that order.
+# Four separate dumps (roles, schema, auth data, public data) because a single
+# dump command captures none of them completely — see section 2 of
+# docs/Backups/F225-database-backups.md. Restore order is roles -> schema ->
+# authdata -> data, and it is not optional: public.users has a foreign key to
+# auth.users, so the auth rows must exist first.
 #
 # Uses pg_dump/pg_dumpall directly rather than `supabase db dump`, because the
 # Supabase CLI's dump command shells out to Docker even for a remote database.
@@ -79,11 +81,27 @@ jobs:
       # superuser, so a restore cannot reassign ownership to supabase_admin.
       # Dumping those statements guarantees a noisy, half-failed restore.
       #
-      # --schema=public: everything this project owns lives in public. Dumping
-      # Supabase's managed schemas (auth, storage, realtime, extensions, vault,
-      # graphql) would collide with the copies that already exist in whatever
-      # project we restore into. Auth *rows* are still captured below, because
-      # losing every user account is not an acceptable restore.
+      # --schema=public --schema=app: the two schemas this project owns. `app`
+      # holds the RLS helper functions (app.is_admin, app.can_write, …) that
+      # every policy in `public` calls, so a public-only dump restores tables
+      # whose policies reference functions that do not exist. Supabase's own
+      # schemas (auth, storage, realtime, extensions, vault, graphql) stay out —
+      # they already exist in whatever project we restore into.
+      #
+      # --no-role-passwords: every role in this cluster is Supabase-managed and
+      # cannot be restored into a Supabase target at all (they are reserved
+      # roles). The file is kept because a plain-Postgres target still needs
+      # `anon`/`authenticated` to exist for the RLS policies to apply — but
+      # shipping SCRAM password hashes for roles nobody can restore is
+      # credential material in the blob store buying nothing.
+      #
+      # auth and public data are dumped SEPARATELY, and auth excludes
+      # schema_migrations. Reason, found during the R4 restore test: postgres
+      # cannot write auth.schema_migrations (it belongs to supabase_auth_admin),
+      # and pg_dump orders auth before public, so one permission error on a
+      # Supabase-internal bookkeeping table aborted the restore before a single
+      # row of application data loaded. Separate files mean an auth problem can
+      # never again block the data we actually care about.
       - name: Dump roles, schema, and data
         id: dump
         run: |
@@ -92,13 +110,17 @@ jobs:
           echo "date=$DATE" >> "$GITHUB_OUTPUT"
           mkdir -p dumps
 
-          pg_dumpall --roles-only -f "dumps/roles_$DATE.sql"
+          pg_dumpall --roles-only --no-role-passwords -f "dumps/roles_$DATE.sql"
 
           pg_dump --schema-only --no-owner --no-privileges \
-            --schema=public -f "dumps/schema_$DATE.sql"
+            --schema=public --schema=app -f "dumps/schema_$DATE.sql"
 
           pg_dump --data-only --no-owner --no-privileges \
-            --schema=public --schema=auth -f "dumps/data_$DATE.sql"
+            --schema=auth --exclude-table=auth.schema_migrations \
+            -f "dumps/authdata_$DATE.sql"
+
+          pg_dump --data-only --no-owner --no-privileges \
+            --schema=public -f "dumps/data_$DATE.sql"
 
           # A dump that "succeeded" but produced an empty file is worse than a
           # failure, because it looks like a backup. pg_dump writes a header
@@ -155,7 +177,7 @@ jobs:
           paths=()
           for (( d=RETENTION_DAYS+1; d<=PRUNE_WINDOW_DAYS; d++ )); do
             PRUNE_DATE=$(date -u -d "$d days ago" +%Y%m%d)
-            for name in roles schema data; do
+            for name in roles schema authdata data; do
               paths+=("backups/$PRUNE_DATE/${name}_$PRUNE_DATE.sql")
             done
           done

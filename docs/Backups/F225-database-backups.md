@@ -78,41 +78,47 @@ pg_dump --version   # must report 17.x
 
 ### 2. Taking a manual backup
 
-**One dump command is not enough.** A database splits into three separate concerns, and a plain schema dump only captures one of them. Roles (database users/permissions) and data (the actual rows) each need their own dump, or a restore looks like it worked but comes back missing users or every row in every table.
+**One dump command is not enough.** A database splits into concerns a single dump cannot cover at once, and a plain schema dump captures only one of them. Roles, schema, auth rows and application rows each need their own dump, or a restore looks like it worked but comes back missing users, missing every row in every table, or — as the restore test actually produced — missing all application data while reporting success.
 
 ```bash
 DATE=$(date -u +%Y%m%d)
 
 # Connection details come from the environment rather than a URL — see the
 # note on PGPASSWORD below.
-export PGHOST="aws-<n>-eu-west-1.pooler.supabase.com"
+export PGHOST="aws-0-eu-west-1.pooler.supabase.com"
 export PGPORT=5432
 export PGDATABASE=postgres
 export PGUSER="postgres.tugfhwiqvwrpvawpjwmd"
 read -rs PGPASSWORD && export PGPASSWORD   # paste the password, it won't echo
 
-# 1. Roles — database users and their permissions. Roles are cluster-wide,
-#    not per-database, which is why this uses pg_dumpall (cluster level),
-#    not pg_dump (single-database level). Must be restored FIRST, since
-#    schema objects (e.g. RLS policies) can reference roles that don't
-#    exist yet otherwise.
-pg_dumpall --roles-only -f "roles_$DATE.sql"
+# 1. Roles — cluster-wide database users, which is why this uses pg_dumpall
+#    (cluster level) rather than pg_dump (single-database level).
+pg_dumpall --roles-only --no-role-passwords -f "roles_$DATE.sql"
 
 # 2. Schema — table structures, RLS policies, functions. No row data.
 pg_dump --schema-only --no-owner --no-privileges \
-  --schema=public -f "schema_$DATE.sql"
+  --schema=public --schema=app -f "schema_$DATE.sql"
 
-# 3. Data — every row, no table structure. Restored last, once 1 and 2 exist.
+# 3. Auth data — the user accounts. Must be restored BEFORE public data.
 pg_dump --data-only --no-owner --no-privileges \
-  --schema=public --schema=auth -f "data_$DATE.sql"
+  --schema=auth --exclude-table=auth.schema_migrations \
+  -f "authdata_$DATE.sql"
+
+# 4. Public data — the application's own rows.
+pg_dump --data-only --no-owner --no-privileges \
+  --schema=public -f "data_$DATE.sql"
 ```
+
+Every flag above is here because the restore test (section 4) proved it was needed. None is decorative.
 
 - **`PGPASSWORD` instead of a connection URL.** `postgresql://user:PASSWORD@host/db` breaks if the password contains `@ / # ? :` — the URL parser splits on them and the resulting error names the wrong host, so it reads like a networking problem rather than a quoting bug. Passing credentials through the standard `PG*` environment variables sidesteps that entirely. (**Never** commit the password; it belongs in `.env.local` or a GitHub Actions secret, same rule as any other secret.)
 - **`--no-owner --no-privileges`.** The `postgres` role on Supabase is not a superuser, so it cannot restore `ALTER ... OWNER TO supabase_admin` statements. Dumping them guarantees a restore that errors on almost every object.
-- **`--schema=public` on the schema dump.** A bare `pg_dump --schema-only` also dumps Supabase's own managed schemas (`auth`, `storage`, `realtime`, `extensions`, `vault`, `graphql`). Those already exist in any project you restore into, so the restore collides with itself. Everything this project owns lives in `public` — verified against `supabase/migrations/`, which creates no other schema.
-- **`--schema=auth` on the *data* dump only.** Rows in `auth.users` are the user accounts. The schema is Supabase's to manage, but losing every login is not an acceptable restore, so the rows come along.
+- **`--no-role-passwords`.** All 16 roles in this cluster are Supabase's own (`anon`, `authenticated`, `service_role`, the `supabase_*` set). Not one can be restored into a Supabase target — they are reserved roles that only a superuser may modify — and Supabase recreates them itself anyway. The file is still worth taking, because a *plain Postgres* restore target does need `anon`/`authenticated` to exist for the RLS policies to apply. What it should not carry is SCRAM password hashes for roles nobody can restore: credential material in the blob store, buying nothing.
+- **`--schema=public --schema=app` on the schema dump.** A bare `pg_dump --schema-only` also drags in Supabase's managed schemas (`auth`, `storage`, `realtime`, `extensions`, `vault`, `graphql`), which already exist in any project you restore into. But `public` alone is *not* enough: this project also owns `app`, which holds the RLS helper functions — `app.is_admin()`, `app.can_write()`, `app.owns_organisation()` and the rest — that every policy in `public` calls. Dump `public` without `app` and the restore fails creating the first policy, because the function it references does not exist. (`create schema if not exists app;` appears in three migrations; an earlier version of this document wrongly claimed `public` was the only schema.)
+- **`--exclude-table=auth.schema_migrations`.** Supabase's own auth-migration bookkeeping. `postgres` has no write permission on it, so restoring it fails — and because `pg_dump` emits `auth` before `public` when both are in one file, that single permission error aborted the restore *before any application data loaded at all*. Splitting auth and public into separate files is the other half of this fix: a Supabase-internal problem can no longer block the rows we actually care about.
+- **Auth data before public data.** `public.users.id` is a foreign key to `auth.users(id)`. Reverse the order and every row fails.
 - `$(date -u +%Y%m%d)` is shell command substitution: it runs `date`, formats it as YYYYMMDD, and drops the result into the filename, e.g. `schema_20260723.sql`. `-u` for UTC, so a dump taken at 00:30 BST doesn't land under yesterday's date. Note the `%` — `date +20260723` (no `%`) just echoes that literal text back instead of computing anything, a mistake worth knowing about since it silently "works" today and silently breaks tomorrow.
-- All three are plain-text SQL files. Restoring means replaying them back through `psql`, in the order **roles → schema → data** — see [section 4](#4-restore-process).
+- All four are plain-text SQL files. Restoring means replaying them back through `psql`, in the order **roles → schema → authdata → data** — see [section 4](#4-restore-process).
 
 **What these files contain.** `data_*.sql` includes every row of `auth.users` — email addresses and password hashes — alongside the organisation and contact data in `public`. `roles_*.sql` includes role password hashes. These dumps are the most sensitive artefacts the project produces, which is what makes the Blob store's private access (R9) load-bearing rather than a nicety: anyone who can read the store can read the whole database.
 
@@ -122,9 +128,9 @@ A manual step that depends on someone remembering to run it is not a backup stra
 
 1. Triggers on a cron schedule (daily at 03:00 UTC) and on `workflow_dispatch` (a manual "Run workflow" button in GitHub's Actions tab, used to test it on demand instead of waiting for 3am).
 2. Checks out the repo, then installs `postgresql-client-17` (the runner's own client is version 16, which cannot dump a 17 server — section 0) and a pinned `vercel@57`. The CLI is pinned deliberately: an unpinned nightly job picks up whatever was published that day, including breaking changes to `vercel blob` flags.
-3. Runs all three dumps from section 2 (roles, schema, data), connecting through the session pooler with `PGUSER`/`PGPASSWORD`. The password is a **GitHub Actions secret** (`SUPABASE_PROD_DB_PASSWORD`) — never in the workflow file itself.
+3. Runs all four dumps from section 2 (roles, schema, auth data, public data), connecting through the session pooler with `PGUSER`/`PGPASSWORD`. The password is a **GitHub Actions secret** (`SUPABASE_PROD_DB_PASSWORD`) — never in the workflow file itself.
 4. **Fails loudly rather than silently producing nothing.** The free-plan production project auto-pauses after inactivity; if that happens the dump step fails, and a failed step fails the job, which GitHub emails to everyone watching the repo by default. That email is the "fail visibly" requirement, satisfied without new infrastructure. The dump commands are deliberately *not* wrapped in `|| true`. The step also rejects any dump file under 1KB, because a truncated or empty dump that uploads cleanly is worse than a failure — it looks like a backup.
-5. Uploads all three files to Vercel Blob using a `BLOB_READ_WRITE_TOKEN` secret, under a path prefixed with the date, with `--access private` and `--allow-overwrite` (so a manual re-run on the same day replaces the day's files instead of erroring).
+5. Uploads all four files to Vercel Blob using a `BLOB_READ_WRITE_TOKEN` secret, under a path prefixed with the date, with `--access private` and `--allow-overwrite` (so a manual re-run on the same day replaces the day's files instead of erroring).
 6. Deletes blobs older than 30 days (Vercel Blob has no automatic lifecycle/expiry, unlike R2 or S3, so this is a script step rather than a platform setting). The prune sweeps a *window* — every date from 31 to 180 days ago — not just the single day that has fallen out of retention. If it only pruned one day, any run the job missed would leave that day's dumps behind permanently, and personal data outliving its documented retention period is precisely what R8 exists to prevent. The 180-day window is the honest limit: if the workflow is dead longer than that, older dumps need pruning by hand.
 
 See [`backup-setup.md`](backup-setup.md) for the exact secrets and variables to create and where to get each value from.
@@ -243,30 +249,73 @@ The comparison table is kept as the record of why F was chosen over the others, 
 
 ### 4. Restore process (Free plan)
 
-Order matters: **roles, then schema, then data.** Restoring data before the schema exists fails (no tables to insert into); restoring schema before roles exist can fail if a policy references a role that doesn't exist yet.
+Order matters: **roles → schema → auth data → public data.** Data before schema fails (no tables to insert into); public data before auth data fails on the `public.users` → `auth.users` foreign key.
 
-1. Provision a target: a fresh Supabase project, or an empty local Postgres instance (`supabase start`) for a dry run.
-2. Restore in order:
+This procedure is written from an actual run (see [Restore test results](#restore-test-results)), not from what ought to work. The awkward steps are in it because without them the restore stops.
+
+1. Provision a target. A local Supabase stack is the cheapest option and behaves closely enough to a fresh project:
    ```bash
-   psql "<target-db-url>" -v ON_ERROR_STOP=1 -f roles_20260723.sql
-   psql "<target-db-url>" -v ON_ERROR_STOP=1 -f schema_20260723.sql
-   psql "<target-db-url>" -v ON_ERROR_STOP=1 -f data_20260723.sql
+   supabase db reset          # empty database with the auth schema and Supabase roles present
+   LOCAL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
    ```
+2. **Drop `public` without recreating it.** The schema dump contains `CREATE SCHEMA public;`, so the target must not already have one:
+   ```bash
+   psql "$LOCAL" -c 'drop schema public cascade;'
+   ```
+   Recreating it by hand — the obvious instinct — makes the restore fail on its first statement. This applies to a fresh Supabase project too, since those ship with `public` already present.
+3. Restore roles, **without** `ON_ERROR_STOP`:
+   ```bash
+   psql "$LOCAL" -f roles_20260727.sql
+   ```
+   This one file is expected to produce a wall of errors, all of one of three kinds: `role "x" already exists`, `"x" is a reserved role, only superusers can modify it`, `permission denied to grant/alter`. Every role in the dump is Supabase-managed and already present. Skim for anything that is *not* one of those three shapes; there should be nothing.
+4. Restore schema, auth data, then public data — these three **must** run clean:
+   ```bash
+   psql "$LOCAL" -v ON_ERROR_STOP=1 -f schema_20260727.sql
+   psql "$LOCAL" -v ON_ERROR_STOP=1 -f authdata_20260727.sql
+   psql "$LOCAL" -c 'truncate public.users cascade;'
+   psql "$LOCAL" -v ON_ERROR_STOP=1 -f data_20260727.sql
+   ```
+   **Why the `truncate` in the middle.** The `on_auth_user_created` trigger on `auth.users` calls `app.handle_new_auth_user()`, which inserts a `public.users` row for every account. Restoring auth data therefore fires it once per user and pre-populates `public.users` with *generated* rows, which then collide with the real backed-up ones. The obvious fix — disable the trigger — is not available: it lives on `auth.users`, owned by `supabase_auth_admin`, and `postgres` gets `must be owner of table users`. Clearing the generated rows immediately before loading the real ones is what works.
 
-   **`-v ON_ERROR_STOP=1` is not optional.** By default `psql` prints an error, carries on to the next statement, and exits 0. A restore that dropped half the tables therefore *looks* like it succeeded. Since the entire point of R4 is proving a restore works, a silent partial restore is the exact failure this test exists to catch.
-
-   Two expected-and-fine exceptions when restoring into a **fresh Supabase project** (rather than empty Postgres): the roles file will fail on roles Supabase already creates (`postgres`, `authenticator`, `anon`, …), and `data_*.sql` will conflict on the `auth.users` rows Supabase seeds. Read the error, confirm it is that and not something else, then re-run the affected file without `ON_ERROR_STOP` — never skip straight to running everything without it.
-3. Verify row counts / spot-check key tables against what's expected. Compare against the source:
+   **`-v ON_ERROR_STOP=1` is not optional here.** By default `psql` prints an error, carries on, and exits 0. In the recorded test run, one permission error on a Supabase-internal table aborted a restore that had loaded *zero* application rows — and without this flag it would have exited 0 and been written up as a pass.
+5. Verify against the source, don't eyeball:
    ```sql
    select relname, n_live_tup from pg_stat_user_tables
    where schemaname = 'public' order by relname;
    ```
-   Run it on both databases and diff. `n_live_tup` is an estimate, so follow up with an exact `count(*)` on the two or three tables that matter most (`ORGANISATIONS`, `CONTACTS`, `USERS`).
-4. Update any environment variables (`NEXT_PUBLIC_SUPABASE_URL`, etc.) if the restore target is a new project rather than the original.
-5. Record the result in the restore test log below — date, who ran it, target, row counts checked, anything that went wrong. An unrecorded restore test does not satisfy R4.
+   Run on both databases and diff. `n_live_tup` is an estimate, so follow up with exact counts on what matters:
+   ```sql
+   select (select count(*) from auth.users) auth_users,
+          (select count(*) from public.users) public_users,
+          (select count(*) from public.organisations) orgs,
+          (select count(*) from public.audit_log) audit;
+   ```
+6. Update any environment variables (`NEXT_PUBLIC_SUPABASE_URL`, etc.) if the restore target is a new project rather than the original.
+7. Record the result in the log below — date, who ran it, source, target, counts, anything that went wrong. An unrecorded restore test does not satisfy R4.
+
+**Known gap, not yet closed.** The `on_auth_user_created` trigger sits on `auth.users`, so it is in none of these dumps. Restore into a genuinely fresh project and new signups will not populate `public.users` until the migrations are applied. The robust long-term shape is probably: apply migrations to the fresh project first (they are the schema's source of truth per SOP §7), then restore data only, treating `schema_*.sql` as a point-in-time cross-check rather than the restore mechanism. Raised here rather than silently changed, because it is a change to the strategy and not just to a flag.
 
 ### Restore test results
 
-_Not yet run._ This section is R4 and the story is not done until it has an entry.
+**27 Jul 2026 — passed, with five defects found and fixed.** Run by Bashir Bobboi.
+
+- **Source:** `180connect-staging` (`cgbfhhdeapasniudyyds`), via the session pooler. Production was not used: it has no tables and no `supabase_migrations` schema — migrations have never been applied to it — so a restore test against it would have proved nothing.
+- **Target:** local Supabase stack (`supabase db reset`), PostgreSQL 17.
+- **Client:** `pg_dump` 18.3 locally. CI installs `postgresql-client-17`; both are ≥ the 17.6 server, which is the constraint that matters.
+- **Result:** exact match on every count checked — `auth.users` 10/10, `public.users` 8/8, `organisations` 0/0, `audit_log` 1/1.
+
+Five defects, each fixed in the workflow or the procedure above:
+
+| # | Defect | Fix |
+|---|---|---|
+| 1 | `auth.schema_migrations` is not writable by `postgres`, and sorts before `public`, so the restore aborted having loaded **no application data at all** | `--exclude-table`, and auth/public split into separate dump files |
+| 2 | Schema dump emits `CREATE SCHEMA public;`, which collides with the `public` every Supabase project already has | Drop `public` without recreating it |
+| 3 | `--schema=public` omitted the `app` schema, so RLS policies referenced helper functions that did not exist | `--schema=public --schema=app` |
+| 4 | `on_auth_user_created` pre-creates `public.users` rows during the auth restore; the trigger cannot be disabled by `postgres` | `truncate public.users cascade` between the auth and public restores |
+| 5 | Roles dump carried 10 SCRAM password hashes for roles that cannot be restored into Supabase at all | `--no-role-passwords` |
+
+Defect 1 is the one worth remembering. Without `ON_ERROR_STOP=1` it would have surfaced as a successful restore containing none of the data.
+
+**Still outstanding for full R4 sign-off:** re-run against production once production actually has a schema. This run proves the *procedure*; only a production run proves the *artifact*.
 
 **Restore test log (R4):** see [Restore test results](#restore-test-results) at the bottom of this doc.

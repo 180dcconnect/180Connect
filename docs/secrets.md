@@ -52,9 +52,41 @@ developer an empty `.env.local` and no explanation.
 The other two stores are not banned, they are just narrower:
 
 - **GitHub Actions secrets** — only if CI itself needs to authenticate to
-  something. It does not today; the secret scan needs no credentials.
+  something. It now does, in two workflows; see the register below.
 - **Supabase secrets** — only for Edge Functions, which read their own store
   rather than Vercel's. We have none yet.
+
+### GitHub Actions secrets and variables
+
+These are held in **Settings → Secrets and variables → Actions**, not in Vercel,
+because the workflows run on GitHub's infrastructure and never see Vercel's
+environment. Nothing the deployed application reads belongs here.
+
+A **secret** is encrypted and masked in logs. A **variable** is plain text, used
+only where the value is already public.
+
+| Name | Kind | Used by | What it is |
+| --- | --- | --- | --- |
+| `SUPABASE_ACCESS_TOKEN` | Secret | `migrations.yml` | Supabase personal access token, for the CLI. Account → Access Tokens. |
+| `SUPABASE_STAGING_REF` | Variable | `migrations.yml` | Staging project ref. Public — it is in the project URL. |
+| `SUPABASE_PROD_REF` | Variable | `backup-production.yml` | Production project ref. Public, same reasoning. |
+| `SUPABASE_PROD_POOLER_HOST` | Variable | `backup-production.yml` | Session-pooler hostname for production. Public — a shared regional endpoint. |
+| `SUPABASE_PROD_DB_PASSWORD` | Secret | `backup-production.yml` | Production database password. Project Settings → Database. |
+| `BLOB_READ_WRITE_TOKEN` | Secret | `backup-production.yml` | Read/write token for the Vercel Blob store holding backups. |
+
+Setup instructions for the backup ones are in
+[`Backups/backup-setup.md`](Backups/backup-setup.md).
+
+Two of these deserve more care than the rest. `SUPABASE_PROD_DB_PASSWORD` is
+direct, unmediated access to production — it bypasses RLS entirely, unlike the
+publishable key. `BLOB_READ_WRITE_TOKEN` reads the nightly database dumps, which
+contain every row of `public` plus `auth.users`, email addresses and password
+hashes included. Either one leaking is equivalent to leaking the database.
+
+Because these live in repository-level storage, every workflow in the repo can
+read them, and anyone who can merge a workflow file can exfiltrate them. That is
+accepted for now given the team size and a private repo, but it is the reason
+workflow changes deserve a real review rather than a rubber stamp.
 
 ## Onboarding a new developer
 
@@ -134,7 +166,10 @@ mentioned is the expensive version.
 1. Say which key, in which repository, and roughly when.
 2. Rotate it at the source — Supabase dashboard → **API Keys** → roll the
    affected key; or the relevant provider's console.
-3. Update the value in Vercel for every environment that used it.
+3. Update the value in Vercel for every environment that used it, **and in
+   GitHub Actions secrets** if it is one of the CI values listed above — those
+   are a separate store and will keep using the old value otherwise, so the
+   nightly backup starts failing a day later for no obvious reason.
 4. Redeploy so running instances pick up the new value.
 
 Removing the commit is not step one and does not replace rotation. Anyone who

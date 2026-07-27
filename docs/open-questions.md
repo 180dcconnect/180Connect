@@ -10,15 +10,15 @@ Last updated: 14 July 2026 (Week 1, Foundations).
 
 These are conscious departures. They are recorded here so they are not mistaken for oversights, and so the PRD's acceptance criteria are not quietly assumed to be met.
 
-### D-01 — No backups or point-in-time recovery
+### D-01 — Backups exist; point-in-time recovery still doesn't (updated 27 July 2026)
 
 **PRD says:** §16.3 step 17 requires daily backups and point-in-time recovery. MVP acceptance journey **#13** is *"Backup restore is demonstrated and documented."*
 
-**We are doing:** Neither. The Supabase free plan provides no PITR, and free projects pause after inactivity.
+**We are doing:** The third option below — a scheduled `pg_dump` to external storage — was built and shipped as F225 (closed 25 July 2026). [`.github/workflows/backup-production.yml`](../.github/workflows/backup-production.yml) dumps the production database nightly to Vercel Blob storage with a 30-day retention window; restore steps are documented in [F225-database-backups.md](Backups/F225-database-backups.md). True PITR is still not provided — the Supabase free plan doesn't offer it, and this workflow is daily snapshots, not continuous replay — so recovery is only ever accurate to the last nightly dump, not to the moment before a failure.
 
-**Consequence:** Acceptance journey #13 **cannot pass** as written. There is no recovery path if the database is lost or corrupted — including by our own migration.
+**Consequence:** Acceptance journey #13 can now largely pass — backup and restore are demonstrated and documented — but PITR-level recovery (restoring to an arbitrary point in time rather than the last 03:00 UTC snapshot) is still not possible on the free plan.
 
-**To resolve:** Either upgrade to Supabase Pro (~$25/month, which also removes the pausing and the 500 MB cap), or formally descope acceptance journey #13 and amend the PRD through change control. A third option is a scheduled `pg_dump` to external storage — cheaper than Pro, weaker than PITR, and someone has to own it.
+**To resolve (if PITR is still wanted):** Upgrade to Supabase Pro (~$25/month, which also removes the pausing and the 500 MB cap) for true PITR, or accept nightly-snapshot recovery as sufficient and formally close this item.
 
 **Owner:** Project Leader. **Decide by:** before real organisation data is loaded.
 

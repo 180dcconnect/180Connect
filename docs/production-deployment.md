@@ -1,7 +1,10 @@
 # Production Deployment (F230)
 
-**Status:** Verified working
-**Last updated:** 22 July 2026
+**Status:** Deployment pipeline verified working 22 July 2026. Re-checked against
+the current environment schema and F225's backup workflow on 27 July 2026 —
+see the flagged items below, which still need Bashir to confirm inside the
+Vercel dashboard (this component owner has no Vercel access — see footnote 2).
+**Last updated:** 27 July 2026
 **Component Owner:** Ben. **Reviewer:** Bashir.
 
 ---
@@ -37,9 +40,24 @@ feature branch → PR → dev (auto-deploys; shared preview/staging) → PR → 
 
 ## Environment variables
 
-Production's Environment Variables in the Vercel dashboard were checked against the startup-validation schema in `src/lib/env.ts` (added by F231) and cover everything currently marked `required: true`: `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SUPABASE_URL`, and one Supabase key (`NEXT_PUBLIC_SUPABASE_ANON_KEY`, present and valid — `env.ts` accepts this as a fallback for the newer `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` name). Preview (`dev`) is not fully required to be re-verified variable-by-variable, since a build with a missing required variable fails startup outright (`assertEnv()` in `src/instrumentation.ts`) — and the most recent `dev` deployment succeeded, which is itself evidence the required variables are present there too.
+The 22 July check covered every variable that was `required: true` in `src/lib/env.ts` (added by F231) at the time: `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SUPABASE_URL`, and one Supabase key. Since then `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (F003, the login CAPTCHA) has also become `required: true` — the server now refuses to start without it. **This has not been re-confirmed against the live Vercel production dashboard**, only against the schema in code; whoever holds Vercel access needs to check Settings → Environment Variables for production and confirm a real (non-test) Turnstile site key is set there, matching the secret configured in that Supabase project's Attack Protection settings.
+
+Two more are worth a deliberate look even though they're `required: false` (so a missing value won't fail the build): `SESSION_ACTIVITY_SECRET` — optional locally, but the schema's own comment says staging and production must set it, since without it the session-expiry record is unsigned and forgeable — and `NEXT_PUBLIC_SENTRY_DSN` / `SENTRY_ENVIRONMENT`, which is how F226 (error logging, closed 20 July) actually reaches Sentry in production rather than just the platform console.
+
+The fact that a build with a missing *required* variable fails startup outright (`assertEnv()` in `src/instrumentation.ts`) is good evidence Preview (`dev`) has its required set covered, since the most recent `dev` deployment succeeded — but it says nothing about the `required: false` ones above, which fail silently, not loudly, if left unset.
 
 Full variable-by-variable reference: [environment-variables.md](environment-variables.md).
+
+---
+
+## Backups and error logging (AC2)
+
+Both landed on `dev` after the 22 July check and are now merged into this branch:
+
+- **Backups (F225, closed 25 July):** [`.github/workflows/backup-production.yml`](../.github/workflows/backup-production.yml) dumps the production database nightly at 03:00 UTC (roles, schema, auth data, public data as four separate files) and uploads them to Vercel Blob storage, pruning anything older than 30 days. It needs four GitHub repository variables/secrets set — `SUPABASE_PROD_REF`, `SUPABASE_PROD_POOLER_HOST`, `SUPABASE_PROD_DB_PASSWORD`, `BLOB_READ_WRITE_TOKEN` — under Settings → Secrets and variables → Actions. **Not yet confirmed these are actually set on the real repo** — check the Actions tab for a green run, or trigger one manually via `workflow_dispatch`. Full detail and the restore procedure: [F225-database-backups.md](Backups/F225-database-backups.md), [backup-setup.md](Backups/backup-setup.md).
+- **Error logging (F226, closed 20 July):** wired through `NEXT_PUBLIC_SENTRY_DSN` — see the environment variables section above for what still needs confirming in the Vercel dashboard.
+
+Both are required for F230's AC2 ("backup and error logging requirements active and functioning, not just staging"). The workflow file existing and the schema wiring being merged is not the same as confirming they are live and running against the real production project — that's the one check left before AC2 can be marked done in good faith.
 
 ---
 
@@ -74,6 +92,6 @@ Editing a variable in Settings → Environment Variables does **not** update the
 
 ---
 
-[^1]: Custom domain vs default `.vercel.app` URL is still an open question on the F230 ticket ("Blocked By: Hosting provider/domain"). 
+[^1]: Custom domain vs default `.vercel.app` URL was an open question on the F230 ticket ("Blocked By: Hosting provider/domain"). **Resolved 27 July 2026: the default `https://180connect.vercel.app` URL is the confirmed production address** — no custom domain is being set up for this project.
 
 [^2]: Vercel's Hobby (free) plan allows only one real collaborator on a private-repo project. Deployments are gated by whether the *commit author's* GitHub account is recognized as a contributor on the Vercel project — logging into a shared Vercel dashboard account does not bypass this. Reproduced 22 July 2026: a push authored by Ben to `220-f225-database-backups` was rejected with *"The deployment was blocked because the commit author did not have contributing access to the project on Vercel. The Hobby Plan does not support collaboration for private repositories."* Only Bashir's commits currently deploy.

@@ -49,6 +49,10 @@ Project Root/
 ### Example
 
 ```bash
+# Absolute base URL this deployment is served from. Required — the server
+# will not start without it (src/lib/env.ts).
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
 # Supabase (Development/Preview Project)
 # From: Supabase Dashboard → Project → API → Copy values
 NEXT_PUBLIC_SUPABASE_URL=https://cgbfhhdeapasniudyyds.supabase.co
@@ -72,12 +76,19 @@ NEXT_PUBLIC_LOG_LEVEL=debug
 NEXT_PUBLIC_ENABLE_AI_BOOKLETS=true
 NEXT_PUBLIC_ENABLE_SCHEDULED_SENDS=true
 
+# Seed scripts only — Postgres connection string for the DB `npm run seed` /
+# `npm run seed:clear` write to (F233). The app never reads this. Use the SESSION
+# POOLER string (dashboard -> Connect -> Session pooler): it is IPv4 and works
+# everywhere; the direct db.<ref> string is IPv6-only. Refuses the production
+# project. See docs/seed-data.md.
+SUPABASE_DB_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
 # Cron/scheduled jobs (shared secret)
 CRON_SECRET=local-dev-secret-12345
 
 # Analytics (optional; can be blank locally)
 NEXT_PUBLIC_POSTHOG_KEY=
-SENTRY_DSN=
+NEXT_PUBLIC_SENTRY_DSN=
 ```
 
 ---
@@ -91,6 +102,9 @@ SENTRY_DSN=
 ### Example
 
 ```bash
+# Absolute base URL this deployment is served from. Required.
+NEXT_PUBLIC_APP_URL=https://<staging-url>
+
 # Supabase (Dev/Preview Project — shared with local dev)
 NEXT_PUBLIC_SUPABASE_URL=https://cgbfhhdeapasniudyyds.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<redacted>
@@ -117,7 +131,7 @@ CRON_SECRET=<shared-secret>
 
 # Analytics
 NEXT_PUBLIC_POSTHOG_KEY=<redacted>
-SENTRY_DSN=<redacted>
+NEXT_PUBLIC_SENTRY_DSN=<redacted>
 ```
 
 ---
@@ -131,6 +145,9 @@ SENTRY_DSN=<redacted>
 ### Example
 
 ```bash
+# Absolute base URL this deployment is served from. Required.
+NEXT_PUBLIC_APP_URL=https://180connect.vercel.app
+
 # Supabase (Production Project)
 NEXT_PUBLIC_SUPABASE_URL=https://<prod-project-id>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<redacted>
@@ -157,7 +174,7 @@ CRON_SECRET=<shared-secret>
 
 # Analytics
 NEXT_PUBLIC_POSTHOG_KEY=<redacted>
-SENTRY_DSN=<redacted>
+NEXT_PUBLIC_SENTRY_DSN=<redacted>
 ```
 
 ---
@@ -170,19 +187,32 @@ SENTRY_DSN=<redacted>
 
 | Variable | Value (Dev/Preview) | Value (Production) | When Revealed | Notes |
 |---|---|---|---|---|
+| `NEXT_PUBLIC_APP_URL` | Vercel preview URL | `https://180connect.vercel.app` | Always | **Required** — server refuses to start without it |
 | `NEXT_PUBLIC_SUPABASE_URL` | cgbfhhdeapasniudyyds.supabase.co | prod-project.supabase.co | Always | Public, safe to expose |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | dev-key | prod-key | Always | Public publishable key, limited permissions. Preferred over the anon key |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | dev-key | prod-key | Always | Legacy name for the publishable key; read as a fallback. Set one or the other |
 | `AUTH_ALLOWED_EMAIL_DOMAIN` | `180dc.org` | `180dc.org` | Only server-side | Email domain users must sign in from. Optional — defaults to `180dc.org` |
+| `PASSWORD_RESET_WINDOW_SECONDS` | `3600` | `3600` | Only server-side | Password-recovery link lifetime in seconds. Keep aligned with the Supabase recovery OTP expiry |
 | `SUPABASE_SERVICE_ROLE_KEY` | dev-key | prod-key | Only server-side | **SENSITIVE:** Never expose to browser |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | `1x00000000000000000000AA` (test key) locally; real key on preview | real key | Always | **Required** (F003) — public site key for the login CAPTCHA. Must match the secret configured in that project's Supabase Attack Protection settings |
+| `TURNSTILE_SECRET_KEY` | test secret locally | not set | Only server-side | **SENSITIVE.** Only the local Supabase stack reads it, via `supabase/config.toml`. Hosted environments hold it in the Supabase dashboard instead |
 | `NEXT_PUBLIC_ENV` | `staging` | `production` | Always | Tells app which environment it's in |
 | `GMAIL_CLIENT_ID` | dev-id | prod-id | Always | Public OAuth client ID |
 | `GMAIL_CLIENT_SECRET` | dev-secret | prod-secret | Only server-side | **SENSITIVE:** Never expose |
 | `OPENAI_API_KEY` | test-key | prod-key | Only server-side | **SENSITIVE:** Never expose |
 | `CRON_SECRET` | shared-secret | shared-secret | Only server-side | **SENSITIVE:** Auth for `/api/cron/*` routes |
+| `SESSION_ACTIVITY_SECRET` | random 32+ chars | random 32+ chars | Only server-side | **SENSITIVE:** Signs the inactivity record behind session expiry (F007). Optional — unset means sessions still expire after 30 idle minutes but the record is unsigned and forgeable, so set it everywhere hosted. `openssl rand -base64 32`. Rotating it signs every open session out once |
 | `NEXT_PUBLIC_POSTHOG_KEY` | dev-key | prod-key | Always | Public analytics key |
 | `NEXT_PUBLIC_SENTRY_DSN` | dev-dsn | prod-dsn | Always | Public error reporting endpoint — where captured errors are sent (F226). Unset ⇒ errors log to the platform console instead |
 | `SENTRY_ENVIRONMENT` | `staging` | `production` | Only server-side | Environment tag on captured errors (F226). Optional — falls back to `VERCEL_ENV` |
+| `SUPABASE_DB_URL` | session-pooler string | not set | Only server-side | **SENSITIVE:** Read by `npm run seed` / `npm run seed:clear` only, never by the app. Use the session pooler string, not the IPv6-only direct one. The scripts refuse to run against production ([docs](seed-data.md)) |
+
+> The authoritative list is `SCHEMA` in [`src/lib/env.ts`](../src/lib/env.ts),
+> mirrored into [`.env.example`](../.env.example) — startup validation is driven
+> from it, so a variable missing there is not checked no matter what this table
+> says. `NEXT_PUBLIC_ENV`, `GMAIL_*`, `OPENAI_API_KEY` and
+> `NEXT_PUBLIC_POSTHOG_KEY` above are planned, not yet declared in the schema
+> and not yet read by any code.
 
 ### How to Set in Vercel
 

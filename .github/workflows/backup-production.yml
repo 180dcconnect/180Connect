@@ -147,17 +147,21 @@ jobs:
       # supported, but the environment form is what Vercel documents, and it
       # keeps the token out of the process's argument list.
       #
-      # VERCEL_TOKEN is optional and only set when the secret exists. The first
-      # CI run of this workflow failed here with "No existing credentials found.
-      # Please run `vercel login` or pass --token", which is the CLI's
-      # account-auth error rather than its Blob-credential one. That error could
-      # not be reproduced locally: with an empty HOME, no config and no account
-      # token, `vercel blob put --rw-token` reaches the Blob API in every case
-      # tried (valid-format, malformed, whitespace-padded and empty tokens each
-      # produce a *Blob* error, never this one). Vercel's own docs show the RW
-      # token used alone, including for raw curl against private blobs. So the
-      # account token is carried as a fallback rather than a diagnosis — if the
-      # secret is absent the step behaves exactly as before.
+      # BOTH credentials are required. The Blob read-write token is not enough
+      # on its own: without VERCEL_TOKEN this step fails with "No existing
+      # credentials found. Please run `vercel login` or pass --token" even when
+      # the RW token is present, correctly named and well-formed. Confirmed by
+      # run 30335243869 (failed, no VERCEL_TOKEN) versus 30335757695 (passed,
+      # same RW token, VERCEL_TOKEN added and nothing else changed).
+      #
+      # Worth knowing because testing with a fake token suggests the opposite.
+      # An invalid token fails at store resolution — "Vercel Blob: This store
+      # does not exist" — which happens *before* the account-auth check, so the
+      # RW token looks sufficient right up until you use a real one. Only a
+      # valid token gets far enough to reveal the second requirement.
+      #
+      # The token is still guarded rather than assumed: if the secret is absent
+      # the step says so explicitly instead of failing with the CLI's message.
       - name: Upload dumps to Vercel Blob
         run: |
           set -euo pipefail
@@ -176,14 +180,13 @@ jobs:
             *) echo "::error::BLOB_READ_WRITE_TOKEN does not start with 'vercel_blob_rw_'. It is probably not a Blob read-write token — re-copy it from Vercel → Storage → the store → Tokens." ; exit 1 ;;
           esac
 
-          # An empty VERCEL_TOKEN would be treated as a supplied-but-invalid
-          # token, so remove it entirely when the secret is not set.
+          # Fail here rather than letting the CLI report a generic credentials
+          # error four lines later. The RW token alone does not complete a put.
           if [ -z "${VERCEL_TOKEN:-}" ]; then
-            unset VERCEL_TOKEN
-            echo "No VERCEL_TOKEN set; relying on the Blob read-write token alone."
-          else
-            echo "VERCEL_TOKEN is set; the CLI will use it for account auth."
+            echo "::error::VERCEL_TOKEN is not set. The Blob read-write token alone is not enough to upload — see docs/Backups/backup-setup.md step 6."
+            exit 1
           fi
+          echo "VERCEL_TOKEN is set; the CLI will use it for account auth."
 
           for f in dumps/*.sql; do
             name=$(basename "$f")
@@ -221,8 +224,8 @@ jobs:
             done
           done
           echo "Pruning ${#paths[@]} candidate paths (${RETENTION_DAYS}-${PRUNE_WINDOW_DAYS} days old)"
-          # Same credential handling as the upload step above.
-          if [ -z "${VERCEL_TOKEN:-}" ]; then unset VERCEL_TOKEN; fi
+          # Both credentials again — see the upload step's comment for why the
+          # Blob read-write token is not sufficient on its own.
           vercel blob del "${paths[@]}"
         env:
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}

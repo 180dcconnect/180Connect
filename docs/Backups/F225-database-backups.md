@@ -130,10 +130,32 @@ A manual step that depends on someone remembering to run it is not a backup stra
 2. Checks out the repo, then installs `postgresql-client-17` (the runner's own client is version 16, which cannot dump a 17 server — section 0) and a pinned `vercel@57`. The CLI is pinned deliberately: an unpinned nightly job picks up whatever was published that day, including breaking changes to `vercel blob` flags.
 3. Runs all four dumps from section 2 (roles, schema, auth data, public data), connecting through the session pooler with `PGUSER`/`PGPASSWORD`. The password is a **GitHub Actions secret** (`SUPABASE_PROD_DB_PASSWORD`) — never in the workflow file itself.
 4. **Fails loudly rather than silently producing nothing.** The free-plan production project auto-pauses after inactivity; if that happens the dump step fails, and a failed step fails the job, which GitHub emails to everyone watching the repo by default. That email is the "fail visibly" requirement, satisfied without new infrastructure. The dump commands are deliberately *not* wrapped in `|| true`. The step also rejects any dump file under 1KB, because a truncated or empty dump that uploads cleanly is worse than a failure — it looks like a backup.
-5. Uploads all four files to Vercel Blob using a `BLOB_READ_WRITE_TOKEN` secret, under a path prefixed with the date, with `--access private` and `--allow-overwrite` (so a manual re-run on the same day replaces the day's files instead of erroring).
+5. Uploads all four files to Vercel Blob under a path prefixed with the date, with `--access private` and `--allow-overwrite` (so a manual re-run on the same day replaces the day's files instead of erroring). This needs **two** secrets, not one — see [Why the upload needs two credentials](#why-the-upload-needs-two-credentials) below.
 6. Deletes blobs older than 30 days (Vercel Blob has no automatic lifecycle/expiry, unlike R2 or S3, so this is a script step rather than a platform setting). The prune sweeps a *window* — every date from 31 to 180 days ago — not just the single day that has fallen out of retention. If it only pruned one day, any run the job missed would leave that day's dumps behind permanently, and personal data outliving its documented retention period is precisely what R8 exists to prevent. The 180-day window is the honest limit: if the workflow is dead longer than that, older dumps need pruning by hand.
 
 See [`backup-setup.md`](backup-setup.md) for the exact secrets and variables to create and where to get each value from.
+
+#### Why the upload needs two credentials
+
+The upload step needs **both** `BLOB_READ_WRITE_TOKEN` and `VERCEL_TOKEN`. The Blob read-write token, despite being the store-specific credential, does not complete an upload on its own — the Vercel CLI fails with:
+
+```
+Error: No existing credentials found. Please run `vercel login` or pass "--token"
+```
+
+even when the Blob token is present, correctly named and well-formed. Adding `VERCEL_TOKEN` and changing nothing else turns the same run green.
+
+This is worth recording because **testing it will actively mislead you**. Probe the CLI with a fake Blob token and it appears to need no account credential at all: an invalid token fails at *store resolution* —
+
+```
+Error: Vercel Blob: This store does not exist.
+```
+
+— and store resolution happens **before** the account-auth check. So every experiment with a made-up token gets a Blob-layer error and never reaches the second gate. Only a genuine Blob token gets far enough to reveal that a second credential is required. Vercel's own documentation reinforces the wrong conclusion here: it shows the read-write token used alone, including for raw `curl` against private blobs, which is true for direct API calls but not for `vercel blob put`.
+
+The evidence is two runs differing in exactly one variable: [30335243869](https://github.com/180dcconnect/180Connect/actions/runs/30335243869) failed with no `VERCEL_TOKEN`, [30335757695](https://github.com/180dcconnect/180Connect/actions/runs/30335757695) passed with it added.
+
+**Cost of this, and the way out.** A Vercel account token is account-wide, where the Blob token is scoped to one store, and any workflow in the repository can read it. The upload does not have to go through the CLI: `@vercel/blob` and a plain `curl` PUT both authenticate with `BLOB_READ_WRITE_TOKEN` alone, and either would let `VERCEL_TOKEN` be deleted. Left as-is deliberately, so the trade-off is visible rather than silently accepted.
 
 #### Storage destination options considered
 
@@ -316,6 +338,23 @@ Five defects, each fixed in the workflow or the procedure above:
 
 Defect 1 is the one worth remembering. Without `ON_ERROR_STOP=1` it would have surfaced as a successful restore containing none of the data.
 
-**Still outstanding for full R4 sign-off:** re-run against production once production actually has a schema. This run proves the *procedure*; only a production run proves the *artifact*.
+**Still outstanding for full R4 sign-off:** re-run against production once production holds real data. This run proves the *procedure*; only a production run proves the *artifact*.
+
+### Production backup runs
+
+**28 Jul 2026 — first successful production backup.** Run [30335757695](https://github.com/180dcconnect/180Connect/actions/runs/30335757695), triggered manually. Four files uploaded to the private Blob store under `backups/20260728/`:
+
+| file | size |
+|---|---|
+| `schema_20260728.sql` | 20,361 B |
+| `authdata_20260728.sql` | 6,694 B |
+| `roles_20260728.sql` | 5,643 B |
+| `data_20260728.sql` | 1,502 B |
+
+Production had schema but no rows at this point, which is why `data_*.sql` is small — it carries the per-table `COPY` headers and no data. That is a legitimately empty database, not a truncated dump, and it is the case the 1KB guard was sized against.
+
+Two earlier runs failed and are worth keeping in the record: [30242064570](https://github.com/180dcconnect/180Connect/actions/runs/30242064570) and [30335243869](https://github.com/180dcconnect/180Connect/actions/runs/30335243869), both on the missing `VERCEL_TOKEN` described above. The dump half of the workflow succeeded in all three.
+
+**Not yet demonstrated:** an unattended run. Every run so far has been `workflow_dispatch`. The 03:00 UTC cron firing green on its own is what actually evidences "backed up on a defined schedule"; until then the schedule is configured but unproven.
 
 **Restore test log (R4):** see [Restore test results](#restore-test-results) at the bottom of this doc.

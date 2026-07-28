@@ -73,15 +73,23 @@ only where the value is already public.
 | `SUPABASE_PROD_POOLER_HOST` | Variable | `backup-production.yml` | Session-pooler hostname for production. Public — a shared regional endpoint. |
 | `SUPABASE_PROD_DB_PASSWORD` | Secret | `backup-production.yml` | Production database password. Project Settings → Database. |
 | `BLOB_READ_WRITE_TOKEN` | Secret | `backup-production.yml` | Read/write token for the Vercel Blob store holding backups. |
+| `VERCEL_TOKEN` | Secret | `backup-production.yml` | Vercel **account** token. Required in addition to the Blob token — the upload fails with `No existing credentials found` without it. Account Settings → Tokens. |
 
 Setup instructions for the backup ones are in
 [`Backups/backup-setup.md`](Backups/backup-setup.md).
 
-Two of these deserve more care than the rest. `SUPABASE_PROD_DB_PASSWORD` is
+Three of these deserve more care than the rest. `SUPABASE_PROD_DB_PASSWORD` is
 direct, unmediated access to production — it bypasses RLS entirely, unlike the
 publishable key. `BLOB_READ_WRITE_TOKEN` reads the nightly database dumps, which
 contain every row of `public` plus `auth.users`, email addresses and password
 hashes included. Either one leaking is equivalent to leaking the database.
+
+`VERCEL_TOKEN` is the broadest of the three: an account token, not scoped to a
+single store the way the Blob token is. It is here only because the Vercel CLI
+will not complete a Blob upload without it. The narrower option is to drop the
+CLI from that step in favour of `@vercel/blob` or a plain `curl` PUT, both of
+which authenticate with `BLOB_READ_WRITE_TOKEN` alone; that would let this
+secret be deleted. Recorded as a known trade-off rather than an oversight.
 
 Because these live in repository-level storage, every workflow in the repo can
 read them, and anyone who can merge a workflow file can exfiltrate them. That is

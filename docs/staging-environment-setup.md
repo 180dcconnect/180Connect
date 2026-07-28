@@ -31,8 +31,12 @@ Free Supabase plan allows **two active projects per organisation**. We use:
 
 | Environment | Project Name | Purpose | Data | Migration Flow |
 |---|---|---|---|---|
-| **Development** | `cgbfhhdeapasniudyyds` (existing) | Local dev + preview deploy base | Fixture/test data | Dev writes → Git PR |
-| **Production** | `180connect-prod` (to create) | Live client data | Real organisations | Git main branch → Migration runs |
+| **Development / staging** | `180connect-staging` (`cgbfhhdeapasniudyyds`, eu-west-2) | Local dev + preview deploy base | Fixture/test data | Dev writes → Git PR |
+| **Production** | `180connect-production` (`tugfhwiqvwrpvawpjwmd`, eu-west-1) | Live client data | Real organisations | Git main branch → Migration runs |
+
+Both projects exist as of 28 July 2026. The production project is named
+`180connect-production` — earlier drafts of these docs called it `180connect-prod`
+before it was created; that name is not correct.
 
 **Limitation:** We share the "Development" Supabase project across local development **and** Vercel preview deployments. This means:
 - ✅ Developers work locally against `dev` project
@@ -281,10 +285,14 @@ npx supabase db push  # (local only)
 
 ### Vercel Preview Deployment
 
+Feature branches do **not** get their own preview URL — `vercel.json` limits
+deployments to `dev` and `main`. The shared `dev` deployment is the preview
+environment; see [production-deployment.md](production-deployment.md).
+
 1. Create a feature branch and push to GitHub
-2. Open a pull request
-3. Vercel automatically creates a preview URL → `https://<branch>.<project>.vercel.app`
-4. Preview uses **staging** Supabase database
+2. Open a pull request into `dev`
+3. On merge, the shared `dev` deployment rebuilds — find it in the Vercel **Deployments** tab
+4. That deployment uses the **staging** Supabase database
 5. Test end-to-end: login, create organisation, send email draft, etc.
 
 ### Shared Staging Environment (if Upgraded to Pro)
@@ -402,14 +410,14 @@ If you upgrade to Pro, create a dedicated third Supabase project called `180conn
 | Q-01: Supabase plan | Open | Free plan chosen; 500 MB limit is a risk. Revisit in Week 2–3. |
 | D-01: No PITR | Accepted | No point-in-time recovery on free plan. Accept or upgrade. |
 | D-02: Two environments | Resolved | Using free plan with dev+preview as one slot, production as second. |
-| Q-04: Project naming | Open | Rename "Development" to clarify it's both dev + preview. |
+| Q-04: Project naming | Resolved 28 Jul 2026 | `180connect-staging` (dev + preview) and `180connect-production`. |
 
 ---
 
 ## Next Steps
 
-1. **Immediately:** Rename existing Supabase project from "Development" to "180connect-dev-preview" (Q-04)
-2. **Week 1:** Create production Supabase project and verify migration path
+1. ~~**Immediately:** Rename existing Supabase project from "Development"~~ — done, now `180connect-staging` (Q-04, 28 July 2026)
+2. ~~**Week 1:** Create production Supabase project~~ — done, `180connect-production` (20 July 2026); migration path verified
 3. **Week 2–3:** Measure database size against 100,000-org target (Q-01)
 4. **Week 2–3:** Test PR preview deployment end-to-end with a real schema change
 5. **Before Go-Live:** Document backup/restore procedure or upgrade to Pro

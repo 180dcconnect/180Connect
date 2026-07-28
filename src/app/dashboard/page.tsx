@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireApprovedUser } from "@/lib/auth/require-approved-user";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { getCurrentActor } from "@/lib/auth/actor";
+import { hasPermission } from "@/lib/auth/permissions";
 import Link from "next/link";
 import { logout } from "./actions";
 
@@ -40,6 +41,13 @@ export default async function DashboardPage() {
   }
   const actor = actorResult.actor;
 
+  // F258: a read-only account is told so up front, rather than discovering it by
+  // pressing a button that fails. "May this role write?" is exactly "does it hold a
+  // write permission" — client:edit stands in for the whole write set (a viewer has
+  // only client:view). No write affordances live on this page yet to hide; when they
+  // do, gate them the same way and keep the server-side check regardless.
+  const canWrite = hasPermission(actor.role, "client:edit");
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#f1f2f4] p-6">
       <section className="w-full max-w-xl rounded-2xl bg-white p-8 shadow-sm">
@@ -51,6 +59,12 @@ export default async function DashboardPage() {
         <p className="mt-2 text-sm font-bold uppercase tracking-wide text-foreground/60">
           Role: {actor.role}
         </p>
+        {!canWrite && (
+          <p className="mt-4 rounded-lg bg-black/5 px-4 py-3 text-sm text-foreground/75">
+            Your account has read-only access. You can view client records and team
+            activity, but not create, edit, or send anything.
+          </p>
+        )}
         {actor.role === "admin" && (
           <nav className="mt-6 grid gap-2 sm:grid-cols-2" aria-label="Admin tools">
             <Link className="rounded-xl border border-brand/40 p-3 font-bold text-brand hover:bg-brand/5" href="/admin">

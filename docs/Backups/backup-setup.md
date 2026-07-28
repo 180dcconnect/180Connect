@@ -56,7 +56,22 @@ Creating the store in step 4 automatically adds `BLOB_READ_WRITE_TOKEN` to the *
    - Name: `BLOB_READ_WRITE_TOKEN`
    - Value: the token from step 1.
 
-## 6. Test it
+## 6. Repository secret: `VERCEL_TOKEN`
+
+**The Blob read-write token from step 5 is not enough on its own.** The upload also needs a Vercel *account* token, or it fails with `No existing credentials found. Please run vercel login or pass "--token"` even though the Blob token is present and valid. Both are required; neither replaces the other.
+
+1. Vercel dashboard → **Account Settings → Tokens** → **Create Token**.
+   - Scope it to the team or project that owns the Blob store, not to everything.
+   - Copy the value immediately; it is shown once.
+2. GitHub → repo → **Settings → Secrets and variables → Actions → Secrets tab → New repository secret**.
+   - Name: `VERCEL_TOKEN`
+   - Value: the token from step 1.
+
+This one is worth understanding rather than just pasting, because testing it will mislead you. An *invalid* Blob token fails at store resolution (`Vercel Blob: This store does not exist`), which happens **before** the account-auth check — so with a fake token the read-write token appears to be sufficient. Only a real Blob token gets far enough to hit the second requirement. That cost most of a morning to work out; it is written down here so it costs nobody else one.
+
+A Vercel account token is broader than the Blob token: account-wide rather than scoped to one store, and readable by every workflow in the repository. The narrower alternative is to drop the Vercel CLI from the upload step and use the `@vercel/blob` package or a plain `curl` PUT, both of which authenticate with `BLOB_READ_WRITE_TOKEN` alone. Not done, deliberately — noted so the trade-off is visible rather than forgotten.
+
+## 7. Test it
 
 Don't wait for 3am. GitHub → repo → **Actions** tab → **Backup production database** (left sidebar) → **Run workflow** button → confirm.
 
@@ -69,12 +84,14 @@ Watch the run. If the "Dump roles, schema, and data" step fails, work down this 
 | `aborting because of version mismatch` | The PostgreSQL 17 client install step didn't take effect | Check the "Install PostgreSQL 17 client" step's `pg_dump --version` output |
 | Connection times out entirely | The free-plan production project has auto-paused | Supabase dashboard → **Restore project**, then re-run |
 | `is only N bytes — refusing to upload` | The dump ran but produced nothing usable | Don't re-run blindly; a near-empty dump means the connection succeeded but returned no schema — check you're pointed at production and not an empty project |
+| `No existing credentials found` on the upload step | `VERCEL_TOKEN` missing — the Blob token alone does not complete an upload | Do step 6 |
+| `does not start with 'vercel_blob_rw_'` | The `BLOB_READ_WRITE_TOKEN` secret holds something other than a Blob read-write token | Re-copy it in step 5 |
 
-## 7. Verify the upload
+## 8. Verify the upload
 
 Vercel dashboard → project → **Storage** → the Blob store → browse to `backups/<today's date>/` and confirm four files: `roles_*.sql`, `schema_*.sql`, `authdata_*.sql`, `data_*.sql`. All four should be well over 1KB — the workflow fails the run rather than uploading anything smaller.
 
-## 8. Run the restore test (R4)
+## 9. Run the restore test (R4)
 
 Setup isn't finished when the upload works. The story's actual requirement is a *proven* restore — download the four files, follow section 4 of [F225-database-backups.md](F225-database-backups.md) against a throwaway Supabase project, and record the result in that document's restore test log.
 

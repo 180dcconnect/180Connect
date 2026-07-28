@@ -1,10 +1,10 @@
 # Production Deployment (F230)
 
 **Status:** Deployment pipeline verified working 22 July 2026. Re-checked against
-the current environment schema and F225's backup workflow on 27 July 2026 —
+the current environment schema and F225's backup workflow on 28 July 2026 —
 see the flagged items below, which still need Bashir to confirm inside the
 Vercel dashboard (this component owner has no Vercel access — see footnote 2).
-**Last updated:** 27 July 2026
+**Last updated:** 28 July 2026
 **Component Owner:** Ben. **Reviewer:** Bashir.
 
 ---
@@ -16,9 +16,15 @@ Vercel dashboard (this component owner has no Vercel access — see footnote 2).
 | URL | `https://180connect.vercel.app`[^1] |
 | Vercel Production Branch | `main` |
 | Vercel Preview Branch | `dev` |
-| Production Supabase project | `180connect-prod` (see [staging-environment-setup.md](staging-environment-setup.md)) |
+| Production Supabase project | `180connect-production` (ref `tugfhwiqvwrpvawpjwmd`, eu-west-1) — see [staging-environment-setup.md](staging-environment-setup.md) |
+| Staging/preview Supabase project | `180connect-staging` (ref `cgbfhhdeapasniudyyds`, eu-west-2) |
 | Auto-deploy on merge to `main` | Confirmed working, 22 July 2026 |
 | Auto-deploy on merge to `dev` | Confirmed working, 22 July 2026 |
+
+> The production project is `180connect-production`, not `180connect-prod` — the
+> shortened form appears in older docs written before the project existed. Names
+> verified against the Supabase API on 28 July 2026; see Q-04 in
+> [open-questions.md](open-questions.md).
 
 ---
 
@@ -29,6 +35,11 @@ feature branch → PR → dev (auto-deploys; shared preview/staging) → PR → 
 ```
 
 - Every change lands on `dev` first and is exercised there before going anywhere near `main`.
+- `main` therefore trails `dev` between releases — that gap *is* the unreleased queue. Check it before opening a release PR:
+  ```
+  git fetch origin && git log --oneline origin/main..origin/dev
+  ```
+  A large gap is not a fault, but it does mean the release PR carries more than one change, so review it as such.
 - **Merging `dev` → `main` is a PM decision** — this keeps a human gate in front of every production release, per the project's SOP ("small, reviewable changes" + "evidence in staging before main").
 - `vercel.json` at the repo root is the source of truth for which branches deploy at all:
   ```json
@@ -54,10 +65,20 @@ Full variable-by-variable reference: [environment-variables.md](environment-vari
 
 Both landed on `dev` after the 22 July check and are now merged into this branch:
 
-- **Backups (F225, closed 25 July):** [`.github/workflows/backup-production.yml`](../.github/workflows/backup-production.yml) dumps the production database nightly at 03:00 UTC (roles, schema, auth data, public data as four separate files) and uploads them to Vercel Blob storage, pruning anything older than 30 days. It needs four GitHub repository variables/secrets set — `SUPABASE_PROD_REF`, `SUPABASE_PROD_POOLER_HOST`, `SUPABASE_PROD_DB_PASSWORD`, `BLOB_READ_WRITE_TOKEN` — under Settings → Secrets and variables → Actions. **Not yet confirmed these are actually set on the real repo** — check the Actions tab for a green run, or trigger one manually via `workflow_dispatch`. Full detail and the restore procedure: [F225-database-backups.md](Backups/F225-database-backups.md), [backup-setup.md](Backups/backup-setup.md).
+- **Backups (F225, closed 25 July):** [`.github/workflows/backup-production.yml`](../.github/workflows/backup-production.yml) dumps the production database nightly at 03:00 UTC (roles, schema, auth data, public data as four separate files) and uploads them to Vercel Blob storage, pruning anything older than 30 days. It needs five GitHub repository variables/secrets under Settings → Secrets and variables → Actions:
+
+  | Name | Kind | Used for |
+  |---|---|---|
+  | `SUPABASE_PROD_REF` | Variable | Pooler username (`postgres.<ref>`) |
+  | `SUPABASE_PROD_POOLER_HOST` | Variable | `PGHOST` for the dump |
+  | `SUPABASE_PROD_DB_PASSWORD` | Secret | `PGPASSWORD` |
+  | `BLOB_READ_WRITE_TOKEN` | Secret | Writing dumps to Blob storage |
+  | `VERCEL_TOKEN` | Secret | Account token the Blob upload/prune steps also require |
+
+  **Status 28 July 2026:** all five are set — a manual `workflow_dispatch` run went green (`gh run list --workflow=backup-production.yml`; two earlier attempts on 27–28 July failed before the token set was complete). **The nightly schedule has not yet been observed firing on its own** — every run so far was manual, so confirm a scheduled run appears after the next 03:00 UTC before treating the cron as proven. Note scheduled runs execute from the default branch (`dev`), where this workflow already lives, so merging to `main` is not a prerequisite. Full detail and the restore procedure: [F225-database-backups.md](Backups/F225-database-backups.md), [backup-setup.md](Backups/backup-setup.md).
 - **Error logging (F226, closed 20 July):** wired through `NEXT_PUBLIC_SENTRY_DSN` — see the environment variables section above for what still needs confirming in the Vercel dashboard.
 
-Both are required for F230's AC2 ("backup and error logging requirements active and functioning, not just staging"). The workflow file existing and the schema wiring being merged is not the same as confirming they are live and running against the real production project — that's the one check left before AC2 can be marked done in good faith.
+Both are required for F230's AC2 ("backup and error logging requirements active and functioning, not just staging"). The backup half is now evidenced by a green run against the real production project. Two things still stand between here and marking AC2 done in good faith: the Sentry DSN check in the Vercel dashboard, and a **restore actually being performed** from one of those dumps into a scratch database — the dumps existing is not the same as knowing they restore (see D-01 in [open-questions.md](open-questions.md)).
 
 ---
 
@@ -66,7 +87,7 @@ Both are required for F230's AC2 ("backup and error logging requirements active 
 ### Normal release
 
 1. Confirm the change has already been merged to `dev` and tested against the shared `dev`/preview deployment.
-2. Open a PR from `dev` into `main`. **Only PM merges this PR** — this is the human gate the process currently relies on. It is a convention, not a technical block: `main` has no branch protection yet — see [Branch Protection Spec](branch-protection-spec.md).
+2. Open a PR from `dev` into `main`. **Only PM merges this PR** — this is the human gate the process currently relies on. It is a convention, not a technical block, and cannot be made one on the current GitHub plan — see [Branch Protection Spec](branch-protection-spec.md).
 3. Once merged, Vercel picks up the push to `main` automatically — no manual "deploy" step. Watch the **Deployments** tab in Vercel; the new build usually goes live within a couple of minutes.
 4. Confirm the live site at `https://180connect.vercel.app` reflects the change.
 5. Check Sentry (and `ERROR_LOG` once F221 lands) for any new errors in the minutes after deploy.
@@ -81,7 +102,7 @@ Editing a variable in Settings → Environment Variables does **not** update the
 
 ### Branch protection
 
-`main` has no GitHub branch protection yet, so AC3's "not an ad hoc action any team member could do differently" is enforced only by convention today. See [Branch Protection Spec](branch-protection-spec.md) for the gap and the exact rule to apply — applying it needs admin permission this component owner doesn't have.
+`main` has no GitHub branch protection, so AC3's "not an ad hoc action any team member could do differently" is enforced only by convention today. This is **not** a task waiting on someone with admin: branch protection and rulesets are gated behind a paid plan for private repositories, and this repo is private on GitHub Free (`gh api …/rulesets` → `403 "Upgrade to GitHub Pro or make this repository public"`, checked 28 July 2026). Unblocking it costs money or means going public. See [Branch Protection Spec](branch-protection-spec.md) for the options and the rule to apply if the plan ever changes; recorded as accepted deviation D-03 in [open-questions.md](open-questions.md).
 
 ## Related files
 

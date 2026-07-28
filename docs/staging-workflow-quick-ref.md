@@ -96,13 +96,18 @@ git commit -m "Migration: add <feature> (F###)"
 
 ### In Preview Deploy
 
-1. Push your branch to GitHub
-2. Open a PR
-3. Vercel creates a preview URL automatically (watch for the comment on the PR)
-4. Preview uses **staging** Supabase database
-5. Test end-to-end: login, create data, send emails (drafts), etc.
+> **Feature branches do not get their own preview URL.** `vercel.json` disables
+> deployments for every branch except `dev` and `main`
+> (`"deploymentEnabled": { "**": false, "dev": true, "main": true }`). The shared
+> `dev` deployment *is* the preview environment. See
+> [production-deployment.md](production-deployment.md).
 
-**Preview URL format:** `https://<your-branch>.<project>.vercel.app`
+1. Push your branch to GitHub and open a PR into `dev`
+2. Once it merges, the `dev` deployment rebuilds automatically — that is where you test
+3. The `dev` deployment uses the **staging** Supabase database
+4. Test end-to-end: login, create data, send emails (drafts), etc.
+
+**Preview URL:** the shared `dev` deployment in the Vercel **Deployments** tab — not a per-branch URL.
 
 ### In Vercel Production
 
@@ -124,8 +129,11 @@ git commit -m "Migration: add <feature> (F###)"
 
 ### "My PR preview is stuck on an old schema"
 
-1. Vercel may be caching
-2. Push a new commit to your branch (even an empty one: `git commit --allow-empty`)
+Remember there is no per-branch preview — you are looking at the shared `dev`
+deployment, so it only reflects what has been merged to `dev`.
+
+1. Confirm your change is actually merged to `dev`
+2. Vercel may be caching — push a new commit to `dev` (even an empty one: `git commit --allow-empty`)
 3. Or clear Vercel cache in the project settings
 
 ### "Database is approaching 500 MB"

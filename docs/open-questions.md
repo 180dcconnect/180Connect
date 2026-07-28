@@ -2,7 +2,7 @@
 
 Decisions that are **not resolved in code** and need a human call, plus places where we have knowingly departed from the PRD. Raise these at the next team meeting.
 
-Last updated: 24 July 2026 (Q-05 resolved).
+Last updated: 28 July 2026 (D-01 updated, D-03 added, Q-04 resolved).
 
 ---
 
@@ -10,13 +10,13 @@ Last updated: 24 July 2026 (Q-05 resolved).
 
 These are conscious departures. They are recorded here so they are not mistaken for oversights, and so the PRD's acceptance criteria are not quietly assumed to be met.
 
-### D-01 — Backups exist; point-in-time recovery still doesn't (updated 27 July 2026)
+### D-01 — Backups exist; point-in-time recovery still doesn't (updated 28 July 2026)
 
 **PRD says:** §16.3 step 17 requires daily backups and point-in-time recovery. MVP acceptance journey **#13** is *"Backup restore is demonstrated and documented."*
 
 **We are doing:** The third option below — a scheduled `pg_dump` to external storage — was built and shipped as F225 (closed 25 July 2026). [`.github/workflows/backup-production.yml`](../.github/workflows/backup-production.yml) dumps the production database nightly to Vercel Blob storage with a 30-day retention window; restore steps are documented in [F225-database-backups.md](Backups/F225-database-backups.md). True PITR is still not provided — the Supabase free plan doesn't offer it, and this workflow is daily snapshots, not continuous replay — so recovery is only ever accurate to the last nightly dump, not to the moment before a failure.
 
-**Consequence:** Acceptance journey #13 can now largely pass — backup and restore are demonstrated and documented — but PITR-level recovery (restoring to an arbitrary point in time rather than the last 03:00 UTC snapshot) is still not possible on the free plan.
+**Consequence:** Acceptance journey #13 is **half met**. The *backup* half is demonstrated — a manual `workflow_dispatch` run went green on 28 July 2026 and wrote dumps to Blob storage. The *restore* half is **documented but not yet demonstrated**: no restore has actually been performed against a scratch database, so journey #13 cannot be signed off until someone runs one and records the result. Separately, the nightly schedule has not yet been observed firing on its own — every run so far was manual. PITR-level recovery (restoring to an arbitrary point in time rather than the last 03:00 UTC snapshot) remains impossible on the free plan regardless.
 
 **To resolve (if PITR is still wanted):** Upgrade to Supabase Pro (~$25/month, which also removes the pausing and the 500 MB cap) for true PITR, or accept nightly-snapshot recovery as sufficient and formally close this item.
 
@@ -31,7 +31,7 @@ These are conscious departures. They are recorded here so they are not mistaken 
 **We are doing:** Development and production only, using free Supabase plan intelligently. Dev/preview share one Supabase project (safe for testing), production is separate.
 
 **Resolution:** Implemented a staging-first architecture that:
-- Uses free plan's 2-project limit: `180connect-dev-preview` (local dev + Vercel previews) and `180connect-prod` (production)
+- Uses free plan's 2-project limit: `180connect-staging` (local dev + Vercel previews) and `180connect-production` (production) — see Q-04 for the naming decision
 - Ensures all PR previews point to dev database (safe to test)
 - All migrations are Git-based, so schema is deterministic across all environments
 - See [Staging Environment Setup](staging-environment-setup.md) for complete architecture
@@ -43,6 +43,22 @@ These are conscious departures. They are recorded here so they are not mistaken 
 - `docs/environment-variables.md` — technical specification
 
 **Owner:** Mohammed (Component Owner F229). **Status:** Implemented (F229).
+
+---
+
+### D-03 — No branch protection on `main` (added 28 July 2026)
+
+**PRD/SOP says:** production changes should be small, reviewed and human-gated. F230's Acceptance Criterion 3 requires deploying to production to be a defined process *"rather than being an ad hoc, undocumented action any team member could do differently."*
+
+**We are doing:** enforcing that by convention only — PM opens and merges the `dev` → `main` release PR, every change reaches `main` via `dev`. Nothing in GitHub stops a direct push to `main` or an unreviewed merge.
+
+**Why:** branch protection rules and rulesets are gated behind a paid plan for **private** repositories, and this repo is private on GitHub Free. Confirmed 28 July 2026 — `gh api repos/180dcconnect/180Connect/rulesets` returns `403 "Upgrade to GitHub Pro or make this repository public to enable this feature."` This is a plan limit, not a permissions one; repo admin cannot switch it on.
+
+**Consequence:** AC3 is met on the "documented process" half and unmet on the "technically enforced" half. A team member with push access can bypass the process without anything blocking or flagging it.
+
+**To resolve:** GitHub Pro on the owning account (~$4/month, repo stays private), move to an organisation on Team, or make the repo public (not acceptable with real organisation data). Full comparison and the exact rule to apply: [Branch Protection Spec](branch-protection-spec.md).
+
+**Owner:** Project Leader. **Decide by:** before the first production release carrying real client data.
 
 ---
 
@@ -70,11 +86,16 @@ PRD §22 leaves this open. Whatever we pick sits behind our own `LlmProvider` in
 
 **Owner:** Project Leader. **Decide by:** before the first production generation (Week 4–5).
 
-### Q-04 — Supabase project naming
+### Q-04 — Supabase project naming — **RESOLVED 28 July 2026**
 
-The existing Supabase project is called **"Development"** (`cgbfhhdeapasniudyyds`, eu-west-2, org `180Connect`), and it is currently empty. Given D-02, it needs to be explicit which environment it *is*, so it does not silently become both dev and production.
+Both projects are now named explicitly for the environment they serve, so neither can silently become the other:
 
-**Owner:** Project Leader. **Decide by:** before the first migration is applied.
+| Project | Ref | Region | Serves |
+|---|---|---|---|
+| `180connect-staging` | `cgbfhhdeapasniudyyds` | eu-west-2 | Local dev + Vercel preview (`dev` branch) |
+| `180connect-production` | `tugfhwiqvwrpvawpjwmd` | eu-west-1 | Production (`main` branch) |
+
+Note the production project is `180connect-production`, **not** `180connect-prod` — some older docs used the shortened form before the project existed. Verified against the Supabase API on 28 July 2026.
 
 ### Q-05 — CAPTCHA provider (RESOLVED)
 

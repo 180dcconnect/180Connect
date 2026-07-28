@@ -10,9 +10,9 @@ Checklist for F229 (Staging Environment) — set up infrastructure & verify end-
 
 ## Phase 1: Project & Account Setup
 
-- [ ] **Q-04 Resolved:** Confirm project naming convention with Project Leader
-  - [ ] Rename existing "Development" Supabase project to `180connect-dev-preview`
-  - [ ] Create new production Supabase project: `180connect-prod`
+- [x] **Q-04 Resolved (28 July 2026):** naming confirmed with Project Leader
+  - [x] Existing "Development" Supabase project renamed to `180connect-staging` (`cgbfhhdeapasniudyyds`, eu-west-2)
+  - [x] Production Supabase project created: `180connect-production` (`tugfhwiqvwrpvawpjwmd`, eu-west-1) — note the full word, not `-prod`
   - [ ] Document project IDs in team Slack
 
 - [ ] **Supabase Projects Verified:**
@@ -198,15 +198,15 @@ Checklist for F229 (Staging Environment) — set up infrastructure & verify end-
   - Action: Measure real payload size in Week 2–3
   - Decision point: Upgrade or implement archival strategy
 
-- [ ] **Q-04: Project Naming Convention**
-  - Rename "Development" → "180connect-dev-preview" (covers both local + preview)
-  - Create "180connect-prod"
+- [x] **Q-04: Project Naming Convention — resolved 28 July 2026**
+  - "Development" → `180connect-staging` (covers both local + preview)
+  - `180connect-production` created
   - Prevents ambiguity (defers D-02 until next decision on Pro upgrade)
 
 - [ ] **D-01: No Point-in-Time Recovery**
-  - Free plan has no PITR
-  - Acceptance criterion #13 ("Backup restore is demonstrated") cannot pass as written
-  - Decision: Upgrade to Pro, or formally descope acceptance criterion #13 through change control
+  - Free plan has no PITR. Nightly `pg_dump` to Vercel Blob (F225) covers daily backups instead
+  - Acceptance criterion #13 ("Backup restore is demonstrated") is half met: backups run and are documented, but no restore has been performed yet
+  - Decision: run a restore drill to close the demonstrated half, then upgrade to Pro for true PITR or formally descope it through change control
 
 ---
 

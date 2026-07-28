@@ -1,8 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
-import { login, type LoginState } from "./actions";
+import { useActionState, useCallback, useEffect, useState } from "react";
+import type { LoginState } from "@/lib/auth/login";
+import { login } from "./actions";
+import {
+  CAPTCHA_HINT_ID,
+  TurnstileChallenge,
+} from "@/components/turnstile-challenge";
 
 const initialLoginState: LoginState = { status: "idle" };
 
@@ -14,8 +19,44 @@ export function LoginForm() {
   const emailError = state.fieldErrors?.email?.[0];
   const passwordError = state.fieldErrors?.password?.[0];
 
+  // Whether the visitor has passed the challenge. F003 AC1 requires the
+  // CAPTCHA to pass *before* credentials are submitted, so this gates the
+  // submit button — the server checks the token again regardless, but without
+  // this the password leaves the browser on every blocked attempt.
+  const [solved, setSolved] = useState(false);
+
+  // A Turnstile token is single-use. Without this, a second attempt after any
+  // failed one — wrong password, unapproved account, a validation error —
+  // resubmits the spent token, and Supabase rejects it as a CAPTCHA failure no
+  // matter what the user types. Reset the widget whenever an attempt comes back.
+  useEffect(() => {
+    if (state.status === "idle") return;
+    window.turnstile?.reset();
+  }, [state]);
+
+  const onSubmit = useCallback(
+    (event: React.FormEvent<HTMLFormElement>) => {
+      // Belt and braces: the button is disabled, but a form can still be
+      // submitted by pressing Enter inside a text field.
+      if (!solved) {
+        event.preventDefault();
+        return;
+      }
+      // The token is spent by this submission, so close the gate again. The
+      // effect above resets the widget once the attempt comes back, and
+      // `onTurnstileSolved` reopens the gate when the fresh challenge passes.
+      setSolved(false);
+    },
+    [solved],
+  );
+
   return (
-    <form action={formAction} className="mt-8 flex flex-col gap-4" noValidate>
+    <form
+      action={formAction}
+      onSubmit={onSubmit}
+      className="mt-8 flex flex-col gap-4"
+      noValidate
+    >
       {state.message && (
         <div
           role={state.status === "error" ? "alert" : "status"}
@@ -83,10 +124,18 @@ export function LoginForm() {
         )}
       </div>
 
+      <TurnstileChallenge
+        solved={solved}
+        onSolvedChange={setSolved}
+        action="log in"
+        gerund="logging in"
+      />
+
       <button
         type="submit"
-        disabled={pending}
-        className="mt-2 h-10 rounded-full bg-brand text-sm font-bold text-white transition-colors hover:bg-brand-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-wait disabled:opacity-60"
+        disabled={pending || !solved}
+        aria-describedby={solved ? undefined : CAPTCHA_HINT_ID}
+        className="mt-2 h-10 rounded-full bg-brand text-sm font-bold text-white transition-colors hover:bg-brand-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
       >
         {pending ? "Logging in..." : "Log in"}
       </button>

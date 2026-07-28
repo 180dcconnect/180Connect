@@ -1,92 +1,71 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { requireApprovedUser, permissionFailureMessage } from "@/lib/auth/require-approved-user";
+import {
+  attemptLogin,
+  normalizeEmail,
+  SERVICE_UNAVAILABLE_MESSAGE,
+} from "@/lib/auth/login";
+import type { LoginState } from "@/lib/auth/login";
+import {
+  ACTIVITY_COOKIE_NAME,
+  activityCookieOptions,
+  activitySecret,
+  signActivity,
+} from "@/lib/supabase/session-expiry";
+import { RECOVERY_COOKIE_NAME } from "@/lib/auth/password-reset";
 import { logSecurityEvent } from "@/lib/log-security-event";
-import { emailField, safeValidate } from "@/lib/validation";
 
-const allowedDomain = (process.env.AUTH_ALLOWED_EMAIL_DOMAIN ?? "180dc.org")
-  .trim()
-  .toLowerCase()
-  .replace(/^@/, "");
-
-const loginSchema = z.object({
-  email: emailField("Enter a valid email address.").refine(
-    (email) => email.endsWith(`@${allowedDomain}`),
-    { message: `Use your @${allowedDomain} email address.` },
-  ),
-  password: z.string().min(1, "Enter your password.").max(256),
-});
-
-export type LoginState = {
-  status: "idle" | "error" | "pending";
-  message?: string;
-  fieldErrors?: { email?: string[]; password?: string[] };
-  email?: string;
-};
+// No `export type { LoginState }` here on purpose. A "use server" module may
+// only export async functions, and Turbopack turns a type re-export into a
+// runtime one — which blows up on the client as "LoginState is not defined",
+// intermittently, because it depends on how the module was last rebuilt.
+// Consumers import the type from `@/lib/auth/login`, where it is declared.
 
 export async function login(
   _previousState: LoginState,
   formData: FormData,
 ): Promise<LoginState> {
-  const email = String(formData.get("email") ?? "").trim().toLowerCase();
-  const result = safeValidate(loginSchema, {
-    email,
-    password: formData.get("password"),
-  });
-
-  if (!result.success) {
-    logSecurityEvent("validation.rejected", {
-      form: "login",
-      fields: Object.keys(result.fieldErrors).join(","),
-    });
-    return {
-      status: "error",
-      message: "Check the highlighted fields and try again.",
-      fieldErrors: result.fieldErrors,
-      email,
-    };
-  }
+  const email = normalizeEmail(formData.get("email"));
 
   try {
     const supabase = await createClient();
-    const { data, error } = await supabase.auth.signInWithPassword(result.data);
+    const outcome = await attemptLogin(supabase, {
+      email,
+      password: formData.get("password"),
+      captchaToken: formData.get("cf-turnstile-response"),
+    });
 
-    if (error || !data.user) {
-      logSecurityEvent("authentication.login_failed", {
-        cause: error?.message ?? "no user returned",
-      });
-      return {
-        status: "error",
-        message: "Invalid email or password.",
-        email,
-      };
+    if (!outcome.ok) {
+      return outcome.state;
     }
 
-    const permission = requireApprovedUser(data.user);
-    if (!permission.ok) {
-      await supabase.auth.signOut();
-      logSecurityEvent("permission.denied", {
-        form: "login",
-        reason: permission.reason,
-      });
-      return {
-        status: "pending",
-        message: permissionFailureMessage(permission.reason),
-        email,
-      };
-    }
+    // Start the inactivity window (F007). Expiry fails closed, so a session
+    // that never gets this first record is expired on its very next request —
+    // signing in is where the record has to come from.
+    const cookieStore = await cookies();
+    cookieStore.set(
+      ACTIVITY_COOKIE_NAME,
+      await signActivity(Date.now(), activitySecret()),
+      activityCookieOptions(),
+    );
+
+    // Signing in ends any password reset that was in flight (F004). An
+    // abandoned reset leaves its marker behind for up to an hour, and the
+    // session guard confines every session carrying one to /reset-password —
+    // so without this, a user who gave up on the reset and logged in normally
+    // would be bounced straight back to the form they walked away from.
+    cookieStore.delete(RECOVERY_COOKIE_NAME);
   } catch (error) {
+    // Reachable when the Supabase client cannot be built (missing environment
+    // variables) or the activity cookie cannot be written. `attemptLogin`
+    // handles its own failures and does not throw.
     logSecurityEvent("authentication.login_failed", {
       cause: error instanceof Error ? error.message : "Unknown error",
     });
-    return {
-      status: "error",
-      message: "Login is temporarily unavailable. Please try again later.",
-      email,
-    };
+    return { status: "error", message: SERVICE_UNAVAILABLE_MESSAGE, email };
   }
 
   redirect("/dashboard");

@@ -12,7 +12,12 @@
 export type SecurityEvent =
   | "validation.rejected"
   | "permission.denied"
-  | "authentication.login_failed";
+  | "authentication.login_failed"
+  | "authentication.password_reset_request_failed"
+  | "authentication.password_recovery_link_rejected"
+  | "authentication.password_update_failed"
+  | "session.expired"
+  | "session.recovery_confined";
 
 export type SecurityEventMeta = Record<string, string | number | boolean | undefined>;
 

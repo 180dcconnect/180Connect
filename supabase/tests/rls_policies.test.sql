@@ -103,13 +103,18 @@ begin
   -- has an on-insert trigger that mirrors auth.users into public.users, so the
   -- public.users insert is written ON CONFLICT DO UPDATE to set the role and the
   -- backdated timestamps the trigger's default row would not carry.
+  --
+  -- Emails are @180dc.org, not a throwaway .local: F002 (enforce_180dc_email_trigger)
+  -- adds a BEFORE INSERT trigger on auth.users rejecting any other domain, so the old
+  -- .test.local fixtures now abort the whole suite. Real accounts are @180dc.org
+  -- anyway (F002 is the point), so this is what the fixture should have used.
   insert into auth.users (id, instance_id, aud, role, email)
   values
-    (v_admin,       '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'admin@test.local'),
-    (v_cam_a,       '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'cam-a@test.local'),
-    (v_cam_b,       '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'cam-b@test.local'),
-    (v_deactivated, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'gone@test.local'),
-    (v_viewer,      '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'viewer@test.local')
+    (v_admin,       '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'admin@180dc.org'),
+    (v_cam_a,       '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'cam-a@180dc.org'),
+    (v_cam_b,       '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'cam-b@180dc.org'),
+    (v_deactivated, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'gone@180dc.org'),
+    (v_viewer,      '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'viewer@180dc.org')
   on conflict (id) do nothing;
 
   -- Timestamps are backdated on purpose. public.set_updated_at() uses now(), which is
@@ -117,11 +122,11 @@ begin
   -- come out with updated_at = created_at and the trigger test could never fail.
   insert into public.users (id, email, full_name, role, is_active, created_at, updated_at)
   values
-    (v_admin,       'admin@test.local', 'Test Admin',       'admin', true,  v_backdated, v_backdated),
-    (v_cam_a,       'cam-a@test.local', 'Test CAM A',       'cam',   true,  v_backdated, v_backdated),
-    (v_cam_b,       'cam-b@test.local', 'Test CAM B',       'cam',   true,  v_backdated, v_backdated),
-    (v_deactivated, 'gone@test.local',  'Deactivated User', 'cam',   false, v_backdated, v_backdated),
-    (v_viewer,      'viewer@test.local','Test Viewer',      'viewer',true,  v_backdated, v_backdated)
+    (v_admin,       'admin@180dc.org', 'Test Admin',       'admin', true,  v_backdated, v_backdated),
+    (v_cam_a,       'cam-a@180dc.org', 'Test CAM A',       'cam',   true,  v_backdated, v_backdated),
+    (v_cam_b,       'cam-b@180dc.org', 'Test CAM B',       'cam',   true,  v_backdated, v_backdated),
+    (v_deactivated, 'gone@180dc.org',  'Deactivated User', 'cam',   false, v_backdated, v_backdated),
+    (v_viewer,      'viewer@180dc.org','Test Viewer',      'viewer',true,  v_backdated, v_backdated)
   on conflict (id) do update
     set role = excluded.role,
         is_active = excluded.is_active,
@@ -428,7 +433,7 @@ begin
   -- Accounts come from the auth trigger / invite flow (F008); a client cannot insert.
   return next is(
     tests.sqlstate_of(v_cam_a,
-      'insert into public.users (id, email, role) values (gen_random_uuid(), ''x@test.local'', ''admin'')'),
+      'insert into public.users (id, email, role) values (gen_random_uuid(), ''x@180dc.org'', ''admin'')'),
     '42501',
     'CAM cannot create a user account'
   );

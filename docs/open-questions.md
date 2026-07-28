@@ -76,7 +76,17 @@ The existing Supabase project is called **"Development"** (`cgbfhhdeapasniudyyds
 
 **Owner:** Project Leader. **Decide by:** before the first migration is applied.
 
-### Q-05 — Viewer role scope — **RESOLVED 24 Jul 2026**
+### Q-05 — CAPTCHA provider (RESOLVED)
+
+PRD §22 leaves the CAPTCHA provider open. Supabase Auth's built-in CAPTCHA support only integrates with **hCaptcha** or **Cloudflare Turnstile** — Supabase does not run its own CAPTCHA, it verifies whichever provider's token is passed to it.
+
+**Decision: Cloudflare Turnstile.** Free with no limits, usually invisible to the user, no cookies (relevant given the PRD's data-minimisation requirements in §15), and Cloudflare provides fixed test keys so local development and CI are never blocked.
+
+**Important:** enabling CAPTCHA in Supabase applies to **every** auth action (login, password reset, invites, sign-up), not just login. The Turnstile widget must be added to each form that calls a Supabase auth method, not only `src/app/login/login-form.tsx`.
+
+**Owner:** Component Owner F003. **Status:** Decided and implemented for login (F003); password reset (F004) and invites (F008) still need the same widget added.
+
+### Q-06 — Viewer role scope — **RESOLVED 24 Jul 2026**
 
 Raised by F258 (#268), which implemented the `viewer` role. `viewer` had sat in the `USERS.role` enum and throughout PRD §4.3 since the start with no story owning it, so nobody had ever decided what a viewer *is*. Three questions blocked pinning down its read scope. All three were answered by the Project Leader on 24 Jul 2026; all three resolve to **internal-only**, which is why the scope shipped in F258 needed no change.
 

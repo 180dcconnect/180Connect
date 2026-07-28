@@ -123,7 +123,7 @@ Not `updated stuff` or `changes`. If the *why* isn't obvious from the subject li
 A pull request (PR) is how you ask for your branch to be merged into `dev`. Opening one, step by step:
 
 1. Push your branch (`git push -u origin <branch>`, as above).
-2. Go to the repo on [github.com](https://github.com/bashirbobboi/180Connect). A yellow banner **"Compare & pull request"** appears for the branch you just pushed — click it. (No banner? Open the **Pull requests** tab → **New pull request**.)
+2. Go to the repo on [github.com](https://github.com/180dcconnect/180Connect). A yellow banner **"Compare & pull request"** appears for the branch you just pushed — click it. (No banner? Open the **Pull requests** tab → **New pull request**.)
 3. **Check the base branch** at the top: it must read `base: dev`. GitHub often defaults it to `main` — change it if so.
 4. The description is pre-filled from our template. Fill in each section and tick the checklist.
 5. Click **Create pull request**.

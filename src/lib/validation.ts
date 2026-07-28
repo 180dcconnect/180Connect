@@ -3,7 +3,7 @@
  *
  * Every form/Server Action/route handler should validate input with these
  * helpers rather than hand-rolling Zod calls, so error shape and messaging
- * stay consistent across the app. See `src/app/login/actions.ts` for the
+ * stay consistent across the app. See `src/lib/auth/login.ts` for the
  * reference usage.
  */
 

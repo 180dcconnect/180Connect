@@ -16,9 +16,11 @@ These are conscious departures. They are recorded here so they are not mistaken 
 
 **We are doing:** The third option below — a scheduled `pg_dump` to external storage — was built and shipped as F225 (closed 25 July 2026). [`.github/workflows/backup-production.yml`](../.github/workflows/backup-production.yml) dumps the production database nightly to Vercel Blob storage with a 30-day retention window; restore steps are documented in [F225-database-backups.md](Backups/F225-database-backups.md). True PITR is still not provided — the Supabase free plan doesn't offer it, and this workflow is daily snapshots, not continuous replay — so recovery is only ever accurate to the last nightly dump, not to the moment before a failure.
 
-**Consequence:** Acceptance journey #13 is **half met**. The *backup* half is demonstrated — a manual `workflow_dispatch` run went green on 28 July 2026 and wrote dumps to Blob storage. The *restore* half is **documented but not yet demonstrated**: no restore has actually been performed against a scratch database, so journey #13 cannot be signed off until someone runs one and records the result. Separately, the nightly schedule has not yet been observed firing on its own — every run so far was manual. PITR-level recovery (restoring to an arbitrary point in time rather than the last 03:00 UTC snapshot) remains impossible on the free plan regardless.
+**Consequence:** Acceptance journey #13 (*"Backup restore is demonstrated and documented"*) is **met**. Backups: a `workflow_dispatch` run went green on 28 July 2026 and wrote dumps to Blob storage. Restore: **a restore from one of those Blob dumps was performed successfully on 28 July 2026** (Bashir), so the "demonstrated" half is satisfied, not just documented. The nightly schedule has not yet been observed firing unattended — every run so far was manual — so confirm one appears after the next 03:00 UTC.
 
-**To resolve (if PITR is still wanted):** Upgrade to Supabase Pro (~$25/month, which also removes the pausing and the 500 MB cap) for true PITR, or accept nightly-snapshot recovery as sufficient and formally close this item.
+What remains a genuine deviation is **PITR only**: recovery is accurate to the last 03:00 UTC snapshot, never to the moment before a failure. Up to 24 hours of writes can be lost. The free plan offers no continuous replay.
+
+**To resolve (if PITR is still wanted):** Upgrade to Supabase Pro (~$25/month, which also removes the pausing and the 500 MB cap). Otherwise nightly-snapshot recovery stands as the accepted position.
 
 **Owner:** Project Leader. **Decide by:** before real organisation data is loaded.
 
@@ -46,7 +48,7 @@ These are conscious departures. They are recorded here so they are not mistaken 
 
 ---
 
-### D-03 — No branch protection on `main` (added 28 July 2026)
+### D-03 — No branch protection on `main` — **DECIDED 28 July 2026: not upgrading**
 
 **PRD/SOP says:** production changes should be small, reviewed and human-gated. F230's Acceptance Criterion 3 requires deploying to production to be a defined process *"rather than being an ad hoc, undocumented action any team member could do differently."*
 
@@ -54,11 +56,15 @@ These are conscious departures. They are recorded here so they are not mistaken 
 
 **Why:** branch protection rules and rulesets are gated behind a paid plan for **private** repositories, and this repo is private on GitHub Free. Confirmed 28 July 2026 — `gh api repos/180dcconnect/180Connect/rulesets` returns `403 "Upgrade to GitHub Pro or make this repository public to enable this feature."` This is a plan limit, not a permissions one; repo admin cannot switch it on.
 
-**Consequence:** AC3 is met on the "documented process" half and unmet on the "technically enforced" half. A team member with push access can bypass the process without anything blocking or flagging it.
+**Consequence:** AC3 is met on the "documented process" half and permanently unmet on the "technically enforced" half. A team member with push access can bypass the process without anything blocking or flagging it. Nothing logs or reverts such a push — if it happens, it is caught by someone noticing, not by tooling.
 
-**To resolve:** GitHub Pro on the owning account (~$4/month, repo stays private), move to an organisation on Team, or make the repo public (not acceptable with real organisation data). Full comparison and the exact rule to apply: [Branch Protection Spec](branch-protection-spec.md).
+**Decision (Project Leader, 28 July 2026):** **not paying for GitHub Pro.** The repo stays private on the Free plan, and AC3 stays convention-enforced for the life of the MVP. This is a deliberate, accepted risk, not a pending task — the spec doc is retained only so the rule can be applied quickly if the plan ever changes.
 
-**Owner:** Project Leader. **Decide by:** before the first production release carrying real client data.
+**What we rely on instead:** the PM is the only person who opens and merges the `dev` → `main` release PR; every change reaches `main` through `dev`; release PRs are reviewed like any other. See [Branch Protection Spec](branch-protection-spec.md) and [production-deployment.md](production-deployment.md).
+
+**Revisit if:** someone merges to `main` without review in practice, the team grows beyond the people who know the convention, or the repo moves to an organisation for other reasons.
+
+**Owner:** Project Leader. **Status:** Closed — accepted.
 
 ---
 

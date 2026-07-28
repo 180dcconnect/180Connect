@@ -1,7 +1,7 @@
 # Branch Protection Spec — `main` (F230)
 
-**Status:** Blocked — **cannot be applied on the repo's current GitHub plan.** Not a permissions problem.
-**Why this is a separate doc:** branch protection is a repo *setting*, not a file in the repo, so it can never be delivered as a pull request. This doc records the gap, what the rule should be if the plan ever allows it, and what we do instead in the meantime.
+**Status:** **Will not be applied.** Blocked by the repo's GitHub plan (not by permissions), and the Project Leader decided on 28 July 2026 not to pay to unblock it. `main` is protected by team convention only, deliberately.
+**Why this is a separate doc:** branch protection is a repo *setting*, not a file in the repo, so it can never be delivered as a pull request. This doc is kept as a ready-made spec in case the plan changes later — it is not an open task.
 
 ---
 
@@ -34,9 +34,9 @@ This matters for [F230](https://github.com/180dcconnect/180Connect/issues/225)'s
 | GitHub Pro on the account owning the repo | ~$4/user/month | Cheapest path; keeps the repo private. Note the repo is owned by a **user** account (`180dcconnect`), not an org, so Pro is the relevant tier, not Team. |
 | GitHub Team (requires moving the repo to an organisation) | ~$4/user/month, billed per member | Also unlocks org-level rulesets and `CODEOWNERS` review, but means an org migration mid-project. |
 | Make the repo public | Free | Branch protection becomes available immediately, but the codebase and its issue history become world-readable. Not acceptable while the project handles real organisation data. |
-| Stay as-is | Free | AC3 enforced by convention only — the current state. Recorded as an accepted deviation in [open-questions.md](open-questions.md) (D-04). |
+| **Stay as-is — chosen** | Free | AC3 enforced by convention only. Recorded as accepted deviation D-03 in [open-questions.md](open-questions.md). |
 
-**Recommendation:** stay as-is for the MVP and keep the convention documented, unless someone merges to `main` without review in practice — at which point ~$4/month is cheap insurance. This is a Project Leader call, not a component-owner one.
+**Decision (Project Leader, 28 July 2026): stay as-is.** The team is not paying for GitHub Pro, and the repo is not going public. Branch protection is off the table for the MVP; the convention below is the whole of the control. Revisit only if someone merges to `main` without review in practice, or the repo moves to an organisation for other reasons.
 
 ---
 
@@ -64,17 +64,17 @@ These steps only work once the repo is on a plan that offers protection for priv
 
 Optional: repeat for `dev` with a lighter version (e.g. require PR, but 0 required approvals) if the team wants to stop accidental direct pushes there too, without slowing down the day-to-day merge-to-dev flow.
 
-## What we do instead, today
+## What we do instead
 
-Until the above is possible, AC3 rests entirely on convention, documented in [production-deployment.md](production-deployment.md):
+Given the decision above, AC3 rests entirely on convention for the life of the MVP. Documented in [production-deployment.md](production-deployment.md):
 
 - Only the PM opens and merges the `dev` → `main` release PR.
 - Every change reaches `main` via `dev`, never directly.
 - The release PR is reviewed before merge, same as any other.
 
-None of this is enforced by GitHub. It holds because the team follows it.
+None of this is enforced by GitHub. It holds because the team follows it, and nothing will flag it if someone doesn't.
 
 ## Related files
 
 - [Production Deployment](production-deployment.md)
-- [Open Questions](open-questions.md) — D-04 records this as an accepted deviation
+- [Open Questions](open-questions.md) — D-03 records this as an accepted deviation

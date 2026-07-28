@@ -1,9 +1,12 @@
 # Production Deployment (F230)
 
 **Status:** Deployment pipeline verified working 22 July 2026. Re-checked against
-the current environment schema and F225's backup workflow on 28 July 2026 —
-see the flagged items below, which still need Bashir to confirm inside the
-Vercel dashboard (this component owner has no Vercel access — see footnote 2).
+the current environment schema and F225's backup workflow on 28 July 2026, and
+the outstanding dashboard items confirmed by Bashir the same day — production
+env vars are set, and a restore from a Blob dump succeeded. AC2 is met; AC3 is
+met on process and accepted as unenforceable on this GitHub plan (D-03). One
+item remains unobserved rather than unresolved: the nightly backup cron firing
+unattended.
 **Last updated:** 28 July 2026
 **Component Owner:** Ben. **Reviewer:** Bashir.
 
@@ -51,11 +54,19 @@ feature branch → PR → dev (auto-deploys; shared preview/staging) → PR → 
 
 ## Environment variables
 
-The 22 July check covered every variable that was `required: true` in `src/lib/env.ts` (added by F231) at the time: `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SUPABASE_URL`, and one Supabase key. Since then `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (F003, the login CAPTCHA) has also become `required: true` — the server now refuses to start without it. **This has not been re-confirmed against the live Vercel production dashboard**, only against the schema in code; whoever holds Vercel access needs to check Settings → Environment Variables for production and confirm a real (non-test) Turnstile site key is set there, matching the secret configured in that Supabase project's Attack Protection settings.
+The 22 July check covered every variable that was `required: true` in `src/lib/env.ts` (added by F231) at the time: `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SUPABASE_URL`, and one Supabase key. Since then `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (F003, the login CAPTCHA) has also become `required: true` — the server refuses to start without it.
 
-Two more are worth a deliberate look even though they're `required: false` (so a missing value won't fail the build): `SESSION_ACTIVITY_SECRET` — optional locally, but the schema's own comment says staging and production must set it, since without it the session-expiry record is unsigned and forgeable — and `NEXT_PUBLIC_SENTRY_DSN` / `SENTRY_ENVIRONMENT`, which is how F226 (error logging, closed 20 July) actually reaches Sentry in production rather than just the platform console.
+**Re-confirmed against the live Vercel production dashboard on 28 July 2026 (Bashir).** The three variables that were outstanding are all set in Production:
 
-The fact that a build with a missing *required* variable fails startup outright (`assertEnv()` in `src/instrumentation.ts`) is good evidence Preview (`dev`) has its required set covered, since the most recent `dev` deployment succeeded — but it says nothing about the `required: false` ones above, which fail silently, not loudly, if left unset.
+| Variable | `required` | Status |
+|---|---|---|
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | `true` | Set — real key, not a Cloudflare test key |
+| `SESSION_ACTIVITY_SECRET` | `false` in schema, **mandatory in practice** | Set — without it the session-expiry record is unsigned and forgeable |
+| `NEXT_PUBLIC_SENTRY_DSN` | `false` | Set — F226 error logging reaches Sentry rather than only the platform console |
+
+`SESSION_ACTIVITY_SECRET` is marked `required: false` because it is genuinely optional locally, but staging and production must set it — the schema comment in `src/lib/env.ts` says so, and it is the one variable here that fails *silently* rather than loudly. Re-check it after any Vercel environment change; a missing value will not fail the build.
+
+A build with a missing *required* variable fails startup outright (`assertEnv()` in `src/instrumentation.ts`), so a successful deployment is itself proof the required set is covered. That guarantee does not extend to the `required: false` ones above — hence the dashboard check.
 
 Full variable-by-variable reference: [environment-variables.md](environment-variables.md).
 
@@ -76,9 +87,9 @@ Both landed on `dev` after the 22 July check and are now merged into this branch
   | `VERCEL_TOKEN` | Secret | Account token the Blob upload/prune steps also require |
 
   **Status 28 July 2026:** all five are set — a manual `workflow_dispatch` run went green (`gh run list --workflow=backup-production.yml`; two earlier attempts on 27–28 July failed before the token set was complete). **The nightly schedule has not yet been observed firing on its own** — every run so far was manual, so confirm a scheduled run appears after the next 03:00 UTC before treating the cron as proven. Note scheduled runs execute from the default branch (`dev`), where this workflow already lives, so merging to `main` is not a prerequisite. Full detail and the restore procedure: [F225-database-backups.md](Backups/F225-database-backups.md), [backup-setup.md](Backups/backup-setup.md).
-- **Error logging (F226, closed 20 July):** wired through `NEXT_PUBLIC_SENTRY_DSN` — see the environment variables section above for what still needs confirming in the Vercel dashboard.
+- **Error logging (F226, closed 20 July):** wired through `NEXT_PUBLIC_SENTRY_DSN`, confirmed set in the Vercel production dashboard on 28 July 2026 — see the environment variables section above.
 
-Both are required for F230's AC2 ("backup and error logging requirements active and functioning, not just staging"). The backup half is now evidenced by a green run against the real production project. Two things still stand between here and marking AC2 done in good faith: the Sentry DSN check in the Vercel dashboard, and a **restore actually being performed** from one of those dumps into a scratch database — the dumps existing is not the same as knowing they restore (see D-01 in [open-questions.md](open-questions.md)).
+**AC2 is met.** F230's AC2 asks for "backup and error logging requirements active and functioning, not just staging". As of 28 July 2026: the backup workflow has run green against the real production project, **a restore from one of those Blob dumps has been performed successfully** (Bashir), and Sentry is wired up in production. The one thing still unobserved is the nightly schedule firing on its own — every run so far was triggered manually — so check the Actions tab after the next 03:00 UTC.
 
 ---
 

@@ -37,6 +37,8 @@ env:
   # variable so environment refs are never hardcoded in the workflow.
   STAGING_REF: ${{ vars.SUPABASE_STAGING_REF }}
   LOCAL_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+  # One place to bump the CLI, read by both jobs. See the note at its first use.
+  SUPABASE_CLI_VERSION: 2.110.0
 
 jobs:
   # Runs on every PR, before anything touches staging. The local stack replays all
@@ -51,7 +53,15 @@ jobs:
 
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Pinned, not `latest`. Resolving `latest` costs an unauthenticated
+          # call to the GitHub releases API, which is rate-limited per runner IP
+          # and shared across every project on that host — so it fails at random,
+          # with nothing wrong in the PR. It took down a green run on 29 Jul 2026
+          # ("Failed to resolve latest Supabase CLI release: rate limit exceeded")
+          # six seconds in. A pin also means the CLI cannot change under us
+          # between two runs of the same commit.
+          # Bump deliberately: https://github.com/supabase/cli/releases
+          version: ${{ env.SUPABASE_CLI_VERSION }}
 
       # Studio, realtime, storage and the rest are not exercised by these tests and
       # cost roughly a minute of startup each.
@@ -99,7 +109,10 @@ jobs:
 
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Same pin as the verify job, and the same reason. It matters more
+          # here: this job writes to the shared staging database, so the tool
+          # doing the writing should not change without someone choosing it.
+          version: ${{ env.SUPABASE_CLI_VERSION }}
 
       - name: Link staging and show pending migrations
         run: |

@@ -8,6 +8,7 @@ import {
   DEFAULT_ALLOWED_EMAIL_DOMAIN,
   normalizeEmail,
   SERVICE_UNAVAILABLE_MESSAGE,
+  SUSPENDED_MESSAGE,
   type LoginClient,
   type LoginInput,
   type LoginOutcome,
@@ -249,6 +250,59 @@ describe("attemptLogin — account status", () => {
     assert.equal(state.status, "pending");
     assert.match(state.message ?? "", /pending activation/i);
     assert.equal(calls.signOut, 1, "the session must not survive the check");
+  });
+
+  it("turns a suspended user away and closes the session it just opened (F013 AC2)", async () => {
+    const { client, calls } = fakeClient({ user: makeUser("approved") });
+    const { result } = await silencingLogs(() =>
+      attemptLogin(client, VALID, undefined, async () => false),
+    );
+
+    const state = rejected(result);
+    assert.equal(state.status, "pending");
+    assert.equal(state.message, SUSPENDED_MESSAGE);
+    assert.equal(
+      calls.signOut,
+      1,
+      "signInWithPassword already opened a session; it must not survive",
+    );
+  });
+
+  it("admits an active user (F013 — the check only bites when is_active is false)", async () => {
+    const { client } = fakeClient({ user: makeUser("approved") });
+    const { result } = await silencingLogs(() =>
+      attemptLogin(client, VALID, undefined, async () => true),
+    );
+
+    assert.equal(result.ok, true);
+  });
+
+  it("admits the user when the status cannot be read, leaving the dashboard gate to decide", async () => {
+    // A missing service-role key must not lock the whole team out of logging in.
+    // getCurrentActor still refuses a suspended account on the very next request.
+    const { client } = fakeClient({ user: makeUser("approved") });
+    const { result } = await silencingLogs(() =>
+      attemptLogin(client, VALID, undefined, async () => null),
+    );
+
+    assert.equal(result.ok, true);
+  });
+
+  it("does not consult the suspension reader before credentials pass", async () => {
+    const { client } = fakeClient({ error: "Invalid login credentials" });
+    let consulted = false;
+    await silencingLogs(() =>
+      attemptLogin(client, VALID, undefined, async () => {
+        consulted = true;
+        return false;
+      }),
+    );
+
+    assert.equal(
+      consulted,
+      false,
+      "reading account state for a failed sign-in would leak whether the account exists",
+    );
   });
 
   it("treats a user with no account_status as unapproved", async () => {

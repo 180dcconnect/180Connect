@@ -21,9 +21,15 @@ export function UserManagementTable({
   const [message, setMessage] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
 
+  /**
+   * One PATCH for both changes a row supports: `{ role }` swaps the role (F012),
+   * `{ isActive }` suspends or reactivates (F013). The route reads whichever it
+   * is given and refuses anything carrying both or neither.
+   */
   async function updateUser(
     userId: string,
-    role: TeamUser["role"],
+    change: { role: TeamUser["role"] } | { isActive: boolean },
+    successMessage: string,
   ) {
     setSavingId(userId);
     setMessage("");
@@ -31,7 +37,7 @@ export function UserManagementTable({
       const response = await fetch("/api/admin/users", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, role }),
+        body: JSON.stringify({ userId, ...change }),
       });
       const result = await response.json();
       if (!response.ok) {
@@ -41,7 +47,10 @@ export function UserManagementTable({
       setUsers((current) =>
         current.map((user) => user.id === userId ? result.user : user),
       );
-      setMessage("Access updated successfully.");
+      // A warning means the change landed but something after it did not — a
+      // suspension whose session sweep failed. It replaces the success line
+      // rather than sitting beside it, so the caveat cannot be missed.
+      setMessage(result.warning ?? successMessage);
     } catch {
       setMessage("The change could not be saved. Check your connection and try again.");
     } finally {
@@ -61,6 +70,7 @@ export function UserManagementTable({
               <th className="p-3">Member</th>
               <th className="p-3">Role</th>
               <th className="p-3">Status</th>
+              <th className="p-3">Access</th>
             </tr>
           </thead>
           <tbody>
@@ -76,7 +86,11 @@ export function UserManagementTable({
                     className="rounded-lg border border-black/15 bg-white px-3 py-2"
                     disabled={savingId === user.id || user.id === currentUserId}
                     onChange={(event) =>
-                      updateUser(user.id, event.target.value as TeamUser["role"])
+                      updateUser(
+                        user.id,
+                        { role: event.target.value as TeamUser["role"] },
+                        "Role updated successfully.",
+                      )
                     }
                     value={user.role}
                   >
@@ -87,8 +101,39 @@ export function UserManagementTable({
                 </td>
                 <td className="p-3">
                   <span className={user.is_active ? "font-bold text-brand" : "font-bold text-red-700"}>
-                    {user.is_active ? "Active" : "Inactive"}
+                    {user.is_active ? "Active" : "Suspended"}
                   </span>
+                </td>
+                <td className="p-3">
+                  {/*
+                    Suspending yourself is refused by set_user_active and by the route
+                    before it; the button is hidden rather than disabled because there
+                    is no state in which an admin can press it.
+                  */}
+                  {user.id === currentUserId ? (
+                    <span className="text-foreground/50">—</span>
+                  ) : (
+                    <button
+                      className={
+                        user.is_active
+                          ? "rounded-lg border border-red-700/40 px-3 py-2 font-bold text-red-700 disabled:opacity-50"
+                          : "rounded-lg border border-black/15 px-3 py-2 font-bold disabled:opacity-50"
+                      }
+                      disabled={savingId === user.id}
+                      onClick={() =>
+                        updateUser(
+                          user.id,
+                          { isActive: !user.is_active },
+                          user.is_active
+                            ? "Team member suspended. They have been signed out and can no longer log in."
+                            : "Team member reactivated. They can log in again.",
+                        )
+                      }
+                      type="button"
+                    >
+                      {user.is_active ? "Suspend" : "Reactivate"}
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

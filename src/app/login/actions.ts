@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { readUserActiveStatus } from "@/lib/supabase/admin";
 import {
   attemptLogin,
   normalizeEmail,
@@ -32,11 +33,18 @@ export async function login(
 
   try {
     const supabase = await createClient();
-    const outcome = await attemptLogin(supabase, {
-      email,
-      password: formData.get("password"),
-      captchaToken: formData.get("cf-turnstile-response"),
-    });
+    const outcome = await attemptLogin(
+      supabase,
+      {
+        email,
+        password: formData.get("password"),
+        captchaToken: formData.get("cf-turnstile-response"),
+      },
+      // Explicit `undefined` keeps the default allowed domain; the suspension
+      // reader is the argument being supplied (F013).
+      undefined,
+      readUserActiveStatus,
+    );
 
     if (!outcome.ok) {
       return outcome.state;

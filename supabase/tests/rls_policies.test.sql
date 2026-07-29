@@ -523,6 +523,98 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Suspend / reactivate RPC — F013 (#15)
+-- ---------------------------------------------------------------------------
+-- users.is_active is granted to nobody, so set_user_active is the only write-path.
+-- These assert the three things the story turns on: an admin can flip it, a non-admin
+-- cannot, and the flag actually revokes access rather than merely recording a state.
+create or replace function tests.suite_active_rpc()
+returns setof text language plpgsql as $$
+declare
+  v_admin   uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a   uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b   uuid := '00000000-0000-4000-a000-000000000003';
+  v_active  boolean;
+  v_count   bigint;
+begin
+  if to_regprocedure('public.set_user_active(uuid, boolean)') is null then
+    return next skip(8, 'set_user_active RPC not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Admin suspends a CAM.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_user_active(%L, false)', v_cam_b)),
+    null,
+    'admin can suspend another user via the RPC'
+  );
+  select is_active into v_active from public.users where id = v_cam_b;
+  return next is(v_active, false, 'the suspension actually landed');
+
+  -- AC3: suspension leaves owned rows alone. The seed gives cam_b an organisation;
+  -- it must still be theirs, so reactivation or F257 reassignment has something to
+  -- work with.
+  if tests.tables_exist('organisations') then
+    select count(*) into v_count
+      from public.organisations where owner_id = v_cam_b;
+    return next is(v_count, 1::bigint,
+      'suspension does not release the user''s owned organisations');
+  else
+    return next skip(1, 'organisations not yet migrated');
+  end if;
+
+  if tests.tables_exist('audit_log') then
+    select count(*) into v_count
+      from public.audit_log
+     where action = 'user_suspended' and target_id = v_cam_b;
+    return next is(v_count, 1::bigint,
+      'the suspension wrote exactly one audit_log row');
+  else
+    return next skip(1, 'audit_log not yet migrated');
+  end if;
+
+  -- The flag is not decorative: a suspended user reads nothing. Every policy gates on
+  -- app.is_active_user(), so their own directory SELECT now returns zero rows.
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.users;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'a suspended user can no longer read the team directory');
+
+  -- Reactivation is reversible and audited under its own action name (AC4).
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_user_active(%L, true)', v_cam_b)),
+    null,
+    'admin can reverse a suspension'
+  );
+
+  -- A CAM cannot call it, even though EXECUTE is granted to authenticated — the body
+  -- self-checks is_admin().
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.set_user_active(%L, false)', v_cam_b)),
+    '42501',
+    'CAM calling the access RPC is refused inside the SECURITY DEFINER body'
+  );
+
+  -- Self-suspension is refused. This is also what guarantees an active admin always
+  -- survives: the only person an admin cannot suspend is themselves, so the caller is
+  -- always a remaining admin.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_user_active(%L, false)', v_admin)),
+    '42501',
+    'an admin cannot suspend their own account'
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Viewer is read-only — F258 (#268)
 -- ---------------------------------------------------------------------------
 -- Matrix §1: viewer = read-only. §3.2: ORGANISATIONS UPDATE is "admin any row;
@@ -637,6 +729,7 @@ select * from tests.suite_users();
 select * from tests.suite_sensitive();
 select * from tests.suite_audit();
 select * from tests.suite_role_rpc();
+select * from tests.suite_active_rpc();
 select * from tests.suite_views();
 
 select * from finish();

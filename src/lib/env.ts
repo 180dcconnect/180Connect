@@ -126,7 +126,7 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     required: false,
     secret: true,
     description:
-      "Supabase service-role key. Bypasses row-level security — server-side only, never prefixed with NEXT_PUBLIC_. Not yet consumed — becomes required with F223.",
+      "Supabase service-role key. Bypasses row-level security — server-side only, never prefixed with NEXT_PUBLIC_. Consumed by `src/lib/supabase/admin.ts` to revoke a suspended user's sessions (F013): without it the suspension still denies all data through RLS, but the user's existing access token stays valid until it expires. Optional locally; staging and production should set it.",
   },
   {
     name: "SESSION_ACTIVITY_SECRET",

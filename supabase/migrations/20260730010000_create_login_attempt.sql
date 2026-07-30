@@ -34,8 +34,8 @@
 --   Data migration| None.
 --   Security      | RLS on; SELECT admin-only; no write policy for any role. anon holds
 --                 | no privilege on the table and cannot execute the RPCs.
---   Documentation | Add to Data Model tab 08 (System Analytics) + Data Dictionary.
---                 | PENDING spreadsheet update — see PR checklist.
+--   Documentation | Data Model tabs 02, 08 and 11 (step 18.0) updated 30 Jul 2026;
+--                 | exported to docs/data-model/. Matrix row: §3.10.
 --
 -- Reversibility: paired rollback in ../rollback/20260730010000_create_login_attempt.down.sql
 

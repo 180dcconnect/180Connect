@@ -59,7 +59,7 @@ reviewers do not assume the matrix alone is sufficient.
 | CAM may edit own profile but **not** their own `role` | RLS is row-level; it cannot allow a row UPDATE while forbidding one column | `REVOKE` (§2.1) then column `GRANT` — `grant update (full_name) on public.users to authenticated`. `role`/`is_active` granted to nobody; an admin role change goes through an RPC (F012) | **shipped** in create_users (F233); F012 RPC still to build |
 | CAM claims an **unowned** organisation | Needs a write to `ORGANISATIONS.owner_id`, otherwise off-limits | Handled **in the UPDATE policy**, not an RPC: a CAM may target an unowned row and its `WITH CHECK` forces the new `owner_id` to be themselves. `claim_organisation(org_id)` as a `SECURITY DEFINER` RPC remains a future enhancement (F162) for atomic race-safety + an audit row | policy **shipped** in create_organisations (F233); RPC deferred to F162 |
 | "Override pipeline stage — **reason required**" | Postgres cannot require a justification string as a condition of an UPDATE | `SECURITY DEFINER` RPC `override_outreach_status(org_id, status, reason)`. `reason` is `not null` and lands in the audit log | to build (F224) |
-| "Reassign ownership: admin only" | Same column-level problem | Currently the org UPDATE policy allows an admin to set any `owner_id`; a dedicated `assign_organisation_owner` RPC (with audit) is the future form | admin path **shipped**; RPC deferred |
+| "Reassign ownership: admin only" | Same column-level problem | Currently the org UPDATE policy allows an admin to set any `owner_id`; a dedicated `assign_organisation_owner` RPC (with audit) is the future form | admin path **shipped**; RPC deferred. The **offboarding** case is now covered: `deactivate_user` (F014) reassigns every organisation the departing user owns, with a required reason and one `ownership_reassigned` audit row per organisation, in the same transaction that closes the account |
 | Audit entries are immutable | RLS controls who writes, not whether a row can later change | `AUDIT_LOG` gets **no** UPDATE or DELETE policy for any role. Append-only by omission | needs the table (§6) |
 
 **Rule that follows:** where a capability needs a *condition*, a *reason string*, or a
@@ -143,6 +143,17 @@ writes an `audit_log` row (PRD §4.2). Nobody writes `role` directly, admins inc
 `is_active` has the same treatment: `public.set_user_active(user_id, is_active)` (F013),
 same column-grant lockout, same self-check, same audit row — `user_suspended` or
 `user_reactivated`. See §2.1 and §7.
+
+`deactivated_at` (F014) is written only by `public.deactivate_user(user_id, reason,
+reassign_to, release_clients)` and cleared only by `set_user_active(..., true)`. It is a
+**marker, not a gate**: `is_active` alone decides whether anyone may log in or read a
+row, and no policy or helper consults `deactivated_at`. It exists so the UI can tell a
+suspension from an offboarding, which are otherwise the same `is_active = false`. The
+constraint `users_deactivated_at_matches_inactive` makes the contradictory combination
+(active *and* carrying a deactivation timestamp) unwritable by anyone, including a
+future RPC. `deactivate_user` additionally refuses to close an account while it still
+owns organisations unless given a destination, and moves them in the same transaction —
+see §3.2.
 
 ### 3.2 Canonical organisation data — shared read, admin write
 
@@ -379,6 +390,28 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    organisation with no active admin, which nothing in the app can then reverse:
    `role` and `is_active` are both writable only through these two RPCs. The fix is a
    last-admin guard inside `set_user_role`. **Open — belongs to F012.**
+8. **`revokeUserSessions` cannot work as written — sessions are never actually
+   revoked.** `src/lib/supabase/admin.ts` calls `auth.admin.signOut(userId, 'global')`,
+   but that method's first parameter is a **JWT**, not a user id: auth-js forwards it as
+   the bearer token on `POST /logout`, so GoTrue answers `invalid JWT: ... token
+   contains an invalid number of segments` every time. Every suspension and every
+   deactivation therefore takes the failure branch and shows the admin the "existing
+   sign-in could not be revoked" warning. Observed against a local stack on 30 Jul 2026
+   while verifying F014; GoTrue v2.193.1 exposes no by-user-id logout endpoint at all
+   (`/admin/users/{id}/logout` and `/admin/users/{id}/sessions` both 404), so this is
+   not a parameter fix.
+
+   **This is defence-in-depth, not an access hole.** Measured on the same stack: a
+   deactivated user holding an access token that Supabase still accepts
+   (`GET /auth/v1/user` → 200) is refused `/dashboard` and `/admin/users` by
+   `getCurrentActor`, and every RLS policy gates on `app.is_active_user()`. What
+   survives is a logged-in-looking shell over no data until the token expires — which
+   is exactly the state F013 set out to remove.
+
+   Fix options, none of them a one-liner: delete the user's `auth.sessions` rows from a
+   `SECURITY DEFINER` RPC (atomic with the flag flip, no service key needed, but writes
+   to a Supabase-managed schema), or reach the same rows over `SUPABASE_DB_URL`.
+   **Open — belongs to F013.**
 
 ---
 

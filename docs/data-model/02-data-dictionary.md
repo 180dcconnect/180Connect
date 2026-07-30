@@ -169,6 +169,7 @@
 | 04 Entities | USERS | created_at | timestamp |  |  |
 | 04 Entities | USERS | updated_at | timestamp |  |  |
 | 04 Entities | USERS | is_seed | boolean |  |  |
+| 04 Entities | USERS | deactivated_at | timestamp |  |  |
 | 04 Entities | NOTES | id | uuid |  |  |
 | 04 Entities | NOTES | organisation_id | uuid | ORGANISATIONS |  |
 | 04 Entities | NOTES | author_id | uuid | USERS |  |
@@ -338,6 +339,20 @@
 | 08 System Analytics | ERROR_LOG | stack_trace | text |  | Full stack trace for debugging |
 | 08 System Analytics | ERROR_LOG | resolved_at | timestamp |  | When the error was marked resolved; null while open |
 | 08 System Analytics | ERROR_LOG | created_at | timestamp |  | Row creation timestamp |
+| 08 System Analytics | AUDIT_LOG | id | uuid |  | Primary key |
+| 08 System Analytics | AUDIT_LOG | action_user_id | uuid | USERS | id of user who acted |
+| 08 System Analytics | AUDIT_LOG | action | text |  | Machine token: role_changed, user_deactivated |
+| 08 System Analytics | AUDIT_LOG | target_table | text |  | Table the action targeted |
+| 08 System Analytics | AUDIT_LOG | target_id | uuid |  | Row targeted |
+| 08 System Analytics | AUDIT_LOG | detail | jsonb |  | Action Context: before/after, reason |
+| 08 System Analytics | AUDIT_LOG | created_at | timestamp |  | Row creation timestamp |
+| 08 System Analytics | LOGIN_ATTEMPT | id | uuid |  | Primary Key |
+| 08 System Analytics | LOGIN_ATTEMPT | email_hash | text |  | sha256 hex of the trimmed, lowercased submitted email; never the address itself |
+| 08 System Analytics | LOGIN_ATTEMPT | failures | int |  | Consecutive failed logins inside the current window |
+| 08 System Analytics | LOGIN_ATTEMPT | window_started_at | timestamp |  | Start of the counting window; failures stop accumulating 15 minutes after it |
+| 08 System Analytics | LOGIN_ATTEMPT | blocked_until | timestamp |  | When this address may next attempt a login; null or past means allowed |
+| 08 System Analytics | LOGIN_ATTEMPT | created_at | timestamp |  | Row creation timestamp |
+| 08 System Analytics | LOGIN_ATTEMPT | updated_at | timestamp |  | Last time a failure was counted |
 | 09 CAM Analytics | CAM_ACTIVITY_SUMMARY | id | uuid |  | Primary key |
 | 09 CAM Analytics | CAM_ACTIVITY_SUMMARY | user_id | uuid |  | Links to USERS; the CAM the week covers |
 | 09 CAM Analytics | CAM_ACTIVITY_SUMMARY | week_start | date |  | Monday of the week the rollup covers |

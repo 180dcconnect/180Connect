@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
+import {
+  deactivationFailureMessage,
+  deactivationFailureStatus,
+} from "@/lib/auth/deactivation";
 import { canChangeAccess, canChangeRole } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { revokeUserSessions } from "@/lib/supabase/admin";
@@ -18,7 +22,34 @@ const accessUpdateSchema = z.object({
   isActive: z.boolean(),
 });
 
-const updateUserSchema = z.union([roleUpdateSchema, accessUpdateSchema]);
+/**
+ * Deactivate (offboard) — F014. `deactivate: true` is a literal rather than a boolean
+ * because there is no such thing as `deactivate: false`: the reverse of deactivation is
+ * reactivation, which is `{ isActive: true }` through the F013 path.
+ *
+ * `reassignTo` and `releaseClients` are the two destinations PRD §6.12 allows for the
+ * departing user's clients. Both may be absent when the user owns nothing; the database
+ * is what decides whether one was required, since it is the only party that can count
+ * the rows without a race.
+ */
+const deactivateSchema = z.object({
+  userId: z.uuid(),
+  deactivate: z.literal(true),
+  reason: z.string().trim().min(1).max(500),
+  reassignTo: z.uuid().optional(),
+  releaseClients: z.boolean().optional(),
+});
+
+/**
+ * Deactivation is matched first. Zod objects ignore unknown keys, so a body carrying
+ * both `deactivate` and `isActive` would otherwise be read as a plain suspension and
+ * silently skip the offboarding.
+ */
+const updateUserSchema = z.union([
+  deactivateSchema,
+  roleUpdateSchema,
+  accessUpdateSchema,
+]);
 
 /**
  * `set_user_active` raises 42501 for two different reasons and attaches a HINT to tell
@@ -51,7 +82,9 @@ export async function GET() {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("users")
-    .select("id, email, full_name, role, is_active, last_seen_at, created_at")
+    .select(
+      "id, email, full_name, role, is_active, deactivated_at, last_seen_at, created_at",
+    )
     .order("full_name", { ascending: true });
 
   if (error) {
@@ -62,7 +95,35 @@ export async function GET() {
     );
   }
 
-  return NextResponse.json({ users: data });
+  // How many clients each member owns, so the table can warn before an admin starts a
+  // deactivation that the gate will refuse (F014 AC2). Counted here rather than trusted
+  // as the decision: deactivate_user recounts inside its own transaction, which is the
+  // only place immune to a client being reassigned between this read and that write.
+  const { data: owned, error: ownedError } = await supabase
+    .from("organisations")
+    .select("owner_id")
+    .not("owner_id", "is", null);
+
+  if (ownedError) {
+    // Non-fatal. Without the counts the table still lists everyone and deactivation
+    // still works — the admin just meets the gate at the point of pressing the button
+    // instead of seeing it coming.
+    await reportError(ownedError, { operation: "admin.users.owned_client_counts" });
+  }
+
+  const ownedCounts = new Map<string, number>();
+  for (const row of owned ?? []) {
+    if (!row.owner_id) continue;
+    ownedCounts.set(row.owner_id, (ownedCounts.get(row.owner_id) ?? 0) + 1);
+  }
+
+  return NextResponse.json({
+    users: (data ?? []).map((user) => ({
+      ...user,
+      owned_client_count: ownedCounts.get(user.id) ?? 0,
+    })),
+    ownedCountsAvailable: !ownedError,
+  });
 }
 
 export async function PATCH(request: Request) {
@@ -95,8 +156,71 @@ export async function PATCH(request: Request) {
   // Set when a suspension landed but its session sweep did not, so the admin is told
   // the account is blocked from the data even though a stale token may still resolve.
   let warning: string | undefined;
+  // How many clients the deactivation moved, so the confirmation can name the number.
+  let clientsMoved = 0;
 
-  if ("role" in parsed.data) {
+  if ("deactivate" in parsed.data) {
+    const accessChange = canChangeAccess(
+      authorization.actor.id,
+      parsed.data.userId,
+    );
+    if (!accessChange.ok) {
+      return NextResponse.json(
+        { error: "You cannot deactivate your own account." },
+        { status: 400 },
+      );
+    }
+
+    const { data: result, error: deactivateError } = await supabase.rpc(
+      "deactivate_user",
+      {
+        p_user_id: parsed.data.userId,
+        p_reason: parsed.data.reason,
+        p_reassign_to: parsed.data.reassignTo ?? null,
+        p_release_clients: parsed.data.releaseClients ?? false,
+      },
+    );
+
+    if (deactivateError) {
+      // owns_active_clients is the reassignment gate doing its job, not a failure, so
+      // it is not reported as an error — it would otherwise fill ERROR_LOG with the
+      // normal first half of every offboarding.
+      if (deactivateError.hint !== "owns_active_clients") {
+        await reportError(deactivateError, {
+          operation: "admin.users.deactivate",
+          targetUserId: parsed.data.userId,
+        });
+      }
+      return NextResponse.json(
+        {
+          error: deactivationFailureMessage(deactivateError.hint),
+          hint: deactivateError.hint ?? undefined,
+        },
+        {
+          status: deactivationFailureStatus(
+            deactivateError.code,
+            deactivateError.hint,
+          ),
+        },
+      );
+    }
+
+    clientsMoved = (result as { clients_moved?: number } | null)?.clients_moved ?? 0;
+
+    // Same order and the same reasoning as the suspension path: the flag is already
+    // false, so every RLS policy denies this user before we touch their sessions. A
+    // failed sweep leaves a token shell over no data, which is a warning, not a
+    // rollback — undoing the deactivation would also have to undo the reassignment.
+    const revoked = await revokeUserSessions(parsed.data.userId);
+    if (!revoked.ok) {
+      await reportError(revoked.error, {
+        operation: "admin.users.revoke_sessions",
+        targetUserId: parsed.data.userId,
+      });
+      warning =
+        "The account is deactivated and blocked from all data, but its existing sign-in could not be revoked and may persist until it expires.";
+    }
+  } else if ("role" in parsed.data) {
     const roleChange = canChangeRole(
       authorization.actor.id,
       parsed.data.userId,
@@ -175,7 +299,7 @@ export async function PATCH(request: Request) {
 
   const { data, error } = await supabase
     .from("users")
-    .select("id, email, full_name, role, is_active")
+    .select("id, email, full_name, role, is_active, deactivated_at")
     .eq("id", parsed.data.userId)
     .single();
 
@@ -190,5 +314,11 @@ export async function PATCH(request: Request) {
     );
   }
 
-  return NextResponse.json(warning ? { user: data, warning } : { user: data });
+  // clientsMoved is only ever non-zero on the deactivation path; the table uses it to
+  // confirm the handover by number rather than making the admin go and check.
+  return NextResponse.json({
+    user: data,
+    ...(warning ? { warning } : {}),
+    ...(clientsMoved > 0 ? { clientsMoved } : {}),
+  });
 }

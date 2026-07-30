@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useCallback, useEffect, useState } from "react";
+import { useActionState, useCallback, useState } from "react";
 import type { LoginState } from "@/lib/auth/login";
 import { login } from "./actions";
 import {
@@ -36,15 +36,6 @@ export function LoginForm() {
   // fresh form, so a password never comes back visible on a shared machine.
   const [passwordVisible, setPasswordVisible] = useState(false);
 
-  // A Turnstile token is single-use. Without this, a second attempt after any
-  // failed one — wrong password, unapproved account, a validation error —
-  // resubmits the spent token, and Supabase rejects it as a CAPTCHA failure no
-  // matter what the user types. Reset the widget whenever an attempt comes back.
-  useEffect(() => {
-    if (state.status === "idle") return;
-    window.turnstile?.reset();
-  }, [state]);
-
   const onSubmit = useCallback(
     (event: React.FormEvent<HTMLFormElement>) => {
       // Belt and braces: the button is disabled, but a form can still be
@@ -53,9 +44,9 @@ export function LoginForm() {
         event.preventDefault();
         return;
       }
-      // The token is spent by this submission, so close the gate again. The
-      // effect above resets the widget once the attempt comes back, and
-      // `onTurnstileSolved` reopens the gate when the fresh challenge passes.
+      // The token is spent by this submission, so close the gate again.
+      // `resetKey` below starts a fresh challenge once the attempt comes back,
+      // which reopens the gate when it passes.
       setSolved(false);
     },
     [solved],
@@ -191,6 +182,7 @@ export function LoginForm() {
         onSolvedChange={setSolved}
         action="log in"
         gerund="logging in"
+        resetKey={state}
       />
 
       <button

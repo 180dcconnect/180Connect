@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useCallback, useEffect, useState } from "react";
+import { useActionState, useCallback, useState } from "react";
 import {
   CAPTCHA_HINT_ID,
   TurnstileChallenge,
@@ -21,13 +21,6 @@ export function ForgotPasswordForm() {
   // This form makes the server send mail, so it is CAPTCHA-gated exactly as
   // login is (F003). The server checks the token again regardless.
   const [solved, setSolved] = useState(false);
-
-  // A Turnstile token is single-use, so a second attempt after a failed one
-  // would resubmit a spent token and be rejected no matter what was typed.
-  useEffect(() => {
-    if (state.status === "idle") return;
-    window.turnstile?.reset();
-  }, [state]);
 
   const onSubmit = useCallback(
     (event: React.FormEvent<HTMLFormElement>) => {
@@ -86,6 +79,7 @@ export function ForgotPasswordForm() {
         onSolvedChange={setSolved}
         action="send reset instructions"
         gerund="sending reset instructions"
+        resetKey={state}
       />
 
       <button

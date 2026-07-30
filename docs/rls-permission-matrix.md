@@ -271,6 +271,32 @@ unless created `with (security_invoker = on)`. Every view over an RLS-protected
 table must be created `with (security_invoker = on)`, or it silently launders data
 around the policies. This is a required check in the schema change approval record.
 
+### 3.10 Login throttle
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `LOGIN_ATTEMPT` | admin | — (`SECURITY DEFINER` RPC only) | — (RPC only) | — (RPC only) |
+
+Backs the F227 login throttle (`supabase/migrations/20260730010000_create_login_attempt.sql`).
+Admin SELECT exists so someone can answer "is this person locked out?"; no role holds a
+write, because a user who could reset their own counter could brute-force freely.
+
+Two things about this table differ from every other row above, both deliberate:
+
+- **Its RPCs are granted to `service_role`, not `authenticated`.** Every other RPC in this
+  matrix is called by a signed-in user; these are called *before* anyone is signed in. The
+  tempting move — grant `record_login_failure` to `anon` so the login action can call it
+  with the publishable key — hands any caller a way to inflate any address's counter over
+  `/rest/v1/rpc/`, with no CAPTCHA in the way, and so to keep a chosen user delayed. The
+  login Server Action holds the service-role key instead (`src/lib/supabase/admin.ts`).
+- **It stores a sha256 of the submitted email, and has no FK to `users`.** Most rows in an
+  attack name accounts that do not exist, so a FK is impossible and the raw strings would
+  make this a log of who tried to sign in (PRD §15 data minimisation).
+
+The throttle reads no user table, so an unknown address is counted, blocked and messaged
+exactly like a real one — it cannot be used to enumerate accounts. See §4 on why the
+user-facing message stays uniform.
+
 ---
 
 ## 4. Denial behaviour and feedback

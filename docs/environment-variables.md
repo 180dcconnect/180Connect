@@ -46,6 +46,21 @@ Project Root/
 **Usage:** `npm run dev`  
 **Secrets source:** Ask team in Slack; stored in password manager
 
+> **Never paste a real key into this file.** Every value below is illustrative —
+> `<redacted>` where a real one would go. This document is committed, so anything
+> written here is in the repository history permanently, and deleting it later does
+> not remove it; the only fix is to rotate the key.
+>
+> Do not write a realistic-looking fake one either. The local Supabase block used to
+> hold two JWT-shaped placeholders with real headers, real-looking payloads and
+> `very-secret-key-do-not-share` where the signature goes. They authenticated against
+> nothing, but they tripped the secret scanner as false positives and read as genuine
+> to anyone skimming — which cost someone an afternoon and a needless security alarm.
+>
+> Do not rely on the pull-request secret scan to catch a mistake here: it scans the
+> **diff**, so a secret is flagged the day it is added and invisible on every run
+> afterwards.
+
 ### Example
 
 ```bash
@@ -56,8 +71,8 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 # Supabase (Development/Preview Project)
 # From: Supabase Dashboard → Project → API → Copy values
 NEXT_PUBLIC_SUPABASE_URL=https://cgbfhhdeapasniudyyds.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNnYmZoaGRlYXBhc25pdWR5eWRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE2MjE5MDY0MzAsImV4cCI6MTkzNzQ4MjQzMH0.a0-something-random
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNnYmZoaGRlYXBhc25pdWR5eWRzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTYyMTkwNjQzMCwiZXhwIjoxOTM3NDgyNDMwfQ.very-secret-key-do-not-share
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<redacted>
+SUPABASE_SERVICE_ROLE_KEY=<redacted>
 
 # Environment label
 NEXT_PUBLIC_ENV=local
@@ -193,8 +208,8 @@ NEXT_PUBLIC_SENTRY_DSN=<redacted>
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | dev-key | prod-key | Always | Legacy name for the publishable key; read as a fallback. Set one or the other |
 | `AUTH_ALLOWED_EMAIL_DOMAIN` | `180dc.org` | `180dc.org` | Only server-side | Email domain users must sign in from. Optional — defaults to `180dc.org` |
 | `PASSWORD_RESET_WINDOW_SECONDS` | `3600` | `3600` | Only server-side | Password-recovery link lifetime in seconds. Keep aligned with the Supabase recovery OTP expiry |
-| `SUPABASE_SERVICE_ROLE_KEY` | dev-key | prod-key | Only server-side | **SENSITIVE:** Never expose to browser |
-| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | `1x00000000000000000000AA` (test key) locally; real key on preview | real key | Always | **Required** (F003) — public site key for the login CAPTCHA. Must match the secret configured in that project's Supabase Attack Protection settings |
+| `SUPABASE_SERVICE_ROLE_KEY` | dev-key | prod-key | Only server-side | **SENSITIVE:** Never expose to browser. Consumed by the F227 login throttle, whose RPCs are granted to `service_role` alone. Unset = the throttle degrades to a no-op and brute-force protection is silently off, so staging and production must have it |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | `1x00000000000000000000AA` (test key) locally; real key on preview | real key | Always | **Required** (F003) — public site key for the login CAPTCHA. **Half of a pair:** the matching secret must be set in that project's Supabase **Authentication → Attack Protection**, or the widget renders, issues a token and nothing ever validates it. Setting this variable alone does *not* turn the CAPTCHA on. Each environment needs its own Cloudflare widget, or one rotation breaks the other. Production was misconfigured on both counts until 30 July 2026 and is now correct — the probe that proves it is in [production-deployment.md](production-deployment.md#the-captcha-needs-a-second-non-vercel-half) |
 | `TURNSTILE_SECRET_KEY` | test secret locally | not set | Only server-side | **SENSITIVE.** Only the local Supabase stack reads it, via `supabase/config.toml`. Hosted environments hold it in the Supabase dashboard instead |
 | `NEXT_PUBLIC_ENV` | `staging` | `production` | Always | Tells app which environment it's in |
 | `GMAIL_CLIENT_ID` | dev-id | prod-id | Always | Public OAuth client ID |

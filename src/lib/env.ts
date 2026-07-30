@@ -126,7 +126,7 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     required: false,
     secret: true,
     description:
-      "Supabase service-role key. Bypasses row-level security — server-side only, never prefixed with NEXT_PUBLIC_. Not yet consumed — becomes required with F223.",
+      "Supabase service-role key. Bypasses row-level security — server-side only, never prefixed with NEXT_PUBLIC_. Read by `src/lib/supabase/admin.ts`, whose only caller is the F227 login throttle: its RPCs are granted to service_role alone, because a failed-login counter that anon could increment over the REST API would let anyone keep a chosen account delayed without solving a CAPTCHA. Optional locally, where an absent key degrades the throttle to a no-op and leaves the CAPTCHA and Supabase's per-IP limits in place. Staging and production must set it, or brute-force throttling is silently off. Becomes required with F223.",
   },
   {
     name: "SESSION_ACTIVITY_SECRET",

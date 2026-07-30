@@ -22,8 +22,9 @@
 | 10.0 | create_email_library | EMAIL_PERFORMANCE_LIBRARY | OUTREACH_MESSAGES (nullable until step 11) | Or create after step 11 if the FK is NOT NULL |
 | 11.0 | create_outreach | OUTREACH_MESSAGES, AI_GENERATIONS | ORGANISATIONS, CONTACTS, USERS, AGENT_RUNS | Draft and send records |
 | 12.0 | create_outreach_events | SEND_EVENTS, REPLY_EVENTS, OUTCOMES | OUTREACH_MESSAGES, ORGANISATIONS, CONTACTS, USERS | Delivery, replies, ground truth |
-| 13.0 | create_analytics | API_HEALTH_LOGS, INGESTION_SUMMARY, COST_TRACKING, ERROR_LOG, CAM_ACTIVITY_SUMMARY, PIPELINE_METRICS, SECTOR_PERFORMANCE | USERS | Tabs 08-09 |
+| 13.0 | create_analytics | API_HEALTH_LOGS, INGESTION_SUMMARY, COST_TRACKING, ERROR_LOG, CAM_ACTIVITY_SUMMARY, PIPELINE_METRICS, SECTOR_PERFORMANCE, AUDIT_LOG | USERS | Tabs 08-09 |
 | 14.0 | create_pulse_view | sector_trends (SQL view) | ORGANISATIONS, GRANTS, FINANCIAL_PERIODS | PULSE is a view, not a table |
 | 15.0 | enable_rls_policies | RLS policies on every table | All tables | Per the Security Controls Register (tab 12) |
 | 16.0 | create_indexes | Indexes: FKs, LATEST_SCORES.priority_score, ORGANISATIONS.outreach_status, RAW_SOURCE_RECORDS.checksum | All tables | Query performance for the dashboard |
 | 17.0 | configure_backups | Daily backups + point-in-time recovery | - | Supabase |
+| 18.0 | create_login_attempt | LOGIN_ATTEMPT + RPCs login_throttle_state, record_login_failure, clear_login_failures, prune_login_attempts | pgcrypto (Step 1) | F003 brute-force throttle. No FK. RPCs granted to service_role only; RLS on, admin SELECT, no write policy |

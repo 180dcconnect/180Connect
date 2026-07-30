@@ -6,8 +6,11 @@ the outstanding dashboard items confirmed by Bashir the same day — production
 env vars are set, and a restore from a Blob dump succeeded. AC2 is met; AC3 is
 met on process and accepted as unenforceable on this GitHub plan (D-03). One
 item remains unobserved rather than unresolved: the nightly backup cron firing
-unattended.
-**Last updated:** 28 July 2026
+unattended. **The CAPTCHA gap found on 30 July 2026 was closed the same day**
+(Bashir): production now has its own Turnstile widget and the paired secret is
+configured on the production Supabase project, verified by probe — see
+[The CAPTCHA needs a second, non-Vercel half](#the-captcha-needs-a-second-non-vercel-half).
+**Last updated:** 30 July 2026
 **Component Owner:** Ben. **Reviewer:** Bashir.
 
 ---
@@ -60,7 +63,7 @@ The 22 July check covered every variable that was `required: true` in `src/lib/e
 
 | Variable | `required` | Status |
 |---|---|---|
-| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | `true` | Set — real key, not a Cloudflare test key |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | `true` | Set to production's **own** widget key (`0x4AAAAAAEBMdWAucsZPC1Fi`), distinct from staging's, with the paired secret configured on the production Supabase project — the CAPTCHA is enforced. It was briefly neither of those things; the check that catches it is in [The CAPTCHA needs a second, non-Vercel half](#the-captcha-needs-a-second-non-vercel-half) below |
 | `SESSION_ACTIVITY_SECRET` | `false` in schema, **mandatory in practice** | Set — without it the session-expiry record is unsigned and forgeable |
 | `NEXT_PUBLIC_SENTRY_DSN` | `false` | Set — F226 error logging reaches Sentry rather than only the platform console |
 
@@ -69,6 +72,76 @@ The 22 July check covered every variable that was `required: true` in `src/lib/e
 A build with a missing *required* variable fails startup outright (`assertEnv()` in `src/instrumentation.ts`), so a successful deployment is itself proof the required set is covered. That guarantee does not extend to the `required: false` ones above — hence the dashboard check.
 
 Full variable-by-variable reference: [environment-variables.md](environment-variables.md).
+
+### The CAPTCHA needs a second, non-Vercel half
+
+`NEXT_PUBLIC_TURNSTILE_SITE_KEY` being set in Vercel is only half of F003. Turnstile
+is a key *pair*: the site key identifies the widget in the browser, and the paired
+**secret key** validates the token. The app never reads the secret — Supabase does,
+from **Authentication → Attack Protection** in that project's dashboard. Setting the
+site key alone gets you a widget that renders, issues a token, and is never checked
+by anyone.
+
+**Production was in exactly that state on the morning of 30 July 2026, and was fixed
+the same day.** Probing each project's sign-in endpoint with no CAPTCHA token:
+
+| Supabase project | Response to a token-less sign-in | Enforcing? |
+|---|---|---|
+| `180connect-staging` | `captcha_failed` — "no captcha_token found" | Yes |
+| `180connect-production` | `captcha_failed` — "no captcha_token found" | Yes (since 30 July 2026) |
+
+Production also had no widget of its own, serving staging's site key — one secret
+across both environments, so rotating staging's key would have broken production and
+the two environments' traffic was indistinguishable in Cloudflare's analytics. It now
+has its own (`0x4AAAAAAEBMdWAucsZPC1Fi`, against staging's `0x4AAAAAAD81XDBIWhZcPxMY`).
+
+Neither F003 PR (#271, #274) could have prevented the original gap — the production
+project was created on 20 July, after #271 merged, and #271 only ever enabled CAPTCHA
+on staging. `supabase/config.toml`'s `[auth.captcha]` block configures the *local*
+stack only; it has no effect on any hosted project.
+
+Keep the procedure below: it is what any new environment needs, and what a key
+rotation has to repeat. Run in this order.
+
+1. **Cloudflare → Turnstile → Add widget.** Name it `180connect-production`, hostname
+   `180connect.vercel.app`, mode Managed. Keep the site key and the secret key.
+2. **Supabase → `180connect-production` → Authentication → Attack Protection.** Enable
+   CAPTCHA protection, provider **Turnstile**, paste the **secret** key, save.
+3. **Vercel → Settings → Environment Variables.** Edit
+   `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, **Production scope only**, to the new **site** key.
+4. **Redeploy production.** `NEXT_PUBLIC_*` values are inlined at build time, so the
+   env change does nothing until a rebuild — see [Changing a production environment
+   variable](#changing-a-production-environment-variable).
+
+Steps 2–4 must not be separated for long. Between enabling the secret and shipping
+the matching site key, production is serving a site key from a *different* widget, so
+every token fails validation and **nobody can log in**. Do them back to back and
+verify immediately.
+
+Verify with the probe below — `captcha_failed` means enforced, `invalid_credentials`
+means the secret is missing and the widget is decorative. Note that a *nonexistent*
+address returns `captcha_failed` too when enforcement is on: the CAPTCHA is checked
+before the credentials, which is what makes this safe to run against production
+without touching a real account.
+
+```bash
+curl -s -X POST "https://tugfhwiqvwrpvawpjwmd.supabase.co/auth/v1/token?grant_type=password" \
+  -H "apikey: <production publishable key>" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"nobody@180dc.org","password":"wrong"}'
+```
+
+then complete one real login in a real browser. Turnstile serves headless browsers an
+interactive challenge and refuses to issue a token, so the happy path cannot be
+automated — see PR #274.
+
+**Before enabling this on a new project, check what else it gates.** Supabase applies CAPTCHA to
+*every* auth action on the project, not just sign-in: sign-up, password recovery, OTP
+and resend all start requiring a token. As of 30 July 2026 only `/login` and
+`/forgot-password` reach those methods and both already render the widget, so nothing
+else breaks. Password reset itself is safe — it goes through `updateUser`, which is
+not gated. Any future flow that signs up or invites a user (F008) must add
+`TurnstileChallenge` before it ships.
 
 ---
 
@@ -102,6 +175,11 @@ Both landed on `dev` after the 22 July check and are now merged into this branch
 3. Once merged, Vercel picks up the push to `main` automatically — no manual "deploy" step. Watch the **Deployments** tab in Vercel; the new build usually goes live within a couple of minutes.
 4. Confirm the live site at `https://180connect.vercel.app` reflects the change.
 5. Check Sentry (and `ERROR_LOG` once F221 lands) for any new errors in the minutes after deploy.
+6. If the release touches authentication, or changed a Turnstile key on either side,
+   confirm the CAPTCHA is still enforced — a token-less sign-in against the production
+   Supabase project must come back `captcha_failed`, and one real login in a real
+   browser must still succeed. A widget that renders proves nothing on its own; see
+   [The CAPTCHA needs a second, non-Vercel half](#the-captcha-needs-a-second-non-vercel-half).
 
 ### If a production deploy breaks something
 
@@ -110,6 +188,12 @@ Vercel keeps every past deployment. In the **Deployments** tab, find the last kn
 ### Changing a production environment variable
 
 Editing a variable in Settings → Environment Variables does **not** update the live site by itself — Vercel only reads env vars at build time. After changing one, go to the latest Production deployment in the **Deployments** tab and choose **Redeploy** (without changing any code) so the new value actually takes effect.
+
+Some variables also have a half that does not live in Vercel at all, and changing one
+side without the other breaks the feature. `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is the
+current example — its secret lives in the Supabase dashboard, and the two must be
+from the same Cloudflare widget. [environment-variables.md](environment-variables.md)
+marks which variables those are.
 
 ### Branch protection
 

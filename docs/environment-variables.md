@@ -46,6 +46,21 @@ Project Root/
 **Usage:** `npm run dev`  
 **Secrets source:** Ask team in Slack; stored in password manager
 
+> **Never paste a real key into this file.** Every value below is illustrative —
+> `<redacted>` where a real one would go. This document is committed, so anything
+> written here is in the repository history permanently, and deleting it later does
+> not remove it; the only fix is to rotate the key.
+>
+> Do not write a realistic-looking fake one either. The local Supabase block used to
+> hold two JWT-shaped placeholders with real headers, real-looking payloads and
+> `very-secret-key-do-not-share` where the signature goes. They authenticated against
+> nothing, but they tripped the secret scanner as false positives and read as genuine
+> to anyone skimming — which cost someone an afternoon and a needless security alarm.
+>
+> Do not rely on the pull-request secret scan to catch a mistake here: it scans the
+> **diff**, so a secret is flagged the day it is added and invisible on every run
+> afterwards.
+
 ### Example
 
 ```bash
@@ -56,8 +71,8 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 # Supabase (Development/Preview Project)
 # From: Supabase Dashboard → Project → API → Copy values
 NEXT_PUBLIC_SUPABASE_URL=https://cgbfhhdeapasniudyyds.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNnYmZoaGRlYXBhc25pdWR5eWRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE2MjE5MDY0MzAsImV4cCI6MTkzNzQ4MjQzMH0.a0-something-random
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNnYmZoaGRlYXBhc25pdWR5eWRzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTYyMTkwNjQzMCwiZXhwIjoxOTM3NDgyNDMwfQ.very-secret-key-do-not-share
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<redacted>
+SUPABASE_SERVICE_ROLE_KEY=<redacted>
 
 # Environment label
 NEXT_PUBLIC_ENV=local

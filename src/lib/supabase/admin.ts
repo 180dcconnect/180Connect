@@ -1,53 +1,41 @@
 import "server-only";
 
-import { createClient as createSupabaseClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
- * The service-role Supabase client (F013).
+ * A Supabase client holding the service-role key.
  *
- * Distinct from `createClient()` in ./server.ts in the way that matters: this one
- * carries SUPABASE_SERVICE_ROLE_KEY, so it BYPASSES ROW-LEVEL SECURITY ENTIRELY.
- * Every policy in the database is inert against it. Reach for it only where the
- * work genuinely cannot be done as the signed-in user, and keep the call site
- * behind its own authorisation check.
+ * The service role bypasses row-level security, so this must never be reachable
+ * from the browser: `server-only` above makes importing it from a Client
+ * Component a build error rather than a leak. It is also why the key is read
+ * from `SUPABASE_SERVICE_ROLE_KEY` and not the `NEXT_PUBLIC_` namespace.
  *
- * Today there is exactly one such place: reading `users.is_active` during login,
- * before the caller has a session that any policy would accept.
+ * Two callers, both on the login path and both for the same underlying reason —
+ * the work has to happen before the caller has a session any policy would accept:
  *
- * Session revocation used to live here too, and could not: `auth.admin.signOut`
- * takes a JWT, not a user id, and GoTrue exposes no by-user-id logout endpoint at
- * all. It is now done in the database, inside `set_user_active` itself — see
- * `supabase/migrations/20260729232500_revoke_sessions_on_suspend.sql`.
+ *   - the login throttle (F227), whose RPCs are granted to `service_role` alone,
+ *     deliberately, because a counter that `anon` can increment over the REST API
+ *     is a way to keep a chosen account delayed without ever solving a CAPTCHA;
+ *   - `readUserActiveStatus` (F013), because `users_select_active` gates SELECT on
+ *     the *reader* being active, so a suspended user cannot read their own row.
  *
- * Never import this from a Client Component. `server-only` makes that a build
- * error rather than a leaked key.
+ * No session, no cookies, no token refresh: this client acts as the project, not
+ * as a user, and persisting anything would risk it being mistaken for one.
  */
-
-/** Thrown rather than returned: a missing key is a deployment fault, not a user error. */
-export class ServiceRoleUnavailableError extends Error {
-  constructor() {
-    super("SUPABASE_SERVICE_ROLE_KEY is not configured.");
-    this.name = "ServiceRoleUnavailableError";
-  }
-}
-
-export function createAdminClient(): SupabaseClient {
+export function createAdminClient(): SupabaseClient | null {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!url || !key) {
-    throw new ServiceRoleUnavailableError();
-  }
+  // Returns null rather than throwing. The key is optional locally (the same
+  // arrangement as SESSION_ACTIVITY_SECRET), and both callers treat an absent
+  // client as "carry on without this check" — see the fail-open note in
+  // `src/lib/auth/login-throttle.ts`, and `readUserActiveStatus` below. Throwing
+  // here would instead take down login entirely on any machine without the key.
+  if (!url || !key) return null;
 
-  // No cookie handling and no session persistence: this client is not acting for
-  // anybody. autoRefreshToken off for the same reason — there is no session to
-  // refresh, and leaving it on starts a timer in a request-scoped client.
   return createSupabaseClient(url, key, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-      detectSessionInUrl: false,
-    },
+    auth: { persistSession: false, autoRefreshToken: false },
   });
 }
 
@@ -65,6 +53,8 @@ export function createAdminClient(): SupabaseClient {
 export async function readUserActiveStatus(userId: string): Promise<boolean | null> {
   try {
     const admin = createAdminClient();
+    if (!admin) return null;
+
     const { data, error } = await admin
       .from("users")
       .select("is_active")

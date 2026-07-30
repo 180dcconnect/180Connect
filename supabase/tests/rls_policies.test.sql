@@ -538,11 +538,23 @@ declare
   v_count   bigint;
 begin
   if to_regprocedure('public.set_user_active(uuid, boolean)') is null then
-    return next skip(8, 'set_user_active RPC not yet migrated');
+    return next skip(10, 'set_user_active RPC not yet migrated');
     return;
   end if;
 
   perform tests.seed();
+
+  -- AC2: the suspension must sign them out, not merely deny them. Give cam_b a
+  -- session first so there is something for the suspension to revoke — without this
+  -- fixture the assertion below passes against a database that revokes nothing.
+  --
+  -- This is the shape of the bug it exists to catch: the original implementation
+  -- called auth-js `admin.signOut(userId)`, which wanted a JWT, failed on every call,
+  -- and left the session alive while the UI reported success with a warning.
+  insert into auth.sessions (id, user_id, created_at, updated_at)
+  values (gen_random_uuid(), v_cam_b, now(), now());
+  select count(*) into v_count from auth.sessions where user_id = v_cam_b;
+  return next is(v_count, 1::bigint, 'the fixture session exists before suspension');
 
   -- Admin suspends a CAM.
   return next is(
@@ -553,6 +565,10 @@ begin
   );
   select is_active into v_active from public.users where id = v_cam_b;
   return next is(v_active, false, 'the suspension actually landed');
+
+  select count(*) into v_count from auth.sessions where user_id = v_cam_b;
+  return next is(v_count, 0::bigint,
+    'suspension revoked the user''s sessions, not just their permissions');
 
   -- AC3: suspension leaves owned rows alone. The seed gives cam_b an organisation;
   -- it must still be theirs, so reactivation or F257 reassignment has something to

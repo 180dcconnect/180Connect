@@ -144,6 +144,16 @@ writes an `audit_log` row (PRD §4.2). Nobody writes `role` directly, admins inc
 same column-grant lockout, same self-check, same audit row — `user_suspended` or
 `user_reactivated`. See §2.1 and §7.
 
+Suspension also **revokes the user's sessions**, in the same transaction, via
+`app.revoke_sessions(uuid)` — a `DELETE` from `auth.sessions`, which invalidates their
+access token and their refresh token at once. Flipping `is_active` denies them every
+row, but it cannot invalidate a JWT that has already been issued; without the delete a
+suspended user keeps a working token, and a logged-in-looking shell, until it expires.
+Measured on GoTrue v2.193.1: with the session row gone, `GET /auth/v1/user` goes
+`200 → 403` and a refresh returns `400`. This replaces an application-side
+`auth.admin.signOut(userId)` call that could never work — that parameter is a JWT, not
+a user id, and GoTrue has no by-user-id logout endpoint.
+
 ### 3.2 Canonical organisation data — shared read, admin write
 
 Everyone authorised reads canonical data (§4.3 "View canonical organisations": all

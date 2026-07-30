@@ -47,10 +47,7 @@ export function UserManagementTable({
       setUsers((current) =>
         current.map((user) => user.id === userId ? result.user : user),
       );
-      // A warning means the change landed but something after it did not — a
-      // suspension whose session sweep failed. It replaces the success line
-      // rather than sitting beside it, so the caveat cannot be missed.
-      setMessage(result.warning ?? successMessage);
+      setMessage(successMessage);
     } catch {
       setMessage("The change could not be saved. Check your connection and try again.");
     } finally {

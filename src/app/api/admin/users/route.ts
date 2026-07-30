@@ -7,7 +7,6 @@ import {
 } from "@/lib/auth/deactivation";
 import { canChangeAccess, canChangeRole } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
-import { revokeUserSessions } from "@/lib/supabase/admin";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
 
@@ -153,9 +152,6 @@ export async function PATCH(request: Request) {
   }
 
   const supabase = await createClient();
-  // Set when a suspension landed but its session sweep did not, so the admin is told
-  // the account is blocked from the data even though a stale token may still resolve.
-  let warning: string | undefined;
   // How many clients the deactivation moved, so the confirmation can name the number.
   let clientsMoved = 0;
 
@@ -207,19 +203,9 @@ export async function PATCH(request: Request) {
 
     clientsMoved = (result as { clients_moved?: number } | null)?.clients_moved ?? 0;
 
-    // Same order and the same reasoning as the suspension path: the flag is already
-    // false, so every RLS policy denies this user before we touch their sessions. A
-    // failed sweep leaves a token shell over no data, which is a warning, not a
-    // rollback — undoing the deactivation would also have to undo the reassignment.
-    const revoked = await revokeUserSessions(parsed.data.userId);
-    if (!revoked.ok) {
-      await reportError(revoked.error, {
-        operation: "admin.users.revoke_sessions",
-        targetUserId: parsed.data.userId,
-      });
-      warning =
-        "The account is deactivated and blocked from all data, but its existing sign-in could not be revoked and may persist until it expires.";
-    }
+    // Nothing follows the RPC. Signing the user out is part of its transaction, the
+    // same as for a suspension, so the reassignment, the account closing and the
+    // session revocation all commit together or none of them do.
   } else if ("role" in parsed.data) {
     const roleChange = canChangeRole(
       authorization.actor.id,
@@ -278,23 +264,11 @@ export async function PATCH(request: Request) {
     // No logSecurityEvent here: set_user_active writes an audit_log row in the same
     // transaction as the change, which is the durable record. This module is for
     // failures that leave no other trace.
-
-    // Order matters. The flag is flipped first, so every RLS policy already denies
-    // this user before we touch their sessions; if the sweep then fails they are
-    // locked out of all data regardless, and only the token shell survives. Doing it
-    // the other way round would leave a window where they are signed out but still
-    // permitted, and could simply sign back in.
-    if (!parsed.data.isActive) {
-      const revoked = await revokeUserSessions(parsed.data.userId);
-      if (!revoked.ok) {
-        await reportError(revoked.error, {
-          operation: "admin.users.revoke_sessions",
-          targetUserId: parsed.data.userId,
-        });
-        warning =
-          "The account is suspended and blocked from all data, but its existing sign-in could not be revoked and may persist until it expires.";
-      }
-    }
+    //
+    // Nothing follows the RPC. Revoking the suspended user's sessions used to be a
+    // second step here, with a warning for when it failed; it is now part of
+    // set_user_active's transaction, so it either happened or the suspension did not.
+    // There is no longer a half-suspended state for the route to describe.
   }
 
   const { data, error } = await supabase
@@ -318,7 +292,6 @@ export async function PATCH(request: Request) {
   // confirm the handover by number rather than making the admin go and check.
   return NextResponse.json({
     user: data,
-    ...(warning ? { warning } : {}),
     ...(clientsMoved > 0 ? { clientsMoved } : {}),
   });
 }

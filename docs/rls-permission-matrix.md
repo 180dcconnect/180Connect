@@ -144,6 +144,17 @@ writes an `audit_log` row (PRD §4.2). Nobody writes `role` directly, admins inc
 same column-grant lockout, same self-check, same audit row — `user_suspended` or
 `user_reactivated`. See §2.1 and §7.
 
+Suspension also **revokes the user's sessions**, in the same transaction, via
+`app.revoke_sessions(uuid)` — a `DELETE` from `auth.sessions`, which invalidates their
+access token and their refresh token at once. Flipping `is_active` denies them every
+row, but it cannot invalidate a JWT that has already been issued; without the delete a
+suspended user keeps a working token, and a logged-in-looking shell, until it expires.
+Measured on GoTrue v2.193.1: with the session row gone, `GET /auth/v1/user` goes
+`200 → 403` and a refresh returns `400`. This replaces an application-side
+`auth.admin.signOut(userId)` call that could never work — that parameter is a JWT, not
+a user id, and GoTrue has no by-user-id logout endpoint. `deactivate_user` revokes the
+same way.
+
 `deactivated_at` (F014) is written only by `public.deactivate_user(user_id, reason,
 reassign_to, release_clients)` and cleared only by `set_user_active(..., true)`. It is a
 **marker, not a gate**: `is_active` alone decides whether anyone may log in or read a
@@ -390,28 +401,32 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    organisation with no active admin, which nothing in the app can then reverse:
    `role` and `is_active` are both writable only through these two RPCs. The fix is a
    last-admin guard inside `set_user_role`. **Open — belongs to F012.**
-8. **`revokeUserSessions` cannot work as written — sessions are never actually
-   revoked.** `src/lib/supabase/admin.ts` calls `auth.admin.signOut(userId, 'global')`,
+8. ~~**`revokeUserSessions` cannot work as written — sessions are never actually
+   revoked.**~~ **Resolved on the F013 branch, 30 Jul 2026** —
+   `20260729232500_revoke_sessions_on_suspend.sql` moved revocation into the database
+   (`app.revoke_sessions`), and pgTAP now seeds a session and asserts it is gone after
+   a suspension. Recorded here because the reasoning is worth keeping:
+   `src/lib/supabase/admin.ts` called `auth.admin.signOut(userId, 'global')`,
    but that method's first parameter is a **JWT**, not a user id: auth-js forwards it as
    the bearer token on `POST /logout`, so GoTrue answers `invalid JWT: ... token
-   contains an invalid number of segments` every time. Every suspension and every
-   deactivation therefore takes the failure branch and shows the admin the "existing
-   sign-in could not be revoked" warning. Observed against a local stack on 30 Jul 2026
-   while verifying F014; GoTrue v2.193.1 exposes no by-user-id logout endpoint at all
-   (`/admin/users/{id}/logout` and `/admin/users/{id}/sessions` both 404), so this is
+   contains an invalid number of segments` every time. Every suspension therefore took
+   the failure branch and showed the admin the "existing sign-in could not be revoked"
+   warning, which read as an intermittent Supabase problem rather than a feature that
+   had never once run. Observed against a local stack on 30 Jul 2026 while verifying
+   F014; GoTrue v2.193.1 exposes no by-user-id logout endpoint at all
+   (`/admin/users/{id}/logout` and `/admin/users/{id}/sessions` both 404), so it was
    not a parameter fix.
 
-   **This is defence-in-depth, not an access hole.** Measured on the same stack: a
-   deactivated user holding an access token that Supabase still accepts
-   (`GET /auth/v1/user` → 200) is refused `/dashboard` and `/admin/users` by
-   `getCurrentActor`, and every RLS policy gates on `app.is_active_user()`. What
-   survives is a logged-in-looking shell over no data until the token expires — which
-   is exactly the state F013 set out to remove.
+   It was never an access hole, only a missing layer: a deactivated user holding an
+   access token Supabase still accepted (`GET /auth/v1/user` → 200) was already refused
+   `/dashboard` and `/admin/users` by `getCurrentActor`, and every RLS policy gates on
+   `app.is_active_user()`. What survived was a logged-in-looking shell over no data
+   until the token expired.
 
-   Fix options, none of them a one-liner: delete the user's `auth.sessions` rows from a
-   `SECURITY DEFINER` RPC (atomic with the flag flip, no service key needed, but writes
-   to a Supabase-managed schema), or reach the same rows over `SUPABASE_DB_URL`.
-   **Open — belongs to F013.**
+   **Lesson for the suite, not just the code:** the pgTAP suite passed throughout. It
+   asserted that `is_active` flipped and that an audit row was written, and had no way
+   to tell revocation from no revocation. An assertion about a side effect nobody seeds
+   a fixture for is not an assertion.
 
 ---
 

@@ -71,7 +71,14 @@ alter table public.users
 -- set_user_active: reactivation must clear the marker
 -- ---------------------------------------------------------------------------
 -- Fix-forward replacement rather than an edit to 20260729232004 (SOP §7: applied
--- migrations are never edited). Only the UPDATE statement differs from F013's version.
+-- migrations are never edited). Only the UPDATE statement differs from the version in
+-- 20260729232500, which is the one this replaces — **not** 20260729232004.
+--
+-- CAREFUL: this is a `create or replace` of a function two earlier migrations already
+-- define, so it silently wins. It must therefore carry forward everything they added,
+-- and the one easy thing to drop is the `app.revoke_sessions` call that
+-- 20260729232500 introduced — losing it would un-fix session revocation while every
+-- test still passed except the one that seeds a session. Kept below, and asserted.
 --
 -- Without this, reactivating a *deactivated* user would set is_active = true while
 -- deactivated_at stayed populated, which the constraint above rejects — reactivation
@@ -119,6 +126,11 @@ begin
      set is_active      = p_is_active,
          deactivated_at = case when p_is_active then null else deactivated_at end
    where id = p_user_id;
+
+  -- Carried forward from 20260729232500. Suspension signs them out for real.
+  if not p_is_active then
+    perform app.revoke_sessions(p_user_id);
+  end if;
 
   insert into public.audit_log (actor_user_id, action, target_table, target_id, detail)
   values (
@@ -294,6 +306,13 @@ begin
      set is_active      = false,
          deactivated_at = now()
    where id = p_user_id;
+
+  -- Same revocation a suspension performs (20260729232500), and for the same reason:
+  -- the flag denies them every row, but only deleting the session invalidates a token
+  -- already in their browser. Here it is in the same transaction as the reassignment
+  -- too, so an offboarded CAM cannot still be holding a working session over clients
+  -- that have already moved to someone else.
+  perform app.revoke_sessions(p_user_id);
 
   insert into public.audit_log (actor_user_id, action, target_table, target_id, detail)
   values (

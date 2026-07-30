@@ -104,14 +104,10 @@ export function UserManagementTable({
             : user,
         ),
       );
-      // A warning means the change landed but something after it did not — a
-      // suspension whose session sweep failed. It replaces the success line
-      // rather than sitting beside it, so the caveat cannot be missed.
       setMessage(
-        result.warning ??
-          (result.clientsMoved
-            ? `${successMessage} ${result.clientsMoved} client${result.clientsMoved === 1 ? "" : "s"} moved.`
-            : successMessage),
+        result.clientsMoved
+          ? `${successMessage} ${result.clientsMoved} client${result.clientsMoved === 1 ? "" : "s"} moved.`
+          : successMessage,
       );
       if (result.clientsMoved) await refreshUsers();
       return true;

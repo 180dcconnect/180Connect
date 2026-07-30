@@ -17,8 +17,9 @@
 
 drop function if exists public.deactivate_user(uuid, text, uuid, boolean);
 
--- set_user_active restored to its F013 body (20260729232004), minus the
--- deactivated_at clear.
+-- set_user_active restored to its 20260729232500 body — the most recent F013 version,
+-- session revocation included — minus the deactivated_at clear. Restoring the older
+-- 20260729232004 body instead would quietly undo that fix.
 create or replace function public.set_user_active(
   p_user_id   uuid,
   p_is_active boolean
@@ -54,6 +55,10 @@ begin
   end if;
 
   update public.users set is_active = p_is_active where id = p_user_id;
+
+  if not p_is_active then
+    perform app.revoke_sessions(p_user_id);
+  end if;
 
   insert into public.audit_log (actor_user_id, action, target_table, target_id, detail)
   values (

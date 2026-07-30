@@ -11,9 +11,13 @@ import { createClient as createSupabaseClient, type SupabaseClient } from "@supa
  * work genuinely cannot be done as the signed-in user, and keep the call site
  * behind its own authorisation check.
  *
- * Today there is exactly one such place: revoking a suspended user's sessions.
- * `auth.admin.signOut(userId)` is an Admin API call and there is no user-scoped
- * equivalent — a signed-in admin cannot end somebody else's session.
+ * Today there is exactly one such place: reading `users.is_active` during login,
+ * before the caller has a session that any policy would accept.
+ *
+ * Session revocation used to live here too, and could not: `auth.admin.signOut`
+ * takes a JWT, not a user id, and GoTrue exposes no by-user-id logout endpoint at
+ * all. It is now done in the database, inside `set_user_active` itself — see
+ * `supabase/migrations/20260729232500_revoke_sessions_on_suspend.sql`.
  *
  * Never import this from a Client Component. `server-only` makes that a build
  * error rather than a leaked key.
@@ -74,29 +78,13 @@ export async function readUserActiveStatus(userId: string): Promise<boolean | nu
   }
 }
 
-/**
- * Revokes every session belonging to `userId`, so a suspension takes effect on
- * the access token and not only in the database (F013 AC2).
- *
- * Flipping `is_active` already denies the user all data: every RLS policy gates on
- * `app.is_active_user()`. What it cannot do is invalidate an access token that has
- * already been issued — without this call the suspended user keeps a working token,
- * and therefore a logged-in-looking shell, until it expires.
- *
- * Returns `ok: false` instead of throwing. The caller has, by this point, already
- * suspended the user; that part is done and must not be reported as a failure just
- * because the session sweep did not land.
+/*
+ * `revokeUserSessions` was here. It called `auth.admin.signOut(userId, 'global')`,
+ * whose first parameter is a JWT and not a user id — auth-js sends it as the bearer
+ * token on POST /logout, so GoTrue rejected every call with "invalid JWT ... token
+ * contains an invalid number of segments" and no suspension ever revoked anything.
+ * There is no by-user-id logout endpoint to correct it to (GoTrue v2.193.1 returns
+ * 404 for /admin/users/{id}/logout and /admin/users/{id}/sessions), so revocation
+ * moved into the database: `set_user_active` now deletes the user's `auth.sessions`
+ * rows in the same transaction as the flag flip. Atomic, and it needs no service key.
  */
-export async function revokeUserSessions(
-  userId: string,
-): Promise<{ ok: true } | { ok: false; error: unknown }> {
-  try {
-    const admin = createAdminClient();
-    // 'global' — every session on every device, not just the current one.
-    const { error } = await admin.auth.admin.signOut(userId, "global");
-    if (error) return { ok: false, error };
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, error };
-  }
-}

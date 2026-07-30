@@ -126,7 +126,7 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     required: false,
     secret: true,
     description:
-      "Supabase service-role key. Bypasses row-level security — server-side only, never prefixed with NEXT_PUBLIC_. Consumed by `src/lib/supabase/admin.ts` to revoke a suspended user's sessions (F013): without it the suspension still denies all data through RLS, but the user's existing access token stays valid until it expires. Optional locally; staging and production should set it.",
+      "Supabase service-role key. Bypasses row-level security — server-side only, never prefixed with NEXT_PUBLIC_. Consumed by `src/lib/supabase/admin.ts` to read `users.is_active` during login (F013), which a suspended user cannot read for themselves: `users_select_active` gates SELECT on the reader being active, so their own row is invisible to them. Without it a suspended user reaches a worse error message rather than a way in — `getCurrentActor` refuses them regardless. Session revocation does not use this key; it happens inside `set_user_active`. Optional locally; staging and production should set it.",
   },
   {
     name: "SESSION_ACTIVITY_SECRET",

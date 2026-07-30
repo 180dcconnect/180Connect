@@ -14,6 +14,7 @@ import { z } from "zod";
 
 import { logSecurityEvent } from "../log-security-event.ts";
 import { emailField, safeValidate } from "../validation.ts";
+import { NO_THROTTLE, throttleMessage, type LoginThrottle } from "./login-throttle.ts";
 import { permissionFailureMessage, requireApprovedUser } from "./require-approved-user.ts";
 
 /** Used when AUTH_ALLOWED_EMAIL_DOMAIN is unset. */
@@ -110,14 +111,22 @@ export const SUSPENDED_MESSAGE =
   "Your account has been suspended. Contact your administrator.";
 
 /**
- * Validates the submission, checks the CAPTCHA was solved, signs in, and
- * confirms the account is approved. Never throws: a transport failure comes
- * back as `SERVICE_UNAVAILABLE_MESSAGE` so the action can render it.
+ * Validates the submission, checks the CAPTCHA was solved, checks the account is
+ * not throttled, signs in, confirms the account is approved, and turns away a
+ * suspended one. Never throws: a transport failure comes back as
+ * `SERVICE_UNAVAILABLE_MESSAGE` so the action can render it.
+ *
+ * `throttle` defaults to the no-op so the twenty-odd tests that predate it read
+ * unchanged; the Server Action always passes a real one. `readActiveStatus` is
+ * optional for the same reason, and omitting it skips the suspension check rather
+ * than failing it — `getCurrentActor` refuses a suspended account on the very next
+ * request regardless, so the reader buys a better error message, not the security.
  */
 export async function attemptLogin(
   client: LoginClient,
   input: LoginInput,
   domain: string = allowedEmailDomain(),
+  throttle: LoginThrottle = NO_THROTTLE,
   readActiveStatus?: ActiveStatusReader,
 ): Promise<LoginOutcome> {
   const email = normalizeEmail(input.email);
@@ -154,6 +163,20 @@ export async function attemptLogin(
     };
   }
 
+  // Checked after the CAPTCHA, so throttle state cannot be probed without paying
+  // for a token first, and before the password reaches Supabase, so a throttled
+  // attempt costs an attacker a round trip and tells them nothing.
+  const blockedUntil = await throttle.blockedUntil(email);
+  if (blockedUntil) {
+    logSecurityEvent("authentication.login_throttled", {
+      blocked_for_seconds: Math.ceil((blockedUntil.getTime() - Date.now()) / 1000),
+    });
+    return {
+      ok: false,
+      state: { status: "error", message: throttleMessage(blockedUntil), email },
+    };
+  }
+
   try {
     const { data, error } = await client.auth.signInWithPassword({
       ...result.data,
@@ -169,6 +192,21 @@ export async function attemptLogin(
       // cannot escape. Credentials stay deliberately vague either way — the
       // message never reveals whether the email exists.
       const isCaptchaFailure = /captcha/i.test(error?.message ?? "");
+
+      // Only a rejected *credential* counts towards the throttle. A CAPTCHA
+      // rejection is already priced by Cloudflare, and counting it would let a
+      // misbehaving widget — a stale token, a blocked script — throttle a user
+      // who never typed a wrong password.
+      if (!isCaptchaFailure) {
+        const earned = await throttle.recordFailure(email);
+        if (earned) {
+          return {
+            ok: false,
+            state: { status: "error", message: throttleMessage(earned), email },
+          };
+        }
+      }
+
       return {
         ok: false,
         state: {
@@ -180,6 +218,10 @@ export async function attemptLogin(
         },
       };
     }
+
+    // The password was right, so this was never a brute force — clear the count
+    // even if the account turns out to be unapproved below.
+    await throttle.clear(email);
 
     const permission = requireApprovedUser(data.user);
     if (!permission.ok) {

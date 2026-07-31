@@ -19,7 +19,10 @@ export type SecurityEvent =
   | "authentication.password_recovery_link_rejected"
   | "authentication.password_update_failed"
   | "session.expired"
-  | "session.recovery_confined";
+  | "session.recovery_confined"
+  | "user.invited"
+  | "user.invite_rejected"
+  | "user.invite_failed";
 
 export type SecurityEventMeta = Record<string, string | number | boolean | undefined>;
 

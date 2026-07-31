@@ -1,23 +1,12 @@
 // src/lib/ingestion/runner.ts
 // This file contains the logic for running the ingestion process. It fetches data from various sources and stores it in the database.
 
-import { createClient } from "@supabase/supabase-js";
-import type { DataSourceAdapter, CommonRecord } from "./type.js";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { DataSourceAdapter, CommonRecord } from "./type";
+import { buildAdminClient } from "../supabase/admin-client-factory";
+import { createHash } from "node:crypto";
 
-function getServiceClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url || !key) {
-    throw new Error("Supabase URL or service role key is not configured.");
-  }
-
-  return createClient(url, key);
-}
-
-async function startRun(source: string) {
-  const supabase = getServiceClient();
-
+async function startRun(supabase: SupabaseClient, source: string) {
   const { data, error } = await supabase
     .from("ingestion_runs")
     .insert({
@@ -32,45 +21,69 @@ async function startRun(source: string) {
   return data;
 }
 
-// runner.ts continued
-
 async function insertRawRecords(
+  supabase: SupabaseClient,
   runId: string,
   source: string,
   records: CommonRecord[],
-) {
-  const supabase = getServiceClient();
+): Promise<{ inserted: number; skipped: number }> {
+  let inserted = 0;
+  let skipped = 0;
 
-  const rows = records.map((record) => ({
-    ingestion_run_id: runId,
-    record_source: source,
-    source_record_id: record.source_record_id,
-    raw_payload: record.raw_payload,
-    checksum: hashPayload(record.raw_payload),
-    source_country: record.source_country ?? null,
-    source_registry_name: record.source_registry_name ?? null,
-  }));
+  for (const record of records) {
+    const checksum = hashPayload(record.raw_payload);
 
-  const { error } = await supabase.from("raw_source_records").insert(rows);
-  if (error) throw error;
+    const { data: existing } = await supabase
+      .from("raw_source_records")
+      .select("id, checksum, ingestion_attempt")
+      .eq("record_source", source)
+      .eq("source_record_id", record.source_record_id)
+      .maybeSingle();
+
+    if (existing && existing.checksum === checksum) {
+      skipped++;
+      continue;
+    }
+
+    const row = {
+      ingestion_run_id: runId,
+      record_source: source,
+      source_record_id: record.source_record_id,
+      raw_payload: record.raw_payload,
+      checksum,
+      source_country: record.source_country ?? null,
+      source_registry_name: record.source_registry_name ?? null,
+      ingestion_attempt: existing ? existing.ingestion_attempt + 1 : 1,
+    };
+
+    const { error } = await supabase
+      .from("raw_source_records")
+      .upsert(row, { onConflict: "record_source,source_record_id" });
+
+    if (error) throw error;
+    inserted++;
+  }
+
+  return { inserted, skipped };
 }
 
 function hashPayload(payload: unknown): string {
-  const json = JSON.stringify(payload);
-  let hash = 0;
-  for (let i = 0; i < json.length; i++) {
-    hash = (hash * 31 + json.charCodeAt(i)) | 0;
-  }
-  return hash.toString(16);
+  const stable = JSON.stringify(payload, Object.keys(payload as object).sort());
+  return createHash("sha256").update(stable).digest("hex");
 }
 
 async function finishRun(
+  supabase: SupabaseClient,
   runId: string,
   status: string,
-  counts: { fetched: number; inserted: number; failed: number },
+  counts: {
+    fetched: number;
+    inserted: number;
+    skipped: number;
+    failed: number;
+  },
+  errorMessage?: string,
 ) {
-  const supabase = getServiceClient();
-
   const { error } = await supabase
     .from("ingestion_runs")
     .update({
@@ -78,7 +91,9 @@ async function finishRun(
       completed_at: new Date().toISOString(),
       records_fetched: counts.fetched,
       records_inserted: counts.inserted,
+      records_skipped: counts.skipped,
       records_failed: counts.failed,
+      error_message: errorMessage ?? null,
     })
     .eq("id", runId);
 
@@ -86,21 +101,57 @@ async function finishRun(
 }
 
 export async function runIngestion(sources: DataSourceAdapter[]) {
+  const supabase = buildAdminClient();
+  if (!supabase) {
+    throw new Error(
+      "Supabase admin client is not configured — check SUPABASE_SERVICE_ROLE_KEY.",
+    );
+  }
+
   for (const source of sources) {
-    const run = await startRun(source.name);
+    let run;
+
+    try {
+      run = await startRun(supabase, source.name);
+    } catch (err) {
+      source.onError(err as Error);
+      continue;
+    }
 
     try {
       const records = await source.fetch();
-      await insertRawRecords(run.id, source.name, records);
-      await finishRun(run.id, "completed", {
-        fetched: records.length,
-        inserted: records.length,
-        failed: 0,
-      });
-      console.log(`[${source.name}] inserted ${records.length} records`);
+      const wasTruncated =
+        (records as CommonRecord[] & { truncated?: boolean }).truncated ??
+        false;
+      const { inserted, skipped } = await insertRawRecords(
+        supabase,
+        run.id,
+        source.name,
+        records,
+      );
+      await finishRun(
+        supabase,
+        run.id,
+        wasTruncated ? "partial" : "completed",
+        {
+          fetched: records.length,
+          inserted,
+          skipped,
+          failed: 0,
+        },
+      );
+      console.log(
+        `[${source.name}] fetched ${records.length}, inserted ${inserted}, skipped ${skipped}${wasTruncated ? " (partial — hit source ceiling)" : ""}`,
+      );
     } catch (err) {
       source.onError(err as Error);
-      await finishRun(run.id, "failed", { fetched: 0, inserted: 0, failed: 0 });
+      await finishRun(
+        supabase,
+        run.id,
+        "failed",
+        { fetched: 0, inserted: 0, skipped: 0, failed: 0 },
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
 }

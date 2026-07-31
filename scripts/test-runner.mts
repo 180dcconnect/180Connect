@@ -1,5 +1,4 @@
-// scripts/test-runner.mts
-import { runIngestion } from "../src/lib/ingestion/runner";
-import { companiesHouseAdapter } from "../src/lib/ingestion/sources/companieshouse";
+import { runIngestion } from "../src/lib/ingestion/runner.ts";
+import { companiesHouseAdapter } from "../src/lib/ingestion/sources/companieshouse.ts";
 
 await runIngestion([companiesHouseAdapter]);

@@ -1,7 +1,7 @@
 import "server-only";
 
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { buildAdminClient } from "./admin-client-factory";
 
 /**
  * A Supabase client holding the service-role key.
@@ -18,19 +18,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  *
  * No session, no cookies, no token refresh: this client acts as the project, not
  * as a user, and persisting anything would risk it being mistaken for one.
+ *
+ * The actual client-building logic lives in `admin-client-factory.ts`, without
+ * this file's `server-only` guard, so the ingestion runner (F038) — which runs
+ * outside Next.js entirely — can reuse it without tripping a check that only
+ * makes sense inside a Next.js server context.
  */
 export function createAdminClient(): SupabaseClient | null {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  // Returns null rather than throwing. The key is optional locally (the same
-  // arrangement as SESSION_ACTIVITY_SECRET), and the one caller treats an absent
-  // client as "no throttle available" and carries on — see the fail-open note in
-  // `src/lib/auth/login-throttle.ts`. Throwing here would instead take down
-  // login entirely on any machine that has not set the key.
-  if (!url || !key) return null;
-
-  return createSupabaseClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  return buildAdminClient();
 }

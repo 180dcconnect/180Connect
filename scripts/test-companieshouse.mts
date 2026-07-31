@@ -1,5 +1,5 @@
 // scripts/test-companieshouse.mts
-import { companiesHouseAdapter } from "../src/lib/ingestion/sources/companieshouse";
+import { companiesHouseAdapter } from "../src/lib/ingestion/sources/companieshouse.ts";
 
 const records = await companiesHouseAdapter.fetch();
 console.log(`Got ${records.length} records`);

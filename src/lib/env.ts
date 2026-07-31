@@ -135,7 +135,9 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     description:
       "Key used to HMAC-sign the inactivity record that drives session expiry (F007) and the password-recovery marker (F004). Server-only — never prefixed with NEXT_PUBLIC_. Optional locally, but staging and production must set it: without it the inactivity timestamp is unsigned and a replayed session could forge a fresh one, and password reset refuses to run at all rather than trust a marker any session holder could forge. Any long random string works, for example `openssl rand -base64 32`. Changing it expires every open session once.",
     validate: (value) =>
-      value.length < 32 ? "must be at least 32 characters of random data" : null,
+      value.length < 32
+        ? "must be at least 32 characters of random data"
+        : null,
   },
   {
     name: "SUPABASE_DB_URL",
@@ -165,6 +167,20 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     secret: false,
     description:
       "Environment tag applied to captured errors — 'staging' or 'production' (F226). Optional: falls back to Vercel's VERCEL_ENV so staging (preview) and production are distinguished automatically.",
+  },
+  {
+    name: "COMPANIES_HOUSE_API_KEY",
+    required: false,
+    secret: true,
+    description:
+      "Companies House API key for company data ingestion (F038). HTTP Basic Auth — sent as the username with a blank password. Not yet required — becomes required once F032 (Companies House data import) ships.",
+  },
+  {
+    name: "CHARITYBASE_API_KEY",
+    required: false,
+    secret: true,
+    description:
+      "CharityBase API key for charity data ingestion (F038/F031). GraphQL API — sent as `Authorization: Apikey <key>`. Not yet required — becomes required once F031 (CharityBase data import) ships, and CharityBase's own API is currently down on their end.",
   },
 ];
 

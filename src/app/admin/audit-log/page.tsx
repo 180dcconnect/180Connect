@@ -19,6 +19,9 @@ type AuditLogRow = {
 type UserOption = { id: string; email: string; full_name: string | null };
 type OrganisationOption = { id: string; legal_name: string };
 
+// Next.js 16: searchParams is a Promise on App Router pages, not a plain
+// object (that changed from older versions). Same pattern already merged in
+// src/app/login/page.tsx and src/app/reset-password/page.tsx.
 type SearchParams = Promise<{ actor?: string; org?: string }>;
 
 export default async function AuditLogPage({
@@ -76,6 +79,9 @@ export default async function AuditLogPage({
     query = query.eq("target_table", "organisations").eq("target_id", orgFilter);
   }
 
+  // overrideTypes is the current @supabase/postgrest-js method for this — it
+  // replaced the older .returns<T>(), which is now the deprecated one. See
+  // node_modules/@supabase/postgrest-js/src/PostgrestTransformBuilder.ts.
   const { data: rows, error } = await query.overrideTypes<AuditLogRow[], { merge: false }>();
 
   if (error) {
@@ -98,6 +104,7 @@ export default async function AuditLogPage({
       .from("users")
       .select("id, email, full_name")
       .order("email")
+      // Same overrideTypes note as above — current method, not deprecated.
       .overrideTypes<UserOption[], { merge: false }>(),
     supabase
       .from("organisations")

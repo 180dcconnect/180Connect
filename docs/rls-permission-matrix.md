@@ -140,8 +140,19 @@ a table ever needs a column granted for one purpose but protected for another.
 `role` is writable only through `public.set_user_role(user_id, role)` (F012) — a
 SECURITY DEFINER RPC that self-checks `app.is_admin()`, refuses a self-change, and
 writes an `audit_log` row (PRD §4.2). Nobody writes `role` directly, admins included.
-`is_active` will need the same treatment (a `set_user_active` RPC, F011) — same
-column-grant lockout, not yet built. See §2.1 and §7.
+`is_active` has the same treatment: `public.set_user_active(user_id, is_active)` (F013),
+same column-grant lockout, same self-check, same audit row — `user_suspended` or
+`user_reactivated`. See §2.1 and §7.
+
+Suspension also **revokes the user's sessions**, in the same transaction, via
+`app.revoke_sessions(uuid)` — a `DELETE` from `auth.sessions`, which invalidates their
+access token and their refresh token at once. Flipping `is_active` denies them every
+row, but it cannot invalidate a JWT that has already been issued; without the delete a
+suspended user keeps a working token, and a logged-in-looking shell, until it expires.
+Measured on GoTrue v2.193.1: with the session row gone, `GET /auth/v1/user` goes
+`200 → 403` and a refresh returns `400`. This replaces an application-side
+`auth.admin.signOut(userId)` call that could never work — that parameter is a JWT, not
+a user id, and GoTrue has no by-user-id logout endpoint.
 
 ### 3.2 Canonical organisation data — shared read, admin write
 
@@ -391,10 +402,19 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    the role is what "authorised" means.
 5. **`SCOUT_PRIORITY_SCORE`** appears on tab 09 without fields and is not in the
    migration sequence. Excluded from this matrix until defined.
-6. **`set_user_active` RPC — owned by F011, not built.** `is_active` has the same
-   column-grant lockout as `role`, so deactivation needs the same self-authorising,
-   audited SECURITY DEFINER RPC as `set_user_role` (F012). Until it exists, no one can
-   deactivate a user. Build it in F011 (Deactivate Account), mirroring `set_user_role`.
+6. ~~**`set_user_active` RPC — owned by F011, not built.**~~ **Resolved by F013 (#15),
+   29 Jul 2026.** Built as `public.set_user_active(uuid, boolean)`, mirroring
+   `set_user_role`: same column-grant lockout, self-checks `app.is_admin()`, refuses a
+   self-change, writes an `audit_log` row (`user_suspended` / `user_reactivated`).
+   Suspension is `is_active = false` — one flag, not a new state; F014 reuses it rather
+   than adding an `account_status` enum.
+7. **`set_user_role` can demote the last active admin.** `set_user_active` cannot
+   suspend its way to zero admins — the self-change refusal means the caller is always
+   a surviving active admin. `set_user_role` carries no equivalent guard, so two admins
+   acting on each other concurrently (B demotes A while A suspends B) can commit to an
+   organisation with no active admin, which nothing in the app can then reverse:
+   `role` and `is_active` are both writable only through these two RPCs. The fix is a
+   last-admin guard inside `set_user_role`. **Open — belongs to F012.**
 
 ---
 

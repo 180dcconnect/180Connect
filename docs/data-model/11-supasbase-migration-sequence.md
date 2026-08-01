@@ -28,3 +28,4 @@
 | 16.0 | create_indexes | Indexes: FKs, LATEST_SCORES.priority_score, ORGANISATIONS.outreach_status, RAW_SOURCE_RECORDS.checksum | All tables | Query performance for the dashboard |
 | 17.0 | configure_backups | Daily backups + point-in-time recovery | - | Supabase |
 | 18.0 | create_login_attempt | LOGIN_ATTEMPT + RPCs login_throttle_state, record_login_failure, clear_login_failures, prune_login_attempts | pgcrypto (Step 1) | F003 brute-force throttle. No FK. RPCs granted to service_role only; RLS on, admin SELECT, no write policy |
+| 19.0 | create_actions | ACTIONS + enum action_status | ORGANISATIONS, USERS | F168/F257 client actions and reminders. RLS on; assignee_user_id carries no UPDATE grant — it is changed only by the F257 reassignment RPC, which writes audit_log. Reminder is a column (remind_at), not a table. |

@@ -169,6 +169,7 @@
 | 04 Entities | USERS | created_at | timestamp |  |  |
 | 04 Entities | USERS | updated_at | timestamp |  |  |
 | 04 Entities | USERS | is_seed | boolean |  |  |
+| 04 Entities | USERS | deactivated_at | timestamp |  |  |
 | 04 Entities | NOTES | id | uuid |  |  |
 | 04 Entities | NOTES | organisation_id | uuid | ORGANISATIONS |  |
 | 04 Entities | NOTES | author_id | uuid | USERS |  |
@@ -185,6 +186,19 @@
 | 04 Entities | ORG_TAGS | tag_id | uuid | TAGS |  |
 | 04 Entities | ORG_TAGS | added_by_user_id | uuid | USERS |  |
 | 04 Entities | ORG_TAGS | created_at | timestamp |  |  |
+| 04 Entities | ACTIONS | id | uuid |  | Primary key |
+| 04 Entities | ACTIONS | organisation_id | uuid | ORGANISATIONS | Client this action belongs to |
+| 04 Entities | ACTIONS | assignee_user_id | uuid | USERS | CAM responsible for doing the action |
+| 04 Entities | ACTIONS | created_by_user_id | uuid | USERS | Who created the action |
+| 04 Entities | ACTIONS | title | text |  | Short description of the work |
+| 04 Entities | ACTIONS | description | text |  | Longer detail |
+| 04 Entities | ACTIONS | due_date | date |  | When the action is due |
+| 04 Entities | ACTIONS | remind_at | timestamp |  | When to remind the assignee |
+| 04 Entities | ACTIONS | status | enum |  | open, completed, cancelled |
+| 04 Entities | ACTIONS | completed_at | timestamp |  | When the action was marked complete |
+| 04 Entities | ACTIONS | is_seed | boolean |  | Marks a row created by the seed script |
+| 04 Entities | ACTIONS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | ACTIONS | updated_at | timestamp |  | Last edit timestamp |
 | 05 - Features | SCORING_WEIGHTS | id | model_name |  | feature_name |
 | 05 - Features | SCORING_WEIGHTS | 1.0 | SCOUT |  | south_yorkshire_flag |
 | 05 - Features | SCORING_WEIGHTS | 2.0 | SCOUT |  | mission_alignment_score |

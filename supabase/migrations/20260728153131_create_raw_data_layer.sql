@@ -1,6 +1,6 @@
 -- Migration: create_raw_data_layer
--- Sequence: Data Model tab "11 Supabase Migration Sequence" — raw ingestion layer.
--- Stories: F038 Modular Data Source Structure (#XXX) — the interface, runner, and
+-- Sequence: Data Model tab "11 Supabase Migration Sequence" step 6.0 (create_ingestion).
+-- Stories: F038 Modular Data Source Structure (#39) — the interface, runner, and
 --   Companies House adapter live in src/lib/ingestion/. This migration is the storage
 --   half: two tables, admin-only read, service-role-only write.
 -- Spec: docs/rls-permission-matrix.md §3.5; Data Model tab "03 Raw Data".
@@ -72,6 +72,13 @@ comment on column public.ingestion_runs.job_status is
 comment on column public.ingestion_runs.error_message is
   'Set only on job_status = failed. Null otherwise — a run that partially succeeded is '
   'partial, not failed, and carries no error_message.';
+comment on column public.ingestion_runs.records_inserted is
+  'Rows written to raw_source_records by this run: new records plus records whose '
+  'payload changed since the last run, so that fetched = inserted + skipped + failed '
+  'reconciles. The Data Model wording is "new records"; there is no records_updated '
+  'column to separate the two, and the runner logs the split to stdout.';
+comment on column public.ingestion_runs.records_skipped is
+  'Records re-fetched whose checksum was unchanged, so nothing was written.';
 
 create table public.raw_source_records (
   id                     uuid primary key default gen_random_uuid(),
@@ -152,4 +159,3 @@ create policy raw_source_records_delete on public.raw_source_records
 -- No UPDATE policy for authenticated on either table, and no INSERT policy on
 -- raw_source_records: every write beyond an admin-triggered ingestion_runs row and an
 -- admin DELETE happens through service_role, which bypasses RLS entirely.
-

@@ -1,14 +1,16 @@
-// scripts/test-runner-connection.mts
-import { createClient } from "@supabase/supabase-js";
+// Connectivity check: can the service-role client reach ingestion_runs at all?
+// Useful for telling "my key/URL is wrong" apart from "the ingestion logic is wrong".
+//
+//   npm run ingest:check-connection
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+import { buildAdminClient } from "../src/lib/supabase/admin-client-factory.ts";
 
-if (!url || !key) {
-  throw new Error("Missing env vars");
+const supabase = buildAdminClient();
+if (!supabase) {
+  throw new Error(
+    "Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.",
+  );
 }
-
-const supabase = createClient(url, key);
 
 const { data, error } = await supabase
   .from("ingestion_runs")

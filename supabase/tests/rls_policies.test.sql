@@ -738,11 +738,108 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Raw ingestion layer — matrix §3.5 (F038, step 6.0 create_ingestion)
+--
+-- suite_sensitive already covers the headline check (a CAM reads zero raw source
+-- records). This is the rest of the §3.5 row: that an admin *can* read what the CAM
+-- cannot — a policy that returns zero rows to everyone would pass the sensitive
+-- check while being useless — plus the write verbs, which no test covered.
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_ingestion()
+returns setof text language plpgsql as $$
+declare
+  v_admin  uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_viewer uuid := '00000000-0000-4000-a000-000000000005';
+  v_run    uuid := '00000000-0000-4000-c000-000000000001';
+  v_record uuid := '00000000-0000-4000-c000-000000000002';
+  v_count  bigint;
+  v_state  text;
+begin
+  if not tests.tables_exist('users') then
+    return next skip(1, 'step 2 create_users not yet migrated');
+    return;
+  end if;
+
+  if not tests.tables_exist('ingestion_runs', 'raw_source_records') then
+    return next skip(8, 'step 6 create_ingestion not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Fixtures are inserted as the table owner, which bypasses RLS — the point of the
+  -- suite is what the *end-user* roles can then see of them.
+  insert into public.ingestion_runs (id, api_source, triggered_by, job_status)
+  values (v_run, 'companies_house', 'manual', 'completed')
+  on conflict (id) do nothing;
+
+  insert into public.raw_source_records
+    (id, ingestion_run_id, record_source, source_record_id, raw_payload, checksum)
+  values
+    (v_record, v_run, 'companies_house', '00000001', '{"company_number":"00000001"}'::jsonb, 'deadbeef')
+  on conflict (id) do nothing;
+
+  -- SELECT: admin yes, everyone else no.
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.ingestion_runs where id = v_run;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'admin reads ingestion runs');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.raw_source_records where id = v_record;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'admin reads raw source records the CAM cannot');
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.ingestion_runs;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'CAM sees zero ingestion runs');
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.raw_source_records;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'viewer sees zero raw source records');
+
+  -- INSERT on ingestion_runs is admin-only, so a CAM triggering a run is refused.
+  v_state := tests.sqlstate_of(v_cam_a,
+    'insert into public.ingestion_runs (api_source, triggered_by) '
+    'values (''companies_house'', ''manual'')');
+  return next is(v_state, '42501', 'CAM cannot record an ingestion run');
+
+  -- No UPDATE policy or grant on raw_source_records for any end-user role: the raw
+  -- layer is append-only to everyone but service_role. Even an admin is refused.
+  v_state := tests.sqlstate_of(v_admin, format(
+    'update public.raw_source_records set processing_status = ''rejected'' where id = %L',
+    v_record));
+  return next is(v_state, '42501', 'not even an admin can edit a raw payload');
+
+  -- DELETE is admin-only (§3.5): the CAM's attempt leaves the row, the admin's removes it.
+  perform tests.sqlstate_of(v_cam_a, format(
+    'delete from public.raw_source_records where id = %L', v_record));
+  select count(*) into v_count from public.raw_source_records where id = v_record;
+  return next is(v_count, 1::bigint, 'CAM cannot delete a raw source record');
+
+  perform tests.sqlstate_of(v_admin, format(
+    'delete from public.raw_source_records where id = %L', v_record));
+  select count(*) into v_count from public.raw_source_records where id = v_record;
+  return next is(v_count, 0::bigint, 'admin can delete a raw source record');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 
 select * from tests.suite_core();
 select * from tests.suite_viewer();
 select * from tests.suite_users();
 select * from tests.suite_sensitive();
+select * from tests.suite_ingestion();
 select * from tests.suite_audit();
 select * from tests.suite_role_rpc();
 select * from tests.suite_active_rpc();

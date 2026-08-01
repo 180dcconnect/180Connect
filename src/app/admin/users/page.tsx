@@ -30,7 +30,11 @@ export default async function AdminUsersPage() {
         <p className="text-sm font-bold text-brand">Admin workspace</p>
         <h1 className="mt-2 text-3xl font-bold">Team members</h1>
         <p className="mt-3 text-sm text-foreground/65">
-          Role changes apply on the user&apos;s next request.
+          Role changes apply on the user&apos;s next request.{" "}
+          <a className="font-bold text-brand underline" href="/admin/offboard">
+            Reassign a leaver&apos;s clients
+          </a>
+          .
         </p>
         {error && (
           <p className="mt-5 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-800" role="alert">

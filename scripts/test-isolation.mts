@@ -19,4 +19,4 @@ const brokenAdapter: DataSourceAdapter = {
   },
 };
 
-await runIngestion([brokenAdapter, companiesHouseAdapter]);
+console.table(await runIngestion([brokenAdapter, companiesHouseAdapter]));

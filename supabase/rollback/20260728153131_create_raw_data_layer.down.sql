@@ -7,3 +7,7 @@
 
 drop table if exists public.raw_source_records;
 drop table if exists public.ingestion_runs;
+
+-- The domain both source columns used. Dropped last: it cannot go while a column
+-- still depends on it.
+drop domain if exists public.data_source_name;

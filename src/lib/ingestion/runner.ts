@@ -1,251 +1,241 @@
 // Ingestion runner (F038): fetches from each registered source and writes the
 // untouched payloads into raw_source_records, one ingestion_runs row per source.
 //
-// Runs outside Next.js (see scripts/ and the future scheduled job), which is why it
-// builds its Supabase client from `admin-client-factory` rather than `admin.ts`.
+// Runs outside Next.js (see scripts/ and the future scheduled job), which is why the
+// default store builds its client from `admin-client-factory` rather than `admin.ts`.
+//
+// The runner holds the decisions; all PostgREST detail is behind IngestionStore.
 
-import type { SupabaseClient } from "@supabase/supabase-js";
-import type { CommonRecord, DataSourceAdapter } from "./type.ts";
-import { buildAdminClient } from "../supabase/admin-client-factory.ts";
 import { hashPayload } from "./checksum.ts";
+import { createDefaultIngestionStore } from "./store.ts";
+import type {
+  CommonRecord,
+  DataSourceAdapter,
+  DataSourceName,
+  IngestionStore,
+  JobStatus,
+  RawRecordRow,
+  RunCounts,
+  RunSummary,
+  RunTrigger,
+} from "./type.ts";
 
-/** Rows per round trip when reading existing checksums and when upserting. */
-const BATCH_SIZE = 500;
+export type InvalidRecord = { index: number; reason: string };
 
-export type RunTrigger = {
-  /** 'schedule' for the cron job, 'manual' for an admin-triggered run. */
-  triggeredBy: "schedule" | "manual";
-  /** The admin who triggered a manual run. Null for scheduled runs. */
-  triggeredByUserId?: string | null;
-};
-
-type RunCounts = {
-  fetched: number;
-  inserted: number;
+export type Partitioned = {
+  rows: RawRecordRow[];
+  /** Unchanged records, plus duplicates collapsed within this same batch. */
   skipped: number;
-  failed: number;
+  /** Of `rows`, how many replace an existing record whose payload changed. */
+  changed: number;
+  invalid: InvalidRecord[];
 };
 
-function chunk<T>(items: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    out.push(items.slice(i, i + size));
-  }
-  return out;
-}
-
-async function startRun(
-  supabase: SupabaseClient,
-  source: string,
-  trigger: RunTrigger,
-) {
-  const { data, error } = await supabase
-    .from("ingestion_runs")
-    .insert({
-      api_source: source,
-      triggered_by: trigger.triggeredBy,
-      triggered_by_user_id: trigger.triggeredByUserId ?? null,
-      job_status: "running",
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
-}
-
 /**
- * Reads the checksum of every record we already hold for this source, keyed by
- * source_record_id.
+ * Sorts a source's records into write / skip / reject, without touching the database.
  *
- * Batched deliberately: a per-record existence check is two round trips per record,
- * which is ~2000 sequential queries for one Companies House run. This is
- * `ceil(n / BATCH_SIZE)` instead.
- */
-async function loadExistingChecksums(
-  supabase: SupabaseClient,
-  source: string,
-  sourceRecordIds: string[],
-): Promise<Map<string, { checksum: string; ingestion_attempt: number }>> {
-  const existing = new Map<
-    string,
-    { checksum: string; ingestion_attempt: number }
-  >();
-
-  for (const batch of chunk(sourceRecordIds, BATCH_SIZE)) {
-    const { data, error } = await supabase
-      .from("raw_source_records")
-      .select("source_record_id, checksum, ingestion_attempt")
-      .eq("record_source", source)
-      .in("source_record_id", batch);
-
-    if (error) throw error;
-
-    for (const row of data ?? []) {
-      existing.set(row.source_record_id, {
-        checksum: row.checksum,
-        ingestion_attempt: row.ingestion_attempt,
-      });
-    }
-  }
-
-  return existing;
-}
-
-/**
- * Writes the records that are new or whose payload changed, skipping the rest.
+ * Exported for its own tests: this is where the dedup and validation decisions live,
+ * and they are worth asserting directly rather than only through an integration run.
  *
- * `inserted` counts rows written — new rows plus rows whose payload changed — so
- * that fetched = inserted + skipped + failed reconciles. The split between the two
- * is logged; there is no `records_updated` column in the Data Model.
+ * Three things happen here:
+ *
+ * 1. **Validation.** A record with no usable `source_record_id`, or a null payload,
+ *    is rejected rather than sent to the database — `source_record_id` is NOT NULL,
+ *    so one malformed record would otherwise abort the whole batch and take the
+ *    other 999 with it. Rejected records land in `records_failed`.
+ * 2. **Intra-batch duplicates.** Paging a search can return the same company twice.
+ *    Postgres refuses an ON CONFLICT DO UPDATE that touches a row twice in one
+ *    statement (21000), so the first occurrence wins and the rest count as skipped.
+ * 3. **Change detection.** An existing record whose checksum matches is skipped; one
+ *    whose payload changed is rewritten with `ingestion_attempt` incremented.
  */
-async function storeRawRecords(
-  supabase: SupabaseClient,
-  runId: string,
-  source: string,
+export function partitionRecords(
   records: CommonRecord[],
-): Promise<{ inserted: number; updated: number; skipped: number }> {
-  const existing = await loadExistingChecksums(
-    supabase,
-    source,
-    records.map((record) => record.source_record_id),
-  );
-
-  let updated = 0;
+  existing: Map<string, { checksum: string; ingestion_attempt: number }>,
+  runId: string,
+  source: DataSourceName,
+): Partitioned {
+  const rows: RawRecordRow[] = [];
+  const invalid: InvalidRecord[] = [];
+  const seen = new Set<string>();
   let skipped = 0;
-  const rows = [];
+  let changed = 0;
 
-  for (const record of records) {
+  records.forEach((record, index) => {
+    const id = record?.source_record_id;
+    if (typeof id !== "string" || id.trim() === "") {
+      invalid.push({ index, reason: "missing or empty source_record_id" });
+      return;
+    }
+    if (record.raw_payload === null || record.raw_payload === undefined) {
+      invalid.push({ index, reason: `record ${id} has no raw_payload` });
+      return;
+    }
+
+    if (seen.has(id)) {
+      skipped++;
+      return;
+    }
+    seen.add(id);
+
     const checksum = hashPayload(record.raw_payload);
-    const previous = existing.get(record.source_record_id);
+    const previous = existing.get(id);
 
     if (previous?.checksum === checksum) {
       skipped++;
-      continue;
+      return;
     }
-
-    if (previous) updated++;
+    if (previous) changed++;
 
     rows.push({
       ingestion_run_id: runId,
       record_source: source,
-      source_record_id: record.source_record_id,
+      source_record_id: id,
       raw_payload: record.raw_payload,
       checksum,
       source_country: record.source_country ?? null,
       source_registry_name: record.source_registry_name ?? null,
       ingestion_attempt: previous ? previous.ingestion_attempt + 1 : 1,
     });
-  }
+  });
 
-  for (const batch of chunk(rows, BATCH_SIZE)) {
-    const { error } = await supabase
-      .from("raw_source_records")
-      .upsert(batch, { onConflict: "record_source,source_record_id" });
-
-    if (error) throw error;
-  }
-
-  return { inserted: rows.length, updated, skipped };
+  return { rows, skipped, changed, invalid };
 }
 
-async function finishRun(
-  supabase: SupabaseClient,
-  runId: string,
-  status: string,
-  counts: RunCounts,
-  errorMessage?: string,
-) {
-  const { error } = await supabase
-    .from("ingestion_runs")
-    .update({
-      job_status: status,
-      completed_at: new Date().toISOString(),
-      records_fetched: counts.fetched,
-      records_inserted: counts.inserted,
-      records_skipped: counts.skipped,
-      records_failed: counts.failed,
-      error_message: errorMessage ?? null,
-    })
-    .eq("id", runId);
+async function runOneSource(
+  store: IngestionStore,
+  source: DataSourceAdapter,
+  trigger: RunTrigger,
+): Promise<RunSummary> {
+  const counts: RunCounts = { fetched: 0, inserted: 0, skipped: 0, failed: 0 };
+  const written = { new: 0, changed: 0 };
 
-  if (error) throw error;
+  let run: { id: string };
+  try {
+    run = await store.startRun(source.name, trigger);
+  } catch (err) {
+    // No run row exists, so there is nothing to mark failed. Report and let the
+    // other sources carry on.
+    source.onError(err as Error);
+    return {
+      source: source.name,
+      status: "failed",
+      counts,
+      written,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  try {
+    const { records, truncated } = await source.fetch();
+    counts.fetched = records.length;
+
+    const existing = await store.loadChecksums(
+      source.name,
+      records
+        .map((record) => record?.source_record_id)
+        .filter((id): id is string => typeof id === "string" && id !== ""),
+    );
+
+    const { rows, skipped, changed, invalid } = partitionRecords(
+      records,
+      existing,
+      run.id,
+      source.name,
+    );
+
+    await store.writeRecords(rows);
+
+    counts.inserted = rows.length;
+    counts.skipped = skipped;
+    counts.failed = invalid.length;
+    written.new = rows.length - changed;
+    written.changed = changed;
+
+    for (const bad of invalid) {
+      console.warn(
+        `[${source.name}] rejected record ${bad.index}: ${bad.reason}`,
+      );
+    }
+
+    // `partial` is a successful run that did not get everything: the source capped
+    // its own result set, or some records were unusable. Neither is a failure.
+    const status: JobStatus =
+      truncated || invalid.length > 0 ? "partial" : "completed";
+
+    await store.finishRun(run.id, status, counts);
+
+    console.log(
+      `[${source.name}] fetched ${counts.fetched}, written ${rows.length} ` +
+        `(${written.new} new, ${changed} changed), skipped ${skipped}, ` +
+        `rejected ${invalid.length}` +
+        `${truncated ? " — hit the source's result ceiling" : ""}`,
+    );
+
+    return { source: source.name, status, counts, written };
+  } catch (err) {
+    // Anything not yet written failed with the batch.
+    counts.failed = counts.fetched - counts.inserted - counts.skipped;
+    const message = err instanceof Error ? err.message : String(err);
+    source.onError(err as Error);
+
+    try {
+      await store.finishRun(run.id, "failed", counts, message);
+    } catch (finishErr) {
+      // Marking the run failed itself failed. The row is left 'running' and will
+      // need reconciling, but the other sources are unaffected.
+      source.onError(finishErr as Error);
+    }
+
+    return {
+      source: source.name,
+      status: "failed",
+      counts,
+      written,
+      error: message,
+    };
+  }
 }
 
+/**
+ * Runs every source concurrently and resolves once all of them have settled.
+ *
+ * Concurrent rather than sequential because F038 AC2 is about sources "running at
+ * the same time": with `Promise.allSettled` no source can affect another even in
+ * principle — there is no shared control flow for a throw to escape into — whereas a
+ * sequential loop only isolates them as carefully as its try/catch placement, which
+ * is exactly what went wrong the first time. Each source writes rows tagged with its
+ * own `record_source`, so their upserts cannot contend on the unique constraint.
+ *
+ * Unbounded: the Data Model tops out at six sources, each spending most of its time
+ * waiting on someone else's API. If that list grows enough to matter, add a limit
+ * here rather than in the adapters.
+ */
 export async function runIngestion(
   sources: DataSourceAdapter[],
   trigger: RunTrigger = { triggeredBy: "manual" },
-) {
-  const supabase = buildAdminClient();
-  if (!supabase) {
+  store: IngestionStore | null = createDefaultIngestionStore(),
+): Promise<RunSummary[]> {
+  if (!store) {
     throw new Error(
       "Supabase admin client is not configured — check SUPABASE_SERVICE_ROLE_KEY.",
     );
   }
 
-  for (const source of sources) {
-    let run;
+  const settled = await Promise.allSettled(
+    sources.map((source) => runOneSource(store, source, trigger)),
+  );
 
-    try {
-      run = await startRun(supabase, source.name, trigger);
-    } catch (err) {
-      // No run row exists, so there is nothing to mark failed. Report and carry on
-      // to the next source rather than taking the whole job down.
-      source.onError(err as Error);
-      continue;
-    }
-
-    // Tracked out here so the failure path reports what actually happened rather
-    // than zeros: a source can fetch 1000 records and then fail on the write.
-    const counts: RunCounts = {
-      fetched: 0,
-      inserted: 0,
-      skipped: 0,
-      failed: 0,
+  // runOneSource catches its own failures, so a rejection here means a bug in the
+  // runner rather than in a source. Surface it without losing the other results.
+  return settled.map((result, index) => {
+    if (result.status === "fulfilled") return result.value;
+    return {
+      source: sources[index].name,
+      status: "failed" as const,
+      counts: { fetched: 0, inserted: 0, skipped: 0, failed: 0 },
+      written: { new: 0, changed: 0 },
+      error: String(result.reason),
     };
-
-    try {
-      const { records, truncated } = await source.fetch();
-      counts.fetched = records.length;
-
-      const { inserted, updated, skipped } = await storeRawRecords(
-        supabase,
-        run.id,
-        source.name,
-        records,
-      );
-      counts.inserted = inserted;
-      counts.skipped = skipped;
-
-      await finishRun(
-        supabase,
-        run.id,
-        truncated ? "partial" : "completed",
-        counts,
-      );
-
-      console.log(
-        `[${source.name}] fetched ${counts.fetched}, written ${inserted} ` +
-          `(${inserted - updated} new, ${updated} changed), skipped ${skipped}` +
-          `${truncated ? " — partial, hit the source's result ceiling" : ""}`,
-      );
-    } catch (err) {
-      counts.failed = counts.fetched - counts.inserted - counts.skipped;
-      source.onError(err as Error);
-
-      try {
-        await finishRun(
-          supabase,
-          run.id,
-          "failed",
-          counts,
-          err instanceof Error ? err.message : String(err),
-        );
-      } catch (finishErr) {
-        // Marking the run failed itself failed. The run row is left 'running' and
-        // will need reconciling, but the remaining sources still get their turn.
-        source.onError(finishErr as Error);
-      }
-    }
-  }
+  });
 }

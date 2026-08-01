@@ -20,10 +20,70 @@ const ITEMS_PER_PAGE = 100; // Companies House's documented maximum per page.
  */
 const SEARCH_RESULT_CEILING = 1000;
 
+/** Per-request timeout. Without one a hung connection hangs the whole run. */
+const REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * Companies House allows 600 requests per five minutes and answers 429 past that.
+ * A run is 10 requests, so the limit is only reachable alongside other traffic —
+ * but a 429 or a 5xx is transient by definition and worth one or two retries before
+ * failing a whole run over it.
+ */
+const MAX_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 1_000;
+
 type CompaniesHouseSearchItem = {
   company_number: string;
   [key: string]: unknown;
 };
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Retries 429 and 5xx with exponential backoff; anything else is returned as-is. */
+async function fetchWithRetry(
+  url: string,
+  headers: Record<string, string>,
+): Promise<Response> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+
+      const retryable = res.status === 429 || res.status >= 500;
+      if (!retryable || attempt === MAX_ATTEMPTS) return res;
+
+      // Honour Retry-After when the server sets it; back off otherwise.
+      const retryAfter = Number(res.headers.get("retry-after"));
+      const delay = Number.isFinite(retryAfter)
+        ? retryAfter * 1000
+        : RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
+
+      console.warn(
+        `[companies_house] ${res.status} on attempt ${attempt}, retrying in ${delay}ms`,
+      );
+      await sleep(delay);
+    } catch (err) {
+      // Timeout or network error. Same treatment: retry, then give up.
+      lastError = err;
+      if (attempt === MAX_ATTEMPTS) break;
+
+      const delay = RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
+      console.warn(
+        `[companies_house] request failed on attempt ${attempt} ` +
+          `(${err instanceof Error ? err.message : String(err)}), retrying in ${delay}ms`,
+      );
+      await sleep(delay);
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Companies House request failed: ${String(lastError)}`);
+}
 
 function shape(raw: CompaniesHouseSearchItem): CommonRecord {
   return {
@@ -53,11 +113,11 @@ export const companiesHouseAdapter: DataSourceAdapter = {
     while (startIndex < SEARCH_RESULT_CEILING) {
       if (knownTotal !== null && startIndex >= knownTotal) break;
 
-      const res = await fetch(
+      const res = await fetchWithRetry(
         `${COMPANIES_HOUSE_URL}/search/companies` +
           `?q=${encodeURIComponent(SEARCH_QUERY)}` +
           `&items_per_page=${ITEMS_PER_PAGE}&start_index=${startIndex}`,
-        { headers: { Authorization: `Basic ${encodedKey}` } },
+        { Authorization: `Basic ${encodedKey}` },
       );
 
       if (!res.ok) {

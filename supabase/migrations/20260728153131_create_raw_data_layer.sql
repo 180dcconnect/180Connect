@@ -27,7 +27,8 @@
 --   authenticated can read, and writes happen exclusively through privileged server code.
 --
 -- Schema change approval record (SOP §7):
---   Change        | Add INGESTION_RUNS + RAW_SOURCE_RECORDS tables
+--   Change        | Add INGESTION_RUNS + RAW_SOURCE_RECORDS tables, and the
+--                 | public.data_source_name domain both use for their source column.
 --   Reason        | F038: storage for raw records fetched by external-source adapters,
 --                 | before validation/matching promotes them into ORGANISATIONS.
 --   Compatibility | New tables, no FKs from existing tables. Written only by the
@@ -43,10 +44,34 @@
 --
 -- Reversibility: paired rollback in ../rollback/20260728153131_create_raw_data_layer.down.sql
 
+-- The source list, defined once.
+--
+-- A domain rather than the same `check (... in (...))` list copy-pasted onto both
+-- ingestion_runs.api_source and raw_source_records.record_source. F038 AC1 is that
+-- adding a source must not mean editing existing definitions: with this, a seventh
+-- source is one `alter domain ... add constraint` in a new migration, and the two
+-- columns pick it up. With duplicated checks it was two edits that could silently
+-- drift apart — a value legal in one table and rejected by the other.
+--
+-- Mirrors DATA_SOURCES in src/lib/ingestion/type.ts; the two lists are the code and
+-- database halves of the same enumeration and change together.
+--
+-- Not a Postgres enum type: adding a value to an enum cannot run inside a
+-- transaction block in older servers and cannot be removed at all, whereas a domain
+-- constraint can be replaced in an ordinary migration.
+create domain public.data_source_name as text
+  check (value in
+    ('charitybase','companies_house','360giving','find_that_charity','globalgiving','candid'));
+
+comment on domain public.data_source_name is
+  'The external data sources the ingestion layer supports (F038). Shared by '
+  'ingestion_runs.api_source and raw_source_records.record_source so the list has one '
+  'definition. Adding a source: alter this domain in a new migration and add the same '
+  'value to DATA_SOURCES in src/lib/ingestion/type.ts.';
+
 create table public.ingestion_runs (
   id                    uuid primary key default gen_random_uuid(),
-  api_source            text not null check (api_source in
-    ('charitybase','companies_house','360giving','find_that_charity','globalgiving','candid')),
+  api_source            public.data_source_name not null,
   triggered_by          text not null check (triggered_by in ('schedule','manual')),
   triggered_by_user_id  uuid references public.users (id),
   started_at            timestamptz not null default now(),
@@ -83,8 +108,7 @@ comment on column public.ingestion_runs.records_skipped is
 create table public.raw_source_records (
   id                     uuid primary key default gen_random_uuid(),
   ingestion_run_id       uuid not null references public.ingestion_runs (id),
-  record_source          text not null check (record_source in
-    ('charitybase','companies_house','360giving','find_that_charity','globalgiving','candid')),
+  record_source          public.data_source_name not null,
   source_record_id       text not null,
   raw_payload            jsonb not null,
   received_at            timestamptz not null default now(),

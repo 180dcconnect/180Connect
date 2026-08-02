@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { canChangeAccess, canChangeRole } from "@/lib/auth/permissions";
+import { roleFailureMessage } from "@/lib/auth/permission-denial";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
 
@@ -114,8 +116,33 @@ export async function PATCH(request: Request) {
         operation: "admin.users.set_role",
         targetUserId: parsed.data.userId,
       });
+
+      // A blocked write is one of the two "observable" denial cases (matrix §4)
+      // and must leave its own record — set_user_role only writes audit_log on
+      // success. authenticated has no INSERT grant on audit_log (by design, so a
+      // client can never forge an entry), so this goes through the service-role
+      // client, the other writer audit_log's own migration names as legitimate.
+      if (roleError.code === "42501") {
+        const admin = createAdminClient();
+        const { error: denialLogError } = admin
+          ? await admin.from("audit_log").insert({
+              actor_user_id: authorization.actor.id,
+              action: "role_change_denied",
+              target_table: "users",
+              target_id: parsed.data.userId,
+              detail: { attempted_role: parsed.data.role, reason: roleError.message },
+            })
+          : { error: new Error("service-role key unavailable") };
+        if (denialLogError) {
+          await reportError(denialLogError, {
+            operation: "admin.users.log_role_denial",
+            targetUserId: parsed.data.userId,
+          });
+        }
+      }
+
       return NextResponse.json(
-        { error: "The role change was blocked. Refresh and try again." },
+        { error: roleFailureMessage(roleError) },
         { status: roleError.code === "42501" ? 403 : 500 },
       );
     }

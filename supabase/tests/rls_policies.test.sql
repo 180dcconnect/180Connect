@@ -1361,7 +1361,7 @@ declare
 begin
   if not tests.tables_exist('actions', 'organisations', 'users', 'audit_log')
      or to_regprocedure('public.deactivate_user(uuid, text, uuid, boolean)') is null then
-    return next skip(6, 'deactivate_user or actions not yet migrated');
+    return next skip(9, 'deactivate_user or actions not yet migrated');
     return;
   end if;
 
@@ -1393,6 +1393,13 @@ begin
     (v_act_stray, v_org_else, v_leaver, v_admin,  'Admin-assigned work elsewhere')
   on conflict (id) do nothing;
 
+  if tests.tables_exist('notes') then
+    insert into public.notes (id, organisation_id, author_id, content)
+    values ('00000000-0000-4000-c000-0000000000fe', v_org_own, v_leaver,
+            'Spoke to the trustee; they want a proposal in September.')
+    on conflict (id) do nothing;
+  end if;
+
   perform tests.sqlstate_of(v_admin, format(
     'select public.deactivate_user(%L, ''left the society'', %L, false)',
     v_leaver, v_taker));
@@ -1423,6 +1430,32 @@ begin
      and detail->>'trigger' = 'offboarding';
   return next is(v_count, 1::bigint,
     'one ownership_reassigned row per client, on the converged token');
+
+  -- F257 AC4. Notes carry no owner column — they hang off organisation_id — so a
+  -- handover should move them implicitly, with nothing in reassign_ownership naming
+  -- them. This is the assertion that turns that from a design argument into a fact.
+  if tests.tables_exist('notes') then
+    select count(*) into v_count
+      from public.notes where organisation_id = v_org_own and author_id = v_leaver;
+    return next is(v_count, 1::bigint,
+      'the leaver''s note is still attached to the client after the handover');
+
+    -- Authorship is history and is never rewritten: the timeline must still say who
+    -- wrote it, even though that person has left (matrix §3.11).
+    select author_id into v_assignee
+      from public.notes where organisation_id = v_org_own limit 1;
+    return next is(v_assignee, v_leaver,
+      'the note is still credited to the CAM who wrote it, not the successor');
+
+    perform tests.login_as(v_taker);
+    select count(*) into v_count from public.notes where organisation_id = v_org_own;
+    execute 'reset role';
+    perform set_config('request.jwt.claims', null, true);
+    return next is(v_count, 1::bigint,
+      'the incoming CAM can read the departed CAM''s note on their new client');
+  else
+    return next skip(3, 'step 4 create_org_children not yet migrated');
+  end if;
 end;
 $$;
 

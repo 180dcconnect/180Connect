@@ -646,12 +646,14 @@ declare
   v_org_cam_a   uuid := '00000000-0000-4000-b000-000000000002';
   v_org_cam_b   uuid := '00000000-0000-4000-b000-000000000003';
   v_action_a    uuid := '00000000-0000-4000-c000-000000000001';
+  v_act_mine    uuid := '00000000-0000-4000-c000-000000000021';
+  v_act_theirs  uuid := '00000000-0000-4000-c000-000000000022';
   v_assignee    uuid;
   v_status      public.action_status;
   v_count       bigint;
 begin
   if not tests.tables_exist('actions', 'organisations', 'users') then
-    return next skip(10, 'step 19 create_actions not yet migrated');
+    return next skip(12, 'step 19 create_actions not yet migrated');
     return;
   end if;
 
@@ -739,6 +741,27 @@ begin
   perform set_config('request.jwt.claims', null, true);
   return next ok(v_count > 0,
     'a CAM can read another CAM''s actions (handover visibility)');
+
+  -- DELETE keys on authorship AND assignment. Authorship alone once let a CAM delete
+  -- work that had been reassigned away from them (fixed in 20260803100000).
+  insert into public.actions
+    (id, organisation_id, assignee_user_id, created_by_user_id, title)
+  values
+    (v_act_mine,   v_org_cam_a, v_cam_a, v_cam_a, 'Raised for myself'),
+    (v_act_theirs, v_org_cam_a, v_cam_b, v_cam_a, 'Raised, then handed on')
+  on conflict (id) do nothing;
+
+  perform tests.sqlstate_of(v_cam_a, format(
+    'delete from public.actions where id = %L', v_act_mine));
+  select count(*) into v_count from public.actions where id = v_act_mine;
+  return next is(v_count, 0::bigint,
+    'CAM can delete an open action they raised for themselves');
+
+  perform tests.sqlstate_of(v_cam_a, format(
+    'delete from public.actions where id = %L', v_act_theirs));
+  select count(*) into v_count from public.actions where id = v_act_theirs;
+  return next is(v_count, 1::bigint,
+    'CAM cannot delete an action they raised once it belongs to someone else');
 end;
 $$;
 
@@ -769,7 +792,7 @@ declare
 begin
   if not tests.tables_exist('actions', 'organisations', 'users', 'audit_log')
      or to_regprocedure('public.reassign_ownership(uuid[], uuid, text, uuid)') is null then
-    return next skip(15, 'reassignment RPCs not yet migrated');
+    return next skip(16, 'reassignment RPCs not yet migrated');
     return;
   end if;
 
@@ -897,6 +920,15 @@ begin
      and detail->>'organisation_id' = v_org_y::text;
   return next is(v_count, 1::bigint,
     'the action audit row carries the client so the timeline can show it');
+
+  -- Regression guard for the hole fixed in 20260803100000. The outgoing CAM raised this
+  -- action and is still an active user, so nothing else in the policy stops them; only
+  -- the assignee check does. A blocked DELETE raises nothing, so assert the row.
+  perform tests.sqlstate_of(v_cam_a, format(
+    'delete from public.actions where id = %L', v_act_open));
+  select count(*) into v_count from public.actions where id = v_act_open;
+  return next is(v_count, 1::bigint,
+    'the outgoing CAM cannot delete open work that was reassigned away from them');
 
   return next ok(
     not has_function_privilege('anon',

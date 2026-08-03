@@ -306,7 +306,7 @@ outgoing one's open actions *before* the handover, not only after.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `ACTIONS` | all roles | admin: any. cam: `created_by_user_id = auth.uid()` **and** `assignee_user_id = auth.uid()` **and** org is unowned or owned by self | admin any row; cam where `assignee_user_id = auth.uid()` — **work columns only** | admin any row; cam own-created **and** `status = 'open'` |
+| `ACTIONS` | all roles | admin: any. cam: `created_by_user_id = auth.uid()` **and** `assignee_user_id = auth.uid()` **and** org is unowned or owned by self | admin any row; cam where `assignee_user_id = auth.uid()` — **work columns only** | admin any row; cam own-created **and** own-assigned **and** `status = 'open'` |
 
 `assignee_user_id` carries **no UPDATE grant for any role, admins included**, and neither
 do `organisation_id` or `is_seed`. `authenticated` is one shared Postgres role, so column
@@ -341,10 +341,21 @@ A CAM assigning work to *another* CAM is F169 and stays admin-only — that is w
 `assignee_user_id = auth.uid()` predicate on INSERT enforces. Viewers create nothing
 (§4.3), enforced by `app.is_cam()`.
 
-Deletion narrows as an action ages: a CAM may drop one they raised and have not closed,
-but a completed or cancelled action is handover history and only an admin may remove it.
-`cancelled` exists as a status for the same reason — an action dropped during a handover
-is context the incoming CAM needs, and deleting it destroys that.
+Deletion requires the CAM to have **raised** the action and to **still hold** it, and it
+must still be open. A completed or cancelled action is handover history and only an admin
+may remove it. `cancelled` exists as a status for the same reason — an action dropped
+during a handover is context the incoming CAM needs, and deleting it destroys that.
+
+The assignment half of that test was added in `20260803100000_fix_actions_delete_policy.sql`
+and is not cosmetic. Authorship is permanent and reassignment does not touch it, so
+keying DELETE on `created_by_user_id` alone gave a standing right that survived the
+handover: a CAM who moved teams — still active, so `app.is_active_user()` did not stop
+them — could delete open work now assigned to the CAM who took over, on a client they no
+longer owned. Because a DELETE blocked by USING removes zero rows and raises nothing
+(§4), it would have failed silently and read as work that had never existed. That is the
+loss F257 exists to prevent, reachable through F257's own table. Requiring both keeps the
+intended case intact (raising something for yourself and dropping it before you start,
+where the two are the same person) and closes the rest.
 
 ---
 

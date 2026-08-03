@@ -92,8 +92,19 @@ succeeded.
 the invited user, and lands them on `/reset-password` — the same "choose a
 password" form password recovery uses (see `src/lib/auth/recovery-landing.ts`).
 There is no separate accept-invite page: setting a password *is* accepting the
-invite. The moment their email is confirmed (which verifying the token itself
-does), the database trigger `app.handle_auth_user_confirmed`
-(`supabase/migrations/20260731090000_add_user_invite_tracking.sql`) stamps
-`users.invite_accepted_at`, which is what moves them out of the admin's
-pending-invites list.
+invite, and that is meant literally. `users.invite_accepted_at` is stamped by
+`public.mark_invite_accepted()`
+(`supabase/migrations/20260804090000_add_user_invite_tracking.sql`), which the
+password form's Server Action calls *after* the password update succeeds — not by
+a trigger on email confirmation.
+
+The distinction matters. Verifying the invite token confirms the email and opens
+a session before any password exists. Had acceptance been stamped there, clicking
+the link in a mail app would be enough to clear the invite from the admin's
+pending list, and anyone who clicked and then closed the tab would be left holding
+an account they cannot log into, with no admin-visible sign of it. Clicking the
+link proves someone can read the mailbox; only a set password proves there is a
+usable account at the end of it.
+
+So a half-finished invite stays pending, and stays visible to the admin, until
+the password is set.

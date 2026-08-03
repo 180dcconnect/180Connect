@@ -1,7 +1,6 @@
 -- Rollback: add_user_invite_tracking
 
-drop trigger if exists on_auth_user_confirmed on auth.users;
-drop function if exists app.handle_auth_user_confirmed();
+drop function if exists public.mark_invite_accepted();
 
 -- Restore handle_new_auth_user to its pre-invite-tracking form (create_users, F233).
 create or replace function app.handle_new_auth_user()

@@ -35,6 +35,8 @@ export type AsciiConfig = {
   inkOpacity: number;
   /** 0..100, how much `bgColor` is washed over the photo behind the ink. */
   wash: number;
+  /** Cover-fit crop anchor: 0 keeps the top of the photo, 100 the bottom. */
+  focalY: number;
   /** -100..100, 0 = neutral */
   brightness: number;
   /** 0..255, 128 = neutral */
@@ -101,6 +103,7 @@ export const FOREST: AsciiConfig = {
   saturation: 108,
   /** Paper wash: white pulled over the photo so the ink has somewhere to sit. */
   wash: 30,
+  focalY: 22,
   grayscale: 0,
   tint: "#3ca6ff",
   tintOpacity: 0,
@@ -133,17 +136,22 @@ export const FOREST: AsciiConfig = {
 
 type Cell = { x: number; y: number; lum: number; hash: number };
 
-/** Draw `img` into `ctx` at cover fit for a w x h box. */
+/**
+ * Draw `img` into `ctx` at cover fit for a w x h box. `focalY` picks which
+ * band of the photo survives the crop: 0 keeps the top, 100 the bottom. Lower
+ * values push the image down the viewport and leave more sky above.
+ */
 function drawCover(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement,
   w: number,
   h: number,
+  focalY: number,
 ) {
   const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
   const dw = img.naturalWidth * scale;
   const dh = img.naturalHeight * scale;
-  ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  ctx.drawImage(img, (w - dw) / 2, (h - dh) * (focalY / 100), dw, dh);
 }
 
 export default function AsciiBackground({
@@ -194,7 +202,7 @@ export default function AsciiBackground({
       work.height = h;
       const wctx = work.getContext("2d")!;
 
-      drawCover(wctx, image, w, h);
+      drawCover(wctx, image, w, h, cfg.focalY);
 
       if (cfg.blurType === "tilt" && cfg.blurAmount > 0) {
         const blurred = document.createElement("canvas");

@@ -18,7 +18,11 @@ function approvedUser(): User {
 
 describe("role permission matrix", () => {
   it("allows admins to perform every CAM action", () => {
-    for (const permission of ["client:view", "client:edit", "client:contact"] as const) {
+    for (const permission of [
+      "client:view",
+      "client:edit",
+      "client:contact",
+    ] as const) {
       assert.equal(hasPermission("cam", permission), true);
       assert.equal(hasPermission("admin", permission), true);
     }
@@ -95,6 +99,42 @@ describe("a suspended account is refused at request time (F013)", () => {
       "user:manage",
     );
     assert.deepEqual(result, { ok: false, reason: "inactive" });
+  });
+});
+
+describe("F017: CAM role boundaries", () => {
+  it("authorizes a CAM for every CAM-facing action (AC1)", () => {
+    for (const permission of [
+      "client:view",
+      "client:edit",
+      "client:contact",
+    ] as const) {
+      const result = authorizeUserProfile(
+        approvedUser(),
+        {
+          id: approvedUser().id,
+          full_name: "CAM",
+          role: "cam",
+          is_active: true,
+        },
+        permission,
+      );
+      assert.equal(result.ok, true);
+    }
+  });
+
+  it("refuses a CAM the admin permission that gates every admin route (AC2/AC4)", () => {
+    const result = authorizeUserProfile(
+      approvedUser(),
+      {
+        id: approvedUser().id,
+        full_name: "CAM",
+        role: "cam",
+        is_active: true,
+      },
+      "user:manage",
+    );
+    assert.deepEqual(result, { ok: false, reason: "forbidden" });
   });
 });
 

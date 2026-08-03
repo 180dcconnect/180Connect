@@ -65,6 +65,26 @@ export default async function DashboardPage() {
             activity, but not create, edit, or send anything.
           </p>
         )}
+        {(actor.role === "cam" || actor.role === "admin") && (
+          <div className="mt-6 grid gap-3 sm:grid-cols-2" aria-label="CAM tools">
+            <div className="rounded-xl border border-black/10 p-5">
+              <h2 className="font-bold">Client database</h2>
+              <p className="mt-1 text-sm text-foreground/65">Coming soon.</p>
+            </div>
+            <div className="rounded-xl border border-black/10 p-5">
+              <h2 className="font-bold">Client profiles</h2>
+              <p className="mt-1 text-sm text-foreground/65">Coming soon.</p>
+            </div>
+            <div className="rounded-xl border border-black/10 p-5">
+              <h2 className="font-bold">Email generation & review</h2>
+              <p className="mt-1 text-sm text-foreground/65">Coming soon.</p>
+            </div>
+            <div className="rounded-xl border border-black/10 p-5">
+              <h2 className="font-bold">My actions</h2>
+              <p className="mt-1 text-sm text-foreground/65">Coming soon.</p>
+            </div>
+          </div>
+        )}
         {actor.role === "admin" && (
           <nav className="mt-6 grid gap-2 sm:grid-cols-2" aria-label="Admin tools">
             <Link className="rounded-xl border border-brand/40 p-3 font-bold text-brand hover:bg-brand/5" href="/admin">

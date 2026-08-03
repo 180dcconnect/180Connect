@@ -48,6 +48,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local Claude Code tool state — personal to each contributor's machine
+.claude/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

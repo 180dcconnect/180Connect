@@ -1,8 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { requireApprovedUser } from "@/lib/auth/require-approved-user";
-import { requireAdmin } from "@/lib/auth/require-admin";
-import { logSecurityEvent } from "@/lib/log-security-event";
+import { getCurrentActor } from "@/lib/auth/actor";
+import { reportError } from "@/lib/error-logging";
 
 // Matches supabase/migrations/20260723100000_create_audit_log.sql. No generated
 // types file exists yet in this repo, so this is hand-written from the migration.
@@ -29,43 +28,19 @@ export default async function AuditLogPage({
 }: {
   searchParams: SearchParams;
 }) {
-  let user;
+  const authorization = await getCurrentActor("user:manage");
+  if (!authorization.ok) {
+    if (authorization.reason === "unauthenticated") redirect("/login");
+    redirect("/dashboard?error=admin-access-required");
+  }
+
   const supabase = await createClient();
-
-  try {
-    const result = await supabase.auth.getUser();
-    user = result.data.user;
-  } catch {
-    redirect("/login");
-  }
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  const approved = requireApprovedUser(user);
-  if (!approved.ok) {
-    logSecurityEvent("permission.denied", {
-      route: "/admin/audit-log",
-      reason: approved.reason,
-    });
-    redirect("/login");
-  }
-
-  const admin = await requireAdmin(supabase, user);
-  if (!admin.ok) {
-    logSecurityEvent("permission.denied", {
-      route: "/admin/audit-log",
-      reason: admin.reason,
-    });
-    redirect("/dashboard");
-  }
 
   const { actor: actorFilter, org: orgFilter } = await searchParams;
 
   // RLS also restricts this SELECT to admins (audit_log_select_admin), so a
-  // bug in requireAdmin above cannot leak rows to a non-admin — this query
-  // fails closed on its own.
+  // bug in the getCurrentActor check above cannot leak rows to a non-admin —
+  // this query fails closed on its own.
   let query = supabase
     .from("audit_log")
     .select("id, actor_user_id, action, target_table, target_id, detail, created_at")
@@ -87,13 +62,8 @@ export default async function AuditLogPage({
   if (error) {
     // Fail visibly per the project SOP, but never show the raw database error
     // to the user — it can describe internal shape (column/constraint names)
-    // that isn't this project's convention to expose. ERROR_LOG (F226) is the
-    // real home for this once that table exists; console.error is today's
-    // stand-in, same pattern as logSecurityEvent.
-    console.error("[audit-log] failed to load audit_log", {
-      message: error.message,
-      code: error.code,
-    });
+    // that isn't this project's convention to expose.
+    await reportError(error, { operation: "admin.audit_log.page_list" });
   }
 
   // Options for the filter dropdowns. Both tables are readable by any active

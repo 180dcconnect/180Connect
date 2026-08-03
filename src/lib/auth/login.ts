@@ -67,6 +67,20 @@ export type LoginClient = {
   };
 };
 
+/**
+ * Reads `users.is_active` for the account that just signed in (F013).
+ *
+ * Separate from `LoginClient` and separately injectable because it cannot use the
+ * signed-in client: `users_select_active` gates SELECT on `app.is_active_user()`, so
+ * a suspended user querying their own row gets zero rows back — indistinguishable
+ * from a missing profile. The caller passes a reader that bypasses RLS.
+ *
+ * `null` means "could not tell". Login is allowed to continue in that case: the
+ * dashboard's own `getCurrentActor` gate still refuses a suspended account, so a
+ * lookup failure costs a worse error message, not access.
+ */
+export type ActiveStatusReader = (userId: string) => Promise<boolean | null>;
+
 export type LoginInput = {
   email: unknown;
   password: unknown;
@@ -87,19 +101,33 @@ export const SERVICE_UNAVAILABLE_MESSAGE =
   "Login is temporarily unavailable. Please try again later.";
 
 /**
+ * Shown to a suspended account (F013 AC2). Deliberately explicit rather than
+ * "invalid email or password": the person is a real team member holding correct
+ * credentials, and a vague error sends them to reset a password that works fine.
+ * It reveals nothing to an attacker who does not already hold those credentials —
+ * it is only ever reached after `signInWithPassword` has succeeded.
+ */
+export const SUSPENDED_MESSAGE =
+  "Your account has been suspended. Contact your administrator.";
+
+/**
  * Validates the submission, checks the CAPTCHA was solved, checks the account is
- * not throttled, signs in, and confirms the account is approved. Never throws: a
- * transport failure comes back as `SERVICE_UNAVAILABLE_MESSAGE` so the action can
- * render it.
+ * not throttled, signs in, confirms the account is approved, and turns away a
+ * suspended one. Never throws: a transport failure comes back as
+ * `SERVICE_UNAVAILABLE_MESSAGE` so the action can render it.
  *
  * `throttle` defaults to the no-op so the twenty-odd tests that predate it read
- * unchanged; the Server Action always passes a real one.
+ * unchanged; the Server Action always passes a real one. `readActiveStatus` is
+ * optional for the same reason, and omitting it skips the suspension check rather
+ * than failing it — `getCurrentActor` refuses a suspended account on the very next
+ * request regardless, so the reader buys a better error message, not the security.
  */
 export async function attemptLogin(
   client: LoginClient,
   input: LoginInput,
   domain: string = allowedEmailDomain(),
   throttle: LoginThrottle = NO_THROTTLE,
+  readActiveStatus?: ActiveStatusReader,
 ): Promise<LoginOutcome> {
   const email = normalizeEmail(input.email);
   const result = safeValidate(loginSchema(domain), { email, password: input.password });
@@ -207,6 +235,22 @@ export async function attemptLogin(
           email,
         },
       };
+    }
+
+    // F013 AC2: a suspended user is turned away here rather than allowed to reach a
+    // dashboard that immediately redirects them back. `requireApprovedUser` cannot
+    // see this — it reads app_metadata.account_status, which suspension does not
+    // touch. The session opened by signInWithPassword is closed again on the way out.
+    if (readActiveStatus) {
+      const isActive = await readActiveStatus(data.user.id);
+      if (isActive === false) {
+        await client.auth.signOut();
+        logSecurityEvent("permission.denied", { form: "login", reason: "inactive" });
+        return {
+          ok: false,
+          state: { status: "pending", message: SUSPENDED_MESSAGE, email },
+        };
+      }
     }
   } catch (error) {
     logSecurityEvent("authentication.login_failed", {

@@ -99,6 +99,42 @@ describe("buildReport", () => {
     assert.equal(report.stack, undefined);
   });
 
+  it("reads a Supabase PostgrestError instead of rendering [object Object]", () => {
+    // The real shape supabase-js returns: a plain object, not an Error. This
+    // exact case logged "[object Object]" and hid a missing-function error.
+    const report = buildReport(
+      {
+        message: "Could not find the function public.set_user_active",
+        code: "PGRST202",
+        hint: "Perhaps you meant set_user_role",
+        details: null,
+      },
+      { operation: "admin.users.set_active" },
+      config,
+    );
+
+    assert.equal(report.message, "Could not find the function public.set_user_active");
+    assert.equal(report.context.errorCode, "PGRST202");
+    assert.equal(report.context.errorHint, "Perhaps you meant set_user_role");
+    // details was null, so it is left out rather than logged as an empty field.
+    assert.equal("errorDetails" in report.context, false);
+    assert.equal(report.context.operation, "admin.users.set_active");
+  });
+
+  it("falls back to JSON for an object carrying no message", () => {
+    const report = buildReport({ weird: true }, {}, config);
+    assert.equal(report.message, '{"weird":true}');
+  });
+
+  it("does not let an error field overwrite the caller's context", () => {
+    const report = buildReport(
+      { message: "boom", code: "FROM_ERROR" },
+      { errorCode: "FROM_CALLER" },
+      config,
+    );
+    assert.equal(report.context.errorCode, "FROM_CALLER");
+  });
+
   it("scrubs sensitive data out of request headers and context", () => {
     const report = buildReport(
       new Error("nope"),

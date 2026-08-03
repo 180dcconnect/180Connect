@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { readUserActiveStatus } from "@/lib/supabase/admin";
 import {
   allowedEmailDomain,
   attemptLogin,
@@ -53,6 +54,9 @@ export async function login(
       },
       allowedEmailDomain(),
       throttle,
+      // F013: reads users.is_active bypassing RLS, which the signed-in client
+      // cannot do for a suspended user — their own row is invisible to them.
+      readUserActiveStatus,
     );
 
     if (!outcome.ok) {

@@ -191,6 +191,57 @@ export function resolveConfig(): LoggingConfig {
 }
 
 /**
+ * Pulls a readable name and message out of whatever was thrown or returned.
+ *
+ * Not everything that reaches here is an `Error`. Supabase hands back a
+ * `PostgrestError` — a plain object `{ message, details, hint, code }` — and
+ * `String()` renders that as "[object Object]", discarding the only part worth
+ * reading. That is not hypothetical: the first real `set_user_active` failure
+ * logged exactly that and said nothing about the cause.
+ *
+ * `code`, `hint` and `details` are returned separately so the caller can fold
+ * them into the report's context, where `scrub` still sees them.
+ */
+export function describeError(error: unknown): {
+  name: string;
+  message: string;
+  stack?: string;
+  fields: Record<string, unknown>;
+} {
+  if (error instanceof Error) {
+    return { name: error.name, message: error.message, stack: error.stack, fields: {} };
+  }
+
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    const fields: Record<string, unknown> = {};
+    for (const key of ["code", "hint", "details"] as const) {
+      if (record[key] !== undefined && record[key] !== null) {
+        fields[`error${key[0].toUpperCase()}${key.slice(1)}`] = record[key];
+      }
+    }
+
+    if (typeof record.message === "string" && record.message !== "") {
+      return {
+        name: typeof record.name === "string" ? record.name : "Error",
+        message: record.message,
+        fields,
+      };
+    }
+
+    // No message to salvage. JSON beats "[object Object]" — it at least shows
+    // the shape. Falls back if the value is circular or otherwise unserialisable.
+    try {
+      return { name: "Error", message: JSON.stringify(error), fields };
+    } catch {
+      return { name: "Error", message: Object.prototype.toString.call(error), fields };
+    }
+  }
+
+  return { name: "Error", message: String(error), fields: {} };
+}
+
+/**
  * Builds a scrubbed {@link ErrorReport} from a caught value and its context.
  * Exported for testing; call {@link reportError} in application code.
  */
@@ -199,10 +250,15 @@ export function buildReport(
   context: ErrorContext,
   config: LoggingConfig,
 ): ErrorReport {
-  const isError = error instanceof Error;
+  const described = describeError(error);
   const { request, ...rest } = context;
 
-  const scrubbedContext = scrub(rest) as Record<string, unknown>;
+  // The error's own code/hint/details go in alongside the caller's context, and
+  // lose to it on a key clash — the call site knows what it was doing.
+  const scrubbedContext = scrub({
+    ...described.fields,
+    ...rest,
+  }) as Record<string, unknown>;
   const scrubbedRequest = request
     ? (scrub(request) as ErrorRequest)
     : undefined;
@@ -214,9 +270,9 @@ export function buildReport(
     environment: config.environment,
     release: config.release,
     platform: config.platform,
-    name: isError ? error.name : "Error",
-    message: scrub(isError ? error.message : String(error)) as string,
-    stack: isError ? (scrub(error.stack) as string | undefined) : undefined,
+    name: described.name,
+    message: scrub(described.message) as string,
+    stack: described.stack ? (scrub(described.stack) as string | undefined) : undefined,
     request: scrubbedRequest,
     context: scrubbedContext,
   };

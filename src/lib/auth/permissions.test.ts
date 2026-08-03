@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import type { User } from "@supabase/supabase-js";
 import {
   authorizeUserProfile,
+  canChangeAccess,
   canChangeRole,
   hasPermission,
 } from "./permissions.ts";
@@ -50,6 +51,50 @@ describe("role-change safety", () => {
 
   it("allows an administrator to target another user", () => {
     assert.deepEqual(canChangeRole("admin-id", "cam-id"), { ok: true });
+  });
+});
+
+describe("suspension safety (F013)", () => {
+  it("blocks an administrator suspending their own account", () => {
+    const result = canChangeAccess("admin-id", "admin-id");
+    assert.equal(result.ok, false);
+    assert.match(
+      result.ok ? "" : result.message,
+      /your own account/i,
+      "the admin should be told why, not just refused",
+    );
+  });
+
+  it("allows an administrator to suspend another user", () => {
+    assert.deepEqual(canChangeAccess("admin-id", "cam-id"), { ok: true });
+  });
+});
+
+describe("a suspended account is refused at request time (F013)", () => {
+  it("rejects an inactive user holding an otherwise valid session", () => {
+    const result = authorizeUserProfile(approvedUser(), {
+      id: approvedUser().id,
+      full_name: "Suspended Admin",
+      role: "admin",
+      is_active: false,
+    });
+    assert.deepEqual(result, { ok: false, reason: "inactive" });
+  });
+
+  it("refuses an inactive admin the permission their role would otherwise carry", () => {
+    // The role check must not run first: an admin who has been suspended is not
+    // an admin for the purposes of this request.
+    const result = authorizeUserProfile(
+      approvedUser(),
+      {
+        id: approvedUser().id,
+        full_name: "Suspended Admin",
+        role: "admin",
+        is_active: false,
+      },
+      "user:manage",
+    );
+    assert.deepEqual(result, { ok: false, reason: "inactive" });
   });
 });
 

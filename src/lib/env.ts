@@ -126,7 +126,7 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     required: false,
     secret: true,
     description:
-      "Supabase service-role key. Bypasses row-level security — server-side only, never prefixed with NEXT_PUBLIC_. Read by `src/lib/supabase/admin.ts`, whose only caller is the F227 login throttle: its RPCs are granted to service_role alone, because a failed-login counter that anon could increment over the REST API would let anyone keep a chosen account delayed without solving a CAPTCHA. Optional locally, where an absent key degrades the throttle to a no-op and leaves the CAPTCHA and Supabase's per-IP limits in place. Staging and production must set it, or brute-force throttling is silently off. Becomes required with F223.",
+      "Supabase service-role key. Bypasses row-level security — server-side only, never prefixed with NEXT_PUBLIC_. Read by `src/lib/supabase/admin.ts`, which has two callers. The F227 login throttle: its RPCs are granted to service_role alone, because a failed-login counter that anon could increment over the REST API would let anyone keep a chosen account delayed without solving a CAPTCHA. And F013's suspended-user check at login, which cannot read `users.is_active` as the user themselves — `users_select_active` gates SELECT on the reader being active, so a suspended user's own row is invisible to them. Optional locally, where an absent key degrades the throttle to a no-op (CAPTCHA and Supabase's per-IP limits stay in place) and makes a suspended user meet a worse error message rather than a way in, since `getCurrentActor` refuses them regardless. Session revocation does not use this key; it happens inside `set_user_active`. Staging and production must set it, or brute-force throttling is silently off. Becomes required with F223.",
   },
   {
     name: "SESSION_ACTIVITY_SECRET",
@@ -165,6 +165,20 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     secret: false,
     description:
       "Environment tag applied to captured errors — 'staging' or 'production' (F226). Optional: falls back to Vercel's VERCEL_ENV so staging (preview) and production are distinguished automatically.",
+  },
+  {
+    name: "COMPANIES_HOUSE_API_KEY",
+    required: false,
+    secret: true,
+    description:
+      "Companies House API key for company data ingestion (F038). HTTP Basic Auth — sent as the username with a blank password. Not yet required — becomes required once F032 (Companies House data import) ships.",
+  },
+  {
+    name: "CHARITYBASE_API_KEY",
+    required: false,
+    secret: true,
+    description:
+      "CharityBase API key for charity data ingestion (F038/F031). GraphQL API — sent as `Authorization: Apikey <key>`. Not yet required — becomes required once F031 (CharityBase data import) ships, and CharityBase's own API is currently down on their end.",
   },
 ];
 

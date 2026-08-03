@@ -2,6 +2,19 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 
+/**
+ * `/admin` is a hub of tiles, one per admin workspace that actually exists.
+ *
+ * It briefly became a straight redirect to `/admin/users`, because team
+ * management was the only destination and three of the tiles pointed at
+ * features that had not been built. F221 added the audit log, so there is a
+ * real choice to make again and the hub earns its place.
+ *
+ * The rule that made the redirect necessary still stands: a tile for a feature
+ * that does not exist is worse than no tile, because the user spends a click
+ * finding out. Add a tile here only when its route exists — see the same
+ * argument in `src/lib/nav.ts`.
+ */
 export default async function AdminPage() {
   const authorization = await getCurrentActor("user:manage");
   if (!authorization.ok) {
@@ -29,23 +42,16 @@ export default async function AdminPage() {
         <div className="mt-8 grid gap-4 sm:grid-cols-2">
           <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/users">
             <h2 className="font-bold">User management</h2>
-            <p className="mt-1 text-sm text-foreground/65">Assign roles and activate or deactivate access.</p>
+            <p className="mt-1 text-sm text-foreground/65">
+              Assign roles, and suspend, deactivate or reactivate access.
+            </p>
           </Link>
-          <div className="rounded-xl border border-black/10 p-5">
-            <h2 className="font-bold">Approvals</h2>
-            <p className="mt-1 text-sm text-foreground/65">Admin-only queue ready for approval records.</p>
-          </div>
-          <div className="rounded-xl border border-black/10 p-5">
-            <h2 className="font-bold">Team Pipeline View</h2>
-            <p className="mt-1 text-sm text-foreground/65">Admin-only view ready for pipeline data.</p>
-          </div>
-          <div className="rounded-xl border border-black/10 p-5">
-            <h2 className="font-bold">Platform settings</h2>
-            <p className="mt-1 text-sm text-foreground/65">Restricted configuration workspace.</p>
-          </div>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/audit-log">
+            <h2 className="font-bold">Audit log</h2>
+            <p className="mt-1 text-sm text-foreground/65">Every recorded action, most recent first.</p>
+          </Link>
         </div>
       </section>
     </main>
   );
 }
-

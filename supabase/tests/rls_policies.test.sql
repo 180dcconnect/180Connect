@@ -1027,6 +1027,71 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Accept-invite RPC — F008 (#8)
+-- ---------------------------------------------------------------------------
+-- users.invite_accepted_at is granted to nobody, so mark_invite_accepted is the only
+-- write-path. What the story turns on: an invitee can accept their own invite exactly
+-- once, and the call is harmless for everyone else — the password-reset action calls
+-- it on every reset, invitee or not.
+create or replace function tests.suite_invite_rpc()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b uuid := '00000000-0000-4000-a000-000000000003';
+  v_accepted timestamptz;
+  v_count bigint;
+begin
+  if to_regprocedure('public.mark_invite_accepted()') is null then
+    return next skip(6, 'mark_invite_accepted RPC not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- CAM B stands in for the invited person: invited, not yet accepted.
+  update public.users
+  set invited_at = now(), invite_accepted_at = null
+  where id = v_cam_b;
+
+  return next is(
+    tests.sqlstate_of(v_cam_b, 'select public.mark_invite_accepted()'),
+    null,
+    'an invited user can accept their own invite'
+  );
+  select invite_accepted_at into v_accepted from public.users where id = v_cam_b;
+  return next isnt(v_accepted, null, 'accepting the invite stamped invite_accepted_at');
+
+  -- Accepting twice must not produce a second transition — the password form calls
+  -- this on every reset, including resets by someone who accepted months ago.
+  return next is(
+    tests.sqlstate_of(v_cam_b, 'select public.mark_invite_accepted()'),
+    null,
+    'calling it again is accepted rather than erroring'
+  );
+
+  -- Someone who was never invited (a plain password reset) is untouched, and
+  -- crucially writes no audit row — it is not a transition.
+  return next is(
+    tests.sqlstate_of(v_cam_a, 'select public.mark_invite_accepted()'),
+    null,
+    'a user with no pending invite may call it harmlessly'
+  );
+  select invite_accepted_at into v_accepted from public.users where id = v_cam_a;
+  return next is(v_accepted, null, 'a user with no invite is not marked as accepted');
+
+  if tests.tables_exist('audit_log') then
+    select count(*) into v_count
+      from public.audit_log
+     where action = 'invite_accepted' and target_id = v_cam_b;
+    return next is(v_count, 1::bigint,
+      'acceptance wrote exactly one audit_log row, and the no-ops wrote none');
+  else
+    return next skip(1, 'audit_log not yet migrated');
+  end if;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 
 select * from tests.suite_core();
 select * from tests.suite_viewer();
@@ -1037,6 +1102,7 @@ select * from tests.suite_audit();
 select * from tests.suite_role_rpc();
 select * from tests.suite_active_rpc();
 select * from tests.suite_deactivate_rpc();
+select * from tests.suite_invite_rpc();
 select * from tests.suite_views();
 
 select * from finish();

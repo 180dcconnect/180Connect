@@ -4,10 +4,10 @@ import AsciiBackground from "@/components/ascii-background";
 
 export default function Home() {
   return (
-    <main className="relative flex flex-1 flex-col items-center justify-center overflow-hidden bg-black p-8">
-      <AsciiBackground src="/tree.jpg" />
-      <div className="relative flex flex-col items-center gap-8">
-        <h1 className="font-body text-2xl font-semibold text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">
+    <main className="relative flex flex-1 flex-col items-center justify-center overflow-hidden bg-background p-8">
+      <AsciiBackground src="/forest.jpg" />
+      <div className="relative flex flex-col items-center gap-8 rounded-2xl bg-background/70 px-10 py-8 backdrop-blur-sm">
+        <h1 className="font-body text-2xl font-semibold">
           180<span className="text-brand">Connect</span>
         </h1>
         <Link

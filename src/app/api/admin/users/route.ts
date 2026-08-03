@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { canChangeAccess, canChangeRole } from "@/lib/auth/permissions";
-import { roleFailureMessage } from "@/lib/auth/permission-denial";
+import { logRoleChangeDenial, roleFailureMessage } from "@/lib/auth/permission-denial";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logSecurityEvent } from "@/lib/log-security-event";
@@ -124,15 +124,12 @@ export async function PATCH(request: Request) {
       // client, the other writer audit_log's own migration names as legitimate.
       if (roleError.code === "42501") {
         const admin = createAdminClient();
-        const { error: denialLogError } = admin
-          ? await admin.from("audit_log").insert({
-              actor_user_id: authorization.actor.id,
-              action: "role_change_denied",
-              target_table: "users",
-              target_id: parsed.data.userId,
-              detail: { attempted_role: parsed.data.role, reason: roleError.message },
-            })
-          : { error: new Error("service-role key unavailable") };
+        const { error: denialLogError } = await logRoleChangeDenial(admin, {
+          actorId: authorization.actor.id,
+          targetUserId: parsed.data.userId,
+          attemptedRole: parsed.data.role,
+          reason: roleError.message,
+        });
         if (denialLogError) {
           await reportError(denialLogError, {
             operation: "admin.users.log_role_denial",

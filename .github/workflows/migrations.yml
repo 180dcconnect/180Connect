@@ -51,6 +51,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Needed only for the last-admin concurrency guard step below, which is a
+      # node/pg script rather than SQL or a shell probe like this job's other
+      # checks. Every other step here works without it.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
       - uses: supabase/setup-cli@v1
         with:
           # Pinned, not `latest`. Resolving `latest` costs an unauthenticated
@@ -78,6 +88,14 @@ jobs:
       # report as skipped.
       - name: RLS behaviour tests
         run: supabase test db
+
+      # Matrix §6 gap 7: proves set_user_role and set_user_active actually serialize
+      # against each other under real concurrency, which pgTAP's single-session
+      # suite structurally cannot exercise (see the script's own header comment).
+      - name: Last-admin concurrency guard
+        run: node --env-file-if-exists=.env.local scripts/verify-last-admin-guard.mts
+        env:
+          SUPABASE_DB_URL: ${{ env.LOCAL_DB_URL }}
 
       # Sequence step 15: no table ships without RLS and policies.
       - name: RLS coverage gate

@@ -361,11 +361,17 @@ RLS, so a suite written against it proves nothing.
 | 10 | log entry created | Test 3 produces exactly one `AUDIT_LOG` row |
 | 11 | bypass attempt | Direct PostgREST call with `anon` key against every table → 0 rows / `42501` |
 | 12 | coverage gate | No table in `public` has `rowsecurity = false` or zero policies |
+| 13 | concurrency | Two admins race each other — one calls `set_user_role` to demote the other while the second calls `set_user_active` to suspend the first — and the platform is left with exactly one active admin, never zero |
 
 Test 11 is the acceptance criterion "even if the application-layer permission check
 were bypassed". It must be run against the API, not through the app's own client.
 
 Test 12 is sequence step 15, run in CI on every migration.
+
+Test 13 needs two real, concurrently-open connections to reproduce — a single-session
+pgTAP suite cannot serialize against itself. It lives in
+[`scripts/verify-last-admin-guard.mts`](../scripts/verify-last-admin-guard.mts), run
+as its own CI step alongside `supabase test db` rather than inside the pgTAP file.
 
 ---
 
@@ -408,13 +414,22 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    self-change, writes an `audit_log` row (`user_suspended` / `user_reactivated`).
    Suspension is `is_active = false` — one flag, not a new state; F014 reuses it rather
    than adding an `account_status` enum.
-7. **`set_user_role` can demote the last active admin.** `set_user_active` cannot
+7. ~~**`set_user_role` can demote the last active admin.**~~ **RESOLVED — F012 (#14),
+   `20260803091819_last_admin_guard.sql`, 3 Aug 2026.** `set_user_active` cannot
    suspend its way to zero admins — the self-change refusal means the caller is always
-   a surviving active admin. `set_user_role` carries no equivalent guard, so two admins
-   acting on each other concurrently (B demotes A while A suspends B) can commit to an
-   organisation with no active admin, which nothing in the app can then reverse:
-   `role` and `is_active` are both writable only through these two RPCs. The fix is a
-   last-admin guard inside `set_user_role`. **Open — belongs to F012.**
+   a surviving active admin. `set_user_role` carried no equivalent guard, so two admins
+   acting on each other concurrently (B demotes A while A suspends B) could commit to
+   an organisation with no active admin, which nothing in the app could then reverse:
+   `role` and `is_active` are both writable only through these two RPCs.
+
+   A guard added to `set_user_role` alone would not have closed this: `set_user_active`
+   would still act on state it read before `set_user_role`'s change committed. Both
+   RPCs now call `app.guard_last_admin(uuid)`, which takes a shared
+   `pg_advisory_xact_lock` before counting active admins, so a concurrent call to
+   either function serializes against the other and re-reads the count fresh. Proven
+   under real concurrency (not just asserted) by
+   [`scripts/verify-last-admin-guard.mts`](../scripts/verify-last-admin-guard.mts),
+   which opens two genuinely concurrent connections — see §5 row 13.
 
 ---
 

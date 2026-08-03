@@ -32,6 +32,8 @@ function accessFailureMessage(hint: string | null | undefined): string {
       return "You cannot suspend your own account.";
     case "not_admin":
       return "Only an admin can change a team member's access.";
+    case "last_admin":
+      return "You cannot suspend the platform's last active admin. Promote another admin first.";
     default:
       return "The access change was blocked. Refresh and try again.";
   }

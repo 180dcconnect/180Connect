@@ -519,6 +519,27 @@ begin
     '42501',
     'CAM calling the role RPC is refused inside the SECURITY DEFINER body'
   );
+
+  -- Matrix §6 gap 7 regression check: demoting cam_b (now admin, from above) back
+  -- down is a legitimate multi-admin operation and must still succeed — the new
+  -- guard only refuses a change when NO other active admin would remain. This
+  -- cannot exercise the guard actually firing: reaching it requires the caller to
+  -- be a distinct active admin from the target, which structurally means the
+  -- caller always survives a solo call. Proof the guard fires under real
+  -- concurrency lives in scripts/verify-last-admin-guard.mts, not here.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_user_role(%L, ''cam'')', v_cam_b)),
+    null,
+    'admin demoting a second admin still succeeds while another admin remains'
+  );
+  select role::text into v_role from public.users where id = v_cam_b;
+  return next is(v_role, 'cam', 'the demotion actually landed');
+
+  select count(*) into v_count
+    from public.users where role = 'admin' and is_active;
+  return next is(v_count, 1::bigint,
+    'exactly one active admin remains after the demotion (never zero)');
 end;
 $$;
 
@@ -627,6 +648,26 @@ begin
     '42501',
     'an admin cannot suspend their own account'
   );
+
+  -- Matrix §6 gap 7 regression check: suspending an admin who is not the last one
+  -- must still succeed. Promoted directly (bypassing RLS, same as the fixtures
+  -- above) rather than via set_user_role, so this suite does not depend on
+  -- suite_role_rpc having run first. As with suite_role_rpc's regression check,
+  -- this cannot exercise the guard actually firing — see that comment for why.
+  update public.users set role = 'admin' where id = v_cam_a;
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_user_active(%L, false)', v_cam_a)),
+    null,
+    'admin suspending a second admin still succeeds while another admin remains'
+  );
+  select is_active into v_active from public.users where id = v_cam_a;
+  return next is(v_active, false, 'the suspension actually landed');
+
+  select count(*) into v_count
+    from public.users where role = 'admin' and is_active;
+  return next is(v_count, 1::bigint,
+    'exactly one active admin remains after the suspension (never zero)');
 end;
 $$;
 

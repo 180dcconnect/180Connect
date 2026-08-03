@@ -169,6 +169,7 @@
 | 04 Entities | USERS | created_at | timestamp |  |  |
 | 04 Entities | USERS | updated_at | timestamp |  |  |
 | 04 Entities | USERS | is_seed | boolean |  |  |
+| 04 Entities | USERS | deactivated_at | timestamp |  |  |
 | 04 Entities | NOTES | id | uuid |  |  |
 | 04 Entities | NOTES | organisation_id | uuid | ORGANISATIONS |  |
 | 04 Entities | NOTES | author_id | uuid | USERS |  |

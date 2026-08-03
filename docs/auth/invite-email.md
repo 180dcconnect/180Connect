@@ -43,7 +43,7 @@ apply here.
         </tr>
         <tr>
           <td style="font-size:14px;line-height:22px;color:#5c5c5c;padding-bottom:28px;">
-            An administrator has invited <strong style="color:#1a1a1a;">{{ .Email }}</strong> to join 180Connect as a Client Account Manager. Choose a password to finish setting up your account.
+            An administrator has invited <strong style="color:#1a1a1a;">{{ .Email }}</strong> to join 180Connect as a Client Acquisition Manager. Choose a password to finish setting up your account.
           </td>
         </tr>
         <tr>

@@ -14,3 +14,7 @@ generated; edit the spreadsheet and run `npm run export:data-model`, never hand-
 
 Migrations live in `supabase/migrations/`; see [`supabase/MIGRATIONS.md`](supabase/MIGRATIONS.md)
 for the conventions. Load fake test data with `npm run seed` ([docs](docs/seed-data.md)).
+
+Any write that changes ownership, status, role, or approval state must record an
+audit log entry — see [`docs/audit-log-pattern.md`](docs/audit-log-pattern.md) for
+the required pattern before writing that migration.

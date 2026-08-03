@@ -166,6 +166,20 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     description:
       "Environment tag applied to captured errors — 'staging' or 'production' (F226). Optional: falls back to Vercel's VERCEL_ENV so staging (preview) and production are distinguished automatically.",
   },
+  {
+    name: "COMPANIES_HOUSE_API_KEY",
+    required: false,
+    secret: true,
+    description:
+      "Companies House API key for company data ingestion (F038). HTTP Basic Auth — sent as the username with a blank password. Not yet required — becomes required once F032 (Companies House data import) ships.",
+  },
+  {
+    name: "CHARITYBASE_API_KEY",
+    required: false,
+    secret: true,
+    description:
+      "CharityBase API key for charity data ingestion (F038/F031). GraphQL API — sent as `Authorization: Apikey <key>`. Not yet required — becomes required once F031 (CharityBase data import) ships, and CharityBase's own API is currently down on their end.",
+  },
 ];
 
 export type EnvProblem = {

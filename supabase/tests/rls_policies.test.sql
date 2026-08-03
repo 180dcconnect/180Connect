@@ -1272,7 +1272,7 @@ begin
 
   select actor_user_id, detail into v_actor, v_detail
     from public.audit_log
-   where action = 'ownership_assigned' and target_id = v_org_x
+   where action = 'ownership_reassigned' and target_id = v_org_x
    order by created_at desc limit 1;
 
   return next is(v_actor, v_admin,
@@ -1280,10 +1280,10 @@ begin
 
   return next is(
     jsonb_build_object(
-      'from', v_detail->>'from_user_id',
-      'to',   v_detail->>'to_user_id',
+      'from', v_detail->>'from',
+      'to',   v_detail->>'to',
       'why',  v_detail->>'reason',
-      'src',  v_detail->>'source',
+      'src',  v_detail->>'trigger',
       'n',    v_detail->>'actions_moved'),
     jsonb_build_object(
       'from', v_cam_a::text,
@@ -1336,6 +1336,97 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- deactivate_user and reassign_ownership are one path (F014 + F257)
+-- ---------------------------------------------------------------------------
+-- Regression suite for 20260803120000. Before that migration deactivate_user moved
+-- organisations.owner_id itself and never touched public.actions, so offboarding
+-- stranded every open action on a closed account. Uses its own identities: the shared
+-- fixture users are deactivated by other suites in this same transaction.
+
+create or replace function tests.suite_offboard_unified()
+returns setof text language plpgsql as $$
+declare
+  v_admin    uuid := '00000000-0000-4000-a000-0000000000f1';
+  v_leaver   uuid := '00000000-0000-4000-a000-0000000000f2';
+  v_taker    uuid := '00000000-0000-4000-a000-0000000000f3';
+  v_other    uuid := '00000000-0000-4000-a000-0000000000f4';
+  v_org_own  uuid := '00000000-0000-4000-b000-0000000000fa';  -- the leaver's client
+  v_org_else uuid := '00000000-0000-4000-b000-0000000000fb';  -- someone else's client
+  v_act_own  uuid := '00000000-0000-4000-c000-0000000000f1';  -- open, on their client
+  v_act_stray uuid := '00000000-0000-4000-c000-0000000000f2'; -- open, on the other client
+  v_owner    uuid;
+  v_assignee uuid;
+  v_active   boolean;
+  v_count    bigint;
+begin
+  if not tests.tables_exist('actions', 'organisations', 'users', 'audit_log')
+     or to_regprocedure('public.deactivate_user(uuid, text, uuid, boolean)') is null then
+    return next skip(6, 'deactivate_user or actions not yet migrated');
+    return;
+  end if;
+
+  insert into auth.users (id, instance_id, aud, role, email) values
+    (v_admin,  '00000000-0000-0000-0000-000000000000','authenticated','authenticated','unify-admin@180dc.org'),
+    (v_leaver, '00000000-0000-0000-0000-000000000000','authenticated','authenticated','unify-leaver@180dc.org'),
+    (v_taker,  '00000000-0000-0000-0000-000000000000','authenticated','authenticated','unify-taker@180dc.org'),
+    (v_other,  '00000000-0000-0000-0000-000000000000','authenticated','authenticated','unify-other@180dc.org')
+  on conflict (id) do nothing;
+
+  insert into public.users (id, email, full_name, role, is_active) values
+    (v_admin,  'unify-admin@180dc.org', 'Unify Admin',  'admin', true),
+    (v_leaver, 'unify-leaver@180dc.org','Unify Leaver', 'cam',   true),
+    (v_taker,  'unify-taker@180dc.org', 'Unify Taker',  'cam',   true),
+    (v_other,  'unify-other@180dc.org', 'Unify Other',  'cam',   true)
+  on conflict (id) do update
+    set role = excluded.role, is_active = excluded.is_active;
+
+  insert into public.organisations (id, legal_name, entry_method, organisation_type, owner_id)
+  values
+    (v_org_own,  'Leaver Client Ltd', 'manual', 'other', v_leaver),
+    (v_org_else, 'Other Client Ltd',  'manual', 'other', v_other)
+  on conflict (id) do update set owner_id = excluded.owner_id;
+
+  insert into public.actions
+    (id, organisation_id, assignee_user_id, created_by_user_id, title)
+  values
+    (v_act_own,   v_org_own,  v_leaver, v_leaver, 'Work on my own client'),
+    (v_act_stray, v_org_else, v_leaver, v_admin,  'Admin-assigned work elsewhere')
+  on conflict (id) do nothing;
+
+  perform tests.sqlstate_of(v_admin, format(
+    'select public.deactivate_user(%L, ''left the society'', %L, false)',
+    v_leaver, v_taker));
+
+  select owner_id into v_owner from public.organisations where id = v_org_own;
+  return next is(v_owner, v_taker, 'deactivation moves the leaver''s client to the successor');
+
+  -- The regression. This assertion fails against the pre-20260803120000 function.
+  select assignee_user_id into v_assignee from public.actions where id = v_act_own;
+  return next is(v_assignee, v_taker,
+    'deactivation moves the open action on that client, not just the client');
+
+  select assignee_user_id into v_assignee from public.actions where id = v_act_stray;
+  return next is(v_assignee, v_taker,
+    'deactivation also moves admin-assigned work on someone else''s client');
+
+  select owner_id into v_owner from public.organisations where id = v_org_else;
+  return next is(v_owner, v_other,
+    'the other CAM''s client is not seized while moving work off it');
+
+  select is_active into v_active from public.users where id = v_leaver;
+  return next is(v_active, false, 'the leaver is deactivated in the same transaction');
+
+  select count(*) into v_count
+    from public.audit_log
+   where action = 'ownership_reassigned'
+     and target_id = v_org_own
+     and detail->>'trigger' = 'offboarding';
+  return next is(v_count, 1::bigint,
+    'one ownership_reassigned row per client, on the converged token');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 
 select * from tests.suite_core();
 select * from tests.suite_viewer();
@@ -1349,6 +1440,7 @@ select * from tests.suite_deactivate_rpc();
 select * from tests.suite_views();
 select * from tests.suite_actions();
 select * from tests.suite_reassign();
+select * from tests.suite_offboard_unified();
 
 select * from finish();
 

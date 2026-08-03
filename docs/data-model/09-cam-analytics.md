@@ -60,4 +60,4 @@
 
 ## SCOUT_PRIORITY_SCORE
 
-## Records scounts priority score at the time of CAM interation
+## Records counts priority score at the time of CAM interation

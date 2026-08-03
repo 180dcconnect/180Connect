@@ -1361,7 +1361,7 @@ declare
 begin
   if not tests.tables_exist('actions', 'organisations', 'users', 'audit_log')
      or to_regprocedure('public.deactivate_user(uuid, text, uuid, boolean)') is null then
-    return next skip(9, 'deactivate_user or actions not yet migrated');
+    return next skip(12, 'deactivate_user or actions not yet migrated');
     return;
   end if;
 
@@ -1397,6 +1397,20 @@ begin
     insert into public.notes (id, organisation_id, author_id, content)
     values ('00000000-0000-4000-c000-0000000000fe', v_org_own, v_leaver,
             'Spoke to the trustee; they want a proposal in September.')
+    on conflict (id) do nothing;
+  end if;
+
+  if tests.tables_exist('outreach_messages', 'reply_events') then
+    insert into public.outreach_messages
+      (id, organisation_id, sent_by_user_id, subject, body, send_status)
+    values ('00000000-0000-4000-c000-0000000000fd', v_org_own, v_leaver,
+            'Partnership proposal', 'Half-written, saved for later.', 'draft')
+    on conflict (id) do nothing;
+
+    insert into public.reply_events
+      (id, organisation_id, reply_body, received_at)
+    values ('00000000-0000-4000-c000-0000000000fc', v_org_own,
+            'Thanks, do send the proposal.', now())
     on conflict (id) do nothing;
   end if;
 
@@ -1455,6 +1469,31 @@ begin
       'the incoming CAM can read the departed CAM''s note on their new client');
   else
     return next skip(3, 'step 4 create_org_children not yet migrated');
+  end if;
+
+  -- F257 AC4 (drafts, replies) and AC8 (linked to the correct client and email
+  -- record). Same principle as notes: these hang off organisation_id, so the handover
+  -- moves them without reassign_ownership naming either table.
+  if tests.tables_exist('outreach_messages', 'reply_events') then
+    select count(*) into v_count
+      from public.outreach_messages
+     where organisation_id = v_org_own and send_status = 'draft';
+    return next is(v_count, 1::bigint,
+      'the leaver''s saved draft is still on the client after the handover');
+
+    select sent_by_user_id into v_assignee
+      from public.outreach_messages where organisation_id = v_org_own limit 1;
+    return next is(v_assignee, v_leaver,
+      'the draft is still attributed to the CAM who wrote it');
+
+    -- Replies carry organisation_id of their own, so they stay with the client even
+    -- though nothing in the handover looks at them.
+    select count(*) into v_count
+      from public.reply_events where organisation_id = v_org_own;
+    return next is(v_count, 1::bigint,
+      'a reply received before the handover is still attached to the client');
+  else
+    return next skip(3, 'steps 11/12 outreach tables not yet migrated');
   end if;
 end;
 $$;

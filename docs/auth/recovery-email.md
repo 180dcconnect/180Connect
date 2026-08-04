@@ -102,25 +102,48 @@ The brand green is `#72b744`, matching `--brand` in `src/app/globals.css`.
 
 ## Sending
 
-Supabase's built-in email service sends these without any SMTP configuration,
-but it is a shared development service: the send rate is a handful of messages
-per hour **for the whole project**, and the template cannot be customised until
-custom SMTP is configured.
+**Staging now sends these through Resend over SMTP** (configured 4 Aug 2026).
+Supabase Auth still composes and sends the message — this is not the path
+`src/lib/email/send.ts` uses — but it hands it to Resend rather than to
+Supabase's shared development mailer. Two things follow: the few-per-hour
+project-wide rate limit is gone, and the template above is live rather than
+ignored.
 
-That rate limit is easy to misread. The reset form deliberately shows the same
-"if an account exists, we've sent instructions" message whether or not the send
-succeeded, so that it cannot be used to discover who has an account. A
-rate-limited send therefore looks identical to a successful one from the
-browser. The failure is recorded — look for `API_HEALTH_LOGS` with
+| Setting | Value |
+| :------ | :---- |
+| Host | `smtp.resend.com` |
+| Port | `587` |
+| Username | `resend` |
+| Password | a Resend API key — see [`../secrets.md`](../secrets.md#the-resend-key-lives-in-four-places) |
+| Sender | must be on the domain verified in Resend |
+
+Production is **not** configured. Until it is, production recovery mail is still
+on the shared mailer and still rate-limited.
+
+### Why a failure here is invisible
+
+The reset form deliberately shows the same "if an account exists, we've sent
+instructions" message whether or not the send succeeded, so that it cannot be
+used to discover who has an account. A failed send therefore looks identical to
+a successful one from the browser — whether the cause is the old rate limit, a
+rotated-away SMTP password, or an unverified sender.
+
+The failure *is* recorded: look for `API_HEALTH_LOGS` with
 `operation: "password-reset-request"` and `ok: false`, and the matching
-`authentication.password_reset_request_failed` entry.
+`authentication.password_reset_request_failed` entry. This is why the rotation
+procedure in `secrets.md` ends with sending a real reset and checking the inbox.
 
-To lift the limit and enable this template, point Supabase at a real provider
-(Resend, Postmark, SES) under Project Settings → Authentication → SMTP.
+### The sending domain
 
-Doing that needs a domain whose DNS you control, so the provider can verify SPF
-and DKIM. `180connect.vercel.app` cannot be used — Vercel owns `vercel.app`, so
-its DNS records are not ours to set. The options are a subdomain of `180dc.org`
-delegated for sending (`connect.180dc.org` or similar), which has the side
-benefit that reset mail arrives from the same domain recipients already trust,
-or a separately purchased domain.
+SMTP needs a domain whose DNS you control, so the provider can verify SPF and
+DKIM. `180connect.vercel.app` cannot be used — Vercel owns `vercel.app`, so its
+DNS records are not ours to set.
+
+Staging currently sends from `steeze.ng`, a domain the project lead controls
+personally. That is a deliberate stopgap while 180DC HQ arranges DNS access, and
+it is not shippable: recipients see a domain with no relationship to 180DC, and
+mail clients may surface it as "via steeze.ng". The intended end state is a
+subdomain of `180dc.org` delegated for sending (`connect.180dc.org` or similar),
+so reset mail arrives from a domain recipients already trust. See
+[`../email-sending.md`](../email-sending.md) for the same constraint on the
+invite path, and for what changes when the delegation lands.

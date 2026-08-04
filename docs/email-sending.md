@@ -13,12 +13,23 @@ mixing them up is the mistake this document exists to prevent.
 | Mail | Path | Verified domain needed? |
 |---|---|---|
 | **Client outreach** — a CAM emailing a charity contact | Gmail API `users.messages.send` on the CAM's own authorised account (PRD §12.1) | No — it is the CAM's real mailbox |
-| **Auth mail** — password reset, email confirmation | Supabase's built-in email service, configured in the dashboard ([recovery-email.md](auth/recovery-email.md)) | No, until custom SMTP is configured |
+| **Auth mail** — password reset, email confirmation | Supabase Auth, over SMTP to Resend ([recovery-email.md](auth/recovery-email.md)) | **Yes** |
 | **Platform mail** — admin invites, notification digests | `src/lib/email/send.ts` → Resend | **Yes** |
 
 Only the third row is this module. Outreach must never be routed through it:
 Gmail is what gives replies a stable thread and message id, which is what the
 whole reply-sync and outcome model in PRD §12.3 is built on.
+
+Rows two and three both end at Resend, and both send from the same verified
+domain — one provider, one reputation, one set of delivery logs. They are still
+two paths, and the difference matters in one specific way:
+
+> **`EMAIL_RECIPIENT_ALLOWLIST` guards this module only.** Auth mail goes
+> Supabase → SMTP → Resend and never passes through `sendEmail`, so the
+> allowlist cannot stop it. A password reset requested for a seeded address on
+> staging **will** be delivered. The allowlist is a guard on the invite path, not
+> a blanket block on outbound mail — Supabase's own recipient is always the
+> account holder who asked, which is why this is acceptable rather than a hole.
 
 The practical consequence is that **not having DNS access to 180dc.org does not
 block outreach**. It blocks invites and notification email, and nothing else.
@@ -73,14 +84,22 @@ sends from a domain the project lead already controls and has verified in
 Resend. That is a deliberate stopgap with two rules attached:
 
 1. **`EMAIL_RECIPIENT_ALLOWLIST` must be set in every environment using it.**
-   Set it to `180dc.org` plus the testers' own addresses. A staging database
-   seeded with real-looking charity contacts is one buggy query away from
-   emailing a trustee from an unrelated business domain, and the allowlist is
-   what makes that impossible rather than unlikely.
+   A staging database seeded with real-looking charity contacts is one buggy
+   query away from emailing a trustee from an unrelated business domain, and the
+   allowlist is what makes that impossible rather than unlikely.
+
+   Set it to **`180dc.org`**, plus any specific outside addresses you are
+   testing with. Not just your own address: invites can only ever be issued to
+   `@180dc.org`, because `enforce_180dc_domain_on_signup` is a BEFORE INSERT
+   trigger on `auth.users`. An allowlist that does not cover that domain blocks
+   every invite the app is capable of sending, and each one comes back as
+   `warning` — account created, nothing delivered.
 2. **`EMAIL_FROM` changes and nothing else does** when 180dc.org becomes
    available. Verify the domain in Resend, update the variable, unset the
    allowlist in production. No code change — the sending domain is a deployment
-   decision, which is why it lives in the environment.
+   decision, which is why it lives in the environment. The Supabase SMTP sender
+   has to be updated in the same pass; it is a separate field in a separate
+   system, and `secrets.md` has the order.
 
 ## Setting it up
 

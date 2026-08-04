@@ -1,16 +1,26 @@
 // Charity Commission adapter (F033).
 //
-// Modelled directly on companieshouse.ts, the F038 reference implementation.
+// Modelled on companieshouse.ts, the F038 reference implementation.
 //
-// Open question carried over from the ticket: the Charity Commission's public API
-// portal documents one example operation, GetSearchCharityByRegNumber
-// (`charityRegNumber/{RegisteredNumber}/{suffix}`), which looks up a charity you
-// already know the registered number of. The full operation list — including
-// whether there is a general search/listing endpoint suitable for a bulk import
-// rather than a single-record lookup — sits behind the developer portal login and
-// has not been confirmed. Until that is resolved, `fetch()` below is a scaffold:
-// the request/retry/paging shape matches companiesHouseAdapter, but the actual
-// endpoint, auth header, and pagination scheme are placeholders.
+// Base URL and auth header confirmed directly from the interactive "Try it"
+// panel on api-portal.charitycommission.gov.uk (2026-08-02):
+//   - Host: https://api.charitycommission.gov.uk/register/api
+//   - Header: Ocp-Apim-Subscription-Key
+//
+// Confirmed via a real test call through the portal's "Try it" panel
+// (2026-08-03, full year 2024 range): response is a flat JSON array, fields
+// match exactly (organisation_number, reg_charity_number, group_subsid_suffix,
+// charity_name, reg_status, date_of_registration, date_of_removal). No
+// pagination metadata of any kind (no total/next/hasMore) — hundreds of
+// records returned for a full year with no error, so CHUNK_DAYS below is a
+// conservative starting point, not a confirmed requirement; it can likely be
+// widened significantly once this is running for real.
+//
+// Still open:
+//   - Whether GetAllCharityDetailsV2 / GetCharityDetailsMulti enrichment (full
+//     address, contact info, classifications) belongs in this adapter or a later
+//     pipeline stage — GetSearchCharityByRegDate alone does not return contact
+//     details. Left out of fetch() for now; see the comment at the bottom.
 
 import type {
   CommonRecord,
@@ -18,29 +28,37 @@ import type {
   SourceFetchResult,
 } from "../type.ts";
 
-// TODO: confirm real base URL once API scope is resolved (ticket's open question).
-const CHARITY_COMMISSION_URL = "https://api-portal.charitycommission.gov.uk";
-
-const ITEMS_PER_PAGE = 100; // TODO: confirm the API's actual page size, if any.
-
-/** TODO: confirm whether/where a result ceiling applies, as with Companies House. */
-const SEARCH_RESULT_CEILING = 1000;
+// Confirmed via the portal's interactive "Try it" panel (GetAllCharityDetails
+// request preview showed the real host — see comment block above).
+const CHARITY_COMMISSION_URL = "https://api.charitycommission.gov.uk/register/api";
 
 const REQUEST_TIMEOUT_MS = 15_000;
-
-// TODO: confirm real rate limits — ticket only says "rate limiting is applied",
-// no published numbers. Reusing Companies House's retry shape as a safe default.
 const MAX_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 1_000;
 
-type CharityCommissionItem = {
+/**
+ * How wide a date range to request per call. Chosen conservatively since
+ * GetSearchCharityByRegDate's pagination behaviour on a wide range is
+ * unconfirmed — a narrower window is safer until that's verified against the
+ * real API, even though it means more requests for a full backfill.
+ */
+const CHUNK_DAYS = 7;
+
+type CharityCommissionSearchItem = {
   organisation_number: number;
   reg_charity_number: number;
+  group_subsid_suffix: number;
   charity_name: string;
-  [key: string]: unknown;
+  reg_status: "R" | "RM";
+  date_of_registration: string;
+  date_of_removal: string | null;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function formatDate(d: Date): string {
+  return d.toISOString().slice(0, 10); // YYYY-MM-DD
+}
 
 /** Retries 429 and 5xx with exponential backoff; anything else is returned as-is. */
 async function fetchWithRetry(
@@ -86,9 +104,9 @@ async function fetchWithRetry(
     : new Error(`Charity Commission request failed: ${String(lastError)}`);
 }
 
-function shape(raw: CharityCommissionItem): CommonRecord {
+function shape(raw: CharityCommissionSearchItem): CommonRecord {
   return {
-    source_record_id: String(raw.reg_charity_number),
+    source_record_id: String(raw.organisation_number),
     raw_payload: raw,
   };
 }
@@ -102,47 +120,64 @@ export const charityCommissionAdapter: DataSourceAdapter = {
       throw new Error("CHARITY_COMMISSION_API_KEY is not set.");
     }
 
-    // TODO: confirm the real auth header. Azure API Management portals (which this
-    // looks like) typically expect `Ocp-Apim-Subscription-Key: <key>` rather than
-    // Basic auth — placeholder below until verified against the real portal.
+    // Confirmed header name, per the portal's Try-it panel.
     const headers = { "Ocp-Apim-Subscription-Key": apiKey };
 
-    // TODO: this loop assumes a paged search endpoint exists, mirroring Companies
-    // House. If the confirmed API only supports GetSearchCharityByRegNumber-style
-    // single-record lookups, this needs a different shape entirely — likely fed a
-    // list of known reg numbers rather than paging blindly.
-    throw new Error(
-      "Not implemented — pending confirmation of the real Charity Commission " +
-        "search/listing endpoint. See comments above for what is and isn't known.",
-    );
+    // Configurable via env so a narrow test range doesn't require editing
+    // code (CHARITY_COMMISSION_BACKFILL_START/_END, both optional).
+    // TODO: confirm the real start of the register's history, or agree a
+    // reasonable default backfill cutoff with the team — 2000-01-01 is a
+    // placeholder default, not a confirmed register start.
+    const registerStart = process.env.CHARITY_COMMISSION_BACKFILL_START
+      ? new Date(process.env.CHARITY_COMMISSION_BACKFILL_START)
+      : new Date("2000-01-01");
+    const today = process.env.CHARITY_COMMISSION_BACKFILL_END
+      ? new Date(process.env.CHARITY_COMMISSION_BACKFILL_END)
+      : new Date();
 
-    // Reference shape, left for whoever resolves the open question above:
-    //
-    // const allRecords: CharityCommissionItem[] = [];
-    // let knownTotal: number | null = null;
-    // let startIndex = 0;
-    //
-    // while (startIndex < SEARCH_RESULT_CEILING) {
-    //   if (knownTotal !== null && startIndex >= knownTotal) break;
-    //   const res = await fetchWithRetry(
-    //     `${CHARITY_COMMISSION_URL}/<endpoint>?start=${startIndex}&count=${ITEMS_PER_PAGE}`,
-    //     headers,
-    //   );
-    //   if (!res.ok) {
-    //     console.error(`[charity_commission] error body for ${res.status}:`, await res.text());
-    //     throw new Error(`Charity Commission API returned ${res.status}`);
-    //   }
-    //   const json = await res.json();
-    //   if (!Array.isArray(json.items)) {
-    //     throw new Error("Charity Commission response is missing an items array.");
-    //   }
-    //   if (json.items.length === 0) break;
-    //   allRecords.push(...json.items);
-    //   startIndex += ITEMS_PER_PAGE;
-    // }
-    //
-    // const truncated = knownTotal !== null && allRecords.length < knownTotal;
-    // return { records: allRecords.map(shape), truncated };
+    const allRecords: CharityCommissionSearchItem[] = [];
+    let chunkStart = new Date(registerStart);
+
+    while (chunkStart < today) {
+      const chunkEnd = new Date(chunkStart);
+      chunkEnd.setDate(chunkEnd.getDate() + CHUNK_DAYS);
+      const boundedEnd = chunkEnd > today ? today : chunkEnd;
+
+      const url =
+        `${CHARITY_COMMISSION_URL}/searchCharityRegDate/` +
+        `${formatDate(chunkStart)}/${formatDate(boundedEnd)}`;
+
+      const res = await fetchWithRetry(url, headers);
+
+      if (!res.ok) {
+        console.error(
+          `[charity_commission] error body for ${res.status}:`,
+          await res.text(),
+        );
+        throw new Error(`Charity Commission API returned ${res.status}`);
+      }
+
+      const json = await res.json();
+      if (!Array.isArray(json)) {
+        throw new Error(
+          "Charity Commission response is not an array — check whether the " +
+            "operation wraps results in an envelope object instead.",
+        );
+      }
+
+      allRecords.push(...(json as CharityCommissionSearchItem[]));
+      chunkStart = boundedEnd;
+    }
+
+    // No documented ceiling for this operation, unlike Companies House's ~1000
+    // search limit — truncated is always false until evidence says otherwise.
+    return { records: allRecords.map(shape), truncated: false };
+
+    // NOTE: this only gets identity + registration status, not address, phone,
+    // email (those live in GetCharityContactInformation / GetAllCharityDetailsV2,
+    // one call per charity). Whether F033 needs that enrichment inside this
+    // adapter or as a later pipeline stage is a scope question for the team —
+    // F041 (standard field structure) likely governs this.
   },
 
   onError(err: Error) {

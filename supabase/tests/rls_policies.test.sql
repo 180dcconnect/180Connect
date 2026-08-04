@@ -1092,6 +1092,99 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Sign-up domain guard — F008 (20260804110000_configurable_signup_domains)
+-- ---------------------------------------------------------------------------
+-- This is a security boundary, and the interesting cases are the ones that must
+-- keep failing. Inserts go directly into auth.users, which is what the trigger
+-- fires on — the same door the admin API and any raw SQL go through.
+create or replace function tests.suite_signup_domain()
+returns setof text language plpgsql as $$
+declare
+  v_new uuid;
+begin
+  if to_regprocedure('public.check_allowed_email_domain()') is null then
+    return next skip(7, 'configurable signup domains not yet migrated');
+    return;
+  end if;
+
+  return next ok(
+    exists (select 1 from app.allowed_email_domains where domain = '180dc.org'),
+    '180dc.org is seeded, so the previous rule still holds with no configuration'
+  );
+
+  -- The table is granted to nobody. A signed-in user reading it directly is the
+  -- thing RLS-with-no-policies exists to stop.
+  return next is(
+    tests.sqlstate_of(
+      '00000000-0000-4000-a000-000000000002'::uuid,
+      'select count(*) from app.allowed_email_domains'
+    ),
+    '42501',
+    'a CAM cannot read the domain list directly'
+  );
+
+  v_new := gen_random_uuid();
+  return next lives_ok(
+    format(
+      $sql$insert into auth.users (id, instance_id, aud, role, email)
+           values (%L, '00000000-0000-0000-0000-000000000000', 'authenticated',
+                   'authenticated', 'permitted@180dc.org')$sql$,
+      v_new
+    ),
+    'a seeded domain is accepted'
+  );
+
+  return next throws_ok(
+    $sql$insert into auth.users (id, instance_id, aud, role, email)
+         values (gen_random_uuid(), '00000000-0000-0000-0000-000000000000',
+                 'authenticated', 'authenticated', 'nope@example.com')$sql$,
+    'P0001',
+    null,
+    'an unlisted domain is refused'
+  );
+
+  -- The old check was `ilike '%@180dc.org'`, which this address satisfies. The
+  -- rewrite matches on the domain after the final '@' instead, so it does not.
+  return next throws_ok(
+    $sql$insert into auth.users (id, instance_id, aud, role, email)
+         values (gen_random_uuid(), '00000000-0000-0000-0000-000000000000',
+                 'authenticated', 'authenticated', 'attacker@evil.com@180dc.org')$sql$,
+    'P0001',
+    null,
+    'a suffix that merely ends in the domain is not a match'
+  );
+
+  -- Adding a domain is the whole point of the table; it must actually take effect
+  -- without any function being redefined.
+  insert into app.allowed_email_domains (domain, note)
+  values ('example.com', 'pgTAP fixture');
+
+  v_new := gen_random_uuid();
+  return next lives_ok(
+    format(
+      $sql$insert into auth.users (id, instance_id, aud, role, email)
+           values (%L, '00000000-0000-0000-0000-000000000000', 'authenticated',
+                   'authenticated', 'tester@example.com')$sql$,
+      v_new
+    ),
+    'a domain added to the table is accepted immediately'
+  );
+
+  -- Fails closed: with nothing permitted, nobody gets in. The opposite — an empty
+  -- table meaning "no restriction" — is the bug this asserts against.
+  delete from app.allowed_email_domains;
+  return next throws_ok(
+    $sql$insert into auth.users (id, instance_id, aud, role, email)
+         values (gen_random_uuid(), '00000000-0000-0000-0000-000000000000',
+                 'authenticated', 'authenticated', 'anyone@180dc.org')$sql$,
+    'P0001',
+    null,
+    'an empty table permits nothing, rather than everything'
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 
 select * from tests.suite_core();
 select * from tests.suite_viewer();
@@ -1103,6 +1196,7 @@ select * from tests.suite_role_rpc();
 select * from tests.suite_active_rpc();
 select * from tests.suite_deactivate_rpc();
 select * from tests.suite_invite_rpc();
+select * from tests.suite_signup_domain();
 select * from tests.suite_views();
 
 select * from finish();

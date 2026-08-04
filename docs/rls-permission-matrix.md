@@ -155,6 +155,19 @@ Measured on GoTrue v2.193.1: with the session row gone, `GET /auth/v1/user` goes
 a user id, and GoTrue has no by-user-id logout endpoint. `deactivate_user` revokes the
 same way.
 
+Which addresses may hold an account at all is decided one layer lower, by
+`public.check_allowed_email_domain()` — a BEFORE INSERT trigger on `auth.users`
+reading `app.allowed_email_domains` (20260804110000). It replaced a function that
+hardcoded `'%@180dc.org'`, so an environment can now permit an extra domain for
+testing with an INSERT rather than an edit to a security control. It fails closed
+twice over: an empty table permits nothing, and an environment nobody configures
+keeps only the seeded `180dc.org`, so production stays restricted by default and
+needs no action to re-lock at the end of a testing period. `AUTH_ALLOWED_EMAIL_DOMAIN`
+mirrors the list for the application's own validation and is deliberately *not*
+authoritative — widening it alone changes a form message and admits nobody. The
+table is in `app`, unreachable through PostgREST, with RLS on and no policies.
+Recipe in [`auth/invite-email.md`](auth/invite-email.md).
+
 `deactivated_at` (F014) is written only by `public.deactivate_user(user_id, reason,
 reassign_to, release_clients)` and cleared only by `set_user_active(..., true)`. It is a
 **marker, not a gate**: `is_active` alone decides whether anyone may log in or read a

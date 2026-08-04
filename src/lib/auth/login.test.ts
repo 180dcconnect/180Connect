@@ -4,6 +4,10 @@ import type { User } from "@supabase/supabase-js";
 
 import {
   allowedEmailDomain,
+  allowedEmailDomains,
+  describeDomains,
+  isOnAllowedDomain,
+  loginSchema,
   attemptLogin,
   DEFAULT_ALLOWED_EMAIL_DOMAIN,
   normalizeEmail,
@@ -99,6 +103,85 @@ describe("allowedEmailDomain", () => {
 
   it("normalises case, whitespace and a leading @", () => {
     assert.equal(allowedEmailDomain({ AUTH_ALLOWED_EMAIL_DOMAIN: "  @Example.ORG " }), "example.org");
+  });
+
+  it("names the first domain when several are configured", () => {
+    assert.equal(
+      allowedEmailDomain({ AUTH_ALLOWED_EMAIL_DOMAIN: "180dc.org,example.com" }),
+      "180dc.org",
+    );
+  });
+});
+
+describe("allowedEmailDomains", () => {
+  it("returns a single-entry list when one domain is configured", () => {
+    assert.deepEqual(allowedEmailDomains({}), [DEFAULT_ALLOWED_EMAIL_DOMAIN]);
+  });
+
+  it("splits a comma-separated list, normalising each entry", () => {
+    assert.deepEqual(
+      allowedEmailDomains({ AUTH_ALLOWED_EMAIL_DOMAIN: "180dc.org, @Example.COM " }),
+      ["180dc.org", "example.com"],
+    );
+  });
+
+  it("falls back rather than permitting nothing when the value is empty", () => {
+    // A login form that refuses every address is worse than one briefly too
+    // strict — and Postgres is the layer that actually decides.
+    assert.deepEqual(allowedEmailDomains({ AUTH_ALLOWED_EMAIL_DOMAIN: " , " }), [
+      DEFAULT_ALLOWED_EMAIL_DOMAIN,
+    ]);
+  });
+});
+
+describe("isOnAllowedDomain", () => {
+  it("accepts an address on any listed domain", () => {
+    assert.equal(isOnAllowedDomain("a@example.com", ["180dc.org", "example.com"]), true);
+  });
+
+  it("rejects an address on none of them", () => {
+    assert.equal(isOnAllowedDomain("a@evil.com", ["180dc.org"]), false);
+  });
+
+  it("matches the domain, not a suffix", () => {
+    // `endsWith('@180dc.org')` — the old check — accepts this. It is not a
+    // 180dc.org address.
+    assert.equal(isOnAllowedDomain("attacker@evil.com@180dc.org", ["180dc.org"]), false);
+  });
+
+  it("does not treat a subdomain as the parent domain", () => {
+    assert.equal(isOnAllowedDomain("a@mail.180dc.org", ["180dc.org"]), false);
+  });
+
+  it("accepts a plus-addressed alias, which is how one mailbox becomes many", () => {
+    assert.equal(isOnAllowedDomain("bashir+ben@180dc.org", ["180dc.org"]), true);
+  });
+});
+
+describe("describeDomains", () => {
+  it("names one domain plainly", () => {
+    assert.equal(describeDomains(["180dc.org"]), "@180dc.org");
+  });
+
+  it("joins several readably", () => {
+    assert.equal(
+      describeDomains(["180dc.org", "example.com"]),
+      "@180dc.org or @example.com",
+    );
+  });
+});
+
+describe("loginSchema", () => {
+  it("accepts either domain when two are permitted", () => {
+    const schema = loginSchema(["180dc.org", "example.com"]);
+    assert.ok(schema.safeParse({ email: "a@example.com", password: "x" }).success);
+    assert.ok(schema.safeParse({ email: "a@180dc.org", password: "x" }).success);
+  });
+
+  it("still accepts a bare string, as every existing caller passes", () => {
+    assert.ok(
+      loginSchema("180dc.org").safeParse({ email: "a@180dc.org", password: "x" }).success,
+    );
   });
 });
 

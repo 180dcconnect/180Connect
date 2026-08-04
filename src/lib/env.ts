@@ -44,12 +44,19 @@ function isAbsoluteHttpUrl(value: string): string | null {
   return null;
 }
 
-function isBareDomain(value: string): string | null {
-  // A leading "@" is tolerated by src/lib/auth/login.ts, so accept it here too.
-  const domain = value.replace(/^@/, "");
-  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(domain)) {
-    return "must be a bare domain, for example 180dc.org";
+function isBareDomainList(value: string): string | null {
+  // One domain, or several separated by commas. A leading "@" is tolerated by
+  // src/lib/auth/login.ts, so accept it here too.
+  const domains = value.split(",").map((entry) => entry.trim().replace(/^@/, ""));
+
+  if (domains.some((domain) => domain === "")) {
+    return "must not contain an empty entry — check for a stray or trailing comma";
   }
+
+  if (!domains.every((domain) => /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(domain))) {
+    return "must be a bare domain, or a comma-separated list of them, for example 180dc.org,example.com";
+  }
+
   return null;
 }
 
@@ -99,8 +106,8 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     required: false,
     secret: false,
     description:
-      "Email domain users must sign in from. Server-only — never prefix with NEXT_PUBLIC_. Defaults to 180dc.org in `src/lib/auth/login.ts` when unset.",
-    validate: isBareDomain,
+      "Email domain(s) users may sign in from — one, or a comma-separated list. Server-only, never prefixed with NEXT_PUBLIC_. Defaults to 180dc.org when unset. This is the friendly half of a two-layer rule: Postgres decides, via app.allowed_email_domains and the trigger on auth.users (20260804110000). Keep the two in step — widening this alone can never let anybody in, it only changes the message the form shows.",
+    validate: isBareDomainList,
   },
   {
     name: "PASSWORD_RESET_WINDOW_SECONDS",

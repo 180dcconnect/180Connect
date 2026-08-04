@@ -30,13 +30,26 @@ import { z } from "zod";
 import { sendEmail } from "../email/send.ts";
 import { logSecurityEvent } from "../log-security-event.ts";
 import { emailField, safeValidate } from "../validation.ts";
-import { allowedEmailDomain } from "./login.ts";
+import {
+  allowedEmailDomains,
+  describeDomains,
+  isOnAllowedDomain,
+  toDomainList,
+  type DomainRule,
+} from "./login.ts";
 
-export function inviteSchema(domain: string = allowedEmailDomain()) {
+export function inviteSchema(rule: DomainRule = allowedEmailDomains()) {
+  const domains = toDomainList(rule);
   return z.object({
     email: emailField("Enter a valid email address.").refine(
-      (email) => email.endsWith(`@${domain}`),
-      { message: `Use a @${domain} email address.` },
+      (email) => isOnAllowedDomain(email, domains),
+      {
+        // Not merely a policy: `enforce_allowed_email_domain_on_signup` is a BEFORE
+        // INSERT trigger on auth.users, so an address outside the permitted set is
+        // refused by Postgres no matter which path creates it. Saying so here turns a
+        // P0001 from deep inside Supabase Auth into a field error on the form.
+        message: `Use a ${describeDomains(domains)} email address.`,
+      },
     ),
   });
 }
@@ -138,10 +151,10 @@ export async function sendInvite(
   invitedByUserId: string,
   input: SendInviteInput,
   redirectTo: string,
-  domain: string = allowedEmailDomain(),
+  rule: DomainRule = allowedEmailDomains(),
   deps: SendInviteDeps = {},
 ): Promise<SendInviteOutcome> {
-  const result = safeValidate(inviteSchema(domain), { email: input.email });
+  const result = safeValidate(inviteSchema(rule), { email: input.email });
 
   if (!result.success) {
     logSecurityEvent("validation.rejected", {

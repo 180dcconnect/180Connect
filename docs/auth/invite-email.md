@@ -117,6 +117,64 @@ Locally, with no `RESEND_API_KEY` set, every invite lands in the `warning` state
 and the message body is written to the dev-server console. That is the intended
 local experience — copy the link out of the log.
 
+## Who can be invited, and how to widen it for testing
+
+Invites can only be issued to a permitted domain, and the enforcement is in
+Postgres — `enforce_allowed_email_domain_on_signup`, a BEFORE INSERT trigger on
+`auth.users` reading `app.allowed_email_domains` (20260804110000). It fires on
+every path: the admin API, the auth hook, raw SQL. There is no way around it
+from the application.
+
+**Production holds `180dc.org` alone, and stays that way by default.** Nothing
+has to be switched off at the end of the project — production is only ever
+widened by someone deliberately inserting a row into it.
+
+### Try plus-addressing first
+
+`bashir+ben@180dc.org`, `bashir+mo@180dc.org` and so on are distinct accounts to
+Supabase, pass the domain check unchanged, and all deliver to the one real
+mailbox. That is usually enough to test the flow with several users and needs no
+configuration at all. It depends on the mail host supporting `+`, which Google
+Workspace does — send yourself one before relying on it.
+
+Where it is not enough: when someone else needs to click *their own* link on
+*their own* device. Aliases all land with you.
+
+### Permitting another domain on staging
+
+Two steps, because there are two layers. Do both, or the symptom is confusing.
+
+```sql
+-- 1. The enforcement. Against the staging project only.
+insert into app.allowed_email_domains (domain, note)
+values ('gmail.com', 'F008 testing while HQ arranges 180dc.org mailboxes — remove after');
+```
+
+```bash
+# 2. The form's own validation, so it stops refusing what the database allows.
+vercel env rm  AUTH_ALLOWED_EMAIL_DOMAIN preview
+vercel env add AUTH_ALLOWED_EMAIL_DOMAIN preview   # 180dc.org,gmail.com
+```
+
+Then redeploy the preview. Miss step 2 and the invite form rejects the address
+before it reaches the database; miss step 1 and the form accepts it and Postgres
+refuses with `email_domain_not_allowed`.
+
+`EMAIL_RECIPIENT_ALLOWLIST` is a third, separate thing — it decides who
+`sendEmail` will deliver to. A domain permitted to hold an account but missing
+from that list produces an invite in the `warning` state.
+
+### Removing it again
+
+```sql
+delete from app.allowed_email_domains where domain = 'gmail.com';
+```
+
+Existing accounts on that domain keep working — the trigger governs new inserts
+only. Deactivate them through the admin UI if they should not survive the test.
+Emptying the table entirely disables sign-up completely rather than opening it
+up; the guard fails closed, and there is a pgTAP test asserting exactly that.
+
 ## What happens after the link is clicked
 
 `/auth/confirm?type=invite` verifies the token, opens a Supabase session for

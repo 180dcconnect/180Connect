@@ -73,6 +73,9 @@ yet and belong to their own tickets; when they ship they join `NAV_ITEMS` with
 the permission they already enforce server-side, and this doc gains their real
 per-table rules.
 
-"Approvals" and "Team Pipeline View" are tiles inside `/admin`, not separate
-routes — so beyond `/admin`, `/admin/users` and `/admin/audit-log` there is
-nothing further for a CAM to be blocked from today.
+"Approvals" and "Team Pipeline View" have no routes and no tiles — `/admin`
+lists only User management and Audit log, for the same reason the dashboard
+lists only what exists. So `/admin`, `/admin/users` and `/admin/audit-log` are
+the whole of what a CAM is blocked from today. When those two screens are
+built they must carry the same two lines above: being nested under `/admin`
+protects nothing on its own.

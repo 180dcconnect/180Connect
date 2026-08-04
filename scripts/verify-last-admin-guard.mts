@@ -131,9 +131,25 @@ async function race(
       "(should block on the same lock)...",
   );
   let bSettled = false;
-  const pendingB = connB.query(callB, [ADMIN_A]).finally(() => {
-    bSettled = true;
-  });
+  // Settles into a *value* — the error or null — rather than rejecting.
+  //
+  // `connB.query(...).finally(...)` returns a promise that rejects too, and nothing
+  // attaches a rejection handler to it until after `connA` commits below. The whole
+  // point of this script is that B is then refused, so that rejection is real and
+  // expected — but for the few ticks between B unblocking and the `await` further
+  // down, it is unobserved, and Node treats an unhandled rejection as fatal. Whether
+  // it lands inside that window is pure timing: it passes locally and killed the CI
+  // run on PR #305. Capturing the outcome at creation means the promise is handled
+  // from the moment it exists, so there is no window at all.
+  const pendingB: Promise<PgError | null> = connB
+    .query(callB, [ADMIN_A])
+    .then(
+      () => null,
+      (error: PgError) => error,
+    )
+    .finally(() => {
+      bSettled = true;
+    });
 
   await sleep(300);
   check(
@@ -147,12 +163,10 @@ async function race(
   // Commit B on success and roll back only on failure — an unconditional rollback
   // would undo the very state corruption this script exists to catch, making the
   // final admin-count check pass whether or not the guard actually worked.
-  let bError: PgError | null = null;
-  try {
-    await pendingB;
+  const bError = await pendingB;
+  if (bError === null) {
     await connB.query("commit");
-  } catch (error) {
-    bError = error as PgError;
+  } else {
     await connB.query("rollback").catch(() => {});
   }
 

@@ -39,7 +39,15 @@ type AdminBehaviour =
   /** Supabase answered without the token the link cannot be built without. */
   | { noToken: true };
 
-const TOKEN_HASH = "pkce_ab12cd34";
+// Deliberately unlike a real token: plain words, no prefix, low entropy.
+//
+// The first version of this fixture imitated a real Supabase token — a short
+// prefix and a random-looking tail — and the secret scanner flagged it on
+// PR #305. A false positive, but a fair one, since that is exactly the shape it
+// looks for. Allow-listing the scanner would have been the wrong fix for a value
+// we control; making the fixture obviously fake is the right one. Keep it that
+// way, and do not paste a realistic-looking token in here.
+const TOKEN_HASH = "fake-token-hash-for-tests";
 
 function fakeAdminClient(behaviour: AdminBehaviour): {
   client: InviteAdminClient;

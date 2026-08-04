@@ -1092,6 +1092,66 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Default role on a new account — F017 (#20)
+-- ---------------------------------------------------------------------------
+-- F017 AC3: someone who accepts an invite is a CAM unless an admin says otherwise.
+-- Nothing in the application decides this — app.handle_new_auth_user() inserts
+-- (id, email, invited_by_user_id, invited_at) and leaves `role` alone, so the
+-- column default in create_users is what actually assigns it. That makes the
+-- default a behaviour worth pinning: change it to 'admin' and every invited person
+-- silently becomes an administrator, with no code change to notice in review.
+create or replace function tests.suite_default_role()
+returns setof text language plpgsql as $$
+declare
+  v_admin   uuid := '00000000-0000-4000-a000-000000000001';
+  v_invitee uuid := '00000000-0000-4000-a000-000000000009';
+  v_role    public.user_role;
+  v_active  boolean;
+  v_invited timestamptz;
+begin
+  if to_regprocedure('app.handle_new_auth_user()') is null then
+    return next skip(4, 'handle_new_auth_user not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Exactly what inviteUserByEmail produces: an auth user carrying the inviting
+  -- admin's id in raw_user_meta_data (src/lib/auth/invite.ts). The trigger fires
+  -- on this insert; no public.users row is written by hand.
+  insert into auth.users (id, instance_id, aud, role, email, raw_user_meta_data)
+  values (
+    v_invitee, '00000000-0000-0000-0000-000000000000', 'authenticated',
+    'authenticated', 'invited@180dc.org',
+    jsonb_build_object('invited_by_user_id', v_admin::text)
+  );
+
+  select role, is_active, invited_at into v_role, v_active, v_invited
+    from public.users where id = v_invitee;
+
+  return next is(v_role, 'cam'::public.user_role,
+    'an invited account defaults to CAM, not admin (F017 AC3)');
+  return next is(v_active, true, 'an invited account is active on creation');
+  return next isnt(v_invited, null,
+    'the invite metadata marked the row as a pending invite');
+
+  -- "unless an admin explicitly sets it to Admin" — the second half of AC3. The
+  -- promotion path is the RPC, never a direct update (suite_role_rpc covers who
+  -- may call it); here it only has to be true that the default is not a ceiling.
+  if to_regprocedure('public.set_user_role(uuid, public.user_role)') is null then
+    return next skip(1, 'set_user_role RPC not yet migrated');
+  else
+    perform tests.sqlstate_of(v_admin, format(
+      'select public.set_user_role(%L, ''admin'')', v_invitee));
+
+    select role into v_role from public.users where id = v_invitee;
+    return next is(v_role, 'admin'::public.user_role,
+      'an admin can promote the invited CAM explicitly');
+  end if;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 
 select * from tests.suite_core();
 select * from tests.suite_viewer();
@@ -1103,6 +1163,7 @@ select * from tests.suite_role_rpc();
 select * from tests.suite_active_rpc();
 select * from tests.suite_deactivate_rpc();
 select * from tests.suite_invite_rpc();
+select * from tests.suite_default_role();
 select * from tests.suite_views();
 
 select * from finish();

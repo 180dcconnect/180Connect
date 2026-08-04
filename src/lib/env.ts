@@ -106,7 +106,7 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     required: false,
     secret: false,
     description:
-      "Email domain(s) users may sign in from — one, or a comma-separated list. Server-only, never prefixed with NEXT_PUBLIC_. Defaults to 180dc.org when unset. This is the friendly half of a two-layer rule: Postgres decides, via app.allowed_email_domains and the trigger on auth.users (20260804110000). Keep the two in step — widening this alone can never let anybody in, it only changes the message the form shows.",
+      "Email domain(s) users may sign in from — one, or a comma-separated list. Server-only, never prefixed with NEXT_PUBLIC_. Defaults to 180dc.org when unset. This is the friendly half of a two-layer rule: Postgres decides, via app.allowed_email_domains and the trigger on auth.users (20260804160000). Keep the two in step — widening this alone can never let anybody in, it only changes the message the form shows.",
     validate: isBareDomainList,
   },
   {

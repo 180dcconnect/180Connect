@@ -157,7 +157,7 @@ same way.
 
 Which addresses may hold an account at all is decided one layer lower, by
 `public.check_allowed_email_domain()` — a BEFORE INSERT trigger on `auth.users`
-reading `app.allowed_email_domains` (20260804110000). It replaced a function that
+reading `app.allowed_email_domains` (20260804160000). It replaced a function that
 hardcoded `'%@180dc.org'`, so an environment can now permit an extra domain for
 testing with an INSERT rather than an edit to a security control. It fails closed
 twice over: an empty table permits nothing, and an environment nobody configures

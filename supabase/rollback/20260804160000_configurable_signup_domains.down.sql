@@ -1,4 +1,4 @@
--- Rollback for 20260804110000_configurable_signup_domains.sql
+-- Rollback for 20260804160000_configurable_signup_domains.sql
 --
 -- Restores the hardcoded @180dc.org guard exactly as 20260726112609 left it, then
 -- removes the table and the function that read it.

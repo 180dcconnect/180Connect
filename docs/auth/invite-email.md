@@ -121,7 +121,7 @@ local experience — copy the link out of the log.
 
 Invites can only be issued to a permitted domain, and the enforcement is in
 Postgres — `enforce_allowed_email_domain_on_signup`, a BEFORE INSERT trigger on
-`auth.users` reading `app.allowed_email_domains` (20260804110000). It fires on
+`auth.users` reading `app.allowed_email_domains` (20260804160000). It fires on
 every path: the admin API, the auth hook, raw SQL. There is no way around it
 from the application.
 

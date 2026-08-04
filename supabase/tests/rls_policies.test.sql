@@ -1092,7 +1092,7 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- Sign-up domain guard — F008 (20260804110000_configurable_signup_domains)
+-- Sign-up domain guard — F008 (20260804160000_configurable_signup_domains)
 -- ---------------------------------------------------------------------------
 -- This is a security boundary, and the interesting cases are the ones that must
 -- keep failing. Inserts go directly into auth.users, which is what the trigger

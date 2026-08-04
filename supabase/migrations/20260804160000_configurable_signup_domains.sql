@@ -47,7 +47,7 @@
 --                 | No Data Model tab change — `app` is not an application entity.
 --                 | Approved by Bashir (Project Leader), 4 Aug 2026.
 --
--- Reversibility: paired rollback in ../rollback/20260804110000_configurable_signup_domains.down.sql
+-- Reversibility: paired rollback in ../rollback/20260804160000_configurable_signup_domains.down.sql
 
 create table if not exists app.allowed_email_domains (
   -- Stored bare and lower case: '180dc.org', never '@180dc.org' or 'FOO.ORG'.

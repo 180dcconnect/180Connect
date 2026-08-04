@@ -33,7 +33,7 @@ export type DomainRule = string | readonly string[];
  * **This is the friendly half of a two-layer rule, not the rule itself.** The
  * enforcement lives in Postgres: `public.check_allowed_email_domain()` fires
  * before every `auth.users` insert and reads `app.allowed_email_domains`
- * (20260804110000). This exists so someone typing the wrong address gets a
+ * (20260804160000). This exists so someone typing the wrong address gets a
  * sentence instead of a database error — and so an environment permitting an
  * extra domain for testing does not have its own login form refuse it.
  *
@@ -82,7 +82,7 @@ export function toDomainList(rule: DomainRule): string[] {
  * malformed; it is not an address on the second domain.
  *
  * The same rule is enforced in Postgres by `public.check_allowed_email_domain()`
- * (20260804110000), and the two are meant to agree exactly.
+ * (20260804160000), and the two are meant to agree exactly.
  */
 export function isOnAllowedDomain(email: string, domains: readonly string[]): boolean {
   const parts = email.trim().toLowerCase().split("@");

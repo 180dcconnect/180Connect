@@ -59,7 +59,7 @@ reviewers do not assume the matrix alone is sufficient.
 | CAM may edit own profile but **not** their own `role` | RLS is row-level; it cannot allow a row UPDATE while forbidding one column | `REVOKE` (§2.1) then column `GRANT` — `grant update (full_name) on public.users to authenticated`. `role`/`is_active` granted to nobody; an admin role change goes through an RPC (F012) | **shipped** in create_users (F233); F012 RPC still to build |
 | CAM claims an **unowned** organisation | Needs a write to `ORGANISATIONS.owner_id`, otherwise off-limits | Handled **in the UPDATE policy**, not an RPC: a CAM may target an unowned row and its `WITH CHECK` forces the new `owner_id` to be themselves. `claim_organisation(org_id)` as a `SECURITY DEFINER` RPC remains a future enhancement (F162) for atomic race-safety + an audit row | policy **shipped** in create_organisations (F233); RPC deferred to F162 |
 | "Override pipeline stage — **reason required**" | Postgres cannot require a justification string as a condition of an UPDATE | `SECURITY DEFINER` RPC `override_outreach_status(org_id, status, reason)`. `reason` is `not null` and lands in the audit log | to build (F224) |
-| "Reassign ownership: admin only" | Same column-level problem | Currently the org UPDATE policy allows an admin to set any `owner_id`; a dedicated `assign_organisation_owner` RPC (with audit) is the future form | admin path **shipped**; RPC deferred |
+| "Reassign ownership: admin only" | Same column-level problem | Currently the org UPDATE policy allows an admin to set any `owner_id`; a dedicated `assign_organisation_owner` RPC (with audit) is the future form | admin path **shipped**; RPC deferred. The **offboarding** case is now covered: `deactivate_user` (F014) reassigns every organisation the departing user owns, with a required reason and one `ownership_reassigned` audit row per organisation, in the same transaction that closes the account |
 | Audit entries are immutable | RLS controls who writes, not whether a row can later change | `AUDIT_LOG` gets **no** UPDATE or DELETE policy for any role. Append-only by omission | needs the table (§6) |
 
 **Rule that follows:** where a capability needs a *condition*, a *reason string*, or a
@@ -152,7 +152,19 @@ suspended user keeps a working token, and a logged-in-looking shell, until it ex
 Measured on GoTrue v2.193.1: with the session row gone, `GET /auth/v1/user` goes
 `200 → 403` and a refresh returns `400`. This replaces an application-side
 `auth.admin.signOut(userId)` call that could never work — that parameter is a JWT, not
-a user id, and GoTrue has no by-user-id logout endpoint.
+a user id, and GoTrue has no by-user-id logout endpoint. `deactivate_user` revokes the
+same way.
+
+`deactivated_at` (F014) is written only by `public.deactivate_user(user_id, reason,
+reassign_to, release_clients)` and cleared only by `set_user_active(..., true)`. It is a
+**marker, not a gate**: `is_active` alone decides whether anyone may log in or read a
+row, and no policy or helper consults `deactivated_at`. It exists so the UI can tell a
+suspension from an offboarding, which are otherwise the same `is_active = false`. The
+constraint `users_deactivated_at_matches_inactive` makes the contradictory combination
+(active *and* carrying a deactivation timestamp) unwritable by anyone, including a
+future RPC. `deactivate_user` additionally refuses to close an account while it still
+owns organisations unless given a destination, and moves them in the same transaction —
+see §3.2.
 
 ### 3.2 Canonical organisation data — shared read, admin write
 
@@ -419,17 +431,49 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    suspend its way to zero admins — the self-change refusal means the caller is always
    a surviving active admin. `set_user_role` carried no equivalent guard, so two admins
    acting on each other concurrently (B demotes A while A suspends B) could commit to
-   an organisation with no active admin, which nothing in the app could then reverse:
-   `role` and `is_active` are both writable only through these two RPCs.
+   an organisation with no active admin, which nothing in the app could then reverse.
 
    A guard added to `set_user_role` alone would not have closed this: `set_user_active`
-   would still act on state it read before `set_user_role`'s change committed. Both
-   RPCs now call `app.guard_last_admin(uuid)`, which takes a shared
-   `pg_advisory_xact_lock` before counting active admins, so a concurrent call to
-   either function serializes against the other and re-reads the count fresh. Proven
-   under real concurrency (not just asserted) by
+   would still act on state it read before `set_user_role`'s change committed. Every RPC
+   that can remove an admin from the active set now calls `app.guard_last_admin(uuid)`,
+   which takes a shared `pg_advisory_xact_lock` before counting active admins, so a
+   concurrent call to any of them serializes against the others and re-reads the count
+   fresh. Proven under real concurrency (not just asserted) by
    [`scripts/verify-last-admin-guard.mts`](../scripts/verify-last-admin-guard.mts),
-   which opens two genuinely concurrent connections — see §5 row 13.
+   which opens genuinely concurrent connections — see §5 row 13.
+
+   **Three RPCs, not two.** `role` and `is_active` are writable only through
+   `set_user_role`, `set_user_active` and — since F014 — `deactivate_user`, which sets
+   `is_active = false` on its own path. A guard on the first two would have left the
+   same race open through the third (B deactivates A while A demotes B), so all three
+   take the lock. Any future RPC that writes either column has to call the guard too;
+   that is the whole reason the lock lives in one shared function rather than inline.
+8. ~~**`revokeUserSessions` cannot work as written — sessions are never actually
+   revoked.**~~ **Resolved on the F013 branch, 30 Jul 2026** —
+   `20260729232500_revoke_sessions_on_suspend.sql` moved revocation into the database
+   (`app.revoke_sessions`), and pgTAP now seeds a session and asserts it is gone after
+   a suspension. Recorded here because the reasoning is worth keeping:
+   `src/lib/supabase/admin.ts` called `auth.admin.signOut(userId, 'global')`,
+   but that method's first parameter is a **JWT**, not a user id: auth-js forwards it as
+   the bearer token on `POST /logout`, so GoTrue answers `invalid JWT: ... token
+   contains an invalid number of segments` every time. Every suspension therefore took
+   the failure branch and showed the admin the "existing sign-in could not be revoked"
+   warning, which read as an intermittent Supabase problem rather than a feature that
+   had never once run. Observed against a local stack on 30 Jul 2026 while verifying
+   F014; GoTrue v2.193.1 exposes no by-user-id logout endpoint at all
+   (`/admin/users/{id}/logout` and `/admin/users/{id}/sessions` both 404), so it was
+   not a parameter fix.
+
+   It was never an access hole, only a missing layer: a deactivated user holding an
+   access token Supabase still accepted (`GET /auth/v1/user` → 200) was already refused
+   `/dashboard` and `/admin/users` by `getCurrentActor`, and every RLS policy gates on
+   `app.is_active_user()`. What survived was a logged-in-looking shell over no data
+   until the token expired.
+
+   **Lesson for the suite, not just the code:** the pgTAP suite passed throughout. It
+   asserted that `is_active` flipped and that an audit row was written, and had no way
+   to tell revocation from no revocation. An assertion about a side effect nobody seeds
+   a fixture for is not an assertion.
 
 ---
 

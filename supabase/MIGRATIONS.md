@@ -14,6 +14,7 @@ Supabase CLI native migrations. Plain SQL under `supabase/migrations/`, applied 
 ## Conventions (SOP §7 — enforced in review)
 
 - Migration files live in `supabase/migrations/`, never edited after they've been applied to a shared environment. Fix-forward with a new migration.
+- **A migration's timestamp must be later than every migration already on `dev`** — not merely later than when you started writing it. `supabase db push` refuses to apply a migration that sits behind the remote's last applied one, and CI runs it without `--include-all`, so a stale timestamp breaks the staging push for the whole team rather than just for you. This bites when a branch sits in review while other migrations land ahead of it: the file was correctly dated the day you wrote it and is stale by the time it merges. Re-date it (and its `supabase/rollback/` counterpart) before merging; anyone who applied the old name locally then needs `supabase db reset`. `scripts/verify-migration-order.sh` checks this on every PR.
 - Table names `UPPER_SNAKE`; field names `lower_snake`.
 - Every new table includes `id uuid` primary key (default `gen_random_uuid()`) and `created_at timestamptz not null default now()`.
 - **Row-Level Security: enable RLS and add its policies in the same migration that creates the table** (SOP §7). A table is never committed with RLS left off "for later" — that would leave a window where the table is readable by anyone. **The full recipe is below ("Row-Level Security — securing a new table"); follow it for every table.**

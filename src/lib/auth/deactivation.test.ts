@@ -7,8 +7,18 @@ import {
   deactivationFailureStatus,
 } from "./deactivation.ts";
 
-const MIGRATION =
-  "supabase/migrations/20260730121500_create_deactivate_user_rpc.sql";
+// The *effective* definition, not the original: 20260804153000 `create or replace`s
+// deactivate_user to add the last-admin guard, so that is the body actually running.
+const MIGRATION = "supabase/migrations/20260804153000_last_admin_guard.sql";
+
+/** The text of one `create or replace function <name>(` … `$$;` block. */
+function functionBody(sql: string, name: string): string {
+  const start = sql.indexOf(`create or replace function ${name}(`);
+  assert.notEqual(start, -1, `${name} is not defined in ${MIGRATION}`);
+  const end = sql.indexOf("\n$$;", start);
+  assert.notEqual(end, -1, `${name}'s body is not terminated in ${MIGRATION}`);
+  return sql.slice(start, end);
+}
 
 describe("deactivation failure messages", () => {
   it("answers every hint the migration can raise", () => {
@@ -18,9 +28,18 @@ describe("deactivation failure messages", () => {
     // message here does not fail a build or throw at runtime; it silently degrades to
     // "refresh and try again", which for owns_active_clients means the reassignment
     // gate stops explaining itself. So the test reads the SQL and checks.
+    //
+    // Scoped to deactivate_user's own body plus the helper it delegates a refusal to,
+    // rather than the whole file: the same migration also defines set_user_role and
+    // set_user_active, whose hints are answered elsewhere and are none of this
+    // module's business.
     const sql = readFileSync(MIGRATION, "utf8");
+    let scanned = functionBody(sql, "public.deactivate_user");
+    if (scanned.includes("app.guard_last_admin")) {
+      scanned += functionBody(sql, "app.guard_last_admin");
+    }
     const raised = new Set(
-      [...sql.matchAll(/hint\s*=\s*'([a-z_]+)'/g)].map((match) => match[1]),
+      [...scanned.matchAll(/hint\s*=\s*'([a-z_]+)'/g)].map((match) => match[1]),
     );
 
     assert.ok(raised.size > 0, "no hints found in the migration — check the regex");

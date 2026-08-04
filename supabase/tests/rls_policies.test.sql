@@ -485,7 +485,7 @@ declare
   v_count bigint;
 begin
   if to_regprocedure('public.set_user_role(uuid, public.user_role)') is null then
-    return next skip(4, 'set_user_role RPC not yet migrated');
+    return next skip(7, 'set_user_role RPC not yet migrated');
     return;
   end if;
 
@@ -559,7 +559,7 @@ declare
   v_count   bigint;
 begin
   if to_regprocedure('public.set_user_active(uuid, boolean)') is null then
-    return next skip(10, 'set_user_active RPC not yet migrated');
+    return next skip(13, 'set_user_active RPC not yet migrated');
     return;
   end if;
 
@@ -700,7 +700,7 @@ declare
   v_count       bigint;
 begin
   if to_regprocedure('public.deactivate_user(uuid, text, uuid, boolean)') is null then
-    return next skip(20, 'deactivate_user RPC not yet migrated');
+    return next skip(23, 'deactivate_user RPC not yet migrated');
     return;
   end if;
 
@@ -854,11 +854,35 @@ begin
     'the released client is unowned and claimable by any CAM'
   );
 
+  -- Matrix §6 gap 7 regression check: deactivate_user is the third writer of
+  -- is_active, so it takes the same guard. Deactivating an admin who is not the last
+  -- one must still succeed. As in suite_role_rpc and suite_active_rpc, this cannot
+  -- exercise the guard actually firing — reaching it requires the caller to be a
+  -- distinct active admin from the target, which structurally means the caller always
+  -- survives a solo call. Proof it fires under real concurrency lives in
+  -- scripts/verify-last-admin-guard.mts.
+  update public.users
+     set role = 'admin', is_active = true, deactivated_at = null
+   where id = v_target;
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, null, true)', v_target, 'second admin')),
+    null,
+    'admin deactivating a second admin still succeeds while another admin remains'
+  );
+  select is_active into v_active from public.users where id = v_target;
+  return next is(v_active, false, 'the deactivation actually landed');
+
+  select count(*) into v_count
+    from public.users where role = 'admin' and is_active;
+  return next is(v_count, 1::bigint,
+    'exactly one active admin remains after the deactivation (never zero)');
+
   -- Leave the fixture as it was found: later suites share this transaction. Restored
   -- with plain SQL rather than the RPCs — those self-check app.is_admin(), which reads
   -- auth.uid(), and here there is no signed-in user to be an admin.
   update public.users
-     set is_active = false, deactivated_at = null
+     set role = 'cam', is_active = false, deactivated_at = null
    where id = v_target;
   delete from public.organisations where id = v_org;
 end;

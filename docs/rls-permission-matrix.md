@@ -373,7 +373,7 @@ RLS, so a suite written against it proves nothing.
 | 10 | log entry created | Test 3 produces exactly one `AUDIT_LOG` row |
 | 11 | bypass attempt | Direct PostgREST call with `anon` key against every table → 0 rows / `42501` |
 | 12 | coverage gate | No table in `public` has `rowsecurity = false` or zero policies |
-| 13 | concurrency | Two admins race each other — one calls `set_user_role` to demote the other while the second calls `set_user_active` to suspend the first — and the platform is left with exactly one active admin, never zero |
+| 13 | concurrency | Two admins race each other — one calls `set_user_role` to demote the other while the second removes them via `set_user_active` or `deactivate_user` — and the platform is left with exactly one active admin, never zero |
 
 Test 11 is the acceptance criterion "even if the application-layer permission check
 were bypassed". It must be run against the API, not through the app's own client.
@@ -383,7 +383,10 @@ Test 12 is sequence step 15, run in CI on every migration.
 Test 13 needs two real, concurrently-open connections to reproduce — a single-session
 pgTAP suite cannot serialize against itself. It lives in
 [`scripts/verify-last-admin-guard.mts`](../scripts/verify-last-admin-guard.mts), run
-as its own CI step alongside `supabase test db` rather than inside the pgTAP file.
+as its own CI step alongside `supabase test db` rather than inside the pgTAP file. It
+runs the race once per RPC that can remove an admin from the active set; a new one
+added without a row there is a gap that reopens silently. Local stacks only — it
+writes `auth.users` rows directly and refuses any hosted project.
 
 ---
 
@@ -427,7 +430,7 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    Suspension is `is_active = false` — one flag, not a new state; F014 reuses it rather
    than adding an `account_status` enum.
 7. ~~**`set_user_role` can demote the last active admin.**~~ **RESOLVED — F012 (#14),
-   `20260803091819_last_admin_guard.sql`, 3 Aug 2026.** `set_user_active` cannot
+   `20260804153000_last_admin_guard.sql`, 4 Aug 2026.** `set_user_active` cannot
    suspend its way to zero admins — the self-change refusal means the caller is always
    a surviving active admin. `set_user_role` carried no equivalent guard, so two admins
    acting on each other concurrently (B demotes A while A suspends B) could commit to

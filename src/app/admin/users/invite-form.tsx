@@ -39,7 +39,18 @@ export function InviteForm() {
         {emailError ? (
           <span className="text-red-700">{emailError}</span>
         ) : state.message ? (
-          <span className={state.status === "error" ? "text-red-700" : "text-brand"}>
+          <span
+            className={
+              state.status === "error"
+                ? "text-red-700"
+                : // The account exists but no email went out. Amber rather than the
+                  // success green, because the admin has to do something about it —
+                  // the invited person is waiting for a link that never arrived.
+                  state.status === "warning"
+                  ? "text-amber-700"
+                  : "text-brand"
+            }
+          >
             {state.message}
           </span>
         ) : null}

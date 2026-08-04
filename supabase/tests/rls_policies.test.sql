@@ -889,6 +889,199 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Deactivate (offboard) RPC — F014 (#16)
+-- ---------------------------------------------------------------------------
+-- Deactivation is suspension plus offboarding: the account closes and its clients go
+-- somewhere. The assertions that matter are the ones a reviewer cannot check by
+-- reading the function — that the gate actually refuses while clients are owned, that
+-- the transfer and the closure land in the same transaction, and that nothing is
+-- deleted (AC3, AC4).
+--
+-- The target is v_deactivated (fixture id ...004) rather than a CAM the earlier suites
+-- rely on. Every suite runs inside the one uncommitted transaction with no reset
+-- between them, so deactivating cam_a or cam_b here would change the world underneath
+-- whatever runs next. ...004 is already is_active = false with no deactivated_at,
+-- which is exactly the suspended-not-deactivated state, and the fixture org below is
+-- created locally for the same isolation reason.
+create or replace function tests.suite_deactivate_rpc()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_target      uuid := '00000000-0000-4000-a000-000000000004';
+  v_org         uuid := '00000000-0000-4000-b000-000000000004';
+  v_deactivated timestamptz;
+  v_active      boolean;
+  v_owner       uuid;
+  v_count       bigint;
+begin
+  if to_regprocedure('public.deactivate_user(uuid, text, uuid, boolean)') is null then
+    return next skip(20, 'deactivate_user RPC not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  insert into public.organisations (id, legal_name, entry_method, organisation_type, owner_id)
+  values (v_org, 'Offboarding Org Ltd', 'manual', 'other', v_target)
+  on conflict (id) do update set owner_id = excluded.owner_id;
+
+  -- Seeded so the revocation assertion further down has something to revoke. This
+  -- migration replaces set_user_active with `create or replace`, which silently wins
+  -- over the two earlier definitions; if a future edit forgets to carry the
+  -- app.revoke_sessions call forward, this is what fails.
+  insert into auth.sessions (id, user_id, created_at, updated_at)
+  values (gen_random_uuid(), v_target, now(), now());
+
+  -- Authorisation, re-checked inside the SECURITY DEFINER body: EXECUTE is granted to
+  -- `authenticated`, which every signed-in user shares, so the body is the only thing
+  -- standing between a CAM and an offboarding.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.deactivate_user(%L, %L, %L, false)', v_target, 'leaving', v_cam_a)),
+    '42501',
+    'CAM calling deactivate_user is refused inside the SECURITY DEFINER body'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, null, false)', v_admin, 'leaving')),
+    '42501',
+    'an admin cannot deactivate their own account'
+  );
+
+  -- PRD §4.2: the reason is required, and whitespace is not a reason.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, %L, false)', v_target, '   ', v_cam_a)),
+    '22023',
+    'a blank reason is refused'
+  );
+
+  -- AC2, the gate. This is the assertion the story turns on: while the user owns
+  -- clients and no destination is given, the account does not close.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, null, false)', v_target, 'leaving')),
+    '22023',
+    'deactivation is refused while the user still owns clients'
+  );
+  select deactivated_at into v_deactivated from public.users where id = v_target;
+  return next is(v_deactivated, null::timestamptz,
+    'the refused deactivation left the account untouched');
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, %L, false)', v_target, 'leaving', v_viewer)),
+    '22023',
+    'clients cannot be reassigned to a viewer'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, %L, true)', v_target, 'leaving', v_cam_a)),
+    '22023',
+    'naming an owner and releasing to the pool at the same time is refused'
+  );
+
+  -- The whole thing, for real.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, %L, false)', v_target, 'left the society', v_cam_a)),
+    null,
+    'admin can deactivate a user and hand their clients on'
+  );
+
+  select is_active, deactivated_at into v_active, v_deactivated
+    from public.users where id = v_target;
+  return next ok(v_active = false and v_deactivated is not null,
+    'the account is inactive and marked as deactivated, not merely suspended');
+
+  select owner_id into v_owner from public.organisations where id = v_org;
+  return next is(v_owner, v_cam_a,
+    'the owned client moved to the named CAM in the same transaction');
+
+  select count(*) into v_count from auth.sessions where user_id = v_target;
+  return next is(v_count, 0::bigint,
+    'deactivation revoked the offboarded user''s sessions');
+
+  -- AC3/AC4: deactivation is not deletion. The row survives, and so does the trail.
+  select count(*) into v_count from public.users where id = v_target;
+  return next is(v_count, 1::bigint, 'the user row is not deleted');
+
+  if tests.tables_exist('audit_log') then
+    select count(*) into v_count
+      from public.audit_log
+     where action = 'user_deactivated' and target_id = v_target;
+    return next is(v_count, 1::bigint,
+      'exactly one user_deactivated audit row, and only for the successful attempt');
+
+    select count(*) into v_count
+      from public.audit_log
+     where action = 'ownership_reassigned'
+       and target_table = 'organisations'
+       and target_id = v_org
+       and detail->>'reason' = 'left the society';
+    return next is(v_count, 1::bigint,
+      'the client handover is audited against the organisation, carrying the reason');
+  else
+    return next skip(2, 'audit_log not yet migrated');
+  end if;
+
+  -- Pressing the button twice does not produce a second audit row or a second sweep.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, null, false)', v_target, 'again')),
+    null,
+    'deactivating an already-deactivated user is a no-op, not an error'
+  );
+
+  -- Reactivation has to clear the marker or the constraint rejects it outright. This
+  -- is the assertion that would have caught shipping F014 without amending F013.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_user_active(%L, true)', v_target)),
+    null,
+    'a deactivated user can be reactivated'
+  );
+  select deactivated_at into v_deactivated from public.users where id = v_target;
+  return next is(v_deactivated, null::timestamptz,
+    'reactivation clears the deactivation marker');
+
+  -- The illegal combination is forbidden by the database, not by the RPCs. Asserted as
+  -- the table owner, which is the only role that could ever write the column directly.
+  return next throws_ok(
+    format('update public.users set deactivated_at = now() where id = %L', v_cam_a),
+    '23514',
+    null,
+    'an active user cannot carry a deactivation timestamp'
+  );
+
+  -- The other destination PRD §6.12 allows: back to the unowned pool.
+  update public.organisations set owner_id = v_target where id = v_org;
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, null, true)', v_target, 'released')),
+    null,
+    'clients can be released to the unowned pool instead of being reassigned'
+  );
+  select owner_id into v_owner from public.organisations where id = v_org;
+  return next is(v_owner, null::uuid,
+    'the released client is unowned and claimable by any CAM'
+  );
+
+  -- Leave the fixture as it was found: later suites share this transaction. Restored
+  -- with plain SQL rather than the RPCs — those self-check app.is_admin(), which reads
+  -- auth.uid(), and here there is no signed-in user to be an admin.
+  update public.users
+     set is_active = false, deactivated_at = null
+   where id = v_target;
+  delete from public.organisations where id = v_org;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Viewer is read-only — F258 (#268)
 -- ---------------------------------------------------------------------------
 -- Matrix §1: viewer = read-only. §3.2: ORGANISATIONS UPDATE is "admin any row;
@@ -1157,6 +1350,107 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Sign-up domain guard — F008 (20260804160000_configurable_signup_domains)
+-- ---------------------------------------------------------------------------
+-- This is a security boundary, and the interesting cases are the ones that must
+-- keep failing. Inserts go directly into auth.users, which is what the trigger
+-- fires on — the same door the admin API and any raw SQL go through.
+create or replace function tests.suite_signup_domain()
+returns setof text language plpgsql as $$
+declare
+  v_new uuid;
+begin
+  if to_regprocedure('public.check_allowed_email_domain()') is null then
+    return next skip(7, 'configurable signup domains not yet migrated');
+    return;
+  end if;
+
+  return next ok(
+    exists (select 1 from app.allowed_email_domains where domain = '180dc.org'),
+    '180dc.org is seeded, so the previous rule still holds with no configuration'
+  );
+
+  -- The table is granted to nobody. A signed-in user reading it directly is the
+  -- thing RLS-with-no-policies exists to stop.
+  return next is(
+    tests.sqlstate_of(
+      '00000000-0000-4000-a000-000000000002'::uuid,
+      'select count(*) from app.allowed_email_domains'
+    ),
+    '42501',
+    'a CAM cannot read the domain list directly'
+  );
+
+  v_new := gen_random_uuid();
+  return next lives_ok(
+    format(
+      $sql$insert into auth.users (id, instance_id, aud, role, email)
+           values (%L, '00000000-0000-0000-0000-000000000000', 'authenticated',
+                   'authenticated', 'permitted@180dc.org')$sql$,
+      v_new
+    ),
+    'a seeded domain is accepted'
+  );
+
+  return next throws_ok(
+    $sql$insert into auth.users (id, instance_id, aud, role, email)
+         values (gen_random_uuid(), '00000000-0000-0000-0000-000000000000',
+                 'authenticated', 'authenticated', 'nope@example.com')$sql$,
+    'P0001',
+    null,
+    'an unlisted domain is refused'
+  );
+
+  -- The old check was `ilike '%@180dc.org'`, which this address satisfies. The
+  -- rewrite matches on the domain after the final '@' instead, so it does not.
+  return next throws_ok(
+    $sql$insert into auth.users (id, instance_id, aud, role, email)
+         values (gen_random_uuid(), '00000000-0000-0000-0000-000000000000',
+                 'authenticated', 'authenticated', 'attacker@evil.com@180dc.org')$sql$,
+    'P0001',
+    null,
+    'a suffix that merely ends in the domain is not a match'
+  );
+
+  -- Adding a domain is the whole point of the table; it must actually take effect
+  -- without any function being redefined.
+  insert into app.allowed_email_domains (domain, note)
+  values ('example.com', 'pgTAP fixture');
+
+  v_new := gen_random_uuid();
+  return next lives_ok(
+    format(
+      $sql$insert into auth.users (id, instance_id, aud, role, email)
+           values (%L, '00000000-0000-0000-0000-000000000000', 'authenticated',
+                   'authenticated', 'tester@example.com')$sql$,
+      v_new
+    ),
+    'a domain added to the table is accepted immediately'
+  );
+
+  -- Fails closed: with nothing permitted, nobody gets in. The opposite — an empty
+  -- table meaning "no restriction" — is the bug this asserts against.
+  delete from app.allowed_email_domains;
+  return next throws_ok(
+    $sql$insert into auth.users (id, instance_id, aud, role, email)
+         values (gen_random_uuid(), '00000000-0000-0000-0000-000000000000',
+                 'authenticated', 'authenticated', 'anyone@180dc.org')$sql$,
+    'P0001',
+    null,
+    'an empty table permits nothing, rather than everything'
+  );
+
+  -- Put it back. The whole file runs in ONE transaction, so the delete above is
+  -- visible to every suite that follows — and any of them calling tests.seed()
+  -- would have its auth.users inserts refused by the guard this suite just proved
+  -- works. That is not a hypothetical: it took out suite_default_role.
+  insert into app.allowed_email_domains (domain, note)
+  values ('180dc.org', '180 Degrees Consulting. The permanent entry — do not remove.')
+  on conflict (domain) do nothing;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Default role on a new account — F017 (#20)
 -- ---------------------------------------------------------------------------
 -- F017 AC3: someone who accepts an invite is a CAM unless an admin says otherwise.
@@ -1228,6 +1522,7 @@ select * from tests.suite_role_rpc();
 select * from tests.suite_active_rpc();
 select * from tests.suite_deactivate_rpc();
 select * from tests.suite_invite_rpc();
+select * from tests.suite_signup_domain();
 select * from tests.suite_default_role();
 select * from tests.suite_views();
 

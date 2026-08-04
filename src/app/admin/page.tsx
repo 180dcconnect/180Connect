@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
+import { adminRouteDestination } from "@/lib/auth/admin-route";
 
 /**
  * `/admin` is a hub of tiles, one per admin workspace that actually exists.
@@ -16,11 +17,8 @@ import { getCurrentActor } from "@/lib/auth/actor";
  * argument in `src/lib/nav.ts`.
  */
 export default async function AdminPage() {
-  const authorization = await getCurrentActor("user:manage");
-  if (!authorization.ok) {
-    if (authorization.reason === "unauthenticated") redirect("/login");
-    redirect("/dashboard?error=admin-access-required");
-  }
+  const authorization = await getCurrentActor("user:manage", { route: "/admin" });
+  if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
   return (
     <main className="min-h-screen bg-[#f1f2f4] p-6">

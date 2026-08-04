@@ -13,12 +13,14 @@ on:
       - 'supabase/**'
       - 'scripts/verify-rls-coverage.sql'
       - 'scripts/verify-anon-lockout.sh'
+      - 'scripts/verify-last-admin-guard.mts'
       - '.github/workflows/migrations.yml'
   pull_request:
     paths:
       - 'supabase/**'
       - 'scripts/verify-rls-coverage.sql'
       - 'scripts/verify-anon-lockout.sh'
+      - 'scripts/verify-last-admin-guard.mts'
       - '.github/workflows/migrations.yml'
   # Manual re-run, e.g. after fixing a failed apply.
   workflow_dispatch:
@@ -51,6 +53,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Cheap and first: a stale migration timestamp is a hard `db push` failure on
+      # dev, and the apply job that would reveal it does not run on pull requests.
+      # No credentials and no network beyond a shallow fetch of the base branch, so
+      # it costs seconds and cannot be the flaky step. See the script's header.
+      - name: Migration timestamps are ahead of the base branch
+        if: github.event_name == 'pull_request'
+        # Via env, not interpolated into the command: a ref name is attacker-shaped
+        # input, and `${{ }}` is substituted before the shell ever sees it.
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: scripts/verify-migration-order.sh "$BASE_REF"
+
+      # Needed only for the last-admin concurrency guard step below, which is a
+      # node/pg script rather than SQL or a shell probe like this job's other
+      # checks. Every other step here works without it.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
       - uses: supabase/setup-cli@v1
         with:
           # Pinned, not `latest`. Resolving `latest` costs an unauthenticated
@@ -78,6 +102,14 @@ jobs:
       # report as skipped.
       - name: RLS behaviour tests
         run: supabase test db
+
+      # Matrix §6 gap 7: proves set_user_role, set_user_active and deactivate_user
+      # actually serialize against each other under real concurrency, which pgTAP's
+      # single-session suite structurally cannot exercise (see the script's header).
+      - name: Last-admin concurrency guard
+        run: npm run verify:last-admin
+        env:
+          SUPABASE_DB_URL: ${{ env.LOCAL_DB_URL }}
 
       # Sequence step 15: no table ships without RLS and policies.
       - name: RLS coverage gate

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
+import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { InviteForm } from "./invite-form";
@@ -12,11 +13,10 @@ import {
 type PendingInvite = { id: string; email: string; invited_at: string };
 
 export default async function AdminUsersPage() {
-  const authorization = await getCurrentActor("user:manage");
-  if (!authorization.ok) {
-    if (authorization.reason === "unauthenticated") redirect("/login");
-    redirect("/dashboard?error=admin-access-required");
-  }
+  const authorization = await getCurrentActor("user:manage", {
+    route: "/admin/users",
+  });
+  if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
   const supabase = await createClient();
 

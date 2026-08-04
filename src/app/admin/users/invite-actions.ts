@@ -68,6 +68,14 @@ export async function sendInviteAction(
     authorization.actor.id,
     { email: formData.get("email") },
     redirectTo,
+    undefined,
+    {
+      // Named in the email so the invitation reads as coming from a colleague.
+      // Falls back through the address to a generic label rather than leaving a
+      // blank where a name should be.
+      inviterName:
+        authorization.actor.fullName ?? authorization.actor.email ?? "An admin",
+    },
   );
 
   if (outcome.ok) {

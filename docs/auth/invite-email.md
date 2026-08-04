@@ -1,24 +1,39 @@
 # Invite New CAM email (F008)
 
-Same reasoning as [Password recovery email](recovery-email.md): the Supabase
-**Invite user** email template is dashboard configuration, not version
-controlled, and a project reset or a second environment set up from scratch
-loses it silently. This file is the source of truth for it.
+> **This email no longer comes from Supabase.** It is composed by
+> `inviteEmail()` in `src/lib/auth/invite.ts` and sent through Resend by
+> `src/lib/email/send.ts` — see [email-sending.md](../email-sending.md). The
+> template below is not dashboard configuration any more; it is the markup in
+> that function, kept here for review. There is nothing to paste into
+> Authentication → Email Templates → **Invite user**, and anything already there
+> is dead: `generateLink` does not send it.
+>
+> Password recovery is unchanged and still uses the dashboard template — see
+> [recovery-email.md](recovery-email.md).
 
 ## Supabase configuration
 
-Authentication → URL Configuration — same Redirect URLs list `recovery-email.md`
-requires already covers this, since invites land on the same `/auth/confirm`
-route:
+Authentication → URL Configuration. Still required: `generateLink` refuses a
+`redirectTo` that is not on the allow-list, so an invite link is not issued at
+all if this is wrong. Same list `recovery-email.md` requires, since invites land
+on the same `/auth/confirm` route:
 
 | Setting | Value |
 | :------ | :---- |
 | Site URL | `https://180connect.vercel.app` |
 | Redirect URLs | `https://180connect.vercel.app/auth/confirm`, `http://localhost:3000/auth/confirm` |
 
+Authentication → Providers → Email → invite expiry is what actually expires the
+link. `INVITE_EXPIRY_HOURS` in `src/lib/auth/invite.ts` only *says* how long it
+lasts; keep the two aligned or the email lies (F010).
+
 ## The template
 
-Authentication → Email Templates → **Invite user**.
+The markup below lives in `inviteEmail()`. Two differences from the dashboard
+version it replaced, both forced by the move: `{{ .TokenHash }}` is interpolated
+in TypeScript rather than by Supabase, and `{{ .Email }}` became the inviter's
+name — Resend does not expand Supabase's template variables, and naming the
+colleague who invited you reads better than naming your own address back at you.
 
 Uses `{{ .TokenHash }}` against `/auth/confirm?token_hash=...&type=invite`, for
 the same reason recovery does: the alternative, `{{ .ConfirmationURL }}`,
@@ -78,13 +93,29 @@ apply here.
 
 ## Sending
 
-Same shared, rate-limited Supabase mailer described in `recovery-email.md`
-applies here — a handful of messages per hour for the whole project, until
-custom SMTP is configured. Unlike the reset form, the invite Server Action does
-**not** hide send failures behind a neutral message: the admin is not an
-anonymous caller probing for account existence, so `src/lib/auth/invite.ts`
-reports a send failure plainly (`user.invite_failed`) rather than pretending it
-succeeded.
+Through Resend, from `EMAIL_FROM`, not through Supabase's shared mailer. That
+mailer's few-messages-per-hour project-wide limit no longer applies to invites —
+only to password recovery, which still uses it.
+
+Unlike the reset form, the invite Server Action does **not** hide failures
+behind a neutral message: the admin is not an anonymous caller probing for
+account existence, so `src/lib/auth/invite.ts` reports plainly.
+
+There are two distinct failures, and they are reported differently because the
+admin has to do different things about them:
+
+| What failed | State | What the admin sees | What to do |
+| :--- | :--- | :--- | :--- |
+| `generateLink` — no account was created | `error` | "Could not send the invite. Try again." | Retry the invite |
+| The send — the account **was** created, the invite is pending, no email went out | `warning` | "… was invited, but the email was not sent" | Do **not** retry (it will be refused as a duplicate). Reissue the link (F252), or fix `RESEND_API_KEY`/`EMAIL_FROM` |
+
+The second row is the outcome that did not exist while Supabase sent the mail:
+`inviteUserByEmail` returned success as soon as Supabase accepted the request,
+so an invite that never arrived was indistinguishable from one that did.
+
+Locally, with no `RESEND_API_KEY` set, every invite lands in the `warning` state
+and the message body is written to the dev-server console. That is the intended
+local experience — copy the link out of the log.
 
 ## What happens after the link is clicked
 

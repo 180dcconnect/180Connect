@@ -3,8 +3,12 @@ import { describe, it, mock } from "node:test";
 
 import {
   DUPLICATE_INVITE_MESSAGE,
+  INVITE_EXPIRY_HOURS,
+  escapeHtml,
+  inviteEmail,
   sendInvite,
   type InviteAdminClient,
+  type InviteSender,
   type LookupExistingUser,
 } from "./invite.ts";
 
@@ -28,7 +32,14 @@ function fakeLookupClient(behaviour: LookupBehaviour): {
   return { lookup, calls };
 }
 
-type AdminBehaviour = { ok: true } | { error: string } | { throws: Error };
+type AdminBehaviour =
+  | { ok: true }
+  | { error: string }
+  | { throws: Error }
+  /** Supabase answered without the token the link cannot be built without. */
+  | { noToken: true };
+
+const TOKEN_HASH = "pkce_ab12cd34";
 
 function fakeAdminClient(behaviour: AdminBehaviour): {
   client: InviteAdminClient;
@@ -39,17 +50,50 @@ function fakeAdminClient(behaviour: AdminBehaviour): {
   const client: InviteAdminClient = {
     auth: {
       admin: {
-        async inviteUserByEmail(email, options) {
+        async generateLink({ email, options }) {
           calls.push({ email, redirectTo: options?.redirectTo, data: options?.data });
           if ("throws" in behaviour) throw behaviour.throws;
           if ("error" in behaviour) return { data: null, error: { message: behaviour.error } };
-          return { data: { user: { id: "new-user" } }, error: null };
+          if ("noToken" in behaviour) {
+            return { data: { properties: null, user: { id: "new-user" } }, error: null };
+          }
+          return {
+            data: {
+              properties: { hashed_token: TOKEN_HASH },
+              user: { id: "new-user" },
+            },
+            error: null,
+          };
         },
       },
     },
   };
 
   return { client, calls };
+}
+
+type SendBehaviour =
+  | { status: "sent" }
+  | { status: "skipped" | "failed"; reason: string };
+
+/**
+ * Always injected, never defaulted: without it the real `sendEmail` runs, and
+ * the console transport would print an invite body into the test output.
+ */
+function fakeSender(behaviour: SendBehaviour = { status: "sent" }): {
+  send: InviteSender;
+  sent: { to: string; subject: string; text: string; html: string }[];
+} {
+  const sent: { to: string; subject: string; text: string; html: string }[] = [];
+
+  const send: InviteSender = async (message) => {
+    sent.push(message);
+    return behaviour.status === "sent"
+      ? { status: "sent" }
+      : { status: behaviour.status, reason: behaviour.reason };
+  };
+
+  return { send, sent };
 }
 
 /** Runs `fn` with `logSecurityEvent`'s console.error captured, same as login.test.ts. */
@@ -130,27 +174,49 @@ describe("sendInvite", () => {
     assert.ok(logs.some((log) => log.includes("user.invite_failed")));
   });
 
-  it("reports a send failure as a generic error, without leaking the cause", async () => {
+  it("reports a token-minting failure as a generic error, without leaking the cause", async () => {
     const { lookup } = fakeLookupClient({ row: null });
     const { client: admin } = fakeAdminClient({ error: "email quota exceeded" });
+    const { send, sent } = fakeSender();
 
     const { result, logs } = await silencingLogs(() =>
-      sendInvite(lookup, admin, INVITED_BY, { email: "ada@180dc.org" }, REDIRECT_TO, "180dc.org"),
+      sendInvite(lookup, admin, INVITED_BY, { email: "ada@180dc.org" }, REDIRECT_TO, "180dc.org", {
+        send,
+      }),
     );
 
     assert.equal(result.ok, false);
     if (!result.ok) {
       assert.doesNotMatch(result.state.message ?? "", /quota/);
     }
+    assert.equal(sent.length, 0, "nothing to email when there is no token");
     assert.ok(logs.some((log) => log.includes("user.invite_failed")));
+  });
+
+  it("fails rather than emailing a link it could not build", async () => {
+    const { lookup } = fakeLookupClient({ row: null });
+    const { client: admin } = fakeAdminClient({ noToken: true });
+    const { send, sent } = fakeSender();
+
+    const { result } = await silencingLogs(() =>
+      sendInvite(lookup, admin, INVITED_BY, { email: "ada@180dc.org" }, REDIRECT_TO, "180dc.org", {
+        send,
+      }),
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(sent.length, 0);
   });
 
   it("sends the invite with the inviting admin's id and the redirect URL", async () => {
     const { lookup } = fakeLookupClient({ row: null });
     const { client: admin, calls: adminCalls } = fakeAdminClient({ ok: true });
+    const { send } = fakeSender();
 
     const { result, logs } = await silencingLogs(() =>
-      sendInvite(lookup, admin, INVITED_BY, { email: "Ada@180DC.org" }, REDIRECT_TO, "180dc.org"),
+      sendInvite(lookup, admin, INVITED_BY, { email: "Ada@180DC.org" }, REDIRECT_TO, "180dc.org", {
+        send,
+      }),
     );
 
     assert.equal(result.ok, true);
@@ -164,14 +230,104 @@ describe("sendInvite", () => {
     assert.ok(logs.some((log) => log.includes("user.invited")));
   });
 
+  it("emails a token_hash link on the configured redirect, not Supabase's action link", async () => {
+    const { lookup } = fakeLookupClient({ row: null });
+    const { client: admin } = fakeAdminClient({ ok: true });
+    const { send, sent } = fakeSender();
+
+    await silencingLogs(() =>
+      sendInvite(lookup, admin, INVITED_BY, { email: "ada@180dc.org" }, REDIRECT_TO, "180dc.org", {
+        send,
+        inviterName: "Bashir",
+      }),
+    );
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].to, "ada@180dc.org");
+    const expected = `${REDIRECT_TO}?token_hash=${TOKEN_HASH}&type=invite`;
+    assert.ok(sent[0].text.includes(expected), "the plain-text body carries the full link");
+    // The HTML body carries the same URL with the query separator escaped, which is
+    // what belongs inside an href — a browser reads `&amp;` back as `&`.
+    assert.ok(sent[0].html.includes(expected.replace(/&/g, "&amp;")));
+    assert.match(sent[0].text, /Bashir/);
+  });
+
+  it("reports an undelivered invite as a warning, not a success or an error", async () => {
+    const { lookup } = fakeLookupClient({ row: null });
+    const { client: admin } = fakeAdminClient({ ok: true });
+    const { send } = fakeSender({ status: "failed", reason: "Domain is not verified." });
+
+    const { result } = await silencingLogs(() =>
+      sendInvite(lookup, admin, INVITED_BY, { email: "ada@180dc.org" }, REDIRECT_TO, "180dc.org", {
+        send,
+      }),
+    );
+
+    // ok stays true: the account exists, so the pending invite must still show up.
+    assert.equal(result.ok, true);
+    assert.equal(result.state.status, "warning");
+    assert.match(result.state.message ?? "", /not sent/);
+  });
+
+  it("treats the console transport's skip as undelivered too", async () => {
+    const { lookup } = fakeLookupClient({ row: null });
+    const { client: admin } = fakeAdminClient({ ok: true });
+    const { send } = fakeSender({ status: "skipped", reason: "No RESEND_API_KEY set." });
+
+    const { result } = await silencingLogs(() =>
+      sendInvite(lookup, admin, INVITED_BY, { email: "ada@180dc.org" }, REDIRECT_TO, "180dc.org", {
+        send,
+      }),
+    );
+
+    assert.equal(result.state.status, "warning");
+  });
+
   it("never logs the invited email address itself", async () => {
     const { lookup } = fakeLookupClient({ row: null });
     const { client: admin } = fakeAdminClient({ ok: true });
+    const { send } = fakeSender();
 
     const { logs } = await silencingLogs(() =>
-      sendInvite(lookup, admin, INVITED_BY, { email: "ada@180dc.org" }, REDIRECT_TO, "180dc.org"),
+      sendInvite(lookup, admin, INVITED_BY, { email: "ada@180dc.org" }, REDIRECT_TO, "180dc.org", {
+        send,
+      }),
     );
 
     assert.ok(logs.every((log) => !log.includes("ada@180dc.org")));
+  });
+});
+
+describe("inviteEmail", () => {
+  const link = "https://180connect.vercel.app/auth/confirm?token_hash=abc&type=invite";
+
+  it("puts the link in the plain-text body, not only behind a button", () => {
+    assert.ok(inviteEmail({ link, inviterName: "Bashir" }).text.includes(link));
+  });
+
+  it("names the inviter and the expiry", () => {
+    const { text } = inviteEmail({ link, inviterName: "Bashir" });
+    assert.match(text, /Bashir/);
+    assert.match(text, new RegExp(`${INVITE_EXPIRY_HOURS} hours`));
+  });
+
+  it("escapes a name that would otherwise inject markup into the HTML body", () => {
+    const { html } = inviteEmail({ link, inviterName: '<script>alert("x")</script>' });
+    assert.doesNotMatch(html, /<script>/);
+    assert.match(html, /&lt;script&gt;/);
+  });
+
+  it("escapes the link so a crafted redirect cannot break out of the href", () => {
+    const { html } = inviteEmail({
+      link: 'https://example.com/"><img src=x onerror=alert(1)>',
+      inviterName: "Bashir",
+    });
+    assert.doesNotMatch(html, /<img/);
+  });
+});
+
+describe("escapeHtml", () => {
+  it("escapes the five characters that matter in an attribute or a body", () => {
+    assert.equal(escapeHtml(`<>&"'`), "&lt;&gt;&amp;&quot;&#39;");
   });
 });

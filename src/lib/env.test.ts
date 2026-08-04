@@ -164,6 +164,52 @@ describe("collectEnvProblems", () => {
 
     assert.deepEqual(problems, []);
   });
+
+  it("accepts an environment that sends no email at all", () => {
+    assert.deepEqual(collectEnvProblems(validEnv()), []);
+  });
+
+  it("requires a sender once an email API key is set", () => {
+    const problems = collectEnvProblems({
+      ...validEnv(),
+      RESEND_API_KEY: "re_test_key",
+    });
+
+    assert.equal(problems.length, 1);
+    assert.equal(problems[0].name, "EMAIL_FROM");
+    assert.match(problems[0].problem, /RESEND_API_KEY/);
+  });
+
+  it("accepts an email key paired with a sender", () => {
+    const problems = collectEnvProblems({
+      ...validEnv(),
+      RESEND_API_KEY: "re_test_key",
+      EMAIL_FROM: "180 Connect <no-reply@example.com>",
+    });
+
+    assert.deepEqual(problems, []);
+  });
+
+  it("rejects an email key that is not shaped like a Resend key", () => {
+    const problems = collectEnvProblems({
+      ...validEnv(),
+      RESEND_API_KEY: "sk_live_wrong_provider",
+      EMAIL_FROM: "no-reply@example.com",
+    });
+
+    assert.equal(problems.length, 1);
+    assert.equal(problems[0].name, "RESEND_API_KEY");
+  });
+
+  it("rejects a sender that is not an address", () => {
+    const problems = collectEnvProblems({
+      ...validEnv(),
+      EMAIL_FROM: "180 Connect",
+    });
+
+    assert.equal(problems.length, 1);
+    assert.equal(problems[0].name, "EMAIL_FROM");
+  });
 });
 
 describe("formatEnvProblems", () => {

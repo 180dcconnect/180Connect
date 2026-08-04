@@ -8,15 +8,41 @@ import {
 } from "./permission-denial.ts";
 
 describe("roleFailureMessage", () => {
-  it("shows the RPC's own message for an insufficient_privilege error", () => {
+  it("names the last-admin rail rather than echoing the RPC's raw wording", () => {
     assert.equal(
-      roleFailureMessage({ code: "42501", message: "Only an admin can change roles." }),
-      "Only an admin can change roles.",
+      roleFailureMessage({
+        code: "42501",
+        hint: "last_admin",
+        message: "this would leave the platform with no active admin",
+      }),
+      "You cannot remove the platform's last active admin. Promote another admin first.",
     );
   });
 
-  it("falls back to a generic sentence if 42501 has no message", () => {
-    assert.equal(roleFailureMessage({ code: "42501" }), "The role change was blocked.");
+  it("explains a self-role-change refusal", () => {
+    assert.equal(
+      roleFailureMessage({ code: "42501", hint: "self_role_change" }),
+      "You cannot change your own administrator role.",
+    );
+  });
+
+  it("explains a non-admin refusal", () => {
+    assert.equal(
+      roleFailureMessage({ code: "42501", hint: "not_admin" }),
+      "Only an admin can change a team member's role.",
+    );
+  });
+
+  it("falls back to a generic sentence for a 42501 carrying no hint", () => {
+    assert.equal(
+      roleFailureMessage({ code: "42501", message: "permission denied for table users" }),
+      "The role change was blocked. Refresh and try again.",
+    );
+  });
+
+  it("never puts a raw Postgres message in front of a user", () => {
+    const raw = "permission denied for table users";
+    assert.notEqual(roleFailureMessage({ code: "42501", message: raw }), raw);
   });
 
   it("gives a generic retry message for any other error code", () => {

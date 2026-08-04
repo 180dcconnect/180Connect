@@ -13,12 +13,14 @@ on:
       - 'supabase/**'
       - 'scripts/verify-rls-coverage.sql'
       - 'scripts/verify-anon-lockout.sh'
+      - 'scripts/verify-last-admin-guard.mts'
       - '.github/workflows/migrations.yml'
   pull_request:
     paths:
       - 'supabase/**'
       - 'scripts/verify-rls-coverage.sql'
       - 'scripts/verify-anon-lockout.sh'
+      - 'scripts/verify-last-admin-guard.mts'
       - '.github/workflows/migrations.yml'
   # Manual re-run, e.g. after fixing a failed apply.
   workflow_dispatch:
@@ -101,11 +103,11 @@ jobs:
       - name: RLS behaviour tests
         run: supabase test db
 
-      # Matrix §6 gap 7: proves set_user_role and set_user_active actually serialize
-      # against each other under real concurrency, which pgTAP's single-session
-      # suite structurally cannot exercise (see the script's own header comment).
+      # Matrix §6 gap 7: proves set_user_role, set_user_active and deactivate_user
+      # actually serialize against each other under real concurrency, which pgTAP's
+      # single-session suite structurally cannot exercise (see the script's header).
       - name: Last-admin concurrency guard
-        run: node --env-file-if-exists=.env.local scripts/verify-last-admin-guard.mts
+        run: npm run verify:last-admin
         env:
           SUPABASE_DB_URL: ${{ env.LOCAL_DB_URL }}
 

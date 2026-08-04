@@ -20,6 +20,9 @@ export const DEACTIVATION_HINTS = [
   "destination_not_eligible",
   "reassign_to_self",
   "ambiguous_destination",
+  // Raised indirectly: deactivate_user calls app.guard_last_admin, which raises this
+  // one on its behalf (F012, matrix §6 gap 7).
+  "last_admin",
 ] as const;
 
 export type DeactivationHint = (typeof DEACTIVATION_HINTS)[number];
@@ -40,6 +43,8 @@ const MESSAGES: Record<DeactivationHint, string> = {
     "Clients cannot be reassigned to the member being deactivated.",
   ambiguous_destination:
     "Choose either a new owner or the unowned pool, not both.",
+  last_admin:
+    "You cannot deactivate the platform's last active admin. Promote another admin first.",
 };
 
 function isKnownHint(hint: unknown): hint is DeactivationHint {

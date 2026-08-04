@@ -51,6 +51,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Cheap and first: a stale migration timestamp is a hard `db push` failure on
+      # dev, and the apply job that would reveal it does not run on pull requests.
+      # No credentials and no network beyond a shallow fetch of the base branch, so
+      # it costs seconds and cannot be the flaky step. See the script's header.
+      - name: Migration timestamps are ahead of the base branch
+        if: github.event_name == 'pull_request'
+        # Via env, not interpolated into the command: a ref name is attacker-shaped
+        # input, and `${{ }}` is substituted before the shell ever sees it.
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: scripts/verify-migration-order.sh "$BASE_REF"
+
       - uses: supabase/setup-cli@v1
         with:
           # Pinned, not `latest`. Resolving `latest` costs an unauthenticated

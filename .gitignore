@@ -48,8 +48,12 @@ yarn-error.log*
 # vercel
 .vercel
 
-# local Claude Code tool state — personal to each contributor's machine
-.claude/
+# local Claude Code tool state — personal to each contributor's machine. Scoped
+# to the local files rather than all of .claude/, so shared settings and skills
+# can still be committed for the team.
+.claude/settings.local.json
+.claude/projects/
+.claude/todos/
 
 # typescript
 *.tsbuildinfo

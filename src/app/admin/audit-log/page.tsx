@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentActor } from "@/lib/auth/actor";
+import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
 
 // Matches supabase/migrations/20260723100000_create_audit_log.sql. No generated
@@ -28,11 +29,10 @@ export default async function AuditLogPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const authorization = await getCurrentActor("user:manage");
-  if (!authorization.ok) {
-    if (authorization.reason === "unauthenticated") redirect("/login");
-    redirect("/dashboard?error=admin-access-required");
-  }
+  const authorization = await getCurrentActor("user:manage", {
+    route: "/admin/audit-log",
+  });
+  if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
   const supabase = await createClient();
 

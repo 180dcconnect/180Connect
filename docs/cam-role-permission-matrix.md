@@ -19,28 +19,60 @@ the same check that gates `/admin`, `/admin/users`, and `/admin/audit-log`
 today (F016). Database tables must also enforce access with RLS. The
 authoritative database-level matrix is `docs/rls-permission-matrix.md`.
 
+## How an admin route refuses a CAM
+
+All three admin pages run the same two lines, and nothing else stands between a
+typed URL and the page:
+
+```ts
+const authorization = await getCurrentActor("user:manage", { route: "/admin" });
+if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
+```
+
+`adminRouteDestination` (`src/lib/auth/admin-route.ts`) is the whole boundary,
+which is why it is a pure function with its own tests rather than a branch
+copied into each page. It splits two different situations that look alike:
+
+- **`forbidden`** — a working session belonging to someone who simply is not an
+  admin. They land on `/dashboard`, which reads `?error=admin-access-required`
+  and tells them the page is restricted. A refusal the user cannot see is a bug.
+- **anything else** (`unauthenticated`, `not_approved`, `inactive`,
+  `profile_missing`) — the session itself is unusable. `/dashboard` refuses all
+  four too, so these go straight to `/login` rather than through a redirect the
+  user never sees.
+
+Both the refusal and the denial log line carry the route, so
+`permission.denied` records which screen was reached for, not just which
+permission was missing.
+
 ## Default role
 
 `public.users.role` defaults to `'cam'`
 (`supabase/migrations/20260722103000_create_users.sql`), so a newly created
 user is a CAM unless an admin explicitly promotes them via
-`public.set_user_role`. There is no invite flow yet (F008 "Invite New CAM"
-and F009 "Accept Invite" are both still open), so this default hasn't been
-exercised in practice. Once that flow lands, it shouldn't need to set a role
-explicitly — this default should just apply.
+`public.set_user_role`.
+
+The invite flow (F008) now exercises this. `app.handle_new_auth_user()` inserts
+only `(id, email, invited_by_user_id, invited_at)` when Supabase Auth creates
+the invited user — it never names `role`, so the column default is what assigns
+it. An invited person is therefore a CAM by construction, with no application
+code choosing it, and an admin promoting them afterwards goes through the RPC.
+`tests.suite_default_role` in `supabase/tests/rls_policies.test.sql` pins both
+halves, because a change to that one default would otherwise turn every future
+invitee into an administrator with nothing in the diff to notice.
 
 ## What a CAM can reach today
 
-Only `/dashboard` exists as a real, CAM-accessible route right now. It shows
-placeholder cards (client database, client profiles, email
-generation & review, and "my actions") reserved for CAM and Admin — these
-are frontend stubs only, with no backing data or routes yet, and are hidden
-from `viewer` accounts. The features themselves — the client database and
-profile pages, and email generation/review/sending — aren't built yet, for
-any role. They belong to their own tickets. Once they exist, this doc needs
-updating to describe their real, per-table access rules (via
-`hasPermission`/RLS), not the current placeholder gating.
+`/dashboard` is the only route a CAM can reach right now, and it deliberately
+shows them nothing but their role and a plain sentence saying so. The dashboard
+builds its links from `NAV_ITEMS` (`src/lib/nav.ts`), which lists only routes
+that exist — a tile for an unbuilt feature costs the user a click to discover
+it is not there, so the client database, client profiles, and email
+generation/review/sending get no placeholder. They are not built for any role
+yet and belong to their own tickets; when they ship they join `NAV_ITEMS` with
+the permission they already enforce server-side, and this doc gains their real
+per-table rules.
 
-"Approvals" and "Team Pipeline View" are likewise placeholder cards inside
-`/admin`, not separate routes yet — there is nothing beyond `/admin` itself
-for a CAM to be blocked from there today.
+"Approvals" and "Team Pipeline View" are tiles inside `/admin`, not separate
+routes — so beyond `/admin`, `/admin/users` and `/admin/audit-log` there is
+nothing further for a CAM to be blocked from today.

@@ -9,7 +9,7 @@ import { useEffect, useRef } from "react";
  *   1. source photo -> work canvas (cover fit), tilt-shift blur applied
  *   2. colour adjustments (brightness/contrast/saturation/grayscale/tint)
  *   3. grid of `cellSize` cells, average colour + luminance sampled per cell
- *   4. background layer (`bgMode`) drawn, then a glyph per cell
+ *   4. background layer (`bgMode`) drawn, then a mark of ink per cell
  *   5. post-effects from `pfx`, in the documented order
  *
  * Cell sampling only re-runs on resize; the animation loop just re-shades
@@ -24,9 +24,19 @@ const CHAR_SETS = {
 } as const;
 
 export type AsciiConfig = {
+  /** "dots" is the halftone look; "characters" swaps dots for glyphs. */
+  renderMode: "dots" | "characters";
   cellSize: number;
   charSet: keyof typeof CHAR_SETS;
   customChars: string;
+  /** Colour of the mark drawn per cell. Dark ink over a light photo. */
+  ink: string;
+  /** 0..100, opacity of the ink at its densest. */
+  inkOpacity: number;
+  /** 0..100, how much `bgColor` is washed over the photo behind the ink. */
+  wash: number;
+  /** Cover-fit crop anchor: 0 keeps the top of the photo, 100 the bottom. */
+  focalY: number;
   /** -100..100, 0 = neutral */
   brightness: number;
   /** 0..255, 128 = neutral */
@@ -76,15 +86,25 @@ export type AsciiConfig = {
   };
 };
 
-/** The "Forest" preset. */
+/**
+ * The "Forest" preset: dark halftone ink printed over the photo, which stays
+ * in colour underneath. Density tracks darkness, so a pale sky fades to bare
+ * paper and the treeline packs into near-solid ink.
+ */
 export const FOREST: AsciiConfig = {
-  cellSize: 10,
+  renderMode: "dots",
+  cellSize: 8,
   charSet: "standard",
   customChars: "",
-  brightness: 0,
-  contrast: 128,
-  saturation: 0,
-  grayscale: 100,
+  ink: "#121820",
+  inkOpacity: 82,
+  brightness: 14,
+  contrast: 104,
+  saturation: 108,
+  /** Paper wash: white pulled over the photo so the ink has somewhere to sit. */
+  wash: 30,
+  focalY: 22,
+  grayscale: 0,
   tint: "#3ca6ff",
   tintOpacity: 0,
   overlayBlend: "multiply",
@@ -92,23 +112,23 @@ export const FOREST: AsciiConfig = {
   coverage: 100,
   density: 0,
   edgeEmphasis: 0,
-  bgMode: "blur",
-  bgBlur: 2,
-  bgOpacity: 90,
-  bgColor: "#000000",
-  blurType: "tilt",
+  bgMode: "photo",
+  bgBlur: 0,
+  bgOpacity: 100,
+  bgColor: "#ffffff",
+  blurType: "none",
   blurAmount: 30,
   tiltFocus: 35,
   tiltPosition: 50,
   tiltFeather: 15,
   animated: true,
   animStyle: "shimmer",
-  animSpeed: 100,
-  animIntensity: 60,
+  animSpeed: 60,
+  animIntensity: 30,
   pfx: {
-    chromatic: { enabled: true, intensity: 20 },
-    halftone: { enabled: true, intensity: 20 },
-    filmDust: { enabled: true, intensity: 20 },
+    chromatic: { enabled: false, intensity: 20 },
+    halftone: { enabled: false, intensity: 20 },
+    filmDust: { enabled: false, intensity: 20 },
     vignette: { enabled: false, intensity: 58 },
     scanLines: { enabled: false, intensity: 40 },
   },
@@ -116,17 +136,22 @@ export const FOREST: AsciiConfig = {
 
 type Cell = { x: number; y: number; lum: number; hash: number };
 
-/** Draw `img` into `ctx` at cover fit for a w x h box. */
+/**
+ * Draw `img` into `ctx` at cover fit for a w x h box. `focalY` picks which
+ * band of the photo survives the crop: 0 keeps the top, 100 the bottom. Lower
+ * values push the image down the viewport and leave more sky above.
+ */
 function drawCover(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement,
   w: number,
   h: number,
+  focalY: number,
 ) {
   const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
   const dw = img.naturalWidth * scale;
   const dh = img.naturalHeight * scale;
-  ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  ctx.drawImage(img, (w - dw) / 2, (h - dh) * (focalY / 100), dw, dh);
 }
 
 export default function AsciiBackground({
@@ -177,7 +202,7 @@ export default function AsciiBackground({
       work.height = h;
       const wctx = work.getContext("2d")!;
 
-      drawCover(wctx, image, w, h);
+      drawCover(wctx, image, w, h, cfg.focalY);
 
       if (cfg.blurType === "tilt" && cfg.blurAmount > 0) {
         const blurred = document.createElement("canvas");
@@ -239,7 +264,11 @@ export default function AsciiBackground({
       return graded;
     }
 
-    /** One glyph per luminance bucket, pre-rendered so frames are drawImage-only. */
+    /**
+     * One mark per luminance bucket, pre-rendered so frames are drawImage-only.
+     * The mark is ink laid on top of the photo, so it scales with *darkness*:
+     * a blown-out sky leaves bare paper, shadow packs the cell solid.
+     */
     function buildAtlas() {
       const cfg = cfgRef.current;
       const chars = cfg.customChars || CHAR_SETS[cfg.charSet];
@@ -252,20 +281,33 @@ export default function AsciiBackground({
       actx.textBaseline = "middle";
 
       for (let i = 0; i < ATLAS_STEPS; i++) {
-        let t = (i + 0.5) / ATLAS_STEPS;
-        if (cfg.invert) t = 1 - t;
-        const ci = Math.min(
-          chars.length - 1,
-          Math.round(t * (chars.length - 1) + (cfg.density / 100) * 1.5),
-        );
-        const ch = chars[ci];
-        if (ch === " ") continue;
-        const size = cfg.cellSize * dpr * (0.72 + 0.5 * t);
-        const shade = Math.round(60 + 195 * t);
-        actx.font = `${size}px ui-monospace, "SFMono-Regular", Menlo, monospace`;
-        actx.fillStyle = `rgb(${shade},${shade},${shade})`;
-        actx.fillText(ch, i * tile + tile / 2, tile / 2);
+        const lum = (i + 0.5) / ATLAS_STEPS;
+        // Ink coverage: 0 at white, 1 at black, unless inverted.
+        let d = cfg.invert ? lum : 1 - lum;
+        d = Math.min(1, Math.max(0, d + cfg.density / 100));
+        if (d <= 0.02) continue;
+
+        const centre = i * tile + tile / 2;
+        actx.globalAlpha = (cfg.inkOpacity / 100) * Math.min(1, 0.35 + d);
+        actx.fillStyle = cfg.ink;
+
+        if (cfg.renderMode === "characters") {
+          const ci = Math.min(chars.length - 1, Math.round(d * (chars.length - 1)));
+          const ch = chars[ci];
+          if (ch === " ") continue;
+          const size = cfg.cellSize * dpr * (0.72 + 0.5 * d);
+          actx.font = `${size}px ui-monospace, "SFMono-Regular", Menlo, monospace`;
+          actx.fillText(ch, centre, tile / 2);
+        } else {
+          // Capped just under half the cell so even the darkest cells keep a
+          // gap: the grid stays legible instead of plugging up into a black mass.
+          const r = (tile / 2) * 0.92 * Math.pow(d, 0.72);
+          actx.beginPath();
+          actx.arc(centre, tile / 2, r, 0, Math.PI * 2);
+          actx.fill();
+        }
       }
+      actx.globalAlpha = 1;
     }
 
     function buildHalftone() {
@@ -306,13 +348,19 @@ export default function AsciiBackground({
       bctx.fillRect(0, 0, bgLayer.width, bgLayer.height);
       if (cfg.bgMode !== "none" && cfg.bgMode !== "color") {
         bctx.save();
-        // Held well under the glyph layer: the blurred photo is an underlay,
-        // not a second copy of the image competing with the ASCII.
-        bctx.globalAlpha = (cfg.bgOpacity / 100) * 0.45;
-        if (cfg.bgMode === "blur") bctx.filter = `blur(${cfg.bgBlur * 8}px)`;
+        bctx.globalAlpha = cfg.bgOpacity / 100;
+        if (cfg.bgMode === "blur" && cfg.bgBlur > 0) {
+          bctx.filter = `blur(${cfg.bgBlur * 4}px)`;
+        }
         bctx.scale(dpr, dpr);
         bctx.drawImage(graded, 0, 0, cssW, cssH);
         bctx.restore();
+      }
+      if (cfg.wash > 0) {
+        bctx.globalAlpha = cfg.wash / 100;
+        bctx.fillStyle = cfg.bgColor;
+        bctx.fillRect(0, 0, bgLayer.width, bgLayer.height);
+        bctx.globalAlpha = 1;
       }
 
       // Step 2: average luminance per cell.

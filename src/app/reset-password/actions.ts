@@ -85,6 +85,18 @@ export async function setNewPassword(
   // again with the password that is now the right one.
   cookieStore.delete(RECOVERY_COOKIE_NAME);
 
+  // Setting a first password is what accepts an invite (F008) — not clicking the
+  // emailed link, which only proves the mailbox is readable. This is the shared
+  // landing for recovery and invites, and the RPC is a no-op for anyone without a
+  // pending invite, so it is called unconditionally rather than trying to tell the
+  // two apart here. Must run before signOutAndReport, which ends the session it
+  // authorises against. A failure leaves the invite showing as pending, which the
+  // admin can see and act on — better than blocking a password that already changed.
+  const { error: acceptError } = await supabase.rpc("mark_invite_accepted");
+  if (acceptError) {
+    logAuthError("user.invite_accept_failed", acceptError);
+  }
+
   // Revoke every other session, so a reset prompted by a suspected compromise
   // actually ends the intruder's access. `signOutAndReport` records a failure
   // rather than throwing (F006) — the redirect below has to happen either way.

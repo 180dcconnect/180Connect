@@ -55,6 +55,9 @@ The other two stores are not banned, they are just narrower:
   something. It now does, in two workflows; see the register below.
 - **Supabase secrets** — only for Edge Functions, which read their own store
   rather than Vercel's. We have none yet.
+- **Supabase Auth SMTP** — one field, holding a Resend API key, because
+  Supabase sends password-recovery mail itself and cannot read Vercel's
+  environment. See [The Resend key lives in four places](#the-resend-key-lives-in-four-places).
 
 ### GitHub Actions secrets and variables
 
@@ -95,6 +98,64 @@ Because these live in repository-level storage, every workflow in the repo can
 read them, and anyone who can merge a workflow file can exfiltrate them. That is
 accepted for now given the team size and a private repo, but it is the reason
 workflow changes deserve a real review rather than a rubber stamp.
+
+## The Resend key lives in four places
+
+Every other secret in this document has one home. This one does not, and the
+reason is that two different systems send email on our behalf:
+
+| Where | Who reads it | What breaks if it is wrong |
+| --- | --- | --- |
+| `.env.local` | your dev server | Invites log to the console instead of sending |
+| Vercel → Preview | staging | Invites on staging silently land in the `warning` state |
+| Vercel → Production | production | Same, in production |
+| Supabase → Project Settings → Authentication → SMTP | Supabase Auth | **Password recovery stops working**, for everyone, with no error on the page |
+
+The last row is the one that catches people. Supabase Auth runs on Supabase's
+infrastructure and cannot read Vercel's environment, so it needs its own copy of
+a sending credential. And the reset form deliberately shows the same "if an
+account exists, we've sent instructions" message whether or not the send
+succeeded — see `docs/auth/recovery-email.md` — so a dead SMTP credential looks
+exactly like a working one from the browser. Nobody finds out until somebody
+locked out of their account says so.
+
+### Use two keys, not one
+
+Create a **separate Resend API key for the Supabase SMTP field**, named so it is
+obvious which is which (`180connect-app`, `180connect-supabase-smtp`). One key
+in both places means rotating for either reason takes down the other, and the
+failure is silent on the auth side.
+
+*(As of 4 Aug 2026 staging uses the same key in both. Splitting it is the first
+thing to do at the next rotation.)*
+
+### Rotation order
+
+Rotate **outwards from the app**, and never revoke the old key until every
+consumer holds the new one. Resend allows multiple live keys, so there is no
+window in which nothing works — unless you revoke first.
+
+1. Create the new key in Resend. Do not touch the old one.
+2. Update `.env.local`, restart the dev server, send yourself an invite.
+3. `vercel env rm` then `vercel env add` for **Preview**. Redeploy. Send an
+   invite on staging.
+4. Same for **Production**.
+5. Update the Supabase SMTP field — **staging project and production project
+   separately**, they do not share settings.
+6. Verify recovery mail actually sends: request a password reset and confirm it
+   arrives. The form will not tell you if it failed; check the inbox, or
+   `API_HEALTH_LOGS` for `operation: "password-reset-request"`, `ok: false`.
+7. Only now revoke the old key in Resend.
+
+Step 6 is not optional. It is the only step that proves the row that fails
+silently is actually working.
+
+### Changing the sending domain
+
+The same walk, plus `EMAIL_FROM` in each of the three application stores and the
+sender address in each Supabase SMTP field. An unverified sender is refused
+outright, so this one fails loudly on the app side and silently on the auth
+side — same asymmetry, same reason to finish with step 6.
 
 ## Onboarding a new developer
 

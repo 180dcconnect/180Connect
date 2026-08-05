@@ -6,7 +6,9 @@ import {
   deactivationFailureStatus,
 } from "@/lib/auth/deactivation";
 import { canChangeAccess, canChangeRole } from "@/lib/auth/permissions";
+import { logRoleChangeDenial, roleFailureMessage } from "@/lib/auth/permission-denial";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
 
@@ -61,6 +63,8 @@ function accessFailureMessage(hint: string | null | undefined): string {
       return "You cannot suspend your own account.";
     case "not_admin":
       return "Only an admin can change a team member's access.";
+    case "last_admin":
+      return "You cannot suspend the platform's last active admin. Promote another admin first.";
     default:
       return "The access change was blocked. Refresh and try again.";
   }
@@ -228,8 +232,30 @@ export async function PATCH(request: Request) {
         operation: "admin.users.set_role",
         targetUserId: parsed.data.userId,
       });
+
+      // A blocked write is one of the two "observable" denial cases (matrix §4)
+      // and must leave its own record — set_user_role only writes audit_log on
+      // success. authenticated has no INSERT grant on audit_log (by design, so a
+      // client can never forge an entry), so this goes through the service-role
+      // client, the other writer audit_log's own migration names as legitimate.
+      if (roleError.code === "42501") {
+        const admin = createAdminClient();
+        const { error: denialLogError } = await logRoleChangeDenial(admin, {
+          actorId: authorization.actor.id,
+          targetUserId: parsed.data.userId,
+          attemptedRole: parsed.data.role,
+          reason: roleError.message,
+        });
+        if (denialLogError) {
+          await reportError(denialLogError, {
+            operation: "admin.users.log_role_denial",
+            targetUserId: parsed.data.userId,
+          });
+        }
+      }
+
       return NextResponse.json(
-        { error: "The role change was blocked. Refresh and try again." },
+        { error: roleFailureMessage(roleError) },
         { status: roleError.code === "42501" ? 403 : 500 },
       );
     }

@@ -6,7 +6,6 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { hasPermission } from "@/lib/auth/permissions";
 import { navItemsFor } from "@/lib/nav";
 import Link from "next/link";
-import { logout } from "./actions";
 
 export default async function DashboardPage({
   searchParams,
@@ -101,11 +100,6 @@ export default async function DashboardPage({
             reporting will appear here as they are released.
           </p>
         )}
-        <form action={logout} className="mt-8">
-          <button type="submit" className="rounded-full border border-black/10 px-5 py-2 text-sm font-bold hover:bg-black/5">
-            Log out
-          </button>
-        </form>
       </section>
     </main>
   );

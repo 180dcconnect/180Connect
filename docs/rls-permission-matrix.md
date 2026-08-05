@@ -155,6 +155,19 @@ Measured on GoTrue v2.193.1: with the session row gone, `GET /auth/v1/user` goes
 a user id, and GoTrue has no by-user-id logout endpoint. `deactivate_user` revokes the
 same way.
 
+Which addresses may hold an account at all is decided one layer lower, by
+`public.check_allowed_email_domain()` — a BEFORE INSERT trigger on `auth.users`
+reading `app.allowed_email_domains` (20260804160000). It replaced a function that
+hardcoded `'%@180dc.org'`, so an environment can now permit an extra domain for
+testing with an INSERT rather than an edit to a security control. It fails closed
+twice over: an empty table permits nothing, and an environment nobody configures
+keeps only the seeded `180dc.org`, so production stays restricted by default and
+needs no action to re-lock at the end of a testing period. `AUTH_ALLOWED_EMAIL_DOMAIN`
+mirrors the list for the application's own validation and is deliberately *not*
+authoritative — widening it alone changes a form message and admits nobody. The
+table is in `app`, unreachable through PostgREST, with RLS on and no policies.
+Recipe in [`auth/invite-email.md`](auth/invite-email.md).
+
 `deactivated_at` (F014) is written only by `public.deactivate_user(user_id, reason,
 reassign_to, release_clients)` and cleared only by `set_user_active(..., true)`. It is a
 **marker, not a gate**: `is_active` alone decides whether anyone may log in or read a
@@ -433,11 +446,20 @@ RLS, so a suite written against it proves nothing.
 | 10 | log entry created | Test 3 produces exactly one `AUDIT_LOG` row |
 | 11 | bypass attempt | Direct PostgREST call with `anon` key against every table → 0 rows / `42501` |
 | 12 | coverage gate | No table in `public` has `rowsecurity = false` or zero policies |
+| 13 | concurrency | Two admins race each other — one calls `set_user_role` to demote the other while the second removes them via `set_user_active` or `deactivate_user` — and the platform is left with exactly one active admin, never zero |
 
 Test 11 is the acceptance criterion "even if the application-layer permission check
 were bypassed". It must be run against the API, not through the app's own client.
 
 Test 12 is sequence step 15, run in CI on every migration.
+
+Test 13 needs two real, concurrently-open connections to reproduce — a single-session
+pgTAP suite cannot serialize against itself. It lives in
+[`scripts/verify-last-admin-guard.mts`](../scripts/verify-last-admin-guard.mts), run
+as its own CI step alongside `supabase test db` rather than inside the pgTAP file. It
+runs the race once per RPC that can remove an admin from the active set; a new one
+added without a row there is a gap that reopens silently. Local stacks only — it
+writes `auth.users` rows directly and refuses any hosted project.
 
 ---
 
@@ -480,13 +502,28 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    self-change, writes an `audit_log` row (`user_suspended` / `user_reactivated`).
    Suspension is `is_active = false` — one flag, not a new state; F014 reuses it rather
    than adding an `account_status` enum.
-7. **`set_user_role` can demote the last active admin.** `set_user_active` cannot
+7. ~~**`set_user_role` can demote the last active admin.**~~ **RESOLVED — F012 (#14),
+   `20260804153000_last_admin_guard.sql`, 4 Aug 2026.** `set_user_active` cannot
    suspend its way to zero admins — the self-change refusal means the caller is always
-   a surviving active admin. `set_user_role` carries no equivalent guard, so two admins
-   acting on each other concurrently (B demotes A while A suspends B) can commit to an
-   organisation with no active admin, which nothing in the app can then reverse:
-   `role` and `is_active` are both writable only through these two RPCs. The fix is a
-   last-admin guard inside `set_user_role`. **Open — belongs to F012.**
+   a surviving active admin. `set_user_role` carried no equivalent guard, so two admins
+   acting on each other concurrently (B demotes A while A suspends B) could commit to
+   an organisation with no active admin, which nothing in the app could then reverse.
+
+   A guard added to `set_user_role` alone would not have closed this: `set_user_active`
+   would still act on state it read before `set_user_role`'s change committed. Every RPC
+   that can remove an admin from the active set now calls `app.guard_last_admin(uuid)`,
+   which takes a shared `pg_advisory_xact_lock` before counting active admins, so a
+   concurrent call to any of them serializes against the others and re-reads the count
+   fresh. Proven under real concurrency (not just asserted) by
+   [`scripts/verify-last-admin-guard.mts`](../scripts/verify-last-admin-guard.mts),
+   which opens genuinely concurrent connections — see §5 row 13.
+
+   **Three RPCs, not two.** `role` and `is_active` are writable only through
+   `set_user_role`, `set_user_active` and — since F014 — `deactivate_user`, which sets
+   `is_active = false` on its own path. A guard on the first two would have left the
+   same race open through the third (B deactivates A while A demotes B), so all three
+   take the lock. Any future RPC that writes either column has to call the guard too;
+   that is the whole reason the lock lives in one shared function rather than inline.
 8. ~~**`revokeUserSessions` cannot work as written — sessions are never actually
    revoked.**~~ **Resolved on the F013 branch, 30 Jul 2026** —
    `20260729232500_revoke_sessions_on_suspend.sql` moved revocation into the database

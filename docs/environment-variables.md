@@ -221,6 +221,9 @@ NEXT_PUBLIC_SENTRY_DSN=<redacted>
 | `NEXT_PUBLIC_SENTRY_DSN` | dev-dsn | prod-dsn | Always | Public error reporting endpoint — where captured errors are sent (F226). Unset ⇒ errors log to the platform console instead |
 | `SENTRY_ENVIRONMENT` | `staging` | `production` | Only server-side | Environment tag on captured errors (F226). Optional — falls back to `VERCEL_ENV` |
 | `SUPABASE_DB_URL` | session-pooler string | not set | Only server-side | **SENSITIVE:** Read by `npm run seed` / `npm run seed:clear` only, never by the app. Use the session pooler string, not the IPv6-only direct one. The scripts refuse to run against production ([docs](seed-data.md)) |
+| `RESEND_API_KEY` | staging key; **unset locally** | prod key | Only server-side | **SENSITIVE:** Transactional platform email only — the F008 invite, never client outreach ([docs](email-sending.md)). Unset ⇒ `src/lib/email/send.ts` logs each message instead of sending, which is what you want locally |
+| `EMAIL_FROM` | sender on the verified staging domain | sender on the 180DC domain | Only server-side | **Required whenever `RESEND_API_KEY` is set** — startup fails on a key with no sender. Domain must be verified in Resend; `onboarding@resend.dev` is not a substitute (it only delivers to the account owner) |
+| `EMAIL_RECIPIENT_ALLOWLIST` | `180dc.org` + testers' addresses | **not set** | Only server-side | Recipients transactional email may reach; anything else is dropped and logged. Unset = no restriction, correct for production. Set it anywhere a seeded charity contact could be emailed by accident |
 
 > The authoritative list is `SCHEMA` in [`src/lib/env.ts`](../src/lib/env.ts),
 > mirrored into [`.env.example`](../.env.example) — startup validation is driven

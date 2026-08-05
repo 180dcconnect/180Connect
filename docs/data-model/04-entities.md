@@ -127,6 +127,9 @@
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last updated timestamp | System | Auto-updated on any change | Tracks when the account was last modified, used to audit role changes, name updates, and deactivations |
 | is_seed | boolean |  | No | Flag for seed data | System/Human | Set in the seed data script | False by default |
+| deactivated_at | timestamp |  | Yes | When the account was deactivated | System | Set by deactivate_user; cleared on reactivation | Null on active and on merely, suspended accounts; distinguishes deactivation from suspension |
+| invited_at | timestamp |  | Yes | When an admin invite created this row | System | Set by app.handle_new_auth_user from the invite's raw_user_meta_data | Null for rows not created by an invite (seed rows, first bootstrapped admin). Set with invite_accepted_at null = a pending invite |
+| invite_accepted_at | timestamp |  | Yes | When the invited person first confirmed their email | System | Set by app.handle_auth_user_confirmed when email_confirmed_at goes non-null | Null while invite pending. Setting it moves the row out of the admin's pending-invites list |
 
 ## NOTES
 
@@ -158,3 +161,21 @@
 | tag_id | uuid | TAGS | No | Tag being applied | System | Set when tag is applied |  |
 | added_by_user_id | uuid | USERS | No | Who applied the tag | System | Set to logged-in user |  |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+
+## ACTIONS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| organisation_id | uuid | ORGANISATIONS | No | Client this action belongs to | System | Set when the action is created | Deleting the organisation deletes its actions |
+| assignee_user_id | uuid | USERS | Yes | CAM responsible for doing the action | Human | Set at creation; changed only by the F257 reassignment RPC | Null if the assignee's account row is deleted |
+| created_by_user_id | uuid | USERS | Yes | Who created the action | System | Set to logged-in user at creation | Null if the creator's account row is deleted |
+| title | text |  | No | Short description of the work | Human | Typed by CAM or admin |  |
+| description | text |  | Yes | Longer detail | Human | Typed by CAM or admin |  |
+| due_date | date |  | Yes | When the action is due | Human | Chosen by CAM or admin | Drives the F172 overdue warning |
+| remind_at | timestamp |  | Yes | When to remind the assignee | Human | Chosen by CAM or admin | A reminder is a field on the action, not a separate table |
+| status | enum |  | No | open, completed, cancelled | System | open at creation; changed by CAM or admin |  |
+| completed_at | timestamp |  | Yes | When the action was marked complete | System | Set when status becomes completed | Null while open or cancelled |
+| is_seed | boolean |  | No | Marks a row created by the seed script | System | Set by scripts/seed.mts | Mirrors ORGANISATIONS.is_seed |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+| updated_at | timestamp |  | No | Last edit timestamp | System | Updated on edit |  |

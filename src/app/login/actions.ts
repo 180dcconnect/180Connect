@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { readUserActiveStatus } from "@/lib/supabase/admin";
 import {
-  allowedEmailDomain,
+  allowedEmailDomains,
   attemptLogin,
   normalizeEmail,
   SERVICE_UNAVAILABLE_MESSAGE,
@@ -52,7 +52,7 @@ export async function login(
         password: formData.get("password"),
         captchaToken: formData.get("cf-turnstile-response"),
       },
-      allowedEmailDomain(),
+      allowedEmailDomains(),
       throttle,
       // F013: reads users.is_active bypassing RLS, which the signed-in client
       // cannot do for a suspended user — their own row is invisible to them.

@@ -1,4 +1,4 @@
--- Rollback for 20260803120000_unify_offboarding_reassignment.sql
+-- Rollback for 20260804170000_unify_offboarding_reassignment.sql
 --
 -- Restores both functions to their pre-unification bodies by re-running the two
 -- migrations that defined them. Both use CREATE OR REPLACE, so replaying them is the

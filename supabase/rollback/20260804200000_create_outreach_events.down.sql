@@ -1,4 +1,4 @@
--- Rollback for 20260803150000_create_outreach_events.sql
+-- Rollback for 20260804200000_create_outreach_events.sql
 --
 -- Drops the delivery, reply and outcome tables and their four enums.
 --

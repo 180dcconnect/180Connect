@@ -1822,7 +1822,7 @@ $$;
 -- ---------------------------------------------------------------------------
 -- deactivate_user and reassign_ownership are one path (F014 + F257)
 -- ---------------------------------------------------------------------------
--- Regression suite for 20260803120000. Before that migration deactivate_user moved
+-- Regression suite for 20260804170000. Before that migration deactivate_user moved
 -- organisations.owner_id itself and never touched public.actions, so offboarding
 -- stranded every open action on a closed account. Uses its own identities: the shared
 -- fixture users are deactivated by other suites in this same transaction.
@@ -1905,7 +1905,7 @@ begin
   select owner_id into v_owner from public.organisations where id = v_org_own;
   return next is(v_owner, v_taker, 'deactivation moves the leaver''s client to the successor');
 
-  -- The regression. This assertion fails against the pre-20260803120000 function.
+  -- The regression. This assertion fails against the pre-20260804170000 function.
   select assignee_user_id into v_assignee from public.actions where id = v_act_own;
   return next is(v_assignee, v_taker,
     'deactivation moves the open action on that client, not just the client');

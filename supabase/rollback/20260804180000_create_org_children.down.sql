@@ -1,4 +1,4 @@
--- Rollback for 20260803130000_create_org_children.sql
+-- Rollback for 20260804180000_create_org_children.sql
 --
 -- Drops all six step-4.0 tables and their enums. This discards every note, contact,
 -- filing, grant and enrichment record: none of this data exists anywhere else in the

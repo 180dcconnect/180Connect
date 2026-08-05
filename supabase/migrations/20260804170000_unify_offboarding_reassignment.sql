@@ -44,7 +44,7 @@
 --   Documentation | Matrix §2 and §3.11 updated.
 --                 | Approved by Bashir (Project Leader), 3 Aug 2026.
 --
--- Reversibility: paired rollback in ../rollback/20260803120000_unify_offboarding_reassignment.down.sql
+-- Reversibility: paired rollback in ../rollback/20260804170000_unify_offboarding_reassignment.down.sql
 
 create or replace function public.reassign_ownership(
   p_organisation_ids uuid[],

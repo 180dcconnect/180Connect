@@ -1,4 +1,4 @@
--- Rollback for 20260803140000_create_outreach.sql
+-- Rollback for 20260804190000_create_outreach.sql
 --
 -- Drops the outreach tables and the send_status enum. This discards every draft and
 -- every record of what was actually sent. Sent messages exist nowhere else in the

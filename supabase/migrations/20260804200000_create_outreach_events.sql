@@ -34,7 +34,7 @@
 --   Documentation | Already in Data Model tab 07; no spreadsheet change needed.
 --                 | Approved by Bashir (Project Leader), 3 Aug 2026.
 --
--- Reversibility: paired rollback in ../rollback/20260803150000_create_outreach_events.down.sql
+-- Reversibility: paired rollback in ../rollback/20260804200000_create_outreach_events.down.sql
 
 create type public.send_event_type as enum ('sent', 'delivered', 'bounced', 'opened');
 create type public.reply_sentiment as enum ('positive', 'neutral', 'negative');

@@ -31,7 +31,7 @@
 --   Documentation | Already in Data Model tabs 02 and 04; no spreadsheet change needed.
 --                 | Approved by Bashir (Project Leader), 3 Aug 2026.
 --
--- Reversibility: paired rollback in ../rollback/20260803130000_create_org_children.down.sql
+-- Reversibility: paired rollback in ../rollback/20260804180000_create_org_children.down.sql
 
 -- Enum values are exactly those in Data Model tab 04. A committed enum value cannot be
 -- dropped in Postgres, so extending any of these needs the Wednesday-call agreement

@@ -33,7 +33,7 @@
 --   Documentation | Already in Data Model tab 07; no spreadsheet change needed.
 --                 | Approved by Bashir (Project Leader), 3 Aug 2026.
 --
--- Reversibility: paired rollback in ../rollback/20260803140000_create_outreach.down.sql
+-- Reversibility: paired rollback in ../rollback/20260804190000_create_outreach.down.sql
 
 create type public.send_status as enum ('draft', 'scheduled', 'sent', 'failed');
 

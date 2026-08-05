@@ -1,5 +1,7 @@
 -- Migration: unify_offboarding_reassignment
--- Sequence: addition (after create_reassign_ownership_rpc and create_deactivate_user_rpc).
+-- Sequence: addition (after create_reassign_ownership_rpc, create_deactivate_user_rpc
+--   and last_admin_guard — this `create or replace`s deactivate_user again and must
+--   carry the app.guard_last_admin() call forward or it silently reverts gap 7).
 -- Stories: F257 Reassign CAM When Offboarded + F014 Delete or Deactivate User.
 -- Spec: docs/rls-permission-matrix.md §2, §3.11
 --
@@ -299,6 +301,15 @@ begin
     v_stray_result := jsonb_build_object('actions_moved', cardinality(v_stray_actions));
   end if;
 
+  -- Matrix §6 gap 7 (20260804153000). This function is the third writer of
+  -- is_active, so it takes the same shared advisory lock as set_user_role and
+  -- set_user_active or the race simply moves here. Carried forward rather than
+  -- dropped: this migration now runs after last_admin_guard and its
+  -- `create or replace` would otherwise silently revert the guard.
+  if v_target.role = 'admin' and v_target.is_active then
+    perform app.guard_last_admin(p_user_id);
+  end if;
+
   update public.users
      set is_active      = false,
          deactivated_at = now()
@@ -340,4 +351,6 @@ comment on function public.deactivate_user(uuid, text, uuid, boolean) is
   'same transaction (AC2), delegating to reassign_ownership so the departing user''s '
   'open actions travel with their clients (F257). Sets is_active = false and '
   'deactivated_at; deletes nothing, so the audit trail survives (AC3, AC4). Requires a '
-  'written reason (PRD §4.2). Accepted advisor exception — self-authorising RPC (§7).';
+  'written reason (PRD §4.2). F012: refuses deactivating the last active admin (matrix '
+  '§6 gap 7), serialized against set_user_role and set_user_active via '
+  'app.guard_last_admin. Accepted advisor exception — self-authorising RPC (§7).';

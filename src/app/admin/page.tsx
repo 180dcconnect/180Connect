@@ -23,18 +23,13 @@ export default async function AdminPage() {
   return (
     <main className="min-h-screen bg-[#f1f2f4] p-6">
       <section className="mx-auto max-w-5xl rounded-2xl bg-white p-8 shadow-sm">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-sm font-bold text-brand">Admin workspace</p>
-            <h1 className="mt-2 text-3xl font-bold">Platform management</h1>
-            <p className="mt-3 max-w-2xl text-sm text-foreground/65">
-              Manage team access and open privileged workflows. Every admin
-              action is checked again on the server.
-            </p>
-          </div>
-          <Link className="text-sm font-bold text-brand hover:underline" href="/dashboard">
-            Back to dashboard
-          </Link>
+        <div>
+          <p className="text-sm font-bold text-brand">Admin workspace</p>
+          <h1 className="mt-2 text-3xl font-bold">Platform management</h1>
+          <p className="mt-3 max-w-2xl text-sm text-foreground/65">
+            Manage team access and open privileged workflows. Every admin
+            action is checked again on the server.
+          </p>
         </div>
 
         <div className="mt-8 grid gap-4 sm:grid-cols-2">

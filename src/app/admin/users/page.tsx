@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
@@ -71,17 +70,12 @@ export default async function AdminUsersPage() {
   return (
     <main className="min-h-screen bg-[#f1f2f4] p-6">
       <section className="mx-auto max-w-5xl rounded-2xl bg-white p-8 shadow-sm">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-sm font-bold text-brand">Team management</p>
-            <h1 className="mt-2 text-3xl font-bold">Team members</h1>
-            <p className="mt-3 text-sm text-foreground/65">
-              Role changes apply on the user&apos;s next request.
-            </p>
-          </div>
-          <Link className="text-sm font-bold text-brand hover:underline" href="/dashboard">
-            Back to dashboard
-          </Link>
+        <div>
+          <p className="text-sm font-bold text-brand">Team management</p>
+          <h1 className="mt-2 text-3xl font-bold">Team members</h1>
+          <p className="mt-3 text-sm text-foreground/65">
+            Role changes apply on the user&apos;s next request.
+          </p>
         </div>
         {error && (
           <p className="mt-5 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-800" role="alert">

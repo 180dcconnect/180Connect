@@ -4,7 +4,7 @@
   --background: #ffffff;
   --foreground: #414042;
   --brand: #72b744;
-  --brand-hover: #63a13a;
+  --brand-hover: #009647;
 }
 
 @theme inline {
@@ -15,30 +15,6 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-body: var(--font-lato);
-}
-
-@layer utilities {
-  /* Landing entrance: one staggered rise, ordered by reading order. */
-  @keyframes rise {
-    from {
-      opacity: 0;
-      transform: translateY(0.75rem);
-    }
-    to {
-      opacity: 1;
-      transform: none;
-    }
-  }
-
-  .rise {
-    animation: rise 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .rise {
-      animation: none;
-    }
-  }
 }
 
 @layer base {

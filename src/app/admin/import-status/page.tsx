@@ -12,6 +12,11 @@
 // permission exists in src/lib/auth/permissions.ts yet — this is an
 // assumption, not a confirmed decision; worth checking whether the team
 // wants a dedicated permission added to the matrix instead.
+//
+// AC3 ("failed runs visible without checking server logs"): a failed run's
+// error_message is now shown directly in the table as a second row under it,
+// not just the status badge — knowing something failed without knowing why
+// still sends someone to the logs, which is what this AC exists to avoid.
 
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
@@ -96,21 +101,33 @@ export default async function AdminImportStatusPage() {
             </thead>
             <tbody>
               {rows.map((run) => (
-                <tr key={run.id} className="border-b border-foreground/5">
-                  <td className="py-2 pr-4 font-mono text-xs">
-                    {run.api_source}
-                  </td>
-                  <td className="py-2 pr-4">
-                    <StatusBadge status={run.job_status} />
-                  </td>
-                  <td className="py-2 pr-4">{run.records_fetched}</td>
-                  <td className="py-2 pr-4">{run.records_inserted}</td>
-                  <td className="py-2 pr-4">{run.records_skipped}</td>
-                  <td className="py-2 pr-4">{run.records_failed}</td>
-                  <td className="py-2 pr-4 text-foreground/60">
-                    {new Date(run.started_at).toLocaleString()}
-                  </td>
-                </tr>
+                <>
+                  <tr key={run.id} className="border-b border-foreground/5">
+                    <td className="py-2 pr-4 font-mono text-xs">
+                      {run.api_source}
+                    </td>
+                    <td className="py-2 pr-4">
+                      <StatusBadge status={run.job_status} />
+                    </td>
+                    <td className="py-2 pr-4">{run.records_fetched}</td>
+                    <td className="py-2 pr-4">{run.records_inserted}</td>
+                    <td className="py-2 pr-4">{run.records_skipped}</td>
+                    <td className="py-2 pr-4">{run.records_failed}</td>
+                    <td className="py-2 pr-4 text-foreground/60">
+                      {new Date(run.started_at).toLocaleString()}
+                    </td>
+                  </tr>
+                  {run.job_status === "failed" && run.error_message && (
+                    <tr
+                      key={`${run.id}-error`}
+                      className="border-b border-foreground/5 bg-red-50/50"
+                    >
+                      <td colSpan={7} className="py-2 pr-4 text-xs text-red-800">
+                        {run.error_message}
+                      </td>
+                    </tr>
+                  )}
+                </>
               ))}
             </tbody>
           </table>

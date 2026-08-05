@@ -27,6 +27,7 @@
 //   - 'error': the insert itself failed (e.g. a database error).
 
 import { buildAdminClient } from "../supabase/admin-client-factory.ts";
+import { reportError } from "../error-logging.ts";
 import {
   standardizeCharityCommissionRecord,
   type RawCharityCommissionRecord,
@@ -137,10 +138,10 @@ export async function promotePendingCharityCommissionRecords(
 
     const result = await store.insertOrganisation(org);
     if ("error" in result) {
-      console.error(
-        `[standardize.charity_commission] insert failed for raw record ${record.id}:`,
-        result.error,
-      );
+      await reportError(new Error(result.error), {
+        operation: "standardize.charity_commission.promote",
+        rawRecordId: record.id,
+      });
       await store.markRecordStatus(record.id, "error");
       counts.failed++;
       continue;

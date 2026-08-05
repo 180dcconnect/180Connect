@@ -15,6 +15,7 @@
     "ingest:companies-house": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/test-runner.mts",
     "ingest:check-companies-house": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/test-companieshouse.mts",
     "ingest:check-connection": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/test-runner-connection.mts",
+    "standardize:run-charity-commission": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-standardize-charity-commission.mts",
     "ingest:check-isolation": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/test-isolation.mts"
   },
   "dependencies": {

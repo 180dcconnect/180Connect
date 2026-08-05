@@ -485,7 +485,7 @@ declare
   v_count bigint;
 begin
   if to_regprocedure('public.set_user_role(uuid, public.user_role)') is null then
-    return next skip(4, 'set_user_role RPC not yet migrated');
+    return next skip(7, 'set_user_role RPC not yet migrated');
     return;
   end if;
 
@@ -519,6 +519,565 @@ begin
     '42501',
     'CAM calling the role RPC is refused inside the SECURITY DEFINER body'
   );
+
+  -- Matrix §6 gap 7 regression check: demoting cam_b (now admin, from above) back
+  -- down is a legitimate multi-admin operation and must still succeed — the new
+  -- guard only refuses a change when NO other active admin would remain. This
+  -- cannot exercise the guard actually firing: reaching it requires the caller to
+  -- be a distinct active admin from the target, which structurally means the
+  -- caller always survives a solo call. Proof the guard fires under real
+  -- concurrency lives in scripts/verify-last-admin-guard.mts, not here.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_user_role(%L, ''cam'')', v_cam_b)),
+    null,
+    'admin demoting a second admin still succeeds while another admin remains'
+  );
+  select role::text into v_role from public.users where id = v_cam_b;
+  return next is(v_role, 'cam', 'the demotion actually landed');
+
+  select count(*) into v_count
+    from public.users where role = 'admin' and is_active;
+  return next is(v_count, 1::bigint,
+    'exactly one active admin remains after the demotion (never zero)');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Suspend / reactivate RPC — F013 (#15)
+-- ---------------------------------------------------------------------------
+-- users.is_active is granted to nobody, so set_user_active is the only write-path.
+-- These assert the three things the story turns on: an admin can flip it, a non-admin
+-- cannot, and the flag actually revokes access rather than merely recording a state.
+create or replace function tests.suite_active_rpc()
+returns setof text language plpgsql as $$
+declare
+  v_admin   uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a   uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b   uuid := '00000000-0000-4000-a000-000000000003';
+  v_active  boolean;
+  v_count   bigint;
+begin
+  if to_regprocedure('public.set_user_active(uuid, boolean)') is null then
+    return next skip(13, 'set_user_active RPC not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- AC2: the suspension must sign them out, not merely deny them. Give cam_b a
+  -- session first so there is something for the suspension to revoke — without this
+  -- fixture the assertion below passes against a database that revokes nothing.
+  --
+  -- This is the shape of the bug it exists to catch: the original implementation
+  -- called auth-js `admin.signOut(userId)`, which wanted a JWT, failed on every call,
+  -- and left the session alive while the UI reported success with a warning.
+  insert into auth.sessions (id, user_id, created_at, updated_at)
+  values (gen_random_uuid(), v_cam_b, now(), now());
+  select count(*) into v_count from auth.sessions where user_id = v_cam_b;
+  return next is(v_count, 1::bigint, 'the fixture session exists before suspension');
+
+  -- Admin suspends a CAM.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_user_active(%L, false)', v_cam_b)),
+    null,
+    'admin can suspend another user via the RPC'
+  );
+  select is_active into v_active from public.users where id = v_cam_b;
+  return next is(v_active, false, 'the suspension actually landed');
+
+  select count(*) into v_count from auth.sessions where user_id = v_cam_b;
+  return next is(v_count, 0::bigint,
+    'suspension revoked the user''s sessions, not just their permissions');
+
+  -- AC3: suspension leaves owned rows alone. The seed gives cam_b an organisation;
+  -- it must still be theirs, so reactivation or F257 reassignment has something to
+  -- work with.
+  if tests.tables_exist('organisations') then
+    select count(*) into v_count
+      from public.organisations where owner_id = v_cam_b;
+    return next is(v_count, 1::bigint,
+      'suspension does not release the user''s owned organisations');
+  else
+    return next skip(1, 'organisations not yet migrated');
+  end if;
+
+  if tests.tables_exist('audit_log') then
+    select count(*) into v_count
+      from public.audit_log
+     where action = 'user_suspended' and target_id = v_cam_b;
+    return next is(v_count, 1::bigint,
+      'the suspension wrote exactly one audit_log row');
+  else
+    return next skip(1, 'audit_log not yet migrated');
+  end if;
+
+  -- The flag is not decorative: a suspended user reads nothing. Every policy gates on
+  -- app.is_active_user(), so their own directory SELECT now returns zero rows.
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.users;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'a suspended user can no longer read the team directory');
+
+  -- Reactivation is reversible and audited under its own action name (AC4).
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_user_active(%L, true)', v_cam_b)),
+    null,
+    'admin can reverse a suspension'
+  );
+
+  -- A CAM cannot call it, even though EXECUTE is granted to authenticated — the body
+  -- self-checks is_admin().
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.set_user_active(%L, false)', v_cam_b)),
+    '42501',
+    'CAM calling the access RPC is refused inside the SECURITY DEFINER body'
+  );
+
+  -- Self-suspension is refused. This is also what guarantees an active admin always
+  -- survives: the only person an admin cannot suspend is themselves, so the caller is
+  -- always a remaining admin.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_user_active(%L, false)', v_admin)),
+    '42501',
+    'an admin cannot suspend their own account'
+  );
+
+  -- Matrix §6 gap 7 regression check: suspending an admin who is not the last one
+  -- must still succeed. Promoted directly (bypassing RLS, same as the fixtures
+  -- above) rather than via set_user_role, so this suite does not depend on
+  -- suite_role_rpc having run first. As with suite_role_rpc's regression check,
+  -- this cannot exercise the guard actually firing — see that comment for why.
+  update public.users set role = 'admin' where id = v_cam_a;
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_user_active(%L, false)', v_cam_a)),
+    null,
+    'admin suspending a second admin still succeeds while another admin remains'
+  );
+  select is_active into v_active from public.users where id = v_cam_a;
+  return next is(v_active, false, 'the suspension actually landed');
+
+  select count(*) into v_count
+    from public.users where role = 'admin' and is_active;
+  return next is(v_count, 1::bigint,
+    'exactly one active admin remains after the suspension (never zero)');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Deactivate (offboard) RPC — F014 (#16)
+-- ---------------------------------------------------------------------------
+-- Deactivation is suspension plus offboarding: the account closes and its clients go
+-- somewhere. The assertions that matter are the ones a reviewer cannot check by
+-- reading the function — that the gate actually refuses while clients are owned, that
+-- the transfer and the closure land in the same transaction, and that nothing is
+-- deleted (AC3, AC4).
+--
+-- The target is v_deactivated (fixture id ...004) rather than a CAM the earlier suites
+-- rely on. Every suite runs inside the one uncommitted transaction with no reset
+-- between them, so deactivating cam_a or cam_b here would change the world underneath
+-- whatever runs next. ...004 is already is_active = false with no deactivated_at,
+-- which is exactly the suspended-not-deactivated state, and the fixture org below is
+-- created locally for the same isolation reason.
+create or replace function tests.suite_deactivate_rpc()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_target      uuid := '00000000-0000-4000-a000-000000000004';
+  v_org         uuid := '00000000-0000-4000-b000-000000000004';
+  v_deactivated timestamptz;
+  v_active      boolean;
+  v_owner       uuid;
+  v_count       bigint;
+begin
+  if to_regprocedure('public.deactivate_user(uuid, text, uuid, boolean)') is null then
+    return next skip(23, 'deactivate_user RPC not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  insert into public.organisations (id, legal_name, entry_method, organisation_type, owner_id)
+  values (v_org, 'Offboarding Org Ltd', 'manual', 'other', v_target)
+  on conflict (id) do update set owner_id = excluded.owner_id;
+
+  -- Seeded so the revocation assertion further down has something to revoke. This
+  -- migration replaces set_user_active with `create or replace`, which silently wins
+  -- over the two earlier definitions; if a future edit forgets to carry the
+  -- app.revoke_sessions call forward, this is what fails.
+  insert into auth.sessions (id, user_id, created_at, updated_at)
+  values (gen_random_uuid(), v_target, now(), now());
+
+  -- Authorisation, re-checked inside the SECURITY DEFINER body: EXECUTE is granted to
+  -- `authenticated`, which every signed-in user shares, so the body is the only thing
+  -- standing between a CAM and an offboarding.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.deactivate_user(%L, %L, %L, false)', v_target, 'leaving', v_cam_a)),
+    '42501',
+    'CAM calling deactivate_user is refused inside the SECURITY DEFINER body'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, null, false)', v_admin, 'leaving')),
+    '42501',
+    'an admin cannot deactivate their own account'
+  );
+
+  -- PRD §4.2: the reason is required, and whitespace is not a reason.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, %L, false)', v_target, '   ', v_cam_a)),
+    '22023',
+    'a blank reason is refused'
+  );
+
+  -- AC2, the gate. This is the assertion the story turns on: while the user owns
+  -- clients and no destination is given, the account does not close.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, null, false)', v_target, 'leaving')),
+    '22023',
+    'deactivation is refused while the user still owns clients'
+  );
+  select deactivated_at into v_deactivated from public.users where id = v_target;
+  return next is(v_deactivated, null::timestamptz,
+    'the refused deactivation left the account untouched');
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, %L, false)', v_target, 'leaving', v_viewer)),
+    '22023',
+    'clients cannot be reassigned to a viewer'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, %L, true)', v_target, 'leaving', v_cam_a)),
+    '22023',
+    'naming an owner and releasing to the pool at the same time is refused'
+  );
+
+  -- The whole thing, for real.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, %L, false)', v_target, 'left the society', v_cam_a)),
+    null,
+    'admin can deactivate a user and hand their clients on'
+  );
+
+  select is_active, deactivated_at into v_active, v_deactivated
+    from public.users where id = v_target;
+  return next ok(v_active = false and v_deactivated is not null,
+    'the account is inactive and marked as deactivated, not merely suspended');
+
+  select owner_id into v_owner from public.organisations where id = v_org;
+  return next is(v_owner, v_cam_a,
+    'the owned client moved to the named CAM in the same transaction');
+
+  select count(*) into v_count from auth.sessions where user_id = v_target;
+  return next is(v_count, 0::bigint,
+    'deactivation revoked the offboarded user''s sessions');
+
+  -- AC3/AC4: deactivation is not deletion. The row survives, and so does the trail.
+  select count(*) into v_count from public.users where id = v_target;
+  return next is(v_count, 1::bigint, 'the user row is not deleted');
+
+  if tests.tables_exist('audit_log') then
+    select count(*) into v_count
+      from public.audit_log
+     where action = 'user_deactivated' and target_id = v_target;
+    return next is(v_count, 1::bigint,
+      'exactly one user_deactivated audit row, and only for the successful attempt');
+
+    select count(*) into v_count
+      from public.audit_log
+     where action = 'ownership_reassigned'
+       and target_table = 'organisations'
+       and target_id = v_org
+       and detail->>'reason' = 'left the society';
+    return next is(v_count, 1::bigint,
+      'the client handover is audited against the organisation, carrying the reason');
+  else
+    return next skip(2, 'audit_log not yet migrated');
+  end if;
+
+  -- Pressing the button twice does not produce a second audit row or a second sweep.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, null, false)', v_target, 'again')),
+    null,
+    'deactivating an already-deactivated user is a no-op, not an error'
+  );
+
+  -- Reactivation has to clear the marker or the constraint rejects it outright. This
+  -- is the assertion that would have caught shipping F014 without amending F013.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_user_active(%L, true)', v_target)),
+    null,
+    'a deactivated user can be reactivated'
+  );
+  select deactivated_at into v_deactivated from public.users where id = v_target;
+  return next is(v_deactivated, null::timestamptz,
+    'reactivation clears the deactivation marker');
+
+  -- The illegal combination is forbidden by the database, not by the RPCs. Asserted as
+  -- the table owner, which is the only role that could ever write the column directly.
+  return next throws_ok(
+    format('update public.users set deactivated_at = now() where id = %L', v_cam_a),
+    '23514',
+    null,
+    'an active user cannot carry a deactivation timestamp'
+  );
+
+  -- The other destination PRD §6.12 allows: back to the unowned pool.
+  update public.organisations set owner_id = v_target where id = v_org;
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, null, true)', v_target, 'released')),
+    null,
+    'clients can be released to the unowned pool instead of being reassigned'
+  );
+  select owner_id into v_owner from public.organisations where id = v_org;
+  return next is(v_owner, null::uuid,
+    'the released client is unowned and claimable by any CAM'
+  );
+
+  -- Matrix §6 gap 7 regression check: deactivate_user is the third writer of
+  -- is_active, so it takes the same guard. Deactivating an admin who is not the last
+  -- one must still succeed. As in suite_role_rpc and suite_active_rpc, this cannot
+  -- exercise the guard actually firing — reaching it requires the caller to be a
+  -- distinct active admin from the target, which structurally means the caller always
+  -- survives a solo call. Proof it fires under real concurrency lives in
+  -- scripts/verify-last-admin-guard.mts.
+  update public.users
+     set role = 'admin', is_active = true, deactivated_at = null
+   where id = v_target;
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, null, true)', v_target, 'second admin')),
+    null,
+    'admin deactivating a second admin still succeeds while another admin remains'
+  );
+  select is_active into v_active from public.users where id = v_target;
+  return next is(v_active, false, 'the deactivation actually landed');
+
+  select count(*) into v_count
+    from public.users where role = 'admin' and is_active;
+  return next is(v_count, 1::bigint,
+    'exactly one active admin remains after the deactivation (never zero)');
+
+  -- Leave the fixture as it was found: later suites share this transaction. Restored
+  -- with plain SQL rather than the RPCs — those self-check app.is_admin(), which reads
+  -- auth.uid(), and here there is no signed-in user to be an admin.
+  update public.users
+     set role = 'cam', is_active = false, deactivated_at = null
+   where id = v_target;
+  delete from public.organisations where id = v_org;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Deactivate (offboard) RPC — F014 (#16)
+-- ---------------------------------------------------------------------------
+-- Deactivation is suspension plus offboarding: the account closes and its clients go
+-- somewhere. The assertions that matter are the ones a reviewer cannot check by
+-- reading the function — that the gate actually refuses while clients are owned, that
+-- the transfer and the closure land in the same transaction, and that nothing is
+-- deleted (AC3, AC4).
+--
+-- The target is v_deactivated (fixture id ...004) rather than a CAM the earlier suites
+-- rely on. Every suite runs inside the one uncommitted transaction with no reset
+-- between them, so deactivating cam_a or cam_b here would change the world underneath
+-- whatever runs next. ...004 is already is_active = false with no deactivated_at,
+-- which is exactly the suspended-not-deactivated state, and the fixture org below is
+-- created locally for the same isolation reason.
+create or replace function tests.suite_deactivate_rpc()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_target      uuid := '00000000-0000-4000-a000-000000000004';
+  v_org         uuid := '00000000-0000-4000-b000-000000000004';
+  v_deactivated timestamptz;
+  v_active      boolean;
+  v_owner       uuid;
+  v_count       bigint;
+begin
+  if to_regprocedure('public.deactivate_user(uuid, text, uuid, boolean)') is null then
+    return next skip(20, 'deactivate_user RPC not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  insert into public.organisations (id, legal_name, entry_method, organisation_type, owner_id)
+  values (v_org, 'Offboarding Org Ltd', 'manual', 'other', v_target)
+  on conflict (id) do update set owner_id = excluded.owner_id;
+
+  -- Seeded so the revocation assertion further down has something to revoke. This
+  -- migration replaces set_user_active with `create or replace`, which silently wins
+  -- over the two earlier definitions; if a future edit forgets to carry the
+  -- app.revoke_sessions call forward, this is what fails.
+  insert into auth.sessions (id, user_id, created_at, updated_at)
+  values (gen_random_uuid(), v_target, now(), now());
+
+  -- Authorisation, re-checked inside the SECURITY DEFINER body: EXECUTE is granted to
+  -- `authenticated`, which every signed-in user shares, so the body is the only thing
+  -- standing between a CAM and an offboarding.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.deactivate_user(%L, %L, %L, false)', v_target, 'leaving', v_cam_a)),
+    '42501',
+    'CAM calling deactivate_user is refused inside the SECURITY DEFINER body'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, null, false)', v_admin, 'leaving')),
+    '42501',
+    'an admin cannot deactivate their own account'
+  );
+
+  -- PRD §4.2: the reason is required, and whitespace is not a reason.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, %L, false)', v_target, '   ', v_cam_a)),
+    '22023',
+    'a blank reason is refused'
+  );
+
+  -- AC2, the gate. This is the assertion the story turns on: while the user owns
+  -- clients and no destination is given, the account does not close.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, null, false)', v_target, 'leaving')),
+    '22023',
+    'deactivation is refused while the user still owns clients'
+  );
+  select deactivated_at into v_deactivated from public.users where id = v_target;
+  return next is(v_deactivated, null::timestamptz,
+    'the refused deactivation left the account untouched');
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, %L, false)', v_target, 'leaving', v_viewer)),
+    '22023',
+    'clients cannot be reassigned to a viewer'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, %L, true)', v_target, 'leaving', v_cam_a)),
+    '22023',
+    'naming an owner and releasing to the pool at the same time is refused'
+  );
+
+  -- The whole thing, for real.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, %L, false)', v_target, 'left the society', v_cam_a)),
+    null,
+    'admin can deactivate a user and hand their clients on'
+  );
+
+  select is_active, deactivated_at into v_active, v_deactivated
+    from public.users where id = v_target;
+  return next ok(v_active = false and v_deactivated is not null,
+    'the account is inactive and marked as deactivated, not merely suspended');
+
+  select owner_id into v_owner from public.organisations where id = v_org;
+  return next is(v_owner, v_cam_a,
+    'the owned client moved to the named CAM in the same transaction');
+
+  select count(*) into v_count from auth.sessions where user_id = v_target;
+  return next is(v_count, 0::bigint,
+    'deactivation revoked the offboarded user''s sessions');
+
+  -- AC3/AC4: deactivation is not deletion. The row survives, and so does the trail.
+  select count(*) into v_count from public.users where id = v_target;
+  return next is(v_count, 1::bigint, 'the user row is not deleted');
+
+  if tests.tables_exist('audit_log') then
+    select count(*) into v_count
+      from public.audit_log
+     where action = 'user_deactivated' and target_id = v_target;
+    return next is(v_count, 1::bigint,
+      'exactly one user_deactivated audit row, and only for the successful attempt');
+
+    select count(*) into v_count
+      from public.audit_log
+     where action = 'ownership_reassigned'
+       and target_table = 'organisations'
+       and target_id = v_org
+       and detail->>'reason' = 'left the society';
+    return next is(v_count, 1::bigint,
+      'the client handover is audited against the organisation, carrying the reason');
+  else
+    return next skip(2, 'audit_log not yet migrated');
+  end if;
+
+  -- Pressing the button twice does not produce a second audit row or a second sweep.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, null, false)', v_target, 'again')),
+    null,
+    'deactivating an already-deactivated user is a no-op, not an error'
+  );
+
+  -- Reactivation has to clear the marker or the constraint rejects it outright. This
+  -- is the assertion that would have caught shipping F014 without amending F013.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_user_active(%L, true)', v_target)),
+    null,
+    'a deactivated user can be reactivated'
+  );
+  select deactivated_at into v_deactivated from public.users where id = v_target;
+  return next is(v_deactivated, null::timestamptz,
+    'reactivation clears the deactivation marker');
+
+  -- The illegal combination is forbidden by the database, not by the RPCs. Asserted as
+  -- the table owner, which is the only role that could ever write the column directly.
+  return next throws_ok(
+    format('update public.users set deactivated_at = now() where id = %L', v_cam_a),
+    '23514',
+    null,
+    'an active user cannot carry a deactivation timestamp'
+  );
+
+  -- The other destination PRD §6.12 allows: back to the unowned pool.
+  update public.organisations set owner_id = v_target where id = v_org;
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.deactivate_user(%L, %L, null, true)', v_target, 'released')),
+    null,
+    'clients can be released to the unowned pool instead of being reassigned'
+  );
+  select owner_id into v_owner from public.organisations where id = v_org;
+  return next is(v_owner, null::uuid,
+    'the released client is unowned and claimable by any CAM'
+  );
+
+  -- Leave the fixture as it was found: later suites share this transaction. Restored
+  -- with plain SQL rather than the RPCs — those self-check app.is_admin(), which reads
+  -- auth.uid(), and here there is no signed-in user to be an admin.
+  update public.users
+     set is_active = false, deactivated_at = null
+   where id = v_target;
+  delete from public.organisations where id = v_org;
 end;
 $$;
 
@@ -630,13 +1189,341 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Raw ingestion layer — matrix §3.5 (F038, step 6.0 create_ingestion)
+--
+-- suite_sensitive already covers the headline check (a CAM reads zero raw source
+-- records). This is the rest of the §3.5 row: that an admin *can* read what the CAM
+-- cannot — a policy that returns zero rows to everyone would pass the sensitive
+-- check while being useless — plus the write verbs, which no test covered.
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_ingestion()
+returns setof text language plpgsql as $$
+declare
+  v_admin  uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_viewer uuid := '00000000-0000-4000-a000-000000000005';
+  v_run    uuid := '00000000-0000-4000-c000-000000000001';
+  v_record uuid := '00000000-0000-4000-c000-000000000002';
+  v_count  bigint;
+  v_state  text;
+begin
+  if not tests.tables_exist('users') then
+    return next skip(1, 'step 2 create_users not yet migrated');
+    return;
+  end if;
+
+  if not tests.tables_exist('ingestion_runs', 'raw_source_records') then
+    return next skip(8, 'step 6 create_ingestion not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Fixtures are inserted as the table owner, which bypasses RLS — the point of the
+  -- suite is what the *end-user* roles can then see of them.
+  insert into public.ingestion_runs (id, api_source, triggered_by, job_status)
+  values (v_run, 'companies_house', 'manual', 'completed')
+  on conflict (id) do nothing;
+
+  insert into public.raw_source_records
+    (id, ingestion_run_id, record_source, source_record_id, raw_payload, checksum)
+  values
+    (v_record, v_run, 'companies_house', '00000001', '{"company_number":"00000001"}'::jsonb, 'deadbeef')
+  on conflict (id) do nothing;
+
+  -- SELECT: admin yes, everyone else no.
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.ingestion_runs where id = v_run;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'admin reads ingestion runs');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.raw_source_records where id = v_record;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'admin reads raw source records the CAM cannot');
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.ingestion_runs;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'CAM sees zero ingestion runs');
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.raw_source_records;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'viewer sees zero raw source records');
+
+  -- INSERT on ingestion_runs is admin-only, so a CAM triggering a run is refused.
+  v_state := tests.sqlstate_of(v_cam_a,
+    'insert into public.ingestion_runs (api_source, triggered_by) '
+    'values (''companies_house'', ''manual'')');
+  return next is(v_state, '42501', 'CAM cannot record an ingestion run');
+
+  -- No UPDATE policy or grant on raw_source_records for any end-user role: the raw
+  -- layer is append-only to everyone but service_role. Even an admin is refused.
+  v_state := tests.sqlstate_of(v_admin, format(
+    'update public.raw_source_records set processing_status = ''rejected'' where id = %L',
+    v_record));
+  return next is(v_state, '42501', 'not even an admin can edit a raw payload');
+
+  -- DELETE is admin-only (§3.5): the CAM's attempt leaves the row, the admin's removes it.
+  perform tests.sqlstate_of(v_cam_a, format(
+    'delete from public.raw_source_records where id = %L', v_record));
+  select count(*) into v_count from public.raw_source_records where id = v_record;
+  return next is(v_count, 1::bigint, 'CAM cannot delete a raw source record');
+
+  perform tests.sqlstate_of(v_admin, format(
+    'delete from public.raw_source_records where id = %L', v_record));
+  select count(*) into v_count from public.raw_source_records where id = v_record;
+  return next is(v_count, 0::bigint, 'admin can delete a raw source record');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Accept-invite RPC — F008 (#8)
+-- ---------------------------------------------------------------------------
+-- users.invite_accepted_at is granted to nobody, so mark_invite_accepted is the only
+-- write-path. What the story turns on: an invitee can accept their own invite exactly
+-- once, and the call is harmless for everyone else — the password-reset action calls
+-- it on every reset, invitee or not.
+create or replace function tests.suite_invite_rpc()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b uuid := '00000000-0000-4000-a000-000000000003';
+  v_accepted timestamptz;
+  v_count bigint;
+begin
+  if to_regprocedure('public.mark_invite_accepted()') is null then
+    return next skip(6, 'mark_invite_accepted RPC not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- CAM B stands in for the invited person: invited, not yet accepted.
+  update public.users
+  set invited_at = now(), invite_accepted_at = null
+  where id = v_cam_b;
+
+  return next is(
+    tests.sqlstate_of(v_cam_b, 'select public.mark_invite_accepted()'),
+    null,
+    'an invited user can accept their own invite'
+  );
+  select invite_accepted_at into v_accepted from public.users where id = v_cam_b;
+  return next isnt(v_accepted, null, 'accepting the invite stamped invite_accepted_at');
+
+  -- Accepting twice must not produce a second transition — the password form calls
+  -- this on every reset, including resets by someone who accepted months ago.
+  return next is(
+    tests.sqlstate_of(v_cam_b, 'select public.mark_invite_accepted()'),
+    null,
+    'calling it again is accepted rather than erroring'
+  );
+
+  -- Someone who was never invited (a plain password reset) is untouched, and
+  -- crucially writes no audit row — it is not a transition.
+  return next is(
+    tests.sqlstate_of(v_cam_a, 'select public.mark_invite_accepted()'),
+    null,
+    'a user with no pending invite may call it harmlessly'
+  );
+  select invite_accepted_at into v_accepted from public.users where id = v_cam_a;
+  return next is(v_accepted, null, 'a user with no invite is not marked as accepted');
+
+  if tests.tables_exist('audit_log') then
+    select count(*) into v_count
+      from public.audit_log
+     where action = 'invite_accepted' and target_id = v_cam_b;
+    return next is(v_count, 1::bigint,
+      'acceptance wrote exactly one audit_log row, and the no-ops wrote none');
+  else
+    return next skip(1, 'audit_log not yet migrated');
+  end if;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Sign-up domain guard — F008 (20260804160000_configurable_signup_domains)
+-- ---------------------------------------------------------------------------
+-- This is a security boundary, and the interesting cases are the ones that must
+-- keep failing. Inserts go directly into auth.users, which is what the trigger
+-- fires on — the same door the admin API and any raw SQL go through.
+create or replace function tests.suite_signup_domain()
+returns setof text language plpgsql as $$
+declare
+  v_new uuid;
+begin
+  if to_regprocedure('public.check_allowed_email_domain()') is null then
+    return next skip(7, 'configurable signup domains not yet migrated');
+    return;
+  end if;
+
+  return next ok(
+    exists (select 1 from app.allowed_email_domains where domain = '180dc.org'),
+    '180dc.org is seeded, so the previous rule still holds with no configuration'
+  );
+
+  -- The table is granted to nobody. A signed-in user reading it directly is the
+  -- thing RLS-with-no-policies exists to stop.
+  return next is(
+    tests.sqlstate_of(
+      '00000000-0000-4000-a000-000000000002'::uuid,
+      'select count(*) from app.allowed_email_domains'
+    ),
+    '42501',
+    'a CAM cannot read the domain list directly'
+  );
+
+  v_new := gen_random_uuid();
+  return next lives_ok(
+    format(
+      $sql$insert into auth.users (id, instance_id, aud, role, email)
+           values (%L, '00000000-0000-0000-0000-000000000000', 'authenticated',
+                   'authenticated', 'permitted@180dc.org')$sql$,
+      v_new
+    ),
+    'a seeded domain is accepted'
+  );
+
+  return next throws_ok(
+    $sql$insert into auth.users (id, instance_id, aud, role, email)
+         values (gen_random_uuid(), '00000000-0000-0000-0000-000000000000',
+                 'authenticated', 'authenticated', 'nope@example.com')$sql$,
+    'P0001',
+    null,
+    'an unlisted domain is refused'
+  );
+
+  -- The old check was `ilike '%@180dc.org'`, which this address satisfies. The
+  -- rewrite matches on the domain after the final '@' instead, so it does not.
+  return next throws_ok(
+    $sql$insert into auth.users (id, instance_id, aud, role, email)
+         values (gen_random_uuid(), '00000000-0000-0000-0000-000000000000',
+                 'authenticated', 'authenticated', 'attacker@evil.com@180dc.org')$sql$,
+    'P0001',
+    null,
+    'a suffix that merely ends in the domain is not a match'
+  );
+
+  -- Adding a domain is the whole point of the table; it must actually take effect
+  -- without any function being redefined.
+  insert into app.allowed_email_domains (domain, note)
+  values ('example.com', 'pgTAP fixture');
+
+  v_new := gen_random_uuid();
+  return next lives_ok(
+    format(
+      $sql$insert into auth.users (id, instance_id, aud, role, email)
+           values (%L, '00000000-0000-0000-0000-000000000000', 'authenticated',
+                   'authenticated', 'tester@example.com')$sql$,
+      v_new
+    ),
+    'a domain added to the table is accepted immediately'
+  );
+
+  -- Fails closed: with nothing permitted, nobody gets in. The opposite — an empty
+  -- table meaning "no restriction" — is the bug this asserts against.
+  delete from app.allowed_email_domains;
+  return next throws_ok(
+    $sql$insert into auth.users (id, instance_id, aud, role, email)
+         values (gen_random_uuid(), '00000000-0000-0000-0000-000000000000',
+                 'authenticated', 'authenticated', 'anyone@180dc.org')$sql$,
+    'P0001',
+    null,
+    'an empty table permits nothing, rather than everything'
+  );
+
+  -- Put it back. The whole file runs in ONE transaction, so the delete above is
+  -- visible to every suite that follows — and any of them calling tests.seed()
+  -- would have its auth.users inserts refused by the guard this suite just proved
+  -- works. That is not a hypothetical: it took out suite_default_role.
+  insert into app.allowed_email_domains (domain, note)
+  values ('180dc.org', '180 Degrees Consulting. The permanent entry — do not remove.')
+  on conflict (domain) do nothing;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Default role on a new account — F017 (#20)
+-- ---------------------------------------------------------------------------
+-- F017 AC3: someone who accepts an invite is a CAM unless an admin says otherwise.
+-- Nothing in the application decides this — app.handle_new_auth_user() inserts
+-- (id, email, invited_by_user_id, invited_at) and leaves `role` alone, so the
+-- column default in create_users is what actually assigns it. That makes the
+-- default a behaviour worth pinning: change it to 'admin' and every invited person
+-- silently becomes an administrator, with no code change to notice in review.
+create or replace function tests.suite_default_role()
+returns setof text language plpgsql as $$
+declare
+  v_admin   uuid := '00000000-0000-4000-a000-000000000001';
+  v_invitee uuid := '00000000-0000-4000-a000-000000000009';
+  v_role    public.user_role;
+  v_active  boolean;
+  v_invited timestamptz;
+begin
+  if to_regprocedure('app.handle_new_auth_user()') is null then
+    return next skip(4, 'handle_new_auth_user not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Exactly what inviteUserByEmail produces: an auth user carrying the inviting
+  -- admin's id in raw_user_meta_data (src/lib/auth/invite.ts). The trigger fires
+  -- on this insert; no public.users row is written by hand.
+  insert into auth.users (id, instance_id, aud, role, email, raw_user_meta_data)
+  values (
+    v_invitee, '00000000-0000-0000-0000-000000000000', 'authenticated',
+    'authenticated', 'invited@180dc.org',
+    jsonb_build_object('invited_by_user_id', v_admin::text)
+  );
+
+  select role, is_active, invited_at into v_role, v_active, v_invited
+    from public.users where id = v_invitee;
+
+  return next is(v_role, 'cam'::public.user_role,
+    'an invited account defaults to CAM, not admin (F017 AC3)');
+  return next is(v_active, true, 'an invited account is active on creation');
+  return next isnt(v_invited, null,
+    'the invite metadata marked the row as a pending invite');
+
+  -- "unless an admin explicitly sets it to Admin" — the second half of AC3. The
+  -- promotion path is the RPC, never a direct update (suite_role_rpc covers who
+  -- may call it); here it only has to be true that the default is not a ceiling.
+  if to_regprocedure('public.set_user_role(uuid, public.user_role)') is null then
+    return next skip(1, 'set_user_role RPC not yet migrated');
+  else
+    perform tests.sqlstate_of(v_admin, format(
+      'select public.set_user_role(%L, ''admin'')', v_invitee));
+
+    select role into v_role from public.users where id = v_invitee;
+    return next is(v_role, 'admin'::public.user_role,
+      'an admin can promote the invited CAM explicitly');
+  end if;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 
 select * from tests.suite_core();
 select * from tests.suite_viewer();
 select * from tests.suite_users();
 select * from tests.suite_sensitive();
+select * from tests.suite_ingestion();
 select * from tests.suite_audit();
 select * from tests.suite_role_rpc();
+select * from tests.suite_active_rpc();
+select * from tests.suite_deactivate_rpc();
+select * from tests.suite_invite_rpc();
+select * from tests.suite_signup_domain();
+select * from tests.suite_default_role();
 select * from tests.suite_views();
 
 select * from finish();

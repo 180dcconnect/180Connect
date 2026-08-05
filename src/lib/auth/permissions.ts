@@ -89,3 +89,24 @@ export function canChangeRole(
   }
   return { ok: true };
 }
+
+/**
+ * The self-suspension rail (F013), checked here so the admin gets a sentence they
+ * can act on rather than a 403 from the database.
+ *
+ * `set_user_active` refuses the same thing inside its SECURITY DEFINER body — that
+ * is the check that actually holds, since anyone can call the RPC directly through
+ * PostgREST. This one exists for the message, not for the security.
+ */
+export function canChangeAccess(
+  actorId: string,
+  targetUserId: string,
+): { ok: true } | { ok: false; message: string } {
+  if (actorId === targetUserId) {
+    return {
+      ok: false,
+      message: "You cannot suspend your own account.",
+    };
+  }
+  return { ok: true };
+}

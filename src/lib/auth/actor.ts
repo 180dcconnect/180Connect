@@ -21,8 +21,17 @@ export type ActorResult =
   | { ok: true; actor: Actor }
   | { ok: false; reason: ActorFailureReason };
 
+/**
+ * Extra detail attached to the `permission.denied` log line. `route` is worth
+ * passing from any page gate: without it a denial says which permission was
+ * missing but not which screen was being reached for, which is the difference
+ * between a log you can act on and one you can only count.
+ */
+export type ActorContext = { route?: string };
+
 export async function getCurrentActor(
   permission?: Permission,
+  context: ActorContext = {},
 ): Promise<ActorResult> {
   const supabase = await createClient();
   const {
@@ -39,6 +48,7 @@ export async function getCurrentActor(
 
   if (error) {
     logSecurityEvent("permission.denied", {
+      ...context,
       reason: "profile_lookup_failed",
       permission,
     });
@@ -48,6 +58,7 @@ export async function getCurrentActor(
   const authorization = authorizeUserProfile(user, data, permission);
   if (!authorization.ok) {
     logSecurityEvent("permission.denied", {
+      ...context,
       userId: user.id,
       reason: authorization.reason,
       permission,

@@ -15,15 +15,17 @@
 | 3.0 | create_organisations | ORGANISATIONS | USERS (owner_id) | Core entity table |
 | 4.0 | create_org_children | ORGANISATION_IDENTIFIERS, CONTACTS, FINANCIAL_PERIODS, GRANTS, ENRICHMENT_RESULTS, NOTES | ORGANISATIONS, USERS | All FK to ORGANISATIONS |
 | 5.0 | create_tags | TAGS, ORG_TAGS | ORGANISATIONS, USERS | Bridge table ORG_TAGS |
-| 6.0 | create_ingestion | INGESTION_RUNS, RAW_SOURCE_RECORDS | USERS, ORGANISATIONS | RAW_SOURCE_RECORDS FK to INGESTION_RUNS |
+| 6.0 | create_ingestion | INGESTION_RUNS, RAW_SOURCE_RECORDS | USERS, ORGANISATIONS | RAW_SOURCE_RECORDS FK to INGESTION_RUNS;  the two source columns use the public.data_source_name domain, not per-table check<br>  constraints. Also record that it landed as 20260728153131_create_raw_data_layer.sql, since the sequence calls it create_ingestion. |
 | 7.0 | create_quality | DATA_QUALITY_EVENTS, ENTITY_MATCH_CANDIDATES, MANUAL_ENTRY_RECORDS | RAW_SOURCE_RECORDS, ORGANISATIONS, USERS | Raw-data checks and the manual entry track |
 | 8.0 | create_model_config | MODEL_VERSIONS, SCORING_WEIGHTS, FEATURE_DEFINITIONS, AGENT_PROMPTS | USERS | Intelligence configuration (tab 05) |
 | 9.0 | create_predictions | AGENT_RUNS, LATEST_SCORES | ORGANISATIONS, MODEL_VERSIONS, USERS | LATEST_SCORES FK to AGENT_RUNS |
 | 10.0 | create_email_library | EMAIL_PERFORMANCE_LIBRARY | OUTREACH_MESSAGES (nullable until step 11) | Or create after step 11 if the FK is NOT NULL |
 | 11.0 | create_outreach | OUTREACH_MESSAGES, AI_GENERATIONS | ORGANISATIONS, CONTACTS, USERS, AGENT_RUNS | Draft and send records |
 | 12.0 | create_outreach_events | SEND_EVENTS, REPLY_EVENTS, OUTCOMES | OUTREACH_MESSAGES, ORGANISATIONS, CONTACTS, USERS | Delivery, replies, ground truth |
-| 13.0 | create_analytics | API_HEALTH_LOGS, INGESTION_SUMMARY, COST_TRACKING, ERROR_LOG, CAM_ACTIVITY_SUMMARY, PIPELINE_METRICS, SECTOR_PERFORMANCE | USERS | Tabs 08-09 |
+| 13.0 | create_analytics | API_HEALTH_LOGS, INGESTION_SUMMARY, COST_TRACKING, ERROR_LOG, CAM_ACTIVITY_SUMMARY, PIPELINE_METRICS, SECTOR_PERFORMANCE, AUDIT_LOG | USERS | Tabs 08-09 |
 | 14.0 | create_pulse_view | sector_trends (SQL view) | ORGANISATIONS, GRANTS, FINANCIAL_PERIODS | PULSE is a view, not a table |
 | 15.0 | enable_rls_policies | RLS policies on every table | All tables | Per the Security Controls Register (tab 12) |
 | 16.0 | create_indexes | Indexes: FKs, LATEST_SCORES.priority_score, ORGANISATIONS.outreach_status, RAW_SOURCE_RECORDS.checksum | All tables | Query performance for the dashboard |
 | 17.0 | configure_backups | Daily backups + point-in-time recovery | - | Supabase |
+| 18.0 | create_login_attempt | LOGIN_ATTEMPT + RPCs login_throttle_state, record_login_failure, clear_login_failures, prune_login_attempts | pgcrypto (Step 1) | F003 brute-force throttle. No FK. RPCs granted to service_role only; RLS on, admin SELECT, no write policy |
+| 19.0 | create_actions | ACTIONS + enum action_status | ORGANISATIONS, USERS | F168/F257 client actions and reminders. RLS on; assignee_user_id carries no UPDATE grant — it is changed only by the F257 reassignment RPC, which writes audit_log. Reminder is a column (remind_at), not a table. |

@@ -169,6 +169,9 @@
 | 04 Entities | USERS | created_at | timestamp |  |  |
 | 04 Entities | USERS | updated_at | timestamp |  |  |
 | 04 Entities | USERS | is_seed | boolean |  |  |
+| 04 Entities | USERS | deactivated_at | timestamp |  |  |
+| 04 Entities | USERS | invited_at | timestamp |  |  |
+| 04 Entities | USERS | invite_accepted_at | timestamp |  |  |
 | 04 Entities | NOTES | id | uuid |  |  |
 | 04 Entities | NOTES | organisation_id | uuid | ORGANISATIONS |  |
 | 04 Entities | NOTES | author_id | uuid | USERS |  |
@@ -185,6 +188,19 @@
 | 04 Entities | ORG_TAGS | tag_id | uuid | TAGS |  |
 | 04 Entities | ORG_TAGS | added_by_user_id | uuid | USERS |  |
 | 04 Entities | ORG_TAGS | created_at | timestamp |  |  |
+| 04 Entities | ACTIONS | id | uuid |  | Primary key |
+| 04 Entities | ACTIONS | organisation_id | uuid | ORGANISATIONS | Client this action belongs to |
+| 04 Entities | ACTIONS | assignee_user_id | uuid | USERS | CAM responsible for doing the action |
+| 04 Entities | ACTIONS | created_by_user_id | uuid | USERS | Who created the action |
+| 04 Entities | ACTIONS | title | text |  | Short description of the work |
+| 04 Entities | ACTIONS | description | text |  | Longer detail |
+| 04 Entities | ACTIONS | due_date | date |  | When the action is due |
+| 04 Entities | ACTIONS | remind_at | timestamp |  | When to remind the assignee |
+| 04 Entities | ACTIONS | status | enum |  | open, completed, cancelled |
+| 04 Entities | ACTIONS | completed_at | timestamp |  | When the action was marked complete |
+| 04 Entities | ACTIONS | is_seed | boolean |  | Marks a row created by the seed script |
+| 04 Entities | ACTIONS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | ACTIONS | updated_at | timestamp |  | Last edit timestamp |
 | 05 - Features | SCORING_WEIGHTS | id | model_name |  | feature_name |
 | 05 - Features | SCORING_WEIGHTS | 1.0 | SCOUT |  | south_yorkshire_flag |
 | 05 - Features | SCORING_WEIGHTS | 2.0 | SCOUT |  | mission_alignment_score |
@@ -338,6 +354,20 @@
 | 08 System Analytics | ERROR_LOG | stack_trace | text |  | Full stack trace for debugging |
 | 08 System Analytics | ERROR_LOG | resolved_at | timestamp |  | When the error was marked resolved; null while open |
 | 08 System Analytics | ERROR_LOG | created_at | timestamp |  | Row creation timestamp |
+| 08 System Analytics | AUDIT_LOG | id | uuid |  | Primary key |
+| 08 System Analytics | AUDIT_LOG | action_user_id | uuid | USERS | id of user who acted |
+| 08 System Analytics | AUDIT_LOG | action | text |  | Machine token: role_changed, user_deactivated |
+| 08 System Analytics | AUDIT_LOG | target_table | text |  | Table the action targeted |
+| 08 System Analytics | AUDIT_LOG | target_id | uuid |  | Row targeted |
+| 08 System Analytics | AUDIT_LOG | detail | jsonb |  | Action Context: before/after, reason |
+| 08 System Analytics | AUDIT_LOG | created_at | timestamp |  | Row creation timestamp |
+| 08 System Analytics | LOGIN_ATTEMPT | id | uuid |  | Primary Key |
+| 08 System Analytics | LOGIN_ATTEMPT | email_hash | text |  | sha256 hex of the trimmed, lowercased submitted email; never the address itself |
+| 08 System Analytics | LOGIN_ATTEMPT | failures | int |  | Consecutive failed logins inside the current window |
+| 08 System Analytics | LOGIN_ATTEMPT | window_started_at | timestamp |  | Start of the counting window; failures stop accumulating 15 minutes after it |
+| 08 System Analytics | LOGIN_ATTEMPT | blocked_until | timestamp |  | When this address may next attempt a login; null or past means allowed |
+| 08 System Analytics | LOGIN_ATTEMPT | created_at | timestamp |  | Row creation timestamp |
+| 08 System Analytics | LOGIN_ATTEMPT | updated_at | timestamp |  | Last time a failure was counted |
 | 09 CAM Analytics | CAM_ACTIVITY_SUMMARY | id | uuid |  | Primary key |
 | 09 CAM Analytics | CAM_ACTIVITY_SUMMARY | user_id | uuid |  | Links to USERS; the CAM the week covers |
 | 09 CAM Analytics | CAM_ACTIVITY_SUMMARY | week_start | date |  | Monday of the week the rollup covers |

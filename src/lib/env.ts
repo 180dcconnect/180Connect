@@ -44,12 +44,19 @@ function isAbsoluteHttpUrl(value: string): string | null {
   return null;
 }
 
-function isBareDomain(value: string): string | null {
-  // A leading "@" is tolerated by src/lib/auth/login.ts, so accept it here too.
-  const domain = value.replace(/^@/, "");
-  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(domain)) {
-    return "must be a bare domain, for example 180dc.org";
+function isBareDomainList(value: string): string | null {
+  // One domain, or several separated by commas. A leading "@" is tolerated by
+  // src/lib/auth/login.ts, so accept it here too.
+  const domains = value.split(",").map((entry) => entry.trim().replace(/^@/, ""));
+
+  if (domains.some((domain) => domain === "")) {
+    return "must not contain an empty entry — check for a stray or trailing comma";
   }
+
+  if (!domains.every((domain) => /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(domain))) {
+    return "must be a bare domain, or a comma-separated list of them, for example 180dc.org,example.com";
+  }
+
   return null;
 }
 
@@ -99,8 +106,8 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     required: false,
     secret: false,
     description:
-      "Email domain users must sign in from. Server-only — never prefix with NEXT_PUBLIC_. Defaults to 180dc.org in `src/lib/auth/login.ts` when unset.",
-    validate: isBareDomain,
+      "Email domain(s) users may sign in from — one, or a comma-separated list. Server-only, never prefixed with NEXT_PUBLIC_. Defaults to 180dc.org when unset. This is the friendly half of a two-layer rule: Postgres decides, via app.allowed_email_domains and the trigger on auth.users (20260804160000). Keep the two in step — widening this alone can never let anybody in, it only changes the message the form shows.",
+    validate: isBareDomainList,
   },
   {
     name: "PASSWORD_RESET_WINDOW_SECONDS",
@@ -126,7 +133,7 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     required: false,
     secret: true,
     description:
-      "Supabase service-role key. Bypasses row-level security — server-side only, never prefixed with NEXT_PUBLIC_. Not yet consumed — becomes required with F223.",
+      "Supabase service-role key. Bypasses row-level security — server-side only, never prefixed with NEXT_PUBLIC_. Read by `src/lib/supabase/admin.ts`, which has two callers. The F227 login throttle: its RPCs are granted to service_role alone, because a failed-login counter that anon could increment over the REST API would let anyone keep a chosen account delayed without solving a CAPTCHA. And F013's suspended-user check at login, which cannot read `users.is_active` as the user themselves — `users_select_active` gates SELECT on the reader being active, so a suspended user's own row is invisible to them. Optional locally, where an absent key degrades the throttle to a no-op (CAPTCHA and Supabase's per-IP limits stay in place) and makes a suspended user meet a worse error message rather than a way in, since `getCurrentActor` refuses them regardless. Session revocation does not use this key; it happens inside `set_user_active`. Staging and production must set it, or brute-force throttling is silently off. Becomes required with F223.",
   },
   {
     name: "SESSION_ACTIVITY_SECRET",
@@ -166,6 +173,47 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     description:
       "Environment tag applied to captured errors — 'staging' or 'production' (F226). Optional: falls back to Vercel's VERCEL_ENV so staging (preview) and production are distinguished automatically.",
   },
+  {
+    name: "RESEND_API_KEY",
+    required: false,
+    secret: true,
+    description:
+      "Resend API key for transactional platform email — the F008 invite today, notification mail later. Server-side only, never prefixed with NEXT_PUBLIC_. Optional by design: with no key set, `src/lib/email/send.ts` falls back to logging each message to the console instead of sending it, so local development and CI can never email a real person. Not used for client outreach, which PRD §12.1 sends from each CAM's own Gmail account.",
+    validate: (value) =>
+      value.startsWith("re_") ? null : "must be a Resend API key, which begins with re_",
+  },
+  {
+    name: "EMAIL_FROM",
+    required: false,
+    secret: false,
+    description:
+      "Sender for transactional platform email, either a bare address or `Name <address>`. The domain must be verified with Resend — an unverified sender is rejected outright, and Resend's own onboarding@resend.dev only ever delivers to the account owner's address, so it is not usable for inviting anyone else. Required whenever RESEND_API_KEY is set; ignored otherwise.",
+    validate: (value) =>
+      /^[^<>]*<[^@<>\s]+@[^@<>\s]+\.[^@<>\s]+>$|^[^@<>\s]+@[^@<>\s]+\.[^@<>\s]+$/.test(value)
+        ? null
+        : "must be an email address, optionally as `Name <address@example.com>`",
+  },
+  {
+    name: "EMAIL_RECIPIENT_ALLOWLIST",
+    required: false,
+    secret: false,
+    description:
+      "Comma-separated addresses or bare domains that transactional email may be delivered to. Any other recipient is dropped and logged rather than sent. Unset means no restriction, which is the production setting. Set it anywhere a real charity contact could be emailed by accident — staging, or a developer sending from a domain that is not 180DC's.",
+  },
+  {
+    name: "COMPANIES_HOUSE_API_KEY",
+    required: false,
+    secret: true,
+    description:
+      "Companies House API key for company data ingestion (F038). HTTP Basic Auth — sent as the username with a blank password. Not yet required — becomes required once F032 (Companies House data import) ships.",
+  },
+  {
+    name: "CHARITYBASE_API_KEY",
+    required: false,
+    secret: true,
+    description:
+      "CharityBase API key for charity data ingestion (F038/F031). GraphQL API — sent as `Authorization: Apikey <key>`. Not yet required — becomes required once F031 (CharityBase data import) ships, and CharityBase's own API is currently down on their end.",
+  },
 ];
 
 export type EnvProblem = {
@@ -204,6 +252,7 @@ export function collectEnvProblems(
   }
 
   problems.push(...requireOneSupabaseKey(source));
+  problems.push(...requireSenderWhenSendingEmail(source));
 
   return problems;
 }
@@ -228,6 +277,28 @@ function requireOneSupabaseKey(
       name: "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
       problem:
         "is required but not set (or set NEXT_PUBLIC_SUPABASE_ANON_KEY instead)",
+    },
+  ];
+}
+
+/**
+ * Neither email variable is required on its own — an environment that sends no
+ * email is valid, and that is the local default. But a key without a sender is
+ * a deployment that believes it can send and cannot: every invite would be
+ * refused at the provider, at send time, one silent failure at a time. Catch
+ * the pair at startup instead.
+ */
+function requireSenderWhenSendingEmail(
+  source: Record<string, string | undefined>,
+): EnvProblem[] {
+  if (!source.RESEND_API_KEY?.trim() || source.EMAIL_FROM?.trim()) {
+    return [];
+  }
+
+  return [
+    {
+      name: "EMAIL_FROM",
+      problem: "is required when RESEND_API_KEY is set (a sender on a verified domain)",
     },
   ];
 }

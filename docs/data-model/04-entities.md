@@ -130,6 +130,8 @@
 | deactivated_at | timestamp |  | Yes | When the account was deactivated | System | Set by deactivate_user; cleared on reactivation | Null on active and on merely, suspended accounts; distinguishes deactivation from suspension |
 | invited_at | timestamp |  | Yes | When an admin invite created this row | System | Set by app.handle_new_auth_user from the invite's raw_user_meta_data | Null for rows not created by an invite (seed rows, first bootstrapped admin). Set with invite_accepted_at null = a pending invite |
 | invite_accepted_at | timestamp |  | Yes | When the invited person first confirmed their email | System | Set by app.handle_auth_user_confirmed when email_confirmed_at goes non-null | Null while invite pending. Setting it moves the row out of the admin's pending-invites list |
+| onboarding_completed_at | timestamp |  | Yes | When the user finished the onboarding flow | System | Set when user completes onboarding | Null until completed |
+| onboarding_dismissed_at | timestamp |  | Yes | When the user dismissed the onboarding flow | System | Set when user dismisses onboarding | Null until dismissed |
 
 ## NOTES
 
@@ -179,3 +181,11 @@
 | is_seed | boolean |  | No | Marks a row created by the seed script | System | Set by scripts/seed.mts | Mirrors ORGANISATIONS.is_seed |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last edit timestamp | System | Updated on edit |  |
+
+## USER_ONBOARDING_STEPS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| user_id | uuid | USERS | No | User completing the step | System | Set when step is completed |  |
+| step_key | text |  | No | Key of the onboarding step | System | Set when step is completed |  |
+| completed_at | timestamp |  | No | When the step was completed | System | Auto-generated |  |

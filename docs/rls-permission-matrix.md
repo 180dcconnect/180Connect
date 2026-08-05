@@ -393,6 +393,68 @@ loss F257 exists to prevent, reachable through F257's own table. Requiring both 
 intended case intact (raising something for yourself and dropping it before you start,
 where the two are the same person) and closes the rest.
 
+### 3.12 Onboarding state — own row only
+
+Backs F255 (`supabase/migrations/20260805100000_create_user_onboarding.sql`). This is the
+one place in the schema where a state-changing write is *not* an RPC. The audit-log
+contract (`docs/audit-log-pattern.md` §1) covers ownership, status, role and approval
+state; onboarding progress is a user's own view state, grants nothing, and no other
+user's access depends on it. So it is governed by RLS and a column grant alone.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `USERS.onboarding_completed_at`, `USERS.onboarding_dismissed_at` | as `USERS` (§3.1: all roles read the directory) | — | own row, these two columns (all roles) | — |
+| `USER_ONBOARDING_STEPS` | own rows (`user_id = auth.uid()`) | own rows | — (append-only) | — (append-only) |
+
+The two `USERS` columns are the whole of AC5 and AC6: either one non-null hides the guide
+permanently, and existing CAMs never see it because the predicate also requires
+`role = 'cam'` and `invite_accepted_at is not null`. Both are nullable with no default, so
+no backfill was needed and every pre-F255 row reads as "not finished, not dismissed".
+
+They carry an explicit `grant update (...) to authenticated`, which is the only reason the
+write succeeds — `create_users.sql` revokes all and grants `update (full_name)` only
+(§2.1), and the existing `users_update_self_or_admin` policy confines it to the caller's
+own row. Unlike `role` and `is_active`, there is nothing here an admin needs to write on
+someone else's behalf, so no RPC exists and none is deferred.
+
+`USER_ONBOARDING_STEPS` has **no UPDATE or DELETE grant for any role**, admins included.
+A completed step is a fact about the past; the guide is hidden by the `USERS` columns,
+never by deleting progress, so there is no legitimate reason to rewrite it — and a user
+who could delete their own rows could make a dismissed guide reappear step by step.
+Admins get no read either: nothing in F255 needs one, and F187 (admin views a CAM's
+settings, P3) can add it with a stated reason when it is actually built.
+
+Both policies AND in `app.is_active_user()` so deactivation bites immediately. Neither
+uses `app.can_write()` — that helper gates *client data* and excludes viewers (F258),
+which is the wrong test for a row a user writes about themselves.
+
+---
+
+### 3.13 Outreach preferences — own row only
+
+Backs F195 (`supabase/migrations/20260805110000_create_outreach_preferences.sql`). Same
+shape as §3.12: a user's own settings, not ownership/status/role/approval state, so it
+is governed by RLS alone — no SECURITY DEFINER RPC, no `audit_log` row
+(`docs/audit-log-pattern.md` §1).
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `OUTREACH_PREFERENCES` | own row (`user_id = auth.uid()`) | own row | own row | — (no grant) |
+
+One row per user (`unique (user_id)`), upserted by the settings form's server action.
+No DELETE grant to any role: clearing preferences is an UPDATE back to empty arrays,
+not a row removal — this keeps "no preferences set" a single always-present state
+(empty arrays) instead of a row that may or may not exist, which is one fewer case for
+F094 (#93, not yet built) to handle when it reads this table.
+
+No admin read: nothing in #191 needs one, and F187 (admin views a CAM's settings, P3)
+can add it with a stated reason when it is actually built — same call already made for
+`USER_ONBOARDING_STEPS` (§3.12).
+
+Both policies AND in `app.is_active_user()`. No `app.can_write()` — that helper gates
+*client data* and excludes viewers (F258); this table is a user's own settings and is
+harmless for any active role to write about themselves.
+
 ---
 
 ## 4. Denial behaviour and feedback

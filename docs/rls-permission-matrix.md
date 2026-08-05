@@ -455,6 +455,61 @@ Both policies AND in `app.is_active_user()`. No `app.can_write()` — that helpe
 *client data* and excludes viewers (F258); this table is a user's own settings and is
 harmless for any active role to write about themselves.
 
+### 3.14 Suppressions — RPC-only, admin decides
+
+Backs F251 Suppress Charity Record (#82),
+`supabase/migrations/20260805120000_create_suppressions.sql`. Resolves open gap #3
+(§6) and the ticket's own "Blocked By / Open Questions: who can suppress records",
+decided by the Project Leader 5 Aug 2026: **only an admin's decision puts a
+suppression into effect.** A CAM may request one; an admin may request one directly,
+which self-approves (no admin ever waits on their own request).
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `SUPPRESSIONS` | all active users | — (RPC only) | — (RPC only) | — (no grant) |
+
+No INSERT/UPDATE policy, by the same reasoning as `AUDIT_LOG` (§3.8) and
+`set_user_role` (§6): "reason required" plus a role-gated state transition is the RLS
+recipe's RPC case (MIGRATIONS.md step 4), not something a policy can express. All
+writes go through two `SECURITY DEFINER` RPCs, each self-checking the caller and each
+writing an `audit_log` row in the same transaction:
+
+- `request_suppression(organisation_id, reason)` — caller must satisfy
+  `app.can_write()` (admin or CAM). `reason` is required and cannot be blank. An
+  admin caller's row lands `active` immediately (`suppression_approved` audit
+  action); a CAM caller's row lands `pending` (`suppression_requested`). A second
+  open (`pending`/`active`) row for the same organisation is rejected — one at a
+  time, enforced by a partial unique index on `organisation_id`.
+- `decide_suppression_request(suppression_id, approve, note)` — admin only. Moves a
+  `pending` row to `active` or `rejected`, records `decided_by`/`decided_at`, and
+  writes `suppression_approved` or `suppression_rejected` to `audit_log`. Rejects a
+  target that is not currently `pending`.
+
+SELECT is open to every active user (not gated to admin/owner) because the working
+list needs to hide a suppressed organisation for everyone, not just the CAM who owns
+it — same reasoning as `organisations_select_active`.
+
+**Outreach block (AC8).** `app.can_contact_organisation()` (§3.4,
+`create_rls_helpers.sql`) is extended in this migration — via `CREATE OR REPLACE`,
+not an edit to the already-applied file — to additionally require
+`not app.organisation_is_suppressed(organisation_id)`. This blocks sending to a
+suppressed organisation for every role, admin included; the only way back in is F185
+lifting the suppression, not bypassing the check.
+
+**Scope note.** This table is not the contact-level `email_hash`/`phone_hash` GDPR
+suppression list in `docs/data-lifecycle-policy.md` §7 (open gap for that one
+remains — it is Art. 21 objection tracking, a different story). `organisation_id`
+here is the same "suppress an organisation" branch that list anticipates, so a future
+contact-level story can extend this table rather than starting over. Built ahead of
+F248 (#243, "a suppression list exists") with the Project Leader's agreement, since
+this table already satisfies that — see the migration header for the full note.
+
+`status` is `pending | active | rejected | lifted`. `lifted` is reserved now, not
+used by any RPC in this migration — F251's own AC commits to an admin being able to
+remove a suppression, and F185 (#181) is that RPC. Adding an enum value later is a
+one-way door in Postgres (`create_organisations.sql` precedent), so it is reserved
+up front rather than negotiated later.
+
 ---
 
 ## 4. Denial behaviour and feedback
@@ -535,8 +590,10 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
 2. **No suggestion table.** §4.3 grants CAMs "suggest organisation field correction"
    and F077 is a P1 story, but no table holds a suggestion. Without one the CAM path
    to changing canonical data does not exist, and 3.2 has no row for it.
-3. **No suppression table.** §4.3 has "Lift suppression: Admin, reason required".
-   Nothing in the Data Model records a suppression.
+3. ~~**No suppression table.**~~ **RESOLVED — F251 (#82)**, 5 Aug 2026. §3.14 has
+   the table and RPCs. "Lift suppression: Admin, reason required" is now split into
+   *request* (CAM or admin, reason required) and *decide* (admin only) — see §3.14
+   for why. Lifting an active suppression is F185 (#181), not built yet.
 4. ~~**Viewer role has no story.**~~ **RESOLVED — F258 (#268) owns it**, raised
    24 Jul 2026. The story also closed a live escalation this question had been
    hiding: `organisations_update_owner_or_admin` tested ownership and admin but

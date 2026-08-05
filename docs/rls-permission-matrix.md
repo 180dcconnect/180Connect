@@ -59,7 +59,7 @@ reviewers do not assume the matrix alone is sufficient.
 | CAM may edit own profile but **not** their own `role` | RLS is row-level; it cannot allow a row UPDATE while forbidding one column | `REVOKE` (§2.1) then column `GRANT` — `grant update (full_name) on public.users to authenticated`. `role`/`is_active` granted to nobody; an admin role change goes through an RPC (F012) | **shipped** in create_users (F233); F012 RPC still to build |
 | CAM claims an **unowned** organisation | Needs a write to `ORGANISATIONS.owner_id`, otherwise off-limits | Handled **in the UPDATE policy**, not an RPC: a CAM may target an unowned row and its `WITH CHECK` forces the new `owner_id` to be themselves. `claim_organisation(org_id)` as a `SECURITY DEFINER` RPC remains a future enhancement (F162) for atomic race-safety + an audit row | policy **shipped** in create_organisations (F233); RPC deferred to F162 |
 | "Override pipeline stage — **reason required**" | Postgres cannot require a justification string as a condition of an UPDATE | `SECURITY DEFINER` RPC `override_outreach_status(org_id, status, reason)`. `reason` is `not null` and lands in the audit log | to build (F224) |
-| "Reassign ownership: admin only" | Same column-level problem | Currently the org UPDATE policy allows an admin to set any `owner_id`; a dedicated `assign_organisation_owner` RPC (with audit) is the future form | admin path **shipped**; RPC deferred. The **offboarding** case is now covered: `deactivate_user` (F014) reassigns every organisation the departing user owns, with a required reason and one `ownership_reassigned` audit row per organisation, in the same transaction that closes the account |
+| "Reassign ownership: admin only" | Same column-level problem | Currently the org UPDATE policy allows an admin to set any `owner_id`; a dedicated `assign_organisation_owner` RPC (with audit) is the future form | admin path **shipped**; RPC deferred. The **offboarding** case is now covered: `deactivate_user` (F014) reassigns every organisation the departing user owns, with a required reason and one `ownership_reassigned` audit row per organisation, in the same transaction that closes the account. Since `20260804170000` it does not move `owner_id` itself — it delegates to `reassign_ownership` (F257), so the departing user's **open actions travel with their clients** instead of being stranded on a closed account. See §3.11 |
 | Audit entries are immutable | RLS controls who writes, not whether a row can later change | `AUDIT_LOG` gets **no** UPDATE or DELETE policy for any role. Append-only by omission | needs the table (§6) |
 
 **Rule that follows:** where a capability needs a *condition*, a *reason string*, or a
@@ -333,6 +333,66 @@ The throttle reads no user table, so an unknown address is counted, blocked and 
 exactly like a real one — it cannot be used to enumerate accounts. See §4 on why the
 user-facing message stays uniform.
 
+### 3.11 Actions — shared read, assignee write, admin assignment
+
+Backs F168–F172 (`supabase/migrations/20260801100000_create_actions.sql`). Read is
+shared for the same reason as notes and outreach (F019), and because F257's "the new CAM
+can understand where the previous CAM left off" requires the incoming CAM to read the
+outgoing one's open actions *before* the handover, not only after.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `ACTIONS` | all roles | admin: any. cam: `created_by_user_id = auth.uid()` **and** `assignee_user_id = auth.uid()` **and** org is unowned or owned by self | admin any row; cam where `assignee_user_id = auth.uid()` — **work columns only** | admin any row; cam own-created **and** own-assigned **and** `status = 'open'` |
+
+`assignee_user_id` carries **no UPDATE grant for any role, admins included**, and neither
+do `organisation_id` or `is_seed`. `authenticated` is one shared Postgres role, so column
+privileges cannot hand admins a write the policies deny to CAMs (the constraint already
+documented for canonical organisation columns in §3.2). Reassignment is instead a
+reason-carrying write — F257 requires an `audit_log` row naming the old CAM, the new CAM
+and why, which no policy can compel — so it goes through a `SECURITY DEFINER` RPC, per
+the MIGRATIONS.md convention that produced `set_user_role` for `role`. Unlike §3.2's
+known gap, this door is closed rather than deferred: the RPCs below are the only write
+path, and they are admin-only.
+
+**Reassignment RPCs** (`supabase/migrations/20260802100000_create_reassign_ownership_rpc.sql`):
+
+| Function | Does | Refuses |
+|---|---|---|
+| `reassign_ownership(org_ids[], new_owner_id, reason, from_user_id)` | moves `organisations.owner_id` and the outgoing owner's **open** actions on those clients; one `audit_log` row per client (`ownership_reassigned`). A **null** `new_owner_id` releases to the unowned pool and unassigns those actions — the F014 release path | non-admin `42501`; blank reason, empty selection, deactivated or viewer recipient `22023` |
+| `reassign_actions(action_ids[], new_assignee_id, reason)` | moves open actions by id — the F169 work sitting on clients the offboarded CAM never owned; one row per action (`action_reassigned`, carrying `organisation_id`) | same |
+
+`from_user_id` is optional and does two jobs: it is a concurrency guard (the offboarding
+screen's selection is a snapshot, so a client whose owner changed since is **skipped**,
+not seized), and it decides whose actions move — work an admin assigned to a *third* CAM
+on that client stays with them. Null is the F253 bulk-assign path, where each client's
+current owner plays that part per row.
+
+Only **open** actions move. Completed and cancelled ones stay with whoever did them, on
+the same principle that keeps note and draft authorship put: reassignment transfers
+responsibility, never history. Both functions return a jsonb summary including a
+`skipped` count, so a partial batch reports itself instead of aborting and leaving the
+admin to work out which of fifty clients was the problem.
+
+A CAM assigning work to *another* CAM is F169 and stays admin-only — that is what the
+`assignee_user_id = auth.uid()` predicate on INSERT enforces. Viewers create nothing
+(§4.3), enforced by `app.is_cam()`.
+
+Deletion requires the CAM to have **raised** the action and to **still hold** it, and it
+must still be open. A completed or cancelled action is handover history and only an admin
+may remove it. `cancelled` exists as a status for the same reason — an action dropped
+during a handover is context the incoming CAM needs, and deleting it destroys that.
+
+The assignment half of that test was added in `20260803100000_fix_actions_delete_policy.sql`
+and is not cosmetic. Authorship is permanent and reassignment does not touch it, so
+keying DELETE on `created_by_user_id` alone gave a standing right that survived the
+handover: a CAM who moved teams — still active, so `app.is_active_user()` did not stop
+them — could delete open work now assigned to the CAM who took over, on a client they no
+longer owned. Because a DELETE blocked by USING removes zero rows and raises nothing
+(§4), it would have failed silently and read as work that had never existed. That is the
+loss F257 exists to prevent, reachable through F257's own table. Requiring both keeps the
+intended case intact (raising something for yourself and dropping it before you start,
+where the two are the same person) and closes the rest.
+
 ---
 
 ## 4. Denial behaviour and feedback
@@ -505,9 +565,20 @@ and the advisor re-run. Status as of the 23 Jul staging run:
 | `0028` / `0029` (SECURITY DEFINER exposed) | `is_admin`, `is_active_user`, `handle_new_auth_user` were in `public`, callable as REST RPCs by anon/authenticated | Moved to the `app` schema, which PostgREST does not expose. Policies still call them; `authenticated` keeps `EXECUTE` (a plain `REVOKE` would break policy evaluation — verified `42501`). **Resolved.** |
 | `0011` (function search_path) | `set_updated_at` had an unpinned `search_path` | Pinned to `''` under F233. **Resolved.** |
 | `0029` on `set_user_role` | The F012 role-change RPC is SECURITY DEFINER and callable by `authenticated` via REST | **Accepted, intentional.** It *must* be REST-callable (the admin UI calls `/rest/v1/rpc/set_user_role`) and it self-authorises: the first thing its body does is re-check `app.is_admin()` and raise `42501` otherwise. This is the strong posture — a direct REST call by a non-admin is rejected *by the database*, not by app code. Moving it to `app` or switching to SECURITY INVOKER would defeat its purpose (INVOKER cannot write `users.role`, which is granted to no one). anon has no EXECUTE. |
+| `0029` on `reassign_ownership` / `reassign_actions` | The F257 handover RPCs are SECURITY DEFINER and callable by `authenticated` via REST | **Accepted, intentional — same shape as `set_user_role`.** Both must be REST-callable (`/admin/offboard` calls them) and both self-authorise, re-checking `app.is_admin()` and raising `42501` first. SECURITY INVOKER is not an option: `actions.assignee_user_id` is granted to no role, so an invoker-rights function could not write it. anon has no EXECUTE (pgTAP asserts this). |
 | `auth_leaked_password_protection` | HaveIBeenPwned check disabled | **Accepted exception — Pro-plan feature.** Attempting to enable it on the free plan returns *"available on Pro Plans and up."* Revisit if the project upgrades (tracked with D-01 / Q-01 in `docs/open-questions.md`, the same plan decision). |
 
-After the fixes, a staging advisor run reports two WARN items — the intentional
-`set_user_role` RPC and the Pro-only password check — and **nothing else fixable**.
-Both are accepted and documented above. Re-run the advisor after the migrations apply
-to each environment (it reads the live database), and after any plan upgrade.
+After the fixes, a staging advisor run reports the intentional self-authorising RPCs and
+the Pro-only password check, and **nothing else fixable**. All are accepted and
+documented above. Re-run the advisor after the migrations apply to each environment (it
+reads the live database), and after any plan upgrade.
+
+**Unresolved, and not from these migrations.** The 2 Aug staging run also flagged `0029`
+on `public.set_user_active`. That function exists on staging but appears in no migration
+file and in no source file — it was created directly against the database, which
+MIGRATIONS.md forbids ("never make an untracked manual change to a live database"). Its
+body is sound (admin self-check, no self-change, writes `audit_log`), so this is a
+process problem rather than a security one: nothing recreates it on `db reset`, and it
+cannot reach production through the release process. It needs capturing as a migration
+by whoever owns F013/F014. Note also that `users.deactivated_at` is now in the Data
+Model but exists in neither the database nor a migration.

@@ -1511,6 +1511,478 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- actions table controls (sequence step 19)
+-- ---------------------------------------------------------------------------
+-- Matrix §3.11. The assertions that matter most are 6 and 7: assignee_user_id
+-- carries no UPDATE grant for anyone, which is what forces reassignment through
+-- the audited F257 RPC instead of a bare write.
+
+create or replace function tests.suite_actions()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_org_cam_a   uuid := '00000000-0000-4000-b000-000000000002';
+  v_org_cam_b   uuid := '00000000-0000-4000-b000-000000000003';
+  v_action_a    uuid := '00000000-0000-4000-c000-000000000001';
+  v_act_mine    uuid := '00000000-0000-4000-c000-000000000021';
+  v_act_theirs  uuid := '00000000-0000-4000-c000-000000000022';
+  v_assignee    uuid;
+  v_status      public.action_status;
+  v_count       bigint;
+begin
+  if not tests.tables_exist('actions', 'organisations', 'users') then
+    return next skip(12, 'step 19 create_actions not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- A CAM raises their own work on a client they own.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.actions (organisation_id, assignee_user_id, created_by_user_id, title)
+       values (%L, %L, %L, ''Follow up'')', v_org_cam_a, v_cam_a, v_cam_a)),
+    null,
+    'CAM can create an action for themselves on a client they own'
+  );
+
+  -- Assigning work to someone else is F169, admin-only.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.actions (organisation_id, assignee_user_id, created_by_user_id, title)
+       values (%L, %L, %L, ''Do this'')', v_org_cam_a, v_cam_b, v_cam_a)),
+    '42501',
+    'CAM cannot assign an action to another CAM (F169 is admin-only)'
+  );
+
+  -- Unlike a note, an action on someone else's client is a claim on their work.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.actions (organisation_id, assignee_user_id, created_by_user_id, title)
+       values (%L, %L, %L, ''Mine now'')', v_org_cam_b, v_cam_a, v_cam_a)),
+    '42501',
+    'CAM cannot create an action on a client owned by another CAM'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'insert into public.actions (organisation_id, assignee_user_id, created_by_user_id, title)
+       values (%L, %L, %L, ''Viewer work'')', v_org_cam_a, v_viewer, v_viewer)),
+    '42501',
+    'viewer cannot create an action'
+  );
+
+  -- Admin assigns across ownership boundaries (F169).
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'insert into public.actions (id, organisation_id, assignee_user_id, created_by_user_id, title)
+       values (%L, %L, %L, %L, ''Admin assigned'')',
+      v_action_a, v_org_cam_b, v_cam_a, v_admin)),
+    null,
+    'admin can assign an action to a CAM on any client'
+  );
+
+  -- F171: the assignee closes their own item. status and completed_at move together
+  -- or the check constraint rejects the write.
+  perform tests.sqlstate_of(v_cam_a, format(
+    'update public.actions set status = ''completed'', completed_at = now() where id = %L',
+    v_action_a));
+  select status into v_status from public.actions where id = v_action_a;
+  return next is(v_status, 'completed'::public.action_status,
+    'assignee can mark their own action complete (F171)');
+
+  -- The two that hold the F257 design up. A missing column privilege raises 42501
+  -- regardless of the row policies, so this holds for admins too.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'update public.actions set assignee_user_id = %L where id = %L', v_cam_b, v_action_a)),
+    '42501',
+    'admin cannot reassign an action by direct write — the F257 RPC is the only path'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.actions set assignee_user_id = %L where id = %L', v_cam_b, v_action_a)),
+    '42501',
+    'assignee cannot hand their action to another CAM'
+  );
+
+  select assignee_user_id into v_assignee from public.actions where id = v_action_a;
+  return next is(v_assignee, v_cam_a,
+    'assignee_user_id survives both blocked writes unchanged');
+
+  -- Shared read (F019). F257 needs the incoming CAM to see the outgoing CAM's queue
+  -- *before* the handover, so this is a requirement and not an oversight.
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.actions where assignee_user_id = v_cam_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_count > 0,
+    'a CAM can read another CAM''s actions (handover visibility)');
+
+  -- DELETE keys on authorship AND assignment. Authorship alone once let a CAM delete
+  -- work that had been reassigned away from them (fixed in 20260803100000).
+  insert into public.actions
+    (id, organisation_id, assignee_user_id, created_by_user_id, title)
+  values
+    (v_act_mine,   v_org_cam_a, v_cam_a, v_cam_a, 'Raised for myself'),
+    (v_act_theirs, v_org_cam_a, v_cam_b, v_cam_a, 'Raised, then handed on')
+  on conflict (id) do nothing;
+
+  perform tests.sqlstate_of(v_cam_a, format(
+    'delete from public.actions where id = %L', v_act_mine));
+  select count(*) into v_count from public.actions where id = v_act_mine;
+  return next is(v_count, 0::bigint,
+    'CAM can delete an open action they raised for themselves');
+
+  perform tests.sqlstate_of(v_cam_a, format(
+    'delete from public.actions where id = %L', v_act_theirs));
+  select count(*) into v_count from public.actions where id = v_act_theirs;
+  return next is(v_count, 1::bigint,
+    'CAM cannot delete an action they raised once it belongs to someone else');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- reassignment RPCs (F257)
+-- ---------------------------------------------------------------------------
+-- Matrix §3.11. Uses its own organisations rather than the shared fixture: earlier
+-- suites move ownership around, and these assertions turn on exactly who owns what.
+
+create or replace function tests.suite_reassign()
+returns setof text language plpgsql as $$
+declare
+  v_admin        uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a        uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b        uuid := '00000000-0000-4000-a000-000000000003';
+  v_deactivated  uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer       uuid := '00000000-0000-4000-a000-000000000005';
+  v_org_x        uuid := '00000000-0000-4000-d000-000000000001';  -- CAM A's client
+  v_org_y        uuid := '00000000-0000-4000-d000-000000000002';  -- CAM B's client
+  v_act_open     uuid := '00000000-0000-4000-c000-000000000011';  -- open, on org X
+  v_act_done     uuid := '00000000-0000-4000-c000-000000000012';  -- completed, on org X
+  v_act_cross    uuid := '00000000-0000-4000-c000-000000000013';  -- open, on org Y
+  v_owner        uuid;
+  v_assignee     uuid;
+  v_detail       jsonb;
+  v_actor        uuid;
+  v_count        bigint;
+begin
+  if not tests.tables_exist('actions', 'organisations', 'users', 'audit_log')
+     or to_regprocedure('public.reassign_ownership(uuid[], uuid, text, uuid)') is null then
+    return next skip(16, 'reassignment RPCs not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  insert into public.organisations (id, legal_name, entry_method, organisation_type, owner_id)
+  values
+    (v_org_x, 'Reassign Org X Ltd', 'manual', 'other', v_cam_a),
+    (v_org_y, 'Reassign Org Y Ltd', 'manual', 'other', v_cam_b)
+  on conflict (id) do update set owner_id = excluded.owner_id;
+
+  insert into public.actions
+    (id, organisation_id, assignee_user_id, created_by_user_id, title, status, completed_at)
+  values
+    (v_act_open,  v_org_x, v_cam_a, v_cam_a, 'Open work',      'open',      null),
+    (v_act_done,  v_org_x, v_cam_a, v_cam_a, 'Finished work',  'completed', now()),
+    (v_act_cross, v_org_y, v_cam_a, v_admin, 'Cross-org work', 'open',      null)
+  on conflict (id) do nothing;
+
+  -- Permission paths first.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.reassign_ownership(array[%L]::uuid[], %L, ''taking over'', null)',
+      v_org_x, v_cam_b)),
+    '42501',
+    'CAM cannot reassign client ownership'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.reassign_ownership(array[%L]::uuid[], %L, ''taking over'', null)',
+      v_org_x, v_cam_b)),
+    '42501',
+    'viewer cannot reassign client ownership'
+  );
+
+  -- The reason is what makes the audit trail worth having; blank must not pass.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.reassign_ownership(array[%L]::uuid[], %L, ''   '', null)',
+      v_org_x, v_cam_b)),
+    '22023',
+    'a blank reason is rejected'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.reassign_ownership(array[%L]::uuid[], %L, ''handover'', null)',
+      v_org_x, v_deactivated)),
+    '22023',
+    'cannot reassign to a deactivated account'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.reassign_ownership(array[%L]::uuid[], %L, ''handover'', null)',
+      v_org_x, v_viewer)),
+    '22023',
+    'cannot reassign to a viewer'
+  );
+
+  -- The offboarding path: CAM A leaves, CAM B inherits.
+  perform tests.sqlstate_of(v_admin, format(
+    'select public.reassign_ownership(array[%L]::uuid[], %L, ''CAM A offboarded'', %L)',
+    v_org_x, v_cam_b, v_cam_a));
+
+  select owner_id into v_owner from public.organisations where id = v_org_x;
+  return next is(v_owner, v_cam_b, 'admin reassigns the client to the incoming CAM');
+
+  select assignee_user_id into v_assignee from public.actions where id = v_act_open;
+  return next is(v_assignee, v_cam_b, 'the outgoing CAM''s open action follows the client');
+
+  -- History stays with whoever made it — the same principle as note and draft authorship.
+  select assignee_user_id into v_assignee from public.actions where id = v_act_done;
+  return next is(v_assignee, v_cam_a, 'a completed action does not follow the client');
+
+  select assignee_user_id into v_assignee from public.actions where id = v_act_cross;
+  return next is(v_assignee, v_cam_a,
+    'an action on a client that was not reassigned is untouched');
+
+  select actor_user_id, detail into v_actor, v_detail
+    from public.audit_log
+   where action = 'ownership_reassigned' and target_id = v_org_x
+   order by created_at desc limit 1;
+
+  return next is(v_actor, v_admin,
+    'the audit row names the acting admin, not the incoming CAM');
+
+  return next is(
+    jsonb_build_object(
+      'from', v_detail->>'from',
+      'to',   v_detail->>'to',
+      'why',  v_detail->>'reason',
+      'src',  v_detail->>'trigger',
+      'n',    v_detail->>'actions_moved'),
+    jsonb_build_object(
+      'from', v_cam_a::text,
+      'to',   v_cam_b::text,
+      'why',  'CAM A offboarded',
+      'src',  'offboarding',
+      'n',    '1'),
+    'the audit row carries both CAMs, the reason, the source and the action count'
+  );
+
+  -- Re-running the same stale selection must not seize the client back off CAM B.
+  perform tests.sqlstate_of(v_admin, format(
+    'select public.reassign_ownership(array[%L]::uuid[], %L, ''stale retry'', %L)',
+    v_org_x, v_admin, v_cam_a));
+  select owner_id into v_owner from public.organisations where id = v_org_x;
+  return next is(v_owner, v_cam_b,
+    'a stale p_from_user_id skips the row instead of overwriting a newer owner');
+
+  -- The second half: F169 work on a client the offboarded CAM never owned.
+  perform tests.sqlstate_of(v_admin, format(
+    'select public.reassign_actions(array[%L]::uuid[], %L, ''CAM A offboarded'')',
+    v_act_cross, v_cam_b));
+  select assignee_user_id into v_assignee from public.actions where id = v_act_cross;
+  return next is(v_assignee, v_cam_b,
+    'reassign_actions moves admin-assigned work on another CAM''s client');
+
+  select count(*) into v_count
+    from public.audit_log
+   where action = 'action_reassigned'
+     and target_id = v_act_cross
+     and detail->>'organisation_id' = v_org_y::text;
+  return next is(v_count, 1::bigint,
+    'the action audit row carries the client so the timeline can show it');
+
+  -- Regression guard for the hole fixed in 20260803100000. The outgoing CAM raised this
+  -- action and is still an active user, so nothing else in the policy stops them; only
+  -- the assignee check does. A blocked DELETE raises nothing, so assert the row.
+  perform tests.sqlstate_of(v_cam_a, format(
+    'delete from public.actions where id = %L', v_act_open));
+  select count(*) into v_count from public.actions where id = v_act_open;
+  return next is(v_count, 1::bigint,
+    'the outgoing CAM cannot delete open work that was reassigned away from them');
+
+  return next ok(
+    not has_function_privilege('anon',
+      'public.reassign_ownership(uuid[], uuid, text, uuid)', 'EXECUTE'),
+    'anon holds no EXECUTE on reassign_ownership'
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- deactivate_user and reassign_ownership are one path (F014 + F257)
+-- ---------------------------------------------------------------------------
+-- Regression suite for 20260804170000. Before that migration deactivate_user moved
+-- organisations.owner_id itself and never touched public.actions, so offboarding
+-- stranded every open action on a closed account. Uses its own identities: the shared
+-- fixture users are deactivated by other suites in this same transaction.
+
+create or replace function tests.suite_offboard_unified()
+returns setof text language plpgsql as $$
+declare
+  v_admin    uuid := '00000000-0000-4000-a000-0000000000f1';
+  v_leaver   uuid := '00000000-0000-4000-a000-0000000000f2';
+  v_taker    uuid := '00000000-0000-4000-a000-0000000000f3';
+  v_other    uuid := '00000000-0000-4000-a000-0000000000f4';
+  v_org_own  uuid := '00000000-0000-4000-b000-0000000000fa';  -- the leaver's client
+  v_org_else uuid := '00000000-0000-4000-b000-0000000000fb';  -- someone else's client
+  v_act_own  uuid := '00000000-0000-4000-c000-0000000000f1';  -- open, on their client
+  v_act_stray uuid := '00000000-0000-4000-c000-0000000000f2'; -- open, on the other client
+  v_owner    uuid;
+  v_assignee uuid;
+  v_active   boolean;
+  v_count    bigint;
+begin
+  if not tests.tables_exist('actions', 'organisations', 'users', 'audit_log')
+     or to_regprocedure('public.deactivate_user(uuid, text, uuid, boolean)') is null then
+    return next skip(12, 'deactivate_user or actions not yet migrated');
+    return;
+  end if;
+
+  insert into auth.users (id, instance_id, aud, role, email) values
+    (v_admin,  '00000000-0000-0000-0000-000000000000','authenticated','authenticated','unify-admin@180dc.org'),
+    (v_leaver, '00000000-0000-0000-0000-000000000000','authenticated','authenticated','unify-leaver@180dc.org'),
+    (v_taker,  '00000000-0000-0000-0000-000000000000','authenticated','authenticated','unify-taker@180dc.org'),
+    (v_other,  '00000000-0000-0000-0000-000000000000','authenticated','authenticated','unify-other@180dc.org')
+  on conflict (id) do nothing;
+
+  insert into public.users (id, email, full_name, role, is_active) values
+    (v_admin,  'unify-admin@180dc.org', 'Unify Admin',  'admin', true),
+    (v_leaver, 'unify-leaver@180dc.org','Unify Leaver', 'cam',   true),
+    (v_taker,  'unify-taker@180dc.org', 'Unify Taker',  'cam',   true),
+    (v_other,  'unify-other@180dc.org', 'Unify Other',  'cam',   true)
+  on conflict (id) do update
+    set role = excluded.role, is_active = excluded.is_active;
+
+  insert into public.organisations (id, legal_name, entry_method, organisation_type, owner_id)
+  values
+    (v_org_own,  'Leaver Client Ltd', 'manual', 'other', v_leaver),
+    (v_org_else, 'Other Client Ltd',  'manual', 'other', v_other)
+  on conflict (id) do update set owner_id = excluded.owner_id;
+
+  insert into public.actions
+    (id, organisation_id, assignee_user_id, created_by_user_id, title)
+  values
+    (v_act_own,   v_org_own,  v_leaver, v_leaver, 'Work on my own client'),
+    (v_act_stray, v_org_else, v_leaver, v_admin,  'Admin-assigned work elsewhere')
+  on conflict (id) do nothing;
+
+  if tests.tables_exist('notes') then
+    insert into public.notes (id, organisation_id, author_id, content)
+    values ('00000000-0000-4000-c000-0000000000fe', v_org_own, v_leaver,
+            'Spoke to the trustee; they want a proposal in September.')
+    on conflict (id) do nothing;
+  end if;
+
+  if tests.tables_exist('outreach_messages', 'reply_events') then
+    insert into public.outreach_messages
+      (id, organisation_id, sent_by_user_id, subject, body, send_status)
+    values ('00000000-0000-4000-c000-0000000000fd', v_org_own, v_leaver,
+            'Partnership proposal', 'Half-written, saved for later.', 'draft')
+    on conflict (id) do nothing;
+
+    insert into public.reply_events
+      (id, organisation_id, reply_body, received_at)
+    values ('00000000-0000-4000-c000-0000000000fc', v_org_own,
+            'Thanks, do send the proposal.', now())
+    on conflict (id) do nothing;
+  end if;
+
+  perform tests.sqlstate_of(v_admin, format(
+    'select public.deactivate_user(%L, ''left the society'', %L, false)',
+    v_leaver, v_taker));
+
+  select owner_id into v_owner from public.organisations where id = v_org_own;
+  return next is(v_owner, v_taker, 'deactivation moves the leaver''s client to the successor');
+
+  -- The regression. This assertion fails against the pre-20260804170000 function.
+  select assignee_user_id into v_assignee from public.actions where id = v_act_own;
+  return next is(v_assignee, v_taker,
+    'deactivation moves the open action on that client, not just the client');
+
+  select assignee_user_id into v_assignee from public.actions where id = v_act_stray;
+  return next is(v_assignee, v_taker,
+    'deactivation also moves admin-assigned work on someone else''s client');
+
+  select owner_id into v_owner from public.organisations where id = v_org_else;
+  return next is(v_owner, v_other,
+    'the other CAM''s client is not seized while moving work off it');
+
+  select is_active into v_active from public.users where id = v_leaver;
+  return next is(v_active, false, 'the leaver is deactivated in the same transaction');
+
+  select count(*) into v_count
+    from public.audit_log
+   where action = 'ownership_reassigned'
+     and target_id = v_org_own
+     and detail->>'trigger' = 'offboarding';
+  return next is(v_count, 1::bigint,
+    'one ownership_reassigned row per client, on the converged token');
+
+  -- F257 AC4. Notes carry no owner column — they hang off organisation_id — so a
+  -- handover should move them implicitly, with nothing in reassign_ownership naming
+  -- them. This is the assertion that turns that from a design argument into a fact.
+  if tests.tables_exist('notes') then
+    select count(*) into v_count
+      from public.notes where organisation_id = v_org_own and author_id = v_leaver;
+    return next is(v_count, 1::bigint,
+      'the leaver''s note is still attached to the client after the handover');
+
+    -- Authorship is history and is never rewritten: the timeline must still say who
+    -- wrote it, even though that person has left (matrix §3.11).
+    select author_id into v_assignee
+      from public.notes where organisation_id = v_org_own limit 1;
+    return next is(v_assignee, v_leaver,
+      'the note is still credited to the CAM who wrote it, not the successor');
+
+    perform tests.login_as(v_taker);
+    select count(*) into v_count from public.notes where organisation_id = v_org_own;
+    execute 'reset role';
+    perform set_config('request.jwt.claims', null, true);
+    return next is(v_count, 1::bigint,
+      'the incoming CAM can read the departed CAM''s note on their new client');
+  else
+    return next skip(3, 'step 4 create_org_children not yet migrated');
+  end if;
+
+  -- F257 AC4 (drafts, replies) and AC8 (linked to the correct client and email
+  -- record). Same principle as notes: these hang off organisation_id, so the handover
+  -- moves them without reassign_ownership naming either table.
+  if tests.tables_exist('outreach_messages', 'reply_events') then
+    select count(*) into v_count
+      from public.outreach_messages
+     where organisation_id = v_org_own and send_status = 'draft';
+    return next is(v_count, 1::bigint,
+      'the leaver''s saved draft is still on the client after the handover');
+
+    select sent_by_user_id into v_assignee
+      from public.outreach_messages where organisation_id = v_org_own limit 1;
+    return next is(v_assignee, v_leaver,
+      'the draft is still attributed to the CAM who wrote it');
+
+    -- Replies carry organisation_id of their own, so they stay with the client even
+    -- though nothing in the handover looks at them.
+    select count(*) into v_count
+      from public.reply_events where organisation_id = v_org_own;
+    return next is(v_count, 1::bigint,
+      'a reply received before the handover is still attached to the client');
+  else
+    return next skip(3, 'steps 11/12 outreach tables not yet migrated');
+  end if;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 
 select * from tests.suite_core();
 select * from tests.suite_viewer();
@@ -1525,6 +1997,9 @@ select * from tests.suite_invite_rpc();
 select * from tests.suite_signup_domain();
 select * from tests.suite_default_role();
 select * from tests.suite_views();
+select * from tests.suite_actions();
+select * from tests.suite_reassign();
+select * from tests.suite_offboard_unified();
 
 select * from finish();
 

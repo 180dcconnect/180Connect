@@ -172,6 +172,11 @@
 | 04 Entities | USERS | deactivated_at | timestamp |  |  |
 | 04 Entities | USERS | invited_at | timestamp |  |  |
 | 04 Entities | USERS | invite_accepted_at | timestamp |  |  |
+| 04 Entities | USERS | onboarding_completed_at | timestamp |  | When the user finished the onboarding flow |
+| 04 Entities | USERS | onboarding_dismissed_at | timestamp |  | When the user dismissed the onboarding flow |
+| 04 Entities | USER_ONBOARDING_STEPS | user_id | uuid | USERS | User completing the step |
+| 04 Entities | USER_ONBOARDING_STEPS | step_key | text |  | Key of the onboarding step |
+| 04 Entities | USER_ONBOARDING_STEPS | completed_at | timestamp |  | When the step was completed |
 | 04 Entities | NOTES | id | uuid |  |  |
 | 04 Entities | NOTES | organisation_id | uuid | ORGANISATIONS |  |
 | 04 Entities | NOTES | author_id | uuid | USERS |  |

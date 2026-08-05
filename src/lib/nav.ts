@@ -26,6 +26,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     permission: "user:manage",
   },
   {
+    href: "/admin/import-status",
+    label: "Import status",
+    description: "See whether data ingestion runs succeeded, partially succeeded, or failed.",
+    permission: "platform-settings:manage",
+  },
+  {
     href: "/profile",
     label: "My profile",
     description: "View your name, email, and role.",

@@ -20,9 +20,9 @@ export type NavItem = {
 
 export const NAV_ITEMS: readonly NavItem[] = [
   {
-    href: "/admin/users",
-    label: "Team management",
-    description: "Assign roles and suspend or reactivate access.",
+    href: "/admin",
+    label: "Admin workspace",
+    description: "Manage users, audit activity and import Companies House data.",
     permission: "user:manage",
   },
   {

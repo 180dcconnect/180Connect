@@ -17,9 +17,9 @@ describe("navigation", () => {
     }
   });
 
-  it("gives admins team management", () => {
+  it("gives admins the admin workspace", () => {
     const hrefs = navItemsFor("admin").map((item) => item.href);
-    assert.ok(hrefs.includes("/admin/users"));
+    assert.ok(hrefs.includes("/admin"));
   });
 
   it("hides admin-only destinations from other roles", () => {

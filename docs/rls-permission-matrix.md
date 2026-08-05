@@ -430,6 +430,33 @@ which is the wrong test for a row a user writes about themselves.
 
 ---
 
+### 3.13 Outreach preferences — own row only
+
+Backs F195 (`supabase/migrations/20260805110000_create_outreach_preferences.sql`). Same
+shape as §3.12: a user's own settings, not ownership/status/role/approval state, so it
+is governed by RLS alone — no SECURITY DEFINER RPC, no `audit_log` row
+(`docs/audit-log-pattern.md` §1).
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `OUTREACH_PREFERENCES` | own row (`user_id = auth.uid()`) | own row | own row | — (no grant) |
+
+One row per user (`unique (user_id)`), upserted by the settings form's server action.
+No DELETE grant to any role: clearing preferences is an UPDATE back to empty arrays,
+not a row removal — this keeps "no preferences set" a single always-present state
+(empty arrays) instead of a row that may or may not exist, which is one fewer case for
+F094 (#93, not yet built) to handle when it reads this table.
+
+No admin read: nothing in #191 needs one, and F187 (admin views a CAM's settings, P3)
+can add it with a stated reason when it is actually built — same call already made for
+`USER_ONBOARDING_STEPS` (§3.12).
+
+Both policies AND in `app.is_active_user()`. No `app.can_write()` — that helper gates
+*client data* and excludes viewers (F258); this table is a user's own settings and is
+harmless for any active role to write about themselves.
+
+---
+
 ## 4. Denial behaviour and feedback
 
 Important and frequently got wrong: **a blocked read is not an error.**

@@ -30,6 +30,11 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: "My profile",
     description: "View your name, email, and role.",
   },
+  {
+    href: "/settings/outreach-preferences",
+    label: "Outreach preferences",
+    description: "Set the geography, sector and size focus for your queue.",
+  },
 ];
 
 export function navItemsFor(role: AppRole): NavItem[] {

@@ -5,9 +5,15 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
+import { validateClientEmail } from "@/lib/client-email-validation";
 import { SuppressButton } from "./suppress-button";
 
-type OrganisationRow = { id: string; legal_name: string; organisation_type: string };
+type OrganisationRow = {
+  id: string;
+  legal_name: string;
+  organisation_type: string;
+  contact_email: string | null;
+};
 type LatestSuppression = {
   status: "pending" | "active" | "rejected" | "lifted";
   reason: string;
@@ -31,7 +37,7 @@ export default async function ClientDetailPage({
 
   const { data: client, error: clientError } = await supabase
     .from("organisations")
-    .select("id, legal_name, organisation_type")
+    .select("id, legal_name, organisation_type, contact_email")
     .eq("id", id)
     .maybeSingle<OrganisationRow>();
 
@@ -39,6 +45,7 @@ export default async function ClientDetailPage({
     await reportError(clientError, { operation: "clients.detail_page", organisationId: id });
   }
   if (!client) notFound();
+  const email = validateClientEmail(client.contact_email);
 
   // Most recent suppression row for this org, whatever its status — pending shows a
   // waiting state, active shows the suppressed state, rejected/lifted/none all fall
@@ -61,6 +68,31 @@ export default async function ClientDetailPage({
         </Link>
         <p className="mt-4 text-sm font-bold text-brand">{client.organisation_type}</p>
         <h1 className="mt-1 text-2xl font-bold">{client.legal_name}</h1>
+
+        <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="email-heading">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="email-heading" className="text-sm font-bold">Contact email</h2>
+            {email.status === "valid" ? (
+              <span className="rounded-full bg-green-50 px-2 py-1 text-xs font-bold text-green-800">
+                Valid format
+              </span>
+            ) : (
+              <span className="rounded-full bg-red-50 px-2 py-1 text-xs font-bold text-red-800">
+                {email.status === "invalid" ? "Invalid format" : "Missing"}
+              </span>
+            )}
+          </div>
+
+          <p className={`mt-2 break-all text-sm ${email.status === "invalid" ? "font-bold text-red-800" : "text-foreground/75"}`}>
+            {email.value ?? "Not provided"}
+          </p>
+
+          {email.message && (
+            <p className="mt-2 text-sm text-red-800" role="alert">
+              {email.message} The rest of this client record is still available.
+            </p>
+          )}
+        </section>
 
         <div className="mt-8">
           {latest?.status === "active" ? (

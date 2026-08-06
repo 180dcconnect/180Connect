@@ -15,6 +15,8 @@ function org(overrides: Partial<ClientListRow> = {}): ClientListRow {
     city: "Bristol",
     country_code: "GB",
     outreach_status: "not_started",
+    owner_id: null,
+    owner: null,
     ...overrides,
   };
 }
@@ -76,5 +78,25 @@ describe("visibleClients", () => {
     const result = visibleClients(organisations, []);
     assert.equal(result[0].location, "GB");
     assert.equal(result[0].outreachStatusLabel, "Queued");
+  });
+
+  it("F162: ownerName is null only for a genuinely unassigned client", () => {
+    const organisations = [org({ id: "a", owner_id: null, owner: null })];
+    const result = visibleClients(organisations, []);
+    assert.equal(result[0].ownerName, null);
+  });
+
+  it("F162: ownerName carries the owning CAM's name", () => {
+    const organisations = [
+      org({ id: "a", owner_id: "cam-1", owner: { full_name: "Jane CAM" } }),
+    ];
+    const result = visibleClients(organisations, []);
+    assert.equal(result[0].ownerName, "Jane CAM");
+  });
+
+  it("F162: falls back to a label when the owner is set but their row is hidden (deactivated)", () => {
+    const organisations = [org({ id: "a", owner_id: "cam-1", owner: null })];
+    const result = visibleClients(organisations, []);
+    assert.equal(result[0].ownerName, "A former team member");
   });
 });

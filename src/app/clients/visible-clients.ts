@@ -14,6 +14,8 @@ export type ClientListRow = {
   city: string | null;
   country_code: string;
   outreach_status: string;
+  owner_id: string | null;
+  owner: { full_name: string | null } | null;
 };
 
 export type OpenSuppression = { organisation_id: string; status: "pending" | "active" };
@@ -22,6 +24,11 @@ export type VisibleClient = ClientListRow & {
   location: string;
   outreachStatusLabel: string;
   suppressionPending: boolean;
+  /** F162: null only when owner_id itself is null (genuinely unassigned, claimable).
+   * A non-null owner_id whose join came back empty is a deactivated former owner
+   * (matrix §1, users_select_active hides their row) — falls back to a label rather
+   * than reading as unassigned. */
+  ownerName: string | null;
 };
 
 /**
@@ -42,5 +49,8 @@ export function visibleClients(
       location: formatLocation(organisation),
       outreachStatusLabel: formatOutreachStatus(organisation.outreach_status),
       suppressionPending: statusByOrg.get(organisation.id) === "pending",
+      ownerName: organisation.owner_id
+        ? (organisation.owner?.full_name ?? "A former team member")
+        : null,
     }));
 }

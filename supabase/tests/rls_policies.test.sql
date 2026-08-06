@@ -157,9 +157,11 @@ declare
   v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
   v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
   v_org_unowned uuid := '00000000-0000-4000-b000-000000000001';
+  v_org_cam_a   uuid := '00000000-0000-4000-b000-000000000002';
   v_org_cam_b   uuid := '00000000-0000-4000-b000-000000000003';
   v_count       bigint;
   v_ok          boolean;
+  v_owner       uuid;
 begin
   if not tests.tables_exist('users') then
     return next skip(1, 'step 2 create_users not yet migrated');
@@ -214,19 +216,23 @@ begin
     return next is(v_count, 0::bigint,
       'deactivated user reads no organisations despite a valid token');
 
-    -- Ownership (F233 model): a CAM claims an unowned organisation by setting
-    -- owner_id to themselves. This is allowed.
-    return next is(
-      tests.sqlstate_of(v_cam_a, format(
-        'update public.organisations set owner_id = %L where id = %L', v_cam_a, v_org_unowned)),
-      null,
-      'CAM can claim an unowned organisation by setting owner_id to themselves'
+    -- Ownership (F162, since 20260806140000): a CAM claiming an unowned organisation
+    -- is RPC-only now (suite_claim_ownership below). A direct UPDATE raises nothing —
+    -- it is blocked by USING, not WITH CHECK — so it must be asserted on the resulting
+    -- row, not the SQLSTATE (same lesson as the role-escalation check above).
+    perform tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set owner_id = %L where id = %L', v_cam_a, v_org_unowned));
+    select owner_id into v_owner from public.organisations where id = v_org_unowned;
+    return next is(v_owner, null::uuid,
+      'a direct UPDATE no longer lets a CAM claim an unowned organisation; claim_organisation() is the only path'
     );
 
-    -- ...but may not hand one to another user. Reassignment is admin-only (matrix §2).
+    -- ...and may not hand one they own to another user — this needs an actually-owned
+    -- row (v_org_unowned stays unowned now claiming it is RPC-only, see above), so the
+    -- WITH CHECK violation (not a USING-filtered no-op) is what fires here.
     return next is(
       tests.sqlstate_of(v_cam_a, format(
-        'update public.organisations set owner_id = %L where id = %L', v_cam_b, v_org_unowned)),
+        'update public.organisations set owner_id = %L where id = %L', v_cam_b, v_org_cam_a)),
       '42501',
       'CAM cannot assign an organisation to another user'
     );
@@ -1095,9 +1101,9 @@ $$;
 -- INSERT is the exception: there is no row to filter, so the WITH CHECK fires and
 -- does raise.
 --
--- The fixture is local to this suite. The shared 'Unowned Org Ltd' stops being
--- unowned partway through suite_core (a CAM claims it, correctly), and every suite
--- runs in one uncommitted transaction with no reset in between.
+-- The fixture is local to this suite rather than reusing the shared 'Unowned Org
+-- Ltd', so this suite's assertions do not depend on what state an earlier suite left
+-- it in — every suite runs in one uncommitted transaction with no reset in between.
 
 create or replace function tests.suite_viewer()
 returns setof text language plpgsql as $$
@@ -1178,13 +1184,17 @@ begin
   return next is(v_count, 1::bigint, 'viewer cannot delete an organisation');
 
   -- Regression guard on the same policy: narrowing it to admin-or-CAM must not have
-  -- taken the CAM's claim path with it. suite_core covers the happy path on the
-  -- shared fixture; this re-checks it on a row whose state this suite controls.
-  perform tests.sqlstate_of(v_cam_a, format(
-    'update public.organisations set owner_id = %L where id = %L', v_cam_a, v_org));
+  -- taken the CAM's claim path with it. Since F162 (20260806140000) that path is
+  -- claim_organisation(), not a direct UPDATE — suite_claim_ownership covers it in
+  -- depth; this re-checks it still works on a row whose state this suite controls.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format('select public.claim_organisation(%L)', v_org)),
+    null,
+    'CAM can still claim an unowned organisation after the viewer lockout'
+  );
   select owner_id into v_owner from public.organisations where id = v_org;
   return next is(v_owner, v_cam_a,
-    'CAM can still claim an unowned organisation after the viewer lockout');
+    'the claim actually took — not just an unraised no-op');
 end;
 $$;
 
@@ -1820,6 +1830,135 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- claim_organisation — a CAM taking ownership of an unowned client (F162)
+-- ---------------------------------------------------------------------------
+-- Own fixture organisations (e000 prefix) rather than the shared 'Unowned Org Ltd':
+-- this suite needs to control exactly when a row is unowned, and other suites both
+-- read and write that shared row in the same uncommitted transaction.
+create or replace function tests.suite_claim_ownership()
+returns setof text language plpgsql as $$
+declare
+  v_admin        uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a        uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b        uuid := '00000000-0000-4000-a000-000000000003';
+  v_deactivated  uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer       uuid := '00000000-0000-4000-a000-000000000005';
+  v_org_unowned  uuid := '00000000-0000-4000-e000-000000000001';  -- claimed by CAM A below
+  v_org_admin    uuid := '00000000-0000-4000-e000-000000000002';  -- claimed by an admin
+  v_owner        uuid;
+  v_count        bigint;
+  v_actor        uuid;
+  v_detail       jsonb;
+begin
+  if not tests.tables_exist('organisations', 'users', 'audit_log')
+     or to_regprocedure('public.claim_organisation(uuid)') is null then
+    return next skip(14, 'claim_organisation RPC not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  insert into public.organisations (id, legal_name, entry_method, organisation_type, owner_id)
+  values
+    (v_org_unowned, 'Claimable Org Ltd', 'manual', 'other', null),
+    (v_org_admin,   'Claimable By Admin Ltd', 'manual', 'other', null)
+  on conflict (id) do update set owner_id = null;
+
+  -- Permission paths first.
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.claim_organisation(%L)', v_org_unowned)),
+    '42501',
+    'viewer cannot claim client ownership'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_deactivated, format(
+      'select public.claim_organisation(%L)', v_org_unowned)),
+    '42501',
+    'a deactivated user cannot claim client ownership'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.claim_organisation(%L)', 'ffffffff-ffff-4fff-afff-ffffffffffff'::uuid)),
+    'P0002',
+    'claiming a client that does not exist is a controlled not-found error'
+  );
+
+  -- The happy path.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.claim_organisation(%L)', v_org_unowned)),
+    null,
+    'a CAM can claim an unowned client'
+  );
+
+  select owner_id into v_owner from public.organisations where id = v_org_unowned;
+  return next is(v_owner, v_cam_a, 'the client is now owned by the claiming CAM');
+
+  select actor_user_id, detail into v_actor, v_detail
+    from public.audit_log
+   where action = 'ownership_reassigned' and target_id = v_org_unowned
+   order by created_at desc limit 1;
+  return next is(v_actor, v_cam_a, 'the audit row names the claiming CAM as actor');
+  return next is(
+    jsonb_build_object(
+      'from',    v_detail->>'from',
+      'to',      v_detail->>'to',
+      'trigger', v_detail->>'trigger'),
+    jsonb_build_object(
+      'from',    null,
+      'to',      v_cam_a::text,
+      'trigger', 'self_claim'),
+    'the audit row carries a null "from", the claiming CAM as "to", and trigger self_claim'
+  );
+
+  -- Idempotent: claiming a client you already own is not an error and not audited
+  -- again, same convention as reassign_ownership's already-there skip (matrix §3.11).
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.claim_organisation(%L)', v_org_unowned)),
+    null,
+    're-claiming your own client is a no-op, not an error'
+  );
+  select count(*) into v_count
+    from public.audit_log
+   where action = 'ownership_reassigned' and target_id = v_org_unowned;
+  return next is(v_count, 1::bigint, 'the no-op re-claim writes no second audit row');
+
+  -- AC2: never silently override. CAM B must not be able to take it, and must not
+  -- see the reassign_ownership 42501 (this is a conflict, not a permission failure)
+  -- or a silent success.
+  return next is(
+    tests.sqlstate_of(v_cam_b, format(
+      'select public.claim_organisation(%L)', v_org_unowned)),
+    '55000',
+    'a CAM cannot claim a client another CAM already owns — raised, not silently skipped'
+  );
+  select owner_id into v_owner from public.organisations where id = v_org_unowned;
+  return next is(v_owner, v_cam_a,
+    'the existing owner is unchanged after the blocked claim attempt');
+
+  -- Admins can be client owners too (matrix: "clients can only be owned by a CAM or
+  -- an admin", same rule reassign_ownership enforces on its incoming owner).
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.claim_organisation(%L)', v_org_admin)),
+    null,
+    'an admin can also claim an unowned client'
+  );
+  select owner_id into v_owner from public.organisations where id = v_org_admin;
+  return next is(v_owner, v_admin, 'the client is now owned by the claiming admin');
+
+  return next ok(
+    not has_function_privilege('anon', 'public.claim_organisation(uuid)', 'EXECUTE'),
+    'anon holds no EXECUTE on claim_organisation'
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- deactivate_user and reassign_ownership are one path (F014 + F257)
 -- ---------------------------------------------------------------------------
 -- Regression suite for 20260804170000. Before that migration deactivate_user moved
@@ -2256,6 +2395,7 @@ select * from tests.suite_default_role();
 select * from tests.suite_views();
 select * from tests.suite_actions();
 select * from tests.suite_reassign();
+select * from tests.suite_claim_ownership();
 select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
 select * from tests.suite_source_tracking();

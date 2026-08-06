@@ -14,6 +14,7 @@ import type { OrganisationDetailRow } from "@/lib/client-basic-info";
 import { SuppressButton } from "./suppress-button";
 import { ComposeButton } from "./compose-button";
 import { BasicInfoPanel } from "./basic-info-panel";
+import { ClaimButton } from "./claim-button";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -21,6 +22,10 @@ type LatestSuppression = {
   status: "pending" | "active" | "rejected" | "lifted";
   reason: string;
   created_at: string;
+};
+type OwnerRow = {
+  owner_id: string | null;
+  owner: { full_name: string | null } | null;
 };
 
 /**
@@ -50,6 +55,13 @@ type LatestSuppression = {
  * no separate step") only holds for an admin's own call, which self-approves; a
  * CAM's flag still lands pending until an admin reviews it, same as any other
  * suppression request — deliberate per F251, not a gap. Scope note on #51.
+ *
+ * Also F162 (#157): the Ownership section is a separate query from BasicInfoPanel's
+ * OrganisationDetailRow (same reason "Record sources" is separate — it isn't part
+ * of F068's realtime-driven basic-info state). ClaimButton posts to
+ * /api/clients/[id]/claim, which calls claim_organisation — see that RPC's header
+ * (20260806140000_create_claim_organisation_rpc.sql) for why a direct owner_id write
+ * is no longer possible for a CAM's own claim.
  */
 export default async function ClientDetailPage({
   params,
@@ -119,7 +131,23 @@ export default async function ClientDetailPage({
     .limit(1)
     .maybeSingle<LatestSuppression>();
 
-  const canSuppress = hasPermission(authorization.actor.role, "client:edit");
+  // Read separately from `client`: owner_id/name isn't part of F068's realtime-driven
+  // OrganisationDetailRow, and a deactivated owner's row is invisible under
+  // users_select_active (matrix §1) — the fallback below covers that, not an error.
+  const { data: ownerRow, error: ownerError } = await supabase
+    .from("organisations")
+    .select("owner_id, owner:users!organisations_owner_id_fkey(full_name)")
+    .eq("id", id)
+    .maybeSingle<OwnerRow>();
+
+  if (ownerError) {
+    await reportError(ownerError, { operation: "clients.detail_owner", organisationId: id });
+  }
+
+  const canEdit = hasPermission(authorization.actor.role, "client:edit");
+  const canSuppress = canEdit;
+  const ownerId = ownerRow?.owner_id ?? null;
+  const ownerName = ownerRow?.owner?.full_name ?? (ownerId ? "A former team member" : null);
 
   return (
     <main className="min-h-screen bg-[#f1f2f4] p-6">
@@ -135,6 +163,25 @@ export default async function ClientDetailPage({
           missionStatement={enrichment?.mission_statement ?? null}
           missionEnrichedAt={enrichment?.enriched_at ?? null}
         />
+
+        <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="ownership-heading">
+          <h2 id="ownership-heading" className="text-sm font-bold">Ownership</h2>
+          {ownerId ? (
+            <p className="mt-2 text-sm text-foreground/75">
+              Owned by <span className="font-bold">{ownerName}</span>
+              {ownerId === authorization.actor.id ? " (you)" : ""}.
+            </p>
+          ) : canEdit ? (
+            <div className="mt-2 flex items-center justify-between gap-4">
+              <p className="text-sm text-foreground/65">
+                Unassigned. Claim it to take responsibility for outreach on this client.
+              </p>
+              <ClaimButton organisationId={client.id} />
+            </div>
+          ) : (
+            <p className="mt-2 text-sm text-foreground/65">Unassigned.</p>
+          )}
+        </section>
 
         <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="source-heading">
           <h2 id="source-heading" className="text-sm font-bold">Record sources</h2>

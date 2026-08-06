@@ -49,6 +49,12 @@ export default async function AdminPage() {
               Import UK company records into the ingestion pipeline.
             </p>
           </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/suppressions">
+            <h2 className="font-bold">Suppressions</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Suppress a charity, or approve/reject a CAM&apos;s request.
+            </p>
+          </Link>
         </div>
       </section>
     </main>

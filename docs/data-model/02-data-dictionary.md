@@ -206,6 +206,22 @@
 | 04 Entities | ACTIONS | is_seed | boolean |  | Marks a row created by the seed script |
 | 04 Entities | ACTIONS | created_at | timestamp |  | Row creation timestamp |
 | 04 Entities | ACTIONS | updated_at | timestamp |  | Last edit timestamp |
+| 04 Entities | OUTREACH_PREFERENCES | id | uuid |  | Primary key |
+| 04 Entities | OUTREACH_PREFERENCES | user_id | uuid | USERS | CAM these preferences belong to |
+| 04 Entities | OUTREACH_PREFERENCES | preferred_geographic_reach | enum[] |  | Subset of geographic_reach values the CAM wants prioritised |
+| 04 Entities | OUTREACH_PREFERENCES | preferred_sectors | text[] |  | Sector values to prioritise, matched against ORGANISATIONS.sector |
+| 04 Entities | OUTREACH_PREFERENCES | preferred_income_bands | enum[] |  | Subset of income_band values to prioritise |
+| 04 Entities | OUTREACH_PREFERENCES | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | OUTREACH_PREFERENCES | updated_at | timestamp |  | Last edit timestamp |
+| 04 Entities | SUPPRESSIONS | id | uuid |  | Primary key |
+| 04 Entities | SUPPRESSIONS | organisation_id | uuid | ORGANISATIONS | Charity being suppressed |
+| 04 Entities | SUPPRESSIONS | status | enum |  | pending, active, rejected, lifted |
+| 04 Entities | SUPPRESSIONS | reason | text |  | Why suppression was requested; required |
+| 04 Entities | SUPPRESSIONS | requested_by | uuid | USERS | Who requested/triggered the suppression |
+| 04 Entities | SUPPRESSIONS | decided_by | uuid | USERS | Admin who approved/rejected; null while pending |
+| 04 Entities | SUPPRESSIONS | decided_at | timestamp |  | When decided; null while pending |
+| 04 Entities | SUPPRESSIONS | decision_note | text |  | Optional admin note on the decision |
+| 04 Entities | SUPPRESSIONS | created_at | timestamp |  | Row creation timestamp |
 | 05 - Features | SCORING_WEIGHTS | id | model_name |  | feature_name |
 | 05 - Features | SCORING_WEIGHTS | 1.0 | SCOUT |  | south_yorkshire_flag |
 | 05 - Features | SCORING_WEIGHTS | 2.0 | SCOUT |  | mission_alignment_score |

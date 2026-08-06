@@ -1983,6 +1983,176 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- suppressions (F251, #82)
+-- ---------------------------------------------------------------------------
+-- Matrix §3.14. Uses the shared fixture's CAM A / CAM B organisations
+-- (own-org requests) and the unowned one (admin direct-suppress).
+
+create or replace function tests.suite_suppressions()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_org_unowned uuid := '00000000-0000-4000-b000-000000000001';
+  v_org_cam_a   uuid := '00000000-0000-4000-b000-000000000002';
+  v_org_cam_b   uuid := '00000000-0000-4000-b000-000000000003';
+  v_req_id      uuid;
+  v_status      public.suppression_status;
+  v_decided_by  uuid;
+  v_requested_by uuid;
+  v_count       bigint;
+  v_can_contact boolean;
+begin
+  if not tests.tables_exist('organisations', 'users', 'audit_log', 'suppressions')
+     or to_regprocedure('public.request_suppression(uuid, text)') is null
+     or to_regprocedure('public.decide_suppression_request(uuid, boolean, text)') is null then
+    return next skip(21, 'suppressions table or RPCs not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Table grants: every write is RPC-only (recipe step 4), same shape as audit_log.
+  return next ok(
+    not has_table_privilege('authenticated', 'public.suppressions', 'INSERT'),
+    'authenticated holds no direct INSERT privilege on suppressions'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.suppressions', 'UPDATE'),
+    'authenticated holds no direct UPDATE privilege on suppressions'
+  );
+
+  -- A viewer may not even request one.
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.request_suppression(%L, ''viewer trying to suppress'')', v_org_cam_a)),
+    '42501',
+    'viewer cannot call request_suppression'
+  );
+
+  -- A blank reason is rejected before a row is ever written.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.request_suppression(%L, ''   '')', v_org_cam_a)),
+    '23514',
+    'blank reason is rejected'
+  );
+
+  -- CAM A requests suppression of their own client. Lands pending, not active —
+  -- only an admin decision (or an admin's own request) reaches active.
+  perform tests.login_as(v_cam_a);
+  select public.request_suppression(v_org_cam_a, 'Charity confirmed defunct by phone')
+    into v_req_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status, requested_by into v_status, v_requested_by
+    from public.suppressions where id = v_req_id;
+  return next is(v_status, 'pending'::public.suppression_status,
+    'a CAM''s own request lands pending, not active');
+  return next is(v_requested_by, v_cam_a, 'requested_by is the CAM who called it');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'suppression_requested' and target_id = v_org_cam_a;
+  return next is(v_count, 1::bigint, 'the request writes one suppression_requested audit row');
+
+  -- CAM A cannot approve their own request — only an admin decides.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.decide_suppression_request(%L, true, null)', v_req_id)),
+    '42501',
+    'the requesting CAM cannot decide their own request'
+  );
+
+  -- A second open request for the same organisation is rejected while one is pending.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.request_suppression(%L, ''second attempt'')', v_org_cam_a)),
+    '23505',
+    'a duplicate open request for the same organisation is rejected'
+  );
+
+  -- Admin approves. Status moves to active, decided_by is recorded, and outreach is
+  -- now blocked for everyone — admin included — until F185 lifts it.
+  perform tests.login_as(v_admin);
+  perform public.decide_suppression_request(v_req_id, true, 'confirmed with the trustee');
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status, decided_by into v_status, v_decided_by
+    from public.suppressions where id = v_req_id;
+  return next is(v_status, 'active'::public.suppression_status,
+    'admin approval moves the request to active');
+  return next is(v_decided_by, v_admin, 'decided_by is the approving admin');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'suppression_approved' and target_id = v_org_cam_a;
+  return next is(v_count, 1::bigint, 'approval writes one suppression_approved audit row');
+
+  select app.can_contact_organisation(v_org_cam_a) into v_can_contact;
+  return next is(v_can_contact, false,
+    'an active suppression blocks outreach via app.can_contact_organisation()');
+
+  -- Deciding an already-decided request is rejected, not silently re-applied.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.decide_suppression_request(%L, true, null)', v_req_id)),
+    '55000',
+    'deciding a request that is no longer pending is rejected'
+  );
+
+  -- CAM B's request gets rejected, and — unlike the duplicate-while-pending case
+  -- above — a fresh request afterwards succeeds: 'rejected' is not an open status.
+  perform tests.login_as(v_cam_b);
+  select public.request_suppression(v_org_cam_b, 'Possible duplicate record')
+    into v_req_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  perform tests.login_as(v_admin);
+  perform public.decide_suppression_request(v_req_id, false, 'confirmed genuine, not a duplicate');
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status into v_status from public.suppressions where id = v_req_id;
+  return next is(v_status, 'rejected'::public.suppression_status,
+    'admin rejection moves the request to rejected');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'suppression_rejected' and target_id = v_org_cam_b;
+  return next is(v_count, 1::bigint, 'rejection writes one suppression_rejected audit row');
+
+  perform tests.login_as(v_cam_b);
+  select public.request_suppression(v_org_cam_b, 'New complaint received') into v_req_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status into v_status from public.suppressions where id = v_req_id;
+  return next is(v_status, 'pending'::public.suppression_status,
+    'a fresh request after a rejection is allowed (rejected is not an open status)');
+
+  select count(*) into v_count from public.suppressions where organisation_id = v_org_cam_b;
+  return next is(v_count, 2::bigint,
+    'both the rejected and the new request survive — history is kept, not overwritten');
+
+  -- An admin's own request self-approves: no admin ever waits on their own request.
+  perform tests.login_as(v_admin);
+  select public.request_suppression(v_org_unowned, 'Admin direct suppression') into v_req_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status, requested_by, decided_by into v_status, v_requested_by, v_decided_by
+    from public.suppressions where id = v_req_id;
+  return next is(v_status, 'active'::public.suppression_status,
+    'an admin''s own request lands active immediately, skipping pending');
+  return next is(v_requested_by, v_admin, 'requested_by is the admin');
+  return next is(v_decided_by, v_admin, 'decided_by is the same admin — self-approved');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 
 select * from tests.suite_core();
 select * from tests.suite_viewer();
@@ -2000,6 +2170,7 @@ select * from tests.suite_views();
 select * from tests.suite_actions();
 select * from tests.suite_reassign();
 select * from tests.suite_offboard_unified();
+select * from tests.suite_suppressions();
 
 select * from finish();
 

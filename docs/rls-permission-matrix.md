@@ -393,6 +393,123 @@ loss F257 exists to prevent, reachable through F257's own table. Requiring both 
 intended case intact (raising something for yourself and dropping it before you start,
 where the two are the same person) and closes the rest.
 
+### 3.12 Onboarding state — own row only
+
+Backs F255 (`supabase/migrations/20260805100000_create_user_onboarding.sql`). This is the
+one place in the schema where a state-changing write is *not* an RPC. The audit-log
+contract (`docs/audit-log-pattern.md` §1) covers ownership, status, role and approval
+state; onboarding progress is a user's own view state, grants nothing, and no other
+user's access depends on it. So it is governed by RLS and a column grant alone.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `USERS.onboarding_completed_at`, `USERS.onboarding_dismissed_at` | as `USERS` (§3.1: all roles read the directory) | — | own row, these two columns (all roles) | — |
+| `USER_ONBOARDING_STEPS` | own rows (`user_id = auth.uid()`) | own rows | — (append-only) | — (append-only) |
+
+The two `USERS` columns are the whole of AC5 and AC6: either one non-null hides the guide
+permanently, and existing CAMs never see it because the predicate also requires
+`role = 'cam'` and `invite_accepted_at is not null`. Both are nullable with no default, so
+no backfill was needed and every pre-F255 row reads as "not finished, not dismissed".
+
+They carry an explicit `grant update (...) to authenticated`, which is the only reason the
+write succeeds — `create_users.sql` revokes all and grants `update (full_name)` only
+(§2.1), and the existing `users_update_self_or_admin` policy confines it to the caller's
+own row. Unlike `role` and `is_active`, there is nothing here an admin needs to write on
+someone else's behalf, so no RPC exists and none is deferred.
+
+`USER_ONBOARDING_STEPS` has **no UPDATE or DELETE grant for any role**, admins included.
+A completed step is a fact about the past; the guide is hidden by the `USERS` columns,
+never by deleting progress, so there is no legitimate reason to rewrite it — and a user
+who could delete their own rows could make a dismissed guide reappear step by step.
+Admins get no read either: nothing in F255 needs one, and F187 (admin views a CAM's
+settings, P3) can add it with a stated reason when it is actually built.
+
+Both policies AND in `app.is_active_user()` so deactivation bites immediately. Neither
+uses `app.can_write()` — that helper gates *client data* and excludes viewers (F258),
+which is the wrong test for a row a user writes about themselves.
+
+---
+
+### 3.13 Outreach preferences — own row only
+
+Backs F195 (`supabase/migrations/20260805110000_create_outreach_preferences.sql`). Same
+shape as §3.12: a user's own settings, not ownership/status/role/approval state, so it
+is governed by RLS alone — no SECURITY DEFINER RPC, no `audit_log` row
+(`docs/audit-log-pattern.md` §1).
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `OUTREACH_PREFERENCES` | own row (`user_id = auth.uid()`) | own row | own row | — (no grant) |
+
+One row per user (`unique (user_id)`), upserted by the settings form's server action.
+No DELETE grant to any role: clearing preferences is an UPDATE back to empty arrays,
+not a row removal — this keeps "no preferences set" a single always-present state
+(empty arrays) instead of a row that may or may not exist, which is one fewer case for
+F094 (#93, not yet built) to handle when it reads this table.
+
+No admin read: nothing in #191 needs one, and F187 (admin views a CAM's settings, P3)
+can add it with a stated reason when it is actually built — same call already made for
+`USER_ONBOARDING_STEPS` (§3.12).
+
+Both policies AND in `app.is_active_user()`. No `app.can_write()` — that helper gates
+*client data* and excludes viewers (F258); this table is a user's own settings and is
+harmless for any active role to write about themselves.
+
+### 3.14 Suppressions — RPC-only, admin decides
+
+Backs F251 Suppress Charity Record (#82),
+`supabase/migrations/20260806100000_create_suppressions.sql`. Resolves open gap #3
+(§6) and the ticket's own "Blocked By / Open Questions: who can suppress records",
+decided by the Project Leader 5 Aug 2026: **only an admin's decision puts a
+suppression into effect.** A CAM may request one; an admin may request one directly,
+which self-approves (no admin ever waits on their own request).
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `SUPPRESSIONS` | all active users | — (RPC only) | — (RPC only) | — (no grant) |
+
+No INSERT/UPDATE policy, by the same reasoning as `AUDIT_LOG` (§3.8) and
+`set_user_role` (§6): "reason required" plus a role-gated state transition is the RLS
+recipe's RPC case (MIGRATIONS.md step 4), not something a policy can express. All
+writes go through two `SECURITY DEFINER` RPCs, each self-checking the caller and each
+writing an `audit_log` row in the same transaction:
+
+- `request_suppression(organisation_id, reason)` — caller must satisfy
+  `app.can_write()` (admin or CAM). `reason` is required and cannot be blank. An
+  admin caller's row lands `active` immediately (`suppression_approved` audit
+  action); a CAM caller's row lands `pending` (`suppression_requested`). A second
+  open (`pending`/`active`) row for the same organisation is rejected — one at a
+  time, enforced by a partial unique index on `organisation_id`.
+- `decide_suppression_request(suppression_id, approve, note)` — admin only. Moves a
+  `pending` row to `active` or `rejected`, records `decided_by`/`decided_at`, and
+  writes `suppression_approved` or `suppression_rejected` to `audit_log`. Rejects a
+  target that is not currently `pending`.
+
+SELECT is open to every active user (not gated to admin/owner) because the working
+list needs to hide a suppressed organisation for everyone, not just the CAM who owns
+it — same reasoning as `organisations_select_active`.
+
+**Outreach block (AC8).** `app.can_contact_organisation()` (§3.4,
+`create_rls_helpers.sql`) is extended in this migration — via `CREATE OR REPLACE`,
+not an edit to the already-applied file — to additionally require
+`not app.organisation_is_suppressed(organisation_id)`. This blocks sending to a
+suppressed organisation for every role, admin included; the only way back in is F185
+lifting the suppression, not bypassing the check.
+
+**Scope note.** This table is not the contact-level `email_hash`/`phone_hash` GDPR
+suppression list in `docs/data-lifecycle-policy.md` §7 (open gap for that one
+remains — it is Art. 21 objection tracking, a different story). `organisation_id`
+here is the same "suppress an organisation" branch that list anticipates, so a future
+contact-level story can extend this table rather than starting over. Built ahead of
+F248 (#243, "a suppression list exists") with the Project Leader's agreement, since
+this table already satisfies that — see the migration header for the full note.
+
+`status` is `pending | active | rejected | lifted`. `lifted` is reserved now, not
+used by any RPC in this migration — F251's own AC commits to an admin being able to
+remove a suppression, and F185 (#181) is that RPC. Adding an enum value later is a
+one-way door in Postgres (`create_organisations.sql` precedent), so it is reserved
+up front rather than negotiated later.
+
 ---
 
 ## 4. Denial behaviour and feedback
@@ -473,8 +590,10 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
 2. **No suggestion table.** §4.3 grants CAMs "suggest organisation field correction"
    and F077 is a P1 story, but no table holds a suggestion. Without one the CAM path
    to changing canonical data does not exist, and 3.2 has no row for it.
-3. **No suppression table.** §4.3 has "Lift suppression: Admin, reason required".
-   Nothing in the Data Model records a suppression.
+3. ~~**No suppression table.**~~ **RESOLVED — F251 (#82)**, 5 Aug 2026. §3.14 has
+   the table and RPCs. "Lift suppression: Admin, reason required" is now split into
+   *request* (CAM or admin, reason required) and *decide* (admin only) — see §3.14
+   for why. Lifting an active suppression is F185 (#181), not built yet.
 4. ~~**Viewer role has no story.**~~ **RESOLVED — F258 (#268) owns it**, raised
    24 Jul 2026. The story also closed a live escalation this question had been
    hiding: `organisations_update_owner_or_admin` tested ownership and admin but

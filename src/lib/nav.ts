@@ -20,6 +20,12 @@ export type NavItem = {
 
 export const NAV_ITEMS: readonly NavItem[] = [
   {
+    href: "/clients",
+    label: "Clients",
+    description: "The active working list. Tap a client to suppress it.",
+    permission: "client:view",
+  },
+  {
     href: "/admin",
     label: "Admin workspace",
     description: "Manage users, audit activity and import Companies House data.",
@@ -29,6 +35,11 @@ export const NAV_ITEMS: readonly NavItem[] = [
     href: "/profile",
     label: "My profile",
     description: "View your name, email, and role.",
+  },
+  {
+    href: "/settings/outreach-preferences",
+    label: "Outreach preferences",
+    description: "Set the geography, sector and size focus for your queue.",
   },
 ];
 

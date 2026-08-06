@@ -189,3 +189,29 @@
 | user_id | uuid | USERS | No | User completing the step | System | Set when step is completed |  |
 | step_key | text |  | No | Key of the onboarding step | System | Set when step is completed |  |
 | completed_at | timestamp |  | No | When the step was completed | System | Auto-generated |  |
+
+## OUTREACH_PREFERENCES
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated |  |
+| user_id | uuid | USERS | No | CAM these preferences belong to | System | Set on save | One row per user (unique) |
+| preferred_geographic_reach | enum[] |  | No | Subset of geographic_reach values the CAM wants prioritised | Human | Chosen by CAM in settings | Same enum as ORGANISATIONS.geographic_reach; empty array = no preference set |
+| preferred_sectors | text[] |  | No | Sector values to prioritise | Human | Chosen by CAM in settings | Free text, matched against ORGANISATIONS.sector; empty array = no preference set |
+| preferred_income_bands | enum[] |  | No | Subset of income_band values to prioritise | Human | Chosen by CAM in settings | Same enum as FINANCIAL_PERIODS.income_band; empty array = no preference set |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+| updated_at | timestamp |  | No | Last edit timestamp | System | Updated on save |  |
+
+## SUPPRESSIONS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated |  |
+| organisation_id | uuid | ORGANISATIONS | No | Charity being suppressed | System | Set by request_suppression RPC | On delete cascade |
+| status | enum |  | No | pending, active, rejected, lifted | System | pending or active at creation; active -> lifted is F185 |  |
+| reason | text |  | No | Why suppression was requested | Human | Typed by CAM or admin | Required, cannot be blank |
+| requested_by | uuid | USERS | No | Who requested/triggered it | System | auth.uid() at request time | Equals decided_by when an admin suppresses directly (self-approved, no pending step) |
+| decided_by | uuid | USERS | Yes | Admin who approved/rejected | System | Set by decide_suppression_request | Null while pending |
+| decided_at | timestamp |  | Yes | When decided | System | Set by decide_suppression_request | Null while pending |
+| decision_note | text |  | Yes | Optional admin note on the decision | Human | Typed by admin |  |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |

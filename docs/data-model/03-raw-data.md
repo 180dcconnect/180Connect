@@ -30,7 +30,7 @@
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
 | ingestion_run_id | uuid | INGESTION_RUNS | No | The job run that fetched this record | System | Set when the record is stored |  |
-| record_source | enum |  | No | Which API this record came from | System | Inherited from the ingestion job | charitybase / companies_house / 360giving / find_that_charity ( GlobalGiving / candid /) |
+| record_source | enum |  | No | Which API this record came from | System | Inherited from the ingestion job | charitybase / companies_house / 360giving / find_that_charity ( GlobalGiving / candid /) / charity_commission |
 | source_record_id | text |  | No | The ID assigned by the external API | API | Taken directly from the API response |  |
 | raw_payload | jsonb |  | No | Full API response stored exactly as received | API | Stored untouched, nothing modified | Never alter this field |
 | received_at | timestamp |  | No | When this record was pulled from the API | System | Recorded at time of fetch |  |

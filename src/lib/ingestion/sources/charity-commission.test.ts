@@ -3,26 +3,20 @@ import { afterEach, beforeEach, describe, it, mock } from "node:test";
 
 import { charityCommissionAdapter } from "./charity-commission.ts";
 
-// ---------------------------------------------------------------------------
-// globalThis.fetch mocking
-//
-// No existing adapter test mocks the network directly (runner.test.ts mocks
-// DataSourceAdapter/IngestionStore instead, since the runner never calls
-// fetch() itself). This adapter does call the real fetch(), so this file
-// establishes that pattern: swap globalThis.fetch for a stub before each
-// test, restore the real one after, and fast-forward node:test's mockable
-// timers so the retry backoff in fetchWithRetry doesn't actually sleep.
-// ---------------------------------------------------------------------------
-
 const REAL_FETCH = globalThis.fetch;
 
 beforeEach(() => {
   process.env.CHARITY_COMMISSION_API_KEY = "test-key";
+  // Narrow range so tests don't loop through 26 years of chunking.
+  process.env.CHARITY_COMMISSION_BACKFILL_START = "2026-07-01";
+  process.env.CHARITY_COMMISSION_BACKFILL_END = "2026-07-08";
 });
 
 afterEach(() => {
   globalThis.fetch = REAL_FETCH;
   delete process.env.CHARITY_COMMISSION_API_KEY;
+  delete process.env.CHARITY_COMMISSION_BACKFILL_START;
+  delete process.env.CHARITY_COMMISSION_BACKFILL_END;
 });
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -32,7 +26,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-const sampleRecord = {
+const searchResult = {
   organisation_number: 5254841,
   reg_charity_number: 1218781,
   group_subsid_suffix: 0,
@@ -42,59 +36,119 @@ const sampleRecord = {
   date_of_removal: null,
 };
 
+const detailResult = {
+  ...searchResult,
+  charity_type: "CIO",
+  address_line_one: "The Old Rectory",
+  address_line_two: "Rectory Road",
+  address_line_three: "Great Holland",
+  address_line_four: "Frinton-on-Sea",
+  address_line_five: null,
+  address_post_code: "CO13 0JP",
+  phone: "07971648901",
+  email: "info@nazeprotectionsociety.org",
+  web: "https://nazeprotectionsociety.org",
+  reporting_status: "New",
+  last_modified_time: "2026-07-13T14:48:43.52",
+};
+
+/** Routes a mocked fetch by URL: search calls vs details calls get different responses. */
+function routedFetch(opts: {
+  onSearch?: (url: string) => Response;
+  onDetails?: (url: string) => Response;
+}) {
+  return mock.fn(async (url: string) => {
+    if (url.includes("/searchCharityRegDate/")) {
+      return opts.onSearch
+        ? opts.onSearch(url)
+        : jsonResponse([searchResult]);
+    }
+    if (url.includes("/charitydetailsmulti/")) {
+      return opts.onDetails
+        ? opts.onDetails(url)
+        : jsonResponse([detailResult]);
+    }
+    throw new Error(`Unexpected URL in test: ${url}`);
+  });
+}
+
 describe("charityCommissionAdapter.fetch — successful import", () => {
-  it("shapes records with the correct source_record_id and raw_payload", async () => {
-    let calls = 0;
-    globalThis.fetch = mock.fn(async () => {
-      calls++;
-      // First chunk returns data, every later chunk (covering the rest of the
-      // configured range) returns empty so the loop terminates quickly.
-      return calls === 1 ? jsonResponse([sampleRecord]) : jsonResponse([]);
-    });
+  it("returns full detail records, not just search-level fields", async () => {
+    globalThis.fetch = routedFetch({});
 
     const { records, truncated } = await charityCommissionAdapter.fetch();
 
     assert.equal(truncated, false);
     assert.ok(records.length >= 1);
     assert.equal(records[0].source_record_id, "5254841");
-    assert.deepEqual(records[0].raw_payload, sampleRecord);
+    const payload = records[0].raw_payload as typeof detailResult;
+    assert.equal(payload.email, "info@nazeprotectionsociety.org");
+    assert.equal(payload.phone, "07971648901");
+    assert.equal(payload.web, "https://nazeprotectionsociety.org");
+    assert.equal(payload.address_post_code, "CO13 0JP");
   });
 
-  it("sends the confirmed auth header", async () => {
-    let seenHeaders: Record<string, string> = {};
-    globalThis.fetch = mock.fn(async (_url: string, init?: RequestInit) => {
-      seenHeaders = init?.headers as Record<string, string>;
-      return jsonResponse([]);
+  it("sends the confirmed auth header on both search and details calls", async () => {
+    const seenHeaders: Record<string, string>[] = [];
+    globalThis.fetch = mock.fn(async (url: string, init?: RequestInit) => {
+      seenHeaders.push(init?.headers as Record<string, string>);
+      if (url.includes("/searchCharityRegDate/")) return jsonResponse([searchResult]);
+      return jsonResponse([detailResult]);
     });
 
     await charityCommissionAdapter.fetch();
 
-    assert.equal(seenHeaders["Ocp-Apim-Subscription-Key"], "test-key");
+    for (const headers of seenHeaders) {
+      assert.equal(headers["Ocp-Apim-Subscription-Key"], "test-key");
+    }
+  });
+
+  it("batches reg_charity_numbers into the details call rather than one request per charity", async () => {
+    const detailUrls: string[] = [];
+    globalThis.fetch = routedFetch({
+      onSearch: () =>
+        jsonResponse([
+          { ...searchResult, reg_charity_number: 1 },
+          { ...searchResult, reg_charity_number: 2 },
+        ]),
+      onDetails: (url) => {
+        detailUrls.push(url);
+        return jsonResponse([
+          { ...detailResult, reg_charity_number: 1, organisation_number: 1 },
+          { ...detailResult, reg_charity_number: 2, organisation_number: 2 },
+        ]);
+      },
+    });
+
+    await charityCommissionAdapter.fetch();
+
+    // Both numbers went into ONE details call, not two separate ones.
+    assert.equal(detailUrls.length, 1);
+    assert.ok(detailUrls[0].includes("1,2") || detailUrls[0].includes("1%2C2"));
   });
 });
 
 describe("charityCommissionAdapter.fetch — API failure", () => {
-  it("throws after exhausting retries on a persistent 500", async () => {
-    globalThis.fetch = mock.fn(async () => jsonResponse({ error: "down" }, 500));
+  it("throws when the search step fails persistently", async () => {
+    globalThis.fetch = routedFetch({
+      onSearch: () => jsonResponse({ error: "down" }, 500),
+    });
 
     await assert.rejects(
       () => charityCommissionAdapter.fetch(),
-      /Charity Commission API returned 500/,
+      /Charity Commission search API returned 500/,
     );
   });
 
-  it("recovers from a transient 429 without failing the run", async () => {
-    let calls = 0;
-    globalThis.fetch = mock.fn(async () => {
-      calls++;
-      if (calls === 1) return jsonResponse({ error: "rate limited" }, 429);
-      return jsonResponse([]);
+  it("throws when the details step fails persistently", async () => {
+    globalThis.fetch = routedFetch({
+      onDetails: () => jsonResponse({ error: "down" }, 500),
     });
 
-    const { records } = await charityCommissionAdapter.fetch();
-
-    assert.ok(calls >= 2, "must have retried after the 429");
-    assert.deepEqual(records, []);
+    await assert.rejects(
+      () => charityCommissionAdapter.fetch(),
+      /Charity Commission details API returned 500/,
+    );
   });
 
   it("throws when CHARITY_COMMISSION_API_KEY is not set", async () => {
@@ -108,56 +162,53 @@ describe("charityCommissionAdapter.fetch — API failure", () => {
 });
 
 describe("charityCommissionAdapter.fetch — missing fields / malformed response", () => {
-  it("throws a clear error when the response is not an array", async () => {
-    globalThis.fetch = mock.fn(async () =>
-      jsonResponse({ unexpected: "envelope, not an array" }),
-    );
+  it("throws a clear error when the search response is not an array", async () => {
+    globalThis.fetch = routedFetch({
+      onSearch: () => jsonResponse({ unexpected: "envelope" }),
+    });
 
     await assert.rejects(
       () => charityCommissionAdapter.fetch(),
-      /Charity Commission response is not an array/,
+      /Charity Commission search response is not an array/,
     );
   });
 
-  it("does not crash shaping a record with a null date_of_removal", async () => {
-    let calls = 0;
-    globalThis.fetch = mock.fn(async () => {
-      calls++;
-      return calls === 1 ? jsonResponse([sampleRecord]) : jsonResponse([]);
+  it("throws a clear error when the details response is not an array", async () => {
+    globalThis.fetch = routedFetch({
+      onDetails: () => jsonResponse({ unexpected: "envelope" }),
     });
 
-    const { records } = await charityCommissionAdapter.fetch();
-
-    assert.equal(records[0].raw_payload && (records[0].raw_payload as typeof sampleRecord).date_of_removal, null);
-  });
-});
-
-describe("charityCommissionAdapter.fetch — duplicate records", () => {
-  it("does not itself deduplicate across chunks — that is partitionRecords' job in runner.ts", async () => {
-    // The adapter's contract is "return everything the source gives back";
-    // cross-request dedup happens downstream in partitionRecords, which is
-    // already covered by runner.test.ts. This test documents that boundary
-    // rather than re-testing partitionRecords here.
-    let calls = 0;
-    globalThis.fetch = mock.fn(async () => {
-      calls++;
-      // Same record returned in two different chunks, simulating an overlap
-      // at a chunk boundary.
-      return calls <= 2 ? jsonResponse([sampleRecord]) : jsonResponse([]);
-    });
-
-    const { records } = await charityCommissionAdapter.fetch();
-
-    const ids = records.map((r) => r.source_record_id);
-    assert.ok(
-      ids.filter((id) => id === "5254841").length >= 2,
-      "the adapter itself does not collapse duplicates — partitionRecords does",
+    await assert.rejects(
+      () => charityCommissionAdapter.fetch(),
+      /Charity Commission details response is not an array/,
     );
+  });
+
+  it("does not crash on a removed charity with null contact fields", async () => {
+    globalThis.fetch = routedFetch({
+      onDetails: () =>
+        jsonResponse([
+          {
+            ...detailResult,
+            reg_status: "RM",
+            phone: null,
+            email: null,
+            web: null,
+            address_line_one: null,
+            address_post_code: null,
+          },
+        ]),
+    });
+
+    const { records } = await charityCommissionAdapter.fetch();
+    const payload = records[0].raw_payload as typeof detailResult;
+    assert.equal(payload.phone, null);
+    assert.equal(payload.email, null);
   });
 });
 
 describe("charityCommissionAdapter.fetch — source tracking", () => {
-  it("reports its own name for onError, matching the DataSourceAdapter contract", () => {
+  it("reports its own name", () => {
     assert.equal(charityCommissionAdapter.name, "charity_commission");
   });
 

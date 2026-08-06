@@ -220,7 +220,7 @@ F019); **send** is restricted.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `OUTREACH_MESSAGES` | all roles | admin: any. cam: `sent_by_user_id = auth.uid()` **and** org is unowned or owned by self | admin, own drafts (`send_status = 'draft'`) | admin, own drafts |
+| `OUTREACH_MESSAGES` | all roles | admin: any not suppressed. cam: `sent_by_user_id = auth.uid()` **and** org is unowned or owned by self **and** not suppressed | admin, own drafts (`send_status = 'draft'`) | admin, own drafts |
 | `AI_GENERATIONS` | all roles | — (service role) | — | admin |
 | `SEND_EVENTS` | all roles | — (service role, Gmail webhook) | — | — |
 | `REPLY_EVENTS` | all roles | — (service role) | — | — |
@@ -229,6 +229,12 @@ F019); **send** is restricted.
 The CAM INSERT check on `OUTREACH_MESSAGES` is the database-layer expression of
 "Send to an organisation owned by another CAM: Admin yes, CAM no". This is the
 policy the acceptance criteria's "misuse attempt" test must target.
+
+Both INSERT policies additionally require `app.can_contact_organisation(organisation_id)`
+(F050, #52) — a suppressed org (F251 §3.14) blocks every insert, admin included. Fixed
+20260806120000: the admin policy originally omitted this check entirely, so an admin's
+own INSERT was never gated by suppression at all — see that migration's header for
+the bug.
 
 A sent message is immutable: the UPDATE predicate requires `send_status = 'draft'`.
 

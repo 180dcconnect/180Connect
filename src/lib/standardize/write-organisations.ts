@@ -28,6 +28,8 @@
 
 import { buildAdminClient } from "../supabase/admin-client-factory.ts";
 import { reportError } from "../error-logging.ts";
+import { checkWebsiteReachability } from "../website-reachability.ts";
+import type { WebsiteStatus } from "../website-validation.ts";
 import {
   standardizeCharityCommissionRecord,
   type RawCharityCommissionRecord,
@@ -112,6 +114,7 @@ function isUsable(org: StandardOrganisation): boolean {
 
 export async function promotePendingCharityCommissionRecords(
   store: OrganisationWriteStore | null = createDefaultOrganisationWriteStore(),
+  checkWebsite: (value: string) => Promise<WebsiteStatus> = checkWebsiteReachability,
 ): Promise<PromoteCounts> {
   if (!store) {
     throw new Error(
@@ -134,6 +137,20 @@ export async function promotePendingCharityCommissionRecords(
       await store.markRecordStatus(record.id, "rejected");
       counts.rejected++;
       continue;
+    }
+
+    // F046: a website-quality failure belongs to that field, not the whole record.
+    // Check during import and record the failure, but preserve the useful organisation.
+    // The profile repeats this check for later manual edits and sites that go offline.
+    if (org.website.trim()) {
+      const website = await checkWebsite(org.website);
+      if (website.status === "invalid" || website.status === "unreachable") {
+        await reportError(new Error("Imported client website validation failed"), {
+          operation: "standardize.charity_commission.website_validation",
+          rawRecordId: record.id,
+          websiteStatus: website.status,
+        });
+      }
     }
 
     const result = await store.insertOrganisation(org);

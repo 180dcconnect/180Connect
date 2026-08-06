@@ -5,9 +5,15 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
+import { checkWebsiteReachability } from "@/lib/website-reachability";
 import { SuppressButton } from "./suppress-button";
 
-type OrganisationRow = { id: string; legal_name: string; organisation_type: string };
+type OrganisationRow = {
+  id: string;
+  legal_name: string;
+  organisation_type: string;
+  website: string | null;
+};
 type LatestSuppression = {
   status: "pending" | "active" | "rejected" | "lifted";
   reason: string;
@@ -31,7 +37,7 @@ export default async function ClientDetailPage({
 
   const { data: client, error: clientError } = await supabase
     .from("organisations")
-    .select("id, legal_name, organisation_type")
+    .select("id, legal_name, organisation_type, website")
     .eq("id", id)
     .maybeSingle<OrganisationRow>();
 
@@ -39,6 +45,14 @@ export default async function ClientDetailPage({
     await reportError(clientError, { operation: "clients.detail_page", organisationId: id });
   }
   if (!client) notFound();
+  const website = await checkWebsiteReachability(client.website);
+  if (website.status === "unreachable") {
+    await reportError(new Error("Client website validation failed"), {
+      operation: "clients.website_validation",
+      organisationId: id,
+      hostname: client.website ? new URL(client.website).hostname : undefined,
+    });
+  }
 
   // Most recent suppression row for this org, whatever its status — pending shows a
   // waiting state, active shows the suppressed state, rejected/lifted/none all fall
@@ -61,6 +75,40 @@ export default async function ClientDetailPage({
         </Link>
         <p className="mt-4 text-sm font-bold text-brand">{client.organisation_type}</p>
         <h1 className="mt-1 text-2xl font-bold">{client.legal_name}</h1>
+
+        <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="website-heading">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="website-heading" className="text-sm font-bold">Website</h2>
+            <span className={`rounded-full px-2 py-1 text-xs font-bold ${website.status === "reachable" ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"}`}>
+              {website.status === "reachable"
+                ? "Reachable"
+                : website.status === "invalid"
+                  ? "Invalid URL"
+                  : website.status === "missing"
+                    ? "Missing"
+                    : "Unreachable"}
+            </span>
+          </div>
+
+          {website.url ? (
+            <a
+              className={`mt-2 block break-all text-sm underline ${website.status === "reachable" ? "text-brand-hover" : "font-bold text-red-800"}`}
+              href={website.url}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {website.url}
+            </a>
+          ) : (
+            <p className="mt-2 text-sm text-foreground/65">Not provided</p>
+          )}
+
+          {website.message && (
+            <p className="mt-2 text-sm text-red-800" role="alert">
+              {website.message} Booklet generation may use unreliable or missing website context.
+            </p>
+          )}
+        </section>
 
         <div className="mt-8">
           {latest?.status === "active" ? (

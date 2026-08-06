@@ -38,7 +38,7 @@ const GENERIC_FAILURE = "The suppression request could not be saved. Refresh and
  * something safe to show an admin.
  *
  * Every errcode below is one the two RPCs raise deliberately, with a message written
- * to be read by an admin (see 20260805120000_create_suppressions.sql) — no table or
+ * to be read by an admin (see 20260806100000_create_suppressions.sql) — no table or
  * constraint names, nothing internal. Passing those through is safe; everything else
  * gets the generic string, same reasoning as rpcFailureResponse in @/lib/offboard
  * (DoD: no stack traces or internals in a user-facing error).

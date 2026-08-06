@@ -458,7 +458,7 @@ harmless for any active role to write about themselves.
 ### 3.14 Suppressions — RPC-only, admin decides
 
 Backs F251 Suppress Charity Record (#82),
-`supabase/migrations/20260805120000_create_suppressions.sql`. Resolves open gap #3
+`supabase/migrations/20260806100000_create_suppressions.sql`. Resolves open gap #3
 (§6) and the ticket's own "Blocked By / Open Questions: who can suppress records",
 decided by the Project Leader 5 Aug 2026: **only an admin's decision puts a
 suppression into effect.** A CAM may request one; an admin may request one directly,

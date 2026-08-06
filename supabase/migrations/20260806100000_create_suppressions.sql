@@ -74,7 +74,7 @@
 --                 | departs from the TODO-comment pattern used by the two migrations
 --                 | above this one).
 --
--- Reversibility: paired rollback in ../rollback/20260805120000_create_suppressions.down.sql
+-- Reversibility: paired rollback in ../rollback/20260806100000_create_suppressions.down.sql
 
 create type public.suppression_status as enum ('pending', 'active', 'rejected', 'lifted');
 

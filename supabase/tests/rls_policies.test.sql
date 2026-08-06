@@ -2008,7 +2008,7 @@ begin
   if not tests.tables_exist('organisations', 'users', 'audit_log', 'suppressions')
      or to_regprocedure('public.request_suppression(uuid, text)') is null
      or to_regprocedure('public.decide_suppression_request(uuid, boolean, text)') is null then
-    return next skip(21, 'suppressions table or RPCs not yet migrated');
+    return next skip(23, 'suppressions table or RPCs not yet migrated');
     return;
   end if;
 
@@ -2094,6 +2094,28 @@ begin
   select app.can_contact_organisation(v_org_cam_a) into v_can_contact;
   return next is(v_can_contact, false,
     'an active suppression blocks outreach via app.can_contact_organisation()');
+
+  -- F050 (#52): the RLS layer itself, not just the helper function, must reject the
+  -- insert — for both roles. outreach_messages_insert_admin used to skip this check
+  -- entirely (fixed 20260806120000); assert both paths here so that bug can't recur.
+  if tests.tables_exist('outreach_messages') then
+    return next is(
+      tests.sqlstate_of(v_cam_a, format(
+        'insert into public.outreach_messages (organisation_id, sent_by_user_id, subject, body, send_status)
+         values (%L, %L, ''s'', ''b'', ''draft'')', v_org_cam_a, v_cam_a)),
+      '42501',
+      'CAM cannot insert outreach_messages for a suppressed organisation'
+    );
+    return next is(
+      tests.sqlstate_of(v_admin, format(
+        'insert into public.outreach_messages (organisation_id, sent_by_user_id, subject, body, send_status)
+         values (%L, %L, ''s'', ''b'', ''draft'')', v_org_cam_a, v_admin)),
+      '42501',
+      'admin cannot insert outreach_messages for a suppressed organisation either'
+    );
+  else
+    return next skip(2, 'step 11 create_outreach not yet migrated');
+  end if;
 
   -- Deciding an already-decided request is rejected, not silently re-applied.
   return next is(

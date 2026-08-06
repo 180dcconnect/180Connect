@@ -6,6 +6,7 @@ import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
 import { SuppressButton } from "./suppress-button";
+import { ComposeButton } from "./compose-button";
 
 type OrganisationRow = { id: string; legal_name: string; organisation_type: string };
 type LatestSuppression = {
@@ -17,6 +18,15 @@ type LatestSuppression = {
 /**
  * F251 AC1/AC2's minimal client screen — see src/app/clients/page.tsx for why this
  * is not F067. Shows the charity's name and its suppression state: nothing else.
+ *
+ * Also F050 (#52): ComposeButton is a placeholder send action — no real outreach
+ * feature exists yet (F094 #93, F100 #99 are both unbuilt). It exists so F050's
+ * "blocked, not just discouraged" and "clear message when blocked" ACs can be
+ * demonstrated end-to-end now, ahead of the real send UI. The gating check
+ * (suppression status) is identical to the one already enforced at the RLS layer
+ * (outreach_messages_insert_*, see 20260806120000) — when the real send screen
+ * replaces this stub, it must reuse this same gate rather than reinvent it, or the
+ * two can drift apart the way the admin RLS policy already once did.
  */
 export default async function ClientDetailPage({
   params,
@@ -87,6 +97,15 @@ export default async function ClientDetailPage({
             <p className="text-sm text-foreground/65">Not suppressed.</p>
           )}
         </div>
+
+        {hasPermission(authorization.actor.role, "client:contact") ? (
+          <div className="mt-8 border-t border-black/10 pt-8">
+            <p className="text-sm font-bold">Outreach</p>
+            <div className="mt-3">
+              <ComposeButton blocked={latest?.status === "active"} />
+            </div>
+          </div>
+        ) : null}
       </section>
     </main>
   );

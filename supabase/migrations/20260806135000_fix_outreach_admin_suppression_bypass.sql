@@ -41,7 +41,7 @@
 --   Approved by   | Bashir (Project Leader), 6 Aug 2026.
 --
 -- Reversibility: paired rollback in
---   ../rollback/20260806120000_fix_outreach_admin_suppression_bypass.down.sql
+--   ../rollback/20260806135000_fix_outreach_admin_suppression_bypass.down.sql
 --   (restores the original policy — see the warning in that file).
 
 drop policy if exists outreach_messages_insert_admin on public.outreach_messages;

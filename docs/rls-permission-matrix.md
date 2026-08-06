@@ -57,17 +57,18 @@ reviewers do not assume the matrix alone is sufficient.
 | §4.3 capability | Why RLS alone fails | Mechanism | Status |
 |---|---|---|---|
 | CAM may edit own profile but **not** their own `role` | RLS is row-level; it cannot allow a row UPDATE while forbidding one column | `REVOKE` (§2.1) then column `GRANT` — `grant update (full_name) on public.users to authenticated`. `role`/`is_active` granted to nobody; an admin role change goes through an RPC (F012) | **shipped** in create_users (F233); F012 RPC still to build |
-| CAM claims an **unowned** organisation | Needs a write to `ORGANISATIONS.owner_id`, otherwise off-limits | Handled **in the UPDATE policy**, not an RPC: a CAM may target an unowned row and its `WITH CHECK` forces the new `owner_id` to be themselves. `claim_organisation(org_id)` as a `SECURITY DEFINER` RPC remains a future enhancement (F162) for atomic race-safety + an audit row | policy **shipped** in create_organisations (F233); RPC deferred to F162 |
+| CAM claims an **unowned** organisation | Needs a write to `ORGANISATIONS.owner_id`, otherwise off-limits | `claim_organisation(org_id)`, a `SECURITY DEFINER` RPC (F162, `20260806140000_create_claim_organisation_rpc.sql`) locks the row, sets `owner_id` to the caller and writes an `audit_log` row in the same transaction; raises `55000` rather than overriding if someone else already owns it. The UPDATE policy's `owner_id is null` branch is gone — a CAM's direct UPDATE on an unowned row now matches zero rows, same as any other RLS-blocked write | **shipped**, F162 — see §3.2 |
 | "Override pipeline stage — **reason required**" | Postgres cannot require a justification string as a condition of an UPDATE | `SECURITY DEFINER` RPC `override_outreach_status(org_id, status, reason)`. `reason` is `not null` and lands in the audit log | to build (F224) |
 | "Reassign ownership: admin only" | Same column-level problem | Currently the org UPDATE policy allows an admin to set any `owner_id`; a dedicated `assign_organisation_owner` RPC (with audit) is the future form | admin path **shipped**; RPC deferred. The **offboarding** case is now covered: `deactivate_user` (F014) reassigns every organisation the departing user owns, with a required reason and one `ownership_reassigned` audit row per organisation, in the same transaction that closes the account. Since `20260804170000` it does not move `owner_id` itself — it delegates to `reassign_ownership` (F257), so the departing user's **open actions travel with their clients** instead of being stranded on a closed account. See §3.11 |
 | Audit entries are immutable | RLS controls who writes, not whether a row can later change | `AUDIT_LOG` gets **no** UPDATE or DELETE policy for any role. Append-only by omission | needs the table (§6) |
 
-**Rule that follows:** where a capability needs a *condition*, a *reason string*, or a
-cross-user write, prefer an RPC over widening a policy. An RPC is `SECURITY DEFINER`
-with `set search_path = ''` and re-checks the caller's role itself, because
-`SECURITY DEFINER` bypasses the RLS that would otherwise protect it. The one place a
-policy carries the logic directly is the unowned-claim above, where the `WITH CHECK`
-can express "new owner must be me" without an RPC — see §3.2.
+**Rule that follows:** where a capability needs a *condition*, a *reason string*, a
+cross-user write, or (as with the unowned-claim above, since F162) an audit row, prefer
+an RPC over widening a policy. An RPC is `SECURITY DEFINER` with `set search_path = ''`
+and re-checks the caller's role itself, because `SECURITY DEFINER` bypasses the RLS
+that would otherwise protect it. The CAM-owns-a-row-they-already-own path is still
+policy, not RPC — editing fields on your own client needs no audit row and no cross-user
+write, so widening the policy is enough there. See §3.2.
 
 ### 2.1 Grants: revoke before you grant
 
@@ -193,9 +194,30 @@ canonical-edit RPC or column-guard trigger (F224). The narrower unowned-org hole
 editing a row they do not own) *is* closed: the `WITH CHECK` uses
 `coalesce(owner_id = auth.uid(), false)`, so a null owner no longer slips through.
 
+**Claiming an unowned client (F162).** Until `20260806140000`, a CAM claimed an unowned
+organisation the same way they edit one they own — directly through this UPDATE policy,
+its `WITH CHECK` pinning the new `owner_id` to themselves. That path wrote no
+`audit_log` row, which F162 AC3 ("taking ownership is recorded with who and when")
+cannot tolerate: a caller going straight to PostgREST instead of the UI would claim a
+client with no trace. `claim_organisation(org_id)`
+(`supabase/migrations/20260806140000_create_claim_organisation_rpc.sql`) replaces that
+path — `SECURITY DEFINER`, locks the row, requires the caller be an active CAM or admin,
+and inserts one `ownership_reassigned` audit row (`trigger: 'self_claim'`, matching
+`reassign_ownership`'s `from`/`to`/`trigger` keys — see §3.11) in the same transaction
+as the claim. The policy's `owner_id is null` branch for CAMs is removed to match: a
+CAM's direct UPDATE on an unowned row now matches zero rows, same as any other
+RLS-blocked write (§5), forcing the claim through the audited RPC. Re-claiming a client
+you already own is a no-op, not an error, and is not audited (same convention as
+`reassign_ownership`'s already-there skip). Claiming a client someone **else** already
+owns raises `55000` rather than silently overriding the existing owner (AC2) — the
+caller renders that as a conflict warning (the minimal form of F165, not yet its own
+story) instead of a generic failure. Admin's separate, still-open ability to set any
+`owner_id` directly through this same policy (the "reassign ownership: admin only" row
+above) is unchanged by this migration.
+
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `ORGANISATIONS` | all roles | admin | admin any row; CAM may claim an unowned row (WITH CHECK pins new `owner_id` to self) or edit one they own | admin |
+| `ORGANISATIONS` | all roles | admin | admin any row; CAM may edit one they own (WITH CHECK pins `owner_id` to self) — claiming an **unowned** row is RPC-only, see below | admin |
 | `ORGANISATION_IDENTIFIERS` | all roles | admin | admin | admin |
 | `CONTACTS` | all roles | admin, cam | admin, cam | admin |
 | `FINANCIAL_PERIODS` | all roles | admin | admin | admin |
@@ -378,6 +400,13 @@ screen's selection is a snapshot, so a client whose owner changed since is **ski
 not seized), and it decides whose actions move — work an admin assigned to a *third* CAM
 on that client stays with them. Null is the F253 bulk-assign path, where each client's
 current owner plays that part per row.
+
+A CAM taking ownership of an **unowned** client themselves is a fourth path onto the same
+`ownership_reassigned` token, but not through this function — `reassign_ownership` is
+admin-only and moves a client *between* two other people, where a self-claim has no
+outgoing owner and no admin in the loop. That is `claim_organisation(org_id)` (F162,
+§3.2), writing `trigger: 'self_claim'` alongside this table's `'bulk_assign'` and
+`'offboarding'` so all four routes read as one timeline.
 
 Only **open** actions move. Completed and cancelled ones stay with whoever did them, on
 the same principle that keeps note and draft authorship put: reassignment transfers

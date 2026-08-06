@@ -3,24 +3,33 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
+import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
 import { visibleClients, type ClientListRow, type OpenSuppression } from "./visible-clients.ts";
+import { ClaimButton } from "./[id]/claim-button";
 
 /**
  * F051 — the charity list view. Every organisation regardless of import method
  * or manual entry (F031/F032/F036) shows here, minus anything F251 has actively
  * suppressed. Row click leads to the F067/F068 detail page (src/app/clients/[id]).
+ *
+ * F162 (#157): the claim button sits beside the row's Link rather than inside it —
+ * a button nested in an anchor is invalid markup and would fire both handlers on
+ * click. Only unassigned rows show it, and only to an actor who can edit clients.
  */
 export default async function ClientsPage() {
   const authorization = await getCurrentActor("client:view", { route: "/clients" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
   const supabase = await createClient();
+  const canClaim = hasPermission(authorization.actor.role, "client:edit");
 
   const [organisations, openSuppressions] = await Promise.all([
     supabase
       .from("organisations")
-      .select("id, legal_name, organisation_type, city, country_code, outreach_status")
+      .select(
+        "id, legal_name, organisation_type, city, country_code, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
+      )
       .order("legal_name")
       .overrideTypes<ClientListRow[], { merge: false }>(),
     supabase
@@ -60,9 +69,9 @@ export default async function ClientsPage() {
         ) : (
           <ul className="mt-8 divide-y divide-black/5">
             {clients.map((client) => (
-              <li key={client.id}>
+              <li key={client.id} className="flex items-center gap-4 py-4">
                 <Link
-                  className="flex items-center justify-between gap-4 py-4 hover:bg-black/2.5"
+                  className="flex flex-1 items-center justify-between gap-4 hover:bg-black/2.5"
                   href={`/clients/${client.id}`}
                 >
                   <span>
@@ -75,6 +84,15 @@ export default async function ClientsPage() {
                     <span className="rounded-full bg-black/5 px-2 py-1 text-xs font-bold text-foreground/65">
                       {client.outreachStatusLabel}
                     </span>
+                    {client.ownerName ? (
+                      <span className="rounded-full bg-brand/10 px-2 py-1 text-xs font-bold text-brand-hover">
+                        {client.ownerName}
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-black/5 px-2 py-1 text-xs font-bold text-foreground/50">
+                        Unassigned
+                      </span>
+                    )}
                     {client.suppressionPending && (
                       <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-bold text-amber-800">
                         Suppression requested
@@ -82,6 +100,9 @@ export default async function ClientsPage() {
                     )}
                   </span>
                 </Link>
+                {canClaim && !client.ownerName && (
+                  <ClaimButton compact organisationId={client.id} />
+                )}
               </li>
             ))}
           </ul>

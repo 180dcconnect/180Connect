@@ -48,6 +48,8 @@ export type PromoteCounts = {
   failed: number;
 };
 
+const WEBSITE_VALIDATION_CONCURRENCY = 5;
+
 /**
  * Everything promotePendingCharityCommissionRecords needs from the database,
  * behind an interface — same reasoning as runner.ts's IngestionStore: the
@@ -130,27 +132,35 @@ export async function promotePendingCharityCommissionRecords(
     failed: 0,
   };
 
-  for (const record of pending) {
-    const org = standardizeCharityCommissionRecord(record.raw_payload);
+  const prepared = pending.map((record) => ({
+    record,
+    org: standardizeCharityCommissionRecord(record.raw_payload),
+  }));
+
+  // Resolve website checks in small concurrent batches. Database writes remain
+  // ordered below, while a slow website cannot serially stall every import row.
+  for (let start = 0; start < prepared.length; start += WEBSITE_VALIDATION_CONCURRENCY) {
+    await Promise.all(
+      prepared.slice(start, start + WEBSITE_VALIDATION_CONCURRENCY).map(async ({ record, org }) => {
+        if (!isUsable(org) || !org.website.trim()) return;
+        const website = await checkWebsite(org.website);
+        if (website.status === "invalid" || website.status === "unreachable") {
+          await reportError(new Error("Imported client website validation failed"), {
+            operation: "standardize.charity_commission.website_validation",
+            rawRecordId: record.id,
+            websiteStatus: website.status,
+          });
+        }
+      }),
+    );
+  }
+
+  for (const { record, org } of prepared) {
 
     if (!isUsable(org)) {
       await store.markRecordStatus(record.id, "rejected");
       counts.rejected++;
       continue;
-    }
-
-    // F046: a website-quality failure belongs to that field, not the whole record.
-    // Check during import and record the failure, but preserve the useful organisation.
-    // The profile repeats this check for later manual edits and sites that go offline.
-    if (org.website.trim()) {
-      const website = await checkWebsite(org.website);
-      if (website.status === "invalid" || website.status === "unreachable") {
-        await reportError(new Error("Imported client website validation failed"), {
-          operation: "standardize.charity_commission.website_validation",
-          rawRecordId: record.id,
-          websiteStatus: website.status,
-        });
-      }
     }
 
     const result = await store.insertOrganisation(org);

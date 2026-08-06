@@ -45,7 +45,9 @@ export function validateWebsiteFormat(value: string | null | undefined): Website
 
 /** Protects the server-side reachability checker from local/private destinations. */
 export function isUnsafeHostname(hostname: string): boolean {
-  const value = hostname.toLowerCase().replace(/\.$/, "");
+  // WHATWG URL keeps brackets around IPv6 literals (`[::1]`). Strip them before
+  // handing the value to isIP/isPrivateAddress or private literals look like names.
+  const value = hostname.toLowerCase().replace(/\.$/, "").replace(/^\[|\]$/g, "");
   if (value === "localhost" || value.endsWith(".localhost") || value.endsWith(".local")) {
     return true;
   }
@@ -53,9 +55,12 @@ export function isUnsafeHostname(hostname: string): boolean {
 }
 
 export function isPrivateAddress(address: string): boolean {
-  const value = address.toLowerCase();
+  const value = address.toLowerCase().replace(/^\[|\]$/g, "");
 
   if (value.includes(":")) {
+    const mapped = value.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/)?.[1];
+    if (mapped) return isPrivateAddress(mapped);
+
     return (
       value === "::" ||
       value === "::1" ||
@@ -64,10 +69,7 @@ export function isPrivateAddress(address: string): boolean {
       value.startsWith("fe8") ||
       value.startsWith("fe9") ||
       value.startsWith("fea") ||
-      value.startsWith("feb") ||
-      value.startsWith("::ffff:127.") ||
-      value.startsWith("::ffff:10.") ||
-      value.startsWith("::ffff:192.168.")
+      value.startsWith("feb")
     );
   }
 
@@ -91,11 +93,14 @@ export function isPrivateAddress(address: string): boolean {
 
 export type WebsiteCheckDependencies = {
   resolve: (hostname: string) => Promise<readonly string[]>;
-  fetch: typeof fetch;
+  /** Requests the URL through the exact address that was checked above. */
+  request: (url: string, pinnedAddress: string) => Promise<WebsiteResponse>;
+  onFailure?: (error: unknown, hostname: string) => Promise<void> | void;
 };
 
+export type WebsiteResponse = { status: number; location: string | null };
+
 const MAX_REDIRECTS = 3;
-const TIMEOUT_MS = 5_000;
 
 /**
  * Checks DNS and HTTP reachability without following a redirect to an unchecked host.
@@ -115,6 +120,10 @@ export async function checkWebsite(
       const currentUrl = new URL(current);
       const addresses = await dependencies.resolve(currentUrl.hostname);
       if (addresses.length === 0 || addresses.some(isPrivateAddress)) {
+        await dependencies.onFailure?.(
+          new Error(addresses.length === 0 ? "Website hostname did not resolve" : "Website resolved to a private address"),
+          currentUrl.hostname,
+        );
         return {
           status: "unreachable",
           url: format.url,
@@ -122,37 +131,50 @@ export async function checkWebsite(
         };
       }
 
-      const response = await dependencies.fetch(current, {
-        method: "HEAD",
-        redirect: "manual",
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      });
+      // Pin the transport to the address we just validated. A second, independent
+      // DNS lookup here would create a DNS-rebinding TOCTOU hole.
+      const response = await dependencies.request(current, addresses[0]);
 
       if (response.status >= 300 && response.status < 400) {
-        const location = response.headers.get("location");
+        const location = response.location;
         if (!location || redirects === MAX_REDIRECTS) break;
         const redirected = new URL(location, current).toString();
         const redirectedFormat = validateWebsiteFormat(redirected);
-        if (redirectedFormat.status !== "valid") break;
+        if (redirectedFormat.status !== "valid") {
+          await dependencies.onFailure?.(
+            new Error("Website redirected to an unsafe or malformed destination"),
+            currentUrl.hostname,
+          );
+          break;
+        }
         current = redirectedFormat.url;
         continue;
       }
 
-      if (response.ok || response.status === 401 || response.status === 403) {
+      if ((response.status >= 200 && response.status < 300) || response.status === 401 || response.status === 403) {
         return { status: "reachable", url: format.url, message: null };
       }
 
+      await dependencies.onFailure?.(
+        new Error(`Website returned HTTP ${response.status}`),
+        currentUrl.hostname,
+      );
       return {
         status: "unreachable",
         url: format.url,
         message: `This website returned HTTP ${response.status}.`,
       };
     }
-  } catch {
-    // DNS, TLS, timeout and network failures are deliberately flattened so neither
-    // provider details nor stack traces reach a CAM.
+  } catch (error) {
+    // The wrapper records the real diagnostic in ERROR_LOG/Sentry. The CAM receives
+    // only the safe status below; unexpected programming errors are no longer swallowed.
+    await dependencies.onFailure?.(error, new URL(current).hostname);
   }
 
+  await dependencies.onFailure?.(
+    new Error("Website exceeded the redirect limit or returned an unusable redirect"),
+    new URL(current).hostname,
+  );
   return {
     status: "unreachable",
     url: format.url,

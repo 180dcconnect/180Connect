@@ -10,8 +10,11 @@ import {
 
 const publicDns = async () => ["93.184.216.34"];
 
-function dependencies(response: Response, resolve = publicDns): WebsiteCheckDependencies {
-  return { resolve, fetch: async () => response };
+function dependencies(
+  response: { status: number; location: string | null },
+  resolve = publicDns,
+): WebsiteCheckDependencies {
+  return { resolve, request: async () => response };
 }
 
 describe("validateWebsiteFormat", () => {
@@ -37,6 +40,11 @@ describe("validateWebsiteFormat", () => {
     assert.equal(isPrivateAddress("10.1.2.3"), true);
     assert.equal(isPrivateAddress("192.168.1.1"), true);
     assert.equal(isPrivateAddress("93.184.216.34"), false);
+    assert.equal(validateWebsiteFormat("http://[::1]/").status, "invalid");
+    assert.equal(validateWebsiteFormat("http://[fc00::1]/").status, "invalid");
+    assert.equal(isPrivateAddress("::ffff:169.254.169.254"), true);
+    assert.equal(isPrivateAddress("::ffff:172.20.1.2"), true);
+    assert.equal(isPrivateAddress("::ffff:100.100.1.2"), true);
   });
 });
 
@@ -44,7 +52,7 @@ describe("checkWebsite", () => {
   it("marks a resolving successful website as reachable", async () => {
     const result = await checkWebsite(
       "https://example.org",
-      dependencies(new Response(null, { status: 200 })),
+      dependencies({ status: 200, location: null }),
     );
     assert.equal(result.status, "reachable");
   });
@@ -52,7 +60,7 @@ describe("checkWebsite", () => {
   it("flags a hostname that does not resolve", async () => {
     const result = await checkWebsite(
       "https://missing.example",
-      dependencies(new Response(null, { status: 200 }), async () => []),
+      dependencies({ status: 200, location: null }, async () => []),
     );
     assert.equal(result.status, "unreachable");
   });
@@ -60,7 +68,7 @@ describe("checkWebsite", () => {
   it("flags a broken HTTP response", async () => {
     const result = await checkWebsite(
       "https://example.org",
-      dependencies(new Response(null, { status: 404 })),
+      dependencies({ status: 404, location: null }),
     );
     assert.deepEqual(result, {
       status: "unreachable",
@@ -70,19 +78,32 @@ describe("checkWebsite", () => {
   });
 
   it("flags a conflicting redirect to a private destination", async () => {
-    const fetches: string[] = [];
+    const requests: { url: string; address: string }[] = [];
     const result = await checkWebsite("https://example.org", {
       resolve: publicDns,
-      fetch: async (input) => {
-        fetches.push(String(input));
-        return new Response(null, {
-          status: 302,
-          headers: { location: "http://127.0.0.1/admin" },
-        });
+      request: async (url, address) => {
+        requests.push({ url, address });
+        return { status: 302, location: "http://127.0.0.1/admin" };
       },
     });
     assert.equal(result.status, "unreachable");
-    assert.equal(fetches.length, 1);
+    assert.deepEqual(requests, [
+      { url: "https://example.org/", address: "93.184.216.34" },
+    ]);
+  });
+
+  it("pins the request to the exact public IP that passed validation", async () => {
+    const requests: { url: string; address: string }[] = [];
+    await checkWebsite("https://example.org", {
+      resolve: async () => ["93.184.216.34"],
+      request: async (url, address) => {
+        requests.push({ url, address });
+        return { status: 200, location: null };
+      },
+    });
+    assert.deepEqual(requests, [
+      { url: "https://example.org/", address: "93.184.216.34" },
+    ]);
   });
 
   it("preserves the existing record when validation fails", async () => {
@@ -91,7 +112,7 @@ describe("checkWebsite", () => {
       resolve: async () => {
         throw new Error("DNS unavailable");
       },
-      fetch: async () => new Response(null, { status: 200 }),
+      request: async () => ({ status: 200, location: null }),
     });
     assert.deepEqual(original, {
       legal_name: "Useful Charity",

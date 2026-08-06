@@ -2153,6 +2153,71 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- organisation source metadata (F043)
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_source_tracking()
+returns setof text language plpgsql as $$
+declare
+  v_viewer uuid := '00000000-0000-4000-a000-000000000005';
+  v_org    uuid := '00000000-0000-4000-b000-000000000001';
+  v_run    uuid := '00000000-0000-4000-c000-000000000043';
+  v_count  bigint;
+begin
+  if to_regprocedure('public.get_organisation_sources(uuid)') is null then
+    return next skip(4, 'F043 source-tracking RPC not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  return next ok(
+    not has_function_privilege('anon', 'public.get_organisation_sources(uuid)', 'EXECUTE'),
+    'anon cannot read organisation source metadata'
+  );
+
+  insert into public.ingestion_runs (id, api_source, triggered_by, job_status)
+  values (v_run, 'companies_house', 'manual', 'completed')
+  on conflict (id) do nothing;
+
+  insert into public.raw_source_records (
+    ingestion_run_id, record_source, source_record_id, raw_payload,
+    matched_organisation_id, checksum
+  ) values
+    (v_run, 'companies_house', '01234567', '{}'::jsonb, v_org, 'f043-ch'),
+    (v_run, 'charity_commission', '7654321', '{}'::jsonb, v_org, 'f043-cc')
+  on conflict (record_source, source_record_id) do update
+    set matched_organisation_id = excluded.matched_organisation_id;
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.get_organisation_sources(v_org);
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  return next is(v_count, 3::bigint,
+    'an active viewer sees manual origin and every API contributor through safe metadata');
+
+  update public.organisations set legal_name = legal_name || ' updated' where id = v_org;
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.get_organisation_sources(v_org);
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  return next is(v_count, 3::bigint,
+    'source links persist after the canonical organisation is edited');
+
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select * from public.get_organisation_sources(%L)',
+      'ffffffff-ffff-4fff-afff-ffffffffffff'::uuid)),
+    'P0002',
+    'an invalid organisation id returns a controlled not-found error'
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 
 select * from tests.suite_core();
 select * from tests.suite_viewer();
@@ -2171,6 +2236,7 @@ select * from tests.suite_actions();
 select * from tests.suite_reassign();
 select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
+select * from tests.suite_source_tracking();
 
 select * from finish();
 

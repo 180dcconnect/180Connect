@@ -49,7 +49,7 @@ export function SuppressButton({
         onClick={() => setExpanded(true)}
         type="button"
       >
-        Suppress this charity
+        Flag as Do Not Contact
       </button>
     );
   }
@@ -60,6 +60,7 @@ export function SuppressButton({
         Reason
       </label>
       <p className="mt-1 text-sm text-foreground/65">
+        e.g. hard no, legal request, unsubscribe.{" "}
         {selfApproves
           ? "Required, and kept on file. Takes effect immediately."
           : "Required, and kept on file. An admin reviews this before it takes effect."}
@@ -79,8 +80,8 @@ export function SuppressButton({
           type="submit"
         >
           {busy
-            ? (selfApproves ? "Suppressing…" : "Requesting…")
-            : (selfApproves ? "Suppress" : "Request suppression")}
+            ? (selfApproves ? "Flagging…" : "Requesting…")
+            : (selfApproves ? "Flag as Do Not Contact" : "Request Do Not Contact")}
         </button>
         <button
           className="rounded-lg border border-black/15 px-5 py-2.5 font-bold disabled:opacity-50"

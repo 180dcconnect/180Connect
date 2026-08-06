@@ -5,6 +5,7 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
+import { validateClientEmail } from "@/lib/client-email-validation";
 import {
   formatOrganisationSources,
   type OrganisationSourceRow,
@@ -12,7 +13,12 @@ import {
 import { SuppressButton } from "./suppress-button";
 import { ComposeButton } from "./compose-button";
 
-type OrganisationRow = { id: string; legal_name: string; organisation_type: string };
+type OrganisationRow = {
+  id: string;
+  legal_name: string;
+  organisation_type: string;
+  contact_email: string | null;
+};
 type LatestSuppression = {
   status: "pending" | "active" | "rejected" | "lifted";
   reason: string;
@@ -51,7 +57,7 @@ export default async function ClientDetailPage({
 
   const { data: client, error: clientError } = await supabase
     .from("organisations")
-    .select("id, legal_name, organisation_type")
+    .select("id, legal_name, organisation_type, contact_email")
     .eq("id", id)
     .maybeSingle<OrganisationRow>();
 
@@ -59,6 +65,7 @@ export default async function ClientDetailPage({
     await reportError(clientError, { operation: "clients.detail_page", organisationId: id });
   }
   if (!client) notFound();
+  const email = validateClientEmail(client.contact_email);
 
   // The generated Supabase types do not know about this branch's new RPC until the
   // remote schema is regenerated, so narrow its table-shaped result at this boundary.
@@ -120,6 +127,31 @@ export default async function ClientDetailPage({
                 </li>
               ))}
             </ul>
+          )}
+        </section>
+
+        <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="email-heading">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="email-heading" className="text-sm font-bold">Contact email</h2>
+            {email.status === "valid" ? (
+              <span className="rounded-full bg-green-50 px-2 py-1 text-xs font-bold text-green-800">
+                Valid format
+              </span>
+            ) : (
+              <span className="rounded-full bg-red-50 px-2 py-1 text-xs font-bold text-red-800">
+                {email.status === "invalid" ? "Invalid format" : "Missing"}
+              </span>
+            )}
+          </div>
+
+          <p className={`mt-2 break-all text-sm ${email.status === "invalid" ? "font-bold text-red-800" : "text-foreground/75"}`}>
+            {email.value ?? "Not provided"}
+          </p>
+
+          {email.message && (
+            <p className="mt-2 text-sm text-red-800" role="alert">
+              {email.message} The rest of this client record is still available.
+            </p>
           )}
         </section>
 

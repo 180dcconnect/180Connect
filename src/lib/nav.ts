@@ -20,6 +20,12 @@ export type NavItem = {
 
 export const NAV_ITEMS: readonly NavItem[] = [
   {
+    href: "/clients",
+    label: "Clients",
+    description: "The active working list. Tap a client to suppress it.",
+    permission: "client:view",
+  },
+  {
     href: "/admin",
     label: "Admin workspace",
     description: "Manage users, audit activity and import Companies House data.",

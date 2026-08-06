@@ -1,6 +1,6 @@
 <!--
   GENERATED FILE — DO NOT EDIT.
-  Source: ~\Downloads\Data Model.xlsx (the Data Model spreadsheet is the source of truth, per SOP §7).
+  Source: ~/Downloads/Data Model.xlsx (the Data Model spreadsheet is the source of truth, per SOP §7).
   To change anything here: edit the spreadsheet, then run `npm run export:data-model`.
 -->
 
@@ -29,6 +29,3 @@
 | 17.0 | configure_backups | Daily backups + point-in-time recovery | - | Supabase |
 | 18.0 | create_login_attempt | LOGIN_ATTEMPT + RPCs login_throttle_state, record_login_failure, clear_login_failures, prune_login_attempts | pgcrypto (Step 1) | F003 brute-force throttle. No FK. RPCs granted to service_role only; RLS on, admin SELECT, no write policy |
 | 19.0 | create_actions | ACTIONS + enum action_status | ORGANISATIONS, USERS | F168/F257 client actions and reminders. RLS on; assignee_user_id carries no UPDATE grant — it is changed only by the F257 reassignment RPC, which writes audit_log. Reminder is a column (remind_at), not a table. |
-| 20.0 | create_user_onboarding | USER_ONBOARDING_STEPS | USERS | F255 first-run guide state. One row per (user, step) completed. RLS on; own-row SELECT/INSERT for active users; no admin read (not needed yet), no UPDATE/DELETE grant — a step is inserted once on completion, never edited. |
-| 21.0 | create_outreach_preferences | OUTREACH_PREFERENCES | USERS | F195 (#191). One row per CAM, upserted. Read by F094 (#93, not yet built) to personalise the queue — does not itself score or reorder. RLS on; own-row SELECT/INSERT/UPDATE for active users; no DELETE grant (clearing preferences is an UPDATE to empty arrays, not a row removal); no admin read. |
-| 21.1 | create_suppressions | SUPPRESSIONS | ORGANISATIONS, USERS, AUDIT_LOG | F251 (#82). A CAM requests suppression (reason required) or an admin suppresses directly (self-approved, skips pending); a separate admin-only RPC approves or rejects a pending request. RPCs: request_suppression, decide_suppression_request — both write AUDIT_LOG in the same transaction. Extends app.can_contact_organisation() so an active suppression blocks outreach for every role, admin included. status includes 'lifted', reserved for F185 (#181) — not built by this migration. Not the contact-level email/phone-hash GDPR suppression list from the data lifecycle policy (§7) — that stays a separate, not-yet-built concern. |

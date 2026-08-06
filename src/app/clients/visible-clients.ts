@@ -3,6 +3,10 @@
  * so it can be tested without a database (same split as @/lib/suppressions).
  */
 
+import { formatLocation, formatOutreachStatus } from "../../lib/organisation-format.ts";
+
+export { formatLocation, formatOutreachStatus };
+
 export type ClientListRow = {
   id: string;
   legal_name: string;
@@ -19,17 +23,6 @@ export type VisibleClient = ClientListRow & {
   outreachStatusLabel: string;
   suppressionPending: boolean;
 };
-
-/** City if we have one, otherwise the ISO country code — country_code is never null. */
-export function formatLocation(client: Pick<ClientListRow, "city" | "country_code">): string {
-  return client.city?.trim() || client.country_code;
-}
-
-/** "not_started" -> "Not started". */
-export function formatOutreachStatus(status: string): string {
-  const spaced = status.replace(/_/g, " ");
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
-}
 
 /**
  * The default list view (F051 AC4): actively suppressed charities (F251) never

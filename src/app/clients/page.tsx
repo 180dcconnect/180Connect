@@ -4,15 +4,14 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
-
-type OrganisationRow = { id: string; legal_name: string; organisation_type: string };
-type OpenSuppression = { organisation_id: string; status: "pending" | "active" };
+import { visibleClients, type ClientListRow, type OpenSuppression } from "./visible-clients.ts";
 
 /**
- * F251 AC1/AC2 minimal home: tap a client to reach the one thing this story needs —
- * the suppress action. Not F067 (Client Detail Page, #69, still open) — no notes, no
- * timeline, no editable fields. Just enough surface to host the button without
- * redoing F067's job under this ticket.
+ * F051 — the charity list view. Every organisation regardless of import method
+ * or manual entry (F031/F032/F036) shows here, minus anything F251 has actively
+ * suppressed. Row click still leads to the minimal F251 detail screen — that page
+ * is not F067 (Client Detail Page, #69, still open) and this ticket doesn't
+ * change that.
  */
 export default async function ClientsPage() {
   const authorization = await getCurrentActor("client:view", { route: "/clients" });
@@ -23,9 +22,9 @@ export default async function ClientsPage() {
   const [organisations, openSuppressions] = await Promise.all([
     supabase
       .from("organisations")
-      .select("id, legal_name, organisation_type")
+      .select("id, legal_name, organisation_type, city, country_code, outreach_status")
       .order("legal_name")
-      .overrideTypes<OrganisationRow[], { merge: false }>(),
+      .overrideTypes<ClientListRow[], { merge: false }>(),
     supabase
       .from("suppressions")
       .select("organisation_id, status")
@@ -40,17 +39,7 @@ export default async function ClientsPage() {
     await reportError(openSuppressions.error, { operation: "clients.page_suppressions" });
   }
 
-  const statusByOrg = new Map(
-    (openSuppressions.data ?? []).map((row) => [row.organisation_id, row.status]),
-  );
-
-  // "Hidden from the team's active working list" (F251 user story) — an actively
-  // suppressed charity does not show up here at all. A pending request still shows
-  // (it is not suppressed yet), flagged so the requesting CAM can see it is awaiting
-  // an admin.
-  const clients = (organisations.data ?? []).filter(
-    (organisation) => statusByOrg.get(organisation.id) !== "active",
-  );
+  const clients = visibleClients(organisations.data ?? [], openSuppressions.data ?? []);
 
   return (
     <main className="min-h-screen bg-[#f1f2f4] p-6">
@@ -72,29 +61,31 @@ export default async function ClientsPage() {
           <p className="mt-8 text-sm text-foreground/65">No clients to show.</p>
         ) : (
           <ul className="mt-8 divide-y divide-black/5">
-            {clients.map((client) => {
-              const pending = statusByOrg.get(client.id) === "pending";
-              return (
-                <li key={client.id}>
-                  <Link
-                    className="flex items-center justify-between gap-4 py-4 hover:bg-black/2.5"
-                    href={`/clients/${client.id}`}
-                  >
-                    <span>
-                      <span className="font-bold">{client.legal_name}</span>
-                      <span className="ml-2 text-sm text-foreground/50">
-                        {client.organisation_type}
-                      </span>
+            {clients.map((client) => (
+              <li key={client.id}>
+                <Link
+                  className="flex items-center justify-between gap-4 py-4 hover:bg-black/2.5"
+                  href={`/clients/${client.id}`}
+                >
+                  <span>
+                    <span className="font-bold">{client.legal_name}</span>
+                    <span className="ml-2 text-sm text-foreground/50">
+                      {client.organisation_type} · {client.location}
                     </span>
-                    {pending && (
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="rounded-full bg-black/5 px-2 py-1 text-xs font-bold text-foreground/65">
+                      {client.outreachStatusLabel}
+                    </span>
+                    {client.suppressionPending && (
                       <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-bold text-amber-800">
                         Suppression requested
                       </span>
                     )}
-                  </Link>
-                </li>
-              );
-            })}
+                  </span>
+                </Link>
+              </li>
+            ))}
           </ul>
         )}
       </section>

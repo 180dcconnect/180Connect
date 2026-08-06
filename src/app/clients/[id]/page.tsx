@@ -10,15 +10,13 @@ import {
   formatOrganisationSources,
   type OrganisationSourceRow,
 } from "@/lib/source-tracking";
+import type { OrganisationDetailRow } from "@/lib/client-basic-info";
 import { SuppressButton } from "./suppress-button";
 import { ComposeButton } from "./compose-button";
+import { BasicInfoPanel } from "./basic-info-panel";
 
-type OrganisationRow = {
-  id: string;
-  legal_name: string;
-  organisation_type: string;
-  contact_email: string | null;
-};
+type OrganisationRow = OrganisationDetailRow;
+type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
 type LatestSuppression = {
   status: "pending" | "active" | "rejected" | "lifted";
   reason: string;
@@ -26,8 +24,17 @@ type LatestSuppression = {
 };
 
 /**
- * F251 AC1/AC2's minimal client screen — see src/app/clients/page.tsx for why this
- * is not F067. Shows the charity's name and its suppression state: nothing else.
+ * F067 (#69) Client Detail Page / F068 (#70) View Client Basic Info: opens from the
+ * charity list (F051) at /clients/[id] and shows that client's info in one place —
+ * BasicInfoPanel below is the F068 basic-info section (AC1/AC2), and this route's
+ * own not-found.tsx supplies F067 AC3's clear message for a deleted/merged client
+ * id, instead of Next's generic 404. Sections beyond basic info (notes, timeline,
+ * F069-081) are still separate open tickets; each will slot in here as its own
+ * `<section aria-labelledby>`, same shape as "Record sources" and this one, to
+ * keep F067 AC2's "each reachable without excessive scrolling" true as they land.
+ *
+ * Started as F251 AC1/AC2's minimal client screen (name + suppression state only)
+ * — see src/app/clients/page.tsx for that history. Extended here, not replaced.
  *
  * Also F050 (#52): ComposeButton is a placeholder send action — no real outreach
  * feature exists yet (F094 #93, F100 #99 are both unbuilt). It exists so F050's
@@ -57,7 +64,9 @@ export default async function ClientDetailPage({
 
   const { data: client, error: clientError } = await supabase
     .from("organisations")
-    .select("id, legal_name, organisation_type, contact_email")
+    .select(
+      "id, legal_name, organisation_type, website, contact_email, address_line_1, city, postcode, country_code, outreach_status",
+    )
     .eq("id", id)
     .maybeSingle<OrganisationRow>();
 
@@ -66,6 +75,23 @@ export default async function ClientDetailPage({
   }
   if (!client) notFound();
   const email = validateClientEmail(client.contact_email);
+
+  // ENRICHMENT_RESULTS is append-only (20260804180000_create_org_children.sql), so
+  // the most recently enriched row is "the" mission statement, not the only one.
+  const { data: enrichment, error: enrichmentError } = await supabase
+    .from("enrichment_results")
+    .select("mission_statement, enriched_at")
+    .eq("organisation_id", id)
+    .order("enriched_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<EnrichmentRow>();
+
+  if (enrichmentError) {
+    await reportError(enrichmentError, {
+      operation: "clients.detail_enrichment",
+      organisationId: id,
+    });
+  }
 
   // The generated Supabase types do not know about this branch's new RPC until the
   // remote schema is regenerated, so narrow its table-shaped result at this boundary.
@@ -103,6 +129,12 @@ export default async function ClientDetailPage({
         </Link>
         <p className="mt-4 text-sm font-bold text-brand">{client.organisation_type}</p>
         <h1 className="mt-1 text-2xl font-bold">{client.legal_name}</h1>
+
+        <BasicInfoPanel
+          organisation={client}
+          missionStatement={enrichment?.mission_statement ?? null}
+          missionEnrichedAt={enrichment?.enriched_at ?? null}
+        />
 
         <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="source-heading">
           <h2 id="source-heading" className="text-sm font-bold">Record sources</h2>

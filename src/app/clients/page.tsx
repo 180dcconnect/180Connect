@@ -9,9 +9,7 @@ import { visibleClients, type ClientListRow, type OpenSuppression } from "./visi
 /**
  * F051 — the charity list view. Every organisation regardless of import method
  * or manual entry (F031/F032/F036) shows here, minus anything F251 has actively
- * suppressed. Row click still leads to the minimal F251 detail screen — that page
- * is not F067 (Client Detail Page, #69, still open) and this ticket doesn't
- * change that.
+ * suppressed. Row click leads to the F067/F068 detail page (src/app/clients/[id]).
  */
 export default async function ClientsPage() {
   const authorization = await getCurrentActor("client:view", { route: "/clients" });

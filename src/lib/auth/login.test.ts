@@ -325,7 +325,33 @@ describe("attemptLogin — credentials", () => {
   });
 });
 
-describe("attemptLogin — active status", () => {
+describe("attemptLogin — account status", () => {
+  it("signs an unapproved user straight back out and reports pending activation (AC4)", async () => {
+    const { client, calls } = fakeClient({ user: makeUser("pending") });
+    const { result } = await silencingLogs(() => attemptLogin(client, VALID));
+
+    const state = rejected(result);
+    assert.equal(state.status, "pending");
+    assert.match(state.message ?? "", /pending activation/i);
+    assert.equal(calls.signOut, 1, "the session must not survive the check");
+  });
+
+  it("blocks a user who just accepted an invite but was never approved (F009 AC3)", async () => {
+    // Accepting an invite (setting a first password) never touches
+    // app_metadata.account_status — Supabase leaves it unset, not "pending" or
+    // any other placeholder string, which is what makeUser(undefined) models.
+    // This is what makes F009's "created inactive until an admin grants
+    // access" true without any code of its own: the gate already refuses
+    // anyone without an explicit "approved" status, invite or not.
+    const { client, calls } = fakeClient({ user: makeUser(undefined) });
+    const { result } = await silencingLogs(() => attemptLogin(client, VALID));
+
+    const state = rejected(result);
+    assert.equal(state.status, "pending");
+    assert.match(state.message ?? "", /pending activation/i);
+    assert.equal(calls.signOut, 1, "the session must not survive the check");
+  });
+
   it("turns a suspended user away and closes the session it just opened (F013 AC2)", async () => {
     const { client, calls } = fakeClient({ user: makeUser() });
     const { result } = await silencingLogs(() =>

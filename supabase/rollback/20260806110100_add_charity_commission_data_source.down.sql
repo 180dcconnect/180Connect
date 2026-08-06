@@ -1,4 +1,4 @@
--- Reverses 20260805171900_add_charity_commission_data_source.sql.
+-- Reverses 20260806110100_add_charity_commission_data_source.sql.
 alter domain public.data_source_name
   drop constraint data_source_name_check;
 

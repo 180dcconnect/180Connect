@@ -17,6 +17,12 @@ type LatestSuppression = {
 /**
  * F251 AC1/AC2's minimal client screen — see src/app/clients/page.tsx for why this
  * is not F067. Shows the charity's name and its suppression state: nothing else.
+ *
+ * Also F254 (#51) AC1/AC4/AC5: this same suppress action is the "Do Not Contact"
+ * flag — the charity-record wrapper F254 asks for. F254's AC3 ("takes effect with
+ * no separate step") only holds for an admin's own call, which self-approves; a
+ * CAM's flag still lands pending until an admin reviews it, same as any other
+ * suppression request — deliberate per F251, not a gap. Scope note on #51.
  */
 export default async function ClientDetailPage({
   params,
@@ -65,7 +71,7 @@ export default async function ClientDetailPage({
         <div className="mt-8">
           {latest?.status === "active" ? (
             <div className="rounded-xl bg-red-50 p-4">
-              <p className="text-sm font-bold text-red-800">Suppressed</p>
+              <p className="text-sm font-bold text-red-800">Do Not Contact</p>
               <p className="mt-1 text-sm text-red-800/80">{latest.reason}</p>
               <p className="mt-2 text-xs text-red-800/60">
                 Hidden from the active working list. Outreach is blocked. Only an admin
@@ -74,7 +80,7 @@ export default async function ClientDetailPage({
             </div>
           ) : latest?.status === "pending" ? (
             <div className="rounded-xl bg-amber-50 p-4">
-              <p className="text-sm font-bold text-amber-800">Suppression requested</p>
+              <p className="text-sm font-bold text-amber-800">Do Not Contact requested</p>
               <p className="mt-1 text-sm text-amber-800/80">{latest.reason}</p>
               <p className="mt-2 text-xs text-amber-800/60">Awaiting admin review.</p>
             </div>

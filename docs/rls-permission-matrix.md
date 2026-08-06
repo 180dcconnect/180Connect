@@ -248,6 +248,12 @@ A sent message is immutable: the UPDATE predicate requires `send_status = 'draft
 "sensitive data check" in the testing notes: a CAM `select *` must return **zero rows**,
 not an error.
 
+F043 exposes provenance without weakening that boundary. Active authenticated users
+may execute `get_organisation_sources(organisation_id)`, which returns only the source
+name, source-assigned identifier, registry name and first-seen timestamp for linked
+records. The `SECURITY DEFINER` function checks `app.is_active_user()` itself and never
+returns `raw_payload`; `anon` has no execute privilege.
+
 ### 3.6 Model and scoring configuration — admin only
 
 | Table | SELECT | INSERT | UPDATE | DELETE |

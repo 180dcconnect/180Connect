@@ -5,6 +5,10 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
+import {
+  formatOrganisationSources,
+  type OrganisationSourceRow,
+} from "@/lib/source-tracking";
 import { SuppressButton } from "./suppress-button";
 
 type OrganisationRow = { id: string; legal_name: string; organisation_type: string };
@@ -40,6 +44,21 @@ export default async function ClientDetailPage({
   }
   if (!client) notFound();
 
+  // The generated Supabase types do not know about this branch's new RPC until the
+  // remote schema is regenerated, so narrow its table-shaped result at this boundary.
+  const { data: rawSourceRows, error: sourcesError } = await supabase
+    .rpc("get_organisation_sources", { p_organisation_id: id });
+
+  if (sourcesError) {
+    await reportError(sourcesError, {
+      operation: "clients.detail_sources",
+      organisationId: id,
+    });
+  }
+  const sources = formatOrganisationSources(
+    (rawSourceRows ?? []) as OrganisationSourceRow[],
+  );
+
   // Most recent suppression row for this org, whatever its status — pending shows a
   // waiting state, active shows the suppressed state, rejected/lifted/none all fall
   // through to the suppress button.
@@ -61,6 +80,32 @@ export default async function ClientDetailPage({
         </Link>
         <p className="mt-4 text-sm font-bold text-brand">{client.organisation_type}</p>
         <h1 className="mt-1 text-2xl font-bold">{client.legal_name}</h1>
+
+        <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="source-heading">
+          <h2 id="source-heading" className="text-sm font-bold">Record sources</h2>
+          <p className="mt-1 text-xs text-foreground/60">
+            Where the information in this client record came from.
+          </p>
+          {sourcesError ? (
+            <p className="mt-3 text-sm font-medium text-red-800" role="alert">
+              Source information could not be loaded. Refresh and try again.
+            </p>
+          ) : sources.length === 0 ? (
+            <p className="mt-3 text-sm text-foreground/65">No source information recorded.</p>
+          ) : (
+            <ul className="mt-3 flex flex-wrap gap-2">
+              {sources.map((source) => (
+                <li
+                  key={source.source}
+                  className="rounded-full bg-brand/10 px-3 py-1.5 text-sm font-bold text-brand-hover"
+                  title={`First recorded ${new Date(source.first_seen_at).toLocaleDateString("en-GB")}`}
+                >
+                  {source.label}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
         <div className="mt-8">
           {latest?.status === "active" ? (

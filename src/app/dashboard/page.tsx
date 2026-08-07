@@ -1,12 +1,21 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { requireApprovedUser } from "@/lib/auth/require-approved-user";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { hasPermission } from "@/lib/auth/permissions";
-import { navItemsFor } from "@/lib/nav";
-import Link from "next/link";
+import { reportError } from "@/lib/error-logging";
+import { computeDashboardMetrics, needsAttention, type DashboardOrgRow } from "@/lib/dashboard-metrics";
+import { StatCard } from "@/components/stat-card";
 
+/**
+ * F021 — first screen after login. The sidebar (AppShell/F030) already wraps this
+ * route via dashboard/layout.tsx; this page adds the top-level metrics (F022-F025)
+ * and Needs Attention panel (F027), all on one screen with no extra clicks (AC).
+ * See src/lib/dashboard-metrics.ts for how the metrics are defined against the
+ * F145 outreach_status pipeline.
+ */
 export default async function DashboardPage({
   searchParams,
 }: {
@@ -47,27 +56,40 @@ export default async function DashboardPage({
   const actor = actorResult.actor;
 
   // F258: a read-only account is told so up front, rather than discovering it by
-  // pressing a button that fails. "May this role write?" is exactly "does it hold a
-  // write permission" — client:edit stands in for the whole write set (a viewer has
-  // only client:view). No write affordances live on this page yet to hide; when they
-  // do, gate them the same way and keep the server-side check regardless.
+  // pressing a button that fails.
   const canWrite = hasPermission(actor.role, "client:edit");
+  const canViewClients = hasPermission(actor.role, "client:view");
 
-  // Every destination this role can actually reach, from the one nav list. No
-  // placeholder tiles: a role with nothing built for it yet is told so plainly.
-  const navItems = navItemsFor(actor.role);
+  let rows: DashboardOrgRow[] = [];
+  let loadFailed = false;
+
+  if (canViewClients) {
+    const supabase = await createClient();
+    const organisations = await supabase
+      .from("organisations")
+      .select("id, legal_name, outreach_status, owner_id, updated_at")
+      .overrideTypes<DashboardOrgRow[], { merge: false }>();
+
+    if (organisations.error) {
+      await reportError(organisations.error, { operation: "dashboard.page_metrics" });
+      loadFailed = true;
+    } else {
+      rows = organisations.data ?? [];
+    }
+  }
+
+  const metrics = computeDashboardMetrics(rows);
+  const attentionItems = needsAttention(rows, actor.id);
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#f1f2f4] p-6">
-      <section className="w-full max-w-xl rounded-2xl bg-white p-8 shadow-sm">
+    <main className="min-h-screen bg-[#f1f2f4] p-6">
+      <section className="mx-auto w-full max-w-3xl rounded-2xl bg-white p-8 shadow-sm">
         <p className="text-sm font-bold text-brand">180Connect</p>
         <h1 className="mt-2 text-2xl font-bold">Dashboard</h1>
         <p className="mt-3 text-sm text-foreground/65">
           You are securely logged in as {user.email}.
         </p>
-        <p className="mt-2 text-sm font-bold uppercase tracking-wide text-foreground/60">
-          Role: {actor.role}
-        </p>
+
         {error === "admin-access-required" && (
           <p className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm font-bold text-red-800" role="alert">
             That page is restricted to administrators.
@@ -79,26 +101,50 @@ export default async function DashboardPage({
             activity, but not create, edit, or send anything.
           </p>
         )}
-        {navItems.length > 0 ? (
-          <nav className="mt-6 grid gap-3" aria-label="Your workspace">
-            {navItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="rounded-xl border border-brand/40 p-4 hover:bg-brand/5"
-              >
-                <span className="font-bold text-brand">{item.label}</span>
-                <span className="mt-1 block text-sm text-foreground/65">
-                  {item.description}
-                </span>
-              </Link>
-            ))}
-          </nav>
-        ) : (
+
+        {!canViewClients ? (
           <p className="mt-6 rounded-xl border border-black/10 p-4 text-sm text-foreground/65">
             No workspace tools are available for your role yet. Client records and
             reporting will appear here as they are released.
           </p>
+        ) : loadFailed ? (
+          <p className="mt-6 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-800" role="alert">
+            Some data could not be loaded. Refresh and try again.
+          </p>
+        ) : (
+          <>
+            <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <StatCard label="Total charities" value={metrics.totalCharities} />
+              <StatCard label="Contacted" value={metrics.contacted} />
+              <StatCard label="Responses received" value={metrics.responsesReceived} />
+              <StatCard label="Converted" value={metrics.converted} />
+            </div>
+
+            <div className="mt-8">
+              <h2 className="text-lg font-bold">Needs attention</h2>
+              {attentionItems.length === 0 ? (
+                <p className="mt-3 text-sm text-foreground/65">
+                  Nothing needs your attention right now.
+                </p>
+              ) : (
+                <ul className="mt-3 divide-y divide-black/5">
+                  {attentionItems.map((item) => (
+                    <li key={item.id} className="py-3">
+                      <Link
+                        href={`/clients/${item.id}`}
+                        className="flex items-center justify-between gap-4 hover:bg-black/2.5"
+                      >
+                        <span className="font-bold">{item.legalName}</span>
+                        <span className="rounded-full bg-black/5 px-2 py-1 text-xs font-bold text-foreground/65">
+                          {item.outreachStatusLabel}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </>
         )}
       </section>
     </main>

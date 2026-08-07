@@ -54,3 +54,20 @@ export function visibleClients(
         : null,
     }));
 }
+
+/**
+ * F163 — owner filter (issue #163). `null`/`""` means no filter (everyone).
+ * "unassigned" is a distinct value, not falsy, so it doesn't collapse into
+ * the no-filter case and genuinely-unowned clients stay reachable rather
+ * than only ever appearing when nothing is selected.
+ */
+export function filterByOwner(
+  clients: VisibleClient[],
+  ownerFilter: string | null | undefined,
+): VisibleClient[] {
+  if (!ownerFilter) return clients;
+  if (ownerFilter === "unassigned") {
+    return clients.filter((client) => client.owner_id === null);
+  }
+  return clients.filter((client) => client.owner_id === ownerFilter);
+}

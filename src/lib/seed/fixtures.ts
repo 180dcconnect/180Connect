@@ -17,13 +17,19 @@
  * of these rows have no email by design.
  */
 
-/** Pipeline stages, exactly as defined by Data Model tab 04 ORGANISATIONS.outreach_status. */
+/** Pipeline stages, exactly as defined by Data Model tab 04 ORGANISATIONS.outreach_status
+ * (F145/F146-F155 — ten values, not_contacted the default for a brand-new client). */
 export const OUTREACH_STATUSES = [
-  "not_started",
-  "queued",
-  "contacted",
-  "replied",
-  "closed",
+  "not_contacted",
+  "initial_outreach_sent",
+  "follow_up_sent",
+  "responded",
+  "converted",
+  "future_potential",
+  "soft_no",
+  "hard_no",
+  "no_response",
+  "loss_due_timing",
 ] as const;
 export type OutreachStatus = (typeof OUTREACH_STATUSES)[number];
 
@@ -157,7 +163,7 @@ export function completenessScore(
 
 /**
  * Spreads `count` records over the pipeline stages as evenly as possible, giving
- * any remainder to the earliest stages. With the default 50 this is 10 per stage.
+ * any remainder to the earliest stages. With the default 50 this is 5 per stage.
  */
 export function distributeStatuses(count: number): OutreachStatus[] {
   return Array.from({ length: count }, (_, index) =>

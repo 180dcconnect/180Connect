@@ -3,6 +3,10 @@
  * so it can be tested without a database (same split as @/lib/suppressions).
  */
 
+import { formatLocation, formatOutreachStatus } from "../../lib/organisation-format.ts";
+
+export { formatLocation, formatOutreachStatus };
+
 export type ClientListRow = {
   id: string;
   legal_name: string;
@@ -10,6 +14,8 @@ export type ClientListRow = {
   city: string | null;
   country_code: string;
   outreach_status: string;
+  owner_id: string | null;
+  owner: { full_name: string | null } | null;
 };
 
 export type OpenSuppression = { organisation_id: string; status: "pending" | "active" };
@@ -18,18 +24,12 @@ export type VisibleClient = ClientListRow & {
   location: string;
   outreachStatusLabel: string;
   suppressionPending: boolean;
+  /** F162: null only when owner_id itself is null (genuinely unassigned, claimable).
+   * A non-null owner_id whose join came back empty is a deactivated former owner
+   * (matrix §1, users_select_active hides their row) — falls back to a label rather
+   * than reading as unassigned. */
+  ownerName: string | null;
 };
-
-/** City if we have one, otherwise the ISO country code — country_code is never null. */
-export function formatLocation(client: Pick<ClientListRow, "city" | "country_code">): string {
-  return client.city?.trim() || client.country_code;
-}
-
-/** "not_started" -> "Not started". */
-export function formatOutreachStatus(status: string): string {
-  const spaced = status.replace(/_/g, " ");
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
-}
 
 /**
  * The default list view (F051 AC4): actively suppressed charities (F251) never
@@ -49,5 +49,25 @@ export function visibleClients(
       location: formatLocation(organisation),
       outreachStatusLabel: formatOutreachStatus(organisation.outreach_status),
       suppressionPending: statusByOrg.get(organisation.id) === "pending",
+      ownerName: organisation.owner_id
+        ? (organisation.owner?.full_name ?? "A former team member")
+        : null,
     }));
+}
+
+/**
+ * F163 — owner filter (issue #163). `null`/`""` means no filter (everyone).
+ * "unassigned" is a distinct value, not falsy, so it doesn't collapse into
+ * the no-filter case and genuinely-unowned clients stay reachable rather
+ * than only ever appearing when nothing is selected.
+ */
+export function filterByOwner(
+  clients: VisibleClient[],
+  ownerFilter: string | null | undefined,
+): VisibleClient[] {
+  if (!ownerFilter) return clients;
+  if (ownerFilter === "unassigned") {
+    return clients.filter((client) => client.owner_id === null);
+  }
+  return clients.filter((client) => client.owner_id === ownerFilter);
 }

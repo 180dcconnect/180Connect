@@ -5,34 +5,65 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
+import { validateClientEmail } from "@/lib/client-email-validation";
 import {
   formatOrganisationSources,
   type OrganisationSourceRow,
 } from "@/lib/source-tracking";
 import { checkWebsiteReachabilityCached } from "@/lib/website-reachability-cache";
+import type { OrganisationDetailRow } from "@/lib/client-basic-info";
 import { SuppressButton } from "./suppress-button";
+import { ComposeButton } from "./compose-button";
+import { BasicInfoPanel } from "./basic-info-panel";
+import { ClaimButton } from "./claim-button";
+import { StatusSelect } from "./status-select";
 
-type OrganisationRow = {
-  id: string;
-  legal_name: string;
-  organisation_type: string;
-  website: string | null;
-};
+type OrganisationRow = OrganisationDetailRow;
+type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
 type LatestSuppression = {
   status: "pending" | "active" | "rejected" | "lifted";
   reason: string;
   created_at: string;
 };
+type OwnerRow = {
+  owner_id: string | null;
+  owner: { full_name: string | null } | null;
+};
 
 /**
- * F251 AC1/AC2's minimal client screen — see src/app/clients/page.tsx for why this
- * is not F067. Shows the charity's name and its suppression state: nothing else.
+ * F067 (#69) Client Detail Page / F068 (#70) View Client Basic Info: opens from the
+ * charity list (F051) at /clients/[id] and shows that client's info in one place —
+ * BasicInfoPanel below is the F068 basic-info section (AC1/AC2), and this route's
+ * own not-found.tsx supplies F067 AC3's clear message for a deleted/merged client
+ * id, instead of Next's generic 404. Sections beyond basic info (notes, timeline,
+ * F069-081) are still separate open tickets; each will slot in here as its own
+ * `<section aria-labelledby>`, same shape as "Record sources" and this one, to
+ * keep F067 AC2's "each reachable without excessive scrolling" true as they land.
+ *
+ * Started as F251 AC1/AC2's minimal client screen (name + suppression state only)
+ * — see src/app/clients/page.tsx for that history. Extended here, not replaced.
+ *
+ * Also F050 (#52): ComposeButton is a placeholder send action — no real outreach
+ * feature exists yet (F094 #93, F100 #99 are both unbuilt). It exists so F050's
+ * "blocked, not just discouraged" and "clear message when blocked" ACs can be
+ * demonstrated end-to-end now, ahead of the real send UI. The gating check
+ * (suppression status) is identical to the one already enforced at the RLS layer
+ * (outreach_messages_insert_*, see 20260806120000) — when the real send screen
+ * replaces this stub, it must reuse this same gate rather than reinvent it, or the
+ * two can drift apart the way the admin RLS policy already once did.
  *
  * Also F254 (#51) AC1/AC4/AC5: this same suppress action is the "Do Not Contact"
  * flag — the charity-record wrapper F254 asks for. F254's AC3 ("takes effect with
  * no separate step") only holds for an admin's own call, which self-approves; a
  * CAM's flag still lands pending until an admin reviews it, same as any other
  * suppression request — deliberate per F251, not a gap. Scope note on #51.
+ *
+ * Also F162 (#157): the Ownership section is a separate query from BasicInfoPanel's
+ * OrganisationDetailRow (same reason "Record sources" is separate — it isn't part
+ * of F068's realtime-driven basic-info state). ClaimButton posts to
+ * /api/clients/[id]/claim, which calls claim_organisation — see that RPC's header
+ * (20260806140000_create_claim_organisation_rpc.sql) for why a direct owner_id write
+ * is no longer possible for a CAM's own claim.
  */
 export default async function ClientDetailPage({
   params,
@@ -47,7 +78,9 @@ export default async function ClientDetailPage({
 
   const { data: client, error: clientError } = await supabase
     .from("organisations")
-    .select("id, legal_name, organisation_type, website")
+    .select(
+      "id, legal_name, organisation_type, website, contact_email, address_line_1, city, postcode, country_code, outreach_status",
+    )
     .eq("id", id)
     .maybeSingle<OrganisationRow>();
 
@@ -56,6 +89,24 @@ export default async function ClientDetailPage({
   }
   if (!client) notFound();
   const website = await checkWebsiteReachabilityCached(client.website);
+  const email = validateClientEmail(client.contact_email);
+
+  // ENRICHMENT_RESULTS is append-only (20260804180000_create_org_children.sql), so
+  // the most recently enriched row is "the" mission statement, not the only one.
+  const { data: enrichment, error: enrichmentError } = await supabase
+    .from("enrichment_results")
+    .select("mission_statement, enriched_at")
+    .eq("organisation_id", id)
+    .order("enriched_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<EnrichmentRow>();
+
+  if (enrichmentError) {
+    await reportError(enrichmentError, {
+      operation: "clients.detail_enrichment",
+      organisationId: id,
+    });
+  }
 
   // The generated Supabase types do not know about this branch's new RPC until the
   // remote schema is regenerated, so narrow its table-shaped result at this boundary.
@@ -83,7 +134,23 @@ export default async function ClientDetailPage({
     .limit(1)
     .maybeSingle<LatestSuppression>();
 
-  const canSuppress = hasPermission(authorization.actor.role, "client:edit");
+  // Read separately from `client`: owner_id/name isn't part of F068's realtime-driven
+  // OrganisationDetailRow, and a deactivated owner's row is invisible under
+  // users_select_active (matrix §1) — the fallback below covers that, not an error.
+  const { data: ownerRow, error: ownerError } = await supabase
+    .from("organisations")
+    .select("owner_id, owner:users!organisations_owner_id_fkey(full_name)")
+    .eq("id", id)
+    .maybeSingle<OwnerRow>();
+
+  if (ownerError) {
+    await reportError(ownerError, { operation: "clients.detail_owner", organisationId: id });
+  }
+
+  const canEdit = hasPermission(authorization.actor.role, "client:edit");
+  const canSuppress = canEdit;
+  const ownerId = ownerRow?.owner_id ?? null;
+  const ownerName = ownerRow?.owner?.full_name ?? (ownerId ? "A former team member" : null);
 
   return (
     <main className="min-h-screen bg-[#f1f2f4] p-6">
@@ -93,6 +160,41 @@ export default async function ClientDetailPage({
         </Link>
         <p className="mt-4 text-sm font-bold text-brand">{client.organisation_type}</p>
         <h1 className="mt-1 text-2xl font-bold">{client.legal_name}</h1>
+
+        <BasicInfoPanel
+          organisation={client}
+          missionStatement={enrichment?.mission_statement ?? null}
+          missionEnrichedAt={enrichment?.enriched_at ?? null}
+        />
+
+        <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="ownership-heading">
+          <h2 id="ownership-heading" className="text-sm font-bold">Ownership</h2>
+          {ownerId ? (
+            <p className="mt-2 text-sm text-foreground/75">
+              Owned by <span className="font-bold">{ownerName}</span>
+              {ownerId === authorization.actor.id ? " (you)" : ""}.
+            </p>
+          ) : canEdit ? (
+            <div className="mt-2 flex items-center justify-between gap-4">
+              <p className="text-sm text-foreground/65">
+                Unassigned. Claim it to take responsibility for outreach on this client.
+              </p>
+              <ClaimButton organisationId={client.id} />
+            </div>
+          ) : (
+            <p className="mt-2 text-sm text-foreground/65">Unassigned.</p>
+          )}
+        </section>
+
+        {(authorization.actor.role === "admin" || ownerId === authorization.actor.id) && (
+          <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="status-heading">
+            <h2 id="status-heading" className="text-sm font-bold">Pipeline status</h2>
+            <p className="mt-1 text-xs text-foreground/60">
+              Where this client sits in the outreach pipeline. Shown on the client list too.
+            </p>
+            <StatusSelect organisationId={client.id} currentStatus={client.outreach_status} />
+          </section>
+        )}
 
         <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="source-heading">
           <h2 id="source-heading" className="text-sm font-bold">Record sources</h2>
@@ -117,6 +219,31 @@ export default async function ClientDetailPage({
                 </li>
               ))}
             </ul>
+          )}
+        </section>
+
+        <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="email-heading">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="email-heading" className="text-sm font-bold">Contact email</h2>
+            {email.status === "valid" ? (
+              <span className="rounded-full bg-green-50 px-2 py-1 text-xs font-bold text-green-800">
+                Valid format
+              </span>
+            ) : (
+              <span className="rounded-full bg-red-50 px-2 py-1 text-xs font-bold text-red-800">
+                {email.status === "invalid" ? "Invalid format" : "Missing"}
+              </span>
+            )}
+          </div>
+
+          <p className={`mt-2 break-all text-sm ${email.status === "invalid" ? "font-bold text-red-800" : "text-foreground/75"}`}>
+            {email.value ?? "Not provided"}
+          </p>
+
+          {email.message && (
+            <p className="mt-2 text-sm text-red-800" role="alert">
+              {email.message} The rest of this client record is still available.
+            </p>
           )}
         </section>
 
@@ -179,6 +306,15 @@ export default async function ClientDetailPage({
             <p className="text-sm text-foreground/65">Not suppressed.</p>
           )}
         </div>
+
+        {hasPermission(authorization.actor.role, "client:contact") ? (
+          <div className="mt-8 border-t border-black/10 pt-8">
+            <p className="text-sm font-bold">Outreach</p>
+            <div className="mt-3">
+              <ComposeButton blocked={latest?.status === "active"} />
+            </div>
+          </div>
+        ) : null}
       </section>
     </main>
   );

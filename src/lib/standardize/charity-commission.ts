@@ -32,11 +32,16 @@ export type GeographicReach =
   | "national"
   | "international";
 export type OutreachStatus =
-  | "not_started"
-  | "queued"
-  | "contacted"
-  | "replied"
-  | "closed";
+  | "not_contacted"
+  | "initial_outreach_sent"
+  | "follow_up_sent"
+  | "responded"
+  | "converted"
+  | "future_potential"
+  | "soft_no"
+  | "hard_no"
+  | "no_response"
+  | "loss_due_timing";
 
 /**
  * The ORGANISATIONS shape this ticket standardises into. Omits id,
@@ -150,8 +155,8 @@ export function standardizeCharityCommissionRecord(
     postcode: raw.address_post_code ?? "",
     // geographic_reach has no source signal at all yet — null, not a guess.
     geographic_reach: null,
-    outreach_status: "not_started", // the correct default for every new
-    // record, not a per-source value — every organisation starts un-reached.
+    outreach_status: "not_contacted", // F145/F146 — the correct default for every
+    // new record, not a per-source value — every organisation starts un-reached.
     is_seed: false,
     owner_id: null, // unassigned on import; a CAM/admin claims it later.
   };

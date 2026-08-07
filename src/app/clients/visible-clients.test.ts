@@ -15,7 +15,7 @@ function org(overrides: Partial<ClientListRow> = {}): ClientListRow {
     organisation_type: "charity",
     city: "Bristol",
     country_code: "GB",
-    outreach_status: "not_started",
+    outreach_status: "not_contacted",
     owner_id: null,
     owner: null,
     ...overrides,
@@ -38,8 +38,8 @@ describe("formatLocation", () => {
 
 describe("formatOutreachStatus", () => {
   it("turns snake_case into a readable label", () => {
-    assert.equal(formatOutreachStatus("not_started"), "Not started");
-    assert.equal(formatOutreachStatus("replied"), "Replied");
+    assert.equal(formatOutreachStatus("not_contacted"), "Not contacted");
+    assert.equal(formatOutreachStatus("responded"), "Responded");
   });
 });
 
@@ -74,11 +74,11 @@ describe("visibleClients", () => {
 
   it("attaches location and outreach status labels", () => {
     const organisations = [
-      org({ id: "a", city: null, country_code: "GB", outreach_status: "queued" }),
+      org({ id: "a", city: null, country_code: "GB", outreach_status: "follow_up_sent" }),
     ];
     const result = visibleClients(organisations, []);
     assert.equal(result[0].location, "GB");
-    assert.equal(result[0].outreachStatusLabel, "Queued");
+    assert.equal(result[0].outreachStatusLabel, "Follow up sent");
   });
 
   it("F162: ownerName is null only for a genuinely unassigned client", () => {

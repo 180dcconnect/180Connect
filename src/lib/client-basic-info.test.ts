@@ -19,7 +19,7 @@ function org(overrides: Partial<OrganisationDetailRow> = {}): OrganisationDetail
     city: "Bristol",
     postcode: "BS1 1AA",
     country_code: "GB",
-    outreach_status: "not_started",
+    outreach_status: "not_contacted",
     ...overrides,
   };
 }
@@ -44,7 +44,7 @@ describe("buildBasicInfo", () => {
       address: "12 High Street, BS1 1AA",
       location: "Bristol",
       website: "https://example.org",
-      status: "Not started",
+      status: "Not contacted",
     });
   });
 

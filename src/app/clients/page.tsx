@@ -5,8 +5,19 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
-import { visibleClients, type ClientListRow, type OpenSuppression } from "./visible-clients.ts";
+import {
+  filterByOwner,
+  visibleClients,
+  type ClientListRow,
+  type OpenSuppression,
+} from "./visible-clients.ts";
 import { ClaimButton } from "./[id]/claim-button";
+
+type TeamMember = { id: string; full_name: string | null };
+
+// Next.js 16: searchParams is a Promise on App Router pages — same pattern as
+// src/app/admin/audit-log/page.tsx.
+type SearchParams = Promise<{ owner?: string }>;
 
 /**
  * F051 — the charity list view. Every organisation regardless of import method
@@ -16,15 +27,25 @@ import { ClaimButton } from "./[id]/claim-button";
  * F162 (#157): the claim button sits beside the row's Link rather than inside it —
  * a button nested in an anchor is invalid markup and would fire both handlers on
  * click. Only unassigned rows show it, and only to an actor who can edit clients.
+ *
+ * F163 (#163): owner filter. The team dropdown lists CAMs only (not admins) —
+ * the AC asks for "any CAM on the team", and an admin who owns a client via the
+ * admin assign path is the rare edge case, not the filter's job to cover.
  */
-export default async function ClientsPage() {
+export default async function ClientsPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
   const authorization = await getCurrentActor("client:view", { route: "/clients" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
+
+  const { owner: ownerFilter } = await searchParams;
 
   const supabase = await createClient();
   const canClaim = hasPermission(authorization.actor.role, "client:edit");
 
-  const [organisations, openSuppressions] = await Promise.all([
+  const [organisations, openSuppressions, team] = await Promise.all([
     supabase
       .from("organisations")
       .select(
@@ -37,6 +58,12 @@ export default async function ClientsPage() {
       .select("organisation_id, status")
       .in("status", ["pending", "active"])
       .overrideTypes<OpenSuppression[], { merge: false }>(),
+    supabase
+      .from("users")
+      .select("id, full_name")
+      .eq("role", "cam")
+      .order("full_name")
+      .overrideTypes<TeamMember[], { merge: false }>(),
   ]);
 
   if (organisations.error) {
@@ -45,8 +72,16 @@ export default async function ClientsPage() {
   if (openSuppressions.error) {
     await reportError(openSuppressions.error, { operation: "clients.page_suppressions" });
   }
+  if (team.error) {
+    await reportError(team.error, { operation: "clients.page_team" });
+  }
 
-  const clients = visibleClients(organisations.data ?? [], openSuppressions.data ?? []);
+  const clients = filterByOwner(
+    visibleClients(organisations.data ?? [], openSuppressions.data ?? []),
+    ownerFilter,
+  );
+  const teamMembers = team.data ?? [];
+  const filterActive = Boolean(ownerFilter);
 
   return (
     <main className="min-h-screen bg-[#f1f2f4] p-6">
@@ -64,8 +99,53 @@ export default async function ClientsPage() {
           </p>
         )}
 
+        <form className="mt-6 flex flex-wrap items-end gap-3" method="get">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-foreground/65">Owner</span>
+            <select
+              name="owner"
+              defaultValue={ownerFilter ?? ""}
+              className="rounded-lg border border-black/10 px-3 py-2 text-sm"
+            >
+              <option value="">Everyone</option>
+              <option value="unassigned">Unassigned</option>
+              {teamMembers.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.full_name ?? "Unnamed CAM"}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button
+            type="submit"
+            className="rounded-full border border-black/10 px-5 py-2 text-sm font-bold hover:bg-black/5"
+          >
+            Filter
+          </button>
+
+          {authorization.actor.role === "cam" && (
+            <Link
+              href={`/clients?owner=${authorization.actor.id}`}
+              className={`text-sm font-bold hover:underline ${
+                ownerFilter === authorization.actor.id ? "text-brand" : "text-foreground/65"
+              }`}
+            >
+              My clients
+            </Link>
+          )}
+
+          {filterActive && (
+            <Link href="/clients" className="text-sm font-medium text-brand hover:underline">
+              Clear filter
+            </Link>
+          )}
+        </form>
+
         {clients.length === 0 ? (
-          <p className="mt-8 text-sm text-foreground/65">No clients to show.</p>
+          <p className="mt-8 text-sm text-foreground/65">
+            {filterActive ? "No clients match this filter." : "No clients to show."}
+          </p>
         ) : (
           <ul className="mt-8 divide-y divide-black/5">
             {clients.map((client) => (

@@ -15,6 +15,7 @@ import { SuppressButton } from "./suppress-button";
 import { ComposeButton } from "./compose-button";
 import { BasicInfoPanel } from "./basic-info-panel";
 import { ClaimButton } from "./claim-button";
+import { StatusSelect } from "./status-select";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -182,6 +183,16 @@ export default async function ClientDetailPage({
             <p className="mt-2 text-sm text-foreground/65">Unassigned.</p>
           )}
         </section>
+
+        {(authorization.actor.role === "admin" || ownerId === authorization.actor.id) && (
+          <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="status-heading">
+            <h2 id="status-heading" className="text-sm font-bold">Pipeline status</h2>
+            <p className="mt-1 text-xs text-foreground/60">
+              Where this client sits in the outreach pipeline. Shown on the client list too.
+            </p>
+            <StatusSelect organisationId={client.id} currentStatus={client.outreach_status} />
+          </section>
+        )}
 
         <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="source-heading">
           <h2 id="source-heading" className="text-sm font-bold">Record sources</h2>

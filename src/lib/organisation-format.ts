@@ -16,3 +16,20 @@ export function formatOutreachStatus(status: string): string {
   const spaced = status.replace(/_/g, " ");
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
+
+/** F145/F146-F155 — the ten pipeline statuses a client can be in, in the order the
+ * tickets define them. `not_contacted` (F146) is the default for a new client. */
+export const PIPELINE_STATUSES = [
+  "not_contacted",
+  "initial_outreach_sent",
+  "follow_up_sent",
+  "responded",
+  "converted",
+  "future_potential",
+  "soft_no",
+  "hard_no",
+  "no_response",
+  "loss_due_timing",
+] as const;
+
+export type PipelineStatus = (typeof PIPELINE_STATUSES)[number];

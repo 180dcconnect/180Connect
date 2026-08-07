@@ -1959,6 +1959,139 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- set_outreach_status — the CRM pipeline status field (F145, #140)
+-- ---------------------------------------------------------------------------
+-- Own fixture organisation (f000 prefix) rather than a shared one, same reasoning
+-- as suite_claim_ownership: this suite drives outreach_status through several
+-- transitions and does not want another suite's writes in the same run.
+create or replace function tests.suite_outreach_status()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_org_cam_a   uuid := '00000000-0000-4000-f000-000000000001';  -- owned by CAM A
+  v_status      public.outreach_status;
+  v_count       bigint;
+  v_actor       uuid;
+  v_detail      jsonb;
+begin
+  if not tests.tables_exist('organisations', 'users', 'audit_log')
+     or to_regprocedure('public.set_outreach_status(uuid, public.outreach_status)') is null then
+    return next skip(15, 'set_outreach_status RPC not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  insert into public.organisations
+    (id, legal_name, entry_method, organisation_type, owner_id, outreach_status)
+  values
+    (v_org_cam_a, 'Pipeline Test Org Ltd', 'manual', 'other', v_cam_a, 'not_contacted')
+  on conflict (id) do update set owner_id = v_cam_a, outreach_status = 'not_contacted';
+
+  -- A brand-new client defaults to not_contacted (F145 AC3 / F146), enforced by the
+  -- column default rather than this RPC — asserted here so a future migration that
+  -- drops the default is caught by the same suite that exercises the enum.
+  select outreach_status into v_status from public.organisations where id = v_org_cam_a;
+  return next is(v_status, 'not_contacted'::public.outreach_status,
+    'a freshly inserted client defaults to not_contacted');
+
+  -- Permission paths first.
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.set_outreach_status(%L, ''responded'')', v_org_cam_a)),
+    '42501',
+    'viewer cannot change pipeline status'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_deactivated, format(
+      'select public.set_outreach_status(%L, ''responded'')', v_org_cam_a)),
+    '42501',
+    'a deactivated user cannot change pipeline status'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_b, format(
+      'select public.set_outreach_status(%L, ''responded'')', v_org_cam_a)),
+    '42501',
+    'a CAM who does not own this client cannot change its status'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_outreach_status(%L, ''responded'')',
+      'ffffffff-ffff-4fff-afff-ffffffffffff'::uuid)),
+    'P0002',
+    'changing the status of a client that does not exist is a controlled not-found error'
+  );
+
+  -- The happy path: the owning CAM moves their own client through the pipeline.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.set_outreach_status(%L, ''initial_outreach_sent'')', v_org_cam_a)),
+    null,
+    'the owning CAM can change their client''s pipeline status'
+  );
+  select outreach_status into v_status from public.organisations where id = v_org_cam_a;
+  return next is(v_status, 'initial_outreach_sent'::public.outreach_status,
+    'the status actually moved');
+
+  select actor_user_id, detail into v_actor, v_detail
+    from public.audit_log
+   where action = 'status_changed' and target_id = v_org_cam_a
+   order by created_at desc limit 1;
+  return next is(v_actor, v_cam_a, 'the audit row names the CAM who made the change');
+  return next is(
+    jsonb_build_object('from', v_detail->>'from', 'to', v_detail->>'to'),
+    jsonb_build_object('from', 'not_contacted', 'to', 'initial_outreach_sent'),
+    'the audit row carries the before and after status'
+  );
+
+  -- No-op: setting the same status again is not an error and is not audited again,
+  -- same convention as claim_organisation's already-there skip.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.set_outreach_status(%L, ''initial_outreach_sent'')', v_org_cam_a)),
+    null,
+    'setting the same status again is a no-op, not an error'
+  );
+  select count(*) into v_count
+    from public.audit_log
+   where action = 'status_changed' and target_id = v_org_cam_a;
+  return next is(v_count, 1::bigint, 'the no-op re-set writes no second audit row');
+
+  -- Admins can change any client's status, owned or not.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_outreach_status(%L, ''hard_no'')', v_org_cam_a)),
+    null,
+    'an admin can change the status of a client they do not own'
+  );
+  select outreach_status into v_status from public.organisations where id = v_org_cam_a;
+  return next is(v_status, 'hard_no'::public.outreach_status,
+    'the admin''s status change actually took');
+
+  -- A direct write, bypassing the RPC, is exactly the gap audit-log-pattern.md and
+  -- this migration close — asserted the same way the role-escalation check above
+  -- does: on the resulting privilege, not just a query error.
+  return next ok(
+    not has_column_privilege('authenticated', 'public.organisations', 'outreach_status', 'UPDATE'),
+    'authenticated holds no direct UPDATE privilege on organisations.outreach_status'
+  );
+
+  return next ok(
+    not has_function_privilege(
+      'anon', 'public.set_outreach_status(uuid, public.outreach_status)', 'EXECUTE'),
+    'anon holds no EXECUTE on set_outreach_status'
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- deactivate_user and reassign_ownership are one path (F014 + F257)
 -- ---------------------------------------------------------------------------
 -- Regression suite for 20260804170000. Before that migration deactivate_user moved
@@ -2396,6 +2529,7 @@ select * from tests.suite_views();
 select * from tests.suite_actions();
 select * from tests.suite_reassign();
 select * from tests.suite_claim_ownership();
+select * from tests.suite_outreach_status();
 select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
 select * from tests.suite_source_tracking();

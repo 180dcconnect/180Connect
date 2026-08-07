@@ -24,7 +24,7 @@
 | city | text |  | Yes | City | API | Pulled from address data |  |
 | postcode | text |  | Yes | Postcode | API | Pulled from address data |  |
 | geographic_reach | enum |  | Yes | How far the organisation operates | LLM | Derived from enrichment and mission data | local / regional / national / international |
-| outreach_status | enum |  | No | Current status of the organisation in the outreach pipeline | System | Updated as organisation moves through pipeline | not_started / queued / contacted / replied / closed |
+| outreach_status | enum |  | No | Current status of the organisation in the outreach pipeline | System | Updated as organisation moves through pipeline | not_contacted / initial_outreach_sent / follow_up_sent / responded / converted / future_potential / soft_no / hard_no / no_response / loss_due_timing |
 | last_reply_sentiment | enum |  | Yes | Sentiment of the most recent reply | LLM | Written when reply classification completes | Null until first reply received |
 | last_reply_intent | enum |  | Yes | Intent of the most recent reply | LLM | Written when reply classification completes | Null until first reply received |
 | data_completeness_score | numeric |  | Yes | How complete the organisation's data is | System | Computed from field coverage |  |

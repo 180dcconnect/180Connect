@@ -1,0 +1,22 @@
+-- Rollback for 20260804170000_unify_offboarding_reassignment.sql
+--
+-- Restores both functions to their pre-unification bodies by re-running the two
+-- migrations that defined them. Both use CREATE OR REPLACE, so replaying them is the
+-- reversal — there is nothing to drop.
+--
+-- WARNING: this reinstates the defect. deactivate_user goes back to moving
+-- organisations.owner_id itself and leaving the departing user's open actions assigned
+-- to a deactivated account, where app.is_active_user() makes them invisible to
+-- everyone but an admin. It also reinstates two audit tokens for one event
+-- ('ownership_reassigned' from F014, 'ownership_assigned' from F257).
+--
+-- Roll back only to unblock a failed deploy, and re-apply immediately. Any
+-- ownership_reassigned rows written by F257's path in the meantime keep that token —
+-- audit_log is append-only and is not rewritten here, which is correct: those rows
+-- record what actually happened.
+--
+--   \i supabase/migrations/20260802100000_create_reassign_ownership_rpc.sql
+--   \i supabase/migrations/20260730121500_create_deactivate_user_rpc.sql
+--
+-- Run those two files in that order against the target. They are left as an explicit
+-- instruction rather than copied here so this file cannot drift from the originals.

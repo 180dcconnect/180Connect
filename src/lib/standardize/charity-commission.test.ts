@@ -76,7 +76,7 @@ describe("standardizeCharityCommissionRecord — AC2: empty, not omitted", () =>
 
   it("gives every new record the same starting outreach_status", () => {
     const org = standardizeCharityCommissionRecord(minimalRecord);
-    assert.equal(org.outreach_status, "not_started");
+    assert.equal(org.outreach_status, "not_contacted");
   });
 });
 

@@ -1,4 +1,4 @@
-// Companies House adapter (F038) — the reference implementation of DataSourceAdapter.
+// Companies House import adapter (F032), built on the F038 ingestion contract.
 
 import type {
   CommonRecord,
@@ -7,39 +7,50 @@ import type {
 } from "../type.ts";
 
 const COMPANIES_HOUSE_URL = "https://api.company-information.service.gov.uk";
-
-/** Search term for the reference implementation. Widening this is F032's job. */
-const SEARCH_QUERY = "charity";
-
-const ITEMS_PER_PAGE = 100; // Companies House's documented maximum per page.
-
-/**
- * Companies House rejects a `start_index` past ~1000 on the search endpoint, so a
- * search matching more than that cannot be paged to the end. Runs that stop here
- * are reported as `partial`, not `completed`.
- */
+const ITEMS_PER_PAGE = 100;
 const SEARCH_RESULT_CEILING = 1000;
-
-/** Per-request timeout. Without one a hung connection hangs the whole run. */
 const REQUEST_TIMEOUT_MS = 15_000;
-
-/**
- * Companies House allows 600 requests per five minutes and answers 429 past that.
- * A run is 10 requests, so the limit is only reachable alongside other traffic —
- * but a 429 or a 5xx is transient by definition and worth one or two retries before
- * failing a whole run over it.
- */
 const MAX_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 1_000;
 
+export type CompaniesHouseLookup =
+  | { companyNumber: string }
+  | { registeredName: string };
+
 type CompaniesHouseSearchItem = {
-  company_number: string;
+  company_number?: unknown;
+  title?: unknown;
+  [key: string]: unknown;
+};
+
+type CompaniesHouseProfile = {
+  company_number?: unknown;
+  company_name?: unknown;
   [key: string]: unknown;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Retries 429 and 5xx with exponential backoff; anything else is returned as-is. */
+function authenticationHeaders(): Record<string, string> {
+  const apiKey = process.env.COMPANIES_HOUSE_API_KEY?.trim();
+  if (!apiKey) throw new Error("COMPANIES_HOUSE_API_KEY is not set.");
+  return {
+    Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
+  };
+}
+
+/** Case/punctuation/spacing-insensitive comparison; never used for display. */
+export function normalizeRegisteredName(value: string): string {
+  return value
+    .normalize("NFKD")
+    .toLocaleUpperCase("en-GB")
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+export function normalizeCompanyNumber(value: string): string {
+  return value.trim().toLocaleUpperCase("en-GB").replace(/\s+/g, "");
+}
+
 async function fetchWithRetry(
   url: string,
   headers: Record<string, string>,
@@ -48,33 +59,28 @@ async function fetchWithRetry(
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      const res = await fetch(url, {
+      const response = await fetch(url, {
         headers,
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
+      const retryable = response.status === 429 || response.status >= 500;
+      if (!retryable || attempt === MAX_ATTEMPTS) return response;
 
-      const retryable = res.status === 429 || res.status >= 500;
-      if (!retryable || attempt === MAX_ATTEMPTS) return res;
-
-      // Honour Retry-After when the server sets it; back off otherwise.
-      const retryAfter = Number(res.headers.get("retry-after"));
-      const delay = Number.isFinite(retryAfter)
+      const retryAfterHeader = response.headers.get("retry-after");
+      const retryAfter = Number(retryAfterHeader);
+      const delay = retryAfterHeader !== null && Number.isFinite(retryAfter)
         ? retryAfter * 1000
         : RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
-
       console.warn(
-        `[companies_house] ${res.status} on attempt ${attempt}, retrying in ${delay}ms`,
+        `[companies_house] ${response.status} on attempt ${attempt}, retrying in ${delay}ms`,
       );
       await sleep(delay);
-    } catch (err) {
-      // Timeout or network error. Same treatment: retry, then give up.
-      lastError = err;
+    } catch (error) {
+      lastError = error;
       if (attempt === MAX_ATTEMPTS) break;
-
       const delay = RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
       console.warn(
-        `[companies_house] request failed on attempt ${attempt} ` +
-          `(${err instanceof Error ? err.message : String(err)}), retrying in ${delay}ms`,
+        `[companies_house] request failed on attempt ${attempt}, retrying in ${delay}ms`,
       );
       await sleep(delay);
     }
@@ -82,84 +88,128 @@ async function fetchWithRetry(
 
   throw lastError instanceof Error
     ? lastError
-    : new Error(`Companies House request failed: ${String(lastError)}`);
+    : new Error("Companies House request failed.");
 }
 
-function shape(raw: CompaniesHouseSearchItem): CommonRecord {
+async function readJson(response: Response): Promise<Record<string, unknown>> {
+  if (!response.ok) {
+    // Do not log response bodies: upstream text is not needed by users and may
+    // change independently of our secret-redaction guarantees.
+    throw new Error(`Companies House API returned ${response.status}.`);
+  }
+  let value: unknown;
+  try {
+    value = await response.json();
+  } catch {
+    throw new Error("Companies House returned malformed JSON.");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Companies House returned a malformed response.");
+  }
+  return value as Record<string, unknown>;
+}
+
+async function searchExactRegisteredName(
+  registeredName: string,
+  headers: Record<string, string>,
+): Promise<string> {
+  const wanted = normalizeRegisteredName(registeredName);
+  if (!wanted) throw new Error("Enter a registered name.");
+
+  const exactMatches = new Map<string, CompaniesHouseSearchItem>();
+  let knownTotal: number | null = null;
+
+  for (let startIndex = 0; startIndex < SEARCH_RESULT_CEILING; startIndex += ITEMS_PER_PAGE) {
+    if (knownTotal !== null && startIndex >= knownTotal) break;
+    const response = await fetchWithRetry(
+      `${COMPANIES_HOUSE_URL}/search/companies` +
+        `?q=${encodeURIComponent(registeredName.trim())}` +
+        `&items_per_page=${ITEMS_PER_PAGE}&start_index=${startIndex}`,
+      headers,
+    );
+    const json = await readJson(response);
+    if (!Array.isArray(json.items)) {
+      throw new Error("Companies House response is missing an items array.");
+    }
+    if (typeof json.total_results === "number") knownTotal = json.total_results;
+
+    for (const raw of json.items as CompaniesHouseSearchItem[]) {
+      if (
+        typeof raw.title === "string" &&
+        typeof raw.company_number === "string" &&
+        normalizeRegisteredName(raw.title) === wanted
+      ) {
+        exactMatches.set(normalizeCompanyNumber(raw.company_number), raw);
+      }
+    }
+    if (json.items.length === 0) break;
+  }
+
+  if (exactMatches.size === 0) {
+    throw new Error("No exact Companies House match was found for that registered name.");
+  }
+  if (exactMatches.size > 1) {
+    throw new Error("More than one exact Companies House match was found; use a company number.");
+  }
+  return exactMatches.keys().next().value as string;
+}
+
+async function fetchCompanyProfile(
+  companyNumber: string,
+  headers: Record<string, string>,
+): Promise<CompaniesHouseProfile> {
+  const normalized = normalizeCompanyNumber(companyNumber);
+  if (!/^[A-Z0-9]{2,10}$/.test(normalized)) {
+    throw new Error("Enter a valid Companies House company number.");
+  }
+
+  const response = await fetchWithRetry(
+    `${COMPANIES_HOUSE_URL}/company/${encodeURIComponent(normalized)}`,
+    headers,
+  );
+  if (response.status === 404) {
+    throw new Error("Companies House could not find that company number.");
+  }
+  const profile = await readJson(response) as CompaniesHouseProfile;
+  if (typeof profile.company_number !== "string" || !profile.company_number.trim()) {
+    throw new Error("Companies House profile is missing its company number.");
+  }
+  return profile;
+}
+
+export function shapeCompaniesHouseProfile(
+  profile: CompaniesHouseProfile,
+): CommonRecord {
   return {
-    source_record_id: raw.company_number,
-    raw_payload: raw,
+    source_record_id: normalizeCompanyNumber(profile.company_number as string),
+    raw_payload: profile,
+    source_country: "GB",
+    source_registry_name: "Companies House",
   };
 }
 
-export const companiesHouseAdapter: DataSourceAdapter = {
-  name: "companies_house",
+/**
+ * Creates one F038-compatible plug for a single organisation lookup.
+ * A known number goes directly to the authoritative profile. A name is only a
+ * discovery fallback and must resolve to exactly one normalized exact match.
+ */
+export function createCompaniesHouseAdapter(
+  lookup: CompaniesHouseLookup,
+): DataSourceAdapter {
+  return {
+    name: "companies_house",
 
-  async fetch(): Promise<SourceFetchResult> {
-    const apiKey = process.env.COMPANIES_HOUSE_API_KEY;
-    if (!apiKey) {
-      throw new Error("COMPANIES_HOUSE_API_KEY is not set.");
-    }
+    async fetch(): Promise<SourceFetchResult> {
+      const headers = authenticationHeaders();
+      const companyNumber = "companyNumber" in lookup
+        ? normalizeCompanyNumber(lookup.companyNumber)
+        : await searchExactRegisteredName(lookup.registeredName, headers);
+      const profile = await fetchCompanyProfile(companyNumber, headers);
+      return { records: [shapeCompaniesHouseProfile(profile)], truncated: false };
+    },
 
-    // Basic auth with the key as the username and an empty password.
-    const encodedKey = Buffer.from(`${apiKey}:`).toString("base64");
-    const allRecords: CompaniesHouseSearchItem[] = [];
-
-    // Null until the API tells us. If it never does we cannot claim the run was
-    // complete or truncated, so it is reported as complete rather than guessed at.
-    let knownTotal: number | null = null;
-    let startIndex = 0;
-
-    while (startIndex < SEARCH_RESULT_CEILING) {
-      if (knownTotal !== null && startIndex >= knownTotal) break;
-
-      const res = await fetchWithRetry(
-        `${COMPANIES_HOUSE_URL}/search/companies` +
-          `?q=${encodeURIComponent(SEARCH_QUERY)}` +
-          `&items_per_page=${ITEMS_PER_PAGE}&start_index=${startIndex}`,
-        { Authorization: `Basic ${encodedKey}` },
-      );
-
-      if (!res.ok) {
-        // The body carries the reason (bad key, rate limit, malformed query) where
-        // the status alone does not. It does not echo the key.
-        console.error(
-          `[companies_house] error body for ${res.status}:`,
-          await res.text(),
-        );
-        throw new Error(`Companies House API returned ${res.status}`);
-      }
-
-      const json = await res.json();
-      if (!Array.isArray(json.items)) {
-        throw new Error("Companies House response is missing an items array.");
-      }
-      if (typeof json.total_results === "number") {
-        knownTotal = json.total_results;
-      }
-
-      // An empty page means the result set ended early, whatever total_results said.
-      if (json.items.length === 0) break;
-
-      allRecords.push(...json.items);
-      startIndex += ITEMS_PER_PAGE;
-    }
-
-    // Truncated only if the source said there was more than we could reach. Hitting
-    // the ceiling exactly — 1000 results, all 1000 fetched — is a complete run.
-    const truncated = knownTotal !== null && allRecords.length < knownTotal;
-
-    if (truncated) {
-      console.warn(
-        `[companies_house] hit the ${SEARCH_RESULT_CEILING}-record search ceiling — ` +
-          `total_results was ${knownTotal}, fetched ${allRecords.length}.`,
-      );
-    }
-
-    return { records: allRecords.map(shape), truncated };
-  },
-
-  onError(err: Error) {
-    console.error(`[companies_house] ingestion failed:`, err.message);
-  },
-};
+    onError(error: Error) {
+      console.error("[companies_house] ingestion failed:", error.message);
+    },
+  };
+}

@@ -57,18 +57,19 @@ function routedFetch(opts: {
   onSearch?: (url: string) => Response;
   onDetails?: (url: string) => Response;
 }) {
-  return mock.fn(async (url: string) => {
-    if (url.includes("/searchCharityRegDate/")) {
+  return mock.fn(async (url: string | URL | Request) => {
+    const urlStr = String(url);
+    if (urlStr.includes("/searchCharityRegDate/")) {
       return opts.onSearch
-        ? opts.onSearch(url)
+        ? opts.onSearch(urlStr)
         : jsonResponse([searchResult]);
     }
-    if (url.includes("/charitydetailsmulti/")) {
+    if (urlStr.includes("/charitydetailsmulti/")) {
       return opts.onDetails
-        ? opts.onDetails(url)
+        ? opts.onDetails(urlStr)
         : jsonResponse([detailResult]);
     }
-    throw new Error(`Unexpected URL in test: ${url}`);
+    throw new Error(`Unexpected URL in test: ${urlStr}`);
   });
 }
 
@@ -90,9 +91,9 @@ describe("charityCommissionAdapter.fetch — successful import", () => {
 
   it("sends the confirmed auth header on both search and details calls", async () => {
     const seenHeaders: Record<string, string>[] = [];
-    globalThis.fetch = mock.fn(async (url: string, init?: RequestInit) => {
+    globalThis.fetch = mock.fn(async (url: string | URL | Request, init?: RequestInit) => {
       seenHeaders.push(init?.headers as Record<string, string>);
-      if (url.includes("/searchCharityRegDate/")) return jsonResponse([searchResult]);
+      if (String(url).includes("/searchCharityRegDate/")) return jsonResponse([searchResult]);
       return jsonResponse([detailResult]);
     });
 

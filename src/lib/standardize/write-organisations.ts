@@ -11,7 +11,6 @@
 //     name/number already exist from another source". Per this team's
 //     confirmed policy (a dependency ticket doesn't block downstream work),
 //     this is built now and flagged, not blocked on F042 existing first.
-//   - Client-criteria filtering (F047) — same reasoning, not built yet.
 //   - Conflict flagging (F048) — same.
 //
 // processing_status semantics used here (per raw_source_records' check
@@ -27,6 +26,7 @@
 //   - 'error': the insert itself failed (e.g. a database error).
 
 import { buildAdminClient } from "../supabase/admin-client-factory.ts";
+import { checkClientCriteria, type ClientCriteriaResult } from "../client-criteria.ts";
 import { reportError } from "../error-logging.ts";
 import {
   standardizeCharityCommissionRecord,
@@ -112,6 +112,7 @@ function isUsable(org: StandardOrganisation): boolean {
 
 export async function promotePendingCharityCommissionRecords(
   store: OrganisationWriteStore | null = createDefaultOrganisationWriteStore(),
+  criteriaCheck: (input: Parameters<typeof checkClientCriteria>[0]) => ClientCriteriaResult = checkClientCriteria,
 ): Promise<PromoteCounts> {
   if (!store) {
     throw new Error(
@@ -131,6 +132,21 @@ export async function promotePendingCharityCommissionRecords(
     const org = standardizeCharityCommissionRecord(record.raw_payload);
 
     if (!isUsable(org)) {
+      await store.markRecordStatus(record.id, "rejected");
+      counts.rejected++;
+      continue;
+    }
+
+    const criteria = criteriaCheck({
+      organisationType: org.organisation_type,
+      city: org.city,
+      postcode: org.postcode,
+      countryCode: org.country_code,
+      geographicReach: org.geographic_reach,
+    });
+    if (criteria.outcome !== "meets") {
+      // Preserve the raw record for admin review, but do not create an active
+      // client. `rejected` is the approved schema's non-error hold state.
       await store.markRecordStatus(record.id, "rejected");
       counts.rejected++;
       continue;

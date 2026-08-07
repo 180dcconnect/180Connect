@@ -188,3 +188,41 @@ describe("promotePendingCharityCommissionRecords — no store configured", () =>
     );
   });
 });
+
+describe("promotePendingCharityCommissionRecords — F047 client criteria", () => {
+  it("checks every usable incoming record before inserting it", async () => {
+    const checkedTypes: string[] = [];
+    const { store, inserted } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Eligible Charity")];
+      },
+    });
+
+    await promotePendingCharityCommissionRecords(store, (input) => {
+      checkedTypes.push(input.organisationType);
+      return { outcome: "meets", priority: "standard", healthcareAligned: false, reasons: [] };
+    });
+
+    assert.deepEqual(checkedTypes, ["charity"]);
+    assert.equal(inserted.length, 1);
+  });
+
+  it("holds a non-matching record instead of creating an active client", async () => {
+    const { store, inserted, statusUpdates } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Needs Review")];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionRecords(store, () => ({
+      outcome: "needs_review",
+      priority: "standard",
+      healthcareAligned: false,
+      reasons: ["Needs evidence of social purpose."],
+    }));
+
+    assert.equal(inserted.length, 0);
+    assert.equal(counts.rejected, 1);
+    assert.equal(statusUpdates[0].status, "rejected");
+  });
+});

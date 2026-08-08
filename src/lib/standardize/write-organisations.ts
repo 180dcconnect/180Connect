@@ -28,6 +28,8 @@
 
 import { buildAdminClient } from "../supabase/admin-client-factory.ts";
 import { reportError } from "../error-logging.ts";
+import { checkWebsiteReachability } from "../website-reachability.ts";
+import type { WebsiteStatus } from "../website-validation.ts";
 import {
   standardizeCharityCommissionRecord,
   type RawCharityCommissionRecord,
@@ -45,6 +47,8 @@ export type PromoteCounts = {
   rejected: number;
   failed: number;
 };
+
+const WEBSITE_VALIDATION_CONCURRENCY = 5;
 
 /**
  * Everything promotePendingCharityCommissionRecords needs from the database,
@@ -112,6 +116,7 @@ function isUsable(org: StandardOrganisation): boolean {
 
 export async function promotePendingCharityCommissionRecords(
   store: OrganisationWriteStore | null = createDefaultOrganisationWriteStore(),
+  checkWebsite: (value: string) => Promise<WebsiteStatus> = checkWebsiteReachability,
 ): Promise<PromoteCounts> {
   if (!store) {
     throw new Error(
@@ -127,8 +132,30 @@ export async function promotePendingCharityCommissionRecords(
     failed: 0,
   };
 
-  for (const record of pending) {
-    const org = standardizeCharityCommissionRecord(record.raw_payload);
+  const prepared = pending.map((record) => ({
+    record,
+    org: standardizeCharityCommissionRecord(record.raw_payload),
+  }));
+
+  // Resolve website checks in small concurrent batches. Database writes remain
+  // ordered below, while a slow website cannot serially stall every import row.
+  for (let start = 0; start < prepared.length; start += WEBSITE_VALIDATION_CONCURRENCY) {
+    await Promise.all(
+      prepared.slice(start, start + WEBSITE_VALIDATION_CONCURRENCY).map(async ({ record, org }) => {
+        if (!isUsable(org) || !org.website.trim()) return;
+        const website = await checkWebsite(org.website);
+        if (website.status === "invalid" || website.status === "unreachable") {
+          await reportError(new Error("Imported client website validation failed"), {
+            operation: "standardize.charity_commission.website_validation",
+            rawRecordId: record.id,
+            websiteStatus: website.status,
+          });
+        }
+      }),
+    );
+  }
+
+  for (const { record, org } of prepared) {
 
     if (!isUsable(org)) {
       await store.markRecordStatus(record.id, "rejected");

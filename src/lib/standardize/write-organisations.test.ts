@@ -112,6 +112,34 @@ describe("promotePendingCharityCommissionRecords — invalid records", () => {
   });
 });
 
+describe("promotePendingCharityCommissionRecords — website validation", () => {
+  it("flags a broken website during import without rejecting the organisation", async () => {
+    const record = pendingRecord("raw-website", "Useful Charity");
+    record.raw_payload.web = "https://broken.example";
+    const checked: string[] = [];
+    const { store, inserted, statusUpdates } = fakeStore({
+      async loadPendingRecords() {
+        return [record];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionRecords(store, async (website) => {
+      checked.push(website);
+      return {
+        status: "unreachable",
+        url: website,
+        message: "Website did not respond.",
+      };
+    });
+
+    assert.deepEqual(checked, ["https://broken.example"]);
+    assert.equal(counts.inserted, 1);
+    assert.equal(counts.rejected, 0);
+    assert.equal(inserted[0].website, "https://broken.example");
+    assert.equal(statusUpdates[0].status, "validated");
+  });
+});
+
 describe("promotePendingCharityCommissionRecords — duplicate candidate / conflicting values", () => {
   it("documents that cross-source dedup and conflict detection are F042/F048, not this layer", () => {
     // F041's testing notes list "duplicate candidate" and "conflicting source

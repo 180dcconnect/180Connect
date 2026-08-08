@@ -106,11 +106,11 @@ export function Sidebar({
   return (
     <nav
       aria-label="Primary"
-      className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-2xl border border-white/10 bg-[#2d2825]/90 p-1.5 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] text-white"
+      className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-2xl border border-white/10 bg-[#2d2825]/90 p-2.5 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] text-white"
     >
       {sections.map((section, sIndex) => (
         <div key={section.label ?? sIndex} className="flex items-center gap-1">
-          {sIndex > 0 && <div className="mx-1 h-5 w-px bg-white/15" aria-hidden="true" />}
+          {sIndex > 0 && <div className="mx-1 h-6 w-px bg-white/15" aria-hidden="true" />}
           {section.items.map((item) => {
             const active = pathname === item.href;
             return (
@@ -118,7 +118,7 @@ export function Sidebar({
                 key={item.href}
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                className={`relative flex items-center gap-2.5 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-200 ${
+                className={`relative flex items-center gap-2.5 rounded-xl px-4.5 py-2.5 text-sm font-semibold transition-all duration-200 ${
                   active
                     ? "bg-[#1c1a18] text-white ring-1 ring-white/15 shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_8px_20px_rgba(0,0,0,0.7)]"
                     : "text-white/70 hover:text-white hover:bg-[#1c1a18] hover:ring-1 hover:ring-white/15 hover:shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_8px_20px_rgba(0,0,0,0.7)]"
@@ -133,7 +133,7 @@ export function Sidebar({
       ))}
 
       {/* Profile & Dropdown menu */}
-      <div className="mx-1 h-5 w-px bg-white/15" aria-hidden="true" />
+      <div className="mx-1 h-6 w-px bg-white/15" aria-hidden="true" />
 
       <div className="relative">
         {profileOpen && (
@@ -171,7 +171,7 @@ export function Sidebar({
           type="button"
           onClick={() => setProfileOpen((prev) => !prev)}
           title={userLabel}
-          className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-all duration-200 ${
+          className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-200 ${
             profileOpen
               ? "bg-[#1c1a18] text-white ring-1 ring-white/15 shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_8px_20px_rgba(0,0,0,0.7)]"
               : "text-white/70 hover:text-white hover:bg-[#1c1a18] hover:ring-1 hover:ring-white/15 hover:shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_8px_20px_rgba(0,0,0,0.7)]"

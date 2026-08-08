@@ -67,9 +67,18 @@ function CollapseIcon({ collapsed }: { collapsed: boolean }) {
   );
 }
 
-function LogoutIcon() {
+function UserIcon() {
   return (
     <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <circle cx="10" cy="6.5" r="3.25" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M4 16.5c.8-3.3 3.2-5 6-5s5.2 1.7 6 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function LogoutIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
       <path d="M8 17H4.5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1H8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       <path d="M13 13.5 17 10l-4-3.5M17 10H7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
@@ -92,6 +101,7 @@ export function Sidebar({
   onLogout: () => Promise<void>;
 }) {
   const pathname = usePathname();
+  const [profileOpen, setProfileOpen] = useState(false);
 
   return (
     <nav
@@ -110,8 +120,8 @@ export function Sidebar({
                 aria-current={active ? "page" : undefined}
                 className={`relative flex items-center gap-2.5 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-200 ${
                   active
-                    ? "bg-[#161413] text-white ring-2 ring-brand shadow-[inset_0_2px_4px_rgba(0,0,0,0.6)]"
-                    : "text-white/70 hover:text-white hover:bg-[#201d1b] hover:-translate-y-0.5 hover:shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_8px_16px_rgba(0,0,0,0.6)] hover:ring-1 hover:ring-white/15"
+                    ? "bg-[#1c1a18] text-white ring-1 ring-white/15 shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_8px_20px_rgba(0,0,0,0.7)]"
+                    : "text-white/70 hover:text-white hover:bg-[#1c1a18] hover:ring-1 hover:ring-white/15 hover:shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_8px_20px_rgba(0,0,0,0.7)]"
                 }`}
               >
                 <span className="shrink-0">{ICONS[item.icon]}</span>
@@ -122,19 +132,55 @@ export function Sidebar({
         </div>
       ))}
 
-      {/* Account / Logout divider & action */}
+      {/* Profile & Dropdown menu */}
       <div className="mx-1 h-5 w-px bg-white/15" aria-hidden="true" />
 
-      <form action={onLogout} className="flex items-center">
+      <div className="relative">
+        {profileOpen && (
+          <>
+            {/* Backdrop overlay to close menu */}
+            <div
+              className="fixed inset-0 z-40"
+              onClick={() => setProfileOpen(false)}
+              aria-hidden="true"
+            />
+            {/* Floating Menu above dock */}
+            <div className="absolute bottom-full right-0 mb-3 w-56 z-50 rounded-2xl border border-white/10 bg-[#24201e]/95 p-2 backdrop-blur-xl shadow-[0_20px_40px_rgba(0,0,0,0.6)] text-white">
+              <div className="px-3 py-2 border-b border-white/10">
+                <p className="truncate text-sm font-bold text-white">{userLabel}</p>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-white/50 mt-0.5">
+                  {roleLabel}
+                </p>
+              </div>
+              <div className="pt-1.5">
+                <form action={onLogout}>
+                  <button
+                    type="submit"
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"
+                  >
+                    <LogoutIcon />
+                    <span>Log out</span>
+                  </button>
+                </form>
+              </div>
+            </div>
+          </>
+        )}
+
         <button
-          type="submit"
-          title={`Log out (${userLabel} - ${roleLabel})`}
-          className="flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold text-white/70 hover:text-white hover:bg-[#201d1b] hover:-translate-y-0.5 hover:shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_8px_16px_rgba(0,0,0,0.6)] hover:ring-1 hover:ring-white/15 transition-all duration-200"
+          type="button"
+          onClick={() => setProfileOpen((prev) => !prev)}
+          title={userLabel}
+          className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-all duration-200 ${
+            profileOpen
+              ? "bg-[#1c1a18] text-white ring-1 ring-white/15 shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_8px_20px_rgba(0,0,0,0.7)]"
+              : "text-white/70 hover:text-white hover:bg-[#1c1a18] hover:ring-1 hover:ring-white/15 hover:shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_8px_20px_rgba(0,0,0,0.7)]"
+          }`}
         >
-          <LogoutIcon />
-          <span className="hidden sm:inline">Logout</span>
+          <UserIcon />
+          <span className="hidden sm:inline">Profile</span>
         </button>
-      </form>
+      </div>
     </nav>
   );
 }

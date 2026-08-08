@@ -33,14 +33,14 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-screen">
+    <div className="relative min-h-screen pb-24">
       <Sidebar
         sections={sections}
         userLabel={actor.fullName ?? actor.email ?? "Account"}
         roleLabel={actor.role}
         onLogout={logout}
       />
-      <div className="min-w-0 flex-1">{children}</div>
+      <main className="min-w-0 flex-1">{children}</main>
     </div>
   );
 }

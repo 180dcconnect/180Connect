@@ -77,10 +77,8 @@ function LogoutIcon() {
 }
 
 /**
- * Persistent app sidebar. The caller builds `sections` from `hasPermission`,
- * so a role only ever sees links it can actually open — mirrors the
- * server-side gate on each page rather than replacing it. Collapse state is
- * local and UI-only; it does not gate anything.
+ * Persistent app bottom dock navigation. The caller builds `sections` from `hasPermission`,
+ * so a role only ever sees links it can actually open.
  */
 export function Sidebar({
   sections,
@@ -94,82 +92,49 @@ export function Sidebar({
   onLogout: () => Promise<void>;
 }) {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <aside
-      className={`sticky top-0 flex h-screen shrink-0 flex-col border-r border-black/10 bg-white transition-[width] duration-200 ${
-        collapsed ? "w-16" : "w-64"
-      }`}
+    <nav
+      aria-label="Primary"
+      className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-2xl border border-white/10 bg-[#2d2825]/90 p-1.5 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] text-white"
     >
-      <div className="flex items-center justify-between gap-2 px-3 py-4">
-        {!collapsed && (
-          <span className="truncate px-1 text-sm font-bold text-brand">180Connect</span>
-        )}
+      {sections.map((section, sIndex) => (
+        <div key={section.label ?? sIndex} className="flex items-center gap-1">
+          {sIndex > 0 && <div className="mx-1 h-5 w-px bg-white/15" aria-hidden="true" />}
+          {section.items.map((item) => {
+            const active = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={active ? "page" : undefined}
+                className={`relative flex items-center gap-2.5 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-200 ${
+                  active
+                    ? "bg-[#161413] text-white ring-2 ring-brand shadow-[inset_0_2px_4px_rgba(0,0,0,0.6)]"
+                    : "text-white/70 hover:text-white hover:bg-[#201d1b] hover:-translate-y-0.5 hover:shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_8px_16px_rgba(0,0,0,0.6)] hover:ring-1 hover:ring-white/15"
+                }`}
+              >
+                <span className="shrink-0">{ICONS[item.icon]}</span>
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      ))}
+
+      {/* Account / Logout divider & action */}
+      <div className="mx-1 h-5 w-px bg-white/15" aria-hidden="true" />
+
+      <form action={onLogout} className="flex items-center">
         <button
-          type="button"
-          onClick={() => setCollapsed((value) => !value)}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="ml-auto shrink-0 rounded-lg p-1.5 text-foreground/50 hover:bg-black/5 hover:text-foreground"
+          type="submit"
+          title={`Log out (${userLabel} - ${roleLabel})`}
+          className="flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold text-white/70 hover:text-white hover:bg-[#201d1b] hover:-translate-y-0.5 hover:shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_8px_16px_rgba(0,0,0,0.6)] hover:ring-1 hover:ring-white/15 transition-all duration-200"
         >
-          <CollapseIcon collapsed={collapsed} />
+          <LogoutIcon />
+          <span className="hidden sm:inline">Logout</span>
         </button>
-      </div>
-
-      <nav className="flex-1 space-y-6 overflow-y-auto px-2 py-2" aria-label="Primary">
-        {sections.map((section, index) => (
-          <div key={section.label ?? index}>
-            {section.label && !collapsed && (
-              <p className="px-3 pb-1 text-xs font-bold uppercase tracking-wide text-foreground/40">
-                {section.label}
-              </p>
-            )}
-            <ul className="space-y-1">
-              {section.items.map((item) => {
-                const active = pathname === item.href;
-                return (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      title={collapsed ? item.label : undefined}
-                      aria-current={active ? "page" : undefined}
-                      className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                        active
-                          ? "bg-brand/10 text-brand"
-                          : "text-foreground/70 hover:bg-black/5 hover:text-foreground"
-                      }`}
-                    >
-                      <span className="shrink-0">{ICONS[item.icon]}</span>
-                      {!collapsed && <span className="truncate">{item.label}</span>}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
-      </nav>
-
-      <div className="border-t border-black/10 p-2">
-        {!collapsed && (
-          <div className="mb-1 px-2 pt-2">
-            <p className="truncate text-sm font-bold">{userLabel}</p>
-            <p className="text-xs font-bold uppercase tracking-wide text-foreground/45">
-              {roleLabel}
-            </p>
-          </div>
-        )}
-        <form action={onLogout}>
-          <button
-            type="submit"
-            title={collapsed ? "Log out" : undefined}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-bold text-foreground/70 hover:bg-black/5 hover:text-foreground"
-          >
-            <LogoutIcon />
-            {!collapsed && <span>Log out</span>}
-          </button>
-        </form>
-      </div>
-    </aside>
+      </form>
+    </nav>
   );
 }

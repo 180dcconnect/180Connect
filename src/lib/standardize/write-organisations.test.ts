@@ -387,3 +387,37 @@ describe("promotePendingCompaniesHouseRecords — no store configured", () => {
     );
   });
 });
+
+describe("promotePendingCompaniesHouseRecords — malformed raw_payload", () => {
+  it("marks a record as error and continues the batch when the mapper throws", async () => {
+    // Regression: before the fix, a record with an unexpected raw_payload shape
+    // (e.g. legacy format) would throw inside standardizeCompaniesHouseRecord
+    // and crash the whole batch, leaving no error status on the failing record.
+    let calls = 0;
+    const { store, inserted, statusUpdates } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          // First record: null payload — mapper will throw
+          { id: "raw-bad", raw_payload: null },
+          // Second record: valid — should still be processed
+          companiesHousePendingRecord("raw-good", "Good Charity Ltd"),
+        ];
+      },
+      async insertOrganisation(org) {
+        calls++;
+        inserted.push(org);
+        return { id: `org-${calls}` };
+      },
+    });
+
+    const counts = await promotePendingCompaniesHouseRecords(store);
+
+    assert.equal(counts.failed, 1);
+    assert.equal(counts.inserted, 1);
+    assert.equal(inserted.length, 1);
+    assert.equal(inserted[0].legal_name, "Good Charity Ltd");
+    assert.equal(statusUpdates[0].status, "error");
+    assert.equal(statusUpdates[0].rawRecordId, "raw-bad");
+    assert.equal(statusUpdates[1].status, "validated");
+  });
+});

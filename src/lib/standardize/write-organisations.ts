@@ -37,6 +37,8 @@ import { standardizeCharityCommissionRecord } from "./charity-commission.ts";
 import { standardizeCompaniesHouseRecord } from "./companies-house.ts";
 import type { StandardOrganisation } from "./types.ts";
 
+
+
 export type PendingRecord = {
   id: string; // raw_source_records.id
   // Left as unknown, not a specific Raw*Record type: this same loader serves
@@ -143,7 +145,21 @@ async function promotePendingRecords<TRaw>(
   };
 
   for (const record of pending) {
-    const org = standardize(record.raw_payload as TRaw);
+    let org: StandardOrganisation;
+    try {
+      org = standardize(record.raw_payload as TRaw);
+    } catch (error) {
+      // raw_payload is untyped JSON from the database. A legacy or malformed
+      // record that doesn't match this source's expected shape can throw inside
+      // the mapper. Catch it here so one bad record doesn't crash the whole batch.
+      await reportError(error instanceof Error ? error : new Error(String(error)), {
+        operation: `standardize.${source}.promote`,
+        rawRecordId: record.id,
+      });
+      await store.markRecordStatus(record.id, "error");
+      counts.failed++;
+      continue;
+    }
 
     if (!isUsable(org)) {
       await store.markRecordStatus(record.id, "rejected");

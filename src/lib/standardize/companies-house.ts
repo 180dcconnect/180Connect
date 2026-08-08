@@ -10,24 +10,25 @@ import {
 } from "./types.ts";
 
 /**
- * The subset of the Companies House `/company/{number}` profile
- * (companieshouse.ts's CompaniesHouseProfile, stored verbatim as raw_payload)
- * this mapper reads. Kept as its own type rather than importing the adapter's
- * loosely-typed CompaniesHouseProfile, for the same reason charity-commission.ts
- * keeps its own Raw*Record type — this module only depends on the field names
- * it actually uses, not on adapter internals.
+ * The fields from the Companies House `/company/{number}` profile
+ * (stored verbatim as raw_payload) that this mapper actually reads.
+ * Kept as its own type rather than importing the adapter's loosely-typed
+ * CompaniesHouseProfile — this module only declares the fields it uses.
+ *
+ * Fields present in the API response but intentionally omitted here:
+ *   - company_number: stored in raw_source_records.external_id, not re-mapped
+ *     into StandardOrganisation (no corresponding field in the schema yet).
+ *   - company_status:  no corresponding ORGANISATIONS field yet; could be used
+ *     to filter dissolved companies in future (flagged, not built here).
+ *   - address_line_2 / region / country: no corresponding ORGANISATIONS fields;
+ *     country could inform is_international once F042 is ready to merge sources.
  */
 export type RawCompaniesHouseRecord = {
-  company_number: string;
   company_name: string;
-  company_status?: string;
   registered_office_address?: {
     address_line_1?: string;
-    address_line_2?: string;
     locality?: string;
-    region?: string;
     postal_code?: string;
-    country?: string;
   };
 };
 

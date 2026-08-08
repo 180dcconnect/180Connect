@@ -30,6 +30,7 @@ import { z } from "zod";
 import { sendEmail } from "../email/send.ts";
 import { logSecurityEvent } from "../log-security-event.ts";
 import { emailField, safeValidate } from "../validation.ts";
+import { INVITE_EXPIRY_HOURS } from "./invite-expiry.ts";
 import {
   allowedEmailDomains,
   describeDomains,
@@ -37,6 +38,11 @@ import {
   toDomainList,
   type DomainRule,
 } from "./login.ts";
+
+// Re-exported so every existing caller/test importing INVITE_EXPIRY_HOURS from
+// here keeps working — the value itself now lives in invite-expiry.ts (F010),
+// which the admin UI can import without pulling in sendEmail/the admin client.
+export { INVITE_EXPIRY_HOURS };
 
 export function inviteSchema(rule: DomainRule = allowedEmailDomains()) {
   const domains = toDomainList(rule);
@@ -75,6 +81,16 @@ export type InviteState = {
  */
 export const DUPLICATE_INVITE_MESSAGE =
   "This email already has an account or a pending invite.";
+
+/**
+ * Shown on `/reset-password` for an expired or already-used invite link (F010).
+ * Deliberately not `RESET_LINK_ERROR` (`password-reset.ts`): that message says
+ * "Request a new link", which is self-service password recovery — an invited
+ * person has no way to send themselves a new invite, only an admin can (F252),
+ * so pointing them at `/forgot-password` would be a dead end dressed up as help.
+ */
+export const INVITE_LINK_ERROR =
+  "This invite link has expired or has already been used. Contact your administrator for a new invite.";
 
 /**
  * Looks up an existing `public.users` row by email, or returns `null`.
@@ -257,13 +273,6 @@ export async function sendInvite(
     state: { status: "success", message: `Invite sent to ${email}.` },
   };
 }
-
-/**
- * How long an invite link is good for, in hours, as configured in Supabase Auth
- * (Authentication → Providers → Email → invite expiry). Used only to say so in
- * the email — Supabase is what enforces it. Keep the two aligned (F010).
- */
-export const INVITE_EXPIRY_HOURS = 24;
 
 /**
  * The message an invited person receives.

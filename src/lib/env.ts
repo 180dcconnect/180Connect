@@ -114,7 +114,7 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     required: false,
     secret: false,
     description:
-      "Password-recovery link lifetime in seconds. Optional and defaults to 3600; keep it aligned with the recovery OTP expiry configured in Supabase Auth.",
+      "Password-recovery link lifetime in seconds. Optional and defaults to 86400 (24 hours, F010); keep it aligned with the recovery OTP expiry configured in Supabase Auth — that setting is shared with invite links, see docs/auth/invite-email.md.",
     validate: (value) =>
       /^\d+$/.test(value) && Number(value) > 0
         ? null

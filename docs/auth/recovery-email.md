@@ -36,10 +36,13 @@ Use `https://`, never `http://`. In production the recovery marker cookie is
 set with `Secure`, so a browser will not send it back over plain http and the
 reset fails at the final step with the generic expired-link message.
 
-Authentication → Providers → Email: leave the recovery OTP expiry at **3600
-seconds**, matching `PASSWORD_RESET_WINDOW_SECONDS` (see
-[environment-variables.md](../environment-variables.md)). The template says "one
-hour" in prose; change both together or neither.
+Authentication → Providers → Email: set the OTP expiry to **86400 seconds (24
+hours)**, matching `PASSWORD_RESET_WINDOW_SECONDS` (see
+[environment-variables.md](../environment-variables.md)). This is the same
+setting invite links use — Supabase has no separate expiry for the two, see
+[invite-email.md](invite-email.md#f010-invite-expiry) — so changing it here
+changes both. The template says "24 hours" in prose; change the config and the
+template together, never one without the other.
 
 `SESSION_ACTIVITY_SECRET` must be set in every hosted environment. The recovery
 marker is HMAC-signed with it, and production refuses an unsigned marker rather

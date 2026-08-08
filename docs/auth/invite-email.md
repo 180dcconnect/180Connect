@@ -36,9 +36,33 @@ on the same `/auth/confirm` route:
 | Site URL | `https://180connect.vercel.app` |
 | Redirect URLs | `https://180connect.vercel.app/auth/confirm`, `http://localhost:3000/auth/confirm` |
 
-Authentication → Providers → Email → invite expiry is what actually expires the
-link. `INVITE_EXPIRY_HOURS` in `src/lib/auth/invite.ts` only *says* how long it
-lasts; keep the two aligned or the email lies (F010).
+## F010 — Invite expiry
+
+**Decided: 24 hours (8 Aug 2026).** Authentication → Providers → Email → OTP
+expiry is what actually expires the link — set it to **86400 seconds**. This is
+the only expiry Supabase enforces for email-based tokens, and it is shared with
+password recovery: there is no way to give invites a different lifetime than
+recovery without this app tracking expiry itself, independently of Supabase's
+token (not done). See [recovery-email.md](recovery-email.md) for the same
+setting from the recovery side.
+
+`INVITE_EXPIRY_HOURS` (`src/lib/auth/invite-expiry.ts`) only *says* how long the
+link lasts, in the email copy and in the admin's pending-invites list
+(`src/app/admin/users/pending-invites-list.tsx`, which shows "Expired" once an
+invite passes this window). It does not enforce anything — Supabase does that.
+The two must be kept aligned by hand in every environment:
+
+| Where | What to set |
+| :---- | :---- |
+| `supabase/config.toml` (local) | `otp_expiry = 86400` — already committed |
+| Staging Supabase dashboard | Authentication → Providers → Email → OTP expiry → `86400` |
+| Production Supabase dashboard | Same, `86400` |
+| `PASSWORD_RESET_WINDOW_SECONDS` (staging & production env vars) | `86400` |
+| `INVITE_EXPIRY_HOURS` (`src/lib/auth/invite-expiry.ts`) | `24` — already committed |
+
+The dashboard settings are the two easy to forget: nothing in the repo fails if
+they drift, the symptom is just an invite or reset link that dies earlier than
+the email promised.
 
 ## The template
 

@@ -220,8 +220,15 @@ secure_password_change = false
 max_frequency = "1s"
 # Number of characters used in the email OTP.
 otp_length = 6
-# Number of seconds before the email OTP expires (defaults to 1 hour).
-otp_expiry = 3600
+# Number of seconds before the email OTP expires. Shared by every email-based
+# token GoTrue issues — password recovery and invite links alike, there is no
+# per-type setting. Set to 24 hours (F010, decided 8 Aug 2026): long enough that
+# an invite sent on a Friday is still good on Monday. Must match
+# PASSWORD_RESET_WINDOW_SECONDS (src/lib/auth/password-reset.ts) and
+# INVITE_EXPIRY_HOURS (src/lib/auth/invite-expiry.ts), and must be set to the
+# same value in the Supabase dashboard for every hosted environment — this file
+# only governs the local stack. See docs/auth/invite-email.md.
+otp_expiry = 86400
 
 # Use a production-ready SMTP server
 # [auth.email.smtp]

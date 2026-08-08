@@ -1,4 +1,5 @@
 import type { PendingInvite } from "@/lib/admin/team-realtime";
+import { isInviteExpired } from "@/lib/auth/invite-expiry";
 
 export function PendingInvitesList({
   invites,
@@ -21,14 +22,23 @@ export function PendingInvitesList({
 
   return (
     <ul className="mt-3 divide-y divide-black/5 text-sm">
-      {invites.map((invite) => (
-        <li key={invite.id} className="flex items-center justify-between py-2">
-          <span className="font-bold">{invite.email}</span>
-          <span className="text-foreground/60">
-            Invited {new Date(invite.invited_at).toLocaleDateString()}
-          </span>
-        </li>
-      ))}
+      {invites.map((invite) => {
+        // Expiry is computed here, not stored — F010 does not add a database
+        // column for it. Supabase is still the only thing that actually
+        // invalidates the token; this is what lets an admin see a stale invite
+        // without waiting for the invited person to report a dead link.
+        const expired = isInviteExpired(invite.invited_at);
+        return (
+          <li key={invite.id} className="flex items-center justify-between py-2">
+            <span className="font-bold">{invite.email}</span>
+            <span className={expired ? "font-bold text-red-700" : "text-foreground/60"}>
+              {expired
+                ? "Expired"
+                : `Invited ${new Date(invite.invited_at).toLocaleDateString()}`}
+            </span>
+          </li>
+        );
+      })}
     </ul>
   );
 }

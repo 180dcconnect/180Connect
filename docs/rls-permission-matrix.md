@@ -760,3 +760,11 @@ process problem rather than a security one: nothing recreates it on `db reset`, 
 cannot reach production through the release process. It needs capturing as a migration
 by whoever owns F013/F014. Note also that `users.deactivated_at` is now in the Data
 Model but exists in neither the database nor a migration.
+
+# F047 data-quality review flags
+
+`DATA_QUALITY_EVENTS` is readable only by active admins and writable only through
+the service-role validation worker. `record_client_criteria_outcome` is not
+executable by `anon` or `authenticated`; it atomically records the distinct
+`needs_review`/`does_not_meet` rule and holds the raw record out of the active
+client list.

@@ -31,7 +31,10 @@ export function checkClientCriteria(
   const city = normalise(input.city);
   const postcode = (input.postcode ?? "").trim().toUpperCase();
   const local = config.priorityCities.includes(city)
-    || config.priorityPostcodePrefixes.some((prefix) => postcode.startsWith(prefix));
+    || config.priorityPostcodePrefixes.some((prefix) => {
+      const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`^${escaped}\\d`).test(postcode);
+    });
   const missionContext = `${normalise(input.sector)} ${normalise(input.mission)}`;
   const healthcareAligned = config.healthcareKeywords.some((keyword) =>
     missionContext.includes(keyword.toLowerCase()),

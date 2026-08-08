@@ -14,6 +14,13 @@ describe("checkClientCriteria", () => {
     assert.equal(result.priority, "south_yorkshire");
   });
 
+  it("does not confuse other S postcode areas with Sheffield", () => {
+    for (const postcode of ["ST1 1AA", "SO14 1AA", "SR1 1AA", "SW1A 1AA", "SE1 1AA", "SM1 1AA", "SL1 1AA", "SS1 1AA"]) {
+      assert.equal(checkClientCriteria({ organisationType: "charity", postcode }).priority, "standard");
+    }
+    assert.equal(checkClientCriteria({ organisationType: "charity", postcode: "S10 2TN" }).priority, "south_yorkshire");
+  });
+
   it("accepts national and international charities without requiring local status", () => {
     assert.equal(checkClientCriteria({ organisationType: "charity", countryCode: "GB", geographicReach: "national" }).outcome, "meets");
     assert.equal(checkClientCriteria({ organisationType: "both", countryCode: "KE", geographicReach: "international" }).outcome, "meets");

@@ -2512,6 +2512,57 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- client criteria review persistence (F047)
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_client_criteria()
+returns setof text language plpgsql as $$
+declare
+  v_admin uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam uuid := '00000000-0000-4000-a000-000000000002';
+  v_run uuid := '47000000-0000-4000-a000-000000000001';
+  v_review uuid := '47000000-0000-4000-a000-000000000002';
+  v_fail uuid := '47000000-0000-4000-a000-000000000003';
+  v_count bigint;
+begin
+  if not tests.tables_exist('data_quality_events', 'raw_source_records', 'ingestion_runs') then
+    return next skip(5, 'F047 data quality migration not yet applied');
+    return;
+  end if;
+  perform tests.seed();
+
+  return next ok(
+    not has_function_privilege('authenticated', 'public.record_client_criteria_outcome(uuid,text,text,text)', 'EXECUTE'),
+    'authenticated users cannot forge client-criteria outcomes');
+
+  insert into public.ingestion_runs (id, api_source, triggered_by, job_status)
+  values (v_run, 'companies_house', 'manual', 'completed') on conflict (id) do nothing;
+  insert into public.raw_source_records
+    (id, ingestion_run_id, record_source, source_record_id, raw_payload, checksum)
+  values
+    (v_review, v_run, 'companies_house', 'f047-review', '{}'::jsonb, 'f047-review'),
+    (v_fail, v_run, 'companies_house', 'f047-fail', '{}'::jsonb, 'f047-fail')
+  on conflict (record_source, source_record_id) do nothing;
+
+  perform public.record_client_criteria_outcome(v_review, 'needs_review', 'company', 'Needs social-purpose evidence.');
+  perform public.record_client_criteria_outcome(v_fail, 'does_not_meet', 'commercial', 'Outside configured criteria.');
+
+  return next is((select rule_name from public.data_quality_events where raw_source_record_id = v_review),
+    'client_criteria_needs_review', 'ambiguous candidates retain a queryable review flag');
+  return next is((select rule_name from public.data_quality_events where raw_source_record_id = v_fail),
+    'client_criteria_does_not_meet', 'definite failures retain a distinct queryable flag');
+
+  perform tests.login_as(v_cam);
+  select count(*) into v_count from public.data_quality_events where raw_source_record_id in (v_review, v_fail);
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'CAM cannot read the admin quality-review queue');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.data_quality_events where raw_source_record_id in (v_review, v_fail);
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 2::bigint, 'admin can find both distinct criteria outcomes');
+end;
+$$;
 
 select * from tests.suite_core();
 select * from tests.suite_viewer();
@@ -2533,6 +2584,7 @@ select * from tests.suite_outreach_status();
 select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
 select * from tests.suite_source_tracking();
+select * from tests.suite_client_criteria();
 
 select * from finish();
 

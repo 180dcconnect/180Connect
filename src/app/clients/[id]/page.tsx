@@ -10,6 +10,7 @@ import {
   formatOrganisationSources,
   type OrganisationSourceRow,
 } from "@/lib/source-tracking";
+import { checkWebsiteReachabilityCached } from "@/lib/website-reachability-cache";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
 import { SuppressButton } from "./suppress-button";
 import { ComposeButton } from "./compose-button";
@@ -87,6 +88,7 @@ export default async function ClientDetailPage({
     await reportError(clientError, { operation: "clients.detail_page", organisationId: id });
   }
   if (!client) notFound();
+  const website = await checkWebsiteReachabilityCached(client.website);
   const email = validateClientEmail(client.contact_email);
 
   // ENRICHMENT_RESULTS is append-only (20260804180000_create_org_children.sql), so
@@ -241,6 +243,40 @@ export default async function ClientDetailPage({
           {email.message && (
             <p className="mt-2 text-sm text-red-800" role="alert">
               {email.message} The rest of this client record is still available.
+            </p>
+          )}
+        </section>
+
+        <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="website-heading">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="website-heading" className="text-sm font-bold">Website</h2>
+            <span className={`rounded-full px-2 py-1 text-xs font-bold ${website.status === "reachable" ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"}`}>
+              {website.status === "reachable"
+                ? "Reachable"
+                : website.status === "invalid"
+                  ? "Invalid URL"
+                  : website.status === "missing"
+                    ? "Missing"
+                    : "Unreachable"}
+            </span>
+          </div>
+
+          {website.url ? (
+            <a
+              className={`mt-2 block break-all text-sm underline ${website.status === "reachable" ? "text-brand-hover" : "font-bold text-red-800"}`}
+              href={website.url}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {website.url}
+            </a>
+          ) : (
+            <p className="mt-2 text-sm text-foreground/65">Not provided</p>
+          )}
+
+          {website.message && (
+            <p className="mt-2 text-sm text-red-800" role="alert">
+              {website.message} Booklet generation may use unreliable or missing website context.
             </p>
           )}
         </section>

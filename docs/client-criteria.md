@@ -14,6 +14,12 @@ that shared function rather than copying these rules.
 - Healthcare alignment is desirable and recorded as a signal, not required.
 - An unknown organisation type does not meet the criteria.
 
+Records that need human review and records that definitely do not meet the
+criteria are both kept out of the active client list, but they are not collapsed:
+`DATA_QUALITY_EVENTS.rule_name` stores `client_criteria_needs_review` or
+`client_criteria_does_not_meet`, together with the configured reasons. Admins can
+therefore query the review candidates independently from definite failures.
+
 To change the policy, update the exported `CLIENT_CRITERIA` object and its tests in
 the same pull request so the change is explicit and reviewable.
 

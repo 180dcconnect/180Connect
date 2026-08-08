@@ -36,7 +36,7 @@ export default function Landing() {
             The slow settle from 1.06 is the only motion applied to it. */}
         <motion.div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0"
+          className="pointer-events-none absolute inset-0 z-0"
           initial={{ opacity: 0, scale: 1.06 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 1.6, ease: EASE }}
@@ -53,13 +53,13 @@ export default function Landing() {
 
         {/* Scrims track the photo's own tonality: paper at the top where the
             type is dark, forest shadow at the foot where it turns light. */}
-        <motion.div
+         {/* <motion.div
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-0 top-0 h-[82%] bg-gradient-to-b from-background via-background/92 to-transparent"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 1.2, ease: EASE }}
-        />
+        />  */}
         <motion.div
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-0 bottom-0 h-[45%] bg-gradient-to-t from-[#0c1014]/90 via-[#0c1014]/45 to-transparent"
@@ -69,38 +69,48 @@ export default function Landing() {
         />
 
         <motion.div
-          className="relative flex flex-1 flex-col px-6 py-6 sm:px-10 sm:py-8"
+          className="relative z-10 flex flex-1 flex-col px-6 py-6 sm:px-10 sm:py-8"
           variants={stack}
           initial="hidden"
           animate="show"
         >
-          <motion.header
-            variants={item}
-            className="flex items-baseline font-mono text-[0.6875rem] uppercase tracking-[0.18em] text-foreground/60"
-          >
-            <span className="font-semibold text-foreground">
-              180<span className="text-brand">Connect</span>
-            </span>
-          </motion.header>
 
           <div className="flex flex-1 flex-col items-center justify-center text-center">
-            <div className="max-w-[52rem]">
+            <div className="max-w-[60rem]">
               <motion.h1
                 variants={item}
-                className="font-body text-[clamp(2.5rem,7.5vw,5.25rem)] font-black leading-[0.94] tracking-[-0.035em] text-foreground"
+                className="font-body text-[clamp(1.75rem,3.75vw,3.25rem)] font-black leading-[1.2] tracking-[-0.035em] text-foreground flex flex-wrap items-center justify-center gap-x-4 gap-y-4"
               >
-                Find the organisations
-                <br />
-                worth contacting first.
-              </motion.h1>
+                <span>Replace</span>
+                
+                <span className="inline-flex items-center gap-3">
+                  <span className="flex items-center justify-center rounded-2xl bg-white p-2.5 ring-1 ring-black/10 shadow-sm dark:bg-white/10 dark:ring-white/20">
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/3/30/Google_Sheets_logo_%282014-2020%29.svg" alt="Google Sheets" className="h-[0.9em] w-[0.9em] object-contain" />
+                  </span>
+                  <span>spreadsheets,</span>
+                </span>
 
-              <motion.p
-                variants={item}
-                className="mx-auto mt-7 max-w-[44ch] text-base leading-relaxed text-foreground/90 sm:text-lg"
-              >
-                One record per organisation — scored, owned and searchable — instead of
-                spreadsheets, shared inboxes and Drive folders.
-              </motion.p>
+                <span className="inline-flex items-center gap-3">
+                  <span className="flex items-center justify-center rounded-2xl bg-white p-2.5 ring-1 ring-black/10 shadow-sm dark:bg-white/10 dark:ring-white/20">
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg" alt="Gmail" className="h-[0.9em] w-[0.9em] object-contain" />
+                  </span>
+                  <span>follow-ups</span>
+                </span>
+                
+                <span>and</span>
+                
+                <span className="inline-flex items-center gap-3">
+                  <span className="flex items-center justify-center rounded-2xl bg-white p-2.5 ring-1 ring-black/10 shadow-sm dark:bg-white/10 dark:ring-white/20">
+                    <img src="https://www.vectorlogo.zone/logos/monday/monday-icon.svg" alt="monday.com" className="h-[0.9em] w-[0.9em] object-contain" />
+                  </span>
+                  <span>tracking.</span>
+                </span>
+                
+                <span className="inline-flex items-center gap-3">
+                  <span>All in one platform</span>
+                  <img src="https://framerusercontent.com/images/lpSL1f275shJ97WvsBBHaO4zSGI.png?scale-down-to=1024&width=1385&height=1432" alt="180Connect Platform" className="h-[1.2em] w-auto object-contain" />
+                </span>
+              </motion.h1>
 
               <motion.div
                 variants={item}

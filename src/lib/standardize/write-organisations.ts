@@ -33,7 +33,10 @@ import { buildAdminClient } from "../supabase/admin-client-factory.ts";
 import { reportError } from "../error-logging.ts";
 import { checkWebsiteReachability } from "../website-reachability.ts";
 import type { WebsiteStatus } from "../website-validation.ts";
-import { standardizeCharityCommissionRecord } from "./charity-commission.ts";
+import {
+  standardizeCharityCommissionRecord,
+  type RawCharityCommissionRecord,
+} from "./charity-commission.ts";
 import { standardizeCompaniesHouseRecord } from "./companies-house.ts";
 import type { StandardOrganisation } from "./types.ts";
 
@@ -211,7 +214,7 @@ export async function promotePendingCharityCommissionRecords(
 
   const prepared = pending.map((record) => ({
     record,
-    org: standardizeCharityCommissionRecord(record.raw_payload),
+    org: standardizeCharityCommissionRecord(record.raw_payload as RawCharityCommissionRecord),
   }));
 
   // Resolve website checks in small concurrent batches. Database writes remain

@@ -5,7 +5,6 @@ import { standardizeCompaniesHouseRecord } from "./companies-house.ts";
 import type { RawCompaniesHouseRecord } from "./companies-house.ts";
 
 const minimalRecord: RawCompaniesHouseRecord = {
-  company_number: "01234567",
   company_name: "Example Charity Ltd",
 };
 

@@ -126,7 +126,7 @@ describe("promotePendingCharityCommissionRecords — invalid records", () => {
 describe("promotePendingCharityCommissionRecords — website validation", () => {
   it("flags a broken website during import without rejecting the organisation", async () => {
     const record = pendingRecord("raw-website", "Useful Charity");
-    record.raw_payload.web = "https://broken.example";
+    (record.raw_payload as any).web = "https://broken.example";
     const checked: string[] = [];
     const { store, inserted, statusUpdates } = fakeStore({
       async loadPendingRecords() {

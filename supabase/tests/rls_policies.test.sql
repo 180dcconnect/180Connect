@@ -2513,6 +2513,58 @@ $$;
 
 -- ---------------------------------------------------------------------------
 
+-- ---------------------------------------------------------------------------
+-- manual client entry (F036)
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_manual_entries()
+returns setof text language plpgsql as $$
+declare
+  v_admin  uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b  uuid := '00000000-0000-4000-a000-000000000003';
+  v_viewer uuid := '00000000-0000-4000-a000-000000000005';
+  v_entry uuid;
+  v_count bigint;
+begin
+  if not tests.tables_exist('manual_entry_records', 'users', 'audit_log') then
+    return next skip(6, 'F036 manual entry migration not yet applied');
+    return;
+  end if;
+  perform tests.seed();
+
+  return next is(
+    tests.sqlstate_of(v_viewer, $query$select public.submit_manual_entry('No', 'GB', null, null, null, null, 'A sufficiently long reason')$query$),
+    '42501', 'viewer cannot submit a manual entry');
+
+  perform tests.login_as(v_cam_a);
+  select public.submit_manual_entry('Manual Charity', 'GB', null, 'bad-email', null, null, 'Not available from an API source') into v_entry;
+  select count(*) into v_count from public.manual_entry_records where id = v_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'CAM can read their own pending manual entry');
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.manual_entry_records where id = v_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'another CAM cannot read the submission');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.manual_entry_records where id = v_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'admin can review every manual entry');
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format('update public.manual_entry_records set review_status = ''approved'' where id = %L', v_entry)),
+    '42501', 'CAM cannot approve their own submission directly');
+
+  perform tests.login_as(v_admin);
+  perform public.reject_manual_entry(v_entry, 'Does not meet the agreed criteria');
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.audit_log where target_id = v_entry and action = 'manual_entry_rejected';
+  return next is(v_count, 1::bigint, 'admin rejection and its audit record are written together');
+end;
+$$;
+
 select * from tests.suite_core();
 select * from tests.suite_viewer();
 select * from tests.suite_users();
@@ -2533,6 +2585,7 @@ select * from tests.suite_outreach_status();
 select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
 select * from tests.suite_source_tracking();
+select * from tests.suite_manual_entries();
 
 select * from finish();
 

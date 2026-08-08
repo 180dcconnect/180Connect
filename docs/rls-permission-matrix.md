@@ -760,3 +760,10 @@ process problem rather than a security one: nothing recreates it on `db reset`, 
 cannot reach production through the release process. It needs capturing as a migration
 by whoever owns F013/F014. Note also that `users.deactivated_at` is now in the Data
 Model but exists in neither the database nor a migration.
+# F036 manual entry access
+
+`MANUAL_ENTRY_RECORDS` is readable by its submitting CAM and by admins. Viewers
+cannot read it. All writes are RPC-only: active CAMs/admins call
+`submit_manual_entry`; only admins call `reject_manual_entry`. Both functions
+self-authorise and write `AUDIT_LOG` in the same transaction. Direct INSERT,
+UPDATE and DELETE privileges are withheld from authenticated users.

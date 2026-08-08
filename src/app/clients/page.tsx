@@ -12,6 +12,7 @@ import {
   type OpenSuppression,
 } from "./visible-clients.ts";
 import { ClaimButton } from "./[id]/claim-button";
+import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 
 type TeamMember = { id: string; full_name: string | null };
 
@@ -83,8 +84,15 @@ export default async function ClientsPage({
   const teamMembers = team.data ?? [];
   const filterActive = Boolean(ownerFilter);
 
+  // F255 step 2 — "review your assigned clients" is complete when the CAM has looked
+  // at their own list, which is this page filtered to themselves. Recording it here
+  // rather than on the guide's link means the step reflects what they did, not what
+  // they clicked. Anyone else's filtered list, or the unfiltered one, records nothing.
+  const reviewingOwnClients = ownerFilter === authorization.actor.id;
+
   return (
     <main className="min-h-screen bg-[#f1f2f4] p-6">
+      {reviewingOwnClients && <RecordOnboardingStep step="review_clients" />}
       <section className="mx-auto w-full max-w-3xl rounded-2xl bg-white p-8 shadow-sm">
         <p className="text-sm font-bold text-brand">180Connect</p>
         <h1 className="mt-2 text-2xl font-bold">Clients</h1>

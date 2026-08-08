@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
+import { recordOnboardingStepAction } from "@/lib/onboarding-actions";
 import {
   GEOGRAPHIC_REACH_OPTIONS,
   INCOME_BAND_OPTIONS,
@@ -91,6 +92,13 @@ export async function saveOutreachPreferencesAction(
     };
   }
 
+  // F255 step 1 is recorded here rather than when the CAM opens this screen: the
+  // guide claims they have set their preferences, and this is the point at which
+  // that becomes true. Failure is swallowed on purpose — a checklist tick is not
+  // worth telling someone their saved preferences did not save.
+  await recordOnboardingStepAction("outreach_preferences");
+
   revalidatePath("/settings/outreach-preferences");
+  revalidatePath("/dashboard");
   return { status: "success", message: "Preferences saved." };
 }

@@ -8,6 +8,7 @@ import {
   type PendingRecord,
 } from "./write-organisations.ts";
 import type { StandardOrganisation } from "./types.ts";
+import type { RawCharityCommissionRecord } from "./charity-commission.ts";
 
 // ---------------------------------------------------------------------------
 // Fake store — same reasoning as runner.test.ts's fakeStore: assert against
@@ -126,7 +127,7 @@ describe("promotePendingCharityCommissionRecords — invalid records", () => {
 describe("promotePendingCharityCommissionRecords — website validation", () => {
   it("flags a broken website during import without rejecting the organisation", async () => {
     const record = pendingRecord("raw-website", "Useful Charity");
-    (record.raw_payload as any).web = "https://broken.example";
+    (record.raw_payload as RawCharityCommissionRecord).web = "https://broken.example";
     const checked: string[] = [];
     const { store, inserted, statusUpdates } = fakeStore({
       async loadPendingRecords() {

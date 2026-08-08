@@ -15,7 +15,6 @@
 //     name/number already exist from another source". Per this team's
 //     confirmed policy (a dependency ticket doesn't block downstream work),
 //     this is built now and flagged, not blocked on F042 existing first.
-//   - Client-criteria filtering (F047) — same reasoning, not built yet.
 //   - Conflict flagging (F048) — same.
 //
 // processing_status semantics used here (per raw_source_records' check
@@ -32,6 +31,8 @@
 
 import { buildAdminClient } from "../supabase/admin-client-factory.ts";
 import { reportError } from "../error-logging.ts";
+import { checkWebsiteReachability } from "../website-reachability.ts";
+import type { WebsiteStatus } from "../website-validation.ts";
 import { standardizeCharityCommissionRecord } from "./charity-commission.ts";
 import { standardizeCompaniesHouseRecord } from "./companies-house.ts";
 import type { StandardOrganisation } from "./types.ts";
@@ -52,8 +53,10 @@ export type PromoteCounts = {
   failed: number;
 };
 
+const WEBSITE_VALIDATION_CONCURRENCY = 5;
+
 /**
- * Everything promotePendingCharityCommissionRecords needs from the database,
+ * Everything promotePending*Records functions need from the database,
  * behind an interface — same reasoning as runner.ts's IngestionStore: the
  * decision logic (map, validate, decide a status) is testable without a
  * database; createDefaultOrganisationWriteStore is the real implementation.
@@ -121,6 +124,10 @@ function isUsable(org: StandardOrganisation): boolean {
  * pending records, map each with that source's standardize function, and
  * insert or reject/error accordingly. The only thing that varies per source
  * is which record_source to filter on and which mapper to run.
+ *
+ * Note: website validation (F046) is Charity Commission-specific and is
+ * handled in promotePendingCharityCommissionRecords directly, since
+ * Companies House records carry no website or email data.
  */
 async function promotePendingRecords<TRaw>(
   store: OrganisationWriteStore,
@@ -174,13 +181,64 @@ function requireStore(
 
 export async function promotePendingCharityCommissionRecords(
   store: OrganisationWriteStore | null = createDefaultOrganisationWriteStore(),
+  checkWebsite: (value: string) => Promise<WebsiteStatus> = checkWebsiteReachability,
 ): Promise<PromoteCounts> {
   requireStore(store);
-  return promotePendingRecords(
-    store,
-    "charity_commission",
-    standardizeCharityCommissionRecord,
-  );
+
+  const pending = await store.loadPendingRecords("charity_commission");
+  const counts: PromoteCounts = {
+    read: pending.length,
+    inserted: 0,
+    rejected: 0,
+    failed: 0,
+  };
+
+  const prepared = pending.map((record) => ({
+    record,
+    org: standardizeCharityCommissionRecord(record.raw_payload),
+  }));
+
+  // Resolve website checks in small concurrent batches. Database writes remain
+  // ordered below, while a slow website cannot serially stall every import row.
+  for (let start = 0; start < prepared.length; start += WEBSITE_VALIDATION_CONCURRENCY) {
+    await Promise.all(
+      prepared.slice(start, start + WEBSITE_VALIDATION_CONCURRENCY).map(async ({ record, org }) => {
+        if (!isUsable(org) || !org.website.trim()) return;
+        const website = await checkWebsite(org.website);
+        if (website.status === "invalid" || website.status === "unreachable") {
+          await reportError(new Error("Imported client website validation failed"), {
+            operation: "standardize.charity_commission.website_validation",
+            rawRecordId: record.id,
+            websiteStatus: website.status,
+          });
+        }
+      }),
+    );
+  }
+
+  for (const { record, org } of prepared) {
+    if (!isUsable(org)) {
+      await store.markRecordStatus(record.id, "rejected");
+      counts.rejected++;
+      continue;
+    }
+
+    const result = await store.insertOrganisation(org);
+    if ("error" in result) {
+      await reportError(new Error(result.error), {
+        operation: "standardize.charity_commission.promote",
+        rawRecordId: record.id,
+      });
+      await store.markRecordStatus(record.id, "error");
+      counts.failed++;
+      continue;
+    }
+
+    await store.markRecordStatus(record.id, "validated", result.id);
+    counts.inserted++;
+  }
+
+  return counts;
 }
 
 export async function promotePendingCompaniesHouseRecords(

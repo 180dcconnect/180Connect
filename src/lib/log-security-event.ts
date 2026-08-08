@@ -21,6 +21,7 @@ export type SecurityEvent =
   | "session.expired"
   | "session.recovery_confined"
   | "user.invited"
+  | "user.invite_resent"
   | "user.invite_rejected"
   | "user.invite_failed"
   | "user.invite_accept_failed";

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
-import { sendInvite, type InviteState } from "@/lib/auth/invite";
+import { resendInvite, sendInvite, type InviteState } from "@/lib/auth/invite";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -81,6 +81,66 @@ export async function sendInviteAction(
   if (outcome.ok) {
     // So the pending-invites list on /admin/users shows the new row immediately,
     // without the admin having to refresh (AC5).
+    revalidatePath("/admin/users");
+  }
+
+  return outcome.state;
+}
+
+/**
+ * F252. Called directly from the pending-invites list's "Resend" button — a
+ * plain function call, not a form action, since there is no field to submit,
+ * only a row id already known to the client.
+ */
+export async function resendInviteAction(userId: string): Promise<InviteState> {
+  const authorization = await getCurrentActor("user:manage");
+  if (!authorization.ok) {
+    return { status: "error", message: actorFailureMessage(authorization.reason) };
+  }
+
+  const adminClient = createAdminClient();
+  if (!adminClient) {
+    return {
+      status: "error",
+      message: "Invites are not configured in this environment.",
+    };
+  }
+
+  let redirectTo: string;
+  try {
+    redirectTo = inviteRedirectUrl();
+  } catch {
+    return {
+      status: "error",
+      message: "Invites are not configured in this environment.",
+    };
+  }
+
+  const supabase = await createClient();
+  const lookupPendingInvite = async (id: string) => {
+    const { data, error } = await supabase
+      .from("users")
+      .select("email, invite_accepted_at")
+      .eq("id", id)
+      .maybeSingle<{ email: string; invite_accepted_at: string | null }>();
+    if (error) throw new Error(error.message);
+    if (!data) return null;
+    return { email: data.email, accepted: data.invite_accepted_at !== null };
+  };
+
+  const outcome = await resendInvite(
+    lookupPendingInvite,
+    adminClient,
+    authorization.actor.id,
+    userId,
+    redirectTo,
+    {
+      inviterName:
+        authorization.actor.fullName ?? authorization.actor.email ?? "An admin",
+    },
+  );
+
+  if (outcome.ok) {
     revalidatePath("/admin/users");
   }
 

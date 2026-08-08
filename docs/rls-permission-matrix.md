@@ -569,6 +569,35 @@ remove a suppression, and F185 (#181) is that RPC. Adding an enum value later is
 one-way door in Postgres (`create_organisations.sql` precedent), so it is reserved
 up front rather than negotiated later.
 
+### 3.15 Potential duplicates — service-role write, admin decides
+
+Backs F042 Deduplicate Clients (#42),
+`supabase/migrations/20260807120000_create_potential_duplicates.sql`. Same shape as
+§3.14: no end-user INSERT/UPDATE, all writes gated — but the writer here is the
+ingestion pipeline (`service_role`), not a CAM/admin request, since a duplicate flag
+is machine-detected, not asked for.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `POTENTIAL_DUPLICATES` | admin only | — (service_role only) | — (RPC only) | — (no grant) |
+
+SELECT is admin-only, not "every active user" like `SUPPRESSIONS` — reviewing a flag
+means joining to `raw_source_records.raw_payload`, which §3.5 already restricts to
+admin because it is unfiltered third-party data. INSERT has no policy for
+`authenticated` at all: only the ingestion pipeline (holding the service key
+server-side, `src/lib/standardize/write-organisations.ts`) writes a row, exactly the
+same restriction as `raw_source_records` itself.
+
+The only end-user write is `decide_duplicate_flag(potential_duplicate_id, confirmed,
+note)` — admin only, `SECURITY DEFINER`, rejects a non-pending target, writes
+`audit_log` (`duplicate_confirmed` / `duplicate_dismissed`) in the same transaction.
+Dismissing a flag (`confirmed = false`) additionally resets the linked
+`raw_source_records` row to `pending` with `matched_organisation_id` cleared, so the
+next ingestion run promotes it as a new organisation — see the migration header for
+why that doesn't loop back to the same flag.
+
+**Known gap, not closed by this table** — see Open gap 5 below.
+
 ---
 
 ## 4. Denial behaviour and feedback
@@ -728,6 +757,15 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    asserted that `is_active` flipped and that an audit row was written, and had no way
    to tell revocation from no revocation. An assertion about a side effect nobody seeds
    a fixture for is not an assertion.
+9. **No way to mark an existing `ORGANISATIONS` row inactive/merged.** F042 (§3.15,
+   `decide_duplicate_flag`) stops a *new* duplicate row being created and confirmed,
+   but its AC3 ("two records that are true duplicates never both remain as separate
+   active clients") is not fully closed: if two rows are already separately promoted
+   (e.g. one from an API source, one entered manually, before this table existed)
+   there is no column or RPC to retire one of them. Needs a schema decision — most
+   likely an `is_active`/`merged_into_organisation_id` column on `ORGANISATIONS`,
+   following the same RPC-gated pattern as `SUPPRESSIONS` — raised rather than added
+   unilaterally, since it changes the core entity every other table hangs off.
 
 ---
 

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 
-import { charityCommissionAdapter } from "./charity-commission.ts";
+import {
+  charityCommissionAdapter,
+  createCharityCommissionLookupAdapter,
+} from "./charity-commission.ts";
 
 const REAL_FETCH = globalThis.fetch;
 
@@ -216,6 +219,124 @@ describe("charityCommissionAdapter.fetch — source tracking", () => {
   it("onError logs without throwing", () => {
     assert.doesNotThrow(() =>
       charityCommissionAdapter.onError(new Error("network down")),
+    );
+  });
+});
+
+describe("createCharityCommissionLookupAdapter.fetch — successful lookup", () => {
+  it("fetches exactly one charity by registration number", async () => {
+    const requestedUrls: string[] = [];
+    globalThis.fetch = mock.fn(async (url: string | URL | Request) => {
+      requestedUrls.push(String(url));
+      return jsonResponse([detailResult]);
+    });
+
+    const { records, truncated } = await createCharityCommissionLookupAdapter({
+      registeredNumber: "1218781",
+    }).fetch();
+
+    assert.equal(truncated, false);
+    assert.equal(records.length, 1);
+    assert.equal(records[0].source_record_id, "5254841");
+    assert.equal(requestedUrls.length, 1);
+    assert.ok(requestedUrls[0].includes("/charitydetailsmulti/1218781"));
+  });
+
+  it("trims whitespace around the registration number", async () => {
+    let requestedUrl = "";
+    globalThis.fetch = mock.fn(async (url: string | URL | Request) => {
+      requestedUrl = String(url);
+      return jsonResponse([detailResult]);
+    });
+
+    await createCharityCommissionLookupAdapter({
+      registeredNumber: "  1218781  ",
+    }).fetch();
+
+    assert.ok(requestedUrl.includes("/charitydetailsmulti/1218781"));
+  });
+});
+
+describe("createCharityCommissionLookupAdapter.fetch — invalid input", () => {
+  it("rejects a non-numeric registration number without calling the API", async () => {
+    let called = false;
+    globalThis.fetch = mock.fn(async () => {
+      called = true;
+      return jsonResponse([detailResult]);
+    });
+
+    await assert.rejects(
+      () =>
+        createCharityCommissionLookupAdapter({
+          registeredNumber: "not-a-number",
+        }).fetch(),
+      /Enter a valid Charity Commission registration number/,
+    );
+    assert.equal(called, false);
+  });
+
+  it("rejects an empty registration number without calling the API", async () => {
+    let called = false;
+    globalThis.fetch = mock.fn(async () => {
+      called = true;
+      return jsonResponse([detailResult]);
+    });
+
+    await assert.rejects(
+      () => createCharityCommissionLookupAdapter({ registeredNumber: "   " }).fetch(),
+      /Enter a valid Charity Commission registration number/,
+    );
+    assert.equal(called, false);
+  });
+});
+
+describe("createCharityCommissionLookupAdapter.fetch — not found / API failure", () => {
+  it("gives a clear message when the API returns an error for an unknown number", async () => {
+    globalThis.fetch = mock.fn(async () => jsonResponse({ error: "down" }, 500));
+
+    await assert.rejects(
+      () =>
+        createCharityCommissionLookupAdapter({
+          registeredNumber: "99999999999",
+        }).fetch(),
+      /Charity Commission could not find a charity with that registration number/,
+    );
+  });
+
+  it("gives the same clear message when the response is empty rather than an error", async () => {
+    globalThis.fetch = mock.fn(async () => jsonResponse([]));
+
+    await assert.rejects(
+      () =>
+        createCharityCommissionLookupAdapter({ registeredNumber: "1218781" }).fetch(),
+      /Charity Commission could not find a charity with that registration number/,
+    );
+  });
+
+  it("throws when CHARITY_COMMISSION_API_KEY is not set", async () => {
+    delete process.env.CHARITY_COMMISSION_API_KEY;
+
+    await assert.rejects(
+      () =>
+        createCharityCommissionLookupAdapter({ registeredNumber: "1218781" }).fetch(),
+      /CHARITY_COMMISSION_API_KEY is not set/,
+    );
+  });
+});
+
+describe("createCharityCommissionLookupAdapter — source tracking", () => {
+  it("reports the same source name as the bulk adapter", () => {
+    assert.equal(
+      createCharityCommissionLookupAdapter({ registeredNumber: "1" }).name,
+      "charity_commission",
+    );
+  });
+
+  it("onError logs without throwing", () => {
+    assert.doesNotThrow(() =>
+      createCharityCommissionLookupAdapter({ registeredNumber: "1" }).onError(
+        new Error("network down"),
+      ),
     );
   });
 });

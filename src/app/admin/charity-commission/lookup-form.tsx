@@ -1,12 +1,9 @@
 "use client";
 
 import { useActionState } from "react";
-import {
-  importCharityCommission,
-  type CharityCommissionImportState,
-} from "./actions";
+import { lookupCharity, type CharityCommissionImportState } from "./actions";
 
-const initialCharityCommissionImportState: CharityCommissionImportState = {
+const initialLookupState: CharityCommissionImportState = {
   kind: "idle",
   message: "",
 };
@@ -17,35 +14,46 @@ const stateStyles = {
   error: "bg-red-50 text-red-900",
 } as const;
 
-export function CharityCommissionImportForm({ configured }: { configured: boolean }) {
-  const [state, action, pending] = useActionState(
-    importCharityCommission,
-    initialCharityCommissionImportState,
-  );
+export function CharityCommissionLookupForm({ configured }: { configured: boolean }) {
+  const [state, action, pending] = useActionState(lookupCharity, initialLookupState);
 
   return (
     <div className="mt-8 rounded-xl border border-black/10 p-5">
-      <h2 className="text-lg font-bold">Run import</h2>
+      <h2 className="text-lg font-bold">Look up a single charity</h2>
       <p className="mt-2 text-sm text-foreground/65">
-        Imports charities registered within the configured date range,
-        including contact details where available. For a single known
-        charity, use the lookup below instead.
+        Enter a known Charity Commission registration number to fetch and
+        import just that charity, without running a date-range backfill.
       </p>
+
       {!configured && (
         <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm font-bold text-amber-900" role="alert">
           Charity Commission API access is not configured. Add the server-side
-          API key before running an import.
+          API key before running a lookup.
         </p>
       )}
-      <form action={action} className="mt-5">
+
+      <form action={action} className="mt-5 space-y-4">
+        <div>
+          <label className="block text-sm font-bold" htmlFor="registeredNumber">
+            Registration number
+          </label>
+          <input
+            className="mt-1 w-full max-w-md rounded-lg border border-black/20 px-3 py-2 text-sm"
+            disabled={!configured || pending}
+            id="registeredNumber"
+            name="registeredNumber"
+            placeholder="For example, 1218781"
+          />
+        </div>
         <button
           className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
           disabled={!configured || pending}
           type="submit"
         >
-          {pending ? "Importing…" : "Import Charity Commission data"}
+          {pending ? "Looking up…" : "Look up charity"}
         </button>
       </form>
+
       {state.kind !== "idle" && (
         <div className={`mt-5 rounded-lg p-4 text-sm ${stateStyles[state.kind]}`} role={state.kind === "error" ? "alert" : "status"}>
           <p className="font-bold">{state.message}</p>

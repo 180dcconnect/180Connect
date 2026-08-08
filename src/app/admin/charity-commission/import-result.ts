@@ -12,18 +12,21 @@ export function importStateFromSummary(
   };
 
   if (summary.status === "failed") {
-    // TODO: unlike Companies House, Charity Commission's fetch() doesn't
-    // currently produce a curated set of user-safe error strings (no
-    // "no exact match" / "invalid number" style messages — those made sense
-    // for a single-lookup flow, not a bulk one). Every failure here falls
-    // through to the generic message below. If real failure modes (e.g. "API
-    // key not set", "date range invalid") turn out to be safe and useful to
-    // show admins directly, they should be added to a matching allowlist
-    // here, same pattern as import-result.ts in companies-house/.
+    // Curated allowlist, same pattern as import-result.ts in companies-house/:
+    // these come from createCharityCommissionLookupAdapter's single-lookup
+    // path and are safe/useful to show directly. The bulk backfill's own
+    // failure modes (API errors, malformed responses) aren't in this list —
+    // those still fall through to the generic message below, since they
+    // aren't actionable by the admin the way "you typed a bad number" is.
+    const safeLookupMessages = [
+      "Enter a valid Charity Commission registration number.",
+      "Charity Commission could not find a charity with that registration number.",
+    ];
     return {
       kind: "error",
-      message:
-        "Charity Commission could not be imported. The failure was recorded; please try again later.",
+      message: safeLookupMessages.includes(summary.error ?? "")
+        ? summary.error!
+        : "Charity Commission could not be imported. The failure was recorded; please try again later.",
       counts,
     };
   }

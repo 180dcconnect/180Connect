@@ -133,6 +133,96 @@ function chunk<T>(items: T[], size: number): T[][] {
   return chunks;
 }
 
+/** Shared by the bulk backfill's batching loop and the single-charity lookup below. */
+async function fetchCharityDetails(
+  regNumbers: (number | string)[],
+  headers: Record<string, string>,
+): Promise<CharityCommissionDetailItem[]> {
+  const url = `${CHARITY_COMMISSION_URL}/charitydetailsmulti/${regNumbers.join(",")}`;
+  const res = await fetchWithRetry(url, headers);
+
+  if (!res.ok) {
+    console.error(
+      `[charity_commission] details error body for ${res.status}:`,
+      await res.text(),
+    );
+    throw new Error(`Charity Commission details API returned ${res.status}`);
+  }
+
+  const json = await res.json();
+  if (!Array.isArray(json)) {
+    throw new Error("Charity Commission details response is not an array.");
+  }
+
+  return json as CharityCommissionDetailItem[];
+}
+
+export type CharityCommissionLookup = { registeredNumber: string };
+
+/** Charity Commission registration numbers are numeric (confirmed live, e.g. 1218781). */
+function normalizeRegisteredNumber(value: string): string {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error("Enter a valid Charity Commission registration number.");
+  }
+  return trimmed;
+}
+
+/**
+ * Creates one F038-compatible plug for looking up a single charity by its
+ * registration number — same pattern as companieshouse.ts's
+ * createCompaniesHouseAdapter, reusing the same GetCharityDetailsMulti
+ * endpoint the bulk backfill batches through (confirmed live: a one-element
+ * number list works the same way a full batch does).
+ *
+ * Number-only, unlike Companies House's number-or-name lookup: no
+ * name-search endpoint has been confirmed for this API (the only search
+ * operation this adapter uses elsewhere, GetSearchCharityByRegDate, searches
+ * by registration date, not by name), so a name fallback isn't built here
+ * without evidence it exists.
+ *
+ * The API does not distinguish "no charity with that number" from a real
+ * server error — both return a 500 with the same generic body (confirmed
+ * live) — so both surface as one message rather than a guessed distinction.
+ */
+export function createCharityCommissionLookupAdapter(
+  lookup: CharityCommissionLookup,
+): DataSourceAdapter {
+  return {
+    name: "charity_commission",
+
+    async fetch(): Promise<SourceFetchResult> {
+      const apiKey = process.env.CHARITY_COMMISSION_API_KEY;
+      if (!apiKey) {
+        throw new Error("CHARITY_COMMISSION_API_KEY is not set.");
+      }
+      const headers = { "Ocp-Apim-Subscription-Key": apiKey };
+      const registeredNumber = normalizeRegisteredNumber(lookup.registeredNumber);
+
+      let details: CharityCommissionDetailItem[];
+      try {
+        details = await fetchCharityDetails([registeredNumber], headers);
+      } catch {
+        throw new Error(
+          "Charity Commission could not find a charity with that registration number.",
+        );
+      }
+
+      if (details.length === 0) {
+        throw new Error(
+          "Charity Commission could not find a charity with that registration number.",
+        );
+      }
+
+      return { records: [shape(details[0])], truncated: false };
+    },
+
+    onError(err: Error) {
+      console.error(`[charity_commission] single lookup failed:`, err.message);
+    },
+  };
+}
+
 export const charityCommissionAdapter: DataSourceAdapter = {
   name: "charity_commission",
 
@@ -190,27 +280,7 @@ export const charityCommissionAdapter: DataSourceAdapter = {
     const detailRecords: CharityCommissionDetailItem[] = [];
 
     for (const batch of chunk(regNumbers, DETAILS_BATCH_SIZE)) {
-      const url = `${CHARITY_COMMISSION_URL}/charitydetailsmulti/${batch.join(",")}`;
-      const res = await fetchWithRetry(url, headers);
-
-      if (!res.ok) {
-        console.error(
-          `[charity_commission] details error body for ${res.status}:`,
-          await res.text(),
-        );
-        throw new Error(
-          `Charity Commission details API returned ${res.status}`,
-        );
-      }
-
-      const json = await res.json();
-      if (!Array.isArray(json)) {
-        throw new Error(
-          "Charity Commission details response is not an array.",
-        );
-      }
-
-      detailRecords.push(...(json as CharityCommissionDetailItem[]));
+      detailRecords.push(...(await fetchCharityDetails(batch, headers)));
     }
 
     // No documented ceiling for either operation, unlike Companies House's

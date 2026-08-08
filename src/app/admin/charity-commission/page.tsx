@@ -4,6 +4,7 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { CharityCommissionImportForm } from "./import-form";
+import { CharityCommissionLookupForm } from "./lookup-form";
 
 // TODO: Companies House's admin trigger uses maxDuration = 60 (a single
 // company lookup finishes well within that). Charity Commission's fetch() is
@@ -70,6 +71,7 @@ export default async function CharityCommissionPage() {
         </div>
 
         <CharityCommissionImportForm configured={configured} />
+        <CharityCommissionLookupForm configured={configured} />
 
         <div className="mt-8">
           <h2 className="text-lg font-bold">Recent imports</h2>

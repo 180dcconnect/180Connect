@@ -145,7 +145,7 @@ export default function Landing() {
               >
                 <MotionLink
                   href="/login"
-                  className="inline-flex h-11 items-center rounded-2xl bg-gradient-to-br from-[#8ed85d] via-brand to-[#4b8427] px-8 text-sm font-bold text-white shadow-[inset_1.5px_1.5px_2px_rgba(255,255,255,0.5),inset_-2.5px_-2.5px_5px_rgba(0,0,0,0.4),0_4px_12px_rgba(0,0,0,0.2)] ring-1 ring-black/15 transition-all hover:brightness-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                  className="inline-flex h-11 items-center rounded-2xl bg-brand px-7 text-sm font-bold text-white transition-colors hover:bg-brand-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
                   whileHover={{ y: -2 }}
                   whileTap={{ scale: 0.97 }}
                   transition={{ type: "spring", stiffness: 420, damping: 28 }}

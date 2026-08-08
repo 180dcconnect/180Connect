@@ -4,7 +4,7 @@ import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 
 import { reportError } from "./error-logging.ts";
-import { checkWebsite, type WebsiteStatus } from "./website-validation.ts";
+import { checkWebsite, isPrivateAddress, type WebsiteStatus } from "./website-validation.ts";
 
 const DNS_TIMEOUT_MS = 3_000;
 const HTTP_TIMEOUT_MS = 5_000;
@@ -25,7 +25,13 @@ async function within<T>(promise: Promise<T>, milliseconds: number, message: str
 
 async function resolvePublicAddresses(hostname: string): Promise<readonly string[]> {
   const literal = hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (isIP(literal)) return [literal];
+  if (isIP(literal)) {
+    // isUnsafeHostname in website-validation.ts already rejects private IP literals at
+    // format-check time. Guard here as well so this function is safe when called in
+    // isolation (tests, future callers) without the format check as a prerequisite.
+    if (isPrivateAddress(literal)) return [];
+    return [literal];
+  }
 
   const [ipv4, ipv6] = await within(
     Promise.all([resolve4(literal).catch(() => []), resolve6(literal).catch(() => [])]),

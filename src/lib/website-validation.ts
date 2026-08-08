@@ -168,7 +168,14 @@ export async function checkWebsite(
   } catch (error) {
     // The wrapper records the real diagnostic in ERROR_LOG/Sentry. The CAM receives
     // only the safe status below; unexpected programming errors are no longer swallowed.
+    // Return here so that execution does not fall through to the redirect-limit
+    // onFailure call below — that would fire a second, misleading log entry.
     await dependencies.onFailure?.(error, new URL(current).hostname);
+    return {
+      status: "unreachable",
+      url: format.url,
+      message: "This website did not respond to the validation check.",
+    };
   }
 
   await dependencies.onFailure?.(

@@ -119,4 +119,23 @@ describe("checkWebsite", () => {
       website: "https://broken.example",
     });
   });
+
+  it("calls onFailure exactly once when DNS throws", async () => {
+    // Regression: before the fix, an exception in the try block would fire onFailure
+    // inside the catch block, then fall through and fire it again with the misleading
+    // "redirect limit" message below the try/catch.
+    const failures: string[] = [];
+    const result = await checkWebsite("https://example.org", {
+      resolve: async () => {
+        throw new Error("DNS unavailable");
+      },
+      request: async () => ({ status: 200, location: null }),
+      onFailure: async (error) => {
+        failures.push(error instanceof Error ? error.message : String(error));
+      },
+    });
+    assert.equal(result.status, "unreachable");
+    assert.equal(failures.length, 1, "onFailure must be called exactly once");
+    assert.equal(failures[0], "DNS unavailable");
+  });
 });

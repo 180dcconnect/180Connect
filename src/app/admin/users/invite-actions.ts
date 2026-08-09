@@ -120,11 +120,15 @@ export async function resendInviteAction(userId: string): Promise<InviteState> {
   const lookupPendingInvite = async (id: string) => {
     const { data, error } = await supabase
       .from("users")
-      .select("email, invite_accepted_at")
+      .select("email, invited_at, invite_accepted_at")
       .eq("id", id)
-      .maybeSingle<{ email: string; invite_accepted_at: string | null }>();
+      .maybeSingle<{ email: string; invited_at: string | null; invite_accepted_at: string | null }>();
     if (error) throw new Error(error.message);
-    if (!data) return null;
+    // Not an invite at all — a seeded/bootstrapped account, or any other row
+    // that never went through the invite flow — must not be resend-able just
+    // because invite_accepted_at happens to be null for it too. Same predicate
+    // as team-realtime.ts's isPendingInvite().
+    if (!data || !data.invited_at) return null;
     return { email: data.email, accepted: data.invite_accepted_at !== null };
   };
 

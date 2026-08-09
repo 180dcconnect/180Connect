@@ -569,17 +569,20 @@ remove a suppression, and F185 (#181) is that RPC. Adding an enum value later is
 one-way door in Postgres (`create_organisations.sql` precedent), so it is reserved
 up front rather than negotiated later.
 
-### 3.15 Potential duplicates — service-role write, admin decides
+### 3.15 Entity match candidates — service-role write, admin decides
 
 Backs F042 Deduplicate Clients (#42),
-`supabase/migrations/20260807120000_create_potential_duplicates.sql`. Same shape as
-§3.14: no end-user INSERT/UPDATE, all writes gated — but the writer here is the
-ingestion pipeline (`service_role`), not a CAM/admin request, since a duplicate flag
-is machine-detected, not asked for.
+`supabase/migrations/20260809150000_create_entity_match_candidates.sql`. Uses the
+`ENTITY_MATCH_CANDIDATES` table already reserved in the Data Model (tab 03, added 23
+Jul 2026) rather than a new table — an earlier draft of this migration created its own
+`POTENTIAL_DUPLICATES` table; corrected in review, 9 Aug 2026. Same shape as §3.14: no
+end-user INSERT/UPDATE, all writes gated — but the writer here is the ingestion
+pipeline (`service_role`), not a CAM/admin request, since a duplicate flag is
+machine-detected, not asked for.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `POTENTIAL_DUPLICATES` | admin only | — (service_role only) | — (RPC only) | — (no grant) |
+| `ENTITY_MATCH_CANDIDATES` | admin only | — (service_role only) | — (RPC only) | — (no grant) |
 
 SELECT is admin-only, not "every active user" like `SUPPRESSIONS` — reviewing a flag
 means joining to `raw_source_records.raw_payload`, which §3.5 already restricts to
@@ -588,7 +591,13 @@ admin because it is unfiltered third-party data. INSERT has no policy for
 server-side, `src/lib/standardize/write-organisations.ts`) writes a row, exactly the
 same restriction as `raw_source_records` itself.
 
-The only end-user write is `decide_duplicate_flag(potential_duplicate_id, confirmed,
+F042's matcher is a binary check (registration number, or name+postcode), not the
+graduated LLM-assisted matcher this table's full column set anticipates — see the
+migration header for exactly which columns (`match_score`, `match_method`,
+`duplicate_group_id`, `llm_reasoning`, `source_priority`) are placeholders/approximated
+rather than computed, and why.
+
+The only end-user write is `decide_duplicate_flag(entity_match_candidate_id, confirmed,
 note)` — admin only, `SECURITY DEFINER`, rejects a non-pending target, writes
 `audit_log` (`duplicate_confirmed` / `duplicate_dismissed`) in the same transaction.
 Dismissing a flag (`confirmed = false`) additionally resets the linked

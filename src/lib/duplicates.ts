@@ -3,30 +3,35 @@
  * can be tested without a database or a request (same split as @/lib/suppressions).
  */
 
-export type PotentialDuplicateStatus = "pending" | "confirmed_duplicate" | "not_duplicate";
+export type MatchStatus = "pending" | "confirmed_match" | "confirmed_new" | "rejected";
 
-export type PotentialDuplicateRow = {
+export type EntityMatchCandidateRow = {
   id: string;
   raw_source_record_id: string;
-  matched_organisation_id: string;
-  matched_on: "registration_number" | "name_and_postcode";
-  status: PotentialDuplicateStatus;
-  decided_by: string | null;
-  decided_at: string | null;
-  decision_note: string | null;
+  candidate_organisation_id: string | null;
+  match_score: number;
+  match_method: "exact_charity_number" | "fuzzy_name" | "address_match" | "manual";
+  match_status: MatchStatus;
+  reviewed_by_user_id: string | null;
+  reviewed_at: string | null;
+  notes: string | null;
   created_at: string;
-  matched_organisation: { legal_name: string } | null;
-  raw_source_record: { raw_payload: { charity_name?: string } } | null;
-  decided_by_user: { full_name: string | null; email: string } | null;
+  candidate_organisation: { legal_name: string } | null;
+  // charity_name (Charity Commission) / company_name (Companies House) — every
+  // source's raw_payload shape is different (see write-organisations.ts header),
+  // so both must be read here or one source's rows show as "Unknown incoming
+  // record" in the admin panel.
+  raw_source_record: { raw_payload: { charity_name?: string; company_name?: string } } | null;
+  reviewed_by_user: { full_name: string | null; email: string } | null;
 };
 
 /** Shared PostgREST select, used by both the admin page's initial load and the GET route. */
-export const POTENTIAL_DUPLICATE_SELECT = `
-  id, raw_source_record_id, matched_organisation_id, matched_on, status,
-  decided_by, decided_at, decision_note, created_at,
-  matched_organisation:organisations!matched_organisation_id ( legal_name ),
+export const ENTITY_MATCH_CANDIDATE_SELECT = `
+  id, raw_source_record_id, candidate_organisation_id, match_score, match_method, match_status,
+  reviewed_by_user_id, reviewed_at, notes, created_at,
+  candidate_organisation:organisations!candidate_organisation_id ( legal_name ),
   raw_source_record:raw_source_records!raw_source_record_id ( raw_payload ),
-  decided_by_user:users!potential_duplicates_decided_by_fkey ( full_name, email )
+  reviewed_by_user:users!entity_match_candidates_reviewed_by_user_id_fkey ( full_name, email )
 `;
 
 export type RpcFailure = { status: number; error: string };
@@ -36,7 +41,7 @@ const GENERIC_FAILURE = "The decision could not be saved. Refresh and try again.
 /**
  * Maps a Postgres error from decide_duplicate_flag onto something safe to show an
  * admin. Every errcode below is one the RPC raises deliberately, with a message
- * written to be read by an admin (see 20260807120000_create_potential_duplicates.sql)
+ * written to be read by an admin (see 20260809150000_create_entity_match_candidates.sql)
  * — no table or constraint names, nothing internal. Passing those through is safe;
  * everything else gets the generic string (DoD: no stack traces or internals in a
  * user-facing error).

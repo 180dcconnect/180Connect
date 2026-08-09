@@ -15,7 +15,7 @@
 // F042 (cross-source deduplication) IS done here: before inserting, every
 // candidate is checked against existing organisations via
 // findDuplicateMatch (src/lib/dedup/match-organisations.ts). A match is
-// flagged in potential_duplicates for admin review instead of being
+// flagged in entity_match_candidates for admin review instead of being
 // inserted as a second row. This runs for every source — both the shared
 // promotePendingRecords loop and promotePendingCharityCommissionRecords's
 // own loop (see its header note below) call it.
@@ -25,7 +25,7 @@
 //   - 'validated': successfully mapped and inserted into organisations.
 //   - 'matched': mapped, but findDuplicateMatch found an existing
 //     organisation this record is probably a duplicate of — flagged in
-//     potential_duplicates rather than inserted. If an admin later dismisses
+//     entity_match_candidates rather than inserted. If an admin later dismisses
 //     the flag (decide_duplicate_flag with p_confirmed = false), the row is
 //     reset to 'pending' so the next run promotes it normally.
 //   - 'rejected': mapped, but failed minimal validation (empty legal_name —
@@ -92,7 +92,7 @@ function newCounts(read: number): PromoteCounts {
 /**
  * Shared by every promotePending*Records loop: check a mapped, criteria-passed
  * candidate against existing organisations (loaded once per run — see callers)
- * and flag it in potential_duplicates instead of inserting a second row. Returns
+ * and flag it in entity_match_candidates instead of inserting a second row. Returns
  * true if the record was flagged (caller should skip insertion and move on).
  */
 async function flagIfDuplicate(
@@ -101,7 +101,7 @@ async function flagIfDuplicate(
   record: PendingRecord,
   org: StandardOrganisation,
   existingOrganisations: ExistingOrganisationForMatch[],
-  operation: string,
+  source: string,
 ): Promise<boolean> {
   const dismissedOrganisationIds = await store.loadDismissedMatches(record.id);
   const match = findDuplicateMatch(
@@ -115,9 +115,17 @@ async function flagIfDuplicate(
     rawRecordId: record.id,
     matchedOrganisationId: match.organisationId,
     matchedOn: match.matchedOn,
+    source,
+    // The only fields this matcher actually compares — see match-organisations.ts.
+    // StandardOrganisation carries no registration-number field, so this is the same
+    // for both matchedOn branches; a real gap, not a shortcut (see migration header).
+    matchFields: { legal_name: org.legal_name, postcode: org.postcode },
   });
   if ("error" in flagResult) {
-    await reportError(new Error(flagResult.error), { operation, rawRecordId: record.id });
+    await reportError(new Error(flagResult.error), {
+      operation: `standardize.${source}.flag_duplicate`,
+      rawRecordId: record.id,
+    });
     await store.markRecordStatus(record.id, "error");
     counts.failed++;
     return true;
@@ -130,6 +138,28 @@ async function flagIfDuplicate(
 
 const WEBSITE_VALIDATION_CONCURRENCY = 5;
 const PAGE_SIZE = 1000;
+
+// entity_match_candidates.match_method/match_score are placeholders this binary
+// matcher approximates, not a computed confidence — see the migration header
+// (20260809150000_create_entity_match_candidates.sql) for the full reasoning.
+const MATCH_METHOD_BY_MATCHED_ON: Record<DuplicateMatch["matchedOn"], string> = {
+  registration_number: "exact_charity_number",
+  name_and_postcode: "fuzzy_name",
+};
+const MATCH_SCORE_BY_MATCHED_ON: Record<DuplicateMatch["matchedOn"], number> = {
+  registration_number: 1.0,
+  name_and_postcode: 0.7,
+};
+
+// entity_match_candidates.source_priority is NOT NULL; lower = higher priority. Per
+// docs/data-model/04-entities.md's legal_name note ("Companies House takes priority
+// over CharityBase"). Falls back to the least-priority value for any future source
+// this list hasn't been updated for yet, rather than failing the insert outright.
+const SOURCE_PRIORITY: Record<string, number> = {
+  companies_house: 1,
+  charity_commission: 2,
+};
+const DEFAULT_SOURCE_PRIORITY = 99;
 
 /**
  * Repeatedly calls fetchPage(from, to) until a page comes back shorter than
@@ -177,6 +207,10 @@ export interface OrganisationWriteStore {
     rawRecordId: string;
     matchedOrganisationId: string;
     matchedOn: DuplicateMatch["matchedOn"];
+    /** record_source, e.g. "charity_commission" / "companies_house" — decides source_priority. */
+    source: string;
+    /** The fields this matcher actually compared — written to entity_match_candidates.match_fields. */
+    matchFields: Record<string, string>;
   }): Promise<{ id: string } | { error: string }>;
   markRecordStatus(
     rawRecordId: string,
@@ -211,20 +245,20 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
       // organisation_identifiers yet (see match-organisations.ts's header), so there is
       // nothing to select. findDuplicateMatch falls back to name + postcode, which is
       // the data this pipeline actually populates.
-      return fetchAllPages((from, to) =>
+      return fetchAllPages(async (from, to) =>
         supabase.from("organisations").select("id, legal_name, postcode").range(from, to),
       );
     },
 
     async loadDismissedMatches(rawRecordId) {
       const { data, error } = await supabase
-        .from("potential_duplicates")
-        .select("matched_organisation_id")
+        .from("entity_match_candidates")
+        .select("candidate_organisation_id")
         .eq("raw_source_record_id", rawRecordId)
-        .eq("status", "not_duplicate");
+        .eq("match_status", "confirmed_new");
 
       if (error) throw error;
-      return (data ?? []).map((row) => row.matched_organisation_id as string);
+      return (data ?? []).map((row) => row.candidate_organisation_id as string);
     },
 
     async insertOrganisation(org) {
@@ -238,13 +272,16 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
       return { id: data.id };
     },
 
-    async flagPotentialDuplicate({ rawRecordId, matchedOrganisationId, matchedOn }) {
+    async flagPotentialDuplicate({ rawRecordId, matchedOrganisationId, matchedOn, source, matchFields }) {
       const { data, error } = await supabase
-        .from("potential_duplicates")
+        .from("entity_match_candidates")
         .insert({
           raw_source_record_id: rawRecordId,
-          matched_organisation_id: matchedOrganisationId,
-          matched_on: matchedOn,
+          candidate_organisation_id: matchedOrganisationId,
+          match_method: MATCH_METHOD_BY_MATCHED_ON[matchedOn],
+          match_score: MATCH_SCORE_BY_MATCHED_ON[matchedOn],
+          match_fields: matchFields,
+          source_priority: SOURCE_PRIORITY[source] ?? DEFAULT_SOURCE_PRIORITY,
         })
         .select("id")
         .single();
@@ -396,16 +433,7 @@ async function promotePendingRecords<TRaw>(
       continue;
     }
 
-    if (
-      await flagIfDuplicate(
-        store,
-        counts,
-        record,
-        org,
-        existingOrganisations,
-        `standardize.${source}.flag_duplicate`,
-      )
-    ) {
+    if (await flagIfDuplicate(store, counts, record, org, existingOrganisations, source)) {
       continue;
     }
 
@@ -500,14 +528,7 @@ export async function promotePendingCharityCommissionRecords(
     }
 
     if (
-      await flagIfDuplicate(
-        store,
-        counts,
-        record,
-        org,
-        existingOrganisations,
-        "standardize.charity_commission.flag_duplicate",
-      )
+      await flagIfDuplicate(store, counts, record, org, existingOrganisations, "charity_commission")
     ) {
       continue;
     }

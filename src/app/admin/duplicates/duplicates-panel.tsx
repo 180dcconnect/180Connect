@@ -1,17 +1,34 @@
 "use client";
 
 import { useState } from "react";
-import type { PotentialDuplicateRow } from "@/lib/duplicates";
+import type { EntityMatchCandidateRow } from "@/lib/duplicates";
 
-const STATUS_STYLE: Record<PotentialDuplicateRow["status"], string> = {
+// "rejected" is part of the underlying match_status enum (a future matcher's "this
+// candidate pairing was wrong" outcome) but decide_duplicate_flag never writes it — see
+// 20260809150000_create_entity_match_candidates.sql's header. Given a style anyway so a
+// row with it doesn't render blank rather than because this admin flow can produce one.
+const STATUS_STYLE: Record<EntityMatchCandidateRow["match_status"], string> = {
   pending: "bg-amber-50 text-amber-800",
-  confirmed_duplicate: "bg-black/5 text-foreground/65",
-  not_duplicate: "bg-green-50 text-green-800",
+  confirmed_match: "bg-black/5 text-foreground/65",
+  confirmed_new: "bg-green-50 text-green-800",
+  rejected: "bg-red-50 text-red-800",
 };
 
-const MATCHED_ON_LABEL: Record<PotentialDuplicateRow["matched_on"], string> = {
-  registration_number: "Registration number",
-  name_and_postcode: "Name and postcode",
+const STATUS_LABEL: Record<EntityMatchCandidateRow["match_status"], string> = {
+  pending: "Pending",
+  confirmed_match: "Confirmed duplicate",
+  confirmed_new: "Not a duplicate",
+  rejected: "Rejected",
+};
+
+// F042's matcher only ever produces exact_charity_number or fuzzy_name (see the
+// migration header for why address_match/manual are reserved for a future matcher);
+// all four are labelled so this doesn't silently drop a row if that changes.
+const MATCH_METHOD_LABEL: Record<EntityMatchCandidateRow["match_method"], string> = {
+  exact_charity_number: "Registration number",
+  fuzzy_name: "Name and postcode",
+  address_match: "Address",
+  manual: "Manual",
 };
 
 function personLabel(person: { full_name: string | null; email: string } | null) {
@@ -19,14 +36,15 @@ function personLabel(person: { full_name: string | null; email: string } | null)
   return person.full_name ?? person.email;
 }
 
-function incomingName(row: PotentialDuplicateRow) {
-  return row.raw_source_record?.raw_payload.charity_name ?? "Unknown incoming record";
+function incomingName(row: EntityMatchCandidateRow) {
+  const payload = row.raw_source_record?.raw_payload;
+  return payload?.charity_name ?? payload?.company_name ?? "Unknown incoming record";
 }
 
 export function DuplicatesPanel({
   initialDuplicates,
 }: {
-  initialDuplicates: PotentialDuplicateRow[];
+  initialDuplicates: EntityMatchCandidateRow[];
 }) {
   const [rows, setRows] = useState(initialDuplicates);
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -37,10 +55,10 @@ export function DuplicatesPanel({
     const response = await fetch("/api/admin/duplicates");
     if (!response.ok) return;
     const body = await response.json();
-    setRows(body.duplicates as PotentialDuplicateRow[]);
+    setRows(body.duplicates as EntityMatchCandidateRow[]);
   }
 
-  async function decide(potentialDuplicateId: string, confirmed: boolean) {
+  async function decide(entityMatchCandidateId: string, confirmed: boolean) {
     setBusy(true);
     setMessage("");
     try {
@@ -48,9 +66,9 @@ export function DuplicatesPanel({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          potentialDuplicateId,
+          entityMatchCandidateId,
           confirmed,
-          note: notes[potentialDuplicateId] ?? "",
+          note: notes[entityMatchCandidateId] ?? "",
         }),
       });
       const body = await response.json();
@@ -71,8 +89,8 @@ export function DuplicatesPanel({
     }
   }
 
-  const pending = rows.filter((row) => row.status === "pending");
-  const decided = rows.filter((row) => row.status !== "pending");
+  const pending = rows.filter((row) => row.match_status === "pending");
+  const decided = rows.filter((row) => row.match_status !== "pending");
 
   return (
     <div className="mt-8 space-y-10">
@@ -96,12 +114,12 @@ export function DuplicatesPanel({
                       Existing record
                     </p>
                     <p className="mt-1 font-bold">
-                      {row.matched_organisation?.legal_name ?? "Unknown charity"}
+                      {row.candidate_organisation?.legal_name ?? "Unknown charity"}
                     </p>
                   </div>
                 </div>
                 <p className="mt-3 text-xs text-foreground/50">
-                  Matched on: {MATCHED_ON_LABEL[row.matched_on]} ·{" "}
+                  Matched on: {MATCH_METHOD_LABEL[row.match_method]} ·{" "}
                   {new Date(row.created_at).toLocaleString("en-GB")}
                 </p>
                 <label className="mt-3 block text-sm font-bold" htmlFor={`note-${row.id}`}>
@@ -166,22 +184,22 @@ export function DuplicatesPanel({
                   <tr key={row.id} className="border-b border-black/5 align-top">
                     <td className="py-3 pr-4 font-medium">{incomingName(row)}</td>
                     <td className="py-3 pr-4">
-                      {row.matched_organisation?.legal_name ?? "Unknown charity"}
+                      {row.candidate_organisation?.legal_name ?? "Unknown charity"}
                     </td>
                     <td className="py-3 pr-4">
-                      <span className={`rounded-full px-2 py-1 text-xs font-bold ${STATUS_STYLE[row.status]}`}>
-                        {row.status === "confirmed_duplicate" ? "Confirmed duplicate" : "Not a duplicate"}
+                      <span className={`rounded-full px-2 py-1 text-xs font-bold ${STATUS_STYLE[row.match_status]}`}>
+                        {STATUS_LABEL[row.match_status]}
                       </span>
                     </td>
                     <td className="py-3 pr-4 text-foreground/65">
-                      {personLabel(row.decided_by_user)}
-                      {row.decision_note && (
-                        <span className="block text-xs text-foreground/50">{row.decision_note}</span>
+                      {personLabel(row.reviewed_by_user)}
+                      {row.notes && (
+                        <span className="block text-xs text-foreground/50">{row.notes}</span>
                       )}
                     </td>
                     <td className="py-3 whitespace-nowrap text-foreground/65">
-                      {row.decided_at
-                        ? new Date(row.decided_at).toLocaleString("en-GB")
+                      {row.reviewed_at
+                        ? new Date(row.reviewed_at).toLocaleString("en-GB")
                         : new Date(row.created_at).toLocaleString("en-GB")}
                     </td>
                   </tr>

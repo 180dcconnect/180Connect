@@ -22,6 +22,8 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
     rawRecordId: string;
     matchedOrganisationId: string;
     matchedOn: string;
+    source: string;
+    matchFields: Record<string, string>;
   }[] = [];
   const statusUpdates: {
     rawRecordId: string;
@@ -45,8 +47,8 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
       inserted.push(org);
       return { id: `org-${nextId++}` };
     },
-    async flagPotentialDuplicate({ rawRecordId, matchedOrganisationId, matchedOn }) {
-      flagged.push({ rawRecordId, matchedOrganisationId, matchedOn });
+    async flagPotentialDuplicate({ rawRecordId, matchedOrganisationId, matchedOn, source, matchFields }) {
+      flagged.push({ rawRecordId, matchedOrganisationId, matchedOn, source, matchFields });
       return { id: `flag-${nextId++}` };
     },
     async markRecordStatus(rawRecordId, status, matchedOrganisationId) {
@@ -199,6 +201,8 @@ describe("promotePendingCharityCommissionRecords — duplicate candidate (F042)"
     assert.equal(flagged.length, 1);
     assert.equal(flagged[0].matchedOrganisationId, "org-existing");
     assert.equal(flagged[0].matchedOn, "name_and_postcode");
+    assert.equal(flagged[0].source, "charity_commission");
+    assert.deepEqual(flagged[0].matchFields, { legal_name: "Test Charity", postcode: "" });
     assert.equal(statusUpdates[0].status, "matched");
     assert.equal(statusUpdates[0].matchedOrganisationId, "org-existing");
   });
@@ -502,6 +506,10 @@ describe("promotePendingCompaniesHouseRecords — duplicate candidate (F042)", (
     assert.equal(inserted.length, 0);
     assert.equal(flagged.length, 1);
     assert.equal(flagged[0].matchedOrganisationId, "org-existing");
+    // The whole point of this regression test: source_priority must reflect the
+    // record actually being promoted (companies_house here), not be left at
+    // whatever the Charity Commission path happens to use.
+    assert.equal(flagged[0].source, "companies_house");
     assert.equal(statusUpdates[0].status, "matched");
   });
 

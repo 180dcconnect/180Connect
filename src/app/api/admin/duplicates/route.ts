@@ -5,9 +5,9 @@ import { createClient } from "@/lib/supabase/server";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
 import {
-  POTENTIAL_DUPLICATE_SELECT,
+  ENTITY_MATCH_CANDIDATE_SELECT,
   duplicateRpcFailure,
-  type PotentialDuplicateRow,
+  type EntityMatchCandidateRow,
 } from "@/lib/duplicates";
 
 /**
@@ -22,7 +22,7 @@ import {
  */
 
 const decideSchema = z.object({
-  potentialDuplicateId: z.uuid(),
+  entityMatchCandidateId: z.uuid(),
   confirmed: z.boolean(),
   note: z.string().trim().optional(),
 });
@@ -41,10 +41,10 @@ export async function GET() {
   const supabase = await createClient();
 
   const { data, error } = await supabase
-    .from("potential_duplicates")
-    .select(POTENTIAL_DUPLICATE_SELECT)
+    .from("entity_match_candidates")
+    .select(ENTITY_MATCH_CANDIDATE_SELECT)
     .order("created_at", { ascending: false })
-    .overrideTypes<PotentialDuplicateRow[], { merge: false }>();
+    .overrideTypes<EntityMatchCandidateRow[], { merge: false }>();
 
   if (error) {
     await reportError(error, { operation: "admin.duplicates.list" });
@@ -85,7 +85,7 @@ export async function PATCH(request: Request) {
   const supabase = await createClient();
 
   const { error } = await supabase.rpc("decide_duplicate_flag", {
-    p_potential_duplicate_id: parsed.data.potentialDuplicateId,
+    p_entity_match_candidate_id: parsed.data.entityMatchCandidateId,
     p_confirmed: parsed.data.confirmed,
     p_note: parsed.data.note || null,
   });
@@ -93,7 +93,7 @@ export async function PATCH(request: Request) {
   if (error) {
     await reportError(error, {
       operation: "admin.duplicates.decide",
-      potentialDuplicateId: parsed.data.potentialDuplicateId,
+      entityMatchCandidateId: parsed.data.entityMatchCandidateId,
     });
     const { status, error: message } = duplicateRpcFailure(error);
     return NextResponse.json({ error: message }, { status });

@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
-import { POTENTIAL_DUPLICATE_SELECT, type PotentialDuplicateRow } from "@/lib/duplicates";
+import { ENTITY_MATCH_CANDIDATE_SELECT, type EntityMatchCandidateRow } from "@/lib/duplicates";
 import { DuplicatesPanel } from "./duplicates-panel";
 
 export default async function DuplicatesPage() {
@@ -15,10 +15,10 @@ export default async function DuplicatesPage() {
   const supabase = await createClient();
 
   const { data, error } = await supabase
-    .from("potential_duplicates")
-    .select(POTENTIAL_DUPLICATE_SELECT)
+    .from("entity_match_candidates")
+    .select(ENTITY_MATCH_CANDIDATE_SELECT)
     .order("created_at", { ascending: false })
-    .overrideTypes<PotentialDuplicateRow[], { merge: false }>();
+    .overrideTypes<EntityMatchCandidateRow[], { merge: false }>();
 
   if (error) {
     await reportError(error, { operation: "admin.duplicates.page_list" });

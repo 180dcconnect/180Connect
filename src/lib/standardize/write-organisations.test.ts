@@ -23,6 +23,7 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
     matchedOrganisationId?: string;
   }[] = [];
   let nextId = 1;
+  const criteriaOutcomes: { rawRecordId: string; outcome: string; reasons: string[] }[] = [];
 
   const store: OrganisationWriteStore = {
     async loadPendingRecords() {
@@ -35,10 +36,14 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
     async markRecordStatus(rawRecordId, status, matchedOrganisationId) {
       statusUpdates.push({ rawRecordId, status, matchedOrganisationId });
     },
+    async recordCriteriaOutcome(rawRecordId, result) {
+      criteriaOutcomes.push({ rawRecordId, outcome: result.outcome, reasons: result.reasons });
+      statusUpdates.push({ rawRecordId, status: "rejected" });
+    },
     ...overrides,
   };
 
-  return { store, inserted, statusUpdates };
+  return { store, inserted, statusUpdates, criteriaOutcomes };
 }
 
 function pendingRecord(id: string, charityName: string): PendingRecord {
@@ -64,6 +69,13 @@ function companiesHousePendingRecord(id: string, companyName: string): PendingRe
     },
   };
 }
+
+const criteriaPass = () => ({
+  outcome: "meets" as const,
+  priority: "standard" as const,
+  healthcareAligned: false,
+  reasons: [],
+});
 
 describe("promotePendingCharityCommissionRecords — valid records", () => {
   it("maps and inserts every pending record, marking each validated", async () => {
@@ -229,6 +241,73 @@ describe("promotePendingCharityCommissionRecords — no store configured", () =>
   });
 });
 
+describe("promotePendingCharityCommissionRecords — F047 client criteria", () => {
+  it("checks every usable incoming record before inserting it", async () => {
+    const checkedTypes: string[] = [];
+    const { store, inserted } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Eligible Charity")];
+      },
+    });
+
+    await promotePendingCharityCommissionRecords(
+      store,
+      async () => ({ status: "missing", url: null, message: "No website provided." }),
+      (input) => {
+      checkedTypes.push(input.organisationType);
+      return { outcome: "meets", priority: "standard", healthcareAligned: false, reasons: [] };
+      },
+    );
+
+    assert.deepEqual(checkedTypes, ["charity"]);
+    assert.equal(inserted.length, 1);
+  });
+
+  it("holds a non-matching record instead of creating an active client", async () => {
+    const { store, inserted, statusUpdates, criteriaOutcomes } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Needs Review")];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionRecords(
+      store,
+      async () => ({ status: "missing", url: null, message: "No website provided." }),
+      () => ({
+        outcome: "needs_review",
+        priority: "standard",
+        healthcareAligned: false,
+        reasons: ["Needs evidence of social purpose."],
+      }),
+    );
+
+    assert.equal(inserted.length, 0);
+    assert.equal(counts.rejected, 1);
+    assert.equal(statusUpdates[0].status, "rejected");
+    assert.equal(criteriaOutcomes[0].outcome, "needs_review");
+    assert.deepEqual(criteriaOutcomes[0].reasons, ["Needs evidence of social purpose."]);
+  });
+
+  it("persists a definite failure with a different outcome from a review candidate", async () => {
+    const { store, criteriaOutcomes } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-fail", "Commercial Firm")];
+      },
+    });
+    await promotePendingCharityCommissionRecords(
+      store,
+      async () => ({ status: "missing", url: null, message: "No website provided." }),
+      () => ({
+        outcome: "does_not_meet",
+        priority: "standard",
+        healthcareAligned: false,
+        reasons: ["Outside the configured target-client criteria."],
+      }),
+    );
+    assert.equal(criteriaOutcomes[0].outcome, "does_not_meet");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // promotePendingCompaniesHouseRecords (F260) — same behaviour as
 // promotePendingCharityCommissionRecords above (they share promotePendingRecords
@@ -237,6 +316,18 @@ describe("promotePendingCharityCommissionRecords — no store configured", () =>
 // ---------------------------------------------------------------------------
 
 describe("promotePendingCompaniesHouseRecords — valid records", () => {
+  it("holds an ambiguous company for admin review under the default F047 policy", async () => {
+    const { store, inserted, criteriaOutcomes } = fakeStore({
+      async loadPendingRecords() {
+        return [companiesHousePendingRecord("raw-review", "Potential Social Enterprise Ltd")];
+      },
+    });
+    const counts = await promotePendingCompaniesHouseRecords(store);
+    assert.equal(inserted.length, 0);
+    assert.equal(counts.rejected, 1);
+    assert.equal(criteriaOutcomes[0].outcome, "needs_review");
+  });
+
   it("maps and inserts every pending record, marking each validated", async () => {
     const { store, inserted, statusUpdates } = fakeStore({
       async loadPendingRecords() {
@@ -247,7 +338,7 @@ describe("promotePendingCompaniesHouseRecords — valid records", () => {
       },
     });
 
-    const counts = await promotePendingCompaniesHouseRecords(store);
+    const counts = await promotePendingCompaniesHouseRecords(store, criteriaPass);
 
     assert.equal(counts.read, 2);
     assert.equal(counts.inserted, 2);
@@ -262,7 +353,7 @@ describe("promotePendingCompaniesHouseRecords — valid records", () => {
 
   it("does nothing when there are no pending records", async () => {
     const { store, inserted } = fakeStore();
-    const counts = await promotePendingCompaniesHouseRecords(store);
+    const counts = await promotePendingCompaniesHouseRecords(store, criteriaPass);
 
     assert.equal(counts.read, 0);
     assert.equal(inserted.length, 0);
@@ -277,7 +368,7 @@ describe("promotePendingCompaniesHouseRecords — valid records", () => {
       },
     });
 
-    await promotePendingCompaniesHouseRecords(store);
+    await promotePendingCompaniesHouseRecords(store, criteriaPass);
 
     assert.equal(requestedSource, "companies_house");
   });
@@ -291,7 +382,7 @@ describe("promotePendingCompaniesHouseRecords — invalid records", () => {
       },
     });
 
-    const counts = await promotePendingCompaniesHouseRecords(store);
+    const counts = await promotePendingCompaniesHouseRecords(store, criteriaPass);
 
     assert.equal(counts.rejected, 1);
     assert.equal(counts.inserted, 0);
@@ -306,7 +397,7 @@ describe("promotePendingCompaniesHouseRecords — invalid records", () => {
       },
     });
 
-    const counts = await promotePendingCompaniesHouseRecords(store);
+    const counts = await promotePendingCompaniesHouseRecords(store, criteriaPass);
 
     assert.equal(counts.rejected, 1);
     assert.equal(inserted.length, 0);
@@ -332,7 +423,7 @@ describe("promotePendingCompaniesHouseRecords — existing internal data preserv
       },
     });
 
-    await promotePendingCompaniesHouseRecords(store);
+    await promotePendingCompaniesHouseRecords(store, criteriaPass);
 
     assert.equal(inserted.length, 1);
   });
@@ -349,7 +440,7 @@ describe("promotePendingCompaniesHouseRecords — write failure", () => {
       },
     });
 
-    const counts = await promotePendingCompaniesHouseRecords(store);
+    const counts = await promotePendingCompaniesHouseRecords(store, criteriaPass);
 
     assert.equal(counts.failed, 1);
     assert.equal(counts.inserted, 0);
@@ -372,7 +463,7 @@ describe("promotePendingCompaniesHouseRecords — write failure", () => {
       },
     });
 
-    const counts = await promotePendingCompaniesHouseRecords(store);
+    const counts = await promotePendingCompaniesHouseRecords(store, criteriaPass);
 
     assert.equal(counts.failed, 1);
     assert.equal(counts.inserted, 1);
@@ -411,7 +502,7 @@ describe("promotePendingCompaniesHouseRecords — malformed raw_payload", () => 
       },
     });
 
-    const counts = await promotePendingCompaniesHouseRecords(store);
+    const counts = await promotePendingCompaniesHouseRecords(store, criteriaPass);
 
     assert.equal(counts.failed, 1);
     assert.equal(counts.inserted, 1);

@@ -207,9 +207,11 @@ async function passesClientCriteria(
 
   // priority/healthcareAligned are passed through to the audit trail (see
   // record_client_criteria_outcome's detail jsonb) but "meets" records below
-  // have nowhere to persist them — ORGANISATIONS has no column for either
-  // (Data Model tab 04); adding one is a schema decision for the Data Model
-  // spreadsheet (AGENTS.md), not something this layer can invent.
+  // are never given an ORGANISATIONS column for either, by design (Bashir,
+  // Project Leader, 9 Aug 2026): priority is a pure function of city/postcode,
+  // both already stored — a stored copy would just be a derived value going
+  // stale, when a filter over those columns gets the same answer on demand.
+  // healthcareAligned has no real signal yet either way (see buildCriteriaInput).
   await store.recordCriteriaOutcome(record.id, criteria, org.organisation_type);
   if (criteria.outcome === "needs_review") counts.needsReview++;
   else counts.doesNotMeet++;

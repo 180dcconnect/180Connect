@@ -198,6 +198,34 @@ export async function sendInvite(
     };
   }
 
+  return mintAndSendInvite(adminClient, invitedByUserId, email, redirectTo, deps, {
+    successEvent: "user.invited",
+    successMessage: `Invite sent to ${email}.`,
+    mintFailureMessage: "Could not send the invite. Try again.",
+  });
+}
+
+/**
+ * The shared tail of `sendInvite` and `resendInvite` (F252): mint a token via
+ * `generateLink` and email it. Both callers reach here only after their own
+ * validation — email format and domain, no existing account, or (for a resend)
+ * a real pending invite to target — so this never re-checks any of that.
+ *
+ * Never returns `ok: false` past the mint step: once `generateLink` succeeds
+ * the account exists (or, for a resend, still does) and the invite is pending
+ * either way, so a delivery failure is a `warning`, not an `error` — the admin
+ * needs to know the mail did not go out, but retrying `sendInvite` would now be
+ * refused as a duplicate, and retrying `resendInvite` is exactly the right fix
+ * and must stay available.
+ */
+async function mintAndSendInvite(
+  adminClient: InviteAdminClient,
+  invitedByUserId: string,
+  email: string,
+  redirectTo: string,
+  deps: SendInviteDeps,
+  outcome: { successEvent: "user.invited" | "user.invite_resent"; successMessage: string; mintFailureMessage: string },
+): Promise<SendInviteOutcome> {
   let tokenHash: string;
   try {
     const { data, error } = await adminClient.auth.admin.generateLink({
@@ -205,7 +233,13 @@ export async function sendInvite(
       email,
       // `data` lands in raw_user_meta_data, which is the only channel
       // app.handle_new_auth_user has for learning who did the inviting — it
-      // fires on the auth.users insert, not on this request.
+      // fires on the auth.users insert, not on this request. A resend passes
+      // the same `invitedByUserId` again rather than the original inviter's,
+      // which is a deliberate simplification: the row already carries
+      // `invited_by_user_id` from the first send, and `handle_new_auth_user`
+      // only ever writes it `on conflict (id) do nothing` — this call cannot
+      // overwrite it. Passed anyway so the metadata reflects who most recently
+      // acted on the invite, if that ever needs to be read.
       options: { redirectTo, data: { invited_by_user_id: invitedByUserId } },
     });
 
@@ -220,13 +254,15 @@ export async function sendInvite(
     });
     return {
       ok: false,
-      state: { status: "error", message: "Could not send the invite. Try again." },
+      state: { status: "error", message: outcome.mintFailureMessage },
     };
   }
 
-  // The account now exists. Everything below can fail without making that untrue,
-  // which is why no path from here returns `ok: false` — the pending invite must
-  // appear in the admin's list either way.
+  // A fresh call to generateLink is what makes the previous link stop working
+  // (F252 AC2/AC3): GoTrue stores one confirmation token per pending user, so
+  // minting a new one overwrites it — the old token no longer matches anything
+  // verifyOtp can find. Nothing in this repo invalidates it; Supabase does,
+  // the same way a second password-reset request invalidates the first.
   const link = `${redirectTo}?token_hash=${encodeURIComponent(tokenHash)}&type=invite`;
   const { subject, text, html } = inviteEmail({
     link,
@@ -251,11 +287,85 @@ export async function sendInvite(
     };
   }
 
-  logSecurityEvent("user.invited", {});
+  logSecurityEvent(outcome.successEvent, {});
   return {
     ok: true,
-    state: { status: "success", message: `Invite sent to ${email}.` },
+    state: { status: "success", message: outcome.successMessage },
   };
+}
+
+/**
+ * Looks up a `public.users` row by id for a resend, returning whether the
+ * invite it carries has already been accepted — or `null` if the row does not
+ * exist at all. A plain function for the same reason `LookupExistingUser` is:
+ * the real query builder is not structurally a `Promise` (see that type's doc).
+ */
+export type LookupPendingInvite = (
+  userId: string,
+) => Promise<{ email: string; accepted: boolean } | null>;
+
+/** Shown when a resend is attempted for an id that no longer has a row. */
+export const INVITE_NOT_FOUND_MESSAGE = "This invite could not be found.";
+
+/**
+ * Shown when a resend is attempted for an invite that was accepted between the
+ * admin's page loading and the click — F252 AC4 enforced here, not only by the
+ * pending-invites list already excluding accepted rows. The list filter is the
+ * common case; this is what makes it correct under a race, not decorative.
+ */
+export const INVITE_ALREADY_ACCEPTED_MESSAGE = "This invite has already been accepted.";
+
+/**
+ * Re-sends an invite for an existing pending row (F252). Deliberately not
+ * `sendInvite` called again: that function's duplicate check exists to refuse
+ * exactly this case (a `public.users` row already present for the email), so a
+ * resend needs its own path that starts from "this row must already exist and
+ * still be pending" rather than "this email must not exist yet".
+ *
+ * Takes a user id, not an email: the caller only ever has one from a row
+ * already rendered in the admin's pending-invites list, and looking the email
+ * up here — rather than trusting one passed in — means the address actually
+ * mailed is always the one the database has, never whatever a client sent.
+ *
+ * Never throws, same contract as `sendInvite`.
+ */
+export async function resendInvite(
+  lookupPendingInvite: LookupPendingInvite,
+  adminClient: InviteAdminClient,
+  invitedByUserId: string,
+  userId: string,
+  redirectTo: string,
+  deps: SendInviteDeps = {},
+): Promise<SendInviteOutcome> {
+  let invite: { email: string; accepted: boolean } | null;
+  try {
+    invite = await lookupPendingInvite(userId);
+  } catch (error) {
+    logSecurityEvent("user.invite_failed", {
+      cause: error instanceof Error ? error.message : "lookup failed",
+      action: "resend",
+    });
+    return {
+      ok: false,
+      state: { status: "error", message: "Could not check this invite. Try again." },
+    };
+  }
+
+  if (!invite) {
+    logSecurityEvent("user.invite_rejected", { reason: "not_found", action: "resend" });
+    return { ok: false, state: { status: "error", message: INVITE_NOT_FOUND_MESSAGE } };
+  }
+
+  if (invite.accepted) {
+    logSecurityEvent("user.invite_rejected", { reason: "already_accepted", action: "resend" });
+    return { ok: false, state: { status: "error", message: INVITE_ALREADY_ACCEPTED_MESSAGE } };
+  }
+
+  return mintAndSendInvite(adminClient, invitedByUserId, invite.email, redirectTo, deps, {
+    successEvent: "user.invite_resent",
+    successMessage: `A new invite was sent to ${invite.email}.`,
+    mintFailureMessage: "Could not resend the invite. Try again.",
+  });
 }
 
 /**

@@ -90,11 +90,11 @@ export async function sendInviteAction(
   const lookupExistingUser = async (email: string) => {
     const { data, error } = await supabase
       .from("users")
-      .select("id")
+      .select("id, deactivated_at")
       .eq("email", email)
-      .maybeSingle<{ id: string }>();
+      .maybeSingle<{ id: string; deactivated_at: string | null }>();
     if (error) throw new Error(error.message);
-    return data;
+    return data ? { id: data.id, deactivatedAt: data.deactivated_at } : null;
   };
 
   const outcome = await sendInvite(

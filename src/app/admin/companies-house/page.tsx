@@ -4,6 +4,7 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { CompaniesHouseImportForm } from "./import-form";
+import { CompaniesHouseBulkSearchForm } from "./bulk-search-form";
 
 export const maxDuration = 60;
 
@@ -56,6 +57,7 @@ export default async function CompaniesHousePage() {
           </Link>
         </div>
 
+        <CompaniesHouseBulkSearchForm configured={configured} />
         <CompaniesHouseImportForm configured={configured} />
 
         <div className="mt-8">

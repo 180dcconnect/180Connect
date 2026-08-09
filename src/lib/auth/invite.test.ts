@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it, mock } from "node:test";
 
 import {
+  DEACTIVATED_ACCOUNT_MESSAGE,
   DUPLICATE_INVITE_MESSAGE,
   INVITE_ALREADY_ACCEPTED_MESSAGE,
   INVITE_ALREADY_OPENED_MESSAGE,
@@ -74,7 +75,9 @@ function fakeAuditLogWriter(behaviour: AuditLogBehaviour = { ok: true }): {
 const REDIRECT_TO = "https://180connect.vercel.app/auth/confirm";
 const INVITED_BY = "admin-1";
 
-type LookupBehaviour = { row: { id: string } | null } | { error: string };
+type LookupBehaviour =
+  | { row: { id: string; deactivatedAt?: string | null } | null }
+  | { error: string };
 
 function fakeLookupClient(behaviour: LookupBehaviour): {
   lookup: LookupExistingUser;
@@ -85,7 +88,10 @@ function fakeLookupClient(behaviour: LookupBehaviour): {
   const lookup: LookupExistingUser = async (email: string) => {
     calls.push(email);
     if ("error" in behaviour) throw new Error(behaviour.error);
-    return behaviour.row;
+    if (!behaviour.row) return null;
+    // Defaults to null (not deactivated) so existing fixtures that don't care
+    // about deactivation don't need updating.
+    return { deactivatedAt: null, ...behaviour.row };
   };
 
   return { lookup, calls };
@@ -235,6 +241,24 @@ describe("sendInvite", () => {
     assert.equal(result.ok, false);
     if (!result.ok) {
       assert.equal(result.state.message, DUPLICATE_INVITE_MESSAGE);
+    }
+    assert.equal(adminCalls.length, 0);
+    assert.ok(logs.some((log) => log.includes("user.invite_rejected")));
+  });
+
+  it("steers to reactivation for an email belonging to a deactivated account, without sending an invite", async () => {
+    const { lookup } = fakeLookupClient({
+      row: { id: "existing-user", deactivatedAt: "2026-01-01T00:00:00Z" },
+    });
+    const { client: admin, calls: adminCalls } = fakeAdminClient({ ok: true });
+
+    const { result, logs } = await silencingLogs(() =>
+      sendInvite(lookup, admin, INVITED_BY, { email: "ada@180dc.org" }, REDIRECT_TO, "180dc.org"),
+    );
+
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.state.message, DEACTIVATED_ACCOUNT_MESSAGE);
     }
     assert.equal(adminCalls.length, 0);
     assert.ok(logs.some((log) => log.includes("user.invite_rejected")));

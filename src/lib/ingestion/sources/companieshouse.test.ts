@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import {
   createCompaniesHouseAdapter,
+  createCompaniesHouseBulkSearchAdapter,
   normalizeRegisteredName,
 } from "./companieshouse.ts";
 
@@ -165,5 +166,103 @@ describe("createCompaniesHouseAdapter", () => {
       },
     );
     assert.equal(calls, 3);
+  });
+});
+
+describe("createCompaniesHouseBulkSearchAdapter", () => {
+  it("shapes search items directly, without fetching a per-company profile", async () => {
+    enableTestKey();
+    const urls: string[] = [];
+    globalThis.fetch = async (input) => {
+      urls.push(String(input));
+      return Response.json({
+        hits: 1,
+        items: [
+          {
+            company_number: "13273297",
+            company_name: "Witsmate Limited",
+            registered_office_address: { postal_code: "WA14 4RW" },
+          },
+        ],
+      });
+    };
+
+    const result = await createCompaniesHouseBulkSearchAdapter({
+      sicCodes: ["62012"],
+      location: "Manchester",
+    }).fetch();
+
+    assert.equal(urls.length, 1);
+    assert.match(urls[0], /\/advanced-search\/companies\?/);
+    assert.match(urls[0], /sic_codes=62012/);
+    assert.match(urls[0], /location=Manchester/);
+    assert.match(urls[0], /company_status=active/);
+    assert.equal(result.records.length, 1);
+    assert.equal(result.records[0].source_record_id, "13273297");
+    assert.equal(result.truncated, false);
+  });
+
+  it("defaults company_status to active and honours an explicit override", async () => {
+    enableTestKey();
+    let requestedUrl = "";
+    globalThis.fetch = async (input) => {
+      requestedUrl = String(input);
+      return Response.json({ hits: 0, items: [] });
+    };
+
+    await createCompaniesHouseBulkSearchAdapter({
+      location: "Leeds",
+      companyStatus: "dissolved",
+    }).fetch();
+
+    assert.match(requestedUrl, /company_status=dissolved/);
+  });
+
+  it("pages through start_index until an empty page is returned", async () => {
+    enableTestKey();
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls++;
+      if (calls === 1) {
+        return Response.json({
+          hits: 150,
+          items: Array.from({ length: 100 }, (_, i) => ({
+            company_number: `${1000 + i}`,
+            company_name: `Company ${i}`,
+          })),
+        });
+      }
+      if (calls === 2) {
+        return Response.json({
+          hits: 150,
+          items: Array.from({ length: 50 }, (_, i) => ({
+            company_number: `${2000 + i}`,
+            company_name: `Company ${i}`,
+          })),
+        });
+      }
+      return Response.json({ hits: 150, items: [] });
+    };
+
+    const result = await createCompaniesHouseBulkSearchAdapter({
+      sicCodes: ["62012"],
+    }).fetch();
+
+    assert.equal(calls, 2);
+    assert.equal(result.records.length, 150);
+    assert.equal(result.truncated, false);
+  });
+
+  it("rejects a search item with no company number", async () => {
+    enableTestKey();
+    globalThis.fetch = async () => Response.json({
+      hits: 1,
+      items: [{ company_name: "No Number Ltd" }],
+    });
+
+    await assert.rejects(
+      () => createCompaniesHouseBulkSearchAdapter({ location: "Leeds" }).fetch(),
+      /missing a company number/,
+    );
   });
 });

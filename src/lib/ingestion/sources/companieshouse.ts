@@ -9,6 +9,13 @@ import type {
 const COMPANIES_HOUSE_URL = "https://api.company-information.service.gov.uk";
 const ITEMS_PER_PAGE = 100;
 const SEARCH_RESULT_CEILING = 1000;
+/**
+ * Confirmed live (2026-08-09): /advanced-search/companies returns a 500 once
+ * start_index reaches 10000, regardless of the query's total `hits` — a hard
+ * pagination ceiling for this endpoint, separate from SEARCH_RESULT_CEILING
+ * above (which is /search/companies, a different endpoint with its own limit).
+ */
+const ADVANCED_SEARCH_CEILING = 10_000;
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 1_000;
@@ -17,9 +24,29 @@ export type CompaniesHouseLookup =
   | { companyNumber: string }
   | { registeredName: string };
 
+/**
+ * Criteria for the bulk /advanced-search/companies endpoint. At least one of
+ * sicCodes/location must be supplied by the caller (enforced at the action
+ * layer, not here) — the full active register alone is 5.5M companies
+ * (confirmed live, 2026-08-09), far past ADVANCED_SEARCH_CEILING.
+ */
+export type CompaniesHouseBulkCriteria = {
+  sicCodes?: string[];
+  location?: string;
+  companyStatus?: string;
+};
+
 type CompaniesHouseSearchItem = {
   company_number?: unknown;
   title?: unknown;
+  [key: string]: unknown;
+};
+
+/** Shape confirmed live (2026-08-09) from /advanced-search/companies items. */
+type CompaniesHouseAdvancedSearchItem = {
+  company_number?: unknown;
+  company_name?: unknown;
+  registered_office_address?: unknown;
   [key: string]: unknown;
 };
 
@@ -210,6 +237,88 @@ export function createCompaniesHouseAdapter(
 
     onError(error: Error) {
       console.error("[companies_house] ingestion failed:", error.message);
+    },
+  };
+}
+
+function shapeAdvancedSearchItem(
+  item: CompaniesHouseAdvancedSearchItem,
+): CommonRecord {
+  if (typeof item.company_number !== "string" || !item.company_number.trim()) {
+    throw new Error("Companies House search result is missing a company number.");
+  }
+  return {
+    source_record_id: normalizeCompanyNumber(item.company_number),
+    raw_payload: item,
+    source_country: "GB",
+    source_registry_name: "Companies House",
+  };
+}
+
+/**
+ * Bulk criteria-based import via /advanced-search/companies. Unlike
+ * createCompaniesHouseAdapter, this does not fetch each company's full
+ * profile — confirmed live (2026-08-09) that advanced-search result items
+ * already carry company_name and registered_office_address, exactly what
+ * standardizeCompaniesHouseRecord reads, so a per-company profile fetch
+ * would only add rate-limited requests with no new information.
+ */
+export function createCompaniesHouseBulkSearchAdapter(
+  criteria: CompaniesHouseBulkCriteria,
+): DataSourceAdapter {
+  return {
+    name: "companies_house",
+
+    async fetch(): Promise<SourceFetchResult> {
+      const headers = authenticationHeaders();
+      const records: CommonRecord[] = [];
+      let truncated = false;
+      let knownHits: number | null = null;
+
+      for (
+        let startIndex = 0;
+        startIndex < ADVANCED_SEARCH_CEILING;
+        startIndex += ITEMS_PER_PAGE
+      ) {
+        if (knownHits !== null && startIndex >= knownHits) break;
+
+        const params = new URLSearchParams({
+          size: String(ITEMS_PER_PAGE),
+          start_index: String(startIndex),
+          company_status: criteria.companyStatus?.trim() || "active",
+        });
+        if (criteria.sicCodes?.length) {
+          params.set("sic_codes", criteria.sicCodes.join(","));
+        }
+        if (criteria.location?.trim()) {
+          params.set("location", criteria.location.trim());
+        }
+
+        const response = await fetchWithRetry(
+          `${COMPANIES_HOUSE_URL}/advanced-search/companies?${params.toString()}`,
+          headers,
+        );
+        const json = await readJson(response);
+        if (!Array.isArray(json.items)) {
+          throw new Error("Companies House response is missing an items array.");
+        }
+        if (typeof json.hits === "number") knownHits = json.hits;
+
+        for (const raw of json.items as CompaniesHouseAdvancedSearchItem[]) {
+          records.push(shapeAdvancedSearchItem(raw));
+        }
+        if (json.items.length === 0) break;
+      }
+
+      if (knownHits !== null && knownHits > ADVANCED_SEARCH_CEILING) {
+        truncated = true;
+      }
+
+      return { records, truncated };
+    },
+
+    onError(error: Error) {
+      console.error("[companies_house] bulk ingestion failed:", error.message);
     },
   };
 }

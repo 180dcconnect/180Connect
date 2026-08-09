@@ -2,11 +2,11 @@
 
 import { useActionState } from "react";
 import {
-  importCompaniesHouse,
+  importCompaniesHouseBulk,
   type CompaniesHouseImportState,
 } from "./actions";
 
-const initialCompaniesHouseImportState: CompaniesHouseImportState = {
+const initialState: CompaniesHouseImportState = {
   kind: "idle",
   message: "",
 };
@@ -17,18 +17,17 @@ const stateStyles = {
   error: "bg-red-50 text-red-900",
 } as const;
 
-export function CompaniesHouseImportForm({ configured }: { configured: boolean }) {
-  const [state, action, pending] = useActionState(
-    importCompaniesHouse,
-    initialCompaniesHouseImportState,
-  );
+export function CompaniesHouseBulkSearchForm({ configured }: { configured: boolean }) {
+  const [state, action, pending] = useActionState(importCompaniesHouseBulk, initialState);
 
   return (
     <div className="mt-8 rounded-xl border border-black/10 p-5">
-      <h2 className="text-lg font-bold">Look up one company</h2>
+      <h2 className="text-lg font-bold">Bulk search and import</h2>
       <p className="mt-2 text-sm text-foreground/65">
-        Enter a company number when known. Otherwise, enter the exact registered
-        name. For matching many companies at once, use bulk search below instead.
+        Searches the Companies House register for companies matching the criteria
+        below and imports every match not already in the ingestion queue. The
+        UK register has over 5 million active companies — enter a SIC code, a
+        location, or both to scope the search.
       </p>
 
       {!configured && (
@@ -40,36 +39,52 @@ export function CompaniesHouseImportForm({ configured }: { configured: boolean }
 
       <form action={action} className="mt-5 space-y-4">
         <div>
-          <label className="block text-sm font-bold" htmlFor="companyNumber">
-            Company number
+          <label className="block text-sm font-bold" htmlFor="sicCodes">
+            SIC code(s)
           </label>
           <input
             className="mt-1 w-full max-w-md rounded-lg border border-black/20 px-3 py-2 text-sm"
             disabled={!configured || pending}
-            id="companyNumber"
-            name="companyNumber"
-            placeholder="For example, 01234567"
+            id="sicCodes"
+            name="sicCodes"
+            placeholder="For example, 62012, 62020"
           />
-          <p className="mt-1 text-xs text-foreground/60">Preferred when available.</p>
+          <p className="mt-1 text-xs text-foreground/60">Comma-separated. Identifies the industry sector.</p>
         </div>
         <div>
-          <label className="block text-sm font-bold" htmlFor="registeredName">
-            Registered name
+          <label className="block text-sm font-bold" htmlFor="location">
+            Location
           </label>
           <input
             className="mt-1 w-full max-w-md rounded-lg border border-black/20 px-3 py-2 text-sm"
             disabled={!configured || pending}
-            id="registeredName"
-            name="registeredName"
-            placeholder="Used only when the company number is unknown"
+            id="location"
+            name="location"
+            placeholder="For example, Manchester"
           />
+        </div>
+        <div>
+          <label className="block text-sm font-bold" htmlFor="companyStatus">
+            Company status
+          </label>
+          <select
+            className="mt-1 w-full max-w-md rounded-lg border border-black/20 px-3 py-2 text-sm"
+            defaultValue="active"
+            disabled={!configured || pending}
+            id="companyStatus"
+            name="companyStatus"
+          >
+            <option value="active">Active</option>
+            <option value="dissolved">Dissolved</option>
+            <option value="liquidation">Liquidation</option>
+          </select>
         </div>
         <button
           className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
           disabled={!configured || pending}
           type="submit"
         >
-          {pending ? "Importing…" : "Import Companies House data"}
+          {pending ? "Searching…" : "Search and import"}
         </button>
       </form>
 

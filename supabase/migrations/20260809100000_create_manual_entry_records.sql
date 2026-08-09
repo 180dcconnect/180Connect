@@ -3,7 +3,7 @@
 -- Source: Data Model tab 03 MANUAL_ENTRY_RECORDS.
 -- Compatibility: additive table and RPCs; no existing rows are changed.
 -- Security: RPC-only writes, submitter/admin reads, audited status transitions.
--- Reversibility: ../rollback/20260807110000_create_manual_entry_records.down.sql
+-- Reversibility: ../rollback/20260809100000_create_manual_entry_records.down.sql
 
 create type public.manual_review_status as enum ('pending', 'approved', 'rejected');
 

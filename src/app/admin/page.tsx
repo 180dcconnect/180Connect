@@ -59,6 +59,12 @@ export default async function AdminPage() {
             <h2 className="font-bold">Manual client entries</h2>
             <p className="mt-1 text-sm text-foreground/65">Review organisations submitted manually by CAMs.</p>
           </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/charity-commission">
+            <h2 className="font-bold">Charity Commission import</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Bring UK charity registration and contact data into the ingestion pipeline.
+            </p>
+          </Link>
         </div>
       </section>
     </main>

@@ -767,3 +767,11 @@ cannot read it. All writes are RPC-only: active CAMs/admins call
 `submit_manual_entry`; only admins call `reject_manual_entry`. Both functions
 self-authorise and write `AUDIT_LOG` in the same transaction. Direct INSERT,
 UPDATE and DELETE privileges are withheld from authenticated users.
+
+# F047 data-quality review flags
+
+`DATA_QUALITY_EVENTS` is readable only by active admins and writable only through
+the service-role validation worker. `record_client_criteria_outcome` is not
+executable by `anon` or `authenticated`; it atomically records the distinct
+`needs_review`/`does_not_meet` rule and holds the raw record out of the active
+client list.

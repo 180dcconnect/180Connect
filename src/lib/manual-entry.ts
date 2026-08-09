@@ -3,6 +3,19 @@ import {
   checkClientCriteria,
   type ClientCriteriaInput,
 } from "./client-criteria.ts";
+import {
+  validateClientEmail,
+  type ClientEmailStatus,
+} from "./client-email-validation.ts";
+import {
+  computeCompletenessScore,
+  type OrganisationType,
+  type StandardOrganisation,
+} from "./standardize/types.ts";
+import {
+  validateWebsiteFormat,
+  type WebsiteStatus,
+} from "./website-validation.ts";
 
 export const manualEntrySchema = z.object({
   legalName: z.string().trim().min(1, "Enter the organisation name.").max(200),
@@ -19,7 +32,12 @@ export type ManualEntryInput = z.infer<typeof manualEntrySchema>;
 export type ManualEntryIntegrationResult =
   | { status: "passed" }
   | { status: "blocked"; message: string }
-  | { status: "not_available"; dependency: "F042" | "F046" };
+  | { status: "not_available"; dependency: "F042" };
+
+export type ManualEntryCriteriaResult = Extract<
+  ManualEntryIntegrationResult,
+  { status: "passed" | "blocked" }
+>;
 
 export type ManualEntryCriteriaEvidence = Omit<ClientCriteriaInput, "organisationType"> & {
   organisationType?: string | null;
@@ -27,15 +45,69 @@ export type ManualEntryCriteriaEvidence = Omit<ClientCriteriaInput, "organisatio
   adminConfirmedEligible?: boolean;
 };
 
+export type ManualEntryFieldReview = {
+  email: ClientEmailStatus;
+  website: WebsiteStatus;
+  warnings: string[];
+};
+
+/**
+ * F045/F046 are field warnings, not record rejection rules. Calling this proves
+ * both checks ran while preserving a useful manual submission when a value is bad.
+ */
+export function reviewManualEntryFields(
+  input: ManualEntryInput,
+  website: WebsiteStatus = validateWebsiteFormat(input.website),
+): ManualEntryFieldReview {
+  const email = validateClientEmail(input.contactEmail);
+  const warnings = [
+    ...(email.status === "invalid" ? [email.message] : []),
+    ...(website.status === "invalid" || website.status === "unreachable"
+      ? [website.message]
+      : []),
+  ];
+  return { email, website, warnings };
+}
+
+/** Standard F041 organisation payload ready for the eventual F042-guarded RPC. */
+export function buildManualOrganisation(
+  input: ManualEntryInput,
+  organisationType: OrganisationType,
+): StandardOrganisation {
+  const email = validateClientEmail(input.contactEmail);
+  const website = validateWebsiteFormat(input.website);
+  const withoutScore: Omit<StandardOrganisation, "data_completeness_score"> = {
+    legal_name: input.legalName.trim(),
+    trading_name: "",
+    country_code: input.countryCode.trim().toUpperCase(),
+    is_international: input.countryCode.trim().toUpperCase() !== "GB",
+    entry_method: "manual",
+    is_verified: false,
+    organisation_type: organisationType,
+    website: website.status === "valid" ? website.url : input.website?.trim() ?? "",
+    contact_email: email.status === "valid" ? email.value : input.contactEmail?.trim() ?? "",
+    address_line_1: "",
+    city: "",
+    postcode: "",
+    geographic_reach: null,
+    outreach_status: "not_contacted",
+    owner_id: null,
+    is_seed: false,
+  };
+  return {
+    ...withoutScore,
+    data_completeness_score: computeCompletenessScore(withoutScore),
+  };
+}
+
 export type ManualEntryApprovalChecks = {
   checkDuplicate(input: ManualEntryInput): Promise<ManualEntryIntegrationResult>;
-  checkWebsite(input: ManualEntryInput): Promise<ManualEntryIntegrationResult>;
 };
 
 /** Apply F047 to manual records without silently guessing a missing organisation type. */
 export function checkManualEntryCriteria(
   evidence?: ManualEntryCriteriaEvidence,
-): ManualEntryIntegrationResult {
+): ManualEntryCriteriaResult {
   const organisationType = evidence?.organisationType?.trim();
   if (!organisationType) {
     return {
@@ -68,7 +140,6 @@ export async function canApproveManualEntry(
 ): Promise<{ ok: true } | { ok: false; messages: string[] }> {
   const results = await Promise.all([
     checks.checkDuplicate(input),
-    checks.checkWebsite(input),
     Promise.resolve(checkManualEntryCriteria(criteriaEvidence)),
   ]);
   const messages = results.flatMap((result) => {

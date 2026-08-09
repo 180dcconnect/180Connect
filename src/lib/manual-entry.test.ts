@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildManualOrganisation,
   canApproveManualEntry,
   checkManualEntryCriteria,
   manualEntrySchema,
+  reviewManualEntryFields,
   type ManualEntryApprovalChecks,
 } from "./manual-entry.ts";
 
@@ -18,22 +20,70 @@ describe("canApproveManualEntry", () => {
   it("fails closed while any dependency integration is unavailable", async () => {
     const checks: ManualEntryApprovalChecks = {
       checkDuplicate: async () => ({ status: "not_available", dependency: "F042" }),
-      checkWebsite: async () => ({ status: "passed" }),
     };
     const result = await canApproveManualEntry(input, checks, { organisationType: "charity" });
     assert.equal(result.ok, false);
     if (!result.ok) assert.match(result.messages[0], /F042/);
   });
-  it("allows approval only after F042, F046 and the real F047 check pass", async () => {
+  it("allows approval only after F042 and the real F047 check pass", async () => {
     const pass = async () => ({ status: "passed" as const });
     assert.deepEqual(
       await canApproveManualEntry(
         input,
-        { checkDuplicate: pass, checkWebsite: pass },
+        { checkDuplicate: pass },
         { organisationType: "charity", countryCode: "GB" },
       ),
       { ok: true },
     );
+  });
+});
+
+describe("reviewManualEntryFields", () => {
+  it("flags invalid email and website fields without rejecting the record", () => {
+    const review = reviewManualEntryFields(
+      { ...input, contactEmail: "not-an-email", website: "broken website" },
+    );
+    assert.equal(review.email.status, "invalid");
+    assert.equal(review.website.status, "invalid");
+    assert.equal(review.warnings.length, 2);
+  });
+
+  it("does not turn missing optional fields into invalid-field warnings", () => {
+    const review = reviewManualEntryFields(input);
+    assert.equal(review.email.status, "missing");
+    assert.equal(review.website.status, "missing");
+    assert.deepEqual(review.warnings, []);
+  });
+});
+
+describe("buildManualOrganisation", () => {
+  it("builds the standard F041 shape with F043 manual provenance", () => {
+    const organisation = buildManualOrganisation(
+      {
+        ...input,
+        countryCode: "fr",
+        website: "https://example.org",
+        contactEmail: " HELLO@EXAMPLE.ORG ",
+      },
+      "charity",
+    );
+    assert.equal(organisation.entry_method, "manual");
+    assert.equal(organisation.organisation_type, "charity");
+    assert.equal(organisation.country_code, "FR");
+    assert.equal(organisation.is_international, true);
+    assert.equal(organisation.contact_email, "hello@example.org");
+    assert.equal(organisation.website, "https://example.org/");
+    assert.equal(organisation.outreach_status, "not_contacted");
+    assert.equal(organisation.owner_id, null);
+  });
+
+  it("preserves invalid field values so warnings do not discard useful data", () => {
+    const organisation = buildManualOrganisation(
+      { ...input, website: "broken website", contactEmail: "bad email" },
+      "other",
+    );
+    assert.equal(organisation.website, "broken website");
+    assert.equal(organisation.contact_email, "bad email");
   });
 });
 

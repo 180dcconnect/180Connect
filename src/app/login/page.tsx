@@ -9,12 +9,17 @@ export default async function LoginPage({
 }) {
   const params = await searchParams;
   const notice =
-    params["password-reset"] === "success"
+    params["invite-accepted"] === "success"
       ? {
           tone: "success" as const,
-          message: "Password updated. Log in with your new password.",
+          message: "Account created. Log in to get started.",
         }
-      : signedOutNotice(params.signed_out);
+      : params["password-reset"] === "success"
+        ? {
+            tone: "success" as const,
+            message: "Password updated. Log in with your new password.",
+          }
+        : signedOutNotice(params.signed_out);
   return (
     <main className="flex flex-1 items-center justify-center p-4 sm:p-8">
       <div className="flex w-full max-w-6xl flex-col gap-6 lg:flex-row">

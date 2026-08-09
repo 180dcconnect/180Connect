@@ -8,11 +8,10 @@ import {
 } from "./permissions.ts";
 import type { User } from "@supabase/supabase-js";
 
-function approvedUser(): User {
+function testUser(): User {
   return {
     id: "11111111-1111-1111-1111-111111111111",
     email: "cam@180dc.org",
-    app_metadata: { account_status: "approved" },
   } as unknown as User;
 }
 
@@ -21,7 +20,6 @@ function approvedUser(): User {
 // sends a refused request fails to compile.
 const ALL_REASONS: Record<PermissionFailureReason, true> = {
   unauthenticated: true,
-  not_approved: true,
   inactive: true,
   profile_missing: true,
   forbidden: true,
@@ -33,8 +31,8 @@ describe("admin route boundary (F017 AC2)", () => {
     // against the permission every admin route gates on, and the refusal it
     // produces decides the redirect. This is the boundary, end to end.
     const refusal = authorizeUserProfile(
-      approvedUser(),
-      { id: approvedUser().id, full_name: "CAM", role: "cam", is_active: true },
+      testUser(),
+      { id: testUser().id, full_name: "CAM", role: "cam", is_active: true },
       "user:manage",
     );
 
@@ -52,8 +50,8 @@ describe("admin route boundary (F017 AC2)", () => {
 
   it("sends a viewer the same way — no role but admin reaches an admin route", () => {
     const refusal = authorizeUserProfile(
-      approvedUser(),
-      { id: approvedUser().id, full_name: "Viewer", role: "viewer", is_active: true },
+      testUser(),
+      { id: testUser().id, full_name: "Viewer", role: "viewer", is_active: true },
       "user:manage",
     );
     assert.deepEqual(refusal, { ok: false, reason: "forbidden" });
@@ -61,14 +59,9 @@ describe("admin route boundary (F017 AC2)", () => {
   });
 
   it("sends an unusable session to the login page, not through the dashboard", () => {
-    // /dashboard refuses all four of these itself, so routing them there would
+    // /dashboard refuses all three of these itself, so routing them there would
     // only add a redirect the user never sees.
-    for (const reason of [
-      "unauthenticated",
-      "not_approved",
-      "inactive",
-      "profile_missing",
-    ] as const) {
+    for (const reason of ["unauthenticated", "inactive", "profile_missing"] as const) {
       assert.equal(adminRouteDestination(reason), "/login", reason);
     }
   });

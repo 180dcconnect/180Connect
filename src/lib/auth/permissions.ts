@@ -16,7 +16,6 @@ export type Permission = (typeof PERMISSIONS)[number];
 
 export type PermissionFailureReason =
   | "unauthenticated"
-  | "not_approved"
   | "inactive"
   | "profile_missing"
   | "forbidden";
@@ -24,7 +23,6 @@ export type PermissionFailureReason =
 export type AuthorizableUser = {
   id: string;
   email?: string;
-  app_metadata: unknown;
 };
 
 export type UserProfile = {
@@ -61,13 +59,6 @@ export function authorizeUserProfile(
   permission?: Permission,
 ): AuthorizedProfileResult {
   if (!user) return { ok: false, reason: "unauthenticated" };
-  const appMetadata =
-    user.app_metadata && typeof user.app_metadata === "object"
-      ? user.app_metadata as Record<string, unknown>
-      : {};
-  if (appMetadata.account_status !== "approved") {
-    return { ok: false, reason: "not_approved" };
-  }
   if (!profile) return { ok: false, reason: "profile_missing" };
   if (!profile.is_active) return { ok: false, reason: "inactive" };
   if (!isAppRole(profile.role)) return { ok: false, reason: "forbidden" };

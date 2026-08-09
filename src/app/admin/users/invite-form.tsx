@@ -14,7 +14,7 @@ export function InviteForm() {
     <form action={formAction} className="mt-4 flex flex-wrap items-end gap-3" noValidate>
       <div className="flex flex-col gap-1.5">
         <label htmlFor="invite-email" className="text-xs font-bold">
-          Invite a new CAM
+          Invite a new team member
         </label>
         <input
           id="invite-email"
@@ -27,6 +27,21 @@ export function InviteForm() {
           className="h-10 w-64 rounded-lg border border-black/15 bg-white px-3 text-sm outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/20 aria-invalid:border-red-500"
           required
         />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="invite-role" className="text-xs font-bold">
+          Role
+        </label>
+        <select
+          id="invite-role"
+          name="role"
+          defaultValue="cam"
+          className="h-10 rounded-lg border border-black/15 bg-white px-3 text-sm outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/20"
+        >
+          <option value="cam">CAM</option>
+          <option value="admin">Admin</option>
+          <option value="viewer">Viewer</option>
+        </select>
       </div>
       <button
         type="submit"

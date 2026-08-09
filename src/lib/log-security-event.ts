@@ -22,8 +22,11 @@ export type SecurityEvent =
   | "session.recovery_confined"
   | "user.invited"
   | "user.invite_resent"
+  | "user.invite_cancelled"
   | "user.invite_rejected"
   | "user.invite_failed"
+  | "user.invite_role_failed"
+  | "user.invite_cancel_audit_failed"
   | "user.invite_accept_failed";
 
 export type SecurityEventMeta = Record<string, string | number | boolean | undefined>;

@@ -105,7 +105,7 @@ export function TeamPanel({
 
       <hr className="my-8 border-black/10" />
 
-      <h2 className="text-xl font-bold">Invite a CAM</h2>
+      <h2 className="text-xl font-bold">Invite a team member</h2>
       <InviteForm />
 
       <h2 className="mt-8 text-xl font-bold">Pending invites</h2>

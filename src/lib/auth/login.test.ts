@@ -25,11 +25,11 @@ const VALID: LoginInput = {
   captchaToken: "turnstile-token",
 };
 
-function makeUser(accountStatus: string | undefined): User {
+function makeUser(): User {
   return {
     id: "user-1",
     email: "ada@180dc.org",
-    app_metadata: { account_status: accountStatus },
+    app_metadata: {},
   } as unknown as User;
 }
 
@@ -198,7 +198,7 @@ describe("normalizeEmail", () => {
 
 describe("attemptLogin — validation", () => {
   it("rejects an email outside the allowed domain and never contacts Supabase", async () => {
-    const { client, calls } = fakeClient({ user: makeUser("approved") });
+    const { client, calls } = fakeClient({ user: makeUser() });
     const { result } = await silencingLogs(() =>
       attemptLogin(client, { ...VALID, email: "ada@gmail.com" }),
     );
@@ -210,7 +210,7 @@ describe("attemptLogin — validation", () => {
   });
 
   it("honours a configured domain other than the default", async () => {
-    const { client } = fakeClient({ user: makeUser("approved") });
+    const { client } = fakeClient({ user: makeUser() });
     const { result } = await silencingLogs(() =>
       attemptLogin(client, { ...VALID, email: "ada@example.org" }, "example.org"),
     );
@@ -219,7 +219,7 @@ describe("attemptLogin — validation", () => {
   });
 
   it("rejects a malformed email", async () => {
-    const { client, calls } = fakeClient({ user: makeUser("approved") });
+    const { client, calls } = fakeClient({ user: makeUser() });
     const { result } = await silencingLogs(() =>
       attemptLogin(client, { ...VALID, email: "not-an-email" }),
     );
@@ -229,7 +229,7 @@ describe("attemptLogin — validation", () => {
   });
 
   it("rejects an empty password", async () => {
-    const { client, calls } = fakeClient({ user: makeUser("approved") });
+    const { client, calls } = fakeClient({ user: makeUser() });
     const { result } = await silencingLogs(() => attemptLogin(client, { ...VALID, password: "" }));
 
     assert.equal(rejected(result).fieldErrors?.password?.[0], "Enter your password.");
@@ -237,7 +237,7 @@ describe("attemptLogin — validation", () => {
   });
 
   it("rejects a missing password field rather than coercing it", async () => {
-    const { client, calls } = fakeClient({ user: makeUser("approved") });
+    const { client, calls } = fakeClient({ user: makeUser() });
     const { result } = await silencingLogs(() =>
       attemptLogin(client, { ...VALID, password: undefined }),
     );
@@ -247,7 +247,7 @@ describe("attemptLogin — validation", () => {
   });
 
   it("echoes the normalised email back so the user does not retype it", async () => {
-    const { client } = fakeClient({ user: makeUser("approved") });
+    const { client } = fakeClient({ user: makeUser() });
     const { result } = await silencingLogs(() =>
       attemptLogin(client, { ...VALID, email: "  Ada@180DC.org ", password: "" }),
     );
@@ -258,7 +258,7 @@ describe("attemptLogin — validation", () => {
 
 describe("attemptLogin — CAPTCHA", () => {
   it("refuses to submit credentials when the CAPTCHA has not been solved", async () => {
-    const { client, calls } = fakeClient({ user: makeUser("approved") });
+    const { client, calls } = fakeClient({ user: makeUser() });
     const { result } = await silencingLogs(() =>
       attemptLogin(client, { ...VALID, captchaToken: "" }),
     );
@@ -268,7 +268,7 @@ describe("attemptLogin — CAPTCHA", () => {
   });
 
   it("forwards the token to Supabase when it is present", async () => {
-    const { client, calls } = fakeClient({ user: makeUser("approved") });
+    const { client, calls } = fakeClient({ user: makeUser() });
     await silencingLogs(() => attemptLogin(client, VALID));
 
     assert.equal(calls.signIn[0]?.captchaToken, "turnstile-token");
@@ -325,19 +325,9 @@ describe("attemptLogin — credentials", () => {
   });
 });
 
-describe("attemptLogin — account status", () => {
-  it("signs an unapproved user straight back out and reports pending activation (AC4)", async () => {
-    const { client, calls } = fakeClient({ user: makeUser("pending") });
-    const { result } = await silencingLogs(() => attemptLogin(client, VALID));
-
-    const state = rejected(result);
-    assert.equal(state.status, "pending");
-    assert.match(state.message ?? "", /pending activation/i);
-    assert.equal(calls.signOut, 1, "the session must not survive the check");
-  });
-
+describe("attemptLogin — active status", () => {
   it("turns a suspended user away and closes the session it just opened (F013 AC2)", async () => {
-    const { client, calls } = fakeClient({ user: makeUser("approved") });
+    const { client, calls } = fakeClient({ user: makeUser() });
     const { result } = await silencingLogs(() =>
       attemptLogin(client, VALID, undefined, undefined, async () => false),
     );
@@ -353,7 +343,7 @@ describe("attemptLogin — account status", () => {
   });
 
   it("admits an active user (F013 — the check only bites when is_active is false)", async () => {
-    const { client } = fakeClient({ user: makeUser("approved") });
+    const { client } = fakeClient({ user: makeUser() });
     const { result } = await silencingLogs(() =>
       attemptLogin(client, VALID, undefined, undefined, async () => true),
     );
@@ -364,7 +354,7 @@ describe("attemptLogin — account status", () => {
   it("admits the user when the status cannot be read, leaving the dashboard gate to decide", async () => {
     // A missing service-role key must not lock the whole team out of logging in.
     // getCurrentActor still refuses a suspended account on the very next request.
-    const { client } = fakeClient({ user: makeUser("approved") });
+    const { client } = fakeClient({ user: makeUser() });
     const { result } = await silencingLogs(() =>
       attemptLogin(client, VALID, undefined, undefined, async () => null),
     );
@@ -389,16 +379,8 @@ describe("attemptLogin — account status", () => {
     );
   });
 
-  it("treats a user with no account_status as unapproved", async () => {
-    const { client, calls } = fakeClient({ user: makeUser(undefined) });
-    const { result } = await silencingLogs(() => attemptLogin(client, VALID));
-
-    assert.equal(rejected(result).status, "pending");
-    assert.equal(calls.signOut, 1);
-  });
-
-  it("admits an approved user (AC2)", async () => {
-    const { client, calls } = fakeClient({ user: makeUser("approved") });
+  it("admits the user on valid credentials with no suspension reader configured (AC2)", async () => {
+    const { client, calls } = fakeClient({ user: makeUser() });
     const { result } = await silencingLogs(() => attemptLogin(client, VALID));
 
     assert.deepEqual(result, { ok: true });
@@ -428,7 +410,7 @@ describe("attemptLogin — secrets", () => {
     const password = "s3cret-never-log-me";
     const cases: Parameters<typeof fakeClient>[0][] = [
       { error: "Invalid login credentials" },
-      { user: makeUser("pending") },
+      { user: makeUser() },
       { throws: new Error("boom") },
     ];
 
@@ -444,7 +426,7 @@ describe("attemptLogin — secrets", () => {
   });
 
   it("does not echo the password back on a validation failure", async () => {
-    const { client } = fakeClient({ user: makeUser("approved") });
+    const { client } = fakeClient({ user: makeUser() });
     const { result } = await silencingLogs(() =>
       attemptLogin(client, { email: "ada@gmail.com", password: "s3cret", captchaToken: "t" }),
     );
@@ -478,7 +460,7 @@ describe("attemptLogin — throttle (F227)", () => {
   }
 
   it("refuses a throttled address before the password reaches Supabase", async () => {
-    const { client, calls } = fakeClient({ user: makeUser("approved") });
+    const { client, calls } = fakeClient({ user: makeUser() });
     const { throttle } = fakeThrottle(new Date(Date.now() + 120_000));
 
     const { result } = await silencingLogs(() =>
@@ -490,7 +472,7 @@ describe("attemptLogin — throttle (F227)", () => {
   });
 
   it("checks the throttle with the normalised address", async () => {
-    const { client } = fakeClient({ user: makeUser("approved") });
+    const { client } = fakeClient({ user: makeUser() });
     const { throttle, calls } = fakeThrottle(null);
 
     await silencingLogs(() =>
@@ -501,7 +483,7 @@ describe("attemptLogin — throttle (F227)", () => {
   });
 
   it("does not check the throttle until the CAPTCHA token is present", async () => {
-    const { client } = fakeClient({ user: makeUser("approved") });
+    const { client } = fakeClient({ user: makeUser() });
     const { throttle, calls } = fakeThrottle(null);
 
     await silencingLogs(() =>
@@ -552,7 +534,7 @@ describe("attemptLogin — throttle (F227)", () => {
   });
 
   it("clears the count on a correct password", async () => {
-    const { client } = fakeClient({ user: makeUser("approved") });
+    const { client } = fakeClient({ user: makeUser() });
     const { throttle, calls } = fakeThrottle(null);
 
     const { result } = await silencingLogs(() =>
@@ -563,20 +545,8 @@ describe("attemptLogin — throttle (F227)", () => {
     assert.deepEqual(calls.cleared, ["ada@180dc.org"]);
   });
 
-  it("clears the count for a correct password on an unapproved account", async () => {
-    const { client } = fakeClient({ user: makeUser("pending") });
-    const { throttle, calls } = fakeThrottle(null);
-
-    const { result } = await silencingLogs(() =>
-      attemptLogin(client, VALID, undefined, throttle),
-    );
-
-    assert.equal(rejected(result).status, "pending");
-    assert.deepEqual(calls.cleared, ["ada@180dc.org"], "a right password is not a brute force");
-  });
-
   it("never logs the throttled address", async () => {
-    const { client } = fakeClient({ user: makeUser("approved") });
+    const { client } = fakeClient({ user: makeUser() });
     const { throttle } = fakeThrottle(new Date(Date.now() + 120_000));
 
     const { logs } = await silencingLogs(() =>

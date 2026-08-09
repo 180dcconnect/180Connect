@@ -3,14 +3,39 @@ import { describe, it, mock } from "node:test";
 
 import {
   DUPLICATE_INVITE_MESSAGE,
+  INVITE_ALREADY_ACCEPTED_MESSAGE,
   INVITE_EXPIRY_HOURS,
+  INVITE_NOT_FOUND_MESSAGE,
   escapeHtml,
   inviteEmail,
+  resendInvite,
   sendInvite,
   type InviteAdminClient,
   type InviteSender,
   type LookupExistingUser,
+  type LookupPendingInvite,
 } from "./invite.ts";
+
+const RESEND_USER_ID = "user-42";
+
+type PendingLookupBehaviour =
+  | { row: { email: string; accepted: boolean } | null }
+  | { error: string };
+
+function fakePendingLookup(behaviour: PendingLookupBehaviour): {
+  lookup: LookupPendingInvite;
+  calls: string[];
+} {
+  const calls: string[] = [];
+
+  const lookup: LookupPendingInvite = async (userId: string) => {
+    calls.push(userId);
+    if ("error" in behaviour) throw new Error(behaviour.error);
+    return behaviour.row;
+  };
+
+  return { lookup, calls };
+}
 
 const REDIRECT_TO = "https://180connect.vercel.app/auth/confirm";
 const INVITED_BY = "admin-1";
@@ -337,5 +362,117 @@ describe("inviteEmail", () => {
 describe("escapeHtml", () => {
   it("escapes the five characters that matter in an attribute or a body", () => {
     assert.equal(escapeHtml(`<>&"'`), "&lt;&gt;&amp;&quot;&#39;");
+  });
+});
+
+describe("resendInvite", () => {
+  it("refuses when no row exists for the id, without calling the admin API", async () => {
+    const { lookup } = fakePendingLookup({ row: null });
+    const { client: admin, calls: adminCalls } = fakeAdminClient({ ok: true });
+    const { send } = fakeSender();
+
+    const { result, logs } = await silencingLogs(() =>
+      resendInvite(lookup, admin, INVITED_BY, RESEND_USER_ID, REDIRECT_TO, { send }),
+    );
+
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.state.message, INVITE_NOT_FOUND_MESSAGE);
+    }
+    assert.equal(adminCalls.length, 0);
+    assert.ok(logs.some((log) => log.includes("not_found")));
+  });
+
+  it("refuses to resend an invite that has already been accepted (AC4)", async () => {
+    const { lookup } = fakePendingLookup({
+      row: { email: "ada@180dc.org", accepted: true },
+    });
+    const { client: admin, calls: adminCalls } = fakeAdminClient({ ok: true });
+    const { send } = fakeSender();
+
+    const { result, logs } = await silencingLogs(() =>
+      resendInvite(lookup, admin, INVITED_BY, RESEND_USER_ID, REDIRECT_TO, { send }),
+    );
+
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.state.message, INVITE_ALREADY_ACCEPTED_MESSAGE);
+    }
+    assert.equal(adminCalls.length, 0, "an accepted invite must never mint a new token");
+    assert.ok(logs.some((log) => log.includes("already_accepted")));
+  });
+
+  it("reports a lookup failure as a generic error, without calling the admin API", async () => {
+    const { lookup } = fakePendingLookup({ error: "connection reset" });
+    const { client: admin, calls: adminCalls } = fakeAdminClient({ ok: true });
+    const { send } = fakeSender();
+
+    const { result } = await silencingLogs(() =>
+      resendInvite(lookup, admin, INVITED_BY, RESEND_USER_ID, REDIRECT_TO, { send }),
+    );
+
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.doesNotMatch(result.state.message ?? "", /connection reset/);
+    }
+    assert.equal(adminCalls.length, 0);
+  });
+
+  it("mints a fresh token for the looked-up email and emails it (AC2, AC3)", async () => {
+    const { lookup, calls: lookupCalls } = fakePendingLookup({
+      row: { email: "ada@180dc.org", accepted: false },
+    });
+    const { client: admin, calls: adminCalls } = fakeAdminClient({ ok: true });
+    const { send, sent } = fakeSender();
+
+    const { result, logs } = await silencingLogs(() =>
+      resendInvite(lookup, admin, INVITED_BY, RESEND_USER_ID, REDIRECT_TO, { send }),
+    );
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.match(result.state.message ?? "", /ada@180dc\.org/);
+    }
+    assert.deepEqual(lookupCalls, [RESEND_USER_ID], "looks up by id, not a client-supplied email");
+    assert.equal(adminCalls.length, 1);
+    assert.equal(adminCalls[0].email, "ada@180dc.org");
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].text, new RegExp(`token_hash=${TOKEN_HASH}`));
+    assert.ok(logs.some((log) => log.includes("user.invite_resent")));
+  });
+
+  it("reports a mint failure without leaking the cause", async () => {
+    const { lookup } = fakePendingLookup({
+      row: { email: "ada@180dc.org", accepted: false },
+    });
+    const { client: admin } = fakeAdminClient({ error: "quota exceeded" });
+    const { send } = fakeSender();
+
+    const { result, logs } = await silencingLogs(() =>
+      resendInvite(lookup, admin, INVITED_BY, RESEND_USER_ID, REDIRECT_TO, { send }),
+    );
+
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.doesNotMatch(result.state.message ?? "", /quota/);
+    }
+    assert.ok(logs.some((log) => log.includes("user.invite_failed")));
+  });
+
+  it("reports an undelivered resend as a warning, the same as a first send", async () => {
+    const { lookup } = fakePendingLookup({
+      row: { email: "ada@180dc.org", accepted: false },
+    });
+    const { client: admin } = fakeAdminClient({ ok: true });
+    const { send } = fakeSender({ status: "failed", reason: "smtp rejected" });
+
+    const { result } = await silencingLogs(() =>
+      resendInvite(lookup, admin, INVITED_BY, RESEND_USER_ID, REDIRECT_TO, { send }),
+    );
+
+    assert.equal(result.ok, true, "the token was still minted, so this is not an error");
+    if (result.ok) {
+      assert.equal(result.state.status, "warning");
+    }
   });
 });

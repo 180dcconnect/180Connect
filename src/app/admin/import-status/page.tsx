@@ -18,6 +18,7 @@
 // not just the status badge — knowing something failed without knowing why
 // still sends someone to the logs, which is what this AC exists to avoid.
 
+import { Fragment } from "react";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
@@ -101,8 +102,8 @@ export default async function AdminImportStatusPage() {
             </thead>
             <tbody>
               {rows.map((run) => (
-                <>
-                  <tr key={run.id} className="border-b border-foreground/5">
+                <Fragment key={run.id}>
+                  <tr className="border-b border-foreground/5">
                     <td className="py-2 pr-4 font-mono text-xs">
                       {run.api_source}
                     </td>
@@ -127,7 +128,7 @@ export default async function AdminImportStatusPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>

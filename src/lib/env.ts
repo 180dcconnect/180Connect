@@ -214,6 +214,31 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     description:
       "CharityBase API key for charity data ingestion (F038/F031). GraphQL API — sent as `Authorization: Apikey <key>`. Not yet required — becomes required once F031 (CharityBase data import) ships, and CharityBase's own API is currently down on their end.",
   },
+  {
+    name: "CHARITY_COMMISSION_API_KEY",
+    required: false,
+    secret: true,
+    description:
+      "Charity Commission API key for charity data ingestion (F038/F033). Sent as `Ocp-Apim-Subscription-Key`. Not yet required — becomes required once F033 (Charity Commission data import) ships.",
+  },
+  {
+    name: "CHARITY_COMMISSION_BACKFILL_START",
+    required: false,
+    secret: false,
+    description:
+      "Start date (YYYY-MM-DD) for Charity Commission imports via GetSearchCharityByRegDate (F033). Optional — defaults to 2000-01-01 if unset.",
+    validate: (value) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(value) ? null : "must be in YYYY-MM-DD format",
+  },
+  {
+    name: "CHARITY_COMMISSION_BACKFILL_END",
+    required: false,
+    secret: false,
+    description:
+      "End date (YYYY-MM-DD) for Charity Commission imports via GetSearchCharityByRegDate (F033). Optional — defaults to today if unset.",
+    validate: (value) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(value) ? null : "must be in YYYY-MM-DD format",
+  },
 ];
 
 export type EnvProblem = {

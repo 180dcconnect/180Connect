@@ -2523,16 +2523,22 @@ declare
   v_run uuid := '47000000-0000-4000-a000-000000000001';
   v_review uuid := '47000000-0000-4000-a000-000000000002';
   v_fail uuid := '47000000-0000-4000-a000-000000000003';
+  v_flip uuid := '47000000-0000-4000-a000-000000000004';
   v_count bigint;
+  v_detail jsonb;
+  v_actor uuid;
+  v_resolved boolean;
+  v_events_before bigint;
 begin
   if not tests.tables_exist('data_quality_events', 'raw_source_records', 'ingestion_runs') then
-    return next skip(5, 'F047 data quality migration not yet applied');
+    return next skip(11, 'F047 data quality migration not yet applied');
     return;
   end if;
   perform tests.seed();
 
   return next ok(
-    not has_function_privilege('authenticated', 'public.record_client_criteria_outcome(uuid,text,text,text)', 'EXECUTE'),
+    not has_function_privilege('authenticated',
+      'public.record_client_criteria_outcome(uuid,text,text,text,text,boolean)', 'EXECUTE'),
     'authenticated users cannot forge client-criteria outcomes');
 
   insert into public.ingestion_runs (id, api_source, triggered_by, job_status)
@@ -2541,16 +2547,63 @@ begin
     (id, ingestion_run_id, record_source, source_record_id, raw_payload, checksum)
   values
     (v_review, v_run, 'companies_house', 'f047-review', '{}'::jsonb, 'f047-review'),
-    (v_fail, v_run, 'companies_house', 'f047-fail', '{}'::jsonb, 'f047-fail')
+    (v_fail, v_run, 'companies_house', 'f047-fail', '{}'::jsonb, 'f047-fail'),
+    (v_flip, v_run, 'companies_house', 'f047-flip', '{}'::jsonb, 'f047-flip')
   on conflict (record_source, source_record_id) do nothing;
 
-  perform public.record_client_criteria_outcome(v_review, 'needs_review', 'company', 'Needs social-purpose evidence.');
-  perform public.record_client_criteria_outcome(v_fail, 'does_not_meet', 'commercial', 'Outside configured criteria.');
+  perform public.record_client_criteria_outcome(
+    v_review, 'needs_review', 'company', 'Needs social-purpose evidence.', 'standard', false);
+  perform public.record_client_criteria_outcome(
+    v_fail, 'does_not_meet', 'commercial', 'Outside configured criteria.', 'south_yorkshire', true);
 
   return next is((select rule_name from public.data_quality_events where raw_source_record_id = v_review),
     'client_criteria_needs_review', 'ambiguous candidates retain a queryable review flag');
   return next is((select rule_name from public.data_quality_events where raw_source_record_id = v_fail),
     'client_criteria_does_not_meet', 'definite failures retain a distinct queryable flag');
+
+  -- AGENTS.md / docs/audit-log-pattern.md: excluding a record from the active
+  -- client list is a status change and must be audited in the same transaction.
+  select actor_user_id, detail into v_actor, v_detail
+    from public.audit_log
+   where action = 'client_criteria_rejected' and target_id = v_fail
+   order by created_at desc limit 1;
+  return next is(v_actor, null, 'the import pipeline has no end-user actor, so actor_user_id is null');
+  return next is(
+    jsonb_build_object('outcome', v_detail->>'outcome', 'priority', v_detail->>'priority',
+      'healthcare_aligned', (v_detail->>'healthcare_aligned')::boolean),
+    jsonb_build_object('outcome', 'does_not_meet', 'priority', 'south_yorkshire', 'healthcare_aligned', true),
+    'the audit row carries the outcome plus the priority/healthcare-alignment signals'
+  );
+
+  -- Re-running the same outcome with unchanged reasons is a no-op: it must not
+  -- reset an admin's prior resolution of that exact issue, and must not audit
+  -- a second time.
+  update public.data_quality_events set resolved = true, resolved_at = now(), resolved_by_user_id = v_admin
+   where raw_source_record_id = v_review and rule_name = 'client_criteria_needs_review';
+  select count(*) into v_events_before from public.audit_log where action = 'client_criteria_rejected';
+  perform public.record_client_criteria_outcome(
+    v_review, 'needs_review', 'company', 'Needs social-purpose evidence.', 'standard', false);
+  select resolved into v_resolved from public.data_quality_events
+   where raw_source_record_id = v_review and rule_name = 'client_criteria_needs_review';
+  return next is(v_resolved, true, 're-recording an unchanged outcome does not un-resolve an admin''s review');
+  return next is(
+    (select count(*) from public.audit_log where action = 'client_criteria_rejected'),
+    v_events_before, 'an unchanged no-op re-evaluation is not audited a second time');
+
+  -- Flipping outcome (needs_review -> does_not_meet) on re-evaluation must not
+  -- leave the old outcome's row dangling open forever.
+  perform public.record_client_criteria_outcome(
+    v_flip, 'needs_review', 'company', 'Needs social-purpose evidence.', 'standard', false);
+  perform public.record_client_criteria_outcome(
+    v_flip, 'does_not_meet', 'commercial', 'Confirmed outside criteria.', 'standard', false);
+  return next is(
+    (select resolved from public.data_quality_events
+      where raw_source_record_id = v_flip and rule_name = 'client_criteria_needs_review'),
+    true, 'the superseded outcome from before a re-evaluation flip is closed out, not left dangling');
+  return next is(
+    (select resolved from public.data_quality_events
+      where raw_source_record_id = v_flip and rule_name = 'client_criteria_does_not_meet'),
+    false, 'the current outcome after a flip is still open for review');
 
   perform tests.login_as(v_cam);
   select count(*) into v_count from public.data_quality_events where raw_source_record_id in (v_review, v_fail);

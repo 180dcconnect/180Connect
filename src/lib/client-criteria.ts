@@ -39,11 +39,19 @@ export function checkClientCriteria(
   const healthcareAligned = config.healthcareKeywords.some((keyword) =>
     missionContext.includes(keyword.toLowerCase()),
   );
+  const priority = local ? "south_yorkshire" : "standard";
 
-  if (config.acceptedOrganisationTypes.includes(type as never)) {
+  // `type` is an arbitrary normalised string (source data or, eventually, Manual
+  // Entry free text), not a checked OrganisationType — `includes` is typed against
+  // the config arrays' element type, so the membership check itself has to compare
+  // as plain strings rather than assert `type` into that type.
+  const acceptedTypes: readonly string[] = config.acceptedOrganisationTypes;
+  const reviewTypes: readonly string[] = config.reviewOrganisationTypes;
+
+  if (acceptedTypes.includes(type)) {
     return {
       outcome: "meets",
-      priority: local ? "south_yorkshire" : "standard",
+      priority,
       healthcareAligned,
       reasons: [
         "Organisation type meets the target-client criteria.",
@@ -54,10 +62,10 @@ export function checkClientCriteria(
     };
   }
 
-  if (config.reviewOrganisationTypes.includes(type as never)) {
+  if (reviewTypes.includes(type)) {
     return {
       outcome: "needs_review",
-      priority: local ? "south_yorkshire" : "standard",
+      priority,
       healthcareAligned,
       reasons: [
         "Organisation type needs evidence of non-profit or social purpose before activation.",
@@ -67,7 +75,7 @@ export function checkClientCriteria(
 
   return {
     outcome: "does_not_meet",
-    priority: local ? "south_yorkshire" : "standard",
+    priority,
     healthcareAligned,
     reasons: ["Organisation type is outside the configured target-client criteria."],
   };

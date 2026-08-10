@@ -59,7 +59,13 @@ export function FirstRunGuide({
   function run(action: () => Promise<{ ok: boolean }>) {
     setFailed(false);
     startTransition(async () => {
-      const result = await action();
+      let result: { ok: boolean };
+      try {
+        result = await action();
+      } catch {
+        setFailed(true);
+        return;
+      }
       if (!result.ok) {
         setFailed(true);
         return;

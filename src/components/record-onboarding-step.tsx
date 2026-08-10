@@ -17,15 +17,16 @@ import { recordOnboardingStepAction } from "@/lib/onboarding-actions";
  * mount from making that two.
  */
 export function RecordOnboardingStep({ step }: { step: string }) {
-  const recorded = useRef(false);
+  const recorded = useRef<string | null>(null);
 
   useEffect(() => {
-    if (recorded.current) return;
-    recorded.current = true;
+    if (recorded.current === step) return;
+    recorded.current = step;
     // Fire and forget: this is bookkeeping behind a page the CAM is already reading,
     // and a failure here must never interrupt or block what they came to do. The
-    // action reports its own errors to ERROR_LOG.
-    void recordOnboardingStepAction(step);
+    // action reports its own errors to ERROR_LOG; the catch here only stops an
+    // unexpected rejection surfacing as an unhandled promise rejection in devtools.
+    void recordOnboardingStepAction(step).catch(() => {});
   }, [step]);
 
   return null;

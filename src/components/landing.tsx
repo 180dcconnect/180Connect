@@ -22,8 +22,14 @@ const stack: Variants = {
 };
 
 const item: Variants = {
-  hidden: { opacity: 0, y: 14 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.7, ease: EASE } },
+  hidden: { opacity: 0, y: 14, filter: "blur(12px)", scale: 0.98 },
+  show: {
+    opacity: 1,
+    y: 0,
+    filter: "blur(0px)",
+    scale: 1,
+    transition: { duration: 0.75, ease: EASE },
+  },
 };
 
 export default function Landing() {
@@ -34,8 +40,8 @@ export default function Landing() {
       <main className="relative flex flex-1 flex-col overflow-hidden bg-background">
         <motion.div
           className="absolute top-0 left-1/2 -translate-x-1/2 w-fit max-w-4xl h-14 bg-black z-50 rounded-b-[1.25rem] flex items-center justify-between gap-8 sm:gap-14 px-7 sm:px-10 text-white shadow-xl"
-          initial={{ y: "-100%" }}
-          animate={{ y: 0 }}
+          initial={{ y: "-100%", filter: "blur(8px)", opacity: 0 }}
+          animate={{ y: 0, filter: "blur(0px)", opacity: 1 }}
           transition={{ duration: 0.8, ease: EASE, delay: 0.1 }}
         >
           {/* Left inverted corner */}
@@ -105,38 +111,38 @@ export default function Landing() {
           <div className="flex flex-1 flex-col items-center justify-center text-center">
             <div className="max-w-[60rem]">
               <motion.h1
-                variants={item}
+                variants={stack}
                 className="font-body text-[clamp(1.75rem,3.75vw,3.25rem)] font-black leading-[1.2] tracking-[-0.035em] text-foreground flex flex-wrap items-center justify-center gap-x-4 gap-y-4"
               >
-                <span>Replace</span>
+                <motion.span variants={item}>Replace</motion.span>
                 
-                <span className="inline-flex items-center gap-3">
+                <motion.span variants={item} className="inline-flex items-center gap-3">
                   <span className="flex items-center justify-center rounded-2xl bg-white p-2.5 ring-1 ring-black/10 shadow-sm dark:bg-white/10 dark:ring-white/20">
                     <img src="https://upload.wikimedia.org/wikipedia/commons/3/30/Google_Sheets_logo_%282014-2020%29.svg" alt="Google Sheets" className="h-[0.9em] w-[0.9em] object-contain" />
                   </span>
                   <span>spreadsheets,</span>
-                </span>
+                </motion.span>
 
-                <span className="inline-flex items-center gap-3">
+                <motion.span variants={item} className="inline-flex items-center gap-3">
                   <span className="flex items-center justify-center rounded-2xl bg-white p-2.5 ring-1 ring-black/10 shadow-sm dark:bg-white/10 dark:ring-white/20">
                     <img src="https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg" alt="Gmail" className="h-[0.9em] w-[0.9em] object-contain" />
                   </span>
                   <span>follow-ups</span>
-                </span>
+                </motion.span>
                 
-                <span>and</span>
+                <motion.span variants={item}>and</motion.span>
                 
-                <span className="inline-flex items-center gap-3">
+                <motion.span variants={item} className="inline-flex items-center gap-3">
                   <span className="flex items-center justify-center rounded-2xl bg-white p-2.5 ring-1 ring-black/10 shadow-sm dark:bg-white/10 dark:ring-white/20">
                     <img src="https://www.vectorlogo.zone/logos/monday/monday-icon.svg" alt="monday.com" className="h-[0.9em] w-[0.9em] object-contain" />
                   </span>
                   <span>tracking.</span>
-                </span>
+                </motion.span>
                 
-                <span className="inline-flex items-center gap-3">
+                <motion.span variants={item} className="inline-flex items-center gap-3">
                   <span>All in one platform</span>
                   <img src="https://framerusercontent.com/images/lpSL1f275shJ97WvsBBHaO4zSGI.png?scale-down-to=1024&width=1385&height=1432" alt="180Connect Platform" className="h-[1.2em] w-auto object-contain" />
-                </span>
+                </motion.span>
               </motion.h1>
 
               <motion.div

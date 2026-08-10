@@ -1830,6 +1830,85 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Assign Client Owner (F163) — the admin path through reassign_ownership, and the
+-- direct owner_id UPDATE it replaces (20260810110000)
+-- ---------------------------------------------------------------------------
+create or replace function tests.suite_assign_client_owner()
+returns setof text language plpgsql as $$
+declare
+  v_admin    uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a    uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b    uuid := '00000000-0000-4000-a000-000000000003';
+  v_org      uuid := '00000000-0000-4000-d000-000000000003';
+  v_owner    uuid;
+  v_detail   jsonb;
+begin
+  if not tests.tables_exist('organisations', 'users', 'audit_log')
+     or to_regprocedure('public.reassign_ownership(uuid[], uuid, text, uuid)') is null then
+    return next skip(5, 'F163 assign-owner path not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  insert into public.organisations (id, legal_name, entry_method, organisation_type, owner_id)
+  values (v_org, 'Assign Owner Fixture Ltd', 'manual', 'other', null)
+  on conflict (id) do update set owner_id = null;
+
+  -- The gap this migration closes: 20260806140000 already removed a CAM's own
+  -- direct-claim branch; this one removes the admin's, so no role can move owner_id
+  -- outside claim_organisation/reassign_ownership. USING blocks this before WITH
+  -- CHECK, same as the CAM case above, so assert the resulting row, not the SQLSTATE.
+  perform tests.sqlstate_of(v_admin, format(
+    'update public.organisations set owner_id = %L where id = %L', v_cam_a, v_org));
+  select owner_id into v_owner from public.organisations where id = v_org;
+  return next is(v_owner, null::uuid,
+    'a direct UPDATE no longer lets an admin set owner_id; reassign_ownership is the only path'
+  );
+
+  return next ok(
+    not has_column_privilege('authenticated', 'public.organisations', 'owner_id', 'UPDATE'),
+    'authenticated holds no UPDATE privilege on organisations.owner_id'
+  );
+  return next ok(
+    has_column_privilege('authenticated', 'public.organisations', 'legal_name', 'UPDATE'),
+    'authenticated can still update other organisations columns (canonical editing works)'
+  );
+
+  -- The actual F163 flow: an admin assigns an unowned client to a CAM, from the
+  -- client profile, no p_from_user_id (the client has no current owner to guard
+  -- against). AC1/AC3.
+  perform tests.sqlstate_of(v_admin, format(
+    'select public.reassign_ownership(array[%L]::uuid[], %L, ''initial assignment'', null)',
+    v_org, v_cam_a));
+  select owner_id into v_owner from public.organisations where id = v_org;
+  return next is(v_owner, v_cam_a, 'admin assigns an unowned client to a CAM via reassign_ownership');
+
+  -- AC2: reassigning a client that already has an owner is not silent — it is
+  -- audited with both the outgoing and incoming CAM, same shape whether the client
+  -- started unowned or owned. The UI shows the conflict warning before this call;
+  -- the audit row is what proves it actually happened.
+  perform tests.sqlstate_of(v_admin, format(
+    'select public.reassign_ownership(array[%L]::uuid[], %L, ''reassigning to CAM B'', null)',
+    v_org, v_cam_b));
+  -- Not `order by created_at desc`: both calls run in this same test transaction,
+  -- so now() — and every audit row's created_at — is identical between them
+  -- (Postgres freezes now() for the transaction's duration). The reason string is
+  -- the only thing that tells the two rows apart here.
+  select detail into v_detail
+    from public.audit_log
+   where action = 'ownership_reassigned'
+     and target_id = v_org
+     and detail->>'reason' = 'reassigning to CAM B';
+  return next is(
+    jsonb_build_object('from', v_detail->>'from', 'to', v_detail->>'to'),
+    jsonb_build_object('from', v_cam_a::text, 'to', v_cam_b::text),
+    'reassigning an already-owned client is audited with both the outgoing and incoming owner'
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- claim_organisation — a CAM taking ownership of an unowned client (F162)
 -- ---------------------------------------------------------------------------
 -- Own fixture organisations (e000 prefix) rather than the shared 'Unowned Org Ltd':
@@ -2738,6 +2817,7 @@ select * from tests.suite_default_role();
 select * from tests.suite_views();
 select * from tests.suite_actions();
 select * from tests.suite_reassign();
+select * from tests.suite_assign_client_owner();
 select * from tests.suite_claim_ownership();
 select * from tests.suite_outreach_status();
 select * from tests.suite_offboard_unified();

@@ -2512,6 +2512,112 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- onboarding state (F255)
+-- ---------------------------------------------------------------------------
+-- Spec: docs/rls-permission-matrix.md §3.12. This is the one place in the schema
+-- where a state-changing write is governed by RLS and a column grant rather than a
+-- SECURITY DEFINER RPC, so the policies are the whole enforcement — there is no
+-- function re-checking anything behind them. Two properties matter most: a CAM can
+-- only ever write their own progress, and nobody can delete progress to walk a
+-- dismissed guide back into view.
+
+create or replace function tests.suite_onboarding()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b  uuid := '00000000-0000-4000-a000-000000000003';
+  v_admin  uuid := '00000000-0000-4000-a000-000000000001';
+  v_count  bigint;
+  v_marker timestamptz;
+begin
+  if not tests.tables_exist('user_onboarding_steps') then
+    return next skip(9, 'F255 onboarding state not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- The guide's own writes: a CAM records their own progress and reads it back.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.user_onboarding_steps (user_id, step_key) values (%L, %L)',
+      v_cam_a, 'outreach_preferences')),
+    null,
+    'a CAM records their own completed step'
+  );
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.user_onboarding_steps;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'a CAM sees their own progress');
+
+  -- The property the whole table hangs on: progress is per-user and unforgeable.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.user_onboarding_steps (user_id, step_key) values (%L, %L)',
+      v_cam_b, 'outreach_preferences')),
+    '42501',
+    'a CAM cannot record progress on another CAM''s behalf'
+  );
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.user_onboarding_steps;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a CAM cannot read another CAM''s progress');
+
+  -- Admins are deliberately not granted a read here. F187 (admin views a CAM's
+  -- settings) can add one with a stated reason when it is actually built; until
+  -- then this asserts the absence is intentional rather than forgotten.
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.user_onboarding_steps;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'an admin has no read on onboarding progress until F187 asks for one');
+
+  -- Append-only. A user who could delete their own rows could make a dismissed
+  -- guide reappear step by step, which is the failure AC5 exists to prevent.
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      'delete from public.user_onboarding_steps'),
+    '42501',
+    'progress cannot be deleted, by its owner or anyone else'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      'update public.user_onboarding_steps set completed_at = now()'),
+    '42501',
+    'progress cannot be rewritten after the fact'
+  );
+
+  -- The guide-level state on USERS: writable by its owner through the column grant
+  -- added in 20260805100000, and by nobody else. The row policy
+  -- (users_update_self_or_admin) is what confines it; the grant is what permits it
+  -- at all.
+  perform tests.login_as(v_cam_a);
+  update public.users set onboarding_dismissed_at = now() where id = v_cam_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select onboarding_dismissed_at into v_marker from public.users where id = v_cam_a;
+  return next ok(v_marker is not null, 'a CAM can dismiss their own guide');
+
+  perform tests.login_as(v_cam_a);
+  update public.users set onboarding_dismissed_at = now() where id = v_cam_b;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select onboarding_dismissed_at into v_marker from public.users where id = v_cam_b;
+  -- A blocked UPDATE removes zero rows and raises nothing (§4), so this asserts the
+  -- absence of the write rather than an error code.
+  return next ok(v_marker is null, 'a CAM cannot dismiss another CAM''s guide');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- client criteria review persistence (F047)
 -- ---------------------------------------------------------------------------
 
@@ -2637,6 +2743,7 @@ select * from tests.suite_outreach_status();
 select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
 select * from tests.suite_source_tracking();
+select * from tests.suite_onboarding();
 select * from tests.suite_client_criteria();
 
 select * from finish();

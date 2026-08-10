@@ -118,7 +118,7 @@
 --                 | match_status/source_priority mapping confirmed with Bashir, 9 Aug
 --                 | 2026. docs/rls-permission-matrix.md §3.15 updated alongside.
 --
--- Reversibility: paired rollback in ../rollback/20260809150000_create_entity_match_candidates.down.sql
+-- Reversibility: paired rollback in ../rollback/20260810120000_create_entity_match_candidates.down.sql
 
 create table public.entity_match_candidates (
   id                          uuid primary key default gen_random_uuid(),

@@ -599,7 +599,7 @@ up front rather than negotiated later.
 ### 3.15 Entity match candidates — service-role write, admin decides
 
 Backs F042 Deduplicate Clients (#42),
-`supabase/migrations/20260809150000_create_entity_match_candidates.sql`. Uses the
+`supabase/migrations/20260810120000_create_entity_match_candidates.sql`. Uses the
 `ENTITY_MATCH_CANDIDATES` table already reserved in the Data Model (tab 03, added 23
 Jul 2026) rather than a new table — an earlier draft of this migration created its own
 `POTENTIAL_DUPLICATES` table; corrected in review, 9 Aug 2026. Same shape as §3.14: no

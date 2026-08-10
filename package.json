@@ -19,6 +19,8 @@
     "ingest:check-connection": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/test-runner-connection.mts",
     "standardize:run-charity-commission": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-standardize-charity-commission.mts",
     "standardize:run-companies-house": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-standardize-companies-house.mts",
+    "standardize:run-three-sixty-giving": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-standardize-three-sixty-giving.mts",
+    "ingest:run-three-sixty-giving": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-three-sixty-giving.mts",
     "ingest:check-isolation": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/test-isolation.mts"
   },
   "dependencies": {

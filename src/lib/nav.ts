@@ -13,18 +13,44 @@ export type NavItem = {
   href: string;
   label: string;
   description: string;
-  permission: Permission;
+  // Omit for a destination every signed-in role can reach (e.g. viewing your
+  // own profile) — there's no permission that means "everyone".
+  permission?: Permission;
 };
 
 export const NAV_ITEMS: readonly NavItem[] = [
   {
-    href: "/admin/users",
-    label: "Team management",
-    description: "Assign roles and suspend or reactivate access.",
+    href: "/clients",
+    label: "Clients",
+    description: "The active working list. Tap a client to suppress it.",
+    permission: "client:view",
+  },
+  {
+    href: "/admin",
+    label: "Admin workspace",
+    description: "Manage users, audit activity and import Companies House data.",
     permission: "user:manage",
+  },
+  {
+    href: "/admin/import-status",
+    label: "Import status",
+    description: "See whether data ingestion runs succeeded, partially succeeded, or failed.",
+    permission: "platform-settings:manage",
+  },
+  {
+    href: "/profile",
+    label: "My profile",
+    description: "View your name, email, and role.",
+  },
+  {
+    href: "/settings/outreach-preferences",
+    label: "Outreach preferences",
+    description: "Set the geography, sector and size focus for your queue.",
   },
 ];
 
 export function navItemsFor(role: AppRole): NavItem[] {
-  return NAV_ITEMS.filter((item) => hasPermission(role, item.permission));
+  return NAV_ITEMS.filter(
+    (item) => !item.permission || hasPermission(role, item.permission),
+  );
 }

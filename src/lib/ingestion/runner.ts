@@ -22,6 +22,25 @@ import type {
 
 export type InvalidRecord = { index: number; reason: string };
 
+/**
+ * Supabase's PostgrestError (and similar client errors) carry a `.message` but
+ * are plain objects, not `instanceof Error` — `String(err)` on those collapses
+ * to the useless "[object Object]", which is what ended up in `ingestion_runs`
+ * and error tracking instead of the real reason (e.g. "Invalid API key").
+ */
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    "message" in err &&
+    typeof (err as { message: unknown }).message === "string"
+  ) {
+    return (err as { message: string }).message;
+  }
+  return String(err);
+}
+
 export type Partitioned = {
   rows: RawRecordRow[];
   /** Unchanged records, plus duplicates collapsed within this same batch. */
@@ -122,7 +141,7 @@ async function runOneSource(
       status: "failed",
       counts,
       written,
-      error: err instanceof Error ? err.message : String(err),
+      error: errorMessage(err),
     };
   }
 
@@ -176,7 +195,7 @@ async function runOneSource(
   } catch (err) {
     // Anything not yet written failed with the batch.
     counts.failed = counts.fetched - counts.inserted - counts.skipped;
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     source.onError(err as Error);
 
     try {

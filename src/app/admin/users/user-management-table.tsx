@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 
 export type TeamUser = {
   id: string;
@@ -35,13 +35,20 @@ function displayName(user: TeamUser) {
 }
 
 export function UserManagementTable({
-  initialUsers,
+  users,
+  setUsers,
   currentUserId,
 }: {
-  initialUsers: TeamUser[];
+  users: TeamUser[];
+  /**
+   * Lifted to team-panel.tsx (F011) so a realtime change from another admin and a
+   * change this table just made through `/api/admin/users` land in the same state —
+   * the panel's subscription and this table's PATCH calls would otherwise race to
+   * overwrite each other's `setUsers`.
+   */
+  setUsers: Dispatch<SetStateAction<TeamUser[]>>;
   currentUserId: string;
 }) {
-  const [users, setUsers] = useState(initialUsers);
   const [message, setMessage] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
   /** The user an offboarding is being composed for, or null when the form is closed. */

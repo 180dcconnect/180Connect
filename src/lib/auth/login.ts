@@ -4,7 +4,7 @@
  * `src/app/login/actions.ts` cannot be imported by a test: `"use server"` and
  * `next/navigation`'s `redirect` only work inside a request. So the part worth
  * testing — domain restriction, the deliberately vague credentials message,
- * the pending-activation branch — lives here behind an injectable client, the
+ * the suspended-account branch — lives here behind an injectable client, the
  * same shape `signOutAndReport` uses. The action keeps only the Supabase
  * client construction and the redirect.
  */
@@ -15,7 +15,6 @@ import { z } from "zod";
 import { logSecurityEvent } from "../log-security-event.ts";
 import { emailField, safeValidate } from "../validation.ts";
 import { NO_THROTTLE, throttleMessage, type LoginThrottle } from "./login-throttle.ts";
-import { permissionFailureMessage, requireApprovedUser } from "./require-approved-user.ts";
 
 /** Used when AUTH_ALLOWED_EMAIL_DOMAIN is unset. */
 export const DEFAULT_ALLOWED_EMAIL_DOMAIN = "180dc.org";
@@ -288,28 +287,12 @@ export async function attemptLogin(
       };
     }
 
-    // The password was right, so this was never a brute force — clear the count
-    // even if the account turns out to be unapproved below.
+    // The password was right, so this was never a brute force — clear the count.
     await throttle.clear(email);
 
-    const permission = requireApprovedUser(data.user);
-    if (!permission.ok) {
-      await client.auth.signOut();
-      logSecurityEvent("permission.denied", { form: "login", reason: permission.reason });
-      return {
-        ok: false,
-        state: {
-          status: "pending",
-          message: permissionFailureMessage(permission.reason),
-          email,
-        },
-      };
-    }
-
     // F013 AC2: a suspended user is turned away here rather than allowed to reach a
-    // dashboard that immediately redirects them back. `requireApprovedUser` cannot
-    // see this — it reads app_metadata.account_status, which suspension does not
-    // touch. The session opened by signInWithPassword is closed again on the way out.
+    // dashboard that immediately redirects them back. The session opened by
+    // signInWithPassword is closed again on the way out.
     if (readActiveStatus) {
       const isActive = await readActiveStatus(data.user.id);
       if (isActive === false) {

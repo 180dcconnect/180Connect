@@ -129,12 +129,23 @@ supabase migration up                # apply pending migrations
 supabase db reset                    # full rebuild (tests migrations from clean)
 ```
 
-### Apply to staging (after review)
+### Apply to staging / production
+
+Both are automatic — `.github/workflows/migrations.yml` runs `db push` on every
+push to `dev` (-> staging) and every push to `main` (-> production), after the
+`verify` job passes. There is no manual step. The human gate is the merge that
+lands on that branch: staging via the PR into `dev`, production via the
+`dev -> main` PR, which is a deliberate PM decision (SOP §7).
+
+Manual push (e.g. workflow is down) is still possible for either target:
 ```bash
-supabase link --project-ref cgbfhhdeapasniudyyds
-supabase db push                     # applies pending migrations to staging
+supabase link --project-ref cgbfhhdeapasniudyyds   # staging
+# or
+supabase link --project-ref tugfhwiqvwrpvawpjwmd   # production
+supabase db push
 ```
-Production `db push` happens only through the release process, never ad hoc.
+Prefer letting CI do it — a manual push skips the RLS/pgTAP/anon-lockout gate
+that `verify` runs first.
 
 ### New developer setup
 ```bash

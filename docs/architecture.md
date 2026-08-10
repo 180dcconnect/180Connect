@@ -49,11 +49,14 @@ so they describe the version we actually run.
 - **Session/auth**: Supabase Auth via `@supabase/ssr`. There's no
   `getServerSession`-style helper — `createClient().auth.getUser()` is the
   primitive, used directly in Server Components/Actions.
-- **Approval gate**: a logged-in Supabase user isn't necessarily allowed in —
-  `user.app_metadata.account_status` must equal `"approved"`. This check is
-  centralised in `src/lib/auth/require-approved-user.ts`
-  (`requireApprovedUser`, `permissionFailureMessage`) rather than duplicated
-  per caller. Both `login/actions.ts` and `dashboard/page.tsx` use it.
+- **Access gate**: a logged-in Supabase user isn't necessarily allowed in —
+  `getCurrentActor()` (`src/lib/auth/actor.ts`) loads their `public.users` row
+  and calls `authorizeUserProfile()` (`src/lib/auth/permissions.ts`), which
+  checks `is_active` and role/permission. This is the one check, used by every
+  page and Server Action; there is no separate `app_metadata`-based approval
+  gate (an early `account_status` claim was never wired to any write path and
+  was removed — activation is `is_active` alone, per the team's F013/F014
+  decision).
 - **Roles and RLS live in the database, not in application code** (F224).
   `public.users.role` is a `public.user_role` enum — `'cam' | 'admin' |
   'viewer'` — and every table enables row-level security with its policies
@@ -68,10 +71,10 @@ so they describe the version we actually run.
   before adding a table, and add the matching policies in the creating
   migration. Role changes go through the `public.set_user_role` admin RPC, not
   a direct update.
-- **`requireApprovedUser` is not the authorisation layer.** It gates access to
-  the app; RLS decides what a user can see and do once inside. The service-role
-  key bypasses RLS entirely, which is how the seed script works — never read it
-  from a client component.
+- **`getCurrentActor`/`authorizeUserProfile` is not the authorisation layer.**
+  It gates access to the app; RLS decides what a user can see and do once
+  inside. The service-role key bypasses RLS entirely, which is how the seed
+  script works — never read it from a client component.
 
 ## Validation
 
@@ -144,7 +147,7 @@ variable is, where to get its value, and how local/staging/production differ.
 | Path | What it's for |
 | --- | --- |
 | `validation.ts` | Shared Zod-based input validation |
-| `auth/require-approved-user.ts` | The one permission check that exists today |
+| `auth/permissions.ts` | Central permission check (`authorizeUserProfile`) — unauthenticated/inactive/profile/role |
 | `log-security-event.ts` | Structured logging for validation/permission/auth failures |
 | `error-logging.ts` | Unhandled-error capture, scrubbing, Sentry/console dispatch |
 | `env.ts` | Environment variable schema and startup validation |

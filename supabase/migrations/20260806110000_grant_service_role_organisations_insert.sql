@@ -1,0 +1,26 @@
+-- Schema change approval record (SOP §7):
+--   Change        | Grant INSERT + SELECT on public.organisations to service_role.
+--   Reason        | F041's write layer (promotePendingCharityCommissionRecords)
+--                 | runs as an unattended backend script using the service-role
+--                 | client (bypasses RLS by design, same pattern as F038's
+--                 | ingestion runner), not as a logged-in app user. The
+--                 | organisations migration only granted authenticated, so the
+--                 | script currently gets "permission denied for table
+--                 | organisations" — service_role was never granted access.
+--                 | SELECT is required alongside INSERT: the write layer does
+--                 | `.insert(org).select("id").single()` to capture the new row's
+--                 | id for raw_source_records.matched_organisation_id, and Postgres
+--                 | checks SELECT privilege on any column referenced by a
+--                 | RETURNING-style clause, not just INSERT privilege on the table.
+--   Compatibility | Additive only. Does not change what authenticated users can
+--                 | do, does not touch RLS policies (service_role bypasses RLS
+--                 | regardless of this grant). No existing behaviour changes.
+--   Data migration| None.
+--   Security      | Grants only INSERT + SELECT, not UPDATE/DELETE, since that is
+--                 | all this script currently needs. service_role already
+--                 | bypasses RLS entirely by Postgres design, so this grant does
+--                 | not weaken row-level access control, it only lets the
+--                 | already-privileged role reach this specific table.
+--   Approved by   | Bashir (Project Leader), 2026-08-05.
+--
+grant insert, select on public.organisations to service_role;

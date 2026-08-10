@@ -1,9 +1,13 @@
-// F041/F260: promotes pending raw_source_records into organisations, using a
-// source-specific standardize function (charity-commission.ts,
-// companies-house.ts) to map fields. One promote function per source
-// (promotePendingCharityCommissionRecords, promotePendingCompaniesHouseRecords)
-// sharing the loop in promotePendingRecords below — the source-specific
-// difference is only which mapper runs and which record_source to filter on.
+// F041/F260/F262: promotes pending raw_source_records into organisations,
+// using a source-specific standardize function (charity-commission.ts,
+// companies-house.ts, find-that-charity.ts) to map fields. One bespoke
+// promote function per source (promotePendingCharityCommissionRecords,
+// promotePendingCompaniesHouseRecords, promotePendingFindThatCharityRecords)
+// — each needs its own extra per-record step (website validation for charity
+// commission; F047 source-confidence classification for companies house;
+// match-confidence filtering for find that charity) that a single shared
+// loop can't express without every source paying for every other source's
+// extra step.
 //
 // Modelled on runner.ts's dependency-injection pattern (an injectable Store
 // interface, a real Supabase-backed default implementation, a fake for
@@ -13,12 +17,15 @@
 //   - Conflict flagging (F048) — not built yet.
 //
 // F042 (cross-source deduplication) IS done here: before inserting, every
-// candidate is checked against existing organisations via
-// findDuplicateMatch (src/lib/dedup/match-organisations.ts). A match is
-// flagged in entity_match_candidates for admin review instead of being
-// inserted as a second row. This runs for every source — both the shared
-// promotePendingRecords loop and promotePendingCharityCommissionRecords's
-// own loop (see its header note below) call it.
+// candidate that passes its own source's checks is checked against existing
+// organisations via findDuplicateMatch (src/lib/dedup/match-organisations.ts).
+// A match is flagged in entity_match_candidates for admin review instead of
+// being inserted as a second row. All three promotePending*Records functions
+// below call the shared flagIfDuplicate for this, so dedup applies to every
+// source — this matters most for find_that_charity: F034's adapter only ever
+// reconciles a name that already came from another source, so without this,
+// every successfully promoted find_that_charity record would be a
+// near-guaranteed duplicate of an existing organisations row, not a maybe.
 //
 // processing_status semantics used here (per raw_source_records' check
 // constraint: pending/validated/matched/rejected/error):
@@ -47,10 +54,17 @@ import {
   standardizeCharityCommissionRecord,
   type RawCharityCommissionRecord,
 } from "./charity-commission.ts";
-import { standardizeCompaniesHouseRecord } from "./companies-house.ts";
+import {
+  classifyCompaniesHouseSourceConfidence,
+  standardizeCompaniesHouseRecord,
+  type RawCompaniesHouseRecord,
+} from "./companies-house.ts";
+import {
+  isConfidentMatch,
+  standardizeFindThatCharityRecord,
+  type RawFindThatCharityRecord,
+} from "./find-that-charity.ts";
 import type { StandardOrganisation } from "./types.ts";
-
-
 
 export type PendingRecord = {
   id: string; // raw_source_records.id
@@ -90,10 +104,11 @@ function newCounts(read: number): PromoteCounts {
 }
 
 /**
- * Shared by every promotePending*Records loop: check a mapped, criteria-passed
- * candidate against existing organisations (loaded once per run — see callers)
- * and flag it in entity_match_candidates instead of inserting a second row. Returns
- * true if the record was flagged (caller should skip insertion and move on).
+ * Shared by every promotePending*Records function below: check a mapped,
+ * criteria-passed candidate against existing organisations (loaded once per
+ * run — see callers) and flag it in entity_match_candidates instead of
+ * inserting a second row. Returns true if the record was flagged (caller
+ * should skip insertion and move on).
  */
 async function flagIfDuplicate(
   store: OrganisationWriteStore,
@@ -153,8 +168,9 @@ const MATCH_SCORE_BY_MATCHED_ON: Record<DuplicateMatch["matchedOn"], number> = {
 
 // entity_match_candidates.source_priority is NOT NULL; lower = higher priority. Per
 // docs/data-model/04-entities.md's legal_name note ("Companies House takes priority
-// over CharityBase"). Falls back to the least-priority value for any future source
-// this list hasn't been updated for yet, rather than failing the insert outright.
+// over CharityBase"). Falls back to the least-priority value for any source this
+// list hasn't been updated for yet (e.g. find_that_charity has no documented
+// priority rule) rather than failing the insert outright.
 const SOURCE_PRIORITY: Record<string, number> = {
   companies_house: 1,
   charity_commission: 2,
@@ -379,82 +395,6 @@ async function passesClientCriteria(
   return false;
 }
 
-/**
- * Loop behind every promotePending*Records function except
- * promotePendingCharityCommissionRecords: load a source's pending records,
- * map each with that source's standardize function, dedup-check, and insert
- * or reject/error accordingly. The only thing that varies per source is
- * which record_source to filter on and which mapper to run.
- *
- * Note: promotePendingCharityCommissionRecords does not call this — it has
- * its own copy of this same shape with one extra step spliced in (F046
- * website validation, which only applies to Charity Commission records,
- * since Companies House records carry no website or email data). Both loops
- * call the shared flagIfDuplicate for F042, so dedup applies to every source
- * either way.
- */
-async function promotePendingRecords<TRaw>(
-  store: OrganisationWriteStore,
-  source: string,
-  standardize: (raw: TRaw) => StandardOrganisation,
-  criteriaCheck: (input: Parameters<typeof checkClientCriteria>[0]) => ClientCriteriaResult,
-): Promise<PromoteCounts> {
-  const pending = await store.loadPendingRecords(source);
-  const counts = newCounts(pending.length);
-
-  // Loaded once per run, not once per record — see promotePendingCharityCommissionRecords's
-  // matching comment; the same reasoning (and the same narrow gap re: in-batch duplicates) applies here.
-  const existingOrganisations = await store.loadExistingOrganisationsForMatching();
-
-  for (const record of pending) {
-    let org: StandardOrganisation;
-    try {
-      org = standardize(record.raw_payload as TRaw);
-    } catch (error) {
-      // raw_payload is untyped JSON from the database. A legacy or malformed
-      // record that doesn't match this source's expected shape can throw inside
-      // the mapper. Catch it here so one bad record doesn't crash the whole batch.
-      await reportError(error instanceof Error ? error : new Error(String(error)), {
-        operation: `standardize.${source}.promote`,
-        rawRecordId: record.id,
-      });
-      await store.markRecordStatus(record.id, "error");
-      counts.failed++;
-      continue;
-    }
-
-    if (!isUsable(org)) {
-      await markInvalidRecord(store, counts, record);
-      continue;
-    }
-
-    const criteria = criteriaCheck(buildCriteriaInput(org));
-    if (!(await passesClientCriteria(store, counts, record, org, criteria))) {
-      continue;
-    }
-
-    if (await flagIfDuplicate(store, counts, record, org, existingOrganisations, source)) {
-      continue;
-    }
-
-    const result = await store.insertOrganisation(org);
-    if ("error" in result) {
-      await reportError(new Error(result.error), {
-        operation: `standardize.${source}.promote`,
-        rawRecordId: record.id,
-      });
-      await store.markRecordStatus(record.id, "error");
-      counts.failed++;
-      continue;
-    }
-
-    await store.markRecordStatus(record.id, "validated", result.id);
-    counts.inserted++;
-  }
-
-  return counts;
-}
-
 function requireStore(
   store: OrganisationWriteStore | null,
 ): asserts store is OrganisationWriteStore {
@@ -551,15 +491,146 @@ export async function promotePendingCharityCommissionRecords(
   return counts;
 }
 
+/**
+ * Bespoke rather than sharing a generic loop with the other two functions
+ * below: this source needs classifyCompaniesHouseSourceConfidence run against
+ * the *raw* payload alongside standardize (F047's Tier A/B bypass — see
+ * client-criteria.ts's sourceConfidence branch), which a
+ * one-standardize-function-in-one-standardize-function-out shared loop
+ * couldn't express without every other source paying for a field it doesn't have.
+ */
 export async function promotePendingCompaniesHouseRecords(
   store: OrganisationWriteStore | null = createDefaultOrganisationWriteStore(),
   criteriaCheck: (input: Parameters<typeof checkClientCriteria>[0]) => ClientCriteriaResult = checkClientCriteria,
 ): Promise<PromoteCounts> {
   requireStore(store);
-  return promotePendingRecords(
-    store,
-    "companies_house",
-    standardizeCompaniesHouseRecord,
-    criteriaCheck,
-  );
+
+  const pending = await store.loadPendingRecords("companies_house");
+  const counts = newCounts(pending.length);
+  const existingOrganisations = await store.loadExistingOrganisationsForMatching();
+
+  for (const record of pending) {
+    let raw: RawCompaniesHouseRecord;
+    let org: StandardOrganisation;
+    try {
+      raw = record.raw_payload as RawCompaniesHouseRecord;
+      org = standardizeCompaniesHouseRecord(raw);
+    } catch (error) {
+      // raw_payload is untyped JSON from the database. A legacy or malformed
+      // record that doesn't match the expected shape can throw inside the
+      // mapper. Catch it here so one bad record doesn't crash the whole batch.
+      await reportError(error instanceof Error ? error : new Error(String(error)), {
+        operation: "standardize.companies_house.promote",
+        rawRecordId: record.id,
+      });
+      await store.markRecordStatus(record.id, "error");
+      counts.failed++;
+      continue;
+    }
+
+    if (!isUsable(org)) {
+      await markInvalidRecord(store, counts, record);
+      continue;
+    }
+
+    const sourceConfidence = classifyCompaniesHouseSourceConfidence(raw);
+    const criteria = criteriaCheck({ ...buildCriteriaInput(org), sourceConfidence });
+    if (!(await passesClientCriteria(store, counts, record, org, criteria))) {
+      continue;
+    }
+
+    if (
+      await flagIfDuplicate(store, counts, record, org, existingOrganisations, "companies_house")
+    ) {
+      continue;
+    }
+
+    const result = await store.insertOrganisation(org);
+    if ("error" in result) {
+      await reportError(new Error(result.error), {
+        operation: "standardize.companies_house.promote",
+        rawRecordId: record.id,
+      });
+      await store.markRecordStatus(record.id, "error");
+      counts.failed++;
+      continue;
+    }
+
+    await store.markRecordStatus(record.id, "validated", result.id);
+    counts.inserted++;
+  }
+
+  return counts;
+}
+
+/**
+ * Bespoke rather than sharing a loop with the two functions above: this
+ * source needs isConfidentMatch checked against the *raw* payload before
+ * anything else. A low-confidence reconcile candidate (match: false) is
+ * rejected outright here, before F047 criteria even runs — organisation_type
+ * is always "charity" for this source, which F047 already auto-accepts (see
+ * CLIENT_CRITERIA.acceptedOrganisationTypes), so criteria alone would never
+ * catch a wrong match; only the source's own confidence signal can.
+ */
+export async function promotePendingFindThatCharityRecords(
+  store: OrganisationWriteStore | null = createDefaultOrganisationWriteStore(),
+  criteriaCheck: (input: Parameters<typeof checkClientCriteria>[0]) => ClientCriteriaResult = checkClientCriteria,
+): Promise<PromoteCounts> {
+  requireStore(store);
+
+  const pending = await store.loadPendingRecords("find_that_charity");
+  const counts = newCounts(pending.length);
+  const existingOrganisations = await store.loadExistingOrganisationsForMatching();
+
+  for (const record of pending) {
+    let raw: RawFindThatCharityRecord;
+    let org: StandardOrganisation;
+    try {
+      raw = record.raw_payload as RawFindThatCharityRecord;
+      org = standardizeFindThatCharityRecord(raw);
+    } catch (error) {
+      // raw_payload is untyped JSON from the database. A legacy or malformed
+      // record that doesn't match the expected shape can throw inside the
+      // mapper. Catch it here so one bad record doesn't crash the whole batch.
+      await reportError(error instanceof Error ? error : new Error(String(error)), {
+        operation: "standardize.find_that_charity.promote",
+        rawRecordId: record.id,
+      });
+      await store.markRecordStatus(record.id, "error");
+      counts.failed++;
+      continue;
+    }
+
+    if (!isUsable(org) || !isConfidentMatch(raw)) {
+      await markInvalidRecord(store, counts, record);
+      continue;
+    }
+
+    const criteria = criteriaCheck(buildCriteriaInput(org));
+    if (!(await passesClientCriteria(store, counts, record, org, criteria))) {
+      continue;
+    }
+
+    if (
+      await flagIfDuplicate(store, counts, record, org, existingOrganisations, "find_that_charity")
+    ) {
+      continue;
+    }
+
+    const result = await store.insertOrganisation(org);
+    if ("error" in result) {
+      await reportError(new Error(result.error), {
+        operation: "standardize.find_that_charity.promote",
+        rawRecordId: record.id,
+      });
+      await store.markRecordStatus(record.id, "error");
+      counts.failed++;
+      continue;
+    }
+
+    await store.markRecordStatus(record.id, "validated", result.id);
+    counts.inserted++;
+  }
+
+  return counts;
 }

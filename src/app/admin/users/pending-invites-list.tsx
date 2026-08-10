@@ -1,10 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import type { PendingInvite } from "@/lib/admin/team-realtime";
-import { resendInviteAction } from "./invite-actions";
+import { isInviteExpired, type PendingInvite } from "@/lib/admin/team-realtime";
+import { cancelInviteAction, resendInviteAction } from "./invite-actions";
 
-type ResendResult = { text: string; status: "success" | "warning" | "error" };
+type ActionResult = { text: string; status: "success" | "warning" | "error" };
+
+const ROLE_LABEL: Record<PendingInvite["role"], string> = {
+  cam: "CAM",
+  admin: "Admin",
+  viewer: "Viewer",
+};
 
 export function PendingInvitesList({
   invites,
@@ -14,13 +20,32 @@ export function PendingInvitesList({
   error: boolean;
 }) {
   const [resendingId, setResendingId] = useState<string | null>(null);
-  const [results, setResults] = useState<Record<string, ResendResult>>({});
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [results, setResults] = useState<Record<string, ActionResult>>({});
 
   async function handleResend(id: string) {
     setResendingId(id);
 
     const result = await resendInviteAction(id);
     setResendingId(null);
+
+    if (result.message) {
+      setResults((current) => ({
+        ...current,
+        [id]: { text: result.message!, status: result.status === "idle" ? "success" : result.status },
+      }));
+    }
+  }
+
+  async function handleCancel(id: string, email: string) {
+    if (!confirm(`Cancel the invite to ${email}? They'll need a brand-new invite to join.`)) {
+      return;
+    }
+
+    setCancellingId(id);
+
+    const result = await cancelInviteAction(id);
+    setCancellingId(null);
 
     if (result.message) {
       setResults((current) => ({
@@ -46,21 +71,37 @@ export function PendingInvitesList({
     <ul className="mt-3 divide-y divide-black/5 text-sm">
       {invites.map((invite) => {
         const result = results[invite.id];
+        const expired = isInviteExpired(invite.invited_at);
+        const busy = resendingId === invite.id || cancellingId === invite.id;
         return (
           <li key={invite.id} className="flex flex-col gap-1 py-2">
             <div className="flex items-center justify-between gap-3">
-              <span className="font-bold">{invite.email}</span>
+              <span className="flex items-center gap-2">
+                <span className="font-bold">{invite.email}</span>
+                <span className="rounded-full bg-black/5 px-2 py-0.5 text-xs font-bold text-foreground/70">
+                  {ROLE_LABEL[invite.role]}
+                </span>
+              </span>
               <div className="flex items-center gap-3">
                 <span className="text-foreground/60">
                   Invited {new Date(invite.invited_at).toLocaleDateString()}
+                  {expired && <span className="ml-2 font-bold text-red-700">Expired</span>}
                 </span>
                 <button
                   type="button"
-                  disabled={resendingId === invite.id}
+                  disabled={busy}
                   onClick={() => handleResend(invite.id)}
                   className="rounded-lg border border-black/15 px-3 py-1.5 text-xs font-bold transition-colors hover:border-brand disabled:cursor-wait disabled:opacity-50"
                 >
                   {resendingId === invite.id ? "Resending..." : "Resend"}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => handleCancel(invite.id, invite.email)}
+                  className="rounded-lg border border-black/15 px-3 py-1.5 text-xs font-bold text-red-700 transition-colors hover:border-red-700 disabled:cursor-wait disabled:opacity-50"
+                >
+                  {cancellingId === invite.id ? "Cancelling..." : "Cancel"}
                 </button>
               </div>
             </div>

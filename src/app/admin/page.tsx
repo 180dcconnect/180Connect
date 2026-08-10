@@ -67,6 +67,12 @@ export default async function AdminPage() {
               Bring UK charity registration and contact data into the ingestion pipeline.
             </p>
           </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/three-sixty-giving">
+            <h2 className="font-bold">360Giving import</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Attach grant and funding history to charities already in the pipeline.
+            </p>
+          </Link>
         </div>
       </section>
     </main>

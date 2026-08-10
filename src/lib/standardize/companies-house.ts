@@ -8,23 +8,36 @@ import {
   computeCompletenessScore,
   type StandardOrganisation,
 } from "./types.ts";
+import {
+  classifyCompaniesHouseTier,
+  type CompaniesHouseTier,
+} from "../ingestion/sources/companies-house-criteria-config.ts";
 
 /**
- * The fields from the Companies House `/company/{number}` profile
- * (stored verbatim as raw_payload) that this mapper actually reads.
- * Kept as its own type rather than importing the adapter's loosely-typed
- * CompaniesHouseProfile — this module only declares the fields it uses.
+ * The fields from the Companies House `/company/{number}` profile or
+ * `/advanced-search/companies` item (stored verbatim as raw_payload) that this
+ * module reads. Kept as its own type rather than importing the adapter's
+ * loosely-typed CompaniesHouseProfile/CompaniesHouseAdvancedSearchItem — this
+ * module only declares the fields it uses.
  *
- * Fields present in the API response but intentionally omitted here:
+ * Fields present in the API response but intentionally omitted from
+ * StandardOrganisation (still read here for source-confidence classification):
  *   - company_number: stored in raw_source_records.external_id, not re-mapped
  *     into StandardOrganisation (no corresponding field in the schema yet).
- *   - company_status:  no corresponding ORGANISATIONS field yet; could be used
- *     to filter dissolved companies in future (flagged, not built here).
+ *   - company_status: no corresponding ORGANISATIONS field yet; read by the
+ *     status-recheck job (companies-house-status-recheck.ts), not this mapper.
+ *   - company_type / company_subtype / sic_codes: no corresponding
+ *     ORGANISATIONS field; read only to classify F047 source confidence (see
+ *     classifyCompaniesHouseSourceConfidence below), never re-mapped.
  *   - address_line_2 / region / country: no corresponding ORGANISATIONS fields;
  *     country could inform is_international once F042 is ready to merge sources.
  */
 export type RawCompaniesHouseRecord = {
   company_name: string;
+  company_type?: string;
+  company_subtype?: string;
+  sic_codes?: string[];
+  company_status?: string;
   registered_office_address?: {
     address_line_1?: string;
     locality?: string;
@@ -90,4 +103,21 @@ export function standardizeCompaniesHouseRecord(
     ...withoutScore,
     data_completeness_score: computeCompletenessScore(withoutScore),
   };
+}
+
+/**
+ * How strong the evidence is that this Companies House record is a mission
+ * fit, independent of the "company" organisation_type every record here always
+ * gets. Tier A (auto-include legal form) and Tier B (CIC subtype) are strong
+ * enough evidence to bypass F047's human-review hold — see
+ * ClientCriteriaConfig.strongEvidenceTypes in client-criteria-config.ts and the
+ * new sourceConfidence branch in client-criteria.ts's checkClientCriteria.
+ * Tier C (SIC-gated) and no-tier records stay "weak" — still routed to
+ * needs_review, same as every companies_house record was before this feature.
+ */
+export function classifyCompaniesHouseSourceConfidence(
+  raw: RawCompaniesHouseRecord,
+): "strong" | "weak" {
+  const tier: CompaniesHouseTier | null = classifyCompaniesHouseTier(raw);
+  return tier === "A" || tier === "B" ? "strong" : "weak";
 }

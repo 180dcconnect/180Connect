@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
+import { recordOnboardingStepAction } from "@/lib/onboarding-actions";
+import { reportError } from "@/lib/error-logging";
 import {
   GEOGRAPHIC_REACH_OPTIONS,
   INCOME_BAND_OPTIONS,
@@ -91,6 +93,19 @@ export async function saveOutreachPreferencesAction(
     };
   }
 
+  // F255 step 1 is recorded here rather than when the CAM opens this screen: the
+  // guide claims they have set their preferences, and this is the point at which
+  // that becomes true. Failure is swallowed on purpose — a checklist tick is not
+  // worth telling someone their saved preferences did not save. The try/catch
+  // covers exceptions (not just the {ok:false} path), so an unexpected throw here
+  // can never take the successful upsert down with it.
+  try {
+    await recordOnboardingStepAction("outreach_preferences");
+  } catch (err) {
+    await reportError(err, { operation: "onboarding.record_step_from_preferences" });
+  }
+
   revalidatePath("/settings/outreach-preferences");
+  revalidatePath("/dashboard");
   return { status: "success", message: "Preferences saved." };
 }

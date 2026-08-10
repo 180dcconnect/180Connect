@@ -11,6 +11,10 @@ export type ClientCriteriaInput = {
   geographicReach?: string | null;
   sector?: string | null;
   mission?: string | null;
+  /** Strong external evidence (e.g. Companies House Tier A/B legal form) that
+   * can bypass the human-review hold for a type in strongEvidenceTypes. Absent
+   * or "weak" changes nothing versus the existing accepted/review/reject logic. */
+  sourceConfidence?: "strong" | "weak";
 };
 
 export type ClientCriteriaResult = {
@@ -58,6 +62,18 @@ export function checkClientCriteria(
         local
           ? "Sheffield/South Yorkshire location receives priority."
           : "National and international organisations remain eligible.",
+      ],
+    };
+  }
+
+  const strongEvidenceTypes: readonly string[] = config.strongEvidenceTypes;
+  if (input.sourceConfidence === "strong" && strongEvidenceTypes.includes(type)) {
+    return {
+      outcome: "meets",
+      priority,
+      healthcareAligned,
+      reasons: [
+        "Strong external evidence (legal form) confirms mission fit without human review.",
       ],
     };
   }

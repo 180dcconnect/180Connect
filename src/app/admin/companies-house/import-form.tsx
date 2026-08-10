@@ -25,10 +25,10 @@ export function CompaniesHouseImportForm({ configured }: { configured: boolean }
 
   return (
     <div className="mt-8 rounded-xl border border-black/10 p-5">
-      <h2 className="text-lg font-bold">Run import</h2>
+      <h2 className="text-lg font-bold">Look up one company</h2>
       <p className="mt-2 text-sm text-foreground/65">
         Enter a company number when known. Otherwise, enter the exact registered
-        name. The full company profile will be stored in the ingestion queue.
+        name. For matching many companies at once, use bulk search below instead.
       </p>
 
       {!configured && (
@@ -85,6 +85,19 @@ export function CompaniesHouseImportForm({ configured }: { configured: boolean }
                 </div>
               ))}
             </dl>
+          )}
+          {state.promoteCounts && (
+            <>
+              <p className="mt-4 text-xs font-bold uppercase opacity-60">Promoted to organisations</p>
+              <dl className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-5">
+                {Object.entries(state.promoteCounts).map(([label, value]) => (
+                  <div key={label}>
+                    <dt className="capitalize opacity-70">{label}</dt>
+                    <dd className="text-lg font-bold">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </>
           )}
         </div>
       )}

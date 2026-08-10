@@ -51,9 +51,16 @@ function PasswordChecklist({ value }: { value: string }) {
   );
 }
 
-export function ResetPasswordForm({ linkError }: { linkError?: string }) {
+export function ResetPasswordForm({
+  linkError,
+  existingFullName,
+}: {
+  linkError?: string;
+  existingFullName?: string | null;
+}) {
   const [state, action, pending] = useActionState(setNewPassword, initialState);
   const [password, setPassword] = useState("");
+  const needsName = !existingFullName;
 
   if (linkError) {
     return (
@@ -69,6 +76,22 @@ export function ResetPasswordForm({ linkError }: { linkError?: string }) {
   return (
     <form action={action} className="mt-8 flex flex-col gap-4" noValidate>
       {state.message && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">{state.message}</div>}
+
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="fullName" className="text-xs font-bold">Your name</label>
+        <input
+          id="fullName"
+          name="fullName"
+          type="text"
+          autoComplete="name"
+          defaultValue={existingFullName ?? ""}
+          aria-invalid={Boolean(state.fieldErrors?.fullName)}
+          required={needsName}
+          maxLength={120}
+          className="h-10 w-full rounded-lg border border-black/10 bg-[#fafafa] px-3 text-sm outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/20 aria-invalid:border-red-500"
+        />
+        {state.fieldErrors?.fullName?.[0] && <p className="text-xs text-red-700">{state.fieldErrors.fullName[0]}</p>}
+      </div>
 
       <div className="flex flex-col gap-1.5">
         <label htmlFor="password" className="text-xs font-bold">New password</label>

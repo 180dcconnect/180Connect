@@ -60,7 +60,7 @@ reviewers do not assume the matrix alone is sufficient.
 | CAM claims an **unowned** organisation | Needs a write to `ORGANISATIONS.owner_id`, otherwise off-limits | `claim_organisation(org_id)`, a `SECURITY DEFINER` RPC (F162, `20260806140000_create_claim_organisation_rpc.sql`) locks the row, sets `owner_id` to the caller and writes an `audit_log` row in the same transaction; raises `55000` rather than overriding if someone else already owns it. The UPDATE policy's `owner_id is null` branch is gone — a CAM's direct UPDATE on an unowned row now matches zero rows, same as any other RLS-blocked write | **shipped**, F162 — see §3.2 |
 | "Set pipeline status — CAM (own client) or admin, no reason required" | RLS is row-level; it cannot let a client's owner write one column (`outreach_status`) while a general policy governs the rest of the row, and the write needs an audit row | `set_outreach_status(org_id, status)`, a `SECURITY DEFINER` RPC (F145, `20260807100000_redefine_outreach_status_pipeline.sql`) locks the row, checks the caller owns it or is admin, and writes an `audit_log` row (`status_changed`) in the same transaction. `outreach_status` is off the general `organisations` UPDATE grant entirely — see §3.2 | **shipped**, F145 — see §3.2 |
 | "Override pipeline stage — **reason required**" | Postgres cannot require a justification string as a condition of an UPDATE | `SECURITY DEFINER` RPC `override_outreach_status(org_id, status, reason)`. `reason` is `not null` and lands in the audit log. Distinct from `set_outreach_status` above — this is the admin escape hatch, not the ordinary path | to build (F224) |
-| "Reassign ownership: admin only" | Same column-level problem | Currently the org UPDATE policy allows an admin to set any `owner_id`; a dedicated `assign_organisation_owner` RPC (with audit) is the future form | admin path **shipped**; RPC deferred. The **offboarding** case is now covered: `deactivate_user` (F014) reassigns every organisation the departing user owns, with a required reason and one `ownership_reassigned` audit row per organisation, in the same transaction that closes the account. Since `20260804170000` it does not move `owner_id` itself — it delegates to `reassign_ownership` (F257), so the departing user's **open actions travel with their clients** instead of being stranded on a closed account. See §3.11 |
+| "Reassign ownership: admin only" | Same column-level problem | `reassign_ownership(org_ids, new_owner_id, reason, from_user_id)` (F257, `20260802100000_create_reassign_ownership_rpc.sql`, unified `20260804170000`) is the only write path — the org UPDATE policy's admin branch could set any `owner_id` directly with no audit row until `20260810110000_close_admin_owner_id_direct_write.sql` revoked `owner_id` from the table's UPDATE grant entirely (same column-level-REVOKE mechanism as `outreach_status`, §3.2). F163's admin assign-owner form (`/clients/[id]`, `assign-owner-form.tsx`) calls it with a single organisation id and no `from_user_id`. The **offboarding** case is also covered: `deactivate_user` (F014) reassigns every organisation the departing user owns, with a required reason and one `ownership_reassigned` audit row per organisation, in the same transaction that closes the account, delegating to `reassign_ownership` so the departing user's **open actions travel with their clients**. See §3.2, §3.11 |
 | Audit entries are immutable | RLS controls who writes, not whether a row can later change | `AUDIT_LOG` gets **no** UPDATE or DELETE policy for any role. Append-only by omission | needs the table (§6) |
 
 **Rule that follows:** where a capability needs a *condition*, a *reason string*, a
@@ -212,9 +212,24 @@ you already own is a no-op, not an error, and is not audited (same convention as
 `reassign_ownership`'s already-there skip). Claiming a client someone **else** already
 owns raises `55000` rather than silently overriding the existing owner (AC2) — the
 caller renders that as a conflict warning (the minimal form of F165, not yet its own
-story) instead of a generic failure. Admin's separate, still-open ability to set any
-`owner_id` directly through this same policy (the "reassign ownership: admin only" row
-above) is unchanged by this migration.
+story) instead of a generic failure. Admin's separate ability to set any `owner_id`
+directly through this same policy was closed later, by F163 below, not by this
+migration.
+
+**Assigning/reassigning a client's owner as an admin (F163).** Until
+`20260810110000`, an admin's `owner_id` write went straight through this UPDATE
+policy the same way a CAM's own-row edit does — no audit row, and no `is_active`
+check on the incoming owner (the gap this section's "known gap" and #298 both
+named). `20260810110000_close_admin_owner_id_direct_write.sql` closes it the way
+`redefine_outreach_status_pipeline` closed `outreach_status`: a column-level
+`REVOKE`/`GRANT` that drops `owner_id` from the table's UPDATE grant entirely
+(RLS can't scope a policy to "every column but one" — see §2's rule), rather than
+rewriting `organisations_update_owner_or_admin` itself, which still governs every
+other column on the row. `owner_id` now has exactly two write paths for every
+role — `claim_organisation` (a CAM or admin claiming an unowned client, above) and
+`reassign_ownership` (an admin assigning or reassigning any client, §3.11, used by
+F163's assign-owner form on `/clients/[id]`) — both `SECURITY DEFINER`, both
+audited, both checking the incoming owner is an active CAM or admin.
 
 **Pipeline status (F145).** `outreach_status` is a different kind of gap from the
 canonical-field one above: it's not that the wrong role can write it, it's that *any*
@@ -287,6 +302,7 @@ A sent message is immutable: the UPDATE predicate requires `send_status = 'draft
 | `INGESTION_RUNS` | admin | admin (trigger refresh) | — | — |
 | `RAW_SOURCE_RECORDS` | admin | — (service role) | — | admin |
 | `DATA_QUALITY_EVENTS` | admin | — (service role) | admin (resolve) | — |
+| `ORGANISATION_STATUS_FLAGS` | admin | — (service role, RPC only) | — (RPC only: acknowledge) | — |
 | `ENTITY_MATCH_CANDIDATES` | admin | — (service role) | admin (adjudicate) | — |
 | `MANUAL_ENTRY_RECORDS` | admin, cam (own) | admin, cam | admin, own | admin |
 
@@ -299,6 +315,17 @@ may execute `get_organisation_sources(organisation_id)`, which returns only the 
 name, source-assigned identifier, registry name and first-seen timestamp for linked
 records. The `SECURITY DEFINER` function checks `app.is_active_user()` itself and never
 returns `raw_payload`; `anon` has no execute privilege.
+
+`ORGANISATION_STATUS_FLAGS` (`20260809100200_create_organisation_status_flags.sql`,
+F032/F260 follow-on) is the Companies House status-watch job's review flag — a
+tracked organisation's `company_status` drifted away from `active`. No
+INSERT/UPDATE policy, same reasoning as `AUDIT_LOG` (§3.8) and `SUPPRESSIONS`
+(§3.14): all writes go through two `SECURITY DEFINER` RPCs, each writing an
+`audit_log` row in the same transaction — `record_organisation_status_flag`
+(`service_role` only, called from the status-recheck job) and
+`acknowledge_organisation_status_flag` (admin only). Neither ever writes to
+`organisations.outreach_status` — an organisation flagged here may be mid-outreach,
+and only a human decides what a status change means for that pipeline state.
 
 ### 3.6 Model and scoring configuration — admin only
 
@@ -569,6 +596,44 @@ remove a suppression, and F185 (#181) is that RPC. Adding an enum value later is
 one-way door in Postgres (`create_organisations.sql` precedent), so it is reserved
 up front rather than negotiated later.
 
+### 3.15 Entity match candidates — service-role write, admin decides
+
+Backs F042 Deduplicate Clients (#42),
+`supabase/migrations/20260810120000_create_entity_match_candidates.sql`. Uses the
+`ENTITY_MATCH_CANDIDATES` table already reserved in the Data Model (tab 03, added 23
+Jul 2026) rather than a new table — an earlier draft of this migration created its own
+`POTENTIAL_DUPLICATES` table; corrected in review, 9 Aug 2026. Same shape as §3.14: no
+end-user INSERT/UPDATE, all writes gated — but the writer here is the ingestion
+pipeline (`service_role`), not a CAM/admin request, since a duplicate flag is
+machine-detected, not asked for.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `ENTITY_MATCH_CANDIDATES` | admin only | — (service_role only) | — (RPC only) | — (no grant) |
+
+SELECT is admin-only, not "every active user" like `SUPPRESSIONS` — reviewing a flag
+means joining to `raw_source_records.raw_payload`, which §3.5 already restricts to
+admin because it is unfiltered third-party data. INSERT has no policy for
+`authenticated` at all: only the ingestion pipeline (holding the service key
+server-side, `src/lib/standardize/write-organisations.ts`) writes a row, exactly the
+same restriction as `raw_source_records` itself.
+
+F042's matcher is a binary check (registration number, or name+postcode), not the
+graduated LLM-assisted matcher this table's full column set anticipates — see the
+migration header for exactly which columns (`match_score`, `match_method`,
+`duplicate_group_id`, `llm_reasoning`, `source_priority`) are placeholders/approximated
+rather than computed, and why.
+
+The only end-user write is `decide_duplicate_flag(entity_match_candidate_id, confirmed,
+note)` — admin only, `SECURITY DEFINER`, rejects a non-pending target, writes
+`audit_log` (`duplicate_confirmed` / `duplicate_dismissed`) in the same transaction.
+Dismissing a flag (`confirmed = false`) additionally resets the linked
+`raw_source_records` row to `pending` with `matched_organisation_id` cleared, so the
+next ingestion run promotes it as a new organisation — see the migration header for
+why that doesn't loop back to the same flag.
+
+**Known gap, not closed by this table** — see Open gap 5 below.
+
 ---
 
 ## 4. Denial behaviour and feedback
@@ -728,6 +793,15 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    asserted that `is_active` flipped and that an audit row was written, and had no way
    to tell revocation from no revocation. An assertion about a side effect nobody seeds
    a fixture for is not an assertion.
+9. **No way to mark an existing `ORGANISATIONS` row inactive/merged.** F042 (§3.15,
+   `decide_duplicate_flag`) stops a *new* duplicate row being created and confirmed,
+   but its AC3 ("two records that are true duplicates never both remain as separate
+   active clients") is not fully closed: if two rows are already separately promoted
+   (e.g. one from an API source, one entered manually, before this table existed)
+   there is no column or RPC to retire one of them. Needs a schema decision — most
+   likely an `is_active`/`merged_into_organisation_id` column on `ORGANISATIONS`,
+   following the same RPC-gated pattern as `SUPPRESSIONS` — raised rather than added
+   unilaterally, since it changes the core entity every other table hangs off.
 
 ---
 
@@ -764,9 +838,14 @@ Model but exists in neither the database nor a migration.
 
 `MANUAL_ENTRY_RECORDS` is readable by its submitting CAM and by admins. Viewers
 cannot read it. All writes are RPC-only: active CAMs/admins call
-`submit_manual_entry`; only admins call `reject_manual_entry`. Both functions
-self-authorise and write `AUDIT_LOG` in the same transaction. Direct INSERT,
-UPDATE and DELETE privileges are withheld from authenticated users.
+`submit_manual_entry`; only admins call `approve_manual_entry` or
+`reject_manual_entry`. The review RPCs self-authorise and write `AUDIT_LOG` in
+the same transaction as the approval/rejection. Approval also re-runs F042's
+duplicate rule and requires the human link-existing/create-new decision before
+creating an active organisation. Direct INSERT, UPDATE and DELETE privileges are
+withheld from authenticated users. `get_organisation_sources_with_actor` exposes
+only safe provenance metadata and the creating CAM's display name to active users;
+it does not expose the full pending submission.
 
 # F047 data-quality review flags
 

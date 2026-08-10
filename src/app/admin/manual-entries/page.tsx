@@ -45,8 +45,8 @@ export default async function ManualEntriesPage() {
         <p className="text-sm font-bold text-brand">Admin workspace</p>
         <h1 className="mt-2 text-2xl font-bold">Manual client entries</h1>
         <p className="mt-2 text-sm text-foreground/65">
-          Review submissions and see who created them. F045, F046 and F047 are connected;
-          approval stays disabled until F042 is connected.
+          Review submissions, run the shared validation and criteria checks, and make
+          a human decision when F042 finds a possible duplicate.
         </p>
         {error && (
           <p className="mt-5 rounded-lg bg-red-50 p-3 text-red-800" role="alert">
@@ -83,13 +83,6 @@ export default async function ManualEntriesPage() {
                 {entry.review_status === "pending" && <ManualEntryReviewForm entryId={entry.id} />}
                 {entry.review_status === "pending" && (
                   <div className="mt-4 flex flex-wrap gap-3">
-                    <button
-                      className="cursor-not-allowed rounded-lg bg-gray-200 px-3 py-2 text-sm font-bold text-gray-600"
-                      disabled
-                      title="F042 must be connected first"
-                    >
-                      Approve (F042 pending)
-                    </button>
                     <form action={rejectManualEntry} className="flex flex-1 gap-2">
                       <input name="id" type="hidden" value={entry.id} />
                       <input

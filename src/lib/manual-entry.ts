@@ -31,8 +31,7 @@ export type ManualEntryInput = z.infer<typeof manualEntrySchema>;
 
 export type ManualEntryIntegrationResult =
   | { status: "passed" }
-  | { status: "blocked"; message: string }
-  | { status: "not_available"; dependency: "F042" };
+  | { status: "blocked"; message: string };
 
 export type ManualEntryCriteriaResult = Extract<
   ManualEntryIntegrationResult,
@@ -69,7 +68,7 @@ export function reviewManualEntryFields(
   return { email, website, warnings };
 }
 
-/** Standard F041 organisation payload ready for the eventual F042-guarded RPC. */
+/** Standard F041 organisation payload used by the F042-guarded approval flow. */
 export function buildManualOrganisation(
   input: ManualEntryInput,
   organisationType: OrganisationType,
@@ -132,7 +131,7 @@ export function checkManualEntryCriteria(
   };
 }
 
-/** Approval must fail closed until every dependency has been connected. */
+/** Approval fails closed when F042 or F047 requires a human decision. */
 export async function canApproveManualEntry(
   input: ManualEntryInput,
   checks: ManualEntryApprovalChecks,
@@ -144,8 +143,7 @@ export async function canApproveManualEntry(
   ]);
   const messages = results.flatMap((result) => {
     if (result.status === "passed") return [];
-    if (result.status === "blocked") return [result.message];
-    return [`${result.dependency} integration is not available yet.`];
+    return [result.message];
   });
   return messages.length === 0 ? { ok: true } : { ok: false, messages };
 }

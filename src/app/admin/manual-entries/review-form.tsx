@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 import {
+  approveManualEntry,
   checkAvailableManualEntryDependencies,
   type ManualEntryReviewState,
 } from "./actions";
@@ -12,19 +14,22 @@ const checkStyles = {
   passed: "border-green-200 bg-green-50 text-green-900",
   warning: "border-amber-200 bg-amber-50 text-amber-900",
   blocked: "border-red-200 bg-red-50 text-red-900",
-  pending: "border-gray-200 bg-gray-50 text-gray-800",
 } as const;
 
 export function ManualEntryReviewForm({ entryId }: { entryId: string }) {
-  const [state, action, pending] = useActionState(
+  const [state, checkAction, checking] = useActionState(
     checkAvailableManualEntryDependencies,
+    initialState,
+  );
+  const [approvalState, approvalAction, approving] = useActionState(
+    approveManualEntry,
     initialState,
   );
 
   return (
     <div className="mt-4 rounded-xl border border-black/10 bg-gray-50 p-4">
       <h3 className="text-sm font-bold">Approval checks</h3>
-      <form action={action} className="mt-3 space-y-3">
+      <form action={checkAction} className="mt-3 space-y-3">
         <input name="id" type="hidden" value={entryId} />
         <label className="block text-sm font-bold">
           Organisation type
@@ -50,10 +55,10 @@ export function ManualEntryReviewForm({ entryId }: { entryId: string }) {
         </label>
         <button
           className="rounded-lg border border-brand px-3 py-2 text-sm font-bold text-brand disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={pending}
+          disabled={checking}
           type="submit"
         >
-          {pending ? "Running checks…" : "Run available checks"}
+          {checking ? "Running checks…" : "Run approval checks"}
         </button>
       </form>
 
@@ -74,6 +79,72 @@ export function ManualEntryReviewForm({ entryId }: { entryId: string }) {
             </li>
           ))}
         </ul>
+      )}
+
+      {state.approval && (
+        <form action={approvalAction} className="mt-4 space-y-3 rounded-lg border border-brand/30 bg-white p-4">
+          <input name="id" type="hidden" value={entryId} />
+          <input name="organisationType" type="hidden" value={state.approval.organisationType} />
+          <input name="adminConfirmedEligible" type="hidden" value={String(state.approval.adminConfirmedEligible)} />
+          <input name="candidateOrganisationId" type="hidden" value={state.approval.candidateOrganisationId ?? ""} />
+
+          {state.approval.candidateOrganisationId ? (
+            <>
+              <p className="text-sm font-bold text-amber-900">
+                Human duplicate decision required
+              </p>
+              <p className="text-sm text-foreground/70">
+                The F042 matcher found{" "}
+                <Link className="font-bold text-brand hover:underline" href={`/clients/${state.approval.candidateOrganisationId}`} target="_blank">
+                  {state.approval.candidateOrganisationName ?? "an existing client"}
+                </Link>
+                {state.approval.matchedOn === "registration_number"
+                  ? " with the same registration number."
+                  : " with the same normalised name."}
+              </p>
+              <label className="block text-sm font-bold">
+                Decision
+                <select className="mt-1 w-full rounded-lg border border-black/20 px-3 py-2" defaultValue="link_existing" name="duplicateDecision" required>
+                  <option value="link_existing">Same organisation — link existing client</option>
+                  <option value="create_new">Different organisation — create separate client</option>
+                </select>
+              </label>
+              <label className="block text-sm font-bold">
+                Decision notes
+                <textarea className="mt-1 w-full rounded-lg border border-black/20 px-3 py-2" minLength={3} name="notes" required rows={3} />
+              </label>
+            </>
+          ) : (
+            <>
+              <input name="duplicateDecision" type="hidden" value="create_new" />
+              <label className="block text-sm font-bold">
+                Approval notes <span className="font-normal text-foreground/60">(optional)</span>
+                <textarea className="mt-1 w-full rounded-lg border border-black/20 px-3 py-2" name="notes" rows={2} />
+              </label>
+            </>
+          )}
+
+          <button
+            className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={approving}
+            type="submit"
+          >
+            {approving
+              ? "Approving…"
+              : state.approval.candidateOrganisationId
+                ? "Save decision and approve"
+                : "Approve and create client"}
+          </button>
+        </form>
+      )}
+
+      {approvalState.message && (
+        <p
+          className={`mt-3 rounded-lg p-3 text-sm ${approvalState.kind === "success" ? "bg-green-50 text-green-900" : "bg-red-50 text-red-900"}`}
+          role={approvalState.kind === "error" ? "alert" : "status"}
+        >
+          {approvalState.message}
+        </p>
       )}
     </div>
   );

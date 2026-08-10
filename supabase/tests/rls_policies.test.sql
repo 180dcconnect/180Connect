@@ -1830,6 +1830,85 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Assign Client Owner (F163) — the admin path through reassign_ownership, and the
+-- direct owner_id UPDATE it replaces (20260810110000)
+-- ---------------------------------------------------------------------------
+create or replace function tests.suite_assign_client_owner()
+returns setof text language plpgsql as $$
+declare
+  v_admin    uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a    uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b    uuid := '00000000-0000-4000-a000-000000000003';
+  v_org      uuid := '00000000-0000-4000-d000-000000000003';
+  v_owner    uuid;
+  v_detail   jsonb;
+begin
+  if not tests.tables_exist('organisations', 'users', 'audit_log')
+     or to_regprocedure('public.reassign_ownership(uuid[], uuid, text, uuid)') is null then
+    return next skip(5, 'F163 assign-owner path not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  insert into public.organisations (id, legal_name, entry_method, organisation_type, owner_id)
+  values (v_org, 'Assign Owner Fixture Ltd', 'manual', 'other', null)
+  on conflict (id) do update set owner_id = null;
+
+  -- The gap this migration closes: 20260806140000 already removed a CAM's own
+  -- direct-claim branch; this one removes the admin's, so no role can move owner_id
+  -- outside claim_organisation/reassign_ownership. USING blocks this before WITH
+  -- CHECK, same as the CAM case above, so assert the resulting row, not the SQLSTATE.
+  perform tests.sqlstate_of(v_admin, format(
+    'update public.organisations set owner_id = %L where id = %L', v_cam_a, v_org));
+  select owner_id into v_owner from public.organisations where id = v_org;
+  return next is(v_owner, null::uuid,
+    'a direct UPDATE no longer lets an admin set owner_id; reassign_ownership is the only path'
+  );
+
+  return next ok(
+    not has_column_privilege('authenticated', 'public.organisations', 'owner_id', 'UPDATE'),
+    'authenticated holds no UPDATE privilege on organisations.owner_id'
+  );
+  return next ok(
+    has_column_privilege('authenticated', 'public.organisations', 'legal_name', 'UPDATE'),
+    'authenticated can still update other organisations columns (canonical editing works)'
+  );
+
+  -- The actual F163 flow: an admin assigns an unowned client to a CAM, from the
+  -- client profile, no p_from_user_id (the client has no current owner to guard
+  -- against). AC1/AC3.
+  perform tests.sqlstate_of(v_admin, format(
+    'select public.reassign_ownership(array[%L]::uuid[], %L, ''initial assignment'', null)',
+    v_org, v_cam_a));
+  select owner_id into v_owner from public.organisations where id = v_org;
+  return next is(v_owner, v_cam_a, 'admin assigns an unowned client to a CAM via reassign_ownership');
+
+  -- AC2: reassigning a client that already has an owner is not silent — it is
+  -- audited with both the outgoing and incoming CAM, same shape whether the client
+  -- started unowned or owned. The UI shows the conflict warning before this call;
+  -- the audit row is what proves it actually happened.
+  perform tests.sqlstate_of(v_admin, format(
+    'select public.reassign_ownership(array[%L]::uuid[], %L, ''reassigning to CAM B'', null)',
+    v_org, v_cam_b));
+  -- Not `order by created_at desc`: both calls run in this same test transaction,
+  -- so now() — and every audit row's created_at — is identical between them
+  -- (Postgres freezes now() for the transaction's duration). The reason string is
+  -- the only thing that tells the two rows apart here.
+  select detail into v_detail
+    from public.audit_log
+   where action = 'ownership_reassigned'
+     and target_id = v_org
+     and detail->>'reason' = 'reassigning to CAM B';
+  return next is(
+    jsonb_build_object('from', v_detail->>'from', 'to', v_detail->>'to'),
+    jsonb_build_object('from', v_cam_a::text, 'to', v_cam_b::text),
+    'reassigning an already-owned client is audited with both the outgoing and incoming owner'
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- claim_organisation — a CAM taking ownership of an unowned client (F162)
 -- ---------------------------------------------------------------------------
 -- Own fixture organisations (e000 prefix) rather than the shared 'Unowned Org Ltd':
@@ -2512,6 +2591,112 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- onboarding state (F255)
+-- ---------------------------------------------------------------------------
+-- Spec: docs/rls-permission-matrix.md §3.12. This is the one place in the schema
+-- where a state-changing write is governed by RLS and a column grant rather than a
+-- SECURITY DEFINER RPC, so the policies are the whole enforcement — there is no
+-- function re-checking anything behind them. Two properties matter most: a CAM can
+-- only ever write their own progress, and nobody can delete progress to walk a
+-- dismissed guide back into view.
+
+create or replace function tests.suite_onboarding()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b  uuid := '00000000-0000-4000-a000-000000000003';
+  v_admin  uuid := '00000000-0000-4000-a000-000000000001';
+  v_count  bigint;
+  v_marker timestamptz;
+begin
+  if not tests.tables_exist('user_onboarding_steps') then
+    return next skip(9, 'F255 onboarding state not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- The guide's own writes: a CAM records their own progress and reads it back.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.user_onboarding_steps (user_id, step_key) values (%L, %L)',
+      v_cam_a, 'outreach_preferences')),
+    null,
+    'a CAM records their own completed step'
+  );
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.user_onboarding_steps;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'a CAM sees their own progress');
+
+  -- The property the whole table hangs on: progress is per-user and unforgeable.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.user_onboarding_steps (user_id, step_key) values (%L, %L)',
+      v_cam_b, 'outreach_preferences')),
+    '42501',
+    'a CAM cannot record progress on another CAM''s behalf'
+  );
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.user_onboarding_steps;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a CAM cannot read another CAM''s progress');
+
+  -- Admins are deliberately not granted a read here. F187 (admin views a CAM's
+  -- settings) can add one with a stated reason when it is actually built; until
+  -- then this asserts the absence is intentional rather than forgotten.
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.user_onboarding_steps;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'an admin has no read on onboarding progress until F187 asks for one');
+
+  -- Append-only. A user who could delete their own rows could make a dismissed
+  -- guide reappear step by step, which is the failure AC5 exists to prevent.
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      'delete from public.user_onboarding_steps'),
+    '42501',
+    'progress cannot be deleted, by its owner or anyone else'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      'update public.user_onboarding_steps set completed_at = now()'),
+    '42501',
+    'progress cannot be rewritten after the fact'
+  );
+
+  -- The guide-level state on USERS: writable by its owner through the column grant
+  -- added in 20260805100000, and by nobody else. The row policy
+  -- (users_update_self_or_admin) is what confines it; the grant is what permits it
+  -- at all.
+  perform tests.login_as(v_cam_a);
+  update public.users set onboarding_dismissed_at = now() where id = v_cam_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select onboarding_dismissed_at into v_marker from public.users where id = v_cam_a;
+  return next ok(v_marker is not null, 'a CAM can dismiss their own guide');
+
+  perform tests.login_as(v_cam_a);
+  update public.users set onboarding_dismissed_at = now() where id = v_cam_b;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select onboarding_dismissed_at into v_marker from public.users where id = v_cam_b;
+  -- A blocked UPDATE removes zero rows and raises nothing (§4), so this asserts the
+  -- absence of the write rather than an error code.
+  return next ok(v_marker is null, 'a CAM cannot dismiss another CAM''s guide');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- client criteria review persistence (F047)
 -- ---------------------------------------------------------------------------
 
@@ -2629,10 +2814,15 @@ declare
   v_cam_b  uuid := '00000000-0000-4000-a000-000000000003';
   v_viewer uuid := '00000000-0000-4000-a000-000000000005';
   v_entry uuid;
+  v_approval_entry uuid;
+  v_duplicate_entry uuid;
+  v_company_entry uuid;
+  v_created_org uuid;
+  v_linked_org uuid;
   v_count bigint;
 begin
   if not tests.tables_exist('manual_entry_records', 'users', 'audit_log') then
-    return next skip(6, 'F036 manual entry migration not yet applied');
+    return next skip(14, 'F036 manual entry migration not yet applied');
     return;
   end if;
   perform tests.seed();
@@ -2666,6 +2856,80 @@ begin
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
   select count(*) into v_count from public.audit_log where target_id = v_entry and action = 'manual_entry_rejected';
   return next is(v_count, 1::bigint, 'admin rejection and its audit record are written together');
+
+  perform tests.login_as(v_cam_a);
+  select public.submit_manual_entry(
+    'Unique F036 Charity', 'FR', 'https://example.org', 'hello@example.org',
+    'International Registry', 'F036-001', 'Not available from an API source'
+  ) into v_approval_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.approve_manual_entry(%L, ''charity'', false, ''create_new'', null, null)',
+      v_approval_entry
+    )),
+    '42501', 'CAM cannot call the manual approval RPC');
+
+  perform tests.login_as(v_admin);
+  select public.approve_manual_entry(
+    v_approval_entry, 'charity', false, 'create_new', null, 'Meets the target criteria'
+  ) into v_created_org;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next ok(v_created_org is not null, 'admin can approve a distinct manual entry');
+
+  select count(*) into v_count
+    from public.organisations
+   where id = v_created_org and entry_method = 'manual' and country_code = 'FR';
+  return next is(v_count, 1::bigint, 'approval creates the standard active manual organisation');
+
+  select count(*) into v_count
+    from public.audit_log
+   where target_id = v_created_org and action = 'manual_entry_approved';
+  return next is(v_count, 1::bigint, 'manual approval and its audit record are written together');
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count
+    from public.get_organisation_sources_with_actor(v_created_org)
+   where source = 'manual' and source_actor_user_id = v_cam_a;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'manual source identifies the creating CAM to active users');
+
+  perform tests.login_as(v_cam_b);
+  select public.submit_manual_entry(
+    'Unique F036 Charity Limited', 'GB', null, null, null, null,
+    'Submitted independently for duplicate review'
+  ) into v_duplicate_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.approve_manual_entry(%L, ''charity'', false, ''create_new'', %L, null)',
+      v_duplicate_entry, v_created_org
+    )),
+    '22023', 'a likely duplicate cannot become a second client without a human explanation');
+
+  perform tests.login_as(v_admin);
+  select public.approve_manual_entry(
+    v_duplicate_entry, 'charity', false, 'link_existing', v_created_org,
+    'Same organisation despite the formatting difference'
+  ) into v_linked_org;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_linked_org, v_created_org, 'confirmed duplicate links to the existing active client');
+
+  perform tests.login_as(v_cam_a);
+  select public.submit_manual_entry(
+    'Unconfirmed Social Company', 'GB', null, null, null, null,
+    'May be a socially focused organisation'
+  ) into v_company_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.approve_manual_entry(%L, ''company'', false, ''create_new'', null, null)',
+      v_company_entry
+    )),
+    '22023', 'ambiguous company cannot bypass the F047 human eligibility decision');
 end;
 $$;
 
@@ -2684,12 +2948,14 @@ select * from tests.suite_default_role();
 select * from tests.suite_views();
 select * from tests.suite_actions();
 select * from tests.suite_reassign();
+select * from tests.suite_assign_client_owner();
 select * from tests.suite_claim_ownership();
 select * from tests.suite_outreach_status();
 select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
 select * from tests.suite_source_tracking();
 select * from tests.suite_manual_entries();
+select * from tests.suite_onboarding();
 select * from tests.suite_client_criteria();
 
 select * from finish();

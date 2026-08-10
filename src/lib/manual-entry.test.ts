@@ -17,9 +17,9 @@ describe("manualEntrySchema", () => {
 });
 
 describe("canApproveManualEntry", () => {
-  it("fails closed while any dependency integration is unavailable", async () => {
+  it("fails closed while the duplicate decision is unresolved", async () => {
     const checks: ManualEntryApprovalChecks = {
-      checkDuplicate: async () => ({ status: "not_available", dependency: "F042" }),
+      checkDuplicate: async () => ({ status: "blocked", message: "F042 needs a human duplicate decision." }),
     };
     const result = await canApproveManualEntry(input, checks, { organisationType: "charity" });
     assert.equal(result.ok, false);

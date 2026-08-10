@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  fetchAllPages,
   promotePendingCharityCommissionRecords,
   promotePendingCompaniesHouseRecords,
+  promotePendingFindThatCharityRecords,
   type OrganisationWriteStore,
   type PendingRecord,
 } from "./write-organisations.ts";
@@ -17,6 +19,13 @@ import type { RawCharityCommissionRecord } from "./charity-commission.ts";
 
 function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
   const inserted: StandardOrganisation[] = [];
+  const flagged: {
+    rawRecordId: string;
+    matchedOrganisationId: string;
+    matchedOn: string;
+    source: string;
+    matchFields: Record<string, string>;
+  }[] = [];
   const statusUpdates: {
     rawRecordId: string;
     status: string;
@@ -29,9 +38,19 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
     async loadPendingRecords() {
       return [];
     },
+    async loadExistingOrganisationsForMatching() {
+      return [];
+    },
+    async loadDismissedMatches() {
+      return [];
+    },
     async insertOrganisation(org) {
       inserted.push(org);
       return { id: `org-${nextId++}` };
+    },
+    async flagPotentialDuplicate({ rawRecordId, matchedOrganisationId, matchedOn, source, matchFields }) {
+      flagged.push({ rawRecordId, matchedOrganisationId, matchedOn, source, matchFields });
+      return { id: `flag-${nextId++}` };
     },
     async markRecordStatus(rawRecordId, status, matchedOrganisationId) {
       statusUpdates.push({ rawRecordId, status, matchedOrganisationId });
@@ -43,7 +62,7 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
     ...overrides,
   };
 
-  return { store, inserted, statusUpdates, criteriaOutcomes };
+  return { store, inserted, flagged, statusUpdates, criteriaOutcomes };
 }
 
 function pendingRecord(id: string, charityName: string): PendingRecord {
@@ -66,6 +85,23 @@ function companiesHousePendingRecord(id: string, companyName: string): PendingRe
     raw_payload: {
       company_number: "01234567",
       company_name: companyName,
+    },
+  };
+}
+
+function findThatCharityPendingRecord(
+  id: string,
+  queriedName: string,
+  overrides: Partial<{ name: string; ftcId: string; score: number; match: boolean }> = {},
+): PendingRecord {
+  return {
+    id,
+    raw_payload: {
+      queried_name: queriedName,
+      name: overrides.name ?? `${queriedName} (${overrides.ftcId ?? "GB-CHC-1"})`,
+      id: overrides.ftcId ?? "GB-CHC-1",
+      score: overrides.score ?? 92,
+      match: overrides.match ?? true,
     },
   };
 }
@@ -164,13 +200,75 @@ describe("promotePendingCharityCommissionRecords — website validation", () => 
   });
 });
 
-describe("promotePendingCharityCommissionRecords — duplicate candidate / conflicting values", () => {
-  it("documents that cross-source dedup and conflict detection are F042/F048, not this layer", () => {
-    // F041's testing notes list "duplicate candidate" and "conflicting source
-    // values" — this layer maps and inserts one raw record at a time with no
-    // knowledge of other organisations rows, so it cannot detect either.
-    // Flagged explicitly in write-organisations.ts's top comment as future
-    // F042/F048 work, not silently skipped.
+describe("promotePendingCharityCommissionRecords — duplicate candidate (F042)", () => {
+  it("flags a match instead of inserting a second organisations row", async () => {
+    const { store, inserted, flagged, statusUpdates } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Test Charity")];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [{ id: "org-existing", legal_name: "Test Charity", postcode: "" }];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionRecords(store);
+
+    assert.equal(counts.flagged, 1);
+    assert.equal(counts.inserted, 0);
+    assert.equal(inserted.length, 0);
+    assert.equal(flagged.length, 1);
+    assert.equal(flagged[0].matchedOrganisationId, "org-existing");
+    assert.equal(flagged[0].matchedOn, "name_and_postcode");
+    assert.equal(flagged[0].source, "charity_commission");
+    assert.deepEqual(flagged[0].matchFields, { legal_name: "Test Charity", postcode: "" });
+    assert.equal(statusUpdates[0].status, "matched");
+    assert.equal(statusUpdates[0].matchedOrganisationId, "org-existing");
+  });
+
+  it("still inserts a record with no match against existing organisations", async () => {
+    const { store, inserted, flagged } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Test Charity")];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [{ id: "org-existing", legal_name: "Unrelated Charity", postcode: "" }];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionRecords(store);
+
+    assert.equal(counts.inserted, 1);
+    assert.equal(counts.flagged, 0);
+    assert.equal(inserted.length, 1);
+    assert.equal(flagged.length, 0);
+  });
+
+  it("does not re-flag an organisation an admin already dismissed for this record", async () => {
+    const { store, inserted, flagged } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Test Charity")];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [{ id: "org-existing", legal_name: "Test Charity", postcode: "" }];
+      },
+      async loadDismissedMatches() {
+        return ["org-existing"];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionRecords(store);
+
+    assert.equal(counts.inserted, 1);
+    assert.equal(counts.flagged, 0);
+    assert.equal(inserted.length, 1);
+    assert.equal(flagged.length, 0);
+  });
+
+  it("documents that conflicting-source-values detection is F048, not this layer", () => {
+    // F041's testing notes also list "conflicting source values" — this layer only
+    // decides new-vs-duplicate (F042); reconciling disagreeing field values between
+    // two records is F048, flagged in write-organisations.ts's top comment as future
+    // work, not silently skipped.
     assert.ok(true);
   });
 });
@@ -309,10 +407,10 @@ describe("promotePendingCharityCommissionRecords — F047 client criteria", () =
 });
 
 // ---------------------------------------------------------------------------
-// promotePendingCompaniesHouseRecords (F260) — same behaviour as
-// promotePendingCharityCommissionRecords above (they share promotePendingRecords
-// in write-organisations.ts), asserted independently so a regression in one
-// source's wiring doesn't hide behind the other's passing tests.
+// promotePendingCompaniesHouseRecords (F260) — same shape of coverage as
+// promotePendingCharityCommissionRecords above, asserted independently so a
+// regression in one source's wiring doesn't hide behind the other's passing
+// tests.
 // ---------------------------------------------------------------------------
 
 describe("promotePendingCompaniesHouseRecords — valid records", () => {
@@ -404,13 +502,60 @@ describe("promotePendingCompaniesHouseRecords — invalid records", () => {
   });
 });
 
-describe("promotePendingCompaniesHouseRecords — duplicate candidate / conflicting values", () => {
-  it("documents that cross-source dedup, conflict detection, and legal_name priority are F042, not this layer", () => {
+describe("promotePendingCompaniesHouseRecords — duplicate candidate (F042)", () => {
+  it("flags a match instead of inserting a second organisations row", async () => {
+    // Regression test for the merge conflict this branch's F042 work hit against
+    // dev's F260 refactor, and again against dev's F262 refactor into three fully
+    // bespoke promote functions: dedup must run inside *every* promotePending*Records
+    // function, not just Charity Commission's, or Companies House (and Find That
+    // Charity) records skip it silently.
+    const { store, inserted, flagged, statusUpdates } = fakeStore({
+      async loadPendingRecords() {
+        return [companiesHousePendingRecord("raw-1", "Acme Ltd")];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [{ id: "org-existing", legal_name: "Acme Ltd", postcode: "" }];
+      },
+    });
+
+    const counts = await promotePendingCompaniesHouseRecords(store, criteriaPass);
+
+    assert.equal(counts.flagged, 1);
+    assert.equal(counts.inserted, 0);
+    assert.equal(inserted.length, 0);
+    assert.equal(flagged.length, 1);
+    assert.equal(flagged[0].matchedOrganisationId, "org-existing");
+    // The whole point of this regression test: source_priority must reflect the
+    // record actually being promoted (companies_house here), not be left at
+    // whatever the Charity Commission path happens to use.
+    assert.equal(flagged[0].source, "companies_house");
+    assert.equal(statusUpdates[0].status, "matched");
+  });
+
+  it("still inserts a record with no match against existing organisations", async () => {
+    const { store, inserted, flagged } = fakeStore({
+      async loadPendingRecords() {
+        return [companiesHousePendingRecord("raw-1", "Acme Ltd")];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [{ id: "org-existing", legal_name: "Unrelated Ltd", postcode: "" }];
+      },
+    });
+
+    const counts = await promotePendingCompaniesHouseRecords(store, criteriaPass);
+
+    assert.equal(counts.inserted, 1);
+    assert.equal(counts.flagged, 0);
+    assert.equal(inserted.length, 1);
+    assert.equal(flagged.length, 0);
+  });
+
+  it("documents that conflicting-source-values detection and legal_name priority are F048, not this layer", () => {
     // Same reasoning as the charity_commission block above, plus the
     // Data Dictionary's "Companies House takes priority over CharityBase"
     // note for legal_name specifically — that's a merge-time decision
-    // between two sources' records, which this insert-only layer has no
-    // way to make since it never sees an existing row to compare against.
+    // between two sources' records, which entity_match_candidates.source_priority
+    // records but does not yet act on (no merge logic reads it) — F048's job.
     assert.ok(true);
   });
 });
@@ -511,5 +656,283 @@ describe("promotePendingCompaniesHouseRecords — malformed raw_payload", () => 
     assert.equal(statusUpdates[0].status, "error");
     assert.equal(statusUpdates[0].rawRecordId, "raw-bad");
     assert.equal(statusUpdates[1].status, "validated");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// promotePendingFindThatCharityRecords (F262) — same shape of coverage as
+// promotePendingCompaniesHouseRecords above, plus its own block for the
+// match-confidence filter, which has no equivalent in either other source.
+// ---------------------------------------------------------------------------
+
+describe("promotePendingFindThatCharityRecords — valid records", () => {
+  it("maps and inserts a confident match, marking it validated", async () => {
+    const { store, inserted, statusUpdates } = fakeStore({
+      async loadPendingRecords() {
+        return [findThatCharityPendingRecord("raw-1", "Oxfam", { ftcId: "GB-CHC-202918" })];
+      },
+    });
+
+    const counts = await promotePendingFindThatCharityRecords(store, criteriaPass);
+
+    assert.equal(counts.read, 1);
+    assert.equal(counts.inserted, 1);
+    assert.equal(counts.rejected, 0);
+    assert.equal(inserted.length, 1);
+    assert.equal(inserted[0].legal_name, "Oxfam");
+    assert.equal(inserted[0].organisation_type, "charity");
+    assert.equal(statusUpdates[0].status, "validated");
+    assert.equal(statusUpdates[0].matchedOrganisationId, "org-1");
+  });
+
+  it("does nothing when there are no pending records", async () => {
+    const { store, inserted } = fakeStore();
+    const counts = await promotePendingFindThatCharityRecords(store, criteriaPass);
+
+    assert.equal(counts.read, 0);
+    assert.equal(inserted.length, 0);
+  });
+
+  it("loads pending records filtered on the find_that_charity source", async () => {
+    let requestedSource = "";
+    const { store } = fakeStore({
+      async loadPendingRecords(source) {
+        requestedSource = source;
+        return [];
+      },
+    });
+
+    await promotePendingFindThatCharityRecords(store, criteriaPass);
+
+    assert.equal(requestedSource, "find_that_charity");
+  });
+});
+
+describe("promotePendingFindThatCharityRecords — invalid records", () => {
+  it("rejects a record with an empty queried_name instead of inserting it", async () => {
+    const { store, inserted, statusUpdates } = fakeStore({
+      async loadPendingRecords() {
+        return [findThatCharityPendingRecord("raw-1", "")];
+      },
+    });
+
+    const counts = await promotePendingFindThatCharityRecords(store, criteriaPass);
+
+    assert.equal(counts.rejected, 1);
+    assert.equal(counts.inserted, 0);
+    assert.equal(inserted.length, 0);
+    assert.equal(statusUpdates[0].status, "rejected");
+  });
+});
+
+describe("promotePendingFindThatCharityRecords — low-confidence match", () => {
+  it("rejects a candidate with match: false rather than inserting reconcileOne's fallback guess", async () => {
+    const { store, inserted, statusUpdates } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          findThatCharityPendingRecord("raw-1", "Some Charity", { match: false, score: 12 }),
+        ];
+      },
+    });
+
+    const counts = await promotePendingFindThatCharityRecords(store, criteriaPass);
+
+    assert.equal(counts.rejected, 1);
+    assert.equal(counts.inserted, 0);
+    assert.equal(inserted.length, 0);
+    assert.equal(statusUpdates[0].status, "rejected");
+  });
+
+  it("still inserts a confident match even with a low numeric score", async () => {
+    // match: true is the deciding signal, not score on its own — see
+    // isConfidentMatch's doc comment.
+    const { store, inserted } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          findThatCharityPendingRecord("raw-1", "Some Charity", { match: true, score: 20 }),
+        ];
+      },
+    });
+
+    const counts = await promotePendingFindThatCharityRecords(store, criteriaPass);
+
+    assert.equal(counts.inserted, 1);
+    assert.equal(inserted.length, 1);
+  });
+});
+
+describe("promotePendingFindThatCharityRecords — legal_name source", () => {
+  it("uses queried_name, not Find That Charity's decorated name, for legal_name", async () => {
+    const { store, inserted } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          findThatCharityPendingRecord("raw-1", "Oxfam International Tsunami Fund", {
+            name: "Oxfam International Tsunami Fund (GB-CHC-1108700) [INACTIVE]",
+            ftcId: "GB-CHC-1108700",
+          }),
+        ];
+      },
+    });
+
+    await promotePendingFindThatCharityRecords(store, criteriaPass);
+
+    assert.equal(inserted[0].legal_name, "Oxfam International Tsunami Fund");
+  });
+});
+
+describe("promotePendingFindThatCharityRecords — duplicate candidate (F042)", () => {
+  it("flags a match instead of inserting a second organisations row", async () => {
+    // Sharper than the equivalent charity_commission/companies_house test: every
+    // find_that_charity record reconciles a name that already came from another
+    // source, so this is the source where F042 matters most — see the
+    // module-level comment at the top of write-organisations.ts.
+    const { store, inserted, flagged, statusUpdates } = fakeStore({
+      async loadPendingRecords() {
+        return [findThatCharityPendingRecord("raw-1", "Oxfam", { ftcId: "GB-CHC-202918" })];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [{ id: "org-existing", legal_name: "Oxfam", postcode: "" }];
+      },
+    });
+
+    const counts = await promotePendingFindThatCharityRecords(store, criteriaPass);
+
+    assert.equal(counts.flagged, 1);
+    assert.equal(counts.inserted, 0);
+    assert.equal(inserted.length, 0);
+    assert.equal(flagged.length, 1);
+    assert.equal(flagged[0].matchedOrganisationId, "org-existing");
+    assert.equal(flagged[0].source, "find_that_charity");
+    assert.equal(statusUpdates[0].status, "matched");
+  });
+
+  it("still inserts a confident match with no existing organisation to match against", async () => {
+    const { store, inserted, flagged } = fakeStore({
+      async loadPendingRecords() {
+        return [findThatCharityPendingRecord("raw-1", "Oxfam", { ftcId: "GB-CHC-202918" })];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [{ id: "org-existing", legal_name: "Unrelated Charity", postcode: "" }];
+      },
+    });
+
+    const counts = await promotePendingFindThatCharityRecords(store, criteriaPass);
+
+    assert.equal(counts.inserted, 1);
+    assert.equal(counts.flagged, 0);
+    assert.equal(inserted.length, 1);
+    assert.equal(flagged.length, 0);
+  });
+});
+
+describe("promotePendingFindThatCharityRecords — existing internal data preserved", () => {
+  it("never updates or deletes an existing organisations row — only inserts new ones", async () => {
+    const { store, inserted } = fakeStore({
+      async loadPendingRecords() {
+        return [findThatCharityPendingRecord("raw-1", "Oxfam")];
+      },
+    });
+
+    await promotePendingFindThatCharityRecords(store, criteriaPass);
+
+    assert.equal(inserted.length, 1);
+  });
+});
+
+describe("promotePendingFindThatCharityRecords — write failure", () => {
+  it("marks a record 'error', not 'validated', when the insert fails", async () => {
+    const { store, statusUpdates } = fakeStore({
+      async loadPendingRecords() {
+        return [findThatCharityPendingRecord("raw-1", "Oxfam")];
+      },
+      async insertOrganisation() {
+        return { error: "duplicate key value" };
+      },
+    });
+
+    const counts = await promotePendingFindThatCharityRecords(store, criteriaPass);
+
+    assert.equal(counts.failed, 1);
+    assert.equal(counts.inserted, 0);
+    assert.equal(statusUpdates[0].status, "error");
+  });
+});
+
+describe("promotePendingFindThatCharityRecords — no store configured", () => {
+  it("throws a clear error rather than a null-reference crash", async () => {
+    await assert.rejects(
+      () => promotePendingFindThatCharityRecords(null),
+      /SUPABASE_SERVICE_ROLE_KEY/,
+    );
+  });
+});
+
+describe("promotePendingFindThatCharityRecords — malformed raw_payload", () => {
+  it("marks a record as error and continues the batch when the mapper throws", async () => {
+    let calls = 0;
+    const { store, inserted, statusUpdates } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          { id: "raw-bad", raw_payload: null },
+          findThatCharityPendingRecord("raw-good", "Good Charity"),
+        ];
+      },
+      async insertOrganisation(org) {
+        calls++;
+        inserted.push(org);
+        return { id: `org-${calls}` };
+      },
+    });
+
+    const counts = await promotePendingFindThatCharityRecords(store, criteriaPass);
+
+    assert.equal(counts.failed, 1);
+    assert.equal(counts.inserted, 1);
+    assert.equal(inserted.length, 1);
+    assert.equal(inserted[0].legal_name, "Good Charity");
+    assert.equal(statusUpdates[0].status, "error");
+    assert.equal(statusUpdates[0].rawRecordId, "raw-bad");
+    assert.equal(statusUpdates[1].status, "validated");
+  });
+});
+
+describe("fetchAllPages", () => {
+  it("keeps fetching until a page comes back shorter than the page size", async () => {
+    // loadExistingOrganisationsForMatching's real Supabase implementation uses
+    // this to page past PostgREST's 1000-row default cap on an unbounded
+    // .select() — without it, matching silently stops seeing organisations
+    // past row 1000 and never recovers on a later run.
+    const PAGE_SIZE = 1000;
+    const fullPage = Array.from({ length: PAGE_SIZE }, (_, i) => ({ id: `org-${i}` }));
+    const lastPage = [{ id: "org-last" }];
+    const requestedRanges: [number, number][] = [];
+
+    const result = await fetchAllPages<{ id: string }>(async (from, to) => {
+      requestedRanges.push([from, to]);
+      return { data: from === 0 ? fullPage : lastPage, error: null };
+    });
+
+    assert.deepEqual(requestedRanges, [
+      [0, PAGE_SIZE - 1],
+      [PAGE_SIZE, PAGE_SIZE * 2 - 1],
+    ]);
+    assert.equal(result.length, PAGE_SIZE + 1);
+    assert.equal(result[result.length - 1].id, "org-last");
+  });
+
+  it("stops after one call when the first page is already short", async () => {
+    const result = await fetchAllPages<{ id: string }>(async () => ({
+      data: [{ id: "org-1" }],
+      error: null,
+    }));
+
+    assert.deepEqual(result, [{ id: "org-1" }]);
+  });
+
+  it("throws instead of swallowing a page error", async () => {
+    await assert.rejects(
+      () => fetchAllPages(async () => ({ data: null, error: new Error("boom") })),
+      /boom/,
+    );
   });
 });

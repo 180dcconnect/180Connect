@@ -4,6 +4,7 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { CompaniesHouseImportForm } from "./import-form";
+import { CompaniesHouseImportAutoButton } from "./import-auto-button";
 
 export const maxDuration = 60;
 
@@ -51,11 +52,19 @@ export default async function CompaniesHousePage() {
               Bring UK company registration data into the validation and matching pipeline.
             </p>
           </div>
-          <Link className="text-sm font-bold text-brand hover:underline" href="/admin">
-            Back to admin
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link className="text-sm font-bold text-brand hover:underline" href="/admin/review">
+              Review queue
+            </Link>
+            <Link className="text-sm font-bold text-brand hover:underline" href="/admin">
+              Back to admin
+            </Link>
+          </div>
         </div>
 
+        <div className="mt-8">
+          <CompaniesHouseImportAutoButton configured={configured} />
+        </div>
         <CompaniesHouseImportForm configured={configured} />
 
         <div className="mt-8">

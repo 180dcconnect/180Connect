@@ -92,6 +92,8 @@ This is a dead index on their end, not an issue with our key or query:
 
 **Owner:** Project Leader. **Decided:** 10 August 2026.
 
+**Note (10 Aug 2026):** [`charity-base/charity-base-data`](https://github.com/charity-base/charity-base-data) shows CharityBase isn't a primary source — it's a wrapper that builds its index from Charity Commission extract/API + 360Giving GrantNav CSVs + postcode geo + social handles, then indexes to Elasticsearch. Repo last pushed 2023-01-11 (stale, not a viable self-host). Everything of substance behind CharityBase is already reachable directly: Charity Commission is built (F033, PR #332); 360Giving already sits in `DATA_SOURCES` (`src/lib/ingestion/type.ts`) as its own unbuilt source, worth a ticket in its own right with no CharityBase dependency. Doesn't change the close decision above.
+
 ---
 
 ## Blocking decisions

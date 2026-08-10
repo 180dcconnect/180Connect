@@ -2,7 +2,7 @@
 
 Decisions that are **not resolved in code** and need a human call, plus places where we have knowingly departed from the PRD. Raise these at the next team meeting.
 
-Last updated: 28 July 2026 (D-01 updated, D-03 added, Q-04 resolved).
+Last updated: 10 August 2026 (Q-07 added).
 
 ---
 
@@ -128,6 +128,28 @@ Worth stating plainly, because it is the one place a viewer sees something a CAM
 **Consequence for the PRD:** §4.3's "if authorised" is treated as satisfied by holding the Viewer role. There is no per-user analytics authorisation flag, and none is planned — the role *is* the authorisation. This is an interpretation of the PRD, not a deviation from it.
 
 **Owner:** Project Leader. **Decided:** 24 Jul 2026. Recorded in `docs/rls-permission-matrix.md` §6.
+
+---
+
+### Q-07 — Find That Charity (F034): source is unreliable, confirmed live
+
+F034's own ticket flags "Find That Charity access/data quality" as an open question rather than a solved dependency. Verified live against `findthatcharity.uk` on 10 Aug 2026 (Bashir) — the flakiness a teammate reported is real and reproducible, not a bug in `find_that_charity.ts`.
+
+**What was tested:** 15 sequential `GET` requests each against `/`, `/reconcile` (no query), and `/reconcile?queries=...` (the actual reconcile call the adapter makes).
+
+**Result:** roughly **40–60% of requests hang indefinitely** — TCP connects, HTTP/2 stream opens, server never sends a response (no error, no 429, no 5xx, just silence until the client's own timeout fires). This happens on every endpoint tested, including the static base page, so it is host-wide, not specific to `/reconcile` or to query load. The requests that *do* return succeed fast (~0.5–0.7s) with correct data.
+
+**Consequence for the adapter as written:** `reconcileOne()` retries 3× with a 15s timeout per attempt, sequentially, one name at a time (`MAX_NAMES_PER_RUN = 200`). Against a ~50% per-attempt hang rate:
+- ~1 in 8 reconcile calls (0.5³) will still exhaust all 3 retries and throw, even though the source has no real problem with that particular query.
+- a worst-case run can burn up to 200 × (3 × 15s) ≈ 2.5 hours before completing, because failures aren't a fast-fail (429/5xx) — they're a full-length hang on every attempt.
+
+This is on top of the adapter's own already-flagged architectural point (no bulk endpoint, so this was never a traditional import) — the two compound: a name-by-name loop was already going to be slow, and doing it against a host that stalls half the time makes that worse, not just cosmetically slower.
+
+**Not caused by:** rate limiting (fails on a cold first request), TLS/DNS (cert is valid, `findthatcharity.uk` resolves fine), or query shape (plain `/` fails the same way).
+
+**To resolve:** re-test closer to when F034 is actually picked up — this may be a transient outage rather than a permanent property of the service. If it persists, options are (a) shorten the per-attempt timeout and raise attempt count so failures fail faster without changing total wait budget, (b) run reconciliation in small scheduled batches rather than one long synchronous run, or (c) park F034 (P2) until the host is stable, per the ticket's own "Blocked By" note.
+
+**Owner:** Component Owner F034. **Status:** Open — needs a re-check before implementation resumes.
 
 ---
 

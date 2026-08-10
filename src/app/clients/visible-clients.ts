@@ -71,3 +71,17 @@ export function filterByOwner(
   }
   return clients.filter((client) => client.owner_id === ownerFilter);
 }
+
+/**
+ * Free-text search on the client list. Case-insensitive substring match on
+ * legal_name only — the field the list actually displays and the one a CAM
+ * would type from memory.
+ */
+export function searchClients(
+  clients: VisibleClient[],
+  search: string | null | undefined,
+): VisibleClient[] {
+  const term = search?.trim().toLowerCase();
+  if (!term) return clients;
+  return clients.filter((client) => client.legal_name.toLowerCase().includes(term));
+}

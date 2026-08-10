@@ -42,6 +42,7 @@
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | source_country | text |  | Yes | Country the record came from | System | Set from API source or API response | Null if source has no country context |
 | source_registry_name | text |  | Yes | Name of the specific registry this record came from | System | Set by ingestion worker | e.g. "Netherlands KVK", "France RNA" |
+| status_last_checked_at | timestamp |  | Yes | When the Companies House status-recheck job last refetched this record's company_status | System | Set after each recheck | Null = never rechecked, sorts first |
 
 ## DATA_QUALITY_EVENTS
 
@@ -61,6 +62,21 @@
 | resolved_by_user_id | uuid | USERS | Yes | Who resolved it | System | Set to logged-in user at resolution time | Null until resolved |
 | rule_version | text |  | No | Which version of the ruleset fired this | System | Set by the validation worker | Lets you audit if a rule change causes a spike in failures |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+
+## ORGANISATION_STATUS_FLAGS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| organisation_id | uuid | ORGANISATIONS | No | Organisation whose Companies House status changed | System | Set by the status-recheck job |  |
+| company_number | text |  | No | Companies House number this flag is about | System | Copied from the record at detection time |  |
+| previous_status | text |  | No | Last known company_status before this change | System | Snapshotted before the recheck |  |
+| new_status | text |  | No | Company_status found on recheck | API | Pulled from Companies House |  |
+| detected_at | timestamp |  | No | When the drift was detected | System | Auto-generated |  |
+| resolved | boolean |  | No | Whether an admin has acknowledged this flag | Human | Admin marks acknowledged | Default false |
+| resolved_at | timestamp |  | Yes | When acknowledged | System | Written when resolved is set to true |  |
+| resolved_by_user_id | uuid | USERS | Yes | Admin who acknowledged it | System | Set to logged-in admin | Null until resolved |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated | never written to ORGANISATIONS.outreach_status — an org may be mid-outreach, only a human decides what a status change means for that. |
 
 ## ENTITY_MATCH_CANDIDATES
 

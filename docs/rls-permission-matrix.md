@@ -287,6 +287,7 @@ A sent message is immutable: the UPDATE predicate requires `send_status = 'draft
 | `INGESTION_RUNS` | admin | admin (trigger refresh) | — | — |
 | `RAW_SOURCE_RECORDS` | admin | — (service role) | — | admin |
 | `DATA_QUALITY_EVENTS` | admin | — (service role) | admin (resolve) | — |
+| `ORGANISATION_STATUS_FLAGS` | admin | — (service role, RPC only) | — (RPC only: acknowledge) | — |
 | `ENTITY_MATCH_CANDIDATES` | admin | — (service role) | admin (adjudicate) | — |
 | `MANUAL_ENTRY_RECORDS` | admin, cam (own) | admin, cam | admin, own | admin |
 
@@ -299,6 +300,17 @@ may execute `get_organisation_sources(organisation_id)`, which returns only the 
 name, source-assigned identifier, registry name and first-seen timestamp for linked
 records. The `SECURITY DEFINER` function checks `app.is_active_user()` itself and never
 returns `raw_payload`; `anon` has no execute privilege.
+
+`ORGANISATION_STATUS_FLAGS` (`20260809100200_create_organisation_status_flags.sql`,
+F032/F260 follow-on) is the Companies House status-watch job's review flag — a
+tracked organisation's `company_status` drifted away from `active`. No
+INSERT/UPDATE policy, same reasoning as `AUDIT_LOG` (§3.8) and `SUPPRESSIONS`
+(§3.14): all writes go through two `SECURITY DEFINER` RPCs, each writing an
+`audit_log` row in the same transaction — `record_organisation_status_flag`
+(`service_role` only, called from the status-recheck job) and
+`acknowledge_organisation_status_flag` (admin only). Neither ever writes to
+`organisations.outreach_status` — an organisation flagged here may be mid-outreach,
+and only a human decides what a status change means for that pipeline state.
 
 ### 3.6 Model and scoring configuration — admin only
 
@@ -760,3 +772,11 @@ process problem rather than a security one: nothing recreates it on `db reset`, 
 cannot reach production through the release process. It needs capturing as a migration
 by whoever owns F013/F014. Note also that `users.deactivated_at` is now in the Data
 Model but exists in neither the database nor a migration.
+
+# F047 data-quality review flags
+
+`DATA_QUALITY_EVENTS` is readable only by active admins and writable only through
+the service-role validation worker. `record_client_criteria_outcome` is not
+executable by `anon` or `authenticated`; it atomically records the distinct
+`needs_review`/`does_not_meet` rule and holds the raw record out of the active
+client list.

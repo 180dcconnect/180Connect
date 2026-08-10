@@ -31,7 +31,7 @@ export default async function AdminUsersPage() {
 
   const { data: pendingInvites, error: pendingError } = await supabase
     .from("users")
-    .select("id, email, invited_at")
+    .select("id, email, invited_at, role")
     .not("invited_at", "is", null)
     .is("invite_accepted_at", null)
     .order("invited_at", { ascending: false });

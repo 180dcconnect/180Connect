@@ -4,6 +4,7 @@ import {
   filterByOwner,
   formatLocation,
   formatOutreachStatus,
+  searchClients,
   visibleClients,
   type ClientListRow,
 } from "./visible-clients.ts";
@@ -136,5 +137,32 @@ describe("filterByOwner", () => {
 
   it("returns an empty list when filtering an empty client list", () => {
     assert.deepEqual(filterByOwner([], "cam-1"), []);
+  });
+});
+
+describe("searchClients", () => {
+  const clients = visibleClients(
+    [
+      org({ id: "a", legal_name: "Bristol Food Bank" }),
+      org({ id: "b", legal_name: "Cardiff Youth Trust" }),
+      org({ id: "c", legal_name: "bristol animal rescue" }),
+    ],
+    [],
+  );
+
+  it("returns every client when no search term is given", () => {
+    assert.deepEqual(searchClients(clients, undefined).map((c) => c.id), ["a", "b", "c"]);
+    assert.deepEqual(searchClients(clients, null).map((c) => c.id), ["a", "b", "c"]);
+    assert.deepEqual(searchClients(clients, "").map((c) => c.id), ["a", "b", "c"]);
+    assert.deepEqual(searchClients(clients, "   ").map((c) => c.id), ["a", "b", "c"]);
+  });
+
+  it("matches a substring of legal_name case-insensitively", () => {
+    assert.deepEqual(searchClients(clients, "bristol").map((c) => c.id), ["a", "c"]);
+    assert.deepEqual(searchClients(clients, "BRISTOL").map((c) => c.id), ["a", "c"]);
+  });
+
+  it("returns an empty list when nothing matches", () => {
+    assert.deepEqual(searchClients(clients, "nonexistent"), []);
   });
 });

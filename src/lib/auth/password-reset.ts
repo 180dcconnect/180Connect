@@ -61,7 +61,7 @@ export type ForgotPasswordState = {
 export type ResetPasswordState = {
   status: "idle" | "error";
   message?: string;
-  fieldErrors?: { password?: string[]; confirmPassword?: string[] };
+  fieldErrors?: { password?: string[]; confirmPassword?: string[]; fullName?: string[] };
 };
 
 /** Cookie marking a session as being mid-recovery. */
@@ -91,10 +91,19 @@ export const passwordSchema = z
     }
   });
 
+/**
+ * Optional here because whether a name is actually required depends on
+ * account state (does this user already have one?) that only the Server
+ * Action can see — it re-checks and fills in `fieldErrors.fullName` itself.
+ * See `setNewPassword` in `src/app/reset-password/actions.ts`.
+ */
+export const fullNameSchema = z.string().trim().max(120, "Name is too long.").optional();
+
 export const newPasswordSchema = z
   .object({
     password: passwordSchema,
     confirmPassword: z.string(),
+    fullName: fullNameSchema,
   })
   .refine((values) => values.password === values.confirmPassword, {
     message: "Passwords do not match.",

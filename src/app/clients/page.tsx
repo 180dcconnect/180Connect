@@ -7,6 +7,7 @@ import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
 import {
   filterByOwner,
+  searchClients,
   visibleClients,
   type ClientListRow,
   type OpenSuppression,
@@ -18,7 +19,9 @@ type TeamMember = { id: string; full_name: string | null };
 
 // Next.js 16: searchParams is a Promise on App Router pages — same pattern as
 // src/app/admin/audit-log/page.tsx.
-type SearchParams = Promise<{ owner?: string }>;
+type SearchParams = Promise<{ owner?: string; q?: string; page?: string }>;
+
+const PAGE_SIZE = 25;
 
 /**
  * F051 — the charity list view. Every organisation regardless of import method
@@ -41,7 +44,7 @@ export default async function ClientsPage({
   const authorization = await getCurrentActor("client:view", { route: "/clients" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
-  const { owner: ownerFilter } = await searchParams;
+  const { owner: ownerFilter, q: search, page: pageParam } = await searchParams;
 
   const supabase = await createClient();
   const canClaim = hasPermission(authorization.actor.role, "client:edit");
@@ -77,12 +80,34 @@ export default async function ClientsPage({
     await reportError(team.error, { operation: "clients.page_team" });
   }
 
-  const clients = filterByOwner(
-    visibleClients(organisations.data ?? [], openSuppressions.data ?? []),
-    ownerFilter,
+  const matchingClients = searchClients(
+    filterByOwner(
+      visibleClients(organisations.data ?? [], openSuppressions.data ?? []),
+      ownerFilter,
+    ),
+    search,
   );
   const teamMembers = team.data ?? [];
-  const filterActive = Boolean(ownerFilter);
+  const filterActive = Boolean(ownerFilter || search);
+
+  const totalPages = Math.max(1, Math.ceil(matchingClients.length / PAGE_SIZE));
+  const requestedPage = Number.parseInt(pageParam ?? "1", 10);
+  const currentPage = Number.isInteger(requestedPage)
+    ? Math.min(Math.max(requestedPage, 1), totalPages)
+    : 1;
+  const clients = matchingClients.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+
+  const pageHref = (targetPage: number) => {
+    const params = new URLSearchParams();
+    if (ownerFilter) params.set("owner", ownerFilter);
+    if (search) params.set("q", search);
+    if (targetPage > 1) params.set("page", String(targetPage));
+    const qs = params.toString();
+    return qs ? `/clients?${qs}` : "/clients";
+  };
 
   // F255 step 2 — "review your assigned clients" is complete when the CAM has looked
   // at their own list, which is this page filtered to themselves. Recording it here
@@ -108,6 +133,17 @@ export default async function ClientsPage({
         )}
 
         <form className="mt-6 flex flex-wrap items-end gap-3" method="get">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-foreground/65">Search</span>
+            <input
+              type="search"
+              name="q"
+              defaultValue={search ?? ""}
+              placeholder="Client name"
+              className="rounded-lg border border-black/10 px-3 py-2 text-sm"
+            />
+          </label>
+
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-foreground/65">Owner</span>
             <select
@@ -145,10 +181,17 @@ export default async function ClientsPage({
 
           {filterActive && (
             <Link href="/clients" className="text-sm font-medium text-brand hover:underline">
-              Clear filter
+              Clear filters
             </Link>
           )}
         </form>
+
+        {matchingClients.length > 0 && (
+          <p className="mt-4 text-xs text-foreground/50">
+            {matchingClients.length} client{matchingClients.length === 1 ? "" : "s"}
+            {totalPages > 1 ? ` · page ${currentPage} of ${totalPages}` : ""}
+          </p>
+        )}
 
         {clients.length === 0 ? (
           <p className="mt-8 text-sm text-foreground/65">
@@ -194,6 +237,28 @@ export default async function ClientsPage({
               </li>
             ))}
           </ul>
+        )}
+
+        {totalPages > 1 && (
+          <nav className="mt-6 flex items-center justify-between text-sm">
+            {currentPage > 1 ? (
+              <Link href={pageHref(currentPage - 1)} className="font-bold text-brand hover:underline">
+                ← Previous
+              </Link>
+            ) : (
+              <span />
+            )}
+            <span className="text-foreground/50">
+              Page {currentPage} of {totalPages}
+            </span>
+            {currentPage < totalPages ? (
+              <Link href={pageHref(currentPage + 1)} className="font-bold text-brand hover:underline">
+                Next →
+              </Link>
+            ) : (
+              <span />
+            )}
+          </nav>
         )}
       </section>
     </main>

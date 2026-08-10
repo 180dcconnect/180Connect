@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { standardizeCompaniesHouseRecord } from "./companies-house.ts";
+import {
+  classifyCompaniesHouseSourceConfidence,
+  standardizeCompaniesHouseRecord,
+} from "./companies-house.ts";
 import type { RawCompaniesHouseRecord } from "./companies-house.ts";
 
 const minimalRecord: RawCompaniesHouseRecord = {
@@ -131,5 +134,50 @@ describe("standardizeCompaniesHouseRecord — legal_name priority note", () => {
 describe("standardizeCompaniesHouseRecord — out of scope for this module", () => {
   it("documents that duplicate/conflict/merge testing notes belong to F042, not this mapper", () => {
     assert.ok(true);
+  });
+});
+
+describe("classifyCompaniesHouseSourceConfidence", () => {
+  it("is strong for a Tier A legal form", () => {
+    assert.equal(
+      classifyCompaniesHouseSourceConfidence({
+        ...minimalRecord,
+        company_type: "charitable-incorporated-organisation",
+      }),
+      "strong",
+    );
+  });
+
+  it("is strong for a Tier B CIC", () => {
+    assert.equal(
+      classifyCompaniesHouseSourceConfidence({
+        ...minimalRecord,
+        company_type: "ltd",
+        company_subtype: "community-interest-company",
+      }),
+      "strong",
+    );
+  });
+
+  it("is weak for a Tier C SIC-gated match", () => {
+    assert.equal(
+      classifyCompaniesHouseSourceConfidence({
+        ...minimalRecord,
+        company_type: "royal-charter",
+        sic_codes: ["86900"],
+      }),
+      "weak",
+    );
+  });
+
+  it("is weak for a record matching no tier", () => {
+    assert.equal(
+      classifyCompaniesHouseSourceConfidence({ ...minimalRecord, company_type: "ltd" }),
+      "weak",
+    );
+  });
+
+  it("is weak when company_type is absent entirely", () => {
+    assert.equal(classifyCompaniesHouseSourceConfidence(minimalRecord), "weak");
   });
 });

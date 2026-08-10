@@ -86,6 +86,8 @@ PRD §10 requires the scheduled-send worker to run *"at least every minute."* Ve
 
 **Owner:** Email epic owner. **Decide by:** before the scheduled-sending story starts (Week 5–6).
 
+**Precedent shipped 9 Aug 2026:** the shape proposed here — `pg_cron` + `net.http_post` + a `CRON_SECRET`-checked route handler — is now live for the Companies House discovery and status-recheck jobs (`supabase/migrations/20260809100400_schedule_companies_house_cron.sql`, `src/app/api/cron/companies-house-import`, `src/app/api/cron/companies-house-status-recheck`). Those run weekly, not minute-granularity, so this proves the mechanism works end-to-end on the free plan, not yet minute-level cadence — the scheduled-send worker is still the one that needs that. `CRON_SECRET` is no longer "not yet consumed"; see `src/lib/env.ts`.
+
 ### Q-03 — LLM provider
 
 PRD §22 leaves this open. Whatever we pick sits behind our own `LlmProvider` interface, so it is swappable — but a default is needed before the first booklet is generated.

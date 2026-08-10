@@ -3,10 +3,8 @@
 import { reportError } from "@/lib/error-logging";
 import { getCurrentActor, actorFailureMessage } from "@/lib/auth/actor";
 import { runIngestion } from "@/lib/ingestion/runner";
-import {
-  createCompaniesHouseAdapter,
-  createCompaniesHouseBulkSearchAdapter,
-} from "@/lib/ingestion/sources/companieshouse";
+import { createCompaniesHouseAdapter } from "@/lib/ingestion/sources/companieshouse";
+import { runCompaniesHouseDiscoveryImport } from "@/lib/ingestion/sources/companies-house-discovery";
 import { promotePendingCompaniesHouseRecords } from "@/lib/standardize/write-organisations";
 import { importStateFromSummary } from "./import-result";
 
@@ -129,11 +127,20 @@ export async function importCompaniesHouse(
   }
 }
 
-export async function importCompaniesHouseBulk(
+/**
+ * Zero-input replacement for the old typed-criteria bulk search: runs the same
+ * 3-tier mission-fit discovery the weekly cron job runs
+ * (companies-house-discovery.ts's runCompaniesHouseDiscoveryImport), so the
+ * manual button and the scheduled job can never drift apart. Promotion —
+ * including the F047 Tier A/B strong-evidence bypass — happens inside that
+ * shared function, not here.
+ */
+export async function importCompaniesHouseAuto(
   previous: CompaniesHouseImportState,
   formData: FormData,
 ): Promise<CompaniesHouseImportState> {
   void previous;
+  void formData;
   const authorization = await getCurrentActor("user:manage");
   if (!authorization.ok) {
     return {
@@ -142,47 +149,38 @@ export async function importCompaniesHouseBulk(
     };
   }
 
-  const sicCodes = String(formData.get("sicCodes") ?? "")
-    .split(",")
-    .map((code) => code.trim())
-    .filter(Boolean);
-  const location = String(formData.get("location") ?? "").trim();
-  const companyStatus = String(formData.get("companyStatus") ?? "").trim();
-
-  if (sicCodes.length === 0 && !location) {
-    return {
-      kind: "error",
-      message: "Enter at least one SIC code or a location to scope the search.",
-    };
-  }
-
-  const adapter = createCompaniesHouseBulkSearchAdapter({
-    sicCodes,
-    location: location || undefined,
-    companyStatus: companyStatus || undefined,
-  });
-
   try {
-    const [summary] = await runIngestion(
-      [adapter],
-      {
-        triggeredBy: "manual",
-        triggeredByUserId: authorization.actor.id,
-      },
+    const result = await runCompaniesHouseDiscoveryImport(
+      { triggeredBy: "manual", triggeredByUserId: authorization.actor.id },
+      authorization.actor.id,
     );
 
-    if (summary.status === "failed") {
-      await reportError(new Error(summary.error ?? "Companies House bulk import failed"), {
-        operation: "admin.companies_house.bulk_import",
-        source: summary.source,
+    if (result.summary.status === "failed") {
+      await reportError(new Error(result.summary.error ?? "Companies House discovery import failed"), {
+        operation: "admin.companies_house.import_auto",
+        source: result.summary.source,
         actorUserId: authorization.actor.id,
       });
-      return importStateFromSummary(summary);
+      return importStateFromSummary(result.summary);
     }
-    return await promoteAndMergeCounts(importStateFromSummary(summary), authorization.actor.id);
+
+    const state = importStateFromSummary(result.summary);
+    if (!result.promoteCounts) {
+      return { ...state, message: `${state.message} ${result.promoteError}`.trim() };
+    }
+    return {
+      ...state,
+      promoteCounts: {
+        inserted: result.promoteCounts.inserted,
+        rejected: result.promoteCounts.rejected,
+        needsReview: result.promoteCounts.needsReview,
+        doesNotMeet: result.promoteCounts.doesNotMeet,
+        failed: result.promoteCounts.failed,
+      },
+    };
   } catch (error) {
     await reportError(error, {
-      operation: "admin.companies_house.bulk_import",
+      operation: "admin.companies_house.import_auto",
       actorUserId: authorization.actor.id,
     });
     return {

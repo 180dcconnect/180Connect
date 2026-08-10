@@ -1,9 +1,11 @@
 // F041/F260: promotes pending raw_source_records into organisations, using a
 // source-specific standardize function (charity-commission.ts,
-// companies-house.ts) to map fields. One promote function per source
+// companies-house.ts) to map fields. One bespoke promote function per source
 // (promotePendingCharityCommissionRecords, promotePendingCompaniesHouseRecords)
-// sharing the loop in promotePendingRecords below — the source-specific
-// difference is only which mapper runs and which record_source to filter on.
+// — each needs its own extra per-record step (website validation for charity
+// commission; F047 source-confidence classification for companies house) that
+// a single shared loop can't express without every source paying for every
+// other source's extra step.
 //
 // Modelled on runner.ts's dependency-injection pattern (an injectable Store
 // interface, a real Supabase-backed default implementation, a fake for
@@ -38,7 +40,11 @@ import {
   standardizeCharityCommissionRecord,
   type RawCharityCommissionRecord,
 } from "./charity-commission.ts";
-import { standardizeCompaniesHouseRecord } from "./companies-house.ts";
+import {
+  classifyCompaniesHouseSourceConfidence,
+  standardizeCompaniesHouseRecord,
+  type RawCompaniesHouseRecord,
+} from "./companies-house.ts";
 import type { StandardOrganisation } from "./types.ts";
 
 
@@ -219,69 +225,6 @@ async function passesClientCriteria(
   return false;
 }
 
-/**
- * Shared loop behind every promotePending*Records function: load a source's
- * pending records, map each with that source's standardize function, and
- * insert or reject/error accordingly. The only thing that varies per source
- * is which record_source to filter on and which mapper to run.
- *
- * Note: website validation (F046) is Charity Commission-specific and is
- * handled in promotePendingCharityCommissionRecords directly, since
- * Companies House records carry no website or email data.
- */
-async function promotePendingRecords<TRaw>(
-  store: OrganisationWriteStore,
-  source: string,
-  standardize: (raw: TRaw) => StandardOrganisation,
-  criteriaCheck: (input: Parameters<typeof checkClientCriteria>[0]) => ClientCriteriaResult,
-): Promise<PromoteCounts> {
-  const pending = await store.loadPendingRecords(source);
-  const counts = newCounts(pending.length);
-
-  for (const record of pending) {
-    let org: StandardOrganisation;
-    try {
-      org = standardize(record.raw_payload as TRaw);
-    } catch (error) {
-      // raw_payload is untyped JSON from the database. A legacy or malformed
-      // record that doesn't match this source's expected shape can throw inside
-      // the mapper. Catch it here so one bad record doesn't crash the whole batch.
-      await reportError(error instanceof Error ? error : new Error(String(error)), {
-        operation: `standardize.${source}.promote`,
-        rawRecordId: record.id,
-      });
-      await store.markRecordStatus(record.id, "error");
-      counts.failed++;
-      continue;
-    }
-
-    if (!isUsable(org)) {
-      await markInvalidRecord(store, counts, record);
-      continue;
-    }
-
-    const criteria = criteriaCheck(buildCriteriaInput(org));
-    if (!(await passesClientCriteria(store, counts, record, org, criteria))) {
-      continue;
-    }
-
-    const result = await store.insertOrganisation(org);
-    if ("error" in result) {
-      await reportError(new Error(result.error), {
-        operation: `standardize.${source}.promote`,
-        rawRecordId: record.id,
-      });
-      await store.markRecordStatus(record.id, "error");
-      counts.failed++;
-      continue;
-    }
-
-    await store.markRecordStatus(record.id, "validated", result.id);
-    counts.inserted++;
-  }
-
-  return counts;
-}
 
 function requireStore(
   store: OrganisationWriteStore | null,
@@ -366,15 +309,67 @@ export async function promotePendingCharityCommissionRecords(
   return counts;
 }
 
+/**
+ * Bespoke rather than sharing a generic loop with the charity-commission
+ * function above: this source needs classifyCompaniesHouseSourceConfidence
+ * run against the *raw* payload alongside standardize (F047's Tier A/B bypass
+ * — see client-criteria.ts's sourceConfidence branch), which a
+ * one-standardize-function-in-one-standardize-function-out shared loop
+ * couldn't express without every other source paying for a field it doesn't have.
+ */
 export async function promotePendingCompaniesHouseRecords(
   store: OrganisationWriteStore | null = createDefaultOrganisationWriteStore(),
   criteriaCheck: (input: Parameters<typeof checkClientCriteria>[0]) => ClientCriteriaResult = checkClientCriteria,
 ): Promise<PromoteCounts> {
   requireStore(store);
-  return promotePendingRecords(
-    store,
-    "companies_house",
-    standardizeCompaniesHouseRecord,
-    criteriaCheck,
-  );
+
+  const pending = await store.loadPendingRecords("companies_house");
+  const counts = newCounts(pending.length);
+
+  for (const record of pending) {
+    let raw: RawCompaniesHouseRecord;
+    let org: StandardOrganisation;
+    try {
+      raw = record.raw_payload as RawCompaniesHouseRecord;
+      org = standardizeCompaniesHouseRecord(raw);
+    } catch (error) {
+      // raw_payload is untyped JSON from the database. A legacy or malformed
+      // record that doesn't match the expected shape can throw inside the
+      // mapper. Catch it here so one bad record doesn't crash the whole batch.
+      await reportError(error instanceof Error ? error : new Error(String(error)), {
+        operation: "standardize.companies_house.promote",
+        rawRecordId: record.id,
+      });
+      await store.markRecordStatus(record.id, "error");
+      counts.failed++;
+      continue;
+    }
+
+    if (!isUsable(org)) {
+      await markInvalidRecord(store, counts, record);
+      continue;
+    }
+
+    const sourceConfidence = classifyCompaniesHouseSourceConfidence(raw);
+    const criteria = criteriaCheck({ ...buildCriteriaInput(org), sourceConfidence });
+    if (!(await passesClientCriteria(store, counts, record, org, criteria))) {
+      continue;
+    }
+
+    const result = await store.insertOrganisation(org);
+    if ("error" in result) {
+      await reportError(new Error(result.error), {
+        operation: "standardize.companies_house.promote",
+        rawRecordId: record.id,
+      });
+      await store.markRecordStatus(record.id, "error");
+      counts.failed++;
+      continue;
+    }
+
+    await store.markRecordStatus(record.id, "validated", result.id);
+    counts.inserted++;
+  }
+
+  return counts;
 }

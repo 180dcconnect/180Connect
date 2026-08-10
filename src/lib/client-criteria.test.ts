@@ -50,11 +50,47 @@ describe("checkClientCriteria", () => {
       {
         acceptedOrganisationTypes: ["company"],
         reviewOrganisationTypes: [],
+        strongEvidenceTypes: [],
         priorityCities: [],
         priorityPostcodePrefixes: [],
         healthcareKeywords: [],
       },
     );
+    assert.equal(result.outcome, "meets");
+  });
+});
+
+describe("checkClientCriteria — sourceConfidence strong-evidence bypass", () => {
+  it("meets when a review type carries strong source confidence", () => {
+    const result = checkClientCriteria({ organisationType: "company", sourceConfidence: "strong" });
+    assert.equal(result.outcome, "meets");
+  });
+
+  it("still needs review when source confidence is weak or absent", () => {
+    assert.equal(
+      checkClientCriteria({ organisationType: "company", sourceConfidence: "weak" }).outcome,
+      "needs_review",
+    );
+    assert.equal(checkClientCriteria({ organisationType: "company" }).outcome, "needs_review");
+  });
+
+  it("does not extend strong confidence to a type outside strongEvidenceTypes", () => {
+    const result = checkClientCriteria(
+      { organisationType: "other", sourceConfidence: "strong" },
+      {
+        acceptedOrganisationTypes: ["charity", "both"],
+        reviewOrganisationTypes: ["company", "other"],
+        strongEvidenceTypes: ["company"],
+        priorityCities: [],
+        priorityPostcodePrefixes: [],
+        healthcareKeywords: [],
+      },
+    );
+    assert.equal(result.outcome, "needs_review");
+  });
+
+  it("an already-accepted type stays meets regardless of sourceConfidence", () => {
+    const result = checkClientCriteria({ organisationType: "charity", sourceConfidence: "weak" });
     assert.equal(result.outcome, "meets");
   });
 });

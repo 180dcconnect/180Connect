@@ -12,6 +12,6 @@ describe("Companies House server-action module", () => {
     assert.doesNotMatch(source, /export\s+const\s+/);
     assert.doesNotMatch(source, /export\s+let\s+/);
     assert.match(source, /export\s+async\s+function\s+importCompaniesHouse\b/);
-    assert.match(source, /export\s+async\s+function\s+importCompaniesHouseBulk/);
+    assert.match(source, /export\s+async\s+function\s+importCompaniesHouseAuto/);
   });
 });

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import {
   createCompaniesHouseAdapter,
-  createCompaniesHouseBulkSearchAdapter,
+  createCompaniesHouseDiscoveryAdapter,
+  createCompaniesHouseStatusRecheckAdapter,
   normalizeRegisteredName,
 } from "./companieshouse.ts";
 
@@ -169,100 +170,124 @@ describe("createCompaniesHouseAdapter", () => {
   });
 });
 
-describe("createCompaniesHouseBulkSearchAdapter", () => {
-  it("shapes search items directly, without fetching a per-company profile", async () => {
+describe("createCompaniesHouseDiscoveryAdapter", () => {
+  it("runs the three tiers, dedupes by company_number, and skips the DB watermark lookup when injected", async () => {
     enableTestKey();
     const urls: string[] = [];
     globalThis.fetch = async (input) => {
-      urls.push(String(input));
-      return Response.json({
-        hits: 1,
-        items: [
-          {
-            company_number: "13273297",
-            company_name: "Witsmate Limited",
-            registered_office_address: { postal_code: "WA14 4RW" },
-          },
-        ],
-      });
-    };
-
-    const result = await createCompaniesHouseBulkSearchAdapter({
-      sicCodes: ["62012"],
-      location: "Manchester",
-    }).fetch();
-
-    assert.equal(urls.length, 1);
-    assert.match(urls[0], /\/advanced-search\/companies\?/);
-    assert.match(urls[0], /sic_codes=62012/);
-    assert.match(urls[0], /location=Manchester/);
-    assert.match(urls[0], /company_status=active/);
-    assert.equal(result.records.length, 1);
-    assert.equal(result.records[0].source_record_id, "13273297");
-    assert.equal(result.truncated, false);
-  });
-
-  it("defaults company_status to active and honours an explicit override", async () => {
-    enableTestKey();
-    let requestedUrl = "";
-    globalThis.fetch = async (input) => {
-      requestedUrl = String(input);
+      const url = String(input);
+      urls.push(url);
+      if (url.includes("charitable-incorporated-organisation")) {
+        return Response.json({
+          hits: 1,
+          items: [{ company_number: "11111111", company_name: "Tier A CIO", company_type: "charitable-incorporated-organisation" }],
+        });
+      }
+      if (url.includes("community-interest-company")) {
+        return Response.json({
+          hits: 1,
+          items: [{ company_number: "22222222", company_name: "Tier B CIC", company_type: "ltd", company_subtype: "community-interest-company" }],
+        });
+      }
       return Response.json({ hits: 0, items: [] });
     };
 
-    await createCompaniesHouseBulkSearchAdapter({
-      location: "Leeds",
-      companyStatus: "dissolved",
+    const result = await createCompaniesHouseDiscoveryAdapter({
+      resolveWatermark: async () => null,
     }).fetch();
 
-    assert.match(requestedUrl, /company_status=dissolved/);
+    // Three tier queries, each paged to a single empty-or-single-page result.
+    assert.equal(urls.length, 3);
+    assert.ok(urls.every((url) => url.includes("/advanced-search/companies?")));
+    assert.equal(result.records.length, 2);
+    assert.deepEqual(
+      result.records.map((record) => record.source_record_id).sort(),
+      ["11111111", "22222222"],
+    );
+    assert.equal(result.truncated, false);
   });
 
-  it("pages through start_index until an empty page is returned", async () => {
+  it("treats a 404 from advanced-search as zero hits for that tier, not a failure", async () => {
+    enableTestKey();
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      if (url.includes("royal-charter")) {
+        return new Response(null, { status: 404 });
+      }
+      return Response.json({ hits: 0, items: [] });
+    };
+
+    const result = await createCompaniesHouseDiscoveryAdapter({
+      resolveWatermark: async () => null,
+    }).fetch();
+
+    assert.equal(result.records.length, 0);
+    assert.equal(result.truncated, false);
+  });
+
+  it("applies a 7-day overlap buffer to the resolved watermark as incorporated_from", async () => {
+    enableTestKey();
+    let sawIncorporatedFrom = "";
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      sawIncorporatedFrom ||= url.searchParams.get("incorporated_from") ?? "";
+      return Response.json({ hits: 0, items: [] });
+    };
+
+    await createCompaniesHouseDiscoveryAdapter({
+      resolveWatermark: async () => "2026-08-09",
+    }).fetch();
+
+    assert.equal(sawIncorporatedFrom, "2026-08-02");
+  });
+
+  it("passes a location through to each tier query when given", async () => {
+    enableTestKey();
+    const locations: (string | null)[] = [];
+    globalThis.fetch = async (input) => {
+      locations.push(new URL(String(input)).searchParams.get("location"));
+      return Response.json({ hits: 0, items: [] });
+    };
+
+    await createCompaniesHouseDiscoveryAdapter({
+      location: "Sheffield",
+      resolveWatermark: async () => null,
+    }).fetch();
+
+    assert.ok(locations.every((location) => location === "Sheffield"));
+  });
+});
+
+describe("createCompaniesHouseStatusRecheckAdapter", () => {
+  it("fetches each company's full profile", async () => {
+    enableTestKey();
+    const urls: string[] = [];
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      urls.push(url);
+      const companyNumber = url.split("/company/")[1];
+      return Response.json({ company_number: companyNumber, company_name: "Some Ltd", company_status: "dissolved" });
+    };
+
+    const result = await createCompaniesHouseStatusRecheckAdapter(["11111111", "22222222"]).fetch();
+
+    assert.equal(urls.length, 2);
+    assert.equal(result.records.length, 2);
+    assert.equal(result.truncated, false);
+  });
+
+  it("skips a company that fails to resolve instead of aborting the whole batch", async () => {
     enableTestKey();
     let calls = 0;
     globalThis.fetch = async () => {
       calls++;
-      if (calls === 1) {
-        return Response.json({
-          hits: 150,
-          items: Array.from({ length: 100 }, (_, i) => ({
-            company_number: `${1000 + i}`,
-            company_name: `Company ${i}`,
-          })),
-        });
-      }
-      if (calls === 2) {
-        return Response.json({
-          hits: 150,
-          items: Array.from({ length: 50 }, (_, i) => ({
-            company_number: `${2000 + i}`,
-            company_name: `Company ${i}`,
-          })),
-        });
-      }
-      return Response.json({ hits: 150, items: [] });
+      if (calls === 1) return new Response(null, { status: 404 });
+      return Response.json({ company_number: "22222222", company_name: "Still Here Ltd" });
     };
 
-    const result = await createCompaniesHouseBulkSearchAdapter({
-      sicCodes: ["62012"],
-    }).fetch();
+    const result = await createCompaniesHouseStatusRecheckAdapter(["11111111", "22222222"]).fetch();
 
-    assert.equal(calls, 2);
-    assert.equal(result.records.length, 150);
-    assert.equal(result.truncated, false);
-  });
-
-  it("rejects a search item with no company number", async () => {
-    enableTestKey();
-    globalThis.fetch = async () => Response.json({
-      hits: 1,
-      items: [{ company_name: "No Number Ltd" }],
-    });
-
-    await assert.rejects(
-      () => createCompaniesHouseBulkSearchAdapter({ location: "Leeds" }).fetch(),
-      /missing a company number/,
-    );
+    assert.equal(result.records.length, 1);
+    assert.equal(result.records[0].source_record_id, "22222222");
   });
 });

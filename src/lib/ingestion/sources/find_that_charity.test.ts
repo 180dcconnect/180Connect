@@ -54,8 +54,8 @@ describe("reconcileOne — successful match", () => {
 
   it("URL-encodes the query so special characters in a charity name don't break the request", async () => {
     let seenUrl = "";
-    globalThis.fetch = mock.fn(async (url: string) => {
-      seenUrl = url;
+    globalThis.fetch = mock.fn(async (url: string | URL | Request) => {
+      seenUrl = String(url);
       return jsonResponse({ q0: { result: [] } });
     });
 

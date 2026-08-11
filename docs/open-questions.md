@@ -2,7 +2,7 @@
 
 Decisions that are **not resolved in code** and need a human call, plus places where we have knowingly departed from the PRD. Raise these at the next team meeting.
 
-Last updated: 28 July 2026 (D-01 updated, D-03 added, Q-04 resolved).
+Last updated: 10 August 2026 (D-04 and Q-07 added).
 
 ---
 
@@ -68,6 +68,34 @@ What remains a genuine deviation is **PITR only**: recovery is accurate to the l
 
 ---
 
+### D-04 — CharityBase import (F031) and field standardisation (F259) not built — upstream API is down
+
+**PRD says:** Technical Brief → Data ingestion / External Data Sources lists CharityBase as one of the external sources to ingest charity records from, alongside Companies House and Charity Commission.
+
+**We are doing:** Not building it, and closing both #33 (F031) and #313 (F259, which depends on F031's raw records) rather than leaving them open against a source with no working backend.
+
+CharityBase's own GraphQL API (`https://charitybase.uk/api/graphql`) fails on every query with:
+
+```
+[index_not_found_exception] no such index, with { resource.id="charity_base_2025_03_charity" }
+```
+
+This is a dead index on their end, not an issue with our key or query:
+- Verified live on 10 Aug 2026 with a freshly issued, valid API key — auth succeeds (`200 OK`, no auth error), the query is schema-valid, and the failure is Elasticsearch's `index_not_found_exception` leaking through their GraphQL layer.
+- Both indexes backing the API are gone, not just one: `charity_base_2025_03_charity` (`getCharities`) and `charity_base_2025_03_filter` (`getFilters`) — i.e. their whole March-2025 dataset generation, not a single broken field.
+- Their schema exposes no index/version selector (`getCharities` only takes a `filters` search argument) — there is no alternate index a client can request instead. The index name is hardcoded server-side in their resolver.
+- This isn't new: Himanshu's first-draft adapter (`src/lib/ingestion/sources/charitybase.ts`, commit `73bf56d`) hit the same error and shipped with its own comment admitting "the following code does not work ATM." It was stripped out of the F038 PR and deferred to a follow-up (commit `13c5348`, PR #294) that was never opened. The outage has persisted from whenever that was written through to the live re-check on 10 Aug 2026.
+
+**Consequence:** F031 and F259 are closed, not just deprioritised — there is nothing to build against today. Charity Commission (F033, PR #332) is the working equivalent for UK charity data and already covers the ingestion this would have added.
+
+**Revisit if:** CharityBase's API starts returning data again. Spot-check: `POST https://charitybase.uk/api/graphql` with a valid `Authorization: Apikey <key>` header and body `{"query":"{ CHC { getCharities(filters: {}) { count } } }"}` — a working API returns a numeric `count`, not `index_not_found_exception`. If it starts working, F031/F259 should be reopened rather than rewritten from scratch — `73bf56d` has a rough starting point for the adapter shape.
+
+**Owner:** Project Leader. **Decided:** 10 August 2026.
+
+**Note (10 Aug 2026):** [`charity-base/charity-base-data`](https://github.com/charity-base/charity-base-data) shows CharityBase isn't a primary source — it's a wrapper that builds its index from Charity Commission extract/API + 360Giving GrantNav CSVs + postcode geo + social handles, then indexes to Elasticsearch. Repo last pushed 2023-01-11 (stale, not a viable self-host). Everything of substance behind CharityBase is already reachable directly: Charity Commission is built (F033, PR #332); 360Giving already sits in `DATA_SOURCES` (`src/lib/ingestion/type.ts`) as its own unbuilt source, worth a ticket in its own right with no CharityBase dependency. Doesn't change the close decision above.
+
+---
+
 ## Blocking decisions
 
 These change what gets built and are needed soon.
@@ -85,6 +113,8 @@ PRD §10 requires the scheduled-send worker to run *"at least every minute."* Ve
 **Proposed default:** Supabase `pg_cron` (runs on the free plan, supports minute granularity) calling a `CRON_SECRET`-protected route handler in the Next app. This keeps us off Vercel Pro and works on either plan.
 
 **Owner:** Email epic owner. **Decide by:** before the scheduled-sending story starts (Week 5–6).
+
+**Precedent shipped 9 Aug 2026:** the shape proposed here — `pg_cron` + `net.http_post` + a `CRON_SECRET`-checked route handler — is now live for the Companies House discovery and status-recheck jobs (`supabase/migrations/20260809100400_schedule_companies_house_cron.sql`, `src/app/api/cron/companies-house-import`, `src/app/api/cron/companies-house-status-recheck`). Those run weekly, not minute-granularity, so this proves the mechanism works end-to-end on the free plan, not yet minute-level cadence — the scheduled-send worker is still the one that needs that. `CRON_SECRET` is no longer "not yet consumed"; see `src/lib/env.ts`.
 
 ### Q-03 — LLM provider
 
@@ -128,6 +158,28 @@ Worth stating plainly, because it is the one place a viewer sees something a CAM
 **Consequence for the PRD:** §4.3's "if authorised" is treated as satisfied by holding the Viewer role. There is no per-user analytics authorisation flag, and none is planned — the role *is* the authorisation. This is an interpretation of the PRD, not a deviation from it.
 
 **Owner:** Project Leader. **Decided:** 24 Jul 2026. Recorded in `docs/rls-permission-matrix.md` §6.
+
+---
+
+### Q-07 — Find That Charity (F034): source is unreliable, confirmed live
+
+F034's own ticket flags "Find That Charity access/data quality" as an open question rather than a solved dependency. Verified live against `findthatcharity.uk` on 10 Aug 2026 (Bashir) — the flakiness a teammate reported is real and reproducible, not a bug in `find_that_charity.ts`. Same day as D-04's CharityBase finding above, different failure mode: CharityBase is permanently dead (every query fails the same way), Find That Charity is intermittent (roughly half of requests succeed fine) — worth reading together, not the same call.
+
+**What was tested:** 15 sequential `GET` requests each against `/`, `/reconcile` (no query), and `/reconcile?queries=...` (the actual reconcile call the adapter makes).
+
+**Result:** roughly **40–60% of requests hang indefinitely** — TCP connects, HTTP/2 stream opens, server never sends a response (no error, no 429, no 5xx, just silence until the client's own timeout fires). This happens on every endpoint tested, including the static base page, so it is host-wide, not specific to `/reconcile` or to query load. The requests that *do* return succeed fast (~0.5–0.7s) with correct data.
+
+**Consequence for the adapter as written:** `reconcileOne()` retries 3× with a 15s timeout per attempt, sequentially, one name at a time (`MAX_NAMES_PER_RUN = 200`). Against a ~50% per-attempt hang rate:
+- ~1 in 8 reconcile calls (0.5³) will still exhaust all 3 retries and throw, even though the source has no real problem with that particular query.
+- a worst-case run can burn up to 200 × (3 × 15s) ≈ 2.5 hours before completing, because failures aren't a fast-fail (429/5xx) — they're a full-length hang on every attempt.
+
+This is on top of the adapter's own already-flagged architectural point (no bulk endpoint, so this was never a traditional import) — the two compound: a name-by-name loop was already going to be slow, and doing it against a host that stalls half the time makes that worse, not just cosmetically slower.
+
+**Not caused by:** rate limiting (fails on a cold first request), TLS/DNS (cert is valid, `findthatcharity.uk` resolves fine), or query shape (plain `/` fails the same way).
+
+**To resolve:** re-test closer to when F034 is actually picked up — this may be a transient outage rather than a permanent property of the service. If it persists, options are (a) shorten the per-attempt timeout and raise attempt count so failures fail faster without changing total wait budget, (b) run reconciliation in small scheduled batches rather than one long synchronous run, or (c) park F034 (P2) until the host is stable, per the ticket's own "Blocked By" note.
+
+**Owner:** Component Owner F034. **Status:** Open — needs a re-check before implementation resumes.
 
 ---
 

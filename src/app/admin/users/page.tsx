@@ -4,13 +4,9 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
-import { InviteForm } from "./invite-form";
-import {
-  UserManagementTable,
-  type TeamUser,
-} from "./user-management-table";
-
-type PendingInvite = { id: string; email: string; invited_at: string };
+import type { PendingInvite } from "@/lib/admin/team-realtime";
+import { TeamPanel } from "./team-panel";
+import type { TeamUser } from "./user-management-table";
 
 export default async function AdminUsersPage() {
   const authorization = await getCurrentActor("user:manage", {
@@ -35,7 +31,7 @@ export default async function AdminUsersPage() {
 
   const { data: pendingInvites, error: pendingError } = await supabase
     .from("users")
-    .select("id, email, invited_at")
+    .select("id, email, invited_at, role")
     .not("invited_at", "is", null)
     .is("invite_accepted_at", null)
     .order("invited_at", { ascending: false });
@@ -76,7 +72,11 @@ export default async function AdminUsersPage() {
             <p className="text-sm font-bold text-brand">Team management</p>
             <h1 className="mt-2 text-3xl font-bold">Team members</h1>
             <p className="mt-3 text-sm text-foreground/65">
-              Role changes apply on the user&apos;s next request.
+              Role changes apply on the user&apos;s next request.{" "}
+              <Link className="font-bold text-brand underline" href="/admin/offboard">
+                Reassign a leaver&apos;s clients
+              </Link>
+              .
             </p>
           </div>
           <Link className="text-sm font-bold text-brand hover:underline" href="/dashboard">
@@ -88,35 +88,12 @@ export default async function AdminUsersPage() {
             Team members could not be loaded. Please refresh and try again.
           </p>
         )}
-        <UserManagementTable
+        <TeamPanel
           currentUserId={authorization.actor.id}
-          initialUsers={teamUsers}
+          initialPendingInvites={(pendingInvites as PendingInvite[] | null) ?? []}
+          initialTeamUsers={teamUsers}
+          pendingInvitesError={Boolean(pendingError)}
         />
-
-        <hr className="my-8 border-black/10" />
-
-        <h2 className="text-xl font-bold">Invite a CAM</h2>
-        <InviteForm />
-
-        <h2 className="mt-8 text-xl font-bold">Pending invites</h2>
-        {pendingError ? (
-          <p className="mt-3 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-800" role="alert">
-            Pending invites could not be loaded. Please refresh and try again.
-          </p>
-        ) : (pendingInvites ?? []).length === 0 ? (
-          <p className="mt-3 text-sm text-foreground/60">No pending invites.</p>
-        ) : (
-          <ul className="mt-3 divide-y divide-black/5 text-sm">
-            {(pendingInvites as PendingInvite[]).map((invite) => (
-              <li key={invite.id} className="flex items-center justify-between py-2">
-                <span className="font-bold">{invite.email}</span>
-                <span className="text-foreground/60">
-                  Invited {new Date(invite.invited_at).toLocaleDateString()}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
       </section>
     </main>
   );

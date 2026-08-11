@@ -8,11 +8,10 @@ import {
   hasPermission,
 } from "./permissions.ts";
 
-function approvedUser(): User {
+function testUser(): User {
   return {
     id: "11111111-1111-1111-1111-111111111111",
     email: "admin@180dc.org",
-    app_metadata: { account_status: "approved" },
   } as unknown as User;
 }
 
@@ -72,8 +71,8 @@ describe("suspension safety (F013)", () => {
 
 describe("a suspended account is refused at request time (F013)", () => {
   it("rejects an inactive user holding an otherwise valid session", () => {
-    const result = authorizeUserProfile(approvedUser(), {
-      id: approvedUser().id,
+    const result = authorizeUserProfile(testUser(), {
+      id: testUser().id,
       full_name: "Suspended Admin",
       role: "admin",
       is_active: false,
@@ -85,9 +84,9 @@ describe("a suspended account is refused at request time (F013)", () => {
     // The role check must not run first: an admin who has been suspended is not
     // an admin for the purposes of this request.
     const result = authorizeUserProfile(
-      approvedUser(),
+      testUser(),
       {
-        id: approvedUser().id,
+        id: testUser().id,
         full_name: "Suspended Admin",
         role: "admin",
         is_active: false,
@@ -101,9 +100,9 @@ describe("a suspended account is refused at request time (F013)", () => {
 describe("request-time actor authorization", () => {
   it("allows an active admin", () => {
     const result = authorizeUserProfile(
-      approvedUser(),
+      testUser(),
       {
-        id: approvedUser().id,
+        id: testUser().id,
         full_name: "Admin",
         role: "admin",
         is_active: true,
@@ -115,9 +114,9 @@ describe("request-time actor authorization", () => {
 
   it("rejects a direct CAM request for an admin permission", () => {
     const result = authorizeUserProfile(
-      approvedUser(),
+      testUser(),
       {
-        id: approvedUser().id,
+        id: testUser().id,
         full_name: "CAM",
         role: "cam",
         is_active: true,
@@ -133,8 +132,8 @@ describe("request-time actor authorization", () => {
       reason: "unauthenticated",
     });
     assert.deepEqual(
-      authorizeUserProfile(approvedUser(), {
-        id: approvedUser().id,
+      authorizeUserProfile(testUser(), {
+        id: testUser().id,
         full_name: "Former CAM",
         role: "cam",
         is_active: false,
@@ -144,7 +143,7 @@ describe("request-time actor authorization", () => {
   });
 
   it("uses the supplied current profile on every request", () => {
-    const user = approvedUser();
+    const user = testUser();
     const cam = authorizeUserProfile(
       user,
       { id: user.id, full_name: "User", role: "cam", is_active: true },

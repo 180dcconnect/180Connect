@@ -80,8 +80,6 @@ export function actorFailureMessage(reason: ActorFailureReason): string {
   switch (reason) {
     case "unauthenticated":
       return "You must be logged in to do that.";
-    case "not_approved":
-      return "Your account is pending activation by an administrator.";
     case "inactive":
       return "Your account is inactive. Contact an administrator.";
     case "profile_missing":

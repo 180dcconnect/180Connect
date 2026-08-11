@@ -17,14 +17,22 @@ describe("navigation", () => {
     }
   });
 
-  it("gives admins team management", () => {
+  it("gives admins the admin workspace", () => {
     const hrefs = navItemsFor("admin").map((item) => item.href);
-    assert.ok(hrefs.includes("/admin/users"));
+    assert.ok(hrefs.includes("/admin"));
   });
 
   it("hides admin-only destinations from other roles", () => {
     for (const role of ROLES.filter((candidate) => candidate !== "admin")) {
-      assert.deepEqual(navItemsFor(role), []);
+      const hrefs = navItemsFor(role).map((item) => item.href);
+      assert.ok(!hrefs.includes("/admin/users"));
+    }
+  });
+
+  it("gives every role their own profile", () => {
+    for (const role of ROLES) {
+      const hrefs = navItemsFor(role).map((item) => item.href);
+      assert.ok(hrefs.includes("/profile"));
     }
   });
 });

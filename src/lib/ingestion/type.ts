@@ -22,6 +22,7 @@ export const DATA_SOURCES = [
   "find_that_charity",
   "globalgiving",
   "candid",
+  "charity_commission",
 ] as const;
 
 export type DataSourceName = (typeof DATA_SOURCES)[number];

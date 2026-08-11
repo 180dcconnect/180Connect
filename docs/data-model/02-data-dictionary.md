@@ -172,6 +172,11 @@
 | 04 Entities | USERS | deactivated_at | timestamp |  |  |
 | 04 Entities | USERS | invited_at | timestamp |  |  |
 | 04 Entities | USERS | invite_accepted_at | timestamp |  |  |
+| 04 Entities | USERS | onboarding_completed_at | timestamp |  | When the user finished the onboarding flow |
+| 04 Entities | USERS | onboarding_dismissed_at | timestamp |  | When the user dismissed the onboarding flow |
+| 04 Entities | USER_ONBOARDING_STEPS | user_id | uuid | USERS | User completing the step |
+| 04 Entities | USER_ONBOARDING_STEPS | step_key | text |  | Key of the onboarding step |
+| 04 Entities | USER_ONBOARDING_STEPS | completed_at | timestamp |  | When the step was completed |
 | 04 Entities | NOTES | id | uuid |  |  |
 | 04 Entities | NOTES | organisation_id | uuid | ORGANISATIONS |  |
 | 04 Entities | NOTES | author_id | uuid | USERS |  |
@@ -201,6 +206,22 @@
 | 04 Entities | ACTIONS | is_seed | boolean |  | Marks a row created by the seed script |
 | 04 Entities | ACTIONS | created_at | timestamp |  | Row creation timestamp |
 | 04 Entities | ACTIONS | updated_at | timestamp |  | Last edit timestamp |
+| 04 Entities | OUTREACH_PREFERENCES | id | uuid |  | Primary key |
+| 04 Entities | OUTREACH_PREFERENCES | user_id | uuid | USERS | CAM these preferences belong to |
+| 04 Entities | OUTREACH_PREFERENCES | preferred_geographic_reach | enum[] |  | Subset of geographic_reach values the CAM wants prioritised |
+| 04 Entities | OUTREACH_PREFERENCES | preferred_sectors | text[] |  | Sector values to prioritise, matched against ORGANISATIONS.sector |
+| 04 Entities | OUTREACH_PREFERENCES | preferred_income_bands | enum[] |  | Subset of income_band values to prioritise |
+| 04 Entities | OUTREACH_PREFERENCES | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | OUTREACH_PREFERENCES | updated_at | timestamp |  | Last edit timestamp |
+| 04 Entities | SUPPRESSIONS | id | uuid |  | Primary key |
+| 04 Entities | SUPPRESSIONS | organisation_id | uuid | ORGANISATIONS | Charity being suppressed |
+| 04 Entities | SUPPRESSIONS | status | enum |  | pending, active, rejected, lifted |
+| 04 Entities | SUPPRESSIONS | reason | text |  | Why suppression was requested; required |
+| 04 Entities | SUPPRESSIONS | requested_by | uuid | USERS | Who requested/triggered the suppression |
+| 04 Entities | SUPPRESSIONS | decided_by | uuid | USERS | Admin who approved/rejected; null while pending |
+| 04 Entities | SUPPRESSIONS | decided_at | timestamp |  | When decided; null while pending |
+| 04 Entities | SUPPRESSIONS | decision_note | text |  | Optional admin note on the decision |
+| 04 Entities | SUPPRESSIONS | created_at | timestamp |  | Row creation timestamp |
 | 05 - Features | SCORING_WEIGHTS | id | model_name |  | feature_name |
 | 05 - Features | SCORING_WEIGHTS | 1.0 | SCOUT |  | south_yorkshire_flag |
 | 05 - Features | SCORING_WEIGHTS | 2.0 | SCOUT |  | mission_alignment_score |
@@ -391,3 +412,19 @@
 | 09 CAM Analytics | SECTOR_PERFORMANCE | conversion_rate | float |  | Converted / contacted |
 | 09 CAM Analytics | SECTOR_PERFORMANCE | avg_priority_score | float |  | Mean SCOUT priority score across the sector |
 | 09 CAM Analytics | SECTOR_PERFORMANCE | updated_at | timestamp |  | Last recalculation timestamp |
+| 03 Raw Data | FIELD_DISCREPANCIES | id | uuid |  | Primary key |
+| 03 Raw Data | FIELD_DISCREPANCIES | organisation_id | uuid | ORGANISATIONS | Organisation the conflicting field belongs to |
+| 03 Raw Data | FIELD_DISCREPANCIES | field_name | text |  | Which ORGANISATIONS field is in conflict |
+| 03 Raw Data | FIELD_DISCREPANCIES | existing_value | text |  | Current value stored on the organisation |
+| 03 Raw Data | FIELD_DISCREPANCIES | existing_source | text |  | Which source last wrote the existing value |
+| 03 Raw Data | FIELD_DISCREPANCIES | incoming_value | text |  | New value proposed by the incoming record |
+| 03 Raw Data | FIELD_DISCREPANCIES | incoming_source | text |  | Which API/source produced the incoming value |
+| 03 Raw Data | FIELD_DISCREPANCIES | raw_source_record_id | uuid | RAW_SOURCE_RECORDS | The incoming record that triggered this conflict |
+| 03 Raw Data | FIELD_DISCREPANCIES | entity_match_candidate_id | uuid | ENTITY_MATCH_CANDIDATES | Match candidate this discrepancy arose from, if any |
+| 03 Raw Data | FIELD_DISCREPANCIES | status | enum |  | Review state of this discrepancy |
+| 03 Raw Data | FIELD_DISCREPANCIES | resolved_choice | enum |  | Which side the reviewer picked |
+| 03 Raw Data | FIELD_DISCREPANCIES | resolved_value | text |  | Final value written back to ORGANISATIONS |
+| 03 Raw Data | FIELD_DISCREPANCIES | resolved_by_user_id | uuid | USERS | Admin who resolved this |
+| 03 Raw Data | FIELD_DISCREPANCIES | resolved_at | timestamp |  | When resolved |
+| 03 Raw Data | FIELD_DISCREPANCIES | notes | text |  | Reviewer notes explaining the decision |
+| 03 Raw Data | FIELD_DISCREPANCIES | created_at | timestamp |  | Row creation timestamp |

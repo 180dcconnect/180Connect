@@ -28,12 +28,13 @@ export async function GET(request: NextRequest) {
   // Only these two. This route must never become a general-purpose way to turn
   // any emailed token into a session.
   if (!tokenHash || (type !== "recovery" && type !== "invite")) {
-    return invalidLinkResponse(request);
+    return invalidLinkResponse(request, type === "invite" ? "invite" : "recovery");
   }
 
   return completeRecoveryLanding(
     request,
     type === "invite" ? "invite-token-verification" : "password-recovery-token-verification",
+    type,
     async () => {
       const supabase = await createClient();
       return supabase.auth.verifyOtp({ token_hash: tokenHash, type });

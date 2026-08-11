@@ -260,7 +260,21 @@ export function createDiscrepancyDetectionStore(
 
       if (originError) throw originError;
 
-      return { organisation: org, source: origin?.record_source ?? "unknown" };
+      // website/contact_email are nullable columns — StandardOrganisation's "empty
+      // string, never null" guarantee (see standardize/*.ts) only holds for rows a
+      // standardize function produced. A row read back from the table carries no
+      // such guarantee, so it's enforced here rather than in findFieldDiscrepancies,
+      // which assumes every field is already a string.
+      const organisation: Pick<StandardOrganisation, DiscrepancyField> = {
+        legal_name: org.legal_name ?? "",
+        website: org.website ?? "",
+        contact_email: org.contact_email ?? "",
+        address_line_1: org.address_line_1 ?? "",
+        city: org.city ?? "",
+        postcode: org.postcode ?? "",
+      };
+
+      return { organisation, source: origin?.record_source ?? "unknown" };
     },
 
     async recordDiscrepancy(input) {

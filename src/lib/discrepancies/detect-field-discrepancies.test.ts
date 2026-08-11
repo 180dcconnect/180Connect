@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  createDiscrepancyDetectionStore,
   detectAndFlagDiscrepancies,
   findFieldDiscrepancies,
   type DiscrepancyDetectionStore,
@@ -147,5 +148,65 @@ describe("detectAndFlagDiscrepancies", () => {
     });
     const result = await detectAndFlagDiscrepancies("candidate-1", store);
     assert.equal(result.flagged, 0);
+  });
+});
+
+// website/contact_email are nullable on organisations, and a row that never went
+// through a standardize function (e.g. entered manually, or — as here — never had
+// those fields set) carries a real SQL null, not "". findFieldDiscrepancies calls
+// .trim() assuming a string; loadOrganisationForComparison must coerce null to ""
+// before handing the row over, or this crashes for any organisation missing either
+// field.
+function fakeSupabaseFor(orgRow: Record<string, unknown> | null, originRow: Record<string, unknown> | null) {
+  return {
+    from(table: string) {
+      const row = table === "organisations" ? orgRow : originRow;
+      const builder = {
+        select() {
+          return builder;
+        },
+        eq() {
+          return builder;
+        },
+        limit() {
+          return builder;
+        },
+        async maybeSingle() {
+          return { data: row, error: null };
+        },
+      };
+      return builder;
+    },
+  };
+}
+
+describe("createDiscrepancyDetectionStore", () => {
+  it("loadOrganisationForComparison coerces null DB columns to empty strings", async () => {
+    const supabase = fakeSupabaseFor(
+      {
+        legal_name: "Test Charity",
+        website: null,
+        contact_email: null,
+        address_line_1: "1 Old Road",
+        city: "London",
+        postcode: "SW1A 1AA",
+      },
+      { record_source: "charity_commission" },
+    );
+    const store = createDiscrepancyDetectionStore(supabase as never);
+
+    const result = await store.loadOrganisationForComparison("org-1");
+
+    assert.deepEqual(result, {
+      organisation: {
+        legal_name: "Test Charity",
+        website: "",
+        contact_email: "",
+        address_line_1: "1 Old Road",
+        city: "London",
+        postcode: "SW1A 1AA",
+      },
+      source: "charity_commission",
+    });
   });
 });

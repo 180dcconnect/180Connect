@@ -19,7 +19,6 @@ export type ManualEntryCheck = {
 };
 
 export type ManualEntryApprovalContext = {
-  organisationType: "charity" | "company" | "both" | "other";
   adminConfirmedEligible: boolean;
   candidateOrganisationId: string | null;
   candidateOrganisationName: string | null;
@@ -35,6 +34,11 @@ export type ManualEntryReviewState = {
 
 type ManualEntryRow = {
   legal_name: string;
+  mission_statement: string;
+  organisation_type: string;
+  address_line_1: string;
+  city: string;
+  postcode: string;
   country_code: string;
   website: string | null;
   contact_email: string | null;
@@ -56,8 +60,9 @@ type IdentifierRow = {
 };
 
 const organisationTypes = ["charity", "company", "both", "other"] as const;
+type ManualOrganisationType = (typeof organisationTypes)[number];
 
-function isOrganisationType(value: string): value is ManualEntryApprovalContext["organisationType"] {
+function isOrganisationType(value: string): value is ManualOrganisationType {
   return organisationTypes.some((organisationType) => organisationType === value);
 }
 
@@ -78,20 +83,15 @@ export async function checkAvailableManualEntryDependencies(
   }
 
   const id = String(formData.get("id") ?? "");
-  const organisationType = String(formData.get("organisationType") ?? "").trim();
   const adminConfirmedEligible = formData.get("adminConfirmedEligible") === "on";
   if (!/^[0-9a-f-]{36}$/i.test(id)) {
     return { kind: "error", message: "This manual entry could not be identified." };
   }
-  if (!isOrganisationType(organisationType)) {
-    return { kind: "error", message: "Choose an organisation type before running the checks." };
-  }
-
   try {
     const supabase = await createClient();
     const { data, error } = await supabase
       .from("manual_entry_records")
-      .select("legal_name, country_code, website, contact_email, registry_name, registry_number, reason_for_manual_entry, review_status")
+      .select("legal_name, mission_statement, organisation_type, address_line_1, city, postcode, country_code, website, contact_email, registry_name, registry_number, reason_for_manual_entry, review_status")
       .eq("id", id)
       .single();
     if (error) throw error;
@@ -99,9 +99,17 @@ export async function checkAvailableManualEntryDependencies(
     if (entry.review_status !== "pending") {
       return { kind: "error", message: "This manual entry has already been reviewed." };
     }
+    if (!isOrganisationType(entry.organisation_type)) {
+      return { kind: "error", message: "This submission has no valid organisation type." };
+    }
 
     const parsed = manualEntrySchema.safeParse({
       legalName: entry.legal_name,
+      missionStatement: entry.mission_statement,
+      organisationType: entry.organisation_type,
+      addressLine1: entry.address_line_1,
+      city: entry.city,
+      postcode: entry.postcode,
       countryCode: entry.country_code,
       website: entry.website ?? "",
       contactEmail: entry.contact_email ?? "",
@@ -161,7 +169,7 @@ export async function checkAvailableManualEntryDependencies(
     }));
     const duplicate = findDuplicateMatch({
       legal_name: parsed.data.legalName,
-      postcode: "",
+      postcode: parsed.data.postcode,
       registrationNumbers: parsed.data.registryNumber ? [parsed.data.registryNumber] : undefined,
     }, existing);
     const duplicateOrganisation = duplicate
@@ -170,8 +178,9 @@ export async function checkAvailableManualEntryDependencies(
 
     const fields = reviewManualEntryFields(parsed.data, websiteStatus);
     const criteria = checkManualEntryCriteria({
-      organisationType,
+      organisationType: entry.organisation_type,
       countryCode: parsed.data.countryCode,
+      postcode: parsed.data.postcode,
       adminConfirmedEligible,
     });
     const checks: ManualEntryCheck[] = [
@@ -206,7 +215,6 @@ export async function checkAvailableManualEntryDependencies(
         : "Automated checks completed. Resolve the client-criteria decision before approval.",
       checks,
       approval: criteria.status === "passed" ? {
-        organisationType,
         adminConfirmedEligible,
         candidateOrganisationId: duplicate?.organisationId ?? null,
         candidateOrganisationName: duplicateOrganisation?.legal_name ?? null,
@@ -236,12 +244,11 @@ export async function approveManualEntry(
   }
 
   const id = String(formData.get("id") ?? "");
-  const organisationType = String(formData.get("organisationType") ?? "");
   const duplicateDecision = String(formData.get("duplicateDecision") ?? "");
   const candidateOrganisationId = String(formData.get("candidateOrganisationId") ?? "") || null;
   const adminConfirmedEligible = formData.get("adminConfirmedEligible") === "true";
   const notes = String(formData.get("notes") ?? "").trim();
-  if (!/^[0-9a-f-]{36}$/i.test(id) || !isOrganisationType(organisationType)) {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) {
     return { kind: "error", message: "The approval details are invalid. Run the checks again." };
   }
   if (!(["create_new", "link_existing"] as const).some((value) => value === duplicateDecision)) {
@@ -255,7 +262,6 @@ export async function approveManualEntry(
     const supabase = await createClient();
     const { data, error } = await supabase.rpc("approve_manual_entry", {
       p_entry_id: id,
-      p_organisation_type: organisationType,
       p_admin_confirmed_eligible: adminConfirmedEligible,
       p_duplicate_decision: duplicateDecision,
       p_candidate_organisation_id: candidateOrganisationId,

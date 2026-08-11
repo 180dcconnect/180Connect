@@ -1,57 +1,64 @@
 # Manual Client Entry (F036)
 
-## Implemented in this branch
+## Workflow
 
-- CAM/admin submission form at `/clients/new`.
-- Approved `MANUAL_ENTRY_RECORDS` fields from Data Model tab 03.
-- Submitter identity, required reason, pending admin review and source-safe storage.
-- Admin review queue at `/admin/manual-entries`.
-- Audited, admin-only approval/rejection through `SECURITY DEFINER` RPCs.
-- A submission becomes active only after the admin completes every check and
-  makes the F042 duplicate decision.
-- F045 email-format validation runs at submission and is visible in review.
-- F046 website format/reachability validation runs at submission and review;
-  field failures are warnings and do not discard the record.
-- F047 client criteria can be reviewed with an explicit admin confirmation for
-  ambiguous companies and other organisations.
-- `buildManualOrganisation` produces the standard F041 payload with
-  `entry_method = manual`, which F043 displays as `Manual Entry` after conversion.
+CAMs and admins use `/clients/new` to create a charity or organisation that is
+not available from an external source. A user may save an incomplete draft and
+resume it later. Drafts are visible only to their creator and admins, and they do
+not appear in the admin review queue or active client list.
 
-## Dependency integration contract
+Submission requires all confirmed standard fields:
 
-`src/lib/manual-entry.ts` defines the approval boundary. F045 and F046 run as
-field-quality warnings, F047 can block activation, and F042 surfaces a candidate
-for an explicit human decision:
+- organisation name, mission and organisation type;
+- address line, town/city, postcode and country;
+- email and website;
+- registry name and registration number; and
+- a reason for using Manual Entry.
 
-- **F042** - connected through the shared `findDuplicateMatch` rules. A likely
-  duplicate can be linked to the existing client, or an admin can explain why it
-  is genuinely separate before creating a new client.
-- **F046** - website format/reachability result (an invalid website remains a field
-  warning and does not discard the submission).
-- **F047** - connected through `checkManualEntryCriteria`, which calls the shared
-  `checkClientCriteria` policy. Missing organisation-type evidence blocks approval;
-  ambiguous company/other records require an explicit admin eligibility decision.
+A CAM submission becomes `pending` and requires an admin decision. An admin's
+own complete submission does not require a second admin: after the same server
+checks pass, it is approved in the admin's own audited workflow. If a duplicate
+candidate appears during that automatic decision, the record remains pending so
+the admin can explicitly link it or confirm that it is a separate organisation.
 
-`approve_manual_entry` re-checks the F042 result inside the database transaction,
-so a stale or forged browser value cannot bypass matching. The RPC atomically:
+## Validation and dependency integration
 
-1. verify the duplicate decision and admin permission;
-2. link a confirmed duplicate or insert the standard `ORGANISATIONS` row;
-3. create the manual registry identifier when supplied;
-4. mark the submission approved and link `converted_to_organisation_id`; and
-5. write the approval audit entry.
+Every submitted record uses the shared dependency boundaries:
 
-The expanded source RPC includes the creating CAM on the client profile and keeps
-`Manual Entry` alongside any external API contributors.
+- **F042 — duplicate detection:** matching registry numbers and normalised
+  organisation identity are checked before activation. A likely duplicate is
+  never silently merged or discarded; an admin must link the existing client or
+  explain why a new one should be created.
+- **F045 — email format:** invalid email format is retained as a visible field
+  warning and does not discard the rest of the record.
+- **F046 — website URL:** format and reachability checks run before submission
+  and again during review. A broken website is retained as a warning.
+- **F047 — client criteria:** charities can proceed; ambiguous company/other
+  records require explicit admin confirmation that they are eligible.
 
-## Open field decision
+Draft saving deliberately does not run the submission-only checks because fields
+may still be incomplete. The complete submission is validated again server-side;
+browser validation is not trusted as the approval boundary.
 
-The approved `MANUAL_ENTRY_RECORDS` model does not contain mission, organisation
-type or full address. They have not been invented in this migration. If the team
-confirms those as manual fields, update the Data Model spreadsheet first, run
-`npm run export:data-model`, and add a later additive migration.
+## Activation and source tracking
 
-Organisation type is selected during the current review checks rather than
-silently defaulted. It cannot be persisted on `MANUAL_ENTRY_RECORDS` until the
-Data Model is updated, so the reviewed value is passed directly into the atomic
-approval RPC and recorded in its audit detail.
+`approve_manual_entry` re-checks permissions and the duplicate decision inside
+the database transaction. It then links the confirmed duplicate or creates the
+standard F041 organisation, stores the registry identifier and mission, marks
+the manual record approved, and writes the audit entry atomically.
+
+New organisations use `entry_method = manual`. F043 therefore displays
+`Manual Entry` on the client profile and identifies the creating CAM/admin. If
+the record is linked to an organisation with API provenance, all contributing
+sources remain visible and existing internal organisation data is preserved.
+
+## Data model
+
+`MANUAL_ENTRY_RECORDS` stores draft inputs, workflow status, submitter, reviewer,
+review notes and the activated organisation link. Inputs are nullable only while
+the status is `draft`; a database constraint requires the full confirmed field
+set for `pending`, `approved` and `rejected` rows.
+
+The Data Model spreadsheet and generated projection were updated with the new
+mission, organisation type and address fields. The migration is paired with a
+rollback and all workflow status/approval changes are recorded in `AUDIT_LOG`.

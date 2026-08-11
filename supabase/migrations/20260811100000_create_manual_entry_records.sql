@@ -5,31 +5,55 @@
 -- Security: RPC-only writes, submitter/admin reads, audited status transitions.
 -- Reversibility: ../rollback/20260811100000_create_manual_entry_records.down.sql
 
-create type public.manual_review_status as enum ('pending', 'approved', 'rejected');
+create type public.manual_review_status as enum ('draft', 'pending', 'approved', 'rejected');
 
 create table public.manual_entry_records (
   id uuid primary key default gen_random_uuid(),
   submitted_by_user_id uuid not null references public.users (id),
-  legal_name text not null check (length(trim(legal_name)) between 1 and 200),
-  country_code text not null default 'GB' check (country_code ~ '^[A-Z]{2}$'),
-  website text,
-  contact_email text,
-  registry_name text,
-  registry_number text,
-  reason_for_manual_entry text not null check (length(trim(reason_for_manual_entry)) between 10 and 2000),
+  legal_name text check (legal_name is null or length(trim(legal_name)) between 1 and 200),
+  mission_statement text check (mission_statement is null or length(trim(mission_statement)) between 1 and 5000),
+  organisation_type public.organisation_type,
+  address_line_1 text check (address_line_1 is null or length(trim(address_line_1)) between 1 and 300),
+  city text check (city is null or length(trim(city)) between 1 and 200),
+  postcode text check (postcode is null or length(trim(postcode)) between 1 and 32),
+  country_code text check (country_code is null or country_code ~ '^[A-Z]{2}$'),
+  website text check (website is null or length(trim(website)) between 1 and 500),
+  contact_email text check (contact_email is null or length(trim(contact_email)) between 1 and 320),
+  registry_name text check (registry_name is null or length(trim(registry_name)) between 1 and 200),
+  registry_number text check (registry_number is null or length(trim(registry_number)) between 1 and 200),
+  reason_for_manual_entry text check (
+    reason_for_manual_entry is null or length(trim(reason_for_manual_entry)) between 10 and 2000
+  ),
   converted_to_organisation_id uuid references public.organisations (id),
-  review_status public.manual_review_status not null default 'pending',
+  review_status public.manual_review_status not null default 'draft',
   reviewed_by_user_id uuid references public.users (id),
   reviewed_at timestamptz,
   review_notes text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint manual_entry_review_consistent check (
-    (review_status = 'pending' and reviewed_by_user_id is null and reviewed_at is null)
-    or (review_status <> 'pending' and reviewed_by_user_id is not null and reviewed_at is not null)
+    (review_status in ('draft', 'pending') and reviewed_by_user_id is null and reviewed_at is null)
+    or (review_status in ('approved', 'rejected') and reviewed_by_user_id is not null and reviewed_at is not null)
   ),
   constraint manual_entry_conversion_consistent check (
     converted_to_organisation_id is null or review_status = 'approved'
+  ),
+  constraint manual_entry_submission_complete check (
+    review_status = 'draft'
+    or (
+      nullif(trim(legal_name), '') is not null
+      and nullif(trim(mission_statement), '') is not null
+      and organisation_type is not null
+      and nullif(trim(address_line_1), '') is not null
+      and nullif(trim(city), '') is not null
+      and nullif(trim(postcode), '') is not null
+      and nullif(trim(country_code), '') is not null
+      and nullif(trim(website), '') is not null
+      and nullif(trim(contact_email), '') is not null
+      and nullif(trim(registry_name), '') is not null
+      and nullif(trim(registry_number), '') is not null
+      and nullif(trim(reason_for_manual_entry), '') is not null
+    )
   )
 );
 
@@ -50,14 +74,21 @@ create policy manual_entry_records_select_own_or_admin on public.manual_entry_re
   for select to authenticated
   using (app.is_active_user() and (submitted_by_user_id = (select auth.uid()) or app.is_admin()));
 
-create or replace function public.submit_manual_entry(
+create or replace function public.save_manual_entry(
+  p_entry_id uuid,
   p_legal_name text,
+  p_mission_statement text,
+  p_organisation_type public.organisation_type,
+  p_address_line_1 text,
+  p_city text,
+  p_postcode text,
   p_country_code text,
   p_website text,
   p_contact_email text,
   p_registry_name text,
   p_registry_number text,
-  p_reason text
+  p_reason text,
+  p_submit boolean
 ) returns uuid
 language plpgsql
 security definer
@@ -66,23 +97,83 @@ as $$
 declare
   v_actor uuid := (select auth.uid());
   v_id uuid;
+  v_existing public.manual_entry_records%rowtype;
+  v_status public.manual_review_status := case when p_submit is true then 'pending' else 'draft' end;
 begin
   if not app.can_write() then
     raise exception 'CAM or admin access required' using errcode = '42501';
   end if;
 
-  insert into public.manual_entry_records (
-    submitted_by_user_id, legal_name, country_code, website, contact_email,
-    registry_name, registry_number, reason_for_manual_entry
-  ) values (
-    v_actor, trim(p_legal_name), upper(trim(p_country_code)), nullif(trim(p_website), ''),
-    nullif(trim(p_contact_email), ''), nullif(trim(p_registry_name), ''),
-    nullif(trim(p_registry_number), ''), trim(p_reason)
-  ) returning id into v_id;
+  if p_submit is true and (
+    nullif(trim(p_legal_name), '') is null
+    or nullif(trim(p_mission_statement), '') is null
+    or p_organisation_type is null
+    or nullif(trim(p_address_line_1), '') is null
+    or nullif(trim(p_city), '') is null
+    or nullif(trim(p_postcode), '') is null
+    or nullif(trim(p_country_code), '') is null
+    or nullif(trim(p_website), '') is null
+    or nullif(trim(p_contact_email), '') is null
+    or nullif(trim(p_registry_name), '') is null
+    or nullif(trim(p_registry_number), '') is null
+    or nullif(trim(p_reason), '') is null
+  ) then
+    raise exception 'complete every required manual-entry field before submission' using errcode = '22023';
+  end if;
+
+  if p_entry_id is not null then
+    select * into v_existing
+      from public.manual_entry_records
+     where id = p_entry_id
+     for update;
+    if v_existing.id is null
+       or v_existing.submitted_by_user_id <> v_actor
+       or v_existing.review_status <> 'draft' then
+      raise exception 'this draft is not available to edit' using errcode = '42501';
+    end if;
+
+    update public.manual_entry_records set
+      legal_name = nullif(trim(p_legal_name), ''),
+      mission_statement = nullif(trim(p_mission_statement), ''),
+      organisation_type = p_organisation_type,
+      address_line_1 = nullif(trim(p_address_line_1), ''),
+      city = nullif(trim(p_city), ''),
+      postcode = nullif(trim(p_postcode), ''),
+      country_code = nullif(upper(trim(p_country_code)), ''),
+      website = nullif(trim(p_website), ''),
+      contact_email = nullif(trim(p_contact_email), ''),
+      registry_name = nullif(trim(p_registry_name), ''),
+      registry_number = nullif(trim(p_registry_number), ''),
+      reason_for_manual_entry = nullif(trim(p_reason), ''),
+      review_status = v_status
+    where id = p_entry_id
+    returning id into v_id;
+  else
+    insert into public.manual_entry_records (
+      submitted_by_user_id, legal_name, mission_statement, organisation_type,
+      address_line_1, city, postcode, country_code, website, contact_email,
+      registry_name, registry_number, reason_for_manual_entry, review_status
+    ) values (
+      v_actor, nullif(trim(p_legal_name), ''), nullif(trim(p_mission_statement), ''),
+      p_organisation_type, nullif(trim(p_address_line_1), ''), nullif(trim(p_city), ''),
+      nullif(trim(p_postcode), ''), nullif(upper(trim(p_country_code)), ''),
+      nullif(trim(p_website), ''), nullif(trim(p_contact_email), ''),
+      nullif(trim(p_registry_name), ''), nullif(trim(p_registry_number), ''),
+      nullif(trim(p_reason), ''), v_status
+    ) returning id into v_id;
+  end if;
 
   insert into public.audit_log (actor_user_id, action, target_table, target_id, detail)
-  values (v_actor, 'manual_entry_submitted', 'manual_entry_records', v_id,
-    jsonb_build_object('review_status', 'pending'));
+  values (
+    v_actor,
+    case when p_submit is true then 'manual_entry_submitted' else 'manual_entry_draft_saved' end,
+    'manual_entry_records',
+    v_id,
+    jsonb_build_object(
+      'from', case when p_entry_id is null then null else 'draft' end,
+      'to', v_status
+    )
+  );
   return v_id;
 end;
 $$;
@@ -116,8 +207,12 @@ begin
 end;
 $$;
 
-revoke execute on function public.submit_manual_entry(text,text,text,text,text,text,text) from public, anon;
-grant execute on function public.submit_manual_entry(text,text,text,text,text,text,text) to authenticated;
+revoke execute on function public.save_manual_entry(
+  uuid,text,text,public.organisation_type,text,text,text,text,text,text,text,text,text,boolean
+) from public, anon;
+grant execute on function public.save_manual_entry(
+  uuid,text,text,public.organisation_type,text,text,text,text,text,text,text,text,text,boolean
+) to authenticated;
 revoke execute on function public.reject_manual_entry(uuid,text) from public, anon;
 grant execute on function public.reject_manual_entry(uuid,text) to authenticated;
 
@@ -128,7 +223,6 @@ grant execute on function public.reject_manual_entry(uuid,text) to authenticated
 -- link-existing/create-new decision before it writes an active organisation.
 create or replace function public.approve_manual_entry(
   p_entry_id uuid,
-  p_organisation_type public.organisation_type,
   p_admin_confirmed_eligible boolean,
   p_duplicate_decision text,
   p_candidate_organisation_id uuid,
@@ -165,14 +259,10 @@ begin
     raise exception 'choose whether this is a new or existing organisation' using errcode = '22023';
   end if;
 
-  if p_organisation_type is null then
-    raise exception 'choose an organisation type before approval' using errcode = '22023';
-  end if;
-
   -- F047: charity/both meet the configured v1 policy. Company/other require the
   -- explicit human evidence checkbox; the UI still runs the shared configurable
   -- TypeScript policy first, while this is the non-bypassable database boundary.
-  if p_organisation_type in ('company', 'other')
+  if v_entry.organisation_type in ('company', 'other')
      and p_admin_confirmed_eligible is not true then
     raise exception 'confirm the organisation is eligible before approval' using errcode = '22023';
   end if;
@@ -209,6 +299,37 @@ begin
      limit 1;
   end if;
 
+  -- Serialize approvals for the same normalized identity so two simultaneous
+  -- manual reviews cannot both observe "no match" and create active duplicates.
+  perform pg_advisory_xact_lock(hashtextextended(
+    coalesce(nullif(trim(v_entry.registry_number), ''), v_normalised_name),
+    0
+  ));
+
+  -- Repeat both match stages after acquiring the identity lock. The first reviewer
+  -- may have created the organisation while this transaction was waiting.
+  v_match_organisation_id := null;
+  if nullif(trim(v_entry.registry_number), '') is not null then
+    select identifier.organisation_id into v_match_organisation_id
+      from public.organisation_identifiers identifier
+     where trim(identifier.identifier_value) = trim(v_entry.registry_number)
+     order by identifier.verified desc, identifier.created_at
+     limit 1;
+  end if;
+  if v_match_organisation_id is null then
+    select organisation.id into v_match_organisation_id
+      from public.organisations organisation
+     where trim(regexp_replace(
+       regexp_replace(
+         regexp_replace(lower(trim(organisation.legal_name)), '[.,()]', '', 'g'),
+         '(^|[[:space:]])(ltd|limited)([[:space:]]|$)', ' ', 'g'
+       ),
+       '[[:space:]]+', ' ', 'g'
+     )) = v_normalised_name
+     order by organisation.created_at, organisation.id
+     limit 1;
+  end if;
+
   -- Re-check the candidate in the transaction. A stale or forged hidden input cannot
   -- approve against a different result from the one the database sees now.
   if p_candidate_organisation_id is distinct from v_match_organisation_id then
@@ -230,6 +351,9 @@ begin
       1
       + case when nullif(trim(v_entry.website), '') is not null then 1 else 0 end
       + case when nullif(trim(v_entry.contact_email), '') is not null then 1 else 0 end
+      + case when nullif(trim(v_entry.address_line_1), '') is not null then 1 else 0 end
+      + case when nullif(trim(v_entry.city), '') is not null then 1 else 0 end
+      + case when nullif(trim(v_entry.postcode), '') is not null then 1 else 0 end
     )::numeric / 8, 2);
 
     insert into public.organisations (
@@ -238,9 +362,15 @@ begin
       city, postcode, geographic_reach, data_completeness_score, owner_id, is_seed
     ) values (
       trim(v_entry.legal_name), '', v_entry.country_code, v_entry.country_code <> 'GB',
-      'manual', false, p_organisation_type, v_entry.website, v_entry.contact_email,
-      '', '', '', null, v_score, null, false
+      'manual', false, v_entry.organisation_type, v_entry.website, v_entry.contact_email,
+      v_entry.address_line_1, v_entry.city, v_entry.postcode, null, v_score, null, false
     ) returning id into v_organisation_id;
+
+    insert into public.enrichment_results (
+      organisation_id, mission_statement, website_url, confidence_score, needs_review
+    ) values (
+      v_organisation_id, v_entry.mission_statement, v_entry.website, 1, false
+    );
 
     if nullif(trim(v_entry.registry_number), '') is not null then
       insert into public.organisation_identifiers (
@@ -270,7 +400,7 @@ begin
     jsonb_build_object(
       'manual_entry_id', p_entry_id,
       'submitted_by_user_id', v_entry.submitted_by_user_id,
-      'organisation_type', p_organisation_type,
+      'organisation_type', v_entry.organisation_type,
       'duplicate_decision', p_duplicate_decision,
       'matched_organisation_id', v_match_organisation_id,
       'admin_confirmed_eligible', p_admin_confirmed_eligible,
@@ -282,10 +412,14 @@ begin
 end;
 $$;
 
-revoke execute on function public.approve_manual_entry(uuid,public.organisation_type,boolean,text,uuid,text)
+revoke execute on function public.approve_manual_entry(uuid,boolean,text,uuid,text)
   from public, anon;
-grant execute on function public.approve_manual_entry(uuid,public.organisation_type,boolean,text,uuid,text)
+grant execute on function public.approve_manual_entry(uuid,boolean,text,uuid,text)
   to authenticated;
+
+comment on table public.enrichment_results is
+  'Organisation profile enrichment from automated sources or an approved manual entry. '
+  'End-user roles have no direct write grant; controlled SECURITY DEFINER workflows may append.';
 
 -- Expanded F043 view for F036: safe source metadata plus the CAM who created a
 -- manual contribution. It wraps the existing F043 RPC and adds approved manual

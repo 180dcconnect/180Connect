@@ -836,16 +836,19 @@ by whoever owns F013/F014. Note also that `users.deactivated_at` is now in the D
 Model but exists in neither the database nor a migration.
 # F036 manual entry access
 
-`MANUAL_ENTRY_RECORDS` is readable by its submitting CAM and by admins. Viewers
-cannot read it. All writes are RPC-only: active CAMs/admins call
-`submit_manual_entry`; only admins call `approve_manual_entry` or
-`reject_manual_entry`. The review RPCs self-authorise and write `AUDIT_LOG` in
-the same transaction as the approval/rejection. Approval also re-runs F042's
+`MANUAL_ENTRY_RECORDS` is readable by its creating CAM/admin and by admins.
+Viewers cannot read it. All writes are RPC-only: active CAMs/admins call
+`save_manual_entry` to create or update their own draft and to submit it. Drafts
+may be incomplete; submission requires the confirmed standard field set. Only
+admins call `approve_manual_entry` or `reject_manual_entry`. An admin submission
+may immediately call the same approval RPC without a second admin, while a CAM
+submission remains pending. The RPCs self-authorise and write `AUDIT_LOG` in the
+same transaction as each draft/status/review change. Approval also re-runs F042's
 duplicate rule and requires the human link-existing/create-new decision before
 creating an active organisation. Direct INSERT, UPDATE and DELETE privileges are
 withheld from authenticated users. `get_organisation_sources_with_actor` exposes
-only safe provenance metadata and the creating CAM's display name to active users;
-it does not expose the full pending submission.
+only safe provenance metadata and the creating user's display name to active
+users; it does not expose the full draft or pending submission.
 
 # F047 data-quality review flags
 

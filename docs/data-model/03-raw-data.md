@@ -123,18 +123,23 @@
 | Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
-| submitted_by_user_id | uuid | USERS | No | CAM who submitted this record | System | Set to logged-in user at submission time |  |
-| legal_name | text |  | No | Organisation name as entered by CAM | Human | Typed by CAM |  |
-| country_code | text |  | No | Country the organisation operates in | Human | Selected by CAM from country list | ISO code — default GB |
-| website | text |  | Yes | Organisation website | Human | Typed by CAM | Null if unknown |
-| contact_email | text |  | Yes | Known contact email address | Human | Typed by CAM | Null if unknown |
-| registry_name | text |  | Yes | Name of the registry if CAM knows it | Human | Typed by CAM | e.g. France RNA, Netherlands KVK — Null if not registered |
-| registry_number | text |  | Yes | Registry number if CAM knows it | Human | Typed by CAM | Null if not registered or unknown |
-| reason_for_manual_entry | text |  | No | Why this organisation is not in any API source | Human | Typed by CAM | Required — forces CAM to justify the manual entry |
-| converted_to_organisation_id | uuid | ORGANISATIONS | Yes | The ORGANISATIONS record created from this entry | System | Set when manual entry is approved and converted | Null until approved |
-| review_status | enum |  | No | Current status of the manual review | System + Human | Updated as entry moves through review queue | pending / approved / rejected |
-| reviewed_by_user_id | uuid | USERS | Yes | Admin who reviewed this entry | System | Set to logged-in admin at review time | Null until reviewed |
-| reviewed_at | timestamp |  | Yes | When the review decision was made | System | Written when review_status is updated | Null until reviewed |
-| review_notes | text |  | Yes | Admin notes explaining the review decision | Human | Written by admin at review time | Null if approved without comment |
+| submitted_by_user_id | uuid | USERS | No | User who created this manual record | System | Set to the logged-in user when the draft is first saved |  |
+| legal_name | text |  | Yes | Organisation name | Human | Typed by the user | Required before submission; nullable only while draft |
+| mission_statement | text |  | Yes | Organisation's mission or purpose | Human | Typed by the user | Required before submission; copied to ENRICHMENT_RESULTS on activation |
+| organisation_type | enum |  | Yes | Type of organisation | Human | Selected by the user | Required before submission: charity / company / both / other |
+| address_line_1 | text |  | Yes | Primary street address | Human | Typed by the user | Required before submission; nullable only while draft |
+| city | text |  | Yes | Town or city | Human | Typed by the user | Required before submission; nullable only while draft |
+| postcode | text |  | Yes | Postcode or postal code | Human | Typed by the user | Required before submission; nullable only while draft |
+| country_code | text |  | Yes | Country the organisation operates in | Human | Selected by the user | Required before submission; ISO code; form defaults to GB |
+| website | text |  | Yes | Organisation website | Human | Typed by the user | Required before submission; format/reachability warnings do not prevent saving |
+| contact_email | text |  | Yes | Contact email address | Human | Typed by the user | Required before submission; invalid format is flagged without discarding the record |
+| registry_name | text |  | Yes | Name of the organisation registry | Human | Typed by the user | Required before submission |
+| registry_number | text |  | Yes | Organisation registry number | Human | Typed by the user | Required before submission and used for duplicate detection |
+| reason_for_manual_entry | text |  | Yes | Why this organisation is not in an API source | Human | Typed by the user | Required before submission; nullable only while draft |
+| converted_to_organisation_id | uuid | ORGANISATIONS | Yes | The active organisation created or linked from this entry | System | Set when the entry is approved and converted | Null until approved |
+| review_status | enum |  | No | Current manual-entry workflow status | System + Human | Updated as the record moves through draft, review and activation | draft / pending / approved / rejected |
+| reviewed_by_user_id | uuid | USERS | Yes | Admin who reviewed or self-approved the entry | System | Set to the approving or rejecting admin | Null while draft or pending |
+| reviewed_at | timestamp |  | Yes | When the review decision was made | System | Written when the entry is approved or rejected | Null while draft or pending |
+| review_notes | text |  | Yes | Admin notes explaining the decision | Human | Written by the reviewing admin | Null if approved without comment |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
-| updated_at | timestamp |  | No | Last updated timestamp | System | Auto-updated on any change |  |
+| updated_at | timestamp |  | No | Last update timestamp | System | Auto-updated on any change |  |

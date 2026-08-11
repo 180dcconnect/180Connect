@@ -10,6 +10,11 @@ import { ManualEntryReviewForm } from "./review-form";
 type Entry = {
   id: string;
   legal_name: string;
+  mission_statement: string;
+  organisation_type: "charity" | "company" | "both" | "other";
+  address_line_1: string;
+  city: string;
+  postcode: string;
   country_code: string;
   website: string | null;
   contact_email: string | null;
@@ -33,7 +38,8 @@ export default async function ManualEntriesPage() {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("manual_entry_records")
-    .select("id, legal_name, country_code, website, contact_email, registry_name, registry_number, reason_for_manual_entry, review_status, created_at, submitter:users!manual_entry_records_submitted_by_user_id_fkey(full_name)")
+    .select("id, legal_name, mission_statement, organisation_type, address_line_1, city, postcode, country_code, website, contact_email, registry_name, registry_number, reason_for_manual_entry, review_status, created_at, submitter:users!manual_entry_records_submitted_by_user_id_fkey(full_name)")
+    .eq("review_status", "pending")
     .order("created_at", { ascending: false });
   if (error) await reportError(error, { operation: "manual_entry.admin_list" });
   const entries = (data ?? []) as unknown as Entry[];
@@ -66,6 +72,10 @@ export default async function ManualEntriesPage() {
                   Submitted by {submitterName(entry)} · {entry.country_code} · {new Date(entry.created_at).toLocaleDateString("en-GB")}
                 </p>
                 <p className="mt-3 text-sm">{entry.reason_for_manual_entry}</p>
+                <p className="mt-2 text-sm text-foreground/75">{entry.mission_statement}</p>
+                <p className="mt-2 text-xs text-foreground/65">
+                  {entry.organisation_type} · {entry.address_line_1}, {entry.city}, {entry.postcode}, {entry.country_code}
+                </p>
                 {(entry.website || entry.contact_email || entry.registry_number) && (
                   <p className="mt-2 text-xs text-foreground/65">
                     {[entry.website, entry.contact_email, entry.registry_name, entry.registry_number].filter(Boolean).join(" · ")}
@@ -79,7 +89,12 @@ export default async function ManualEntriesPage() {
                     Website format: {websiteStatus.status}
                   </span>
                 </div>
-                {entry.review_status === "pending" && <ManualEntryReviewForm entryId={entry.id} />}
+                {entry.review_status === "pending" && (
+                  <ManualEntryReviewForm
+                    entryId={entry.id}
+                    organisationType={entry.organisation_type}
+                  />
+                )}
               </article>
             );
           })}

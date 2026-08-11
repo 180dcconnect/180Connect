@@ -17,7 +17,13 @@ const checkStyles = {
   blocked: "border-red-200 bg-red-50 text-red-900",
 } as const;
 
-export function ManualEntryReviewForm({ entryId }: { entryId: string }) {
+export function ManualEntryReviewForm({
+  entryId,
+  organisationType,
+}: {
+  entryId: string;
+  organisationType: "charity" | "company" | "both" | "other";
+}) {
   const [state, checkAction, checking] = useActionState(
     checkAvailableManualEntryDependencies,
     initialState,
@@ -34,30 +40,20 @@ export function ManualEntryReviewForm({ entryId }: { entryId: string }) {
   return (
     <div className="mt-4 rounded-xl border border-black/10 bg-gray-50 p-4">
       <h3 className="text-sm font-bold">Approval checks</h3>
+      <p className="mt-1 text-sm text-foreground/65">
+        Submitted organisation type: <span className="font-bold">{organisationType}</span>
+      </p>
       <form action={checkAction} className="mt-3 space-y-3">
         <input name="id" type="hidden" value={entryId} />
-        <label className="block text-sm font-bold">
-          Organisation type
-          <select
-            className="mt-1 w-full rounded-lg border border-black/20 bg-white px-3 py-2"
-            defaultValue=""
-            name="organisationType"
-            required
-          >
-            <option disabled value="">Choose a type</option>
-            <option value="charity">Charity</option>
-            <option value="both">Charity and company</option>
-            <option value="company">Company</option>
-            <option value="other">Other organisation</option>
-          </select>
-        </label>
-        <label className="flex items-start gap-2 text-sm">
-          <input className="mt-1" name="adminConfirmedEligible" type="checkbox" />
-          <span>
-            I have confirmed that an ambiguous company/other organisation is a
-            non-profit, social enterprise, NGO or socially focused startup.
-          </span>
-        </label>
+        {(organisationType === "company" || organisationType === "other") && (
+          <label className="flex items-start gap-2 text-sm">
+            <input className="mt-1" name="adminConfirmedEligible" type="checkbox" />
+            <span>
+              I have confirmed that this organisation is a non-profit, social enterprise,
+              NGO or socially focused startup.
+            </span>
+          </label>
+        )}
         <button
           className="rounded-lg border border-brand px-3 py-2 text-sm font-bold text-brand disabled:cursor-not-allowed disabled:opacity-50"
           disabled={checking}
@@ -89,7 +85,6 @@ export function ManualEntryReviewForm({ entryId }: { entryId: string }) {
       {state.approval && (
         <form action={approvalAction} className="mt-4 space-y-3 rounded-lg border border-brand/30 bg-white p-4">
           <input name="id" type="hidden" value={entryId} />
-          <input name="organisationType" type="hidden" value={state.approval.organisationType} />
           <input name="adminConfirmedEligible" type="hidden" value={String(state.approval.adminConfirmedEligible)} />
           <input name="candidateOrganisationId" type="hidden" value={state.approval.candidateOrganisationId ?? ""} />
 

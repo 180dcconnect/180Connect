@@ -17,17 +17,40 @@ import {
   type WebsiteStatus,
 } from "./website-validation.ts";
 
+const organisationTypeSchema = z.enum(["charity", "company", "both", "other"]);
+
+export const manualEntryDraftSchema = z.object({
+  legalName: z.string().trim().max(200),
+  missionStatement: z.string().trim().max(5000),
+  organisationType: organisationTypeSchema.optional().or(z.literal("")),
+  addressLine1: z.string().trim().max(300),
+  city: z.string().trim().max(200),
+  postcode: z.string().trim().max(32),
+  countryCode: z.string().trim().toUpperCase().max(2),
+  website: z.string().trim().max(500),
+  contactEmail: z.string().trim().max(320),
+  registryName: z.string().trim().max(200),
+  registryNumber: z.string().trim().max(200),
+  reason: z.string().trim().max(2000),
+});
+
 export const manualEntrySchema = z.object({
   legalName: z.string().trim().min(1, "Enter the organisation name.").max(200),
+  missionStatement: z.string().trim().min(1, "Enter the organisation mission.").max(5000),
+  organisationType: organisationTypeSchema,
+  addressLine1: z.string().trim().min(1, "Enter the first address line.").max(300),
+  city: z.string().trim().min(1, "Enter the town or city.").max(200),
+  postcode: z.string().trim().min(1, "Enter the postcode or postal code.").max(32),
   countryCode: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/, "Choose a two-letter country code."),
-  website: z.string().trim().max(500).optional().or(z.literal("")),
-  contactEmail: z.string().trim().max(320).optional().or(z.literal("")),
-  registryName: z.string().trim().max(200).optional().or(z.literal("")),
-  registryNumber: z.string().trim().max(200).optional().or(z.literal("")),
+  website: z.string().trim().min(1, "Enter the organisation website.").max(500),
+  contactEmail: z.string().trim().min(1, "Enter the contact email.").max(320),
+  registryName: z.string().trim().min(1, "Enter the registry name.").max(200),
+  registryNumber: z.string().trim().min(1, "Enter the registry number.").max(200),
   reason: z.string().trim().min(10, "Explain why manual entry is needed (at least 10 characters).").max(2000),
 });
 
 export type ManualEntryInput = z.infer<typeof manualEntrySchema>;
+export type ManualEntryDraftInput = z.infer<typeof manualEntryDraftSchema>;
 
 export type ManualEntryIntegrationResult =
   | { status: "passed" }
@@ -71,7 +94,6 @@ export function reviewManualEntryFields(
 /** Standard F041 organisation payload used by the F042-guarded approval flow. */
 export function buildManualOrganisation(
   input: ManualEntryInput,
-  organisationType: OrganisationType,
 ): StandardOrganisation {
   const email = validateClientEmail(input.contactEmail);
   const website = validateWebsiteFormat(input.website);
@@ -82,12 +104,12 @@ export function buildManualOrganisation(
     is_international: input.countryCode.trim().toUpperCase() !== "GB",
     entry_method: "manual",
     is_verified: false,
-    organisation_type: organisationType,
+    organisation_type: input.organisationType as OrganisationType,
     website: website.status === "valid" ? website.url : input.website?.trim() ?? "",
     contact_email: email.status === "valid" ? email.value : input.contactEmail?.trim() ?? "",
-    address_line_1: "",
-    city: "",
-    postcode: "",
+    address_line_1: input.addressLine1.trim(),
+    city: input.city.trim(),
+    postcode: input.postcode.trim(),
     geographic_reach: null,
     outreach_status: "not_contacted",
     owner_id: null,

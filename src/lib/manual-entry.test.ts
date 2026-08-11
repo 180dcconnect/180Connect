@@ -4,16 +4,56 @@ import {
   buildManualOrganisation,
   canApproveManualEntry,
   checkManualEntryCriteria,
+  manualEntryDraftSchema,
   manualEntrySchema,
   reviewManualEntryFields,
   type ManualEntryApprovalChecks,
 } from "./manual-entry.ts";
 
-const input = { legalName: "Useful Charity", countryCode: "GB", website: "", contactEmail: "", registryName: "", registryNumber: "", reason: "Not present in available API sources." };
+const input = {
+  legalName: "Useful Charity",
+  missionStatement: "Improves access to useful community services.",
+  organisationType: "charity" as const,
+  addressLine1: "1 Example Street",
+  city: "Sheffield",
+  postcode: "S1 2AB",
+  countryCode: "GB",
+  website: "https://example.org",
+  contactEmail: "hello@example.org",
+  registryName: "Charity Commission",
+  registryNumber: "1234567",
+  reason: "Not present in available API sources.",
+};
 
 describe("manualEntrySchema", () => {
   it("accepts the approved Data Model fields", () => assert.equal(manualEntrySchema.safeParse(input).success, true));
   it("rejects missing name and an unexplained submission", () => assert.equal(manualEntrySchema.safeParse({ ...input, legalName: "", reason: "why" }).success, false));
+  it("requires mission, organisation type, full address and source details", () => {
+    assert.equal(manualEntrySchema.safeParse({
+      ...input,
+      missionStatement: "",
+      organisationType: "",
+      addressLine1: "",
+      website: "",
+      registryNumber: "",
+    }).success, false);
+  });
+  it("allows an incomplete record to be saved as a draft", () => {
+    assert.equal(manualEntryDraftSchema.safeParse({
+      legalName: "Partially researched",
+      missionStatement: "",
+      organisationType: "",
+      addressLine1: "",
+      city: "",
+      postcode: "",
+      countryCode: "GB",
+      website: "",
+      contactEmail: "",
+      registryName: "",
+      registryNumber: "",
+      reason: "",
+    }).success, true);
+  });
 });
 
 describe("canApproveManualEntry", () => {
@@ -48,8 +88,8 @@ describe("reviewManualEntryFields", () => {
     assert.equal(review.warnings.length, 2);
   });
 
-  it("does not turn missing optional fields into invalid-field warnings", () => {
-    const review = reviewManualEntryFields(input);
+  it("does not turn an incomplete draft into invalid-field warnings", () => {
+    const review = reviewManualEntryFields({ ...input, contactEmail: "", website: "" });
     assert.equal(review.email.status, "missing");
     assert.equal(review.website.status, "missing");
     assert.deepEqual(review.warnings, []);
@@ -65,7 +105,6 @@ describe("buildManualOrganisation", () => {
         website: "https://example.org",
         contactEmail: " HELLO@EXAMPLE.ORG ",
       },
-      "charity",
     );
     assert.equal(organisation.entry_method, "manual");
     assert.equal(organisation.organisation_type, "charity");
@@ -80,7 +119,6 @@ describe("buildManualOrganisation", () => {
   it("preserves invalid field values so warnings do not discard useful data", () => {
     const organisation = buildManualOrganisation(
       { ...input, website: "broken website", contactEmail: "bad email" },
-      "other",
     );
     assert.equal(organisation.website, "broken website");
     assert.equal(organisation.contact_email, "bad email");

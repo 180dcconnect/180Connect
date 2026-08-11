@@ -7,7 +7,8 @@ import {
   charityCommissionAdapter,
   createCharityCommissionLookupAdapter,
 } from "@/lib/ingestion/sources/charity-commission";
-import { importStateFromSummary } from "./import-result";
+import { promotePendingCharityCommissionRecords } from "@/lib/standardize/write-organisations";
+import { importStateFromSummary, describePromotion } from "./import-result";
 
 export type CharityCommissionImportState = {
   kind: "idle" | "success" | "warning" | "error";
@@ -18,7 +19,46 @@ export type CharityCommissionImportState = {
     skipped: number;
     failed: number;
   };
+  promoted?: {
+    inserted: number;
+    needsReview: number;
+    doesNotMeet: number;
+    invalidData: number;
+    failed: number;
+  };
 };
+
+/**
+ * F049: shared by both the bulk trigger and the single lookup below - each
+ * only differs in which adapter it runs, both need the same "ingest, then
+ * promote the whole pending backlog" chaining afterward.
+ */
+async function withPromotion(
+  ingestState: CharityCommissionImportState,
+  actorUserId: string,
+  operation: string,
+): Promise<CharityCommissionImportState> {
+  try {
+    const promoteCounts = await promotePendingCharityCommissionRecords();
+    return {
+      ...ingestState,
+      message: `${ingestState.message} ${describePromotion(promoteCounts)}`,
+      promoted: {
+        inserted: promoteCounts.inserted,
+        needsReview: promoteCounts.needsReview,
+        doesNotMeet: promoteCounts.doesNotMeet,
+        invalidData: promoteCounts.invalidData,
+        failed: promoteCounts.failed,
+      },
+    };
+  } catch (promoteError) {
+    await reportError(promoteError, { operation, actorUserId });
+    return {
+      ...ingestState,
+      message: `${ingestState.message} The data was imported, but could not be promoted into the client list - it will be picked up on the next run.`,
+    };
+  }
+}
 
 export async function importCharityCommission(
   previous: CharityCommissionImportState,
@@ -53,7 +93,11 @@ export async function importCharityCommission(
       return importStateFromSummary(summary);
     }
 
-    return importStateFromSummary(summary);
+    return withPromotion(
+      importStateFromSummary(summary),
+      authorization.actor.id,
+      "admin.charity_commission.promote",
+    );
   } catch (error) {
     await reportError(error, {
       operation: "admin.charity_commission.import",
@@ -107,7 +151,11 @@ export async function lookupCharity(
       return importStateFromSummary(summary);
     }
 
-    return importStateFromSummary(summary);
+    return withPromotion(
+      importStateFromSummary(summary),
+      authorization.actor.id,
+      "admin.charity_commission.promote",
+    );
   } catch (error) {
     await reportError(error, {
       operation: "admin.charity_commission.lookup",

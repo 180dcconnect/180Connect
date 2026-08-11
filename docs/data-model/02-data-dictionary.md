@@ -412,3 +412,19 @@
 | 09 CAM Analytics | SECTOR_PERFORMANCE | conversion_rate | float |  | Converted / contacted |
 | 09 CAM Analytics | SECTOR_PERFORMANCE | avg_priority_score | float |  | Mean SCOUT priority score across the sector |
 | 09 CAM Analytics | SECTOR_PERFORMANCE | updated_at | timestamp |  | Last recalculation timestamp |
+| 03 Raw Data | FIELD_DISCREPANCIES | id | uuid |  | Primary key |
+| 03 Raw Data | FIELD_DISCREPANCIES | organisation_id | uuid | ORGANISATIONS | Organisation the conflicting field belongs to |
+| 03 Raw Data | FIELD_DISCREPANCIES | field_name | text |  | Which ORGANISATIONS field is in conflict |
+| 03 Raw Data | FIELD_DISCREPANCIES | existing_value | text |  | Current value stored on the organisation |
+| 03 Raw Data | FIELD_DISCREPANCIES | existing_source | text |  | Which source last wrote the existing value |
+| 03 Raw Data | FIELD_DISCREPANCIES | incoming_value | text |  | New value proposed by the incoming record |
+| 03 Raw Data | FIELD_DISCREPANCIES | incoming_source | text |  | Which API/source produced the incoming value |
+| 03 Raw Data | FIELD_DISCREPANCIES | raw_source_record_id | uuid | RAW_SOURCE_RECORDS | The incoming record that triggered this conflict |
+| 03 Raw Data | FIELD_DISCREPANCIES | entity_match_candidate_id | uuid | ENTITY_MATCH_CANDIDATES | Match candidate this discrepancy arose from, if any |
+| 03 Raw Data | FIELD_DISCREPANCIES | status | enum |  | Review state of this discrepancy |
+| 03 Raw Data | FIELD_DISCREPANCIES | resolved_choice | enum |  | Which side the reviewer picked |
+| 03 Raw Data | FIELD_DISCREPANCIES | resolved_value | text |  | Final value written back to ORGANISATIONS |
+| 03 Raw Data | FIELD_DISCREPANCIES | resolved_by_user_id | uuid | USERS | Admin who resolved this |
+| 03 Raw Data | FIELD_DISCREPANCIES | resolved_at | timestamp |  | When resolved |
+| 03 Raw Data | FIELD_DISCREPANCIES | notes | text |  | Reviewer notes explaining the decision |
+| 03 Raw Data | FIELD_DISCREPANCIES | created_at | timestamp |  | Row creation timestamp |

@@ -97,6 +97,27 @@
 | notes | text |  | Yes | Reviewer notes explaining their decision | Human | Free text written by the reviewer |  |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 
+## FIELD_DISCREPANCIES
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| organisation_id | uuid | ORGANISATIONS | No | Organisation the conflicting field belongs to | System | Set when discrepancy is flagged |  |
+| field_name | text |  | No | Which ORGANISATIONS field is in conflict | System | Identified by the reconciliation worker |  |
+| existing_value | text |  | Yes | Current value stored on the organisation | System | Read from ORGANISATIONS at flag time | Null if field was previously empty |
+| existing_source | text |  | Yes | Which source last wrote the existing value | System | Read from provenance tracking | Null if unknown |
+| incoming_value | text |  | Yes | New value proposed by the incoming record | System | Taken from the raw payload | Null if incoming record has no value for this field |
+| incoming_source | text |  | No | Which API/source produced the incoming value | System | Inherited from the raw source record |  |
+| raw_source_record_id | uuid | RAW_SOURCE_RECORDS | No | The incoming record that triggered this conflict | System | Set when discrepancy is flagged |  |
+| entity_match_candidate_id | uuid | ENTITY_MATCH_CANDIDATES | Yes | Match candidate this discrepancy arose from, if any | System | Set when conflict is detected during matching | Null if detected outside the matching flow. This table is only for conflicts source_priority rules can't resolve (ties or fields the priority ruleset doesn't cover) — cases the automatic Canonical Entity Update step (stage 3.0) can't settle on its own. |
+| status | enum |  | No | Review state of this discrepancy | System | Set to pending on creation, updated on resolution | pending / resolved. This table is only for conflicts source_priority rules can't resolve (ties or fields the priority ruleset doesn't cover) — cases the automatic Canonical Entity Update step (stage 3.0) can't settle on its own. |
+| resolved_choice | enum |  | Yes | Which side the reviewer picked | Human | Reviewer decision | existing / incoming / manual — null until resolved |
+| resolved_value | text |  | Yes | Final value written back to ORGANISATIONS | Human | Set by reviewer, defaults to existing/incoming value unless manual | Null until resolved |
+| resolved_by_user_id | uuid | USERS | Yes | Admin who resolved this | System | Set to logged-in admin at resolution time | Null until resolved |
+| resolved_at | timestamp |  | Yes | When resolved | System | Written when status is set to resolved | Null until resolved |
+| notes | text |  | Yes | Reviewer notes explaining the decision | Human | Free text written by reviewer |  |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+
 ## MANUAL_ENTRY_RECORDS
 
 | Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |

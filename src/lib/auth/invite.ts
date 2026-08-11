@@ -117,6 +117,17 @@ export const INVITE_ALREADY_OPENED_MESSAGE =
   "This invite link was already opened once but never completed. Cancel this invite, then send a new one.";
 
 /**
+ * Shown on `/reset-password` for an expired or already-used invite link (F009
+ * AC4). Deliberately not `RESET_LINK_ERROR` (`password-reset.ts`): that message
+ * says "Request a new link", which is self-service password recovery — an
+ * invited person has no way to send themselves a new invite, only an admin can
+ * (F252), so pointing them at `/forgot-password` would be a dead end dressed up
+ * as help.
+ */
+export const INVITE_LINK_ERROR =
+  "This invite link has expired or has already been used. Contact your administrator for a new invite.";
+
+/**
  * Looks up an existing `public.users` row by email, or returns `null`.
  * `deactivatedAt` is carried along so `sendInvite` can tell a deactivated
  * account apart from an active one or a pending invite, and steer the admin

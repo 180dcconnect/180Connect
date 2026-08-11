@@ -67,8 +67,13 @@ export type ResetPasswordState = {
 /** Cookie marking a session as being mid-recovery. */
 export const RECOVERY_COOKIE_NAME = "180connect-password-recovery";
 
-/** How long the marker lives when `PASSWORD_RESET_WINDOW_SECONDS` is unusable. */
-export const DEFAULT_RECOVERY_WINDOW_SECONDS = 3600;
+/**
+ * How long the marker lives when `PASSWORD_RESET_WINDOW_SECONDS` is unusable.
+ * 24 hours, matching the shared Supabase `otp_expiry` (F010) — see
+ * `invite-expiry.ts` for why recovery and invite links cannot have different
+ * lifetimes.
+ */
+export const DEFAULT_RECOVERY_WINDOW_SECONDS = 86400;
 
 export const emailSchema = emailField().pipe(z.string().max(254));
 

@@ -33,6 +33,10 @@
 import { buildAdminClient } from "../supabase/admin-client-factory.ts";
 import { reportError } from "../error-logging.ts";
 import { normalizeCompanyNumber } from "../ingestion/sources/companieshouse.ts";
+import {
+  standardizeThreeSixtyGivingOrganisationRecord,
+  type RawThreeSixtyGivingOrganisationRecord,
+} from "./three-sixty-giving-organisation.ts";
 import type { PendingRecord } from "./write-organisations.ts";
 
 export type StandardGrant = {
@@ -263,6 +267,18 @@ export async function promotePendingThreeSixtyGivingRecords(
     }
 
     if (!organisationId) {
+      // F261: standardize the recipient into the shared ORGANISATIONS shape
+      // purely so the rejection is legible to an admin reviewing raw_source_
+      // records — legal_name here is never written anywhere. Deliberately not
+      // a write path; see three-sixty-giving-organisation.ts's header for why.
+      const unmatchedOrg = standardizeThreeSixtyGivingOrganisationRecord(
+        record.raw_payload as RawThreeSixtyGivingOrganisationRecord,
+      );
+      await reportError(new Error("360Giving grant recipient did not match a known organisation"), {
+        operation: "standardize.three_sixty_giving.unmatched",
+        rawRecordId: record.id,
+        recipientName: unmatchedOrg.legal_name || "(no name in source record)",
+      });
       await store.markRecordStatus(record.id, "rejected");
       counts.unmatched++;
       continue;

@@ -118,6 +118,22 @@ export async function setNewPassword(
     }
   }
 
+  // Read before mark_invite_accepted runs, so the redirect below can tell a
+  // first-time invite acceptance apart from an ordinary password reset.
+  // mark_invite_accepted() itself knows the difference internally but returns
+  // void either way (supabase/migrations/20260804090000_add_user_invite_tracking.sql)
+  // — it exists to be called blindly from the shared reset path, not to report
+  // back what it did. A plain read of the same columns it acts on is enough,
+  // and does not require touching that RPC's signature. If the read fails for
+  // any reason, this falls back to the password-reset copy — the safe default,
+  // and not worth blocking the redirect over.
+  const { data: profile } = await supabase
+    .from("users")
+    .select("invited_at, invite_accepted_at")
+    .eq("id", recoveryUserId)
+    .maybeSingle<{ invited_at: string | null; invite_accepted_at: string | null }>();
+  const isInviteAcceptance = Boolean(profile?.invited_at) && !profile?.invite_accepted_at;
+
   // Setting a first password is what accepts an invite (F008) — not clicking the
   // emailed link, which only proves the mailbox is readable. This is the shared
   // landing for recovery and invites, and the RPC is a no-op for anyone without a
@@ -135,5 +151,5 @@ export async function setNewPassword(
   // rather than throwing (F006) — the redirect below has to happen either way.
   await signOutAndReport(supabase);
 
-  redirect("/login?password-reset=success");
+  redirect(isInviteAcceptance ? "/login?invite-accepted=success" : "/login?password-reset=success");
 }

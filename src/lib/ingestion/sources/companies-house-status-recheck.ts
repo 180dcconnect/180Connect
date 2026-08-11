@@ -111,6 +111,7 @@ export async function runCompaniesHouseStatusRecheck(
       p_company_number: after.source_record_id,
       p_previous_status: oldStatus,
       p_new_status: newStatus,
+      p_source: "companies_house",
     });
     if (rpcError) {
       await reportError(rpcError, {

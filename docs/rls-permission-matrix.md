@@ -317,15 +317,22 @@ records. The `SECURITY DEFINER` function checks `app.is_active_user()` itself an
 returns `raw_payload`; `anon` has no execute privilege.
 
 `ORGANISATION_STATUS_FLAGS` (`20260809100200_create_organisation_status_flags.sql`,
-F032/F260 follow-on) is the Companies House status-watch job's review flag — a
-tracked organisation's `company_status` drifted away from `active`. No
-INSERT/UPDATE policy, same reasoning as `AUDIT_LOG` (§3.8) and `SUPPRESSIONS`
-(§3.14): all writes go through two `SECURITY DEFINER` RPCs, each writing an
-`audit_log` row in the same transaction — `record_organisation_status_flag`
-(`service_role` only, called from the status-recheck job) and
-`acknowledge_organisation_status_flag` (admin only). Neither ever writes to
-`organisations.outreach_status` — an organisation flagged here may be mid-outreach,
-and only a human decides what a status change means for that pipeline state.
+F032/F260 follow-on; generalized to a `source` column covering both weekly
+status-recheck jobs by `20260811090000_generalize_organisation_status_flags.sql`,
+F049) is the weekly status-recheck jobs' review flag — a tracked organisation's
+status drifted away from its source's "alive" value (`company_status` away from
+`active` for Companies House, `reg_status` away from `R` for Charity Commission;
+`source` distinguishes which). No INSERT/UPDATE policy, same reasoning as
+`AUDIT_LOG` (§3.8) and `SUPPRESSIONS` (§3.14): all writes go through two
+`SECURITY DEFINER` RPCs, each writing an `audit_log` row in the same transaction —
+`record_organisation_status_flag` (`service_role` only, called from either
+status-recheck job) and `acknowledge_organisation_status_flag` (admin only).
+Neither ever writes to `organisations.outreach_status` — an organisation flagged
+here may be mid-outreach, and only a human decides what a status change means for
+that pipeline state. `company_number` keeps its name despite now holding either
+source's own identifier — MIGRATIONS.md bars a shared-field rename without
+Wednesday-call agreement, so the 20260811090000 migration only added `source`
+rather than renaming the column.
 
 ### 3.6 Model and scoring configuration — admin only
 

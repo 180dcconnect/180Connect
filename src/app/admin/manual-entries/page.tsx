@@ -5,7 +5,6 @@ import { validateClientEmail } from "@/lib/client-email-validation";
 import { reportError } from "@/lib/error-logging";
 import { createClient } from "@/lib/supabase/server";
 import { validateWebsiteFormat } from "@/lib/website-validation";
-import { rejectManualEntry } from "./actions";
 import { ManualEntryReviewForm } from "./review-form";
 
 type Entry = {
@@ -81,23 +80,6 @@ export default async function ManualEntriesPage() {
                   </span>
                 </div>
                 {entry.review_status === "pending" && <ManualEntryReviewForm entryId={entry.id} />}
-                {entry.review_status === "pending" && (
-                  <div className="mt-4 flex flex-wrap gap-3">
-                    <form action={rejectManualEntry} className="flex flex-1 gap-2">
-                      <input name="id" type="hidden" value={entry.id} />
-                      <input
-                        className="min-w-40 flex-1 rounded-lg border border-black/20 px-3 py-2 text-sm"
-                        minLength={3}
-                        name="notes"
-                        placeholder="Reason for rejection"
-                        required
-                      />
-                      <button className="rounded-lg bg-red-700 px-3 py-2 text-sm font-bold text-white" type="submit">
-                        Reject
-                      </button>
-                    </form>
-                  </div>
-                )}
               </article>
             );
           })}

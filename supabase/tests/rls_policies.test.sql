@@ -2822,7 +2822,7 @@ declare
   v_count bigint;
 begin
   if not tests.tables_exist('manual_entry_records', 'users', 'audit_log') then
-    return next skip(14, 'F036 manual entry migration not yet applied');
+    return next skip(16, 'F036 manual entry migration not yet applied');
     return;
   end if;
   perform tests.seed();
@@ -2923,6 +2923,20 @@ begin
     'May be a socially focused organisation'
   ) into v_company_entry;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.approve_manual_entry(%L, ''company'', true, null, null, null)',
+      v_company_entry
+    )),
+    '22023', 'a null duplicate decision cannot bypass the approval decision');
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.approve_manual_entry(%L, ''company'', null, ''create_new'', null, null)',
+      v_company_entry
+    )),
+    '22023', 'a null eligibility confirmation cannot bypass F047');
 
   return next is(
     tests.sqlstate_of(v_admin, format(

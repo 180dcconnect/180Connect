@@ -293,14 +293,41 @@ export async function approveManualEntry(
   }
 }
 
-export async function rejectManualEntry(formData: FormData): Promise<void> {
+export async function rejectManualEntry(
+  _previous: ManualEntryReviewState,
+  formData: FormData,
+): Promise<ManualEntryReviewState> {
   const authorization = await getCurrentActor("approval:manage", { route: "/admin/manual-entries" });
-  if (!authorization.ok) return;
+  if (!authorization.ok) {
+    return { kind: "error", message: actorFailureMessage(authorization.reason) };
+  }
   const id = String(formData.get("id") ?? "");
   const notes = String(formData.get("notes") ?? "").trim();
-  if (!/^[0-9a-f-]{36}$/i.test(id) || notes.length < 3) return;
-  const supabase = await createClient();
-  const { error } = await supabase.rpc("reject_manual_entry", { p_entry_id: id, p_notes: notes });
-  if (error) await reportError(error, { operation: "manual_entry.reject", actorUserId: authorization.actor.id, manualEntryId: id });
-  revalidatePath("/admin/manual-entries");
+  if (!/^[0-9a-f-]{36}$/i.test(id)) {
+    return { kind: "error", message: "This manual entry could not be identified." };
+  }
+  if (notes.length < 3) {
+    return { kind: "error", message: "Enter a reason for rejecting this manual entry." };
+  }
+
+  try {
+    const supabase = await createClient();
+    const { error } = await supabase.rpc("reject_manual_entry", {
+      p_entry_id: id,
+      p_notes: notes,
+    });
+    if (error) throw error;
+    revalidatePath("/admin/manual-entries");
+    return { kind: "success", message: "Manual entry rejected." };
+  } catch (error) {
+    await reportError(error, {
+      operation: "manual_entry.reject",
+      actorUserId: authorization.actor.id,
+      manualEntryId: id,
+    });
+    return {
+      kind: "error",
+      message: "The manual entry could not be rejected. The failure was recorded; refresh and try again.",
+    };
+  }
 }

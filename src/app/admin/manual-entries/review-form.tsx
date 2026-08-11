@@ -5,6 +5,7 @@ import { useActionState } from "react";
 import {
   approveManualEntry,
   checkAvailableManualEntryDependencies,
+  rejectManualEntry,
   type ManualEntryReviewState,
 } from "./actions";
 
@@ -23,6 +24,10 @@ export function ManualEntryReviewForm({ entryId }: { entryId: string }) {
   );
   const [approvalState, approvalAction, approving] = useActionState(
     approveManualEntry,
+    initialState,
+  );
+  const [rejectionState, rejectionAction, rejecting] = useActionState(
+    rejectManualEntry,
     initialState,
   );
 
@@ -144,6 +149,32 @@ export function ManualEntryReviewForm({ entryId }: { entryId: string }) {
           role={approvalState.kind === "error" ? "alert" : "status"}
         >
           {approvalState.message}
+        </p>
+      )}
+
+      <form action={rejectionAction} className="mt-4 flex flex-wrap gap-2 border-t border-black/10 pt-4">
+        <input name="id" type="hidden" value={entryId} />
+        <input
+          className="min-w-40 flex-1 rounded-lg border border-black/20 px-3 py-2 text-sm"
+          minLength={3}
+          name="notes"
+          placeholder="Reason for rejection"
+          required
+        />
+        <button
+          className="rounded-lg bg-red-700 px-3 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={rejecting}
+          type="submit"
+        >
+          {rejecting ? "Rejecting…" : "Reject"}
+        </button>
+      </form>
+      {rejectionState.message && (
+        <p
+          className={`mt-3 rounded-lg p-3 text-sm ${rejectionState.kind === "success" ? "bg-green-50 text-green-900" : "bg-red-50 text-red-900"}`}
+          role={rejectionState.kind === "error" ? "alert" : "status"}
+        >
+          {rejectionState.message}
         </p>
       )}
     </div>

@@ -160,14 +160,20 @@ begin
   if v_entry.review_status <> 'pending' then
     raise exception 'manual entry has already been reviewed' using errcode = '55000';
   end if;
-  if p_duplicate_decision not in ('create_new', 'link_existing') then
+  if p_duplicate_decision is null
+     or p_duplicate_decision not in ('create_new', 'link_existing') then
     raise exception 'choose whether this is a new or existing organisation' using errcode = '22023';
+  end if;
+
+  if p_organisation_type is null then
+    raise exception 'choose an organisation type before approval' using errcode = '22023';
   end if;
 
   -- F047: charity/both meet the configured v1 policy. Company/other require the
   -- explicit human evidence checkbox; the UI still runs the shared configurable
   -- TypeScript policy first, while this is the non-bypassable database boundary.
-  if p_organisation_type in ('company', 'other') and not p_admin_confirmed_eligible then
+  if p_organisation_type in ('company', 'other')
+     and p_admin_confirmed_eligible is not true then
     raise exception 'confirm the organisation is eligible before approval' using errcode = '22023';
   end if;
 

@@ -99,7 +99,7 @@ describe("assignTagsCore — invalid tag", () => {
           return {
             ok: false,
             code: "23503",
-            message: "foreign key violation",
+            message: "insert or update on table \"org_tags\" violates foreign key constraint",
           };
         }
         return { ok: true };
@@ -115,6 +115,28 @@ describe("assignTagsCore — invalid tag", () => {
 
     assert.equal(result.failed.length, 1);
     assert.equal(result.failed[0].tagId, "tag-invalid");
+    assert.equal(result.failed[0].message, "This tag no longer exists.");
     assert.deepEqual(result.assigned, ["tag-valid"]);
+  });
+
+  it("never surfaces the raw database error text to the caller", async () => {
+    const { client } = fakeClient({
+      async insertOrgTag() {
+        return {
+          ok: false,
+          code: "08006",
+          message: "connection to server was lost, internal host 10.0.4.2",
+        };
+      },
+    });
+
+    const result = await assignTagsCore("org-1", ["tag-1"], "user-1", client);
+
+    assert.equal(result.failed.length, 1);
+    assert.ok(!result.failed[0].message.includes("10.0.4.2"));
+    assert.equal(
+      result.failed[0].message,
+      "This tag could not be assigned. Please try again later.",
+    );
   });
 });

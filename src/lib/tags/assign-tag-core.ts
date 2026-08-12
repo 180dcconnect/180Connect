@@ -70,11 +70,17 @@ export async function assignTagsCore(
       continue;
     }
 
-    // A genuine failure (e.g. tagId doesn't exist -> foreign_key_violation,
-    // Postgres code 23503). Testing notes explicitly call for "invalid tag"
-    // coverage, so this is surfaced per-tag rather than aborting the whole
-    // batch on one bad id.
-    result.failed.push({ tagId, message: outcome.message });
+    // A genuine failure. The raw DB message (outcome.message) is never
+    // surfaced here — that's server-side detail, already sent to
+    // reportError by the real entry point (assign-tag.ts). Only a safe,
+    // specific-where-possible message goes into the result CAMs will see.
+    result.failed.push({
+      tagId,
+      message:
+        outcome.code === "23503"
+          ? "This tag no longer exists."
+          : "This tag could not be assigned. Please try again later.",
+    });
   }
 
   return result;

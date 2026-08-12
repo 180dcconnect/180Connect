@@ -7,6 +7,7 @@ import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
 import {
   filterByOwner,
+  filterByTags,
   searchClients,
   visibleClients,
   type ClientListRow,
@@ -19,7 +20,12 @@ type TeamMember = { id: string; full_name: string | null };
 
 // Next.js 16: searchParams is a Promise on App Router pages — same pattern as
 // src/app/admin/audit-log/page.tsx.
-type SearchParams = Promise<{ owner?: string; q?: string; page?: string }>;
+type SearchParams = Promise<{
+  owner?: string;
+  q?: string;
+  page?: string;
+  tags?: string | string[];
+}>;
 
 const PAGE_SIZE = 25;
 
@@ -52,16 +58,25 @@ export default async function ClientsPage({
   const authorization = await getCurrentActor("client:view", { route: "/clients" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
-  const { owner: ownerFilter, q: search, page: pageParam } = await searchParams;
+  const { owner: ownerFilter, q: search, page: pageParam, tags: tagsParam } =
+    await searchParams;
+  // Same-name checkboxes submit as a repeated query param; Next.js gives us
+  // either a single string (one checked) or string[] (several), normalise
+  // to an array either way.
+  const tagFilter = tagsParam
+    ? Array.isArray(tagsParam)
+      ? tagsParam
+      : [tagsParam]
+    : [];
 
   const supabase = await createClient();
   const canClaim = hasPermission(authorization.actor.role, "client:edit");
 
-  const [organisations, openSuppressions, team] = await Promise.all([
+  const [organisations, openSuppressions, team, allTags] = await Promise.all([
     supabase
       .from("organisations")
       .select(
-        "id, legal_name, organisation_type, city, country_code, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
+        "id, legal_name, organisation_type, city, country_code, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id)",
       )
       .order("legal_name")
       .overrideTypes<ClientListRow[], { merge: false }>(),
@@ -76,6 +91,11 @@ export default async function ClientsPage({
       .eq("role", "cam")
       .order("full_name")
       .overrideTypes<TeamMember[], { merge: false }>(),
+    supabase
+      .from("tags")
+      .select("id, name")
+      .order("name")
+      .overrideTypes<{ id: string; name: string }[], { merge: false }>(),
   ]);
 
   if (organisations.error) {
@@ -87,16 +107,23 @@ export default async function ClientsPage({
   if (team.error) {
     await reportError(team.error, { operation: "clients.page_team" });
   }
+  if (allTags.error) {
+    await reportError(allTags.error, { operation: "clients.page_tags" });
+  }
 
   const matchingClients = searchClients(
-    filterByOwner(
-      visibleClients(organisations.data ?? [], openSuppressions.data ?? []),
-      ownerFilter,
+    filterByTags(
+      filterByOwner(
+        visibleClients(organisations.data ?? [], openSuppressions.data ?? []),
+        ownerFilter,
+      ),
+      tagFilter,
     ),
     search,
   );
   const teamMembers = team.data ?? [];
-  const filterActive = Boolean(ownerFilter || search);
+  const availableTags = allTags.data ?? [];
+  const filterActive = Boolean(ownerFilter || search || tagFilter.length > 0);
   // F166 AC1/AC3: this is the CAM viewing their own filter, not just any owner
   // filter — the heading, count label and empty state read "your clients" so the
   // view reads as its own thing rather than a generic filtered list.
@@ -117,6 +144,7 @@ export default async function ClientsPage({
     const params = new URLSearchParams();
     if (ownerFilter) params.set("owner", ownerFilter);
     if (search) params.set("q", search);
+    for (const tagId of tagFilter) params.append("tags", tagId);
     if (targetPage > 1) params.set("page", String(targetPage));
     const qs = params.toString();
     return qs ? `/clients?${qs}` : "/clients";
@@ -174,6 +202,24 @@ export default async function ClientsPage({
               ))}
             </select>
           </label>
+          {availableTags.length > 0 && (
+            <fieldset className="flex flex-col gap-1 text-sm">
+              <legend className="text-foreground/65">Tags</legend>
+              <div className="flex flex-wrap gap-3">
+                {availableTags.map((tag) => (
+                  <label key={tag.id} className="flex items-center gap-1.5 text-sm">
+                    <input
+                      type="checkbox"
+                      name="tags"
+                      value={tag.id}
+                      defaultChecked={tagFilter.includes(tag.id)}
+                    />
+                    {tag.name}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
 
           <button
             type="submit"

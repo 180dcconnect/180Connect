@@ -2,11 +2,9 @@
  * F051 — list-shaping logic behind the charity list view, kept out of the route
  * so it can be tested without a database (same split as @/lib/suppressions).
  */
-
 import { formatLocation, formatOutreachStatus } from "../../lib/organisation-format.ts";
-
 export { formatLocation, formatOutreachStatus };
-
+export type ClientTagRow = { tag_id: string };
 export type ClientListRow = {
   id: string;
   legal_name: string;
@@ -16,10 +14,9 @@ export type ClientListRow = {
   outreach_status: string;
   owner_id: string | null;
   owner: { full_name: string | null } | null;
+  org_tags: ClientTagRow[];
 };
-
 export type OpenSuppression = { organisation_id: string; status: "pending" | "active" };
-
 export type VisibleClient = ClientListRow & {
   location: string;
   outreachStatusLabel: string;
@@ -29,8 +26,10 @@ export type VisibleClient = ClientListRow & {
    * (matrix §1, users_select_active hides their row) — falls back to a label rather
    * than reading as unassigned. */
   ownerName: string | null;
+  /** F191/F193: ids of every tag assigned to this client, from the embedded
+   * org_tags join. Used by filterByTags below. */
+  tagIds: string[];
 };
-
 /**
  * The default list view (F051 AC4): actively suppressed charities (F251) never
  * appear here, regardless of import method or manual entry (F051 AC1). A pending
@@ -41,7 +40,6 @@ export function visibleClients(
   suppressions: OpenSuppression[],
 ): VisibleClient[] {
   const statusByOrg = new Map(suppressions.map((row) => [row.organisation_id, row.status]));
-
   return organisations
     .filter((organisation) => statusByOrg.get(organisation.id) !== "active")
     .map((organisation) => ({
@@ -52,9 +50,9 @@ export function visibleClients(
       ownerName: organisation.owner_id
         ? (organisation.owner?.full_name ?? "A former team member")
         : null,
+      tagIds: (organisation.org_tags ?? []).map((row) => row.tag_id),
     }));
 }
-
 /**
  * F163 — owner filter (issue #163). `null`/`""` means no filter (everyone).
  * "unassigned" is a distinct value, not falsy, so it doesn't collapse into
@@ -71,7 +69,23 @@ export function filterByOwner(
   }
   return clients.filter((client) => client.owner_id === ownerFilter);
 }
-
+/**
+ * F193 — tag filter. OR logic (a client matching ANY selected tag is
+ * included), matching the ticket's stated convention for the platform's
+ * other multi-select filters. Note: F053/F055/F056, cited by the ticket as
+ * the existing pattern to match, do not appear to be built in this codebase
+ * yet — this establishes the OR-logic multi-select shape rather than
+ * copying an existing implementation.
+ */
+export function filterByTags(
+  clients: VisibleClient[],
+  tagFilter: string[] | null | undefined,
+): VisibleClient[] {
+  if (!tagFilter || tagFilter.length === 0) return clients;
+  return clients.filter((client) =>
+    client.tagIds.some((tagId) => tagFilter.includes(tagId)),
+  );
+}
 /**
  * Free-text search on the client list. Case-insensitive substring match on
  * legal_name only — the field the list actually displays and the one a CAM

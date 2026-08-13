@@ -247,14 +247,36 @@ export default function Landing() {
           </div>
 
           <motion.div variants={item} className="pt-8 sm:pt-10">
+            {/* Two capsules meeting at a tangent, not one merged shape: they
+                touch at a single point, leaving the dark lens slivers above and
+                below that give the look its bite. */}
             <MotionLink
               href="/login"
-              className="inline-flex h-11 items-center rounded-2xl bg-brand px-7 text-sm font-bold text-white transition-colors hover:bg-brand-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+              className="group inline-flex items-center focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#e6f5c0]"
               whileHover={{ y: -2 }}
               whileTap={{ scale: 0.97 }}
               transition={{ type: "spring", stiffness: 420, damping: 28 }}
             >
-              Log in
+              {/* Both halves share the height so the circle stays a circle and
+                  the two keep meeting at a single tangent point. */}
+              <span className="flex h-10 items-center rounded-full bg-[#e6f5c0] px-6 font-body text-sm font-medium text-[#0c1014]">
+                Log in
+              </span>
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#e6f5c0] text-[#0c1014]">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-[18px] w-[18px] transition-transform duration-300 group-hover:translate-x-[2px]"
+                  aria-hidden="true"
+                >
+                  <path d="M5 12h14" />
+                  <path d="m13 6 6 6-6 6" />
+                </svg>
+              </span>
             </MotionLink>
           </motion.div>
 

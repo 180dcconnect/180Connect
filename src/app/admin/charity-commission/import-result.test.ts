@@ -10,6 +10,7 @@ function summary(status: RunSummary["status"], error?: string): RunSummary {
     status,
     counts: { fetched: 5, inserted: 2, skipped: 2, failed: 1 },
     written: { new: 1, changed: 1 },
+    runId: "11111111-1111-1111-1111-111111111111",
     error: status === "failed" ? (error ?? "secret upstream detail") : undefined,
   };
 }

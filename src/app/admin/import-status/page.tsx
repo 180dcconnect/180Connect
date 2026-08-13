@@ -17,6 +17,10 @@
 // error_message is now shown directly in the table as a second row under it,
 // not just the status badge — knowing something failed without knowing why
 // still sends someone to the logs, which is what this AC exists to avoid.
+//
+// records_flagged (F049 AC3): a status-recheck run's flagged count, same
+// persistent-history treatment as every other outcome count on this page. Always
+// 0 for a non-status-recheck run — nothing else on this table flags records.
 
 import { Fragment } from "react";
 import { redirect } from "next/navigation";
@@ -33,6 +37,7 @@ export type IngestionRunRow = {
   records_inserted: number;
   records_skipped: number;
   records_failed: number;
+  records_flagged: number;
   started_at: string;
   completed_at: string | null;
   error_message: string | null;
@@ -51,7 +56,7 @@ export default async function AdminImportStatusPage() {
   const { data: runs, error } = await supabase
     .from("ingestion_runs")
     .select(
-      "id, api_source, job_status, records_fetched, records_inserted, records_skipped, records_failed, started_at, completed_at, error_message",
+      "id, api_source, job_status, records_fetched, records_inserted, records_skipped, records_failed, records_flagged, started_at, completed_at, error_message",
     )
     .order("started_at", { ascending: false })
     .limit(100);
@@ -97,6 +102,7 @@ export default async function AdminImportStatusPage() {
                 <th className="py-2 pr-4 font-medium">Inserted</th>
                 <th className="py-2 pr-4 font-medium">Skipped</th>
                 <th className="py-2 pr-4 font-medium">Failed</th>
+                <th className="py-2 pr-4 font-medium">Flagged</th>
                 <th className="py-2 pr-4 font-medium">Started</th>
               </tr>
             </thead>
@@ -114,6 +120,7 @@ export default async function AdminImportStatusPage() {
                     <td className="py-2 pr-4">{run.records_inserted}</td>
                     <td className="py-2 pr-4">{run.records_skipped}</td>
                     <td className="py-2 pr-4">{run.records_failed}</td>
+                    <td className="py-2 pr-4">{run.records_flagged}</td>
                     <td className="py-2 pr-4 text-foreground/60">
                       {new Date(run.started_at).toLocaleString()}
                     </td>
@@ -123,7 +130,7 @@ export default async function AdminImportStatusPage() {
                       key={`${run.id}-error`}
                       className="border-b border-foreground/5 bg-red-50/50"
                     >
-                      <td colSpan={7} className="py-2 pr-4 text-xs text-red-800">
+                      <td colSpan={8} className="py-2 pr-4 text-xs text-red-800">
                         {run.error_message}
                       </td>
                     </tr>

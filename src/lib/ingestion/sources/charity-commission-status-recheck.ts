@@ -130,6 +130,22 @@ export async function runCharityCommissionStatusRecheck(
     flagged++;
   }
 
+  // F049 AC3: the flagged count must be part of the run's persistent history
+  // (ingestion_runs), not only the digest email below — an admin looking at a past
+  // run should be able to see how many records it flagged the same way they can
+  // already see how many it failed.
+  if (summary.runId) {
+    const { error: flagCountError } = await supabase
+      .from("ingestion_runs")
+      .update({ records_flagged: flagged })
+      .eq("id", summary.runId);
+    if (flagCountError) {
+      await reportError(flagCountError, {
+        operation: "ingestion.charity_commission.status_recheck.record_flagged_count",
+      });
+    }
+  }
+
   await sendCharityCommissionStatusDigest({ flagged });
 
   return { summary, checked: batch.length, flagged };

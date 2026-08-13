@@ -17,6 +17,82 @@
   --font-body: var(--font-lato);
 }
 
+/**
+ * Social icons as vertical sprite sheets (white artwork on transparent,
+ * generated from the source GIFs). Sprites rather than the GIFs themselves:
+ * their frames have an opaque white ground, and the CSS needed to knock that
+ * out (invert + screen) is neutralised by the stacking context the animated
+ * menu sheet creates. Stepping a background-position sidesteps all of that,
+ * restarts cleanly on every hover, and only animates while hovered.
+ */
+.icon-sprite {
+  width: 38px;
+  height: 38px;
+  background-repeat: no-repeat;
+  background-position: 0 0;
+}
+
+.ig-sprite {
+  background-image: url("/instagram-sprite.png");
+  background-size: 38px 608px; /* 38 * 16 frames */
+}
+
+.li-sprite {
+  background-image: url("/linkedin-sprite.png");
+  background-size: 38px 912px; /* 38 * 24 frames */
+}
+
+.mail-sprite {
+  background-image: url("/mail-sprite.png");
+  background-size: 38px 950px; /* 38 * 25 frames */
+}
+
+/** Linktree came as a still only, so it has no hover animation. */
+.lt-sprite {
+  background-image: url("/linktree-white.png");
+  background-size: 38px 38px;
+}
+
+/* ~45ms a frame across all three, so they feel like one set regardless of
+   frame count, rather than each running at its source GIF's own delay. */
+a:hover .ig-sprite {
+  animation: ig-sprite-play 0.72s steps(16) infinite;
+}
+
+a:hover .li-sprite {
+  animation: li-sprite-play 1.08s steps(24) infinite;
+}
+
+a:hover .mail-sprite {
+  animation: mail-sprite-play 1.12s steps(25) infinite;
+}
+
+@keyframes ig-sprite-play {
+  to {
+    background-position: 0 -608px;
+  }
+}
+
+@keyframes li-sprite-play {
+  to {
+    background-position: 0 -912px;
+  }
+}
+
+@keyframes mail-sprite-play {
+  to {
+    background-position: 0 -950px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  a:hover .ig-sprite,
+  a:hover .li-sprite,
+  a:hover .mail-sprite {
+    animation: none;
+  }
+}
+
 @layer base {
   body {
     background: var(--background);
@@ -33,3 +109,4 @@
     font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
   }
 }
+

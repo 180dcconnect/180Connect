@@ -57,6 +57,39 @@ const menuLinks = [
   { label: "Cookies", href: "/cookies" },
 ] as const;
 
+const MAIL = "sheffield@180dc.org";
+
+/**
+ * Icons are inline paths rather than an icon package — three glyphs is not
+ * worth a dependency, and it keeps the sheet free of external requests. The
+ * Linktree URL is stored bare: the shared link carried utm_* and fbclid
+ * parameters from an Instagram bio click, which have no business being
+ * hard-coded into our own site.
+ */
+const socials = [
+  {
+    label: "Instagram",
+    href: "https://www.instagram.com/180dcsheffield/",
+    // Rendered from a sprite sheet rather than an <svg>; see .icon-sprite.
+    sprite: "ig-sprite",
+  },
+  {
+    label: "LinkedIn",
+    href: "https://www.linkedin.com/company/180dcsheffield/",
+    sprite: "li-sprite",
+  },
+  {
+    label: "Linktree",
+    href: "https://linktr.ee/180dcsheffield",
+    sprite: "lt-sprite",
+  },
+  {
+    label: `Email ${MAIL}`,
+    href: `mailto:${MAIL}`,
+    sprite: "mail-sprite",
+  },
+] as const;
+
 /**
  * The sheet opens as a circle under the burger and swells until it engulfs the
  * screen. The origin is a rough average of where the button lands across
@@ -322,14 +355,34 @@ export default function Landing() {
                 ))}
               </nav>
 
-              <motion.div variants={sheetItem} className="pt-10">
-                <Link
-                  href="/login"
-                  onClick={() => setMenuOpen(false)}
-                  className="font-mono text-xs uppercase tracking-widest text-[#f4f4ef]/50 transition-colors hover:text-[#f4f4ef]"
-                >
-                  [ Log in ]
-                </Link>
+              {/* Sits above the tree, which is decorative and pointer-events
+                  none, so these stay clickable where the two overlap. */}
+              <motion.div
+                variants={sheetItem}
+                className="absolute right-0 bottom-0 left-0 z-10 flex flex-wrap items-center gap-x-6 gap-y-3 px-6 pb-6 sm:px-10 sm:pb-8"
+              >
+                <div className="flex items-center gap-5">
+                  {socials.map((social) => (
+                    <a
+                      key={social.label}
+                      href={social.href}
+                      // mailto: hands off to a mail client, so a new tab would
+                      // just leave a blank one behind.
+                      target={social.href.startsWith("http") ? "_blank" : undefined}
+                      rel={social.href.startsWith("http") ? "noopener noreferrer" : undefined}
+                      aria-label={social.label}
+                      className="text-[#f4f4ef]/60 transition-colors hover:text-[#f4f4ef]"
+                    >
+                      {/* Frame 0 until hovered, then the sprite steps through
+                          its frames — see .icon-sprite in globals.css. Linktree
+                          is a single-frame sheet, so it simply sits still. */}
+                      <span
+                        className={`icon-sprite ${social.sprite} block opacity-60 transition-opacity hover:opacity-100`}
+                        aria-hidden="true"
+                      />
+                    </a>
+                  ))}
+                </div>
               </motion.div>
             </motion.div>
           )}

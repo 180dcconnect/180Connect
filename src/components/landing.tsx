@@ -99,6 +99,83 @@ const squareItem: Variants = {
   },
 };
 
+/**
+ * Hover on the CTA runs as a chain, not one simultaneous change:
+ *   1. the green disc swells to swallow its own dark ring,
+ *   2. only then does green wash leftward across the label capsule,
+ *   3. the arrow darts out and back while that wash travels.
+ * The delays below encode that ordering; each stage starts as the previous
+ * one lands. Leaving hover reverses everything at once, quickly.
+ */
+const CTA_FILL = 0.22;
+const CTA_WASH = 0.38;
+
+/** Shared so the two capsules' greens and darks cannot drift apart. */
+const CTA_INK = "#0c1014";
+const CTA_GREEN = "#e6f5c0";
+
+/**
+ * Both capsules paint dark and green as a *single* background on one element,
+ * never as two stacked children. Stacked children are each antialiased against
+ * the rounded clip independently, so an edge pixel of coverage α composites to
+ * page(1-α)² + α(1-α)·dark + α·green — that middle term is a dark hairline that
+ * no amount of overshoot removes. One layer means one antialiased edge.
+ *
+ * Circle: permanently green, with the dark ring drawn as an *inset shadow* that
+ * shrinks to nothing. A gradient animated on this element left a faint seam at
+ * the rounded edge once Chrome promoted it to its own layer; an inset shadow is
+ * rasterised together with the background, so the element has exactly one
+ * antialiased edge and nothing can peek out from under it.
+ */
+const ctaDisc: Variants = {
+  rest: {
+    boxShadow: `inset 0 0 0 3px ${CTA_INK}`,
+    transition: { duration: 0.25, ease: EASE },
+  },
+  hover: {
+    boxShadow: `inset 0 0 0 0px ${CTA_INK}`,
+    transition: { duration: CTA_FILL, ease: EASE },
+  },
+};
+
+/**
+ * Pill: a two-stop linear gradient at double width. Sliding the background from
+ * one end to the other walks the hard boundary across, so green enters from the
+ * circle's side — same read as the old scaleX wash, but one paint layer.
+ */
+const ctaWash: Variants = {
+  rest: { backgroundPosition: "0% 0%", transition: { duration: 0.28, ease: EASE } },
+  hover: {
+    backgroundPosition: "100% 0%",
+    transition: { duration: CTA_WASH, ease: EASE, delay: CTA_FILL },
+  },
+};
+
+const ctaLabel: Variants = {
+  rest: { color: "#f4f4ef", transition: { duration: 0.2 } },
+  // Flips once the wash is far enough left to be under the text.
+  hover: { color: "#0c1014", transition: { duration: 0.18, delay: CTA_FILL + 0.1 } },
+};
+
+/**
+ * The arrow exits stage right, then re-enters from the left — the jump between
+ * the two is instantaneous and happens while it is outside the disc, which
+ * clips it, so the eye reads one arrow travelling through rather than two.
+ * 26px clears half the disc plus half the icon.
+ */
+const ctaArrow: Variants = {
+  rest: { x: 0, transition: { duration: 0.25, ease: EASE } },
+  hover: {
+    x: [0, 26, -26, 0],
+    transition: {
+      duration: 0.7,
+      delay: CTA_FILL,
+      times: [0, 0.45, 0.4501, 1],
+      ease: EASE,
+    },
+  },
+};
+
 function Wordmark({ tone }: { tone: "light" | "dark" }) {
   return (
     <div
@@ -106,7 +183,9 @@ function Wordmark({ tone }: { tone: "light" | "dark" }) {
         tone === "light" ? "text-white" : "text-[#0c1014]"
       }`}
     >
-      <div className="h-4 w-4 rounded-[0.3rem] bg-gradient-to-b from-[#4facfe] to-[#00f2fe] shadow-sm" />
+      {/* Globe mark only — the source lockup's wordmark is white and would
+          disappear against the light page. */}
+      <Image src="/180dc-globe.png" alt="" width={20} height={20} className="h-5 w-5 object-contain" />
       180Connect
     </div>
   );
@@ -130,9 +209,9 @@ export default function Landing() {
     // "user" honours prefers-reduced-motion: transforms are dropped, opacity
     // fades survive, so the page still resolves rather than snapping in.
     <MotionConfig reducedMotion="user">
-      <main className="relative flex flex-1 flex-col overflow-hidden bg-[#0c1014]">
-        {/* Sits *below* the sheet: the dark twin inside the sheet is revealed by
-            the same circle that paints the white, so the swap is exact by
+      <main className="relative flex flex-1 flex-col overflow-hidden bg-[#f4f4ef]">
+        {/* Sits *below* the sheet: the light twin inside the sheet is revealed
+            by the same circle that paints the ink, so the swap is exact by
             construction instead of a delay guessing when the edge arrives. */}
         <motion.div
           className="absolute top-0 left-0 z-30 px-6 py-6 sm:px-10 sm:py-8"
@@ -140,7 +219,7 @@ export default function Landing() {
           animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
           transition={{ duration: 0.8, ease: EASE, delay: 0.1 }}
         >
-          <Wordmark tone="light" />
+          <Wordmark tone="dark" />
         </motion.div>
 
         {/* Three lines that fold into an X: the outer bars meet in the middle
@@ -166,9 +245,9 @@ export default function Landing() {
                   y: menuOpen ? (line === 0 ? 6 : line === 2 ? -6 : 0) : 0,
                   rotate: menuOpen ? (line === 0 ? 45 : line === 2 ? -45 : 0) : 0,
                   opacity: menuOpen && line === 1 ? 0 : 1,
-                  // The burger sits at the circle's origin, so white reaches it
-                  // immediately — no delay needed here.
-                  backgroundColor: menuOpen ? "#0c1014" : "#ffffff",
+                  // The burger sits at the circle's origin, so the sheet reaches
+                  // it immediately — no delay needed here.
+                  backgroundColor: menuOpen ? "#f4f4ef" : "#0c1014",
                 }}
                 transition={{ duration: 0.35, ease: EASE }}
               />
@@ -183,12 +262,12 @@ export default function Landing() {
               initial="hidden"
               animate="show"
               exit="exit"
-              className="fixed inset-0 z-40 flex flex-col justify-center bg-white px-6 sm:px-10"
+              className="fixed inset-0 z-40 flex flex-col justify-center bg-[#0c1014] px-6 sm:px-10"
             >
-              {/* Same position as the light one underneath, so the circle wipes
+              {/* Same position as the dark one underneath, so the circle wipes
                   one into the other with no cross-fade. */}
               <div className="absolute top-0 left-0 px-6 py-6 sm:px-10 sm:py-8">
-                <Wordmark tone="dark" />
+                <Wordmark tone="light" />
               </div>
 
               <nav className="flex flex-col gap-2 sm:gap-4">
@@ -197,7 +276,7 @@ export default function Landing() {
                     <Link
                       href={link.href}
                       onClick={() => setMenuOpen(false)}
-                      className="font-body text-[clamp(2.5rem,8vw,5.5rem)] font-black leading-[1.05] tracking-[-0.03em] text-[#0c1014] transition-opacity hover:opacity-50"
+                      className="font-body text-[clamp(2.5rem,8vw,5.5rem)] font-black leading-[1.05] tracking-[-0.03em] text-[#f4f4ef] transition-opacity hover:opacity-50"
                     >
                       {link.label}
                     </Link>
@@ -209,7 +288,7 @@ export default function Landing() {
                 <Link
                   href="/login"
                   onClick={() => setMenuOpen(false)}
-                  className="font-mono text-xs uppercase tracking-widest text-[#0c1014]/50 transition-colors hover:text-[#0c1014]"
+                  className="font-mono text-xs uppercase tracking-widest text-[#f4f4ef]/50 transition-colors hover:text-[#f4f4ef]"
                 >
                   [ Log in ]
                 </Link>
@@ -229,7 +308,7 @@ export default function Landing() {
           <div className="grid grid-cols-1 gap-6 pt-6 sm:pt-10 lg:grid-cols-[1fr_18rem] lg:gap-10">
             <motion.h1
               variants={item}
-              className="font-body text-[clamp(2.25rem,6vw,4.5rem)] font-black leading-[1.05] tracking-[-0.03em] text-white"
+              className="font-body text-[clamp(2.25rem,6vw,4.5rem)] font-black leading-[1.05] tracking-[-0.03em] text-[#0c1014]"
             >
               Replace spreadsheets,
               <br />
@@ -238,7 +317,7 @@ export default function Landing() {
 
             <motion.p
               variants={item}
-              className="font-mono text-sm leading-relaxed text-white/50 lg:pt-3"
+              className="font-mono text-sm leading-relaxed text-[#0c1014]/55 lg:pt-3"
             >
               180Connect replaces the sheets, inboxes, and trackers you&apos;re
               stitching together today with one platform for outreach,
@@ -248,35 +327,61 @@ export default function Landing() {
 
           <motion.div variants={item} className="pt-8 sm:pt-10">
             {/* Two capsules meeting at a tangent, not one merged shape: they
-                touch at a single point, leaving the dark lens slivers above and
+                touch at a single point, leaving the lens slivers above and
                 below that give the look its bite. */}
             <MotionLink
               href="/login"
-              className="group inline-flex items-center focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#e6f5c0]"
-              whileHover={{ y: -2 }}
+              className="inline-flex items-center focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#0c1014]"
+              initial="rest"
+              animate="rest"
+              whileHover="hover"
               whileTap={{ scale: 0.97 }}
+              variants={{ rest: { y: 0 }, hover: { y: -2 } }}
               transition={{ type: "spring", stiffness: 420, damping: 28 }}
             >
               {/* Both halves share the height so the circle stays a circle and
                   the two keep meeting at a single tangent point. */}
-              <span className="flex h-10 items-center rounded-full bg-[#e6f5c0] px-6 font-body text-sm font-medium text-[#0c1014]">
-                Log in
-              </span>
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#e6f5c0] text-[#0c1014]">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.75"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="h-[18px] w-[18px] transition-transform duration-300 group-hover:translate-x-[2px]"
-                  aria-hidden="true"
-                >
-                  <path d="M5 12h14" />
-                  <path d="m13 6 6 6-6 6" />
-                </svg>
-              </span>
+              <motion.span
+                variants={ctaWash}
+                className="relative flex h-10 items-center rounded-full px-6"
+                style={{
+                  // Hard stop at the midpoint of a double-width gradient: the
+                  // visible window slides from the all-dark half to the all-green
+                  // half, giving a clean vertical wipe with no second layer.
+                  backgroundImage: `linear-gradient(to right, ${CTA_INK} 50%, ${CTA_GREEN} 50%)`,
+                  backgroundSize: "200% 100%",
+                  backgroundRepeat: "no-repeat",
+                }}
+              >
+                <motion.span variants={ctaLabel} className="font-body text-sm font-medium">
+                  Get Started
+                </motion.span>
+              </motion.span>
+              {/* Green disc inset inside the dark circle, so the dark reads as a
+                  ring around it rather than the whole token going green. */}
+              <motion.span
+                variants={ctaDisc}
+                // overflow-hidden is what sells the arrow's loop-through: it
+                // vanishes at the rim instead of drifting outside the circle.
+                className="relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full text-[#0c1014]"
+                style={{ backgroundColor: CTA_GREEN }}
+              >
+                <motion.span variants={ctaArrow} className="flex">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.75"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-[16px] w-[16px]"
+                    aria-hidden="true"
+                  >
+                    <path d="M5 12h14" />
+                    <path d="m13 6 6 6-6 6" />
+                  </svg>
+                </motion.span>
+              </motion.span>
             </MotionLink>
           </motion.div>
 

@@ -184,8 +184,16 @@ function Wordmark({ tone }: { tone: "light" | "dark" }) {
       }`}
     >
       {/* Globe mark only — the source lockup's wordmark is white and would
-          disappear against the light page. */}
-      <Image src="/180dc-globe.png" alt="" width={20} height={20} className="h-5 w-5 object-contain" />
+          disappear against the light page. The white variant is the same mark
+          stencilled from its own alpha, so it swaps in cleanly on the dark
+          menu sheet where the green reads muddy. */}
+      <Image
+        src={tone === "light" ? "/180dc-globe-white.png" : "/180dc-globe.png"}
+        alt=""
+        width={20}
+        height={20}
+        className="h-5 w-5 object-contain"
+      />
       180Connect
     </div>
   );

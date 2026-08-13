@@ -176,6 +176,24 @@ const ctaArrow: Variants = {
   },
 };
 
+/**
+ * Hand-drawn tree used as the menu sheet's corner motif. The source PNG is
+ * white line-art on a transparent ground, so it needs no keying — opacity
+ * alone gives it the low-contrast, drawn-on feel.
+ */
+function TreeMark() {
+  return (
+    <Image
+      src="/try.png"
+      alt=""
+      fill
+      sizes="(max-width: 640px) 60vw, 660px"
+      className="object-contain object-bottom"
+      priority={false}
+    />
+  );
+}
+
 function Wordmark({ tone }: { tone: "light" | "dark" }) {
   return (
     <div
@@ -277,6 +295,18 @@ export default function Landing() {
               <div className="absolute top-0 left-0 px-6 py-6 sm:px-10 sm:py-8">
                 <Wordmark tone="light" />
               </div>
+
+              {/* Oversized and pushed past the corner so it reads as a crop of
+                  something larger rather than a placed icon. */}
+              <motion.div
+                variants={sheetItem}
+                // Box follows the artwork's portrait ratio, and bleeds off the
+                // right edge only — pushing it down as well would cut the roots.
+                className="pointer-events-none absolute right-0 bottom-0 h-[min(88vh,760px)] w-[min(71vh,613px)] translate-x-[10%] translate-y-[4%] opacity-25"
+                aria-hidden="true"
+              >
+                <TreeMark />
+              </motion.div>
 
               <nav className="flex flex-col gap-2 sm:gap-4">
                 {menuLinks.map((link) => (

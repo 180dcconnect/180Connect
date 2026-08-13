@@ -190,9 +190,9 @@ function Wordmark({ tone }: { tone: "light" | "dark" }) {
       <Image
         src={tone === "light" ? "/180dc-globe-white.png" : "/180dc-globe.png"}
         alt=""
-        width={20}
-        height={20}
-        className="h-5 w-5 object-contain"
+        width={28}
+        height={28}
+        className="h-7 w-7 object-contain"
       />
       180Connect
     </div>

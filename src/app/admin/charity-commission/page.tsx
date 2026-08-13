@@ -4,6 +4,7 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { CharityCommissionImportForm } from "./import-form";
+import { CharityCommissionImportAutoButton } from "./import-auto-button";
 import { CharityCommissionLookupForm } from "./lookup-form";
 
 // TODO: Companies House's admin trigger uses maxDuration = 60 (a single
@@ -65,11 +66,19 @@ export default async function CharityCommissionPage() {
               validation and matching pipeline.
             </p>
           </div>
-          <Link className="text-sm font-bold text-brand hover:underline" href="/admin">
-            Back to admin
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link className="text-sm font-bold text-brand hover:underline" href="/admin/review">
+              Review queue
+            </Link>
+            <Link className="text-sm font-bold text-brand hover:underline" href="/admin">
+              Back to admin
+            </Link>
+          </div>
         </div>
 
+        <div className="mt-8">
+          <CharityCommissionImportAutoButton configured={configured} />
+        </div>
         <CharityCommissionImportForm configured={configured} />
         <CharityCommissionLookupForm configured={configured} />
 

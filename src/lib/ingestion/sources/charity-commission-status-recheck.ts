@@ -1,8 +1,8 @@
-// Shared Companies House status watch — the one function both the weekly cron
-// route (src/app/api/cron/companies-house-status-recheck/route.ts) calls today,
-// kept in this shared-function shape (rather than inlined in the route) for the
-// same reason companies-house-discovery.ts is: so the logic is unit-testable and
-// has exactly one place to change.
+// Shared Charity Commission status watch (F049) — the one function the weekly cron
+// route (src/app/api/cron/charity-commission-status-recheck/route.ts) calls, kept
+// in this shared-function shape so the logic is unit-testable and has exactly one
+// place to change. Mirrors companies-house-status-recheck.ts /
+// runCompaniesHouseStatusRecheck.
 //
 // Never writes organisations.outreach_status — see the migration header on
 // 20260809100200_create_organisation_status_flags.sql for why. This function only
@@ -11,28 +11,28 @@
 
 import { buildAdminClient } from "../../supabase/admin-client-factory.ts";
 import { reportError } from "../../error-logging.ts";
-import { sendCompaniesHouseStatusDigest } from "../../email/companies-house-digest.ts";
+import { sendCharityCommissionStatusDigest } from "../../email/charity-commission-digest.ts";
 import { runIngestion } from "../runner.ts";
 import type { RunSummary, RunTrigger } from "../type.ts";
-import { ALIVE_COMPANY_STATUS, STATUS_RECHECK_BATCH_SIZE } from "./companies-house-criteria-config.ts";
-import { createCompaniesHouseStatusRecheckAdapter } from "./companieshouse.ts";
+import { ALIVE_REG_STATUS, STATUS_RECHECK_BATCH_SIZE } from "./charity-commission-criteria-config.ts";
+import { createCharityCommissionStatusRecheckAdapter } from "./charity-commission.ts";
 
 type BatchRow = {
   id: string;
-  source_record_id: string;
+  reg_charity_number: string | null;
   matched_organisation_id: string | null;
-  company_status: string | null;
+  reg_status: string | null;
 };
 
-export type CompaniesHouseStatusRecheckResult = {
+export type CharityCommissionStatusRecheckResult = {
   summary: RunSummary | null;
   checked: number;
   flagged: number;
 };
 
-export async function runCompaniesHouseStatusRecheck(
+export async function runCharityCommissionStatusRecheck(
   trigger: RunTrigger,
-): Promise<CompaniesHouseStatusRecheckResult> {
+): Promise<CharityCommissionStatusRecheckResult> {
   const supabase = buildAdminClient();
   if (!supabase) {
     throw new Error(
@@ -41,26 +41,35 @@ export async function runCompaniesHouseStatusRecheck(
   }
 
   // Least-recently-rechecked first (nulls — never checked — sort first), only
-  // already-promoted records: an unpromoted or rejected record has no
-  // organisation to flag anything against.
+  // already-promoted records with a registration number to refetch by: an
+  // unpromoted or rejected record has no organisation to flag anything against.
   const { data, error } = await supabase
     .from("raw_source_records")
-    .select("id, source_record_id, matched_organisation_id, company_status:raw_payload->>company_status")
-    .eq("record_source", "companies_house")
+    .select(
+      "id, reg_charity_number:raw_payload->>reg_charity_number, matched_organisation_id, " +
+        "reg_status:raw_payload->>reg_status",
+    )
+    .eq("record_source", "charity_commission")
     .eq("processing_status", "validated")
     .not("matched_organisation_id", "is", null)
     .order("status_last_checked_at", { ascending: true, nullsFirst: true })
     .limit(STATUS_RECHECK_BATCH_SIZE);
 
   if (error) throw error;
-  const batch = (data ?? []) as BatchRow[];
+  // Cast through unknown: two aliased raw_payload->>x extractions in one select
+  // string is more than supabase-js's generated select-string type parser can
+  // statically resolve (a single one, as companies-house-status-recheck.ts uses,
+  // parses fine) — the runtime shape is exactly BatchRow regardless.
+  const batch = ((data ?? []) as unknown as BatchRow[]).filter(
+    (row): row is BatchRow & { reg_charity_number: string } => Boolean(row.reg_charity_number),
+  );
 
   if (batch.length === 0) {
     return { summary: null, checked: 0, flagged: 0 };
   }
 
-  const companyNumbers = batch.map((row) => row.source_record_id);
-  const adapter = createCompaniesHouseStatusRecheckAdapter(companyNumbers);
+  const registeredNumbers = batch.map((row) => row.reg_charity_number);
+  const adapter = createCharityCommissionStatusRecheckAdapter(registeredNumbers);
   const [summary] = await runIngestion([adapter], trigger);
 
   const ids = batch.map((row) => row.id);
@@ -71,7 +80,7 @@ export async function runCompaniesHouseStatusRecheck(
     .in("id", ids);
   if (touchError) {
     await reportError(touchError, {
-      operation: "ingestion.companies_house.status_recheck.touch_cursor",
+      operation: "ingestion.charity_commission.status_recheck.touch_cursor",
     });
   }
 
@@ -80,42 +89,40 @@ export async function runCompaniesHouseStatusRecheck(
   // old and new status are trivially equal below and nothing gets flagged.
   const { data: refreshed, error: refreshedError } = await supabase
     .from("raw_source_records")
-    .select("id, source_record_id, matched_organisation_id, company_status:raw_payload->>company_status")
+    .select(
+      "id, reg_charity_number:raw_payload->>reg_charity_number, matched_organisation_id, " +
+        "reg_status:raw_payload->>reg_status",
+    )
     .in("id", ids);
   if (refreshedError) throw refreshedError;
 
-  const refreshedById = new Map((refreshed ?? []).map((row) => [(row as BatchRow).id, row as BatchRow]));
+  const refreshedRows = (refreshed ?? []) as unknown as BatchRow[];
+  const refreshedById = new Map(refreshedRows.map((row) => [row.id, row]));
 
   let flagged = 0;
   for (const before of batch) {
     const after = refreshedById.get(before.id);
-    if (!after?.matched_organisation_id) continue;
+    if (!after?.matched_organisation_id || !after.reg_charity_number) continue;
 
-    const oldStatus = before.company_status ?? "unknown";
-    const newStatus = after.company_status ?? "unknown";
+    const oldStatus = before.reg_status ?? "unknown";
+    const newStatus = after.reg_status ?? "unknown";
 
     if (oldStatus === newStatus) continue;
-    // Recovered to active — leave any existing open flag as-is for admin review
-    // rather than auto-resolving it; a dip that already reversed itself is still
-    // exactly the kind of drift the admin asked to see, not something to hide
-    // because it self-corrected before they looked. No new flag needed either,
-    // since "now active" is not itself something to review.
-    if (newStatus === ALIVE_COMPANY_STATUS) continue;
+    // Recovered to registered — leave any existing open flag as-is for admin
+    // review rather than auto-resolving it, same reasoning as the Companies House
+    // job's ALIVE_COMPANY_STATUS branch.
+    if (newStatus === ALIVE_REG_STATUS) continue;
 
-    // Covers both an active -> non-active transition and a further drift between
-    // two non-active statuses (e.g. administration -> liquidation) — the RPC
-    // upserts the existing open flag's new_status in the latter case rather than
-    // creating a second one.
     const { error: rpcError } = await supabase.rpc("record_organisation_status_flag", {
       p_organisation_id: after.matched_organisation_id,
-      p_company_number: after.source_record_id,
+      p_company_number: after.reg_charity_number,
       p_previous_status: oldStatus,
       p_new_status: newStatus,
-      p_source: "companies_house",
+      p_source: "charity_commission",
     });
     if (rpcError) {
       await reportError(rpcError, {
-        operation: "ingestion.companies_house.status_recheck.record_flag",
+        operation: "ingestion.charity_commission.status_recheck.record_flag",
         organisationId: after.matched_organisation_id,
       });
       continue;
@@ -134,12 +141,12 @@ export async function runCompaniesHouseStatusRecheck(
       .eq("id", summary.runId);
     if (flagCountError) {
       await reportError(flagCountError, {
-        operation: "ingestion.companies_house.status_recheck.record_flagged_count",
+        operation: "ingestion.charity_commission.status_recheck.record_flagged_count",
       });
     }
   }
 
-  await sendCompaniesHouseStatusDigest({ flagged });
+  await sendCharityCommissionStatusDigest({ flagged });
 
   return { summary, checked: batch.length, flagged };
 }

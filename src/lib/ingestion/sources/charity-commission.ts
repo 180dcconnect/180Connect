@@ -23,6 +23,7 @@ import type {
   DataSourceAdapter,
   SourceFetchResult,
 } from "../type.ts";
+import { buildAdminClient } from "../../supabase/admin-client-factory.ts";
 
 const CHARITY_COMMISSION_URL = "https://api.charitycommission.gov.uk/register/api";
 
@@ -223,6 +224,62 @@ export function createCharityCommissionLookupAdapter(
   };
 }
 
+/**
+ * Shared by charityCommissionAdapter's fixed backfill range and
+ * createCharityCommissionDiscoveryAdapter's watermark-derived range: search by
+ * registration date, then batch-fetch full contact/address details for
+ * everything found. No documented ceiling for either operation, unlike
+ * Companies House's ~1000 search limit — truncated is always false until
+ * evidence says otherwise.
+ */
+async function fetchCharitiesRegisteredBetween(
+  start: Date,
+  end: Date,
+  headers: Record<string, string>,
+): Promise<CommonRecord[]> {
+  const searchResults: CharityCommissionSearchItem[] = [];
+  let chunkStart = new Date(start);
+
+  while (chunkStart < end) {
+    const chunkEnd = new Date(chunkStart);
+    chunkEnd.setDate(chunkEnd.getDate() + CHUNK_DAYS);
+    const boundedEnd = chunkEnd > end ? end : chunkEnd;
+
+    const url =
+      `${CHARITY_COMMISSION_URL}/searchCharityRegDate/` +
+      `${formatDate(chunkStart)}/${formatDate(boundedEnd)}`;
+
+    const res = await fetchWithRetry(url, headers);
+
+    if (!res.ok) {
+      console.error(
+        `[charity_commission] search error body for ${res.status}:`,
+        await res.text(),
+      );
+      throw new Error(`Charity Commission search API returned ${res.status}`);
+    }
+
+    const json = await res.json();
+    if (!Array.isArray(json)) {
+      throw new Error(
+        "Charity Commission search response is not an array.",
+      );
+    }
+
+    searchResults.push(...(json as CharityCommissionSearchItem[]));
+    chunkStart = boundedEnd;
+  }
+
+  const regNumbers = searchResults.map((r) => r.reg_charity_number);
+  const detailRecords: CharityCommissionDetailItem[] = [];
+
+  for (const batch of chunk(regNumbers, DETAILS_BATCH_SIZE)) {
+    detailRecords.push(...(await fetchCharityDetails(batch, headers)));
+  }
+
+  return detailRecords.map(shape);
+}
+
 export const charityCommissionAdapter: DataSourceAdapter = {
   name: "charity_commission",
 
@@ -241,55 +298,163 @@ export const charityCommissionAdapter: DataSourceAdapter = {
       ? new Date(process.env.CHARITY_COMMISSION_BACKFILL_END)
       : new Date();
 
-    // Step 1: search by date range to find which charities exist in it.
-    const searchResults: CharityCommissionSearchItem[] = [];
-    let chunkStart = new Date(registerStart);
-
-    while (chunkStart < today) {
-      const chunkEnd = new Date(chunkStart);
-      chunkEnd.setDate(chunkEnd.getDate() + CHUNK_DAYS);
-      const boundedEnd = chunkEnd > today ? today : chunkEnd;
-
-      const url =
-        `${CHARITY_COMMISSION_URL}/searchCharityRegDate/` +
-        `${formatDate(chunkStart)}/${formatDate(boundedEnd)}`;
-
-      const res = await fetchWithRetry(url, headers);
-
-      if (!res.ok) {
-        console.error(
-          `[charity_commission] search error body for ${res.status}:`,
-          await res.text(),
-        );
-        throw new Error(`Charity Commission search API returned ${res.status}`);
-      }
-
-      const json = await res.json();
-      if (!Array.isArray(json)) {
-        throw new Error(
-          "Charity Commission search response is not an array.",
-        );
-      }
-
-      searchResults.push(...(json as CharityCommissionSearchItem[]));
-      chunkStart = boundedEnd;
-    }
-
-    // Step 2: batch-fetch full contact/address details for everything found.
-    const regNumbers = searchResults.map((r) => r.reg_charity_number);
-    const detailRecords: CharityCommissionDetailItem[] = [];
-
-    for (const batch of chunk(regNumbers, DETAILS_BATCH_SIZE)) {
-      detailRecords.push(...(await fetchCharityDetails(batch, headers)));
-    }
-
-    // No documented ceiling for either operation, unlike Companies House's
-    // ~1000 search limit — truncated is always false until evidence says
-    // otherwise.
-    return { records: detailRecords.map(shape), truncated: false };
+    const records = await fetchCharitiesRegisteredBetween(registerStart, today, headers);
+    return { records, truncated: false };
   },
 
   onError(err: Error) {
     console.error(`[charity_commission] ingestion failed:`, err.message);
   },
 };
+
+/** How far back of the last known registration date to re-scan, to absorb any
+ * registration that lands just before/after the boundary of a previous run's
+ * watermark — same reasoning as companieshouse.ts's WATERMARK_OVERLAP_DAYS.
+ * Re-fetching an already-known charity is a safe no-op — checksum dedup in the
+ * ingestion runner skips it. */
+const WATERMARK_OVERLAP_DAYS = 7;
+
+/**
+ * Fallback start when no watermark exists yet (a genuinely empty
+ * raw_source_records table for this source). Deliberately NOT a full-history
+ * scan back to 2000: unlike Companies House's discovery, which sends the whole
+ * unbounded range as one query, this adapter must chunk client-side into
+ * CHUNK_DAYS windows to satisfy the search endpoint's date-range-per-call
+ * contract — a true 26-year fallback would be well over a thousand chunk calls,
+ * blowing past the 300s cron timeout by orders of magnitude. A true first-time
+ * historical import is what charityCommissionAdapter (the manual bulk-backfill
+ * button, with an admin-set BACKFILL_START/END range) is for; this job only
+ * needs to catch anything recent if the watermark lookup itself ever comes back
+ * empty.
+ */
+const NEVER_RUN_FALLBACK_DAYS = 30;
+
+export type RegistrationWatermarkResolver = () => Promise<string | null>;
+
+/**
+ * Reads the latest `date_of_registration` already seen for charity_commission, so
+ * the discovery adapter can search only what's registered since then. No new state
+ * table — raw_source_records.raw_payload already carries this per record, same
+ * pattern as companieshouse.ts's defaultResolveIncorporationWatermark. Returns null
+ * (falls back to the fixed backfill range) when nothing has been ingested yet, or
+ * the admin client isn't configured.
+ */
+async function defaultResolveRegistrationWatermark(): Promise<string | null> {
+  const supabase = buildAdminClient();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from("raw_source_records")
+    .select("date_of_registration:raw_payload->>date_of_registration")
+    .eq("record_source", "charity_commission")
+    .not("raw_payload->>date_of_registration", "is", null)
+    .order("raw_payload->>date_of_registration", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return (data as { date_of_registration: string | null }).date_of_registration ?? null;
+}
+
+/**
+ * Zero-input discovery: searches from (the latest already-ingested registration
+ * date, minus a 7-day overlap buffer) to today, rather than the fixed
+ * CHARITY_COMMISSION_BACKFILL_START/END range charityCommissionAdapter uses. This is
+ * what both the weekly cron job and the manual "Discover new charities" button call,
+ * so the two trigger paths cannot drift apart — same shape as
+ * companies-house-discovery.ts / createCompaniesHouseDiscoveryAdapter.
+ *
+ * No tier/mission-fit filtering, unlike Companies House: every Charity Commission
+ * record maps to organisation_type "charity", which F047's criteria config always
+ * accepts (CLIENT_CRITERIA.acceptedOrganisationTypes) — there is no equivalent of
+ * Companies House's legal-form ambiguity to filter for at discovery time.
+ */
+export function createCharityCommissionDiscoveryAdapter(
+  options: { resolveWatermark?: RegistrationWatermarkResolver } = {},
+): DataSourceAdapter {
+  const resolveWatermark = options.resolveWatermark ?? defaultResolveRegistrationWatermark;
+
+  return {
+    name: "charity_commission",
+
+    async fetch(): Promise<SourceFetchResult> {
+      const apiKey = process.env.CHARITY_COMMISSION_API_KEY;
+      if (!apiKey) {
+        throw new Error("CHARITY_COMMISSION_API_KEY is not set.");
+      }
+      const headers = { "Ocp-Apim-Subscription-Key": apiKey };
+
+      // Deliberately independent of CHARITY_COMMISSION_BACKFILL_START/END: those
+      // exist to bound the manual bulk-backfill button's fixed historical range,
+      // not this adapter's ongoing "since the watermark" range. Coupling them
+      // would mean an admin narrowing the backfill env vars for a one-off manual
+      // test silently reshapes the weekly discovery job's range too. End is
+      // always "now" — discovery means "catch up to today", not to some fixed
+      // historical cutoff.
+      const watermark = await resolveWatermark();
+      const start = watermark
+        ? (() => {
+            const date = new Date(watermark);
+            date.setUTCDate(date.getUTCDate() - WATERMARK_OVERLAP_DAYS);
+            return date;
+          })()
+        : (() => {
+            const date = new Date();
+            date.setUTCDate(date.getUTCDate() - NEVER_RUN_FALLBACK_DAYS);
+            return date;
+          })();
+      const end = new Date();
+
+      const records = await fetchCharitiesRegisteredBetween(start, end, headers);
+      return { records, truncated: false };
+    },
+
+    onError(err: Error) {
+      console.error("[charity_commission] discovery ingestion failed:", err.message);
+    },
+  };
+}
+
+/**
+ * Status watch for charities already promoted into organisations: refetches each
+ * charity's full record via GetCharityDetailsMulti (batched, same as the bulk
+ * backfill) so the caller can compare `reg_status` against what was last known and
+ * flag a change for admin review. A whole batch failing to resolve (e.g. a
+ * transient API error) is logged and skipped rather than aborting the run — the
+ * next scheduled run picks the same records up again, since status_last_checked_at
+ * is only advanced for rows that were actually touched by the caller.
+ */
+export function createCharityCommissionStatusRecheckAdapter(
+  registeredNumbers: readonly (string | number)[],
+): DataSourceAdapter {
+  return {
+    name: "charity_commission",
+
+    async fetch(): Promise<SourceFetchResult> {
+      const apiKey = process.env.CHARITY_COMMISSION_API_KEY;
+      if (!apiKey) {
+        throw new Error("CHARITY_COMMISSION_API_KEY is not set.");
+      }
+      const headers = { "Ocp-Apim-Subscription-Key": apiKey };
+
+      const records: CommonRecord[] = [];
+      for (const batch of chunk([...registeredNumbers], DETAILS_BATCH_SIZE)) {
+        try {
+          const details = await fetchCharityDetails(batch, headers);
+          records.push(...details.map(shape));
+        } catch (error) {
+          console.warn(
+            `[charity_commission] status recheck batch skipped: ` +
+              `${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+
+      return { records, truncated: false };
+    },
+
+    onError(err: Error) {
+      console.error("[charity_commission] status recheck failed:", err.message);
+    },
+  };
+}

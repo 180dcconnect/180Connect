@@ -1,9 +1,12 @@
 "use client";
 
 import { useActionState } from "react";
-import { lookupCharity, type CharityCommissionImportState } from "./actions";
+import {
+  importCharityCommissionAuto,
+  type CharityCommissionImportState,
+} from "./actions";
 
-const initialLookupState: CharityCommissionImportState = {
+const initialState: CharityCommissionImportState = {
   kind: "idle",
   message: "",
 };
@@ -14,43 +17,33 @@ const stateStyles = {
   error: "bg-red-50 text-red-900",
 } as const;
 
-export function CharityCommissionLookupForm({ configured }: { configured: boolean }) {
-  const [state, action, pending] = useActionState(lookupCharity, initialLookupState);
+export function CharityCommissionImportAutoButton({ configured }: { configured: boolean }) {
+  const [state, action, pending] = useActionState(importCharityCommissionAuto, initialState);
 
   return (
-    <div className="mt-8 rounded-xl border border-black/10 p-5">
-      <h2 className="text-lg font-bold">Look up a single charity</h2>
+    <div className="rounded-xl border border-black/10 p-5">
+      <h2 className="text-lg font-bold">Discover new charities</h2>
       <p className="mt-2 text-sm text-foreground/65">
-        Enter a known Charity Commission registration number to fetch and
-        import just that charity, without running a date-range backfill.
+        Searches the Charity Commission register for charities registered since the
+        last successful import and imports every new match. No details to enter.
+        The same search runs automatically every week, so new registrations keep
+        getting picked up without clicking this again.
       </p>
 
       {!configured && (
         <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm font-bold text-amber-900" role="alert">
-          Charity Commission API access is not configured. Add the server-side
-          API key before running a lookup.
+          Charity Commission API access is not configured. Add the server-side API
+          key before running an import.
         </p>
       )}
 
-      <form action={action} className="mt-5 space-y-4">
-        <div>
-          <label className="block text-sm font-bold" htmlFor="registeredNumber">
-            Registration number
-          </label>
-          <input
-            className="mt-1 w-full max-w-md rounded-lg border border-black/20 px-3 py-2 text-sm"
-            disabled={!configured || pending}
-            id="registeredNumber"
-            name="registeredNumber"
-            placeholder="For example, 1218781"
-          />
-        </div>
+      <form action={action} className="mt-5">
         <button
           className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
           disabled={!configured || pending}
           type="submit"
         >
-          {pending ? "Looking up…" : "Look up charity"}
+          {pending ? "Importing…" : "Discover new charities"}
         </button>
       </form>
 

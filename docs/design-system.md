@@ -150,9 +150,13 @@ rasterises with the background, so the element has exactly one antialiased edge.
 
 ## Motion
 
-One curve for everything: `EASE = [0.2, 0.7, 0.2, 1]`. The menu sheet is the sole
-exception — its circle uses `[0.76, 0, 0.24, 1]`, which eases *in* so the small
-disc is visible under the burger before it expands.
+One curve for everything: `EASE = [0.2, 0.7, 0.2, 1]`. Two exceptions, both
+deliberate:
+
+- the **menu sheet's** circle uses `[0.76, 0, 0.24, 1]`, which eases *in* so the
+  small disc is visible under the burger before it expands;
+- the **auth dialog** rides the animate-ui primitive's spring
+  (`stiffness: 150, damping: 25`) and its 3D flip.
 
 **Entrance** is always opacity + a short rise + a blur-up. Blur is what makes it
 feel like the brand rather than a generic fade:
@@ -255,6 +259,29 @@ the time the sheet's own Escape handler runs, the dialog has already closed and
 the URL has already reverted. No state check can tell that the keypress was
 spoken for. The dialog therefore marks the event itself (`markEscapeHandled`) and
 the sheet checks the mark (`wasEscapeHandled`). Without it one press closes both.
+
+### Animation
+
+Presence, portalling, and the entrance come from
+`@/components/animate-ui/primitives/radix/dialog`, installed with
+`npx shadcn@latest add @animate-ui/components-radix-dialog`. The panel flips in
+on a perspective `rotateX` from `-20deg` at `scale(0.8)`, blurring up, on a
+spring; the overlay blurs in behind it. Only the surface is ours.
+
+The close button uses the animate-ui `X`
+(`npx shadcn@latest add @animate-ui/icons-x`), whose two lines rotate 90° a beat
+apart on hover. It is wrapped in `<AnimateIcon asChild>` so the *button* is the
+trigger — bound to the glyph, the 32px button's padding would be dead to it.
+
+That install also writes `animate-ui/components/radix/dialog.tsx`, the
+shadcn-*styled* wrapper. It is deliberately unused: it carries the app's neutral
+card look (`bg-background`, `rounded-lg`, a border) rather than this system's.
+Take the primitive, not the wrapper.
+
+Because the primitive keeps the panel mounted through its exit animation, the
+copy and the form have to survive `view` going `null` — the dialog holds the last
+open view in state, adjusted during render, so closing never blanks the panel for
+the length of the exit.
 
 ### Tone
 

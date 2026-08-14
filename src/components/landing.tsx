@@ -468,15 +468,11 @@ function SheetsMark() {
 
 function GmailMark() {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="#EA4335"
-      className={INLINE_MARK}
-      role="img"
-      aria-label="Gmail"
-    >
-      <path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z" />
-    </svg>
+    <img
+      src="/gmail.svg"
+      alt="Gmail"
+      className="inline-block h-[0.6em] w-auto -translate-y-[0.06em] align-middle"
+    />
   );
 }
 
@@ -832,7 +828,10 @@ export default function Landing() {
                     >
                       <motion.div
                         variants={ctaWash}
-                        className="absolute inset-y-0 w-[999px] rounded-l-full"
+                        // See the hero CTA's copy of this element: 1px bleed
+                        // on top/bottom avoids the hairline where two
+                        // independently-antialiased rounded curves meet.
+                        className="absolute -inset-y-[1px] w-[999px] rounded-l-full"
                         style={{ backgroundColor: "#f4f4ef" }}
                         aria-hidden="true"
                       />
@@ -999,7 +998,17 @@ export default function Landing() {
                       frame — only the rounded leading edge is ever on screen. */}
                   <motion.div
                     variants={ctaWash}
-                    className="absolute inset-y-0 w-[999px] rounded-l-full"
+                    // Overshoots the pill's own top/bottom by 1px rather than
+                    // sitting exactly flush: the wash's rounded-l-full cap and
+                    // the parent's overflow-hidden clip are two independently
+                    // antialiased curves, and Chrome subpixel-rounds them a
+                    // hair apart, leaving a hairline of the glass colour
+                    // showing through at the arc even when they're nominally
+                    // identical (same bug noted below for the disc). A 1px
+                    // bleed guarantees the wash's curve is always slightly
+                    // outside the parent's, so the clip — not a near-miss —
+                    // is what draws the edge.
+                    className="absolute -inset-y-[1px] w-[999px] rounded-l-full"
                     style={{ backgroundColor: CTA_GREEN }}
                     aria-hidden="true"
                   />

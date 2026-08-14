@@ -42,6 +42,13 @@ const item: Variants = {
   },
 };
 
+/** Base delay before the first wordmark token appears, in seconds. */
+const WM_DELAY = 0.2;
+/** Gap between each successive token (globe + 10 chars). */
+const WM_STAGGER = 0.045;
+/** How long each token takes to resolve. */
+const WM_DURATION = 0.5;
+
 /**
  * Each square is its own pre-cropped file (see public/crops/, cut from
  * tree2.jpg with sharp) rather than an object-position trick — real close-in
@@ -68,13 +75,13 @@ type CropSpec = {
 const squares: CropSpec[] = [
   { left: 42, top: 7, size: 100, src: "/crops/leaf-branch-soft.png", className: "" },
   { left: 17, top: 19, size: 157, src: "/crops/leaf-bark.png", className: "hidden sm:block" },
-  { left: 88, top: 11, size: 78, src: "/crops/leaf-branch-soft.png", className: "hidden md:block" },
+  { left: 88, top: 11, size: 78, src: "/crops/leaf-moss-top.png", className: "hidden md:block" },
   { left: 4, top: 15, size: 96, src: "/crops/leaf-vine.png", className: "", hero: true },
-  { left: 90, top: 12, size: 78, src: "/crops/leaf-branch-soft.png", className: "", hero: true },
-  { left: 13, top: 23, size: 68, src: "/crops/leaf-branch-soft.png", className: "", hero: true },
-  { left: 60, top: 34, size: 65, src: "/crops/leaf-branch-soft.png", className: "hidden md:block" },
-  { left: 76, top: 32, size: 135, src: "/crops/leaf-vine.png", className: "" },
-  { left: 4, top: 43, size: 96, src: "/crops/leaf-vine.png", className: "hidden lg:block" },
+  { left: 90, top: 12, size: 78, src: "/crops/leaf-bark-right.png", className: "", hero: true },
+  { left: 13, top: 23, size: 68, src: "/crops/leaf-branch-alt.png", className: "", hero: true },
+  { left: 60, top: 34, size: 65, src: "/crops/leaf-fern-left.png", className: "hidden md:block" },
+  { left: 76, top: 32, size: 135, src: "/crops/leaf-float-center.png", className: "" },
+  { left: 4, top: 43, size: 96, src: "/crops/leaf-bark-soft.png", className: "hidden lg:block" },
   { left: 30, top: 56, size: 242, src: "/crops/leaf-moss.png", className: "" },
   { left: 56, top: 74, size: 178, src: "/crops/leaf-fern.png", className: "hidden sm:block" },
   { left: 86, top: 67, size: 118, src: "/crops/leaf-bark.png", className: "hidden sm:block" },
@@ -198,7 +205,7 @@ function Crop({ crop, delay, index }: { crop: CropSpec; delay: number; index: nu
           ease: "easeInOut",
         }}
       >
-        <Image src={crop.src} alt="" fill sizes="230px" className="object-cover" />
+        <Image src={crop.src} alt="" width={crop.size} height={crop.size} className="w-full h-full" unoptimized />
       </motion.div>
     </motion.div>
   );
@@ -509,6 +516,10 @@ function MondayMark() {
  * which never scales with the page).
  */
 function Wordmark({ tone, scroll }: { tone: "light" | "dark"; scroll?: boolean }) {
+  /** Split only in scroll (hero) mode — the sheet copy is never re-mounted
+   *  so it has no entrance of its own; it's revealed by the clip-path circle. */
+  const chars = scroll ? "180Connect".split("") : null;
+
   return (
     <div
       className={`flex items-center font-body font-black tracking-tight ${
@@ -537,7 +548,12 @@ function Wordmark({ tone, scroll }: { tone: "light" | "dark"; scroll?: boolean }
           but keeps the box from collapsing to 0 (and the image with it) in the
           frame before `--t` resolves. */}
       {scroll ? (
-        <div className="relative h-[calc(clamp(2.6rem,12.6vw,13rem)*var(--t,1)+2.25rem*(1_-_var(--t,1)))] min-h-9 w-[calc(clamp(2.6rem,12.6vw,13rem)*var(--t,1)+2.25rem*(1_-_var(--t,1)))] min-w-9 shrink-0 min-[1700px]:h-[calc(14.5rem*var(--t,1)+2.25rem*(1_-_var(--t,1)))] min-[1700px]:w-[calc(14.5rem*var(--t,1)+2.25rem*(1_-_var(--t,1)))]">
+        <motion.div
+          initial={{ opacity: 0, filter: "blur(10px)" }}
+          animate={{ opacity: 1, filter: "blur(0px)" }}
+          transition={{ duration: WM_DURATION, ease: EASE, delay: WM_DELAY }}
+          className="relative h-[calc(clamp(2.6rem,12.6vw,13rem)*var(--t,1)+2.25rem*(1_-_var(--t,1)))] min-h-9 w-[calc(clamp(2.6rem,12.6vw,13rem)*var(--t,1)+2.25rem*(1_-_var(--t,1)))] min-w-9 shrink-0 min-[1700px]:h-[calc(14.5rem*var(--t,1)+2.25rem*(1_-_var(--t,1)))] min-[1700px]:w-[calc(14.5rem*var(--t,1)+2.25rem*(1_-_var(--t,1)))]"
+        >
           <Image
             src={tone === "light" ? "/180dc-globe-white.png" : "/180dc-globe.png"}
             alt=""
@@ -545,7 +561,7 @@ function Wordmark({ tone, scroll }: { tone: "light" | "dark"; scroll?: boolean }
             sizes="280px"
             className="object-contain"
           />
-        </div>
+        </motion.div>
       ) : (
         <Image
           src={tone === "light" ? "/180dc-globe-white.png" : "/180dc-globe.png"}
@@ -555,7 +571,36 @@ function Wordmark({ tone, scroll }: { tone: "light" | "dark"; scroll?: boolean }
           className="h-9 w-9 object-contain"
         />
       )}
-      180Connect
+      {/* In scroll mode each character is its own motion.span with an
+          explicit delay — same pattern as TextBlurIn. The wrapping span
+          keeps them as a single flex item so the gap only fires between
+          the globe and the text block, not between every letter.
+          The sr-only span keeps the label atomic for screen readers. */}
+      {chars ? (
+        <>
+          <span className="sr-only">180Connect</span>
+          <span aria-hidden="true" className="inline-block">
+            {chars.map((char, i) => (
+              <motion.span
+                key={i}
+                initial={{ opacity: 0, filter: "blur(10px)" }}
+                animate={{ opacity: 1, filter: "blur(0px)" }}
+                transition={{
+                  duration: WM_DURATION,
+                  ease: EASE,
+                  // token 0 is the globe, so chars start at index 1
+                  delay: WM_DELAY + (i + 1) * WM_STAGGER,
+                }}
+                className="inline-block"
+              >
+                {char}
+              </motion.span>
+            ))}
+          </span>
+        </>
+      ) : (
+        <span>180Connect</span>
+      )}
     </div>
   );
 }
@@ -619,14 +664,12 @@ export default function Landing() {
         {/* Sits *below* the sheet: the light twin inside the sheet is revealed
             by the same circle that paints the ink, so the swap is exact by
             construction instead of a delay guessing when the edge arrives. */}
-        <motion.div
-          className="absolute top-0 left-0 z-30 translate-x-[calc(2.5rem*var(--t,1))] px-6 py-6 sm:px-10 sm:py-8"
-          initial={{ opacity: 0, filter: "blur(8px)" }}
-          animate={{ opacity: 1, filter: "blur(0px)" }}
-          transition={{ duration: 0.8, ease: EASE, delay: 0.4 }}
-        >
+        {/* Plain wrapper — the Wordmark's own variants drive the entrance now.
+            translate-x shifts the whole lockup right in splash mode so the
+            big globe doesn't clip the viewport left edge. */}
+        <div className="absolute top-0 left-0 z-30 translate-x-[calc(2.5rem*var(--t,1))] px-6 py-6 sm:px-10 sm:py-8">
           <Wordmark tone="dark" scroll />
-        </motion.div>
+        </div>
 
           {/* Nav twin of the hero CTA, parked to the left of the burger. Offsets
               are the burger's own gutter plus its 44px box plus a gap, so the

@@ -882,7 +882,7 @@ export default function Landing() {
               className="flex flex-col items-center gap-6 text-center"
               style={{
                 paddingTop:
-                  "calc(50vh * var(--t, 1) + 1.5rem * (1 - var(--t, 1)))",
+                  "calc(54vh * var(--t, 1) + 8rem * (1 - var(--t, 1)))",
               }}
             >
               <motion.h1

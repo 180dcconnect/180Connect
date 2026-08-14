@@ -15,6 +15,11 @@ const eslintConfig = defineConfig([
     // code that is not authored or maintained by this repository.
     "supabase/.temp/**",
     "next-env.d.ts",
+    // Vendored verbatim by `shadcn add @animate-ui/...`. Upstream source, not
+    // authored here — re-running the CLI would overwrite any local fixes, so it
+    // is exempt from the react-compiler rules rather than patched.
+    "src/components/animate-ui/**",
+    "src/hooks/use-is-in-view.tsx",
   ]),
   {
     // `src/lib/supabase/admin-client-factory.ts` holds the service-role key and

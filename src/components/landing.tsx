@@ -27,7 +27,7 @@ const EASE = [0.2, 0.7, 0.2, 1] as const;
 const stack: Variants = {
   hidden: {},
   show: {
-    transition: { staggerChildren: 0.09, delayChildren: 0.15 },
+    transition: { staggerChildren: 0.09, delayChildren: 0.75 },
   },
 };
 
@@ -63,6 +63,7 @@ const menuLinks = [
   { label: "About", href: "/about" },
   { label: "Terms", href: "/terms" },
   { label: "Privacy", href: "/privacy" },
+  { label: "Changelog", href: "/changelog" },
   { label: "Cookies", href: "/cookies" },
 ] as const;
 
@@ -262,30 +263,46 @@ function Wordmark({ tone, scroll }: { tone: "light" | "dark"; scroll?: boolean }
         tone === "light" ? "text-white" : "text-[#0c1014]"
       } ${
         scroll
-          ? "text-[calc(clamp(3rem,14.5vw,15rem)*var(--t)+1.125rem*(1_-_var(--t)))] min-[1700px]:text-[calc(17.2rem*var(--t)+1.125rem*(1_-_var(--t)))]"
-          : "gap-2 text-lg"
+          ? "text-[calc(clamp(3rem,14.5vw,15rem)*var(--t,1)+1.5rem*(1_-_var(--t,1)))] min-[1700px]:text-[calc(17.2rem*var(--t,1)+1.5rem*(1_-_var(--t,1)))]"
+          : "gap-3 text-2xl"
       }`}
       style={
         scroll
-          ? { gap: "calc(1.75rem * var(--t) + 0.5rem * (1 - var(--t)))" }
+          ? { gap: "calc(1.75rem * var(--t, 1) + 0.75rem * (1 - var(--t, 1)))" }
           : undefined
       }
     >
       {/* Globe mark only — the source lockup's wordmark is white and would
           disappear against the light page. The white variant is the same mark
           stencilled from its own alpha, so it swaps in cleanly on the dark
-          menu sheet where the green reads muddy. */}
-      <Image
-        src={tone === "light" ? "/180dc-globe-white.png" : "/180dc-globe.png"}
-        alt=""
-        width={scroll ? 276 : 28}
-        height={scroll ? 276 : 28}
-        className={
-          scroll
-            ? "h-[calc(clamp(2.6rem,12.6vw,13rem)*var(--t)+1.75rem*(1_-_var(--t)))] w-[calc(clamp(2.6rem,12.6vw,13rem)*var(--t)+1.75rem*(1_-_var(--t)))] min-[1700px]:h-[calc(14.5rem*var(--t)+1.75rem*(1_-_var(--t)))] min-[1700px]:w-[calc(14.5rem*var(--t)+1.75rem*(1_-_var(--t)))] object-contain"
-            : "h-7 w-7 object-contain"
-        }
-      />
+          menu sheet where the green reads muddy.
+          `scroll` mode sizes via `fill` on a calc()'d wrapper instead of
+          width/height props: two independently-rounded identical `calc()`
+          expressions can land a sub-pixel apart, and Next's Image warns about
+          "aspect ratio changed" whenever the rendered box doesn't exactly
+          match the width/height attributes — fill sidesteps that check.
+          The min-h/min-w floor is the settled size, so it's a no-op visually
+          but keeps the box from collapsing to 0 (and the image with it) in the
+          frame before `--t` resolves. */}
+      {scroll ? (
+        <div className="relative h-[calc(clamp(2.6rem,12.6vw,13rem)*var(--t,1)+2.25rem*(1_-_var(--t,1)))] min-h-9 w-[calc(clamp(2.6rem,12.6vw,13rem)*var(--t,1)+2.25rem*(1_-_var(--t,1)))] min-w-9 shrink-0 min-[1700px]:h-[calc(14.5rem*var(--t,1)+2.25rem*(1_-_var(--t,1)))] min-[1700px]:w-[calc(14.5rem*var(--t,1)+2.25rem*(1_-_var(--t,1)))]">
+          <Image
+            src={tone === "light" ? "/180dc-globe-white.png" : "/180dc-globe.png"}
+            alt=""
+            fill
+            sizes="280px"
+            className="object-contain"
+          />
+        </div>
+      ) : (
+        <Image
+          src={tone === "light" ? "/180dc-globe-white.png" : "/180dc-globe.png"}
+          alt=""
+          width={36}
+          height={36}
+          className="h-9 w-9 object-contain"
+        />
+      )}
       180Connect
     </div>
   );
@@ -312,8 +329,8 @@ export default function Landing() {
   const revealT = useMotionValue(0);
 
   useEffect(() => {
-    const shrink = animate(introT, 0, { duration: 2.2, ease: EASE, delay: 0.5 });
-    const reveal = animate(revealT, 1, { duration: 0.8, ease: EASE, delay: 1.6 });
+    const shrink = animate(introT, 0, { duration: 2.2, ease: EASE, delay: 1.8 });
+    const reveal = animate(revealT, 1, { duration: 0.8, ease: EASE, delay: 2.9 });
     return () => {
       shrink.stop();
       reveal.stop();
@@ -336,10 +353,10 @@ export default function Landing() {
             by the same circle that paints the ink, so the swap is exact by
             construction instead of a delay guessing when the edge arrives. */}
         <motion.div
-          className="absolute top-0 left-0 z-30 translate-x-[calc(2.5rem*var(--t))] px-6 py-6 sm:px-10 sm:py-8"
+          className="absolute top-0 left-0 z-30 translate-x-[calc(2.5rem*var(--t,1))] px-6 py-6 sm:px-10 sm:py-8"
           initial={{ opacity: 0, filter: "blur(8px)" }}
           animate={{ opacity: 1, filter: "blur(0px)" }}
-          transition={{ duration: 0.8, ease: EASE, delay: 0.1 }}
+          transition={{ duration: 0.8, ease: EASE, delay: 0.4 }}
         >
           <Wordmark tone="dark" scroll />
         </motion.div>
@@ -469,10 +486,12 @@ export default function Landing() {
             <div
               className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_18rem]"
               style={{
-                paddingTop: "calc(46vh * var(--t) + 1.5rem * (1 - var(--t)))",
+                paddingTop:
+                  "calc(46vh * var(--t, 1) + 1.5rem * (1 - var(--t, 1)))",
                 paddingLeft:
-                  "calc((clamp(0.75rem,4vw,2.5rem) + 0.5rem) * var(--t))",
-                columnGap: "calc(0.75rem * var(--t) + 2.5rem * (1 - var(--t)))",
+                  "calc((clamp(0.75rem,4vw,2.5rem) + 0.5rem) * var(--t, 1))",
+                columnGap:
+                  "calc(0.75rem * var(--t, 1) + 2.5rem * (1 - var(--t, 1)))",
               }}
             >
               <motion.h1

@@ -2,18 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useState, type ComponentType } from "react";
 import { motion, useReducedMotion, type Variants } from "motion/react";
-import {
-  LayoutDashboard,
-  LogOut,
-  PanelLeftClose,
-  PanelLeftOpen,
-  ScrollText,
-  ShieldCheck,
-  Users,
-  type LucideIcon,
-} from "lucide-react";
+import { LogOut, PanelLeftClose, PanelLeftOpen, ScrollText, ShieldCheck } from "lucide-react";
+import { Compass } from "@/components/animate-ui/icons/compass";
+import { AnimateIcon } from "@/components/animate-ui/icons/icon";
+import { Users } from "@/components/animate-ui/icons/users";
 
 export type SidebarIconName = "dashboard" | "admin" | "users" | "audit";
 
@@ -28,12 +22,22 @@ export type SidebarSection = {
   items: SidebarNavItem[];
 };
 
+type RailIcon = ComponentType<{
+  className?: string;
+  strokeWidth?: number;
+  "aria-hidden"?: boolean;
+}>;
+
 /**
  * Nav items name an icon rather than importing one, so the shell stays a plain
  * list of routes and every icon in the rail is drawn on the same grid.
+ *
+ * Dashboard and team management use animate-ui glyphs, which draw their own
+ * motion from the `AnimateIcon` context on the row rather than the shared
+ * spring below.
  */
-const ICONS: Record<SidebarIconName, LucideIcon> = {
-  dashboard: LayoutDashboard,
+const ICONS: Record<SidebarIconName, RailIcon> = {
+  dashboard: Compass,
   admin: ShieldCheck,
   users: Users,
   audit: ScrollText,
@@ -53,11 +57,12 @@ const ICON_SPRING = { type: "spring", stiffness: 420, damping: 17, mass: 0.6 } a
  * ~8 degrees so a rail of them reads as one system rather than a toybox.
  * Triggered from the row, not the glyph, so the whole target responds.
  */
-const ICON_MOTION: Record<SidebarIconName, Variants> = {
-  dashboard: { rest: { scale: 1 }, hover: { scale: 1.12 } },
+const ICON_MOTION: Partial<Record<SidebarIconName, Variants>> = {
   admin: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: -6 } },
-  users: { rest: { scale: 1, x: 0 }, hover: { scale: 1.08, x: 1.5 } },
   audit: { rest: { rotate: 0, y: 0 }, hover: { rotate: -8, y: -1 } },
+  // `dashboard` and `users` are deliberately absent: those animate-ui glyphs
+  // animate their own interiors, so a wrapper transform on top would read as
+  // two gestures.
 };
 
 const LOGOUT_MOTION: Variants = { rest: { x: 0 }, hover: { x: 3 } };
@@ -84,11 +89,12 @@ export function Sidebar({
   const [collapsed, setCollapsed] = useState(false);
   // Someone who asked the OS for less motion gets the colour change only.
   const reduceMotion = useReducedMotion();
-  const iconVariants = (variants: Variants) => (reduceMotion ? undefined : variants);
+  const iconVariants = (variants: Variants | undefined) =>
+    reduceMotion ? undefined : variants;
 
   return (
     <aside
-      className={`sticky top-0 flex h-screen shrink-0 flex-col border-r border-black/10 bg-white transition-[width] duration-200 ${
+      className={`sticky top-0 flex h-screen shrink-0 flex-col bg-white/55 backdrop-blur-2xl backdrop-saturate-150 transition-[width] duration-200 after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-linear-to-b after:from-white/90 after:via-black/12 after:to-white/50 ${
         collapsed ? "w-16" : "w-64"
       }`}
     >
@@ -103,7 +109,7 @@ export function Sidebar({
           initial="rest"
           animate="rest"
           whileHover="hover"
-          className="ml-auto shrink-0 rounded-lg p-1.5 text-black/60 transition-colors hover:bg-black/10 hover:text-black"
+          className="ml-auto shrink-0 rounded-lg p-1.5 text-black/60 transition-colors hover:bg-white/55 hover:text-black"
         >
           <motion.span
             className="flex"
@@ -133,26 +139,28 @@ export function Sidebar({
                 const Icon = ICONS[item.icon];
                 return (
                   <li key={item.href}>
-                    <MotionLink
-                      href={item.href}
-                      title={collapsed ? item.label : undefined}
-                      aria-current={active ? "page" : undefined}
-                      initial="rest"
-                      animate="rest"
-                      whileHover="hover"
-                      className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-black transition-colors hover:bg-black/10 ${
-                        active ? "bg-black/10 font-bold" : "font-medium"
-                      }`}
-                    >
-                      <motion.span
-                        className="flex shrink-0"
-                        variants={iconVariants(ICON_MOTION[item.icon])}
-                        transition={ICON_SPRING}
+                    <AnimateIcon animateOnHover={!reduceMotion} asChild>
+                      <MotionLink
+                        href={item.href}
+                        title={collapsed ? item.label : undefined}
+                        aria-current={active ? "page" : undefined}
+                        initial="rest"
+                        animate="rest"
+                        whileHover="hover"
+                        className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-black transition-colors hover:bg-white/55 ${
+                          active ? "bg-white/75 font-bold shadow-xs" : "font-medium"
+                        }`}
                       >
-                        <Icon className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
-                      </motion.span>
-                      {!collapsed && <span className="truncate">{item.label}</span>}
-                    </MotionLink>
+                        <motion.span
+                          className="flex shrink-0"
+                          variants={iconVariants(ICON_MOTION[item.icon])}
+                          transition={ICON_SPRING}
+                        >
+                          <Icon className="h-5 w-5" strokeWidth={1.75} aria-hidden={true} />
+                        </motion.span>
+                        {!collapsed && <span className="truncate">{item.label}</span>}
+                      </MotionLink>
+                    </AnimateIcon>
                   </li>
                 );
               })}
@@ -161,7 +169,7 @@ export function Sidebar({
         ))}
       </nav>
 
-      <div className="border-t border-black/10 p-2">
+      <div className="border-t border-white/70 p-2">
         {!collapsed && (
           <div className="mb-1 px-2 pt-2">
             <p className="truncate text-sm font-bold text-black">{userLabel}</p>
@@ -175,7 +183,7 @@ export function Sidebar({
             initial="rest"
             animate="rest"
             whileHover="hover"
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-bold text-black transition-colors hover:bg-black/10"
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-bold text-black transition-colors hover:bg-white/55"
           >
             <motion.span
               className="flex shrink-0"

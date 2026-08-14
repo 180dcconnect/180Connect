@@ -20,6 +20,9 @@ const eslintConfig = defineConfig([
     // is exempt from the react-compiler rules rather than patched.
     "src/components/animate-ui/**",
     "src/hooks/use-is-in-view.tsx",
+    "src/hooks/use-controlled-state.tsx",
+    "src/hooks/use-data-state.tsx",
+    "src/lib/get-strict-context.tsx",
   ]),
   {
     // `src/lib/supabase/admin-client-factory.ts` holds the service-role key and

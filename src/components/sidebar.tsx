@@ -4,10 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ComponentType } from "react";
 import { motion, useReducedMotion, type Variants } from "motion/react";
-import { LogOut, PanelLeftClose, PanelLeftOpen, ScrollText, ShieldCheck } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, ScrollText, ShieldCheck } from "lucide-react";
 import { Compass } from "@/components/animate-ui/icons/compass";
 import { AnimateIcon } from "@/components/animate-ui/icons/icon";
 import { Users } from "@/components/animate-ui/icons/users";
+import { SidebarAccountMenu } from "@/components/sidebar-account-menu";
 
 export type SidebarIconName = "dashboard" | "admin" | "users" | "audit";
 
@@ -65,7 +66,6 @@ const ICON_MOTION: Partial<Record<SidebarIconName, Variants>> = {
   // two gestures.
 };
 
-const LOGOUT_MOTION: Variants = { rest: { x: 0 }, hover: { x: 3 } };
 const TOGGLE_MOTION: Variants = { rest: { x: 0 }, hover: { x: -2 } };
 
 /**
@@ -76,12 +76,14 @@ const TOGGLE_MOTION: Variants = { rest: { x: 0 }, hover: { x: -2 } };
  */
 export function Sidebar({
   sections,
-  userLabel,
+  userName,
+  userEmail,
   roleLabel,
   onLogout,
 }: {
   sections: SidebarSection[];
-  userLabel: string;
+  userName: string | null;
+  userEmail: string | null;
   roleLabel: string;
   onLogout: () => Promise<void>;
 }) {
@@ -94,7 +96,7 @@ export function Sidebar({
 
   return (
     <aside
-      className={`sticky top-0 flex h-screen shrink-0 flex-col bg-white/55 backdrop-blur-2xl backdrop-saturate-150 transition-[width] duration-200 after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-linear-to-b after:from-white/90 after:via-black/12 after:to-white/50 ${
+      className={`sticky top-0 z-20 flex h-screen shrink-0 flex-col bg-white/55 backdrop-blur-2xl backdrop-saturate-150 transition-[width] duration-200 after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-linear-to-b after:from-white/90 after:via-black/12 after:to-white/50 ${
         collapsed ? "w-16" : "w-64"
       }`}
     >
@@ -170,31 +172,13 @@ export function Sidebar({
       </nav>
 
       <div className="border-t border-white/70 p-2">
-        {!collapsed && (
-          <div className="mb-1 px-2 pt-2">
-            <p className="truncate text-sm font-bold text-black">{userLabel}</p>
-            <p className="text-xs font-bold uppercase tracking-wide text-black/45">{roleLabel}</p>
-          </div>
-        )}
-        <form action={onLogout}>
-          <motion.button
-            type="submit"
-            title={collapsed ? "Log out" : undefined}
-            initial="rest"
-            animate="rest"
-            whileHover="hover"
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-bold text-black transition-colors hover:bg-white/55"
-          >
-            <motion.span
-              className="flex shrink-0"
-              variants={iconVariants(LOGOUT_MOTION)}
-              transition={ICON_SPRING}
-            >
-              <LogOut className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
-            </motion.span>
-            {!collapsed && <span>Log out</span>}
-          </motion.button>
-        </form>
+        <SidebarAccountMenu
+          name={userName}
+          email={userEmail}
+          roleLabel={roleLabel}
+          collapsed={collapsed}
+          onLogout={onLogout}
+        />
       </div>
     </aside>
   );

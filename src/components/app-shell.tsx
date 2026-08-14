@@ -29,7 +29,7 @@ function ShellWash() {
       style={{
         background: [
           "radial-gradient(85% 55% at 0% 0%, rgba(114, 183, 68, 0.45), rgba(114, 183, 68, 0) 72%)",
-          "linear-gradient(to bottom, rgba(114, 183, 68, 0) 45%, rgba(114, 183, 68, 0.24) 100%)",
+          "linear-gradient(to bottom, rgba(114, 183, 68, 0) 22%, rgba(114, 183, 68, 0.26) 100%)",
         ].join(", "),
         WebkitMaskImage: fadeOutRight,
         maskImage: fadeOutRight,
@@ -71,7 +71,8 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
       <ShellWash />
       <Sidebar
         sections={sections}
-        userLabel={actor.fullName ?? actor.email ?? "Account"}
+        userName={actor.fullName}
+        userEmail={actor.email}
         roleLabel={actor.role}
         onLogout={logout}
       />

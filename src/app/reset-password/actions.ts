@@ -19,6 +19,7 @@ export async function setNewPassword(
   formData: FormData,
 ): Promise<ResetPasswordState> {
   const parsed = safeValidate(newPasswordSchema, {
+    fullName: formData.get("fullName"),
     password: formData.get("password"),
     confirmPassword: formData.get("confirmPassword"),
   });
@@ -84,6 +85,18 @@ export async function setNewPassword(
   // failure to the user: telling them it did not work would send them round
   // again with the password that is now the right one.
   cookieStore.delete(RECOVERY_COOKIE_NAME);
+
+  // Column grant is `update (full_name)` only (create_users migration), so this is
+  // the one field this session can write on its own row. Same non-blocking
+  // treatment as mark_invite_accepted below: the password already changed, so a
+  // failure here must not read to the user as the whole action having failed.
+  const { error: nameError } = await supabase
+    .from("users")
+    .update({ full_name: parsed.data.fullName })
+    .eq("id", recoveryUserId);
+  if (nameError) {
+    logAuthError("user.full_name_update_failed", nameError);
+  }
 
   // Setting a first password is what accepts an invite (F008) — not clicking the
   // emailed link, which only proves the mailbox is readable. This is the shared

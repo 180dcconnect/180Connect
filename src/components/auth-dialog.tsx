@@ -1,11 +1,20 @@
 "use client";
 
-import { AnimatePresence, motion } from "motion/react";
-import { Dialog } from "radix-ui";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+
+import { AnimateIcon } from "@/components/animate-ui/icons/icon";
+import { XIcon } from "@/components/animate-ui/icons/x";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogOverlay,
+  DialogPortal,
+  DialogTitle,
+} from "@/components/animate-ui/primitives/radix/dialog";
 
 import { bannerClass, fieldVars } from "@/components/brand/fields";
-import { EASE } from "@/components/brand/motion";
 import { GROUND, INK, INK_RAISED } from "@/components/brand/tokens";
 import type { AuthView } from "@/components/brand/use-auth-dialog";
 import { LoginForm } from "@/app/login/login-form";
@@ -52,7 +61,6 @@ const TONES = {
     notch: GROUND,
     ring: "",
     heading: INK,
-    eyebrow: "text-[#0c1014]/40",
     body: "text-[#0c1014]/50",
     close: "text-[#0c1014]/35 hover:bg-[#0c1014]/5 hover:text-[#0c1014] focus-visible:outline-[#0c1014]",
   },
@@ -61,7 +69,6 @@ const TONES = {
     notch: INK_RAISED,
     ring: "ring-1 ring-white/15",
     heading: GROUND,
-    eyebrow: "text-[#f4f4ef]/45",
     body: "text-[#f4f4ef]/55",
     close: "text-[#f4f4ef]/45 hover:bg-white/10 hover:text-[#f4f4ef] focus-visible:outline-[#f4f4ef]",
   },
@@ -69,13 +76,11 @@ const TONES = {
 
 const COPY = {
   signin: {
-    eyebrow: "Sign in",
     title: "Welcome.",
     body: "Accounts are created by an admin. Use the details you were invited with.",
   },
   forgot: {
-    eyebrow: "Reset password",
-    title: "Forgot it?",
+    title: "Forgot Password?",
     body: "Enter your email and we'll send instructions if an account is available.",
   },
 } as const;
@@ -103,7 +108,16 @@ export function AuthDialog({
   notice?: SignedOutNotice | null;
 }) {
   const t = TONES[tone];
-  const copy = view ? COPY[view] : null;
+
+  // The panel keeps rendering through its exit animation, by which point `view`
+  // is already null — so the copy and the form have to come from the last view
+  // that was actually open, or the dialog empties itself on the way out.
+  // Adjusted during render rather than in an effect: React re-runs this
+  // component immediately with the new value and never commits the stale one, so
+  // the panel cannot flash the wrong copy for a frame.
+  const [shown, setShown] = useState<AuthView>("signin");
+  if (view && view !== shown) setShown(view);
+  const copy = COPY[shown];
 
   // Radix runs its autofocus once, when the dialog opens. Switching panels
   // replaces the form underneath it, so the field has to be claimed again.
@@ -113,120 +127,89 @@ export function AuthDialog({
   }, [view]);
 
   return (
-    <Dialog.Root open={view !== null} onOpenChange={onOpenChange}>
-      {/* forceMount hands the open/close animation to Motion — Radix would
-          otherwise unmount the moment `open` flips and the exit never plays. */}
-      <AnimatePresence>
-        {view && copy && (
-          <Dialog.Portal forceMount>
-            <Dialog.Overlay asChild forceMount>
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.3, ease: EASE }}
-                // Ink rather than plain black, and blurred: the page stays
-                // legible underneath, which is the point of opening over it.
-                className="fixed inset-0 z-[60] backdrop-blur-[5px]"
-                style={{ backgroundColor: "rgba(12, 16, 20, 0.55)" }}
-              />
-            </Dialog.Overlay>
+    <Dialog open={view !== null} onOpenChange={onOpenChange}>
+      {/* Presence, portalling, and the flip entrance come from the animate-ui
+          primitive (`npx shadcn add @animate-ui/components-radix-dialog`); only
+          the surface below is ours. Its sibling `components/radix/dialog.tsx` is
+          the shadcn-styled wrapper — deliberately unused, since it carries the
+          app's neutral card look rather than this system's. */}
+      <DialogPortal>
+        <DialogOverlay
+          // Ink rather than plain black: the page stays legible underneath,
+          // which is the point of opening over it.
+          className="fixed inset-0 z-[60] backdrop-blur-[5px]"
+          style={{ backgroundColor: "rgba(12, 16, 20, 0.55)" }}
+        />
 
-            <Dialog.Content
-              asChild
-              forceMount
-              onEscapeKeyDown={markEscapeHandled}
-              // Radix focuses the first tabbable node, which is the close
-              // button — someone who opened this wants to start typing, so send
-              // focus to the email field instead.
-              onOpenAutoFocus={(event) => {
-                event.preventDefault();
-                document.getElementById("email")?.focus();
-              }}
+        <DialogContent
+          onEscapeKeyDown={markEscapeHandled}
+          // Radix focuses the first tabbable node, which is the close button —
+          // someone who opened this wants to start typing, so send focus to the
+          // email field instead.
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            document.getElementById("email")?.focus();
+          }}
+          // outline-none on the panel itself: Radix makes the content focusable,
+          // and switching panels unmounts whatever had focus, which drops it
+          // back here and paints the UA's focus ring around the whole dialog.
+          className={`fixed left-1/2 top-1/2 z-[60] w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl p-7 shadow-xl outline-none sm:p-9 ${t.ring}`}
+          style={{
+            backgroundColor: t.panel,
+            maxHeight: "calc(100vh - 2rem)",
+            ...fieldVars(tone, t.notch),
+          }}
+        >
+          {/* asChild puts the trigger on the button rather than the glyph: the
+              32px button is the affordance, and binding hover to the 16px icon
+              inside it would leave the surrounding padding dead. */}
+          <AnimateIcon asChild animateOnHover animateOnTap>
+            <DialogClose
+              aria-label="Close"
+              className={`absolute right-5 top-5 flex h-8 w-8 items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ${t.close}`}
             >
-              <motion.div
-                // The house entrance, shortened: a dialog answering a click has
-                // to feel immediate in a way a page entrance does not.
-                initial={{ opacity: 0, y: 16, scale: 0.97, filter: "blur(10px)" }}
-                animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
-                exit={{ opacity: 0, y: 8, scale: 0.98, filter: "blur(6px)" }}
-                transition={{ duration: 0.4, ease: EASE }}
-                // outline-none on the panel itself: Radix makes the content
-                // focusable, and switching panels unmounts whatever had focus,
-                // which drops it back here and paints the UA's focus ring around
-                // the whole dialog. Focus is sent to the email field instead
-                // (below), so nothing is lost by suppressing it.
-                className={`fixed left-1/2 top-1/2 z-[60] w-[calc(100vw-2rem)] max-w-md outline-none -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl p-7 shadow-xl sm:p-9 ${t.ring}`}
-                style={{
-                  backgroundColor: t.panel,
-                  maxHeight: "calc(100vh - 2rem)",
-                  ...fieldVars(tone, t.notch),
-                }}
-              >
-                <Dialog.Close
-                  aria-label="Close"
-                  className={`absolute right-5 top-5 flex h-8 w-8 items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ${t.close}`}
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.75"
-                    strokeLinecap="round"
-                    className="h-4 w-4"
-                    aria-hidden="true"
-                  >
-                    <path d="M6 6l12 12M18 6L6 18" />
-                  </svg>
-                </Dialog.Close>
+              <XIcon size={16} strokeWidth={1.75} aria-hidden="true" />
+            </DialogClose>
+          </AnimateIcon>
 
-                <p
-                  className={`font-body text-[11px] font-bold uppercase tracking-[0.12em] ${t.eyebrow}`}
-                >
-                  {copy.eyebrow}
-                </p>
+          <DialogTitle
+            className="font-body text-[clamp(1.75rem,4vw,2.25rem)] font-black leading-[1.05] tracking-[-0.03em]"
+            style={{ color: t.heading }}
+          >
+            {copy.title}
+          </DialogTitle>
 
-                <Dialog.Title
-                  className="mt-2.5 font-body text-[clamp(1.75rem,4vw,2.25rem)] font-black leading-[1.05] tracking-[-0.03em]"
-                  style={{ color: t.heading }}
-                >
-                  {copy.title}
-                </Dialog.Title>
+          <DialogDescription
+            className={`mt-2 font-body text-sm leading-[1.65] ${t.body}`}
+          >
+            {copy.body}
+          </DialogDescription>
 
-                <Dialog.Description
-                  className={`mt-2 font-body text-sm leading-[1.65] ${t.body}`}
-                >
-                  {copy.body}
-                </Dialog.Description>
+          {notice && shown === "signin" && (
+            <div
+              role="status"
+              className={`mt-5 ${bannerClass(
+                tone,
+                notice.tone === "success" ? "success" : "pending",
+              )}`}
+            >
+              {notice.message}
+            </div>
+          )}
 
-                {notice && view === "signin" && (
-                  <div
-                    role="status"
-                    className={`mt-5 ${bannerClass(
-                      tone,
-                      notice.tone === "success" ? "success" : "pending",
-                    )}`}
-                  >
-                    {notice.message}
-                  </div>
-                )}
-
-                {/*
-                  No social sign-in and no sign-up link. Accounts are created by
-                  an admin (PRD §4.2 prohibits public self-sign-up), so
-                  Google/Apple and a "Sign up" route would be affordances for
-                  something the platform does not do.
-                */}
-                {view === "signin" ? (
-                  <LoginForm tone={tone} onForgotPassword={() => onShow("forgot")} />
-                ) : (
-                  <ForgotPasswordForm tone={tone} onBack={() => onShow("signin")} />
-                )}
-              </motion.div>
-            </Dialog.Content>
-          </Dialog.Portal>
-        )}
-      </AnimatePresence>
-    </Dialog.Root>
+          {/*
+            No social sign-in and no sign-up link. Accounts are created by an
+            admin (PRD §4.2 prohibits public self-sign-up), so Google/Apple and a
+            "Sign up" route would be affordances for something the platform does
+            not do.
+          */}
+          {shown === "signin" ? (
+            <LoginForm tone={tone} onForgotPassword={() => onShow("forgot")} />
+          ) : (
+            <ForgotPasswordForm tone={tone} onBack={() => onShow("signin")} />
+          )}
+        </DialogContent>
+      </DialogPortal>
+    </Dialog>
   );
 }

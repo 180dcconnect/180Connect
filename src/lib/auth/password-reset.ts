@@ -27,7 +27,7 @@
 import { z } from "zod";
 
 import { signValue, timingSafeEqual } from "../hmac.ts";
-import { emailField } from "../validation.ts";
+import { emailField, nonEmptyTrimmed } from "../validation.ts";
 import { MAX_PASSWORD_LENGTH, PASSWORD_RULES } from "./password-rules.ts";
 
 /**
@@ -61,7 +61,11 @@ export type ForgotPasswordState = {
 export type ResetPasswordState = {
   status: "idle" | "error";
   message?: string;
-  fieldErrors?: { password?: string[]; confirmPassword?: string[] };
+  fieldErrors?: {
+    fullName?: string[];
+    password?: string[];
+    confirmPassword?: string[];
+  };
 };
 
 /** Cookie marking a session as being mid-recovery. */
@@ -91,8 +95,12 @@ export const passwordSchema = z
     }
   });
 
+/** Matches the `full_name` column's practical limit (120) and the form's `maxLength`. */
+export const fullNameSchema = nonEmptyTrimmed(120, "Enter your name.");
+
 export const newPasswordSchema = z
   .object({
+    fullName: fullNameSchema,
     password: passwordSchema,
     confirmPassword: z.string(),
   })

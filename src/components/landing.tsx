@@ -2,52 +2,30 @@
 
 import {
   animate,
-  AnimatePresence,
   MotionConfig,
   motion,
   useMotionTemplate,
   useMotionValue,
   useTransform,
-  type Variants,
 } from "motion/react";
 import Image from "next/image";
-import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
-const MotionLink = motion.create(Link);
-
-/** Matches the old `.rise` curve so the entrance feel is unchanged. */
-const EASE = [0.2, 0.7, 0.2, 1] as const;
+import { BrandCtaButton } from "@/components/brand/brand-cta";
+import { EASE, entrance, stagger } from "@/components/brand/motion";
+import { SiteChrome } from "@/components/brand/site-chrome";
+import { useAuthDialog } from "@/components/brand/use-auth-dialog";
+import { GROUND, INK_WARM } from "@/components/brand/tokens";
+import { Wordmark } from "@/components/brand/wordmark";
+import type { SignedOutNotice } from "@/lib/auth/signed-out-notice";
 
 /**
- * The copy block enters as one staggered run in reading order: wordmark,
- * headline, standfirst, CTA. `delayChildren` holds it back just long enough
- * for the photo squares to have started resolving underneath.
+ * The copy block enters as one staggered run in reading order: headline, then
+ * CTA. `delayChildren` holds it back just long enough for the photo squares to
+ * have started resolving underneath — except when the intro is skipped, where
+ * there is nothing to wait for.
  */
-const stack: Variants = {
-  hidden: {},
-  show: {
-    transition: { staggerChildren: 0.09, delayChildren: 0.75 },
-  },
-};
-
-const item: Variants = {
-  hidden: { opacity: 0, y: 14, filter: "blur(12px)", scale: 0.98 },
-  show: {
-    opacity: 1,
-    y: 0,
-    filter: "blur(0px)",
-    scale: 1,
-    transition: { duration: 0.75, ease: EASE },
-  },
-};
-
-/** Base delay before the first wordmark token appears, in seconds. */
-const WM_DELAY = 0.2;
-/** Gap between each successive token (globe + 10 chars). */
-const WM_STAGGER = 0.045;
-/** How long each token takes to resolve. */
-const WM_DURATION = 0.5;
+const stack = (skipIntro: boolean) => stagger(0.09, skipIntro ? 0 : 0.75);
 
 /**
  * Each square is its own pre-cropped file (see public/crops/, cut from
@@ -214,237 +192,6 @@ function Crop({ crop, delay, index }: { crop: CropSpec; delay: number; index: nu
   );
 }
 
-const menuLinks = [
-  { label: "Home", href: "/" },
-  { label: "Terms", href: "/terms" },
-  { label: "Privacy", href: "/privacy" },
-  { label: "Changelog", href: "/changelog" },
-  { label: "Cookies", href: "/cookies" },
-] as const;
-
-const MAIL = "sheffield@180dc.org";
-
-/**
- * Icons are inline paths rather than an icon package — three glyphs is not
- * worth a dependency, and it keeps the sheet free of external requests. The
- * Linktree URL is stored bare: the shared link carried utm_* and fbclid
- * parameters from an Instagram bio click, which have no business being
- * hard-coded into our own site.
- */
-const socials = [
-  {
-    label: "Instagram",
-    href: "https://www.instagram.com/180dcsheffield/",
-    // Rendered from a sprite sheet rather than an <svg>; see .icon-sprite.
-    sprite: "ig-sprite",
-  },
-  {
-    label: "LinkedIn",
-    href: "https://www.linkedin.com/company/180dcsheffield/",
-    sprite: "li-sprite",
-  },
-  {
-    label: "Linktree",
-    href: "https://linktr.ee/180dcsheffield",
-    sprite: "lt-sprite",
-  },
-  {
-    label: `Email ${MAIL}`,
-    href: `mailto:${MAIL}`,
-    sprite: "mail-sprite",
-  },
-] as const;
-
-/**
- * The sheet opens as a circle under the burger and swells until it engulfs the
- * screen. The origin is a rough average of where the button lands across
- * breakpoints; 150% is enough radius to clear the far corner.
- */
-const SHEET_ORIGIN = "95% 5%";
-
-/**
- * Deliberately not `EASE`: that curve is front-loaded and blows the circle past
- * full radius within ~120ms, so the reveal never reads as a circle. This one
- * eases in, holding the small disc under the burger long enough to see.
- */
-const SHEET_EASE = [0.76, 0, 0.24, 1] as const;
-
-const sheet: Variants = {
-  hidden: { clipPath: `circle(0% at ${SHEET_ORIGIN})` },
-  show: {
-    clipPath: `circle(150% at ${SHEET_ORIGIN})`,
-    transition: { duration: 0.85, ease: SHEET_EASE, staggerChildren: 0.06, delayChildren: 0.45 },
-  },
-  exit: {
-    clipPath: `circle(0% at ${SHEET_ORIGIN})`,
-    transition: { duration: 0.6, ease: SHEET_EASE, staggerChildren: 0.04 },
-  },
-};
-
-const sheetItem: Variants = {
-  hidden: { opacity: 0, y: 28 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.5, ease: EASE } },
-  exit: { opacity: 0, y: 12, transition: { duration: 0.2, ease: EASE } },
-};
-
-/**
- * Hover on the CTA runs as a chain, not one simultaneous change:
- *   1. the green disc swells to swallow its own dark ring,
- *   2. only then does green wash leftward across the label capsule,
- *   3. the arrow darts out and back while that wash travels.
- * The delays below encode that ordering; each stage starts as the previous
- * one lands. Leaving hover reverses everything at once, quickly.
- */
-const CTA_FILL = 0.22;
-const CTA_WASH = 0.38;
-
-/** Shared so the two capsules' greens and darks cannot drift apart. */
-const CTA_GREEN = "#e6f5c0";
-
-/**
- * Rest state of the CTA is glass rather than solid: the same charcoal at 72%,
- * which is the lowest opacity that still keeps the cream label above 4.5:1
- * against the page. Hover washes to opaque green, so the translucency only
- * ever shows on the dark half.
- */
-const CTA_GLASS = "rgba(28, 26, 24, 0.72)";
-
-/**
- * The lit top edge that sells glass: a one-pixel inset highlight, the way a
- * pane catches light on its upper rim. Kept on through hover so the capsule
- * and the disc do not lose their edge at different moments.
- */
-const CTA_LIP = "inset 0 1px 0 rgba(255, 255, 255, 0.3)";
-
-/**
- * Both capsules paint dark and green as a *single* background on one element,
- * never as two stacked children. Stacked children are each antialiased against
- * the rounded clip independently, so an edge pixel of coverage α composites to
- * page(1-α)² + α(1-α)·dark + α·green — that middle term is a dark hairline that
- * no amount of overshoot removes. One layer means one antialiased edge.
- *
- * Circle: permanently green, with the dark ring drawn as an *inset shadow* that
- * shrinks to nothing. A gradient animated on this element left a faint seam at
- * the rounded edge once Chrome promoted it to its own layer; an inset shadow is
- * rasterised together with the background, so the element has exactly one
- * antialiased edge and nothing can peek out from under it.
- */
-const ctaDisc: Variants = {
-  rest: {
-    boxShadow: `inset 0 0 0 3px ${CTA_GLASS}, ${CTA_LIP}`,
-    transition: { duration: 0.25, ease: EASE },
-  },
-  hover: {
-    boxShadow: `inset 0 0 0 0px ${CTA_GLASS}, ${CTA_LIP}`,
-    transition: { duration: CTA_FILL, ease: EASE },
-  },
-};
-
-/**
- * The fill's leading edge is the pill's own end-cap, reused rather than
- * redrawn: a `rounded-l-full` block at the pill's full height caps its radius
- * at height/2 exactly like `rounded-full` does on the pill itself, so the two
- * curves are nominally identical — same mechanism, same radius. Breaks the
- * single-paint-layer rule the pill used to hold (see ctaDisc above) — a
- * rounded leading edge isn't expressible as one background, so this is a
- * second layer under the label instead.
- *
- * "Nominally identical" isn't good enough, though: two independently
- * antialiased curves — this block's own `rounded-l-full` and the parent's
- * `overflow-hidden` clip — get subpixel-rounded a hair apart, and the
- * parent's dark glass background shows through that hairline gap even when
- * both radii resolve to the same number on paper. Landing the settled hover
- * state at `left: 0%` puts the cap exactly on the seam where that's visible.
- * `-20%` instead drives the cap's own curve past the parent's rounded corner
- * entirely, so the flat (uncurved) part of this rectangle is what the corner
- * clips against — one curve draws the edge, not two fighting over it.
- */
-const ctaWash: Variants = {
-  rest: { left: "100%", transition: { duration: 0.28, ease: EASE } },
-  hover: {
-    left: "-20%",
-    transition: { duration: CTA_WASH, ease: EASE, delay: CTA_FILL },
-  },
-};
-
-const ctaLabel: Variants = {
-  rest: { color: "#f4f4ef", transition: { duration: 0.2 } },
-  // Flips once the wash is far enough left to be under the text.
-  hover: { color: "#0c1014", transition: { duration: 0.18, delay: CTA_FILL + 0.1 } },
-};
-
-/**
- * The arrow exits stage right, then re-enters from the left — the jump between
- * the two is instantaneous and happens while it is outside the disc, which
- * clips it, so the eye reads one arrow travelling through rather than two.
- * 26px clears half the disc plus half the icon.
- */
-const ctaArrow: Variants = {
-  rest: { x: 0, transition: { duration: 0.25, ease: EASE } },
-  hover: {
-    x: [0, 26, -26, 0],
-    transition: {
-      duration: 0.7,
-      delay: CTA_FILL,
-      times: [0, 0.45, 0.4501, 1],
-      ease: EASE,
-    },
-  },
-};
-
-/**
- * The sheet's copy of the CTA runs the identical hover chain — disc swallows its
- * ring, wash sweeps left, arrow darts — with white standing in everywhere the
- * hero uses green. Only the disc needs its own variants: the ring is drawn in
- * the sheet's own ink rather than the glass charcoal, so it reads as the sheet
- * showing through a gap around the white disc instead of as a painted ring.
- * `ctaWash`, `ctaLabel`, and `ctaArrow` are reused untouched — the wash animates
- * `left` only, and the label already flips cream to ink.
- */
-const SHEET_INK = "#0c1014";
-
-const sheetCtaDisc: Variants = {
-  rest: {
-    boxShadow: `inset 0 0 0 3px ${SHEET_INK}, ${CTA_LIP}`,
-    transition: { duration: 0.25, ease: EASE },
-  },
-  hover: {
-    boxShadow: `inset 0 0 0 0px ${SHEET_INK}, ${CTA_LIP}`,
-    transition: { duration: CTA_FILL, ease: EASE },
-  },
-};
-
-/**
- * The nav copy of the arrow dart. Same loop-through as `ctaArrow`, but it fires
- * on the hover frame instead of waiting on a fill stage the small button has no
- * equivalent of, and 22px is what clears half the 36px disc plus half the icon.
- */
-const navArrow: Variants = {
-  rest: { x: 0, transition: { duration: 0.25, ease: EASE } },
-  hover: {
-    x: [0, 22, -22, 0],
-    transition: { duration: 0.6, times: [0, 0.45, 0.4501, 1], ease: EASE },
-  },
-};
-
-/**
- * Hand-drawn tree used as the menu sheet's corner motif. The source PNG is
- * white line-art on a transparent ground, so it needs no keying — opacity
- * alone gives it the low-contrast, drawn-on feel.
- */
-function TreeMark() {
-  return (
-    <Image
-      src="/try.png"
-      alt=""
-      fill
-      sizes="(max-width: 640px) 60vw, 660px"
-      className="object-contain object-bottom"
-      priority={false}
-    />
-  );
-}
-
 /**
  * Brand marks set inline in the headline, standing in for the three tools the
  * product replaces. Sized in `em` so they track the headline's `clamp()` type
@@ -456,8 +203,8 @@ function TreeMark() {
  * its paths come from public/monday-seeklogo.svg, kept as the provenance copy.
  *
  * All three are inlined rather than fetched as <Image src="…svg">, matching the
- * social icons above: no extra request, and the mark inherits the headline's
- * `em` sizing directly.
+ * social icons: no extra request, and the mark inherits the headline's `em`
+ * sizing directly.
  */
 const INLINE_MARK =
   "inline-block h-[0.78em] w-[0.78em] -translate-y-[0.06em] align-middle";
@@ -513,132 +260,38 @@ function MondayMark() {
   );
 }
 
-/**
- * `scroll` mode renders the wordmark at a size driven entirely by the
- * inherited `--t` CSS variable (1 = full splash size, 0 = resting nav size):
- * every dimension is a `calc()` mixing the two endpoints, so native CSS
- * re-evaluates it on every scroll frame with zero React re-renders. Without
- * `scroll`, it's just the fixed small wordmark (used inside the menu sheet,
- * which never scales with the page).
- */
-function Wordmark({ tone, scroll }: { tone: "light" | "dark"; scroll?: boolean }) {
-  /** Split only in scroll (hero) mode — the sheet copy is never re-mounted
-   *  so it has no entrance of its own; it's revealed by the clip-path circle. */
-  const chars = scroll ? "180Connect".split("") : null;
-
-  return (
-    <div
-      className={`flex items-center font-body font-black tracking-tight ${
-        tone === "light" ? "text-white" : "text-[#0c1014]"
-      } ${
-        scroll
-          ? "text-[calc(clamp(3rem,14.5vw,15rem)*var(--t,1)+1.5rem*(1_-_var(--t,1)))] min-[1700px]:text-[calc(17.2rem*var(--t,1)+1.5rem*(1_-_var(--t,1)))]"
-          : "gap-3 text-2xl"
-      }`}
-      style={
-        scroll
-          ? { gap: "calc(1.75rem * var(--t, 1) + 0.75rem * (1 - var(--t, 1)))" }
-          : undefined
-      }
-    >
-      {/* Globe mark only — the source lockup's wordmark is white and would
-          disappear against the light page. The white variant is the same mark
-          stencilled from its own alpha, so it swaps in cleanly on the dark
-          menu sheet where the green reads muddy.
-          `scroll` mode sizes via `fill` on a calc()'d wrapper instead of
-          width/height props: two independently-rounded identical `calc()`
-          expressions can land a sub-pixel apart, and Next's Image warns about
-          "aspect ratio changed" whenever the rendered box doesn't exactly
-          match the width/height attributes — fill sidesteps that check.
-          The min-h/min-w floor is the settled size, so it's a no-op visually
-          but keeps the box from collapsing to 0 (and the image with it) in the
-          frame before `--t` resolves. */}
-      {scroll ? (
-        <motion.div
-          initial={{ opacity: 0, filter: "blur(10px)" }}
-          animate={{ opacity: 1, filter: "blur(0px)" }}
-          transition={{ duration: WM_DURATION, ease: EASE, delay: WM_DELAY }}
-          className="relative h-[calc(clamp(2.6rem,12.6vw,13rem)*var(--t,1)+2.25rem*(1_-_var(--t,1)))] min-h-9 w-[calc(clamp(2.6rem,12.6vw,13rem)*var(--t,1)+2.25rem*(1_-_var(--t,1)))] min-w-9 shrink-0 min-[1700px]:h-[calc(14.5rem*var(--t,1)+2.25rem*(1_-_var(--t,1)))] min-[1700px]:w-[calc(14.5rem*var(--t,1)+2.25rem*(1_-_var(--t,1)))]"
-        >
-          <Image
-            src={tone === "light" ? "/180dc-globe-white.png" : "/180dc-globe.png"}
-            alt=""
-            fill
-            sizes="280px"
-            className="object-contain"
-          />
-        </motion.div>
-      ) : (
-        <Image
-          src={tone === "light" ? "/180dc-globe-white.png" : "/180dc-globe.png"}
-          alt=""
-          width={36}
-          height={36}
-          className="h-9 w-9 object-contain"
-        />
-      )}
-      {/* In scroll mode each character is its own motion.span with an
-          explicit delay — same pattern as TextBlurIn. The wrapping span
-          keeps them as a single flex item so the gap only fires between
-          the globe and the text block, not between every letter.
-          The sr-only span keeps the label atomic for screen readers. */}
-      {chars ? (
-        <>
-          <span className="sr-only">180Connect</span>
-          <span aria-hidden="true" className="inline-block">
-            {chars.map((char, i) => (
-              <motion.span
-                key={i}
-                initial={{ opacity: 0, filter: "blur(10px)" }}
-                animate={{ opacity: 1, filter: "blur(0px)" }}
-                transition={{
-                  duration: WM_DURATION,
-                  ease: EASE,
-                  // token 0 is the globe, so chars start at index 1
-                  delay: WM_DELAY + (i + 1) * WM_STAGGER,
-                }}
-                className="inline-block"
-              >
-                {char}
-              </motion.span>
-            ))}
-          </span>
-        </>
-      ) : (
-        <span>180Connect</span>
-      )}
-    </div>
-  );
-}
-
-export default function Landing() {
-  const [menuOpen, setMenuOpen] = useState(false);
-  // Escape closes the sheet — the burger is the only other way out, and it can
-  // scroll out of reach on short viewports.
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenuOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [menuOpen]);
+export default function Landing({
+  skipIntro = false,
+  notice = null,
+}: {
+  /**
+   * Set when an auth route (/login, /forgot-password) is rendering this rather
+   * than /. The dialog is already open over the top, and someone redirected here
+   * by an expired session is waiting to log in, not watching a title sequence.
+   */
+  skipIntro?: boolean;
+  /** Passed straight to the dialog; only /login ever has one. */
+  notice?: SignedOutNotice | null;
+}) {
+  // Only for the hero button — the chrome renders the dialog itself.
+  const { openSignin } = useAuthDialog();
 
   // 1 = full splash (big, centred low), 0 = settled into the nav corner.
-  // CTA, leaf crops, and burger blur in a little before the shrink finishes.
+  // Chrome, CTA, and leaf crops blur in a little before the shrink finishes.
   // Everything below reads off these two motion values via `calc()`, same as
   // the scroll-driven version — only the source (a timer, not scroll) changed.
-  const introT = useMotionValue(1);
-  const revealT = useMotionValue(0);
+  const introT = useMotionValue(skipIntro ? 0 : 1);
+  const revealT = useMotionValue(skipIntro ? 1 : 0);
 
   useEffect(() => {
+    if (skipIntro) return;
     const shrink = animate(introT, 0, { duration: 2.2, ease: EASE, delay: 1.8 });
     const reveal = animate(revealT, 1, { duration: 0.8, ease: EASE, delay: 2.9 });
     return () => {
       shrink.stop();
       reveal.stop();
     };
-  }, [introT, revealT]);
+  }, [introT, revealT, skipIntro]);
 
   const revealY = useTransform(revealT, [0, 1], [14, 0]);
   // Templated (not passed as a bare `y`) so it goes through the same plain
@@ -649,14 +302,19 @@ export default function Landing() {
   const revealTransform = useMotionTemplate`translateY(${revealY}px)`;
   const revealBlur = useTransform(revealT, [0, 1], [10, 0]);
   const revealFilter = useMotionTemplate`blur(${revealBlur}px)`;
+  const reveal = {
+    opacity: revealT,
+    transform: revealTransform,
+    filter: revealFilter,
+  };
 
   return (
     // "user" honours prefers-reduced-motion: transforms are dropped, opacity
     // fades survive, so the page still resolves rather than snapping in.
     <MotionConfig reducedMotion="user">
       <motion.main
-        className="relative flex flex-1 flex-col overflow-hidden bg-[#f4f4ef]"
-        style={{ "--t": introT } as React.CSSProperties}
+        className="relative flex flex-1 flex-col overflow-hidden"
+        style={{ "--t": introT, backgroundColor: GROUND } as React.CSSProperties}
       >
         {/* The scatter can only start below the CTA, which on a wide desktop
             leaves the whole band beside the headline empty — this layer fills
@@ -669,419 +327,83 @@ export default function Landing() {
           aria-hidden="true"
         >
           {squares.map((sq, i) =>
-            sq.hero ? <Crop key={i} crop={sq} delay={cropDelays[i]} index={i} /> : null,
+            sq.hero ? <Crop key={i} crop={sq} delay={skipIntro ? 0 : cropDelays[i]} index={i} /> : null,
           )}
         </div>
 
         {/* Sits *below* the sheet: the light twin inside the sheet is revealed
             by the same circle that paints the ink, so the swap is exact by
-            construction instead of a delay guessing when the edge arrives. */}
-        {/* Plain wrapper — the Wordmark's own variants drive the entrance now.
-            translate-x shifts the whole lockup right in splash mode so the
-            big globe doesn't clip the viewport left edge. */}
+            construction instead of a delay guessing when the edge arrives.
+            translate-x shifts the whole lockup right in splash mode so the big
+            globe doesn't clip the viewport left edge. */}
         <div className="absolute top-0 left-0 z-30 translate-x-[calc(2.5rem*var(--t,1))] px-6 py-6 sm:px-10 sm:py-8">
           <Wordmark tone="dark" scroll />
         </div>
 
-          {/* Nav twin of the hero CTA, parked to the left of the burger. Offsets
-              are the burger's own gutter plus its 44px box plus a gap, so the
-              two sit on one line however the gutter changes at sm — and the
-              sheet's own copy of this button reuses the same three offsets, so
-              the two land in exactly the same place.
+        <SiteChrome revealStyle={reveal} activeHref="/" onCtaClick={openSignin}
+          notice={notice} />
 
-              z-30 keeps it *under* the sheet rather than above it like the
-              burger: the opening circle paints straight over it and the sheet's
-              wordmark does, with no state of its own to animate. */}
-          <MotionLink
-            href="/login"
-            aria-label="Get started"
-            className="absolute top-0 right-[68px] z-30 mt-6 flex h-11 items-center focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#0c1014] sm:right-[86px] sm:mt-8"
-            style={{ opacity: revealT, y: revealY, filter: revealFilter }}
-            initial="rest"
-            animate="rest"
-            whileHover="hover"
-            whileTap={{ scale: 0.96 }}
-            variants={{ rest: { y: 0 }, hover: { y: -2 } }}
-            transition={{ type: "spring", stiffness: 420, damping: 28 }}
+        <motion.div
+          // The wordmark and burger are absolute now, so this pad stands in for
+          // the height they used to occupy in flow.
+          className="relative z-10 flex flex-1 flex-col px-6 pt-[76px] sm:px-10 sm:pt-[92px]"
+          variants={stack(skipIntro)}
+          initial="hidden"
+          animate="show"
+        >
+          <div
+            className="flex flex-col items-center gap-6 text-center"
+            style={{
+              paddingTop: "calc(54vh * var(--t, 1) + 8rem * (1 - var(--t, 1)))",
+            }}
           >
-            <span
-              className="relative flex h-9 items-center overflow-hidden rounded-full ring-1 ring-white/25 backdrop-blur-md"
-              style={{ backgroundColor: CTA_GLASS, boxShadow: CTA_LIP }}
+            <motion.h1
+              variants={entrance}
+              className="font-body text-[clamp(2.25rem,6vw,4.5rem)] font-black leading-[1.05] tracking-[-0.03em]"
+              style={{ color: INK_WARM }}
             >
-              <motion.div
-                variants={ctaWash}
-                className="absolute -inset-y-[1px] w-[999px] rounded-l-full"
-                style={{ backgroundColor: CTA_GREEN }}
-                aria-hidden="true"
-              />
-              <motion.span
-                variants={ctaLabel}
-                className="relative z-10 whitespace-nowrap px-4 font-body text-xs font-medium sm:px-5 sm:text-sm"
-              >
-                Get Started
-              </motion.span>
-            </span>
+              Replace <SheetsMark /> spreadsheets, <GmailMark /> follow-ups
+              <br />
+               and <MondayMark /> tracking. All in one place.
+            </motion.h1>
+          </div>
 
-            <motion.span
-              variants={ctaDisc}
-              className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full text-[#0c1014]"
-              style={{ backgroundColor: CTA_GREEN }}
-            >
-              <motion.span variants={navArrow} className="flex">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.75"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="h-[15px] w-[15px]"
-                  aria-hidden="true"
-                >
-                  <path d="M5 12h14" />
-                  <path d="m13 6 6 6-6 6" />
-                </svg>
-              </motion.span>
-            </motion.span>
-          </MotionLink>
-
-          {/* Three lines that fold into an X: the outer bars meet in the middle
-              and cross, the middle bar drops out underneath them. Kept above the
-              sheet so it stays clickable once the menu is open. */}
-          <motion.button
-            type="button"
-            onClick={() => setMenuOpen((v) => !v)}
-            aria-expanded={menuOpen}
-            aria-label={menuOpen ? "Close menu" : "Open menu"}
-            className="absolute top-0 right-0 z-50 mt-6 mr-4 flex h-11 w-11 items-center justify-center sm:mt-8 sm:mr-8"
-            style={{ opacity: revealT, transform: revealTransform, filter: revealFilter }}
-          >
-            <span className="relative block h-[14px] w-7">
-              {[0, 1, 2].map((line) => (
-                <motion.span
-                  key={line}
-                  className="absolute left-0 block h-[2px] w-full rounded-full"
-                  style={{ top: line * 6 }}
-                  animate={{
-                    y: menuOpen ? (line === 0 ? 6 : line === 2 ? -6 : 0) : 0,
-                    rotate: menuOpen ? (line === 0 ? 45 : line === 2 ? -45 : 0) : 0,
-                    opacity: menuOpen && line === 1 ? 0 : 1,
-                    // The burger sits at the circle's origin, so the sheet reaches
-                    // it immediately — no delay needed here.
-                    backgroundColor: menuOpen ? "#f4f4ef" : "#0c1014",
-                  }}
-                  transition={{ duration: 0.35, ease: EASE }}
-                />
-              ))}
-            </span>
-          </motion.button>
-
-          <AnimatePresence>
-            {menuOpen && (
-              <motion.div
-                variants={sheet}
-                initial="hidden"
-                animate="show"
-                exit="exit"
-                className="fixed inset-0 z-40 flex flex-col justify-center bg-[#0c1014] px-6 sm:px-10"
-              >
-                {/* Same position as the dark one underneath, so the circle wipes
-                    one into the other with no cross-fade. */}
-                <div className="absolute top-0 left-0 px-6 py-6 sm:px-10 sm:py-8">
-                  <Wordmark tone="light" />
-                </div>
-
-                {/* Oversized and pushed past the corner so it reads as a crop of
-                    something larger rather than a placed icon. */}
-                <motion.div
-                  variants={sheetItem}
-                  // Box follows the artwork's portrait ratio, and bleeds off the
-                  // right edge only — pushing it down as well would cut the roots.
-                  className="pointer-events-none absolute right-0 bottom-0 h-[min(88vh,760px)] w-[min(71vh,613px)] translate-x-[10%] translate-y-[4%] opacity-25"
-                  aria-hidden="true"
-                >
-                  <TreeMark />
-                </motion.div>
-
-                <nav className="flex flex-col gap-2 sm:gap-4">
-                  {menuLinks.map((link) => (
-                    <motion.div key={link.label} variants={sheetItem}>
-                      <Link
-                        href={link.href}
-                        onClick={() => setMenuOpen(false)}
-                        className="font-body text-[clamp(2.5rem,8vw,5.5rem)] font-black leading-[1.05] tracking-[-0.03em] text-[#f4f4ef] transition-opacity hover:opacity-50"
-                      >
-                        {link.label}
-                      </Link>
-                    </motion.div>
-                  ))}
-                </nav>
-
-                {/* Same two-capsule CTA as the hero, white where that one is
-                    green, sized and placed to land exactly on the dark nav
-                    button underneath — same three offsets, same 36px halves —
-                    so opening the sheet reads as that button turning white
-                    rather than one button leaving and another arriving.
-                    Unlike the other sheet children, this wrapper carries no
-                    sheetItem entrance: it must already be sitting in its final
-                    place, unanimated, before the circle even starts opening,
-                    so the clip-path reveal is the only thing that makes it
-                    appear — the same button caught mid-recolour, not a new
-                    element flying in on its own delay. */}
-                <div className="absolute top-0 right-[68px] mt-6 flex h-11 items-center sm:right-[86px] sm:mt-8">
-                  <MotionLink
-                    href="/login"
-                    onClick={() => setMenuOpen(false)}
-                    className="inline-flex items-center focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#f4f4ef]"
-                    initial="rest"
-                    animate="rest"
-                    whileHover="hover"
-                    whileTap={{ scale: 0.97 }}
-                    variants={{ rest: { y: 0 }, hover: { y: -2 } }}
-                    transition={{ type: "spring", stiffness: 420, damping: 28 }}
-                  >
-                    {/* No backdrop-blur on this twin, unlike the hero's: the
-                        sheet is flat ink, so there is nothing behind the pill
-                        for a blur to pick up, and the hero's glass charcoal is
-                        near-invisible against it. A faint white tint keeps the
-                        capsule readable at rest and gives the wash something to
-                        travel over. */}
-                    <motion.span
-                      className="relative flex h-9 items-center overflow-hidden rounded-full px-4 ring-1 ring-white/25 sm:px-5"
-                      style={{
-                        backgroundColor: "rgba(244, 244, 239, 0.08)",
-                        boxShadow: CTA_LIP,
-                      }}
-                    >
-                      <motion.div
-                        variants={ctaWash}
-                        // See the hero CTA's copy of this element: 1px bleed
-                        // on top/bottom avoids the hairline where two
-                        // independently-antialiased rounded curves meet.
-                        className="absolute -inset-y-[1px] w-[999px] rounded-l-full"
-                        style={{ backgroundColor: "#f4f4ef" }}
-                        aria-hidden="true"
-                      />
-                      <motion.span
-                        variants={ctaLabel}
-                        className="relative z-10 whitespace-nowrap font-body text-xs font-medium sm:text-sm"
-                      >
-                        Get Started
-                      </motion.span>
-                    </motion.span>
-                    <motion.span
-                      variants={sheetCtaDisc}
-                      className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full text-[#0c1014]"
-                      style={{ backgroundColor: "#f4f4ef" }}
-                    >
-                      {/* navArrow, not ctaArrow: 22px is what a 36px disc needs,
-                          and the dart fires on the hover frame — the hero's
-                          delay sequences it behind a fill stage this pair still
-                          has, but at nav scale the wait reads as lag. */}
-                      <motion.span variants={navArrow} className="flex">
-                        <svg
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.75"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="h-[15px] w-[15px]"
-                          aria-hidden="true"
-                        >
-                          <path d="M5 12h14" />
-                          <path d="m13 6 6 6-6 6" />
-                        </svg>
-                      </motion.span>
-                    </motion.span>
-                  </MotionLink>
-                </div>
-
-                {/* Sits above the tree, which is decorative and pointer-events
-                    none, so these stay clickable where the two overlap. */}
-                <motion.div
-                  variants={sheetItem}
-                  className="absolute right-0 bottom-0 left-0 z-10 flex flex-wrap items-center gap-x-6 gap-y-3 px-6 pb-6 sm:px-10 sm:pb-8"
-                >
-                  <div className="flex items-center gap-5">
-                    {socials.map((social) => (
-                      <a
-                        key={social.label}
-                        href={social.href}
-                        // mailto: hands off to a mail client, so a new tab would
-                        // just leave a blank one behind.
-                        target={social.href.startsWith("http") ? "_blank" : undefined}
-                        rel={social.href.startsWith("http") ? "noopener noreferrer" : undefined}
-                        aria-label={social.label}
-                        className="text-[#f4f4ef]/60 transition-colors hover:text-[#f4f4ef]"
-                      >
-                        {/* Frame 0 until hovered, then the sprite steps through
-                            its frames — see .icon-sprite in globals.css. Linktree
-                            is a single-frame sheet, so it simply sits still. */}
-                        <span
-                          className={`icon-sprite ${social.sprite} block opacity-60 transition-opacity hover:opacity-100`}
-                          aria-hidden="true"
-                        />
-                      </a>
-                    ))}
-                  </div>
-
-                  {/* mx-auto centres it in what's left of the row after the
-                      icons, which lands it in the gap before the tree rather
-                      than under it; the translate biases it back towards the
-                      icons. Translating rather than changing the margins keeps
-                      the centring maths intact at every width. */}
-                  <p suppressHydrationWarning className="font-body text-xs tracking-[0.02em] text-[#f4f4ef]/40 sm:mx-auto sm:-translate-x-40">
-                    © {new Date().getFullYear()} 180 Degrees Consulting Sheffield
-                  </p>
-                </motion.div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
+          {/* z-10 makes this a stacking context, which is what lets the leaf
+              below sit behind the button while still covering the page. */}
           <motion.div
-            // The wordmark and burger are absolute now, so this pad stands in for
-            // the height they used to occupy in flow.
-            className="relative z-10 flex flex-1 flex-col px-6 pt-[76px] sm:px-10 sm:pt-[92px]"
-            variants={stack}
-            initial="hidden"
-            animate="show"
+            style={reveal}
+            className="relative z-10 flex justify-center pt-8 sm:pt-10"
           >
+            {/* A crop pulled up out of the scatter below and parked under the
+                CTA, so the capsule's backdrop-blur has something to blur.
+                Anchored to this wrapper rather than positioned in the scatter
+                grid, so it tracks the button at every width. Sized and placed to
+                clear the copy above it: below lg that copy runs full width, and
+                a taller crop reached up into it. */}
             <div
-              className="flex flex-col items-center gap-6 text-center"
-              style={{
-                paddingTop:
-                  "calc(54vh * var(--t, 1) + 8rem * (1 - var(--t, 1)))",
-              }}
+              className="pointer-events-none absolute top-0 -left-12 -z-10 h-[160px] w-[160px]"
+              aria-hidden="true"
             >
-              <motion.h1
-                variants={item}
-                className="font-body text-[clamp(2.25rem,6vw,4.5rem)] font-black leading-[1.05] tracking-[-0.03em] text-[#1c1a18]"
-              >
-                Replace <SheetsMark /> spreadsheets, <GmailMark /> follow-ups
-                <br />
-                 and <MondayMark /> tracking. All in one place.
-              </motion.h1>
-
-              {/* <motion.p
-                variants={item}
-                className="max-w-[42rem] font-mono text-sm leading-relaxed text-[#0c1014]/55"
-              >
-                180Connect replaces the sheets, inboxes, and trackers you&apos;re
-                stitching together today with one platform for outreach,
-                follow-ups, and reporting.
-              </motion.p> */}
+              <Image
+                src="/crops/leaf-vine.png"
+                alt=""
+                fill
+                sizes="190px"
+                className="object-cover"
+              />
             </div>
 
-            {/* z-10 makes this a stacking context, which is what lets the leaf
-                below sit behind the button while still covering the page. */}
-            <motion.div
-              style={{ opacity: revealT, transform: revealTransform, filter: revealFilter }}
-              className="relative z-10 flex justify-center pt-8 sm:pt-10"
-            >
-              {/* A crop pulled up out of the scatter below and parked under the
-                  CTA, so the capsule's backdrop-blur has something to blur.
-                  Anchored to this wrapper rather than positioned in the scatter
-                  grid, so it tracks the button at every width. */}
-              <div
-                // Sized and placed to clear the paragraph above it: below lg the
-                // copy runs full width, and a taller crop reached up into it.
-                className="pointer-events-none absolute top-0 -left-12 -z-10 h-[160px] w-[160px]"
-                aria-hidden="true"
-              >
-                <Image
-                  src="/crops/leaf-vine.png"
-                  alt=""
-                  fill
-                  sizes="190px"
-                  className="object-cover"
-                />
-              </div>
-
-              {/* Two capsules meeting at a tangent, not one merged shape: they
-                  touch at a single point, leaving the lens slivers above and
-                  below that give the look its bite. */}
-              <MotionLink
-                href="/login"
-                className="inline-flex items-center focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#0c1014]"
-                initial="rest"
-                animate="rest"
-                whileHover="hover"
-                whileTap={{ scale: 0.97 }}
-                variants={{ rest: { y: 0 }, hover: { y: -2 } }}
-                transition={{ type: "spring", stiffness: 420, damping: 28 }}
-              >
-                {/* Both halves share the height so the circle stays a circle and
-                    the two keep meeting at a single tangent point. */}
-                <motion.span
-                  // backdrop-blur bites on the leaf behind; the ring and the lit
-                  // top edge keep the glass legible where it overhangs the flat
-                  // page, which the blur alone cannot do. overflow-hidden clips
-                  // the oversized wash block to the pill's rounded shape.
-                  className="relative flex h-10 items-center overflow-hidden rounded-full px-6 ring-1 ring-white/25 backdrop-blur-md"
-                  style={{ backgroundColor: CTA_GLASS, boxShadow: CTA_LIP }}
-                >
-                  {/* Wide enough that its square trailing edge never enters
-                      frame — only the rounded leading edge is ever on screen. */}
-                  <motion.div
-                    variants={ctaWash}
-                    // Overshoots the pill's own top/bottom by 1px rather than
-                    // sitting exactly flush: the wash's rounded-l-full cap and
-                    // the parent's overflow-hidden clip are two independently
-                    // antialiased curves, and Chrome subpixel-rounds them a
-                    // hair apart, leaving a hairline of the glass colour
-                    // showing through at the arc even when they're nominally
-                    // identical (same bug noted below for the disc). A 1px
-                    // bleed guarantees the wash's curve is always slightly
-                    // outside the parent's, so the clip — not a near-miss —
-                    // is what draws the edge.
-                    className="absolute -inset-y-[1px] w-[999px] rounded-l-full"
-                    style={{ backgroundColor: CTA_GREEN }}
-                    aria-hidden="true"
-                  />
-                  <motion.span
-                    variants={ctaLabel}
-                    className="relative z-10 font-body text-sm font-medium"
-                  >
-                    Get Started
-                  </motion.span>
-                </motion.span>
-                {/* Green disc inset inside the dark circle, so the dark reads as a
-                    ring around it rather than the whole token going green. */}
-                <motion.span
-                  variants={ctaDisc}
-                  // overflow-hidden is what sells the arrow's loop-through: it
-                  // vanishes at the rim instead of drifting outside the circle.
-                  className="relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full text-[#0c1014]"
-                  style={{ backgroundColor: CTA_GREEN }}
-                >
-                  <motion.span variants={ctaArrow} className="flex">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.75"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="h-[16px] w-[16px]"
-                      aria-hidden="true"
-                    >
-                      <path d="M5 12h14" />
-                      <path d="m13 6 6 6-6 6" />
-                    </svg>
-                  </motion.span>
-                </motion.span>
-              </MotionLink>
-            </motion.div>
-
-            {/* Scattered crops of the same source photo — a few left soft to
-                read as depth-of-field rather than a gallery grid. */}
-            <div className="relative mt-10 h-[360px] flex-1 sm:h-[460px] lg:h-[520px]">
-              {squares.map((sq, i) =>
-                sq.hero ? null : <Crop key={i} crop={sq} delay={cropDelays[i]} index={i} />,
-              )}
-            </div>
+            <BrandCtaButton type="button" label="Get Started" size="lg" onClick={openSignin} />
           </motion.div>
+
+          {/* Scattered crops of the same source photo — a few left soft to
+              read as depth-of-field rather than a gallery grid. */}
+          <div className="relative mt-10 h-[360px] flex-1 sm:h-[460px] lg:h-[520px]">
+            {squares.map((sq, i) =>
+              sq.hero ? null : <Crop key={i} crop={sq} delay={skipIntro ? 0 : cropDelays[i]} index={i} />,
+            )}
+          </div>
+        </motion.div>
       </motion.main>
     </MotionConfig>
   );

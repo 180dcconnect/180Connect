@@ -89,7 +89,7 @@ export default function PrivacyPage() {
       title="Privacy Policy"
       subtitle="We keep things simple: your data stays private, is never sold, and is only ever used to make 180Connect work better for your team."
       sections={SECTIONS}
-      activeLink="privacy"
+      activeHref="/privacy"
     />
   );
 }

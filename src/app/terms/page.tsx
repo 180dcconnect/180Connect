@@ -84,7 +84,7 @@ export default function TermsPage() {
       title="Terms of Service"
       subtitle="Please read these Terms carefully before using 180Connect. They set out the rules for using our platform and your responsibilities as a user."
       sections={SECTIONS}
-      activeLink="terms"
+      activeHref="/terms"
       showHomeLink={false}
     />
   );

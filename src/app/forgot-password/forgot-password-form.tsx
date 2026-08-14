@@ -1,7 +1,16 @@
 "use client";
 
-import Link from "next/link";
 import { useActionState, useCallback, useState } from "react";
+
+import { BrandCtaButton } from "@/components/brand/brand-cta";
+import {
+  bannerClass,
+  fieldClass,
+  fieldErrorClass,
+  quietLinkClass,
+  type FieldTone,
+} from "@/components/brand/fields";
+import { FloatingLabelInput } from "@/components/spectrumui/floating-label-input";
 import {
   CAPTCHA_HINT_ID,
   TurnstileChallenge,
@@ -11,7 +20,14 @@ import { requestPasswordReset } from "./actions";
 
 const initialState: ForgotPasswordState = { status: "idle" };
 
-export function ForgotPasswordForm() {
+export function ForgotPasswordForm({
+  tone = "light",
+  onBack,
+}: {
+  tone?: FieldTone;
+  /** Swaps the dialog back to its sign-in panel rather than navigating away. */
+  onBack: () => void;
+}) {
   const [state, action, pending] = useActionState(
     requestPasswordReset,
     initialState,
@@ -37,29 +53,42 @@ export function ForgotPasswordForm() {
   if (state.status === "success") {
     return (
       <div className="mt-8">
-        <div role="status" className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm leading-relaxed text-green-900">
+        <div role="status" className={bannerClass(tone, "success")}>
           {state.message}
         </div>
-        <p className="mt-3 text-xs leading-relaxed text-foreground/55">
+        <p
+          className={`mt-3 font-body text-xs leading-relaxed ${
+            tone === "dark" ? "text-[#f4f4ef]/50" : "text-[#0c1014]/50"
+          }`}
+        >
           Check your spam folder too. The link can only be used once.
         </p>
-        <Link href="/login" className="mt-6 block text-center text-sm font-bold text-brand underline-offset-4 hover:underline">
+        <button
+          type="button"
+          onClick={onBack}
+          className={`mt-6 ${quietLinkClass(tone)}`}
+        >
           Back to log in
-        </Link>
+        </button>
       </div>
     );
   }
 
   return (
-    <form action={action} onSubmit={onSubmit} className="mt-8 flex flex-col gap-4" noValidate>
+    <form
+      action={action}
+      onSubmit={onSubmit}
+      className="mt-8 flex flex-col gap-5"
+      noValidate
+    >
       {state.message && (
-        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-xs text-red-700">
+        <div role="alert" className={bannerClass(tone, "error")}>
           {state.message}
         </div>
       )}
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="email" className="text-xs font-bold">Email address</label>
-        <input
+
+      <div className="flex flex-col gap-1">
+        <FloatingLabelInput
           id="email"
           name="email"
           type="email"
@@ -68,10 +97,15 @@ export function ForgotPasswordForm() {
           defaultValue={state.email}
           aria-invalid={Boolean(emailError)}
           aria-describedby={emailError ? "email-error" : undefined}
-          className="h-10 rounded-lg border border-black/10 bg-[#fafafa] px-3 text-sm outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/20 aria-invalid:border-red-500"
+          className={fieldClass(tone)}
+          label="Email address"
           required
         />
-        {emailError && <p id="email-error" className="text-xs text-red-700">{emailError}</p>}
+        {emailError && (
+          <p id="email-error" className={fieldErrorClass(tone)}>
+            {emailError}
+          </p>
+        )}
       </div>
 
       <TurnstileChallenge
@@ -80,19 +114,20 @@ export function ForgotPasswordForm() {
         action="send reset instructions"
         gerund="sending reset instructions"
         resetKey={state}
+        tone={tone}
       />
 
-      <button
-        type="submit"
-        disabled={pending || !solved}
-        aria-describedby={solved ? undefined : CAPTCHA_HINT_ID}
-        className="mt-2 h-10 rounded-full bg-brand text-sm font-bold text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {pending ? "Sending..." : "Send reset instructions"}
-      </button>
-      <Link href="/login" className="text-center text-xs text-foreground/55 underline-offset-4 hover:text-brand hover:underline">
-        Back to log in
-      </Link>
+      <div className="mt-1 flex flex-wrap items-center gap-x-5 gap-y-3">
+        <BrandCtaButton
+          label={pending ? "Sending…" : "Send instructions"}
+          disabled={pending || !solved}
+          describedBy={solved ? undefined : CAPTCHA_HINT_ID}
+          tone={tone === "dark" ? "sheet" : "glass"}
+        />
+        <button type="button" onClick={onBack} className={quietLinkClass(tone)}>
+          Back to log in
+        </button>
+      </div>
     </form>
   );
 }

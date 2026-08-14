@@ -52,37 +52,27 @@ const PREVIEW_SCALE = 0.25;
 
 function PagePreviewPanel({ href, title }: { href: string; title: string }) {
   return (
-    <PreviewLinkCardPanel className="w-80 overflow-hidden rounded-xl border border-[#0c1014]/10 bg-white p-0 text-left shadow-xl">
+    <PreviewLinkCardPanel
+      className="w-80 overflow-hidden rounded-xl border border-[#0c1014]/10 bg-white p-0 shadow-xl"
+      style={{ height: PREVIEW_PAGE_HEIGHT * PREVIEW_SCALE }}
+    >
       <div
-        className="relative w-full overflow-hidden bg-white"
-        style={{ height: PREVIEW_PAGE_HEIGHT * PREVIEW_SCALE }}
+        aria-hidden="true"
+        className="pointer-events-none origin-top-left"
+        style={{
+          width: PREVIEW_PAGE_WIDTH,
+          height: PREVIEW_PAGE_HEIGHT,
+          transform: `scale(${PREVIEW_SCALE})`,
+        }}
       >
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute left-0 top-0 origin-top-left"
-          style={{
-            width: PREVIEW_PAGE_WIDTH,
-            height: PREVIEW_PAGE_HEIGHT,
-            transform: `scale(${PREVIEW_SCALE})`,
-          }}
-        >
-          <iframe
-            src={href}
-            tabIndex={-1}
-            title={`${title} preview`}
-            loading="lazy"
-            className="h-full w-full border-0"
-          />
-        </div>
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-white via-white/85 to-transparent px-3.5 pb-2 pt-6">
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[#72b744]">
-            Opens in new tab &rarr;
-          </span>
-        </div>
+        <iframe
+          src={href}
+          tabIndex={-1}
+          title={`${title} preview`}
+          loading="lazy"
+          className="h-full w-full border-0"
+        />
       </div>
-      <p className="border-t border-[#0c1014]/8 px-3.5 py-2.5 text-xs font-bold text-[#0c1014]">
-        {title}
-      </p>
     </PreviewLinkCardPanel>
   );
 }

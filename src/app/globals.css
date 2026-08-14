@@ -63,34 +63,65 @@
 }
 
 /* ~45ms a frame across all three, so they feel like one set regardless of
-   frame count, rather than each running at its source GIF's own delay. */
+   frame count, rather than each running at its source GIF's own delay.
+   Each cycle is the run plus a 0.6s hold on the last frame, so a long hover
+   reads as the animation playing again rather than as a loop that never
+   settles. The hold is why the timing function lives in the keyframes: the
+   run needs steps(), the hold needs step-end, and one function on the
+   shorthand cannot do both. jump-none lands the run on the last real frame
+   (rather than one past the end of the sheet) so the hold has something to
+   show. */
 a:hover .ig-sprite {
-  animation: ig-sprite-play 0.72s steps(16) infinite;
+  animation: ig-sprite-play 1.32s infinite;
 }
 
 a:hover .li-sprite {
-  animation: li-sprite-play 1.08s steps(24) infinite;
+  animation: li-sprite-play 1.68s infinite;
 }
 
 a:hover .mail-sprite {
-  animation: mail-sprite-play 1.12s steps(25) infinite;
+  animation: mail-sprite-play 1.72s infinite;
 }
 
 @keyframes ig-sprite-play {
-  to {
-    background-position: 0 -608px;
+  0% {
+    background-position: 0 0;
+    animation-timing-function: steps(16, jump-none);
+  }
+  54.55% {
+    background-position: 0 -570px;
+    animation-timing-function: step-end;
+  }
+  100% {
+    background-position: 0 -570px;
   }
 }
 
 @keyframes li-sprite-play {
-  to {
-    background-position: 0 -912px;
+  0% {
+    background-position: 0 0;
+    animation-timing-function: steps(24, jump-none);
+  }
+  64.29% {
+    background-position: 0 -874px;
+    animation-timing-function: step-end;
+  }
+  100% {
+    background-position: 0 -874px;
   }
 }
 
 @keyframes mail-sprite-play {
-  to {
-    background-position: 0 -900px;
+  0% {
+    background-position: 0 0;
+    animation-timing-function: steps(25, jump-none);
+  }
+  65.12% {
+    background-position: 0 -864px;
+    animation-timing-function: step-end;
+  }
+  100% {
+    background-position: 0 -864px;
   }
 }
 

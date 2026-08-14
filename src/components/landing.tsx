@@ -383,6 +383,15 @@ export default function Landing() {
                     </a>
                   ))}
                 </div>
+
+                {/* mx-auto centres it in what's left of the row after the
+                    icons, which lands it in the gap before the tree rather
+                    than under it; the translate biases it back towards the
+                    icons. Translating rather than changing the margins keeps
+                    the centring maths intact at every width. */}
+                <p className="font-body text-xs tracking-[0.02em] text-[#f4f4ef]/40 sm:mx-auto sm:-translate-x-40">
+                  © {new Date().getFullYear()} 180 Degrees Consulting Sheffield
+                </p>
               </motion.div>
             </motion.div>
           )}

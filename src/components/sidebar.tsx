@@ -67,18 +67,9 @@ function CollapseIcon({ collapsed }: { collapsed: boolean }) {
   );
 }
 
-function UserIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
-      <circle cx="10" cy="6.5" r="3.25" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M4 16.5c.8-3.3 3.2-5 6-5s5.2 1.7 6 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function LogoutIcon() {
   return (
-    <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
       <path d="M8 17H4.5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1H8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       <path d="M13 13.5 17 10l-4-3.5M17 10H7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
@@ -86,8 +77,10 @@ function LogoutIcon() {
 }
 
 /**
- * Persistent app bottom dock navigation. The caller builds `sections` from `hasPermission`,
- * so a role only ever sees links it can actually open.
+ * Persistent app sidebar. The caller builds `sections` from `hasPermission`,
+ * so a role only ever sees links it can actually open — mirrors the
+ * server-side gate on each page rather than replacing it. Collapse state is
+ * local and UI-only; it does not gate anything.
  */
 export function Sidebar({
   sections,
@@ -101,86 +94,82 @@ export function Sidebar({
   onLogout: () => Promise<void>;
 }) {
   const pathname = usePathname();
-  const [profileOpen, setProfileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <nav
-      aria-label="Primary"
-      className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-2xl border border-white/10 bg-[#2d2825]/90 p-2.5 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] text-white"
+    <aside
+      className={`sticky top-0 flex h-screen shrink-0 flex-col border-r border-black/10 bg-white transition-[width] duration-200 ${
+        collapsed ? "w-16" : "w-64"
+      }`}
     >
-      {sections.map((section, sIndex) => (
-        <div key={section.label ?? sIndex} className="flex items-center gap-1">
-          {sIndex > 0 && <div className="mx-1 h-6 w-px bg-white/15" aria-hidden="true" />}
-          {section.items.map((item) => {
-            const active = pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                aria-current={active ? "page" : undefined}
-                className={`relative flex items-center gap-2.5 rounded-xl px-4.5 py-2.5 text-sm font-semibold transition-all duration-200 ${
-                  active
-                    ? "bg-[#1c1a18] text-white ring-1 ring-white/15 shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_8px_20px_rgba(0,0,0,0.7)]"
-                    : "text-white/70 hover:text-white hover:bg-[#1c1a18] hover:ring-1 hover:ring-white/15 hover:shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_8px_20px_rgba(0,0,0,0.7)]"
-                }`}
-              >
-                <span className="shrink-0">{ICONS[item.icon]}</span>
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
-        </div>
-      ))}
-
-      {/* Profile & Dropdown menu */}
-      <div className="mx-1 h-6 w-px bg-white/15" aria-hidden="true" />
-
-      <div className="relative">
-        {profileOpen && (
-          <>
-            {/* Backdrop overlay to close menu */}
-            <div
-              className="fixed inset-0 z-40"
-              onClick={() => setProfileOpen(false)}
-              aria-hidden="true"
-            />
-            {/* Floating Menu above dock */}
-            <div className="absolute bottom-full right-0 mb-3 w-56 z-50 rounded-2xl border border-white/10 bg-[#24201e]/95 p-2 backdrop-blur-xl shadow-[0_20px_40px_rgba(0,0,0,0.6)] text-white">
-              <div className="px-3 py-2 border-b border-white/10">
-                <p className="truncate text-sm font-bold text-white">{userLabel}</p>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-white/50 mt-0.5">
-                  {roleLabel}
-                </p>
-              </div>
-              <div className="pt-1.5">
-                <form action={onLogout}>
-                  <button
-                    type="submit"
-                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"
-                  >
-                    <LogoutIcon />
-                    <span>Log out</span>
-                  </button>
-                </form>
-              </div>
-            </div>
-          </>
+      <div className="flex items-center justify-between gap-2 px-3 py-4">
+        {!collapsed && (
+          <span className="truncate px-1 text-sm font-bold text-brand">180Connect</span>
         )}
-
         <button
           type="button"
-          onClick={() => setProfileOpen((prev) => !prev)}
-          title={userLabel}
-          className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-200 ${
-            profileOpen
-              ? "bg-[#1c1a18] text-white ring-1 ring-white/15 shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_8px_20px_rgba(0,0,0,0.7)]"
-              : "text-white/70 hover:text-white hover:bg-[#1c1a18] hover:ring-1 hover:ring-white/15 hover:shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_8px_20px_rgba(0,0,0,0.7)]"
-          }`}
+          onClick={() => setCollapsed((value) => !value)}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="ml-auto shrink-0 rounded-lg p-1.5 text-foreground/50 hover:bg-black/5 hover:text-foreground"
         >
-          <UserIcon />
-          <span className="hidden sm:inline">Profile</span>
+          <CollapseIcon collapsed={collapsed} />
         </button>
       </div>
-    </nav>
+
+      <nav className="flex-1 space-y-6 overflow-y-auto px-2 py-2" aria-label="Primary">
+        {sections.map((section, index) => (
+          <div key={section.label ?? index}>
+            {section.label && !collapsed && (
+              <p className="px-3 pb-1 text-xs font-bold uppercase tracking-wide text-foreground/40">
+                {section.label}
+              </p>
+            )}
+            <ul className="space-y-1">
+              {section.items.map((item) => {
+                const active = pathname === item.href;
+                return (
+                  <li key={item.href}>
+                    <Link
+                      href={item.href}
+                      title={collapsed ? item.label : undefined}
+                      aria-current={active ? "page" : undefined}
+                      className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                        active
+                          ? "bg-brand/10 text-brand"
+                          : "text-foreground/70 hover:bg-black/5 hover:text-foreground"
+                      }`}
+                    >
+                      <span className="shrink-0">{ICONS[item.icon]}</span>
+                      {!collapsed && <span className="truncate">{item.label}</span>}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </nav>
+
+      <div className="border-t border-black/10 p-2">
+        {!collapsed && (
+          <div className="mb-1 px-2 pt-2">
+            <p className="truncate text-sm font-bold">{userLabel}</p>
+            <p className="text-xs font-bold uppercase tracking-wide text-foreground/45">
+              {roleLabel}
+            </p>
+          </div>
+        )}
+        <form action={onLogout}>
+          <button
+            type="submit"
+            title={collapsed ? "Log out" : undefined}
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-bold text-foreground/70 hover:bg-black/5 hover:text-foreground"
+          >
+            <LogoutIcon />
+            {!collapsed && <span>Log out</span>}
+          </button>
+        </form>
+      </div>
+    </aside>
   );
 }

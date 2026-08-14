@@ -42,9 +42,18 @@
   background-size: 38px 912px; /* 38 * 24 frames */
 }
 
+/* The envelope reads heavier than the others at the shared size, so it is set
+   a little smaller and nudged up to sit optically level with them.
+   Its sheet is drawn with the art inset inside each frame — the source art ran
+   to the frame's bottom edge, and that row bled across the seam and showed as a
+   stray line at the top of the icon. The box is 36px so the inset art still
+   reads at ~32px. */
 .mail-sprite {
+  width: 36px;
+  height: 36px;
   background-image: url("/mail-sprite.png");
-  background-size: 38px 950px; /* 38 * 25 frames */
+  background-size: 36px 900px; /* 36 * 25 frames */
+  transform: translateY(-3px);
 }
 
 /** Linktree came as a still only, so it has no hover animation. */
@@ -81,7 +90,7 @@ a:hover .mail-sprite {
 
 @keyframes mail-sprite-play {
   to {
-    background-position: 0 -950px;
+    background-position: 0 -900px;
   }
 }
 

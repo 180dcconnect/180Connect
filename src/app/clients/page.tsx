@@ -6,6 +6,7 @@ import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
 import {
+  emptyStateMessage,
   filterByOwner,
   searchClients,
   visibleClients,
@@ -13,6 +14,7 @@ import {
   type OpenSuppression,
 } from "./visible-clients.ts";
 import { ClaimButton } from "./[id]/claim-button";
+import { ClientSearch } from "./client-search";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 
 type TeamMember = { id: string; full_name: string | null };
@@ -43,6 +45,14 @@ const PAGE_SIZE = 25;
  * case. AC2 (updates without a manual refresh) is free: this page has no cache —
  * every visit re-queries organisations, so a reassignment shows up on the next
  * normal navigation here, same as any other filter change.
+ *
+ * F052 (#54) search by organisation name: `q` was already read here, but as part
+ * of the GET form below, so applying or clearing it meant a full document
+ * reload — AC4 asks for neither. The input is now <ClientSearch>, which
+ * debounces and soft-navigates; this page keeps reading `q` from the URL
+ * exactly as before, so pagination, deep links and searchClients() are unchanged.
+ * The owner <select> stays a plain GET form — one control needs to be live, not
+ * both, and the form carries a hidden `q` so submitting it preserves the search.
  */
 export default async function ClientsPage({
   searchParams,
@@ -147,16 +157,11 @@ export default async function ClientsPage({
         )}
 
         <form className="mt-6 flex flex-wrap items-end gap-3" method="get">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-foreground/65">Search</span>
-            <input
-              type="search"
-              name="q"
-              defaultValue={search ?? ""}
-              placeholder="Client name"
-              className="rounded-lg border border-black/10 px-3 py-2 text-sm"
-            />
-          </label>
+          <ClientSearch initialTerm={search ?? ""} ownerFilter={ownerFilter} />
+
+          {/* F052: ClientSearch's input has no `name`, so without this the owner
+              filter's submit would drop the active search term. */}
+          <input type="hidden" name="q" value={search ?? ""} />
 
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-foreground/65">Owner</span>
@@ -210,11 +215,7 @@ export default async function ClientsPage({
 
         {clients.length === 0 ? (
           <p className="mt-8 text-sm text-foreground/65">
-            {isOwnedView
-              ? "You don't own any clients yet. Claim one from the list, or ask an admin to assign you one."
-              : filterActive
-                ? "No clients match this filter."
-                : "No clients to show."}
+            {emptyStateMessage({ isOwnedView, search, filterActive })}
           </p>
         ) : (
           <ul className="mt-8 divide-y divide-black/5">

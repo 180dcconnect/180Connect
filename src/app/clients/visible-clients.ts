@@ -85,3 +85,28 @@ export function searchClients(
   if (!term) return clients;
   return clients.filter((client) => client.legal_name.toLowerCase().includes(term));
 }
+
+/**
+ * F052 AC3 — the empty list needs to explain itself rather than just showing
+ * nothing. A search term takes priority over the F166 owned-view copy: a CAM on
+ * "My clients" who searches for something absent was previously told "You don't
+ * own any clients yet", which is simply false when they do own some.
+ */
+export function emptyStateMessage({
+  isOwnedView,
+  search,
+  filterActive,
+}: {
+  isOwnedView: boolean;
+  search?: string | null;
+  filterActive: boolean;
+}): string {
+  const term = search?.trim();
+  if (term) {
+    return `No clients match “${term}”. Clear the search to see the full list.`;
+  }
+  if (isOwnedView) {
+    return "You don't own any clients yet. Claim one from the list, or ask an admin to assign you one.";
+  }
+  return filterActive ? "No clients match this filter." : "No clients to show.";
+}

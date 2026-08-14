@@ -40,7 +40,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         roleLabel={actor.role}
         onLogout={logout}
       />
-      <div className="min-w-0 flex-1">{children}</div>
+      <main className="min-w-0 flex-1">{children}</main>
     </div>
   );
 }

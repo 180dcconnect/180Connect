@@ -112,7 +112,7 @@ const sheet: Variants = {
   },
   exit: {
     clipPath: `circle(0% at ${SHEET_ORIGIN})`,
-    transition: { duration: 0.6, ease: SHEET_EASE, when: "afterChildren", staggerChildren: 0.04 },
+    transition: { duration: 0.6, ease: SHEET_EASE, staggerChildren: 0.04 },
   },
 };
 
@@ -144,8 +144,22 @@ const CTA_FILL = 0.22;
 const CTA_WASH = 0.38;
 
 /** Shared so the two capsules' greens and darks cannot drift apart. */
-const CTA_INK = "#0c1014";
 const CTA_GREEN = "#e6f5c0";
+
+/**
+ * Rest state of the CTA is glass rather than solid: the same charcoal at 72%,
+ * which is the lowest opacity that still keeps the cream label above 4.5:1
+ * against the page. Hover washes to opaque green, so the translucency only
+ * ever shows on the dark half.
+ */
+const CTA_GLASS = "rgba(28, 26, 24, 0.72)";
+
+/**
+ * The lit top edge that sells glass: a one-pixel inset highlight, the way a
+ * pane catches light on its upper rim. Kept on through hover so the capsule
+ * and the disc do not lose their edge at different moments.
+ */
+const CTA_LIP = "inset 0 1px 0 rgba(255, 255, 255, 0.3)";
 
 /**
  * Both capsules paint dark and green as a *single* background on one element,
@@ -162,24 +176,31 @@ const CTA_GREEN = "#e6f5c0";
  */
 const ctaDisc: Variants = {
   rest: {
-    boxShadow: `inset 0 0 0 3px ${CTA_INK}`,
+    boxShadow: `inset 0 0 0 3px ${CTA_GLASS}, ${CTA_LIP}`,
     transition: { duration: 0.25, ease: EASE },
   },
   hover: {
-    boxShadow: `inset 0 0 0 0px ${CTA_INK}`,
+    boxShadow: `inset 0 0 0 0px ${CTA_GLASS}, ${CTA_LIP}`,
     transition: { duration: CTA_FILL, ease: EASE },
   },
 };
 
 /**
- * Pill: a two-stop linear gradient at double width. Sliding the background from
- * one end to the other walks the hard boundary across, so green enters from the
- * circle's side — same read as the old scaleX wash, but one paint layer.
+ * The fill's leading edge is the pill's own end-cap, reused rather than
+ * redrawn: a `rounded-l-full` block at the pill's full height caps its radius
+ * at height/2 exactly like `rounded-full` does on the pill itself, so the two
+ * curves are guaranteed identical — same mechanism, same 20px radius. Sliding
+ * it on `left` (a percentage, so it reads off the pill's own width as
+ * containing block) walks that cap across like a second pill sweeping through
+ * the first, entering from the circle's side. Breaks the single-paint-layer
+ * rule the pill used to hold (see ctaDisc above) — a rounded leading edge
+ * isn't expressible as one background, so this is a second layer under the
+ * label instead.
  */
 const ctaWash: Variants = {
-  rest: { backgroundPosition: "0% 0%", transition: { duration: 0.28, ease: EASE } },
+  rest: { left: "100%", transition: { duration: 0.28, ease: EASE } },
   hover: {
-    backgroundPosition: "100% 0%",
+    left: "0%",
     transition: { duration: CTA_WASH, ease: EASE, delay: CTA_FILL },
   },
 };
@@ -408,7 +429,7 @@ export default function Landing() {
           <div className="grid grid-cols-1 gap-6 pt-6 sm:pt-10 lg:grid-cols-[1fr_18rem] lg:gap-10">
             <motion.h1
               variants={item}
-              className="font-body text-[clamp(2.25rem,6vw,4.5rem)] font-black leading-[1.05] tracking-[-0.03em] text-[#0c1014]"
+              className="font-body text-[clamp(2.25rem,6vw,4.5rem)] font-black leading-[1.05] tracking-[-0.03em] text-[#1c1a18]"
             >
               Replace spreadsheets,
               <br />
@@ -425,7 +446,28 @@ export default function Landing() {
             </motion.p>
           </div>
 
-          <motion.div variants={item} className="pt-8 sm:pt-10">
+          {/* z-10 makes this a stacking context, which is what lets the leaf
+              below sit behind the button while still covering the page. */}
+          <motion.div variants={item} className="relative z-10 pt-8 sm:pt-10">
+            {/* A crop pulled up out of the scatter below and parked under the
+                CTA, so the capsule's backdrop-blur has something to blur.
+                Anchored to this wrapper rather than positioned in the scatter
+                grid, so it tracks the button at every width. */}
+            <div
+              // Sized and placed to clear the paragraph above it: below lg the
+              // copy runs full width, and a taller crop reached up into it.
+              className="pointer-events-none absolute top-0 -left-12 -z-10 h-[160px] w-[160px]"
+              aria-hidden="true"
+            >
+              <Image
+                src="/crops/leaf-vine.png"
+                alt=""
+                fill
+                sizes="190px"
+                className="object-cover"
+              />
+            </div>
+
             {/* Two capsules meeting at a tangent, not one merged shape: they
                 touch at a single point, leaving the lens slivers above and
                 below that give the look its bite. */}
@@ -442,18 +484,25 @@ export default function Landing() {
               {/* Both halves share the height so the circle stays a circle and
                   the two keep meeting at a single tangent point. */}
               <motion.span
-                variants={ctaWash}
-                className="relative flex h-10 items-center rounded-full px-6"
-                style={{
-                  // Hard stop at the midpoint of a double-width gradient: the
-                  // visible window slides from the all-dark half to the all-green
-                  // half, giving a clean vertical wipe with no second layer.
-                  backgroundImage: `linear-gradient(to right, ${CTA_INK} 50%, ${CTA_GREEN} 50%)`,
-                  backgroundSize: "200% 100%",
-                  backgroundRepeat: "no-repeat",
-                }}
+                // backdrop-blur bites on the leaf behind; the ring and the lit
+                // top edge keep the glass legible where it overhangs the flat
+                // page, which the blur alone cannot do. overflow-hidden clips
+                // the oversized wash block to the pill's rounded shape.
+                className="relative flex h-10 items-center overflow-hidden rounded-full px-6 ring-1 ring-white/25 backdrop-blur-md"
+                style={{ backgroundColor: CTA_GLASS, boxShadow: CTA_LIP }}
               >
-                <motion.span variants={ctaLabel} className="font-body text-sm font-medium">
+                {/* Wide enough that its square trailing edge never enters
+                    frame — only the rounded leading edge is ever on screen. */}
+                <motion.div
+                  variants={ctaWash}
+                  className="absolute inset-y-0 w-[999px] rounded-l-full"
+                  style={{ backgroundColor: CTA_GREEN }}
+                  aria-hidden="true"
+                />
+                <motion.span
+                  variants={ctaLabel}
+                  className="relative z-10 font-body text-sm font-medium"
+                >
                   Get Started
                 </motion.span>
               </motion.span>

@@ -344,30 +344,34 @@ export function ResetPasswordForm({
           <span>
             I agree to the{" "}
             <PreviewLinkCard>
-              <PreviewLinkCardTrigger asChild>
-                <Link
-                  href="/terms"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-0.5 font-semibold text-[#0c1014] underline underline-offset-4 hover:opacity-80"
-                >
-                  Terms &amp; Conditions
-                </Link>
-              </PreviewLinkCardTrigger>
+              <PreviewLinkCardTrigger
+                render={
+                  <Link
+                    href="/terms"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-0.5 font-semibold text-[#0c1014] underline underline-offset-4 hover:opacity-80"
+                  >
+                    Terms &amp; Conditions
+                  </Link>
+                }
+              />
               <PagePreviewPanel href="/terms" title="Terms & Conditions" />
             </PreviewLinkCard>{" "}
             and{" "}
             <PreviewLinkCard>
-              <PreviewLinkCardTrigger asChild>
-                <Link
-                  href="/privacy"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-0.5 font-semibold text-[#0c1014] underline underline-offset-4 hover:opacity-80"
-                >
-                  Privacy Policy
-                </Link>
-              </PreviewLinkCardTrigger>
+              <PreviewLinkCardTrigger
+                render={
+                  <Link
+                    href="/privacy"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-0.5 font-semibold text-[#0c1014] underline underline-offset-4 hover:opacity-80"
+                  >
+                    Privacy Policy
+                  </Link>
+                }
+              />
               <PagePreviewPanel href="/privacy" title="Privacy Policy" />
             </PreviewLinkCard>
             .

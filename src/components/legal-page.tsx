@@ -17,7 +17,7 @@ const EASE = [0.2, 0.7, 0.2, 1] as const;
 /* ─── Menu data (same as landing) ──────────────────────────────────────── */
 
 const menuLinks = [
-  { label: "About", href: "/about" },
+  { label: "Home", href: "/" },
   { label: "Terms", href: "/terms" },
   { label: "Privacy", href: "/privacy" },
   { label: "Changelog", href: "/changelog" },
@@ -169,9 +169,10 @@ export type LegalSection = {
 type LegalPageProps = {
   title: string;
   subtitle: string;
-  lastUpdated: string;
+  lastUpdated?: string;
   sections: LegalSection[];
   activeLink: string;
+  showHomeLink?: boolean;
 };
 
 /* ─── Component ────────────────────────────────────────────────────────── */
@@ -182,6 +183,7 @@ export default function LegalPage({
   lastUpdated,
   sections,
   activeLink,
+  showHomeLink = true,
 }: LegalPageProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeSection, setActiveSection] = useState(0);
@@ -453,27 +455,29 @@ export default function LegalPage({
         >
           <div className="max-w-[1200px]">
             {/* back link */}
-            <motion.div variants={entrance} className="mb-8">
-              <Link
-                href="/"
-                className="group inline-flex items-center gap-2 font-body text-[13px] font-medium tracking-wide text-[#0c1014]/40 uppercase transition-colors hover:text-[#0c1014]"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5"
-                  aria-hidden="true"
+            {showHomeLink && (
+              <motion.div variants={entrance} className="mb-8">
+                <Link
+                  href="/"
+                  className="group inline-flex items-center gap-2 font-body text-[13px] font-medium tracking-wide text-[#0c1014]/40 uppercase transition-colors hover:text-[#0c1014]"
                 >
-                  <path d="M19 12H5" />
-                  <path d="m11 18-6-6 6-6" />
-                </svg>
-                Home
-              </Link>
-            </motion.div>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5"
+                    aria-hidden="true"
+                  >
+                    <path d="M19 12H5" />
+                    <path d="m11 18-6-6 6-6" />
+                  </svg>
+                  Home
+                </Link>
+              </motion.div>
+            )}
 
             {/* title */}
             <motion.h1
@@ -484,17 +488,19 @@ export default function LegalPage({
             </motion.h1>
 
             {/* meta row */}
-            <motion.div
-              variants={entrance}
-              className="mt-6 flex flex-wrap items-center gap-4"
-            >
-              <span className="rounded-full bg-[#0c1014] px-3 py-1 font-body text-[11px] font-bold uppercase tracking-[0.1em] text-[#f4f4ef]">
-                Legal
-              </span>
-              <span className="font-body text-[13px] text-[#0c1014]/35">
-                {lastUpdated}
-              </span>
-            </motion.div>
+            {lastUpdated && (
+              <motion.div
+                variants={entrance}
+                className="mt-6 flex flex-wrap items-center gap-4"
+              >
+                <span className="rounded-full bg-[#0c1014] px-3 py-1 font-body text-[11px] font-bold uppercase tracking-[0.1em] text-[#f4f4ef]">
+                  Legal
+                </span>
+                <span className="font-body text-[13px] text-[#0c1014]/35">
+                  {lastUpdated}
+                </span>
+              </motion.div>
+            )}
 
             <motion.p
               variants={entrance}
@@ -532,7 +538,7 @@ export default function LegalPage({
                             : "text-[#0c1014]/35 hover:text-[#0c1014]/65"
                         }`}
                       >
-                        <span className="shrink-0 font-mono text-[11px] tabular-nums opacity-50">
+                        <span className="shrink-0 font-body text-[13px] font-bold text-[#0c1014] tabular-nums">
                           {String(idx + 1).padStart(2, "0")}
                         </span>
                         <span className="truncate">{section.heading}</span>
@@ -566,11 +572,11 @@ export default function LegalPage({
                   className="scroll-mt-8"
                 >
                   {/* heading */}
-                  <div className="flex items-baseline gap-3">
-                    <span className="hidden font-mono text-[12px] tabular-nums text-[#0c1014]/15 sm:inline">
+                  <div className="flex items-baseline gap-3.5">
+                    <span className="hidden font-body text-2xl sm:text-3xl font-black text-[#0c1014] tabular-nums sm:inline">
                       {String(idx + 1).padStart(2, "0")}
                     </span>
-                    <h2 className="font-body text-[1.125rem] font-black tracking-[-0.015em] text-[#0c1014] sm:text-[1.25rem]">
+                    <h2 className="font-body text-2xl font-black tracking-[-0.02em] text-[#0c1014] sm:text-3xl">
                       {section.heading}
                     </h2>
                   </div>
@@ -597,68 +603,43 @@ export default function LegalPage({
               {/* contact card */}
               <motion.div
                 variants={entrance}
-                className="mt-16 flex items-start justify-between gap-6 rounded-xl bg-[#0c1014] px-7 py-7 sm:items-center sm:px-9"
+                className="mt-16 relative overflow-hidden rounded-2xl border border-[#0c1014]/10 bg-white/80 p-8 shadow-sm backdrop-blur-md sm:p-10"
               >
-                <div>
-                  <p className="font-body text-[13px] font-medium text-[#f4f4ef]/40">
-                    Have questions?
-                  </p>
-                  <p className="mt-0.5 font-body text-[15px] font-bold text-[#f4f4ef]">
-                    Reach out at{" "}
-                    <a
-                      href={`mailto:${MAIL}`}
-                      className="text-[#e6f5c0] underline-offset-2 hover:underline"
-                    >
-                      {MAIL}
-                    </a>
-                  </p>
-                </div>
-                <a
-                  href={`mailto:${MAIL}`}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f4f4ef]/10 text-[#f4f4ef] transition-colors hover:bg-[#f4f4ef]/20"
-                  aria-label="Send email"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.75"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="h-4 w-4"
+                <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <span className="font-body text-xs font-bold uppercase tracking-[0.12em] text-[#0c1014]/40">
+                      Have questions?
+                    </span>
+                    <h3 className="mt-1 font-body text-2xl font-black tracking-[-0.02em] text-[#0c1014] sm:text-3xl">
+                      Reach out to our team
+                    </h3>
+                    <p className="mt-1 font-body text-sm text-[#0c1014]/60">
+                      We're here to help with any inquiries about our terms or platform.
+                    </p>
+                  </div>
+                  <a
+                    href={`mailto:${MAIL}`}
+                    className="inline-flex shrink-0 items-center justify-center gap-2.5 rounded-full bg-[#0c1014] px-6 py-3 font-body text-xs sm:text-sm font-bold text-[#f4f4ef] transition-all hover:bg-[#0c1014]/85 hover:scale-[1.02] active:scale-[0.98]"
                   >
-                    <path d="M5 12h14" />
-                    <path d="m13 6 6 6-6 6" />
-                  </svg>
-                </a>
+                    <span>{MAIL}</span>
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="h-4 w-4"
+                    >
+                      <path d="M5 12h14" />
+                      <path d="m13 6 6 6-6 6" />
+                    </svg>
+                  </a>
+                </div>
               </motion.div>
             </motion.main>
           </div>
         </div>
-
-        {/* ── footer ── */}
-        <footer className="border-t border-[#0c1014]/6 px-6 py-6 sm:px-10 lg:px-16">
-          <div className="flex max-w-[1200px] flex-wrap items-center justify-between gap-4">
-            <div className="flex gap-6">
-              {menuLinks.map((link) => (
-                <Link
-                  key={link.label}
-                  href={link.href}
-                  className={`font-body text-[12px] tracking-wide transition-colors hover:text-[#0c1014] ${
-                    link.href === `/${activeLink}`
-                      ? "font-bold text-[#0c1014]"
-                      : "text-[#0c1014]/30"
-                  }`}
-                >
-                  {link.label}
-                </Link>
-              ))}
-            </div>
-            <p className="font-body text-[12px] text-[#0c1014]/25">
-              © {new Date().getFullYear()} 180 Degrees Consulting Sheffield
-            </p>
-          </div>
-        </footer>
       </div>
     </MotionConfig>
   );

@@ -88,7 +88,6 @@ export default function PrivacyPage() {
     <LegalPage
       title="Privacy Policy"
       subtitle="We keep things simple: your data stays private, is never sold, and is only ever used to make 180Connect work better for your team."
-      lastUpdated="Last updated · 1 January 2025"
       sections={SECTIONS}
       activeLink="privacy"
     />

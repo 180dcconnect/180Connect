@@ -83,9 +83,9 @@ export default function TermsPage() {
     <LegalPage
       title="Terms of Service"
       subtitle="Please read these Terms carefully before using 180Connect. They set out the rules for using our platform and your responsibilities as a user."
-      lastUpdated="Last updated · 1 January 2025"
       sections={SECTIONS}
       activeLink="terms"
+      showHomeLink={false}
     />
   );
 }

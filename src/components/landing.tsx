@@ -70,21 +70,21 @@ type CropSpec = {
   src: string;
   className: string;
   hero?: boolean;
+  /** Stays blurred after entrance — reads as depth-of-field behind the sharp crops. */
+  blur?: boolean;
 };
 
 const squares: CropSpec[] = [
-  { left: 42, top: 7, size: 100, src: "/crops/leaf-branch-soft.png", className: "" },
+  { left: 88, top: 4, size: 138, src: "/crops/leaf-bark-right.png", className: "", hero: true },
+  { left: 42, top: 9, size: 85, src: "/crops/leaf-branch-soft.png", className: "" },
   { left: 17, top: 19, size: 157, src: "/crops/leaf-bark.png", className: "hidden sm:block" },
-  { left: 88, top: 11, size: 78, src: "/crops/leaf-moss-top.png", className: "hidden md:block" },
   { left: 4, top: 15, size: 96, src: "/crops/leaf-vine.png", className: "", hero: true },
-  { left: 90, top: 12, size: 78, src: "/crops/leaf-bark-right.png", className: "", hero: true },
-  { left: 13, top: 23, size: 68, src: "/crops/leaf-branch-alt.png", className: "", hero: true },
-  { left: 60, top: 34, size: 65, src: "/crops/leaf-fern-left.png", className: "hidden md:block" },
-  { left: 76, top: 32, size: 135, src: "/crops/leaf-float-center.png", className: "" },
-  { left: 4, top: 43, size: 96, src: "/crops/leaf-bark-soft.png", className: "hidden lg:block" },
+  { left: 60, top: 34, size: 65, src: "/crops/leaf-fern-left.png", className: "hidden md:block", blur: true },
+  { left: 76, top: 32, size: 135, src: "/crops/leaf-float-center.png", className: "", blur: true },
+  { left: 4, top: 43, size: 96, src: "/crops/leaf-branch-alt.png", className: "hidden lg:block" },
   { left: 30, top: 56, size: 242, src: "/crops/leaf-moss.png", className: "" },
   { left: 56, top: 74, size: 178, src: "/crops/leaf-fern.png", className: "hidden sm:block" },
-  { left: 86, top: 67, size: 118, src: "/crops/leaf-bark.png", className: "hidden sm:block" },
+  { left: 89, top: 62, size: 118, src: "/crops/leaf-bark.png", className: "hidden sm:block" },
 ];
 
 /**
@@ -175,6 +175,9 @@ const IDLE_DRIFT = 5;
 function Crop({ crop, delay, index }: { crop: CropSpec; delay: number; index: number }) {
   const idleDuration = IDLE_DURATION + (index % 5) * (IDLE_VARY / 5);
   const idleDrift = index % 2 === 0 ? IDLE_DRIFT : -IDLE_DRIFT;
+  // Settles into a soft blur rather than fully sharp — depth-of-field, not a
+  // second entrance state, so it still resolves from the same blur(10px) start.
+  const restBlur = crop.blur ? "blur(4px)" : "blur(0px)";
 
   return (
     <motion.div
@@ -190,7 +193,7 @@ function Crop({ crop, delay, index }: { crop: CropSpec; delay: number; index: nu
         x: cropDrift(crop.top),
         filter: "blur(10px)",
       }}
-      animate={{ opacity: 1, scale: 1, x: 0, filter: "blur(0px)" }}
+      animate={{ opacity: 1, scale: 1, x: 0, filter: restBlur }}
       transition={{ duration: CROP_TRAVEL, ease: EASE, delay }}
       className={`absolute ${crop.className}`}
     >
@@ -212,7 +215,7 @@ function Crop({ crop, delay, index }: { crop: CropSpec; delay: number; index: nu
 }
 
 const menuLinks = [
-  { label: "About", href: "/about" },
+  { label: "Home", href: "/" },
   { label: "Terms", href: "/terms" },
   { label: "Privacy", href: "/privacy" },
   { label: "Changelog", href: "/changelog" },
@@ -341,18 +344,25 @@ const ctaDisc: Variants = {
  * The fill's leading edge is the pill's own end-cap, reused rather than
  * redrawn: a `rounded-l-full` block at the pill's full height caps its radius
  * at height/2 exactly like `rounded-full` does on the pill itself, so the two
- * curves are guaranteed identical — same mechanism, same 20px radius. Sliding
- * it on `left` (a percentage, so it reads off the pill's own width as
- * containing block) walks that cap across like a second pill sweeping through
- * the first, entering from the circle's side. Breaks the single-paint-layer
- * rule the pill used to hold (see ctaDisc above) — a rounded leading edge
- * isn't expressible as one background, so this is a second layer under the
- * label instead.
+ * curves are nominally identical — same mechanism, same radius. Breaks the
+ * single-paint-layer rule the pill used to hold (see ctaDisc above) — a
+ * rounded leading edge isn't expressible as one background, so this is a
+ * second layer under the label instead.
+ *
+ * "Nominally identical" isn't good enough, though: two independently
+ * antialiased curves — this block's own `rounded-l-full` and the parent's
+ * `overflow-hidden` clip — get subpixel-rounded a hair apart, and the
+ * parent's dark glass background shows through that hairline gap even when
+ * both radii resolve to the same number on paper. Landing the settled hover
+ * state at `left: 0%` puts the cap exactly on the seam where that's visible.
+ * `-20%` instead drives the cap's own curve past the parent's rounded corner
+ * entirely, so the flat (uncurved) part of this rectangle is what the corner
+ * clips against — one curve draws the edge, not two fighting over it.
  */
 const ctaWash: Variants = {
   rest: { left: "100%", transition: { duration: 0.28, ease: EASE } },
   hover: {
-    left: "0%",
+    left: "-20%",
     transition: { duration: CTA_WASH, ease: EASE, delay: CTA_FILL },
   },
 };
@@ -631,6 +641,12 @@ export default function Landing() {
   }, [introT, revealT]);
 
   const revealY = useTransform(revealT, [0, 1], [14, 0]);
+  // Templated (not passed as a bare `y`) so it goes through the same plain
+  // style path as revealFilter — Motion applies raw `y`/`x`/etc transform
+  // shorthand imperatively via ref, skipping React's client render tree,
+  // which desyncs from the SSR-rendered `transform` and trips a hydration
+  // mismatch. Templating forces it into the ordinary style codepath.
+  const revealTransform = useMotionTemplate`translateY(${revealY}px)`;
   const revealBlur = useTransform(revealT, [0, 1], [10, 0]);
   const revealFilter = useMotionTemplate`blur(${revealBlur}px)`;
 
@@ -649,7 +665,7 @@ export default function Landing() {
             text without ever competing with it. Positions stay in the margins
             regardless, well clear of the headline's measure. */}
         <div
-          className="pointer-events-none absolute inset-0 z-0 hidden min-[1800px]:block"
+          className="pointer-events-none absolute inset-0 z-0 hidden md:block"
           aria-hidden="true"
         >
           {squares.map((sq, i) =>
@@ -675,7 +691,6 @@ export default function Landing() {
 
               z-30 keeps it *under* the sheet rather than above it like the
               burger: the opening circle paints straight over it and the sheet's
-              white twin takes the slot, which is the same wipe-not-fade swap the
               wordmark does, with no state of its own to animate. */}
           <MotionLink
             href="/login"
@@ -686,19 +701,31 @@ export default function Landing() {
             animate="rest"
             whileHover="hover"
             whileTap={{ scale: 0.96 }}
+            variants={{ rest: { y: 0 }, hover: { y: -2 } }}
+            transition={{ type: "spring", stiffness: 420, damping: 28 }}
           >
             <span
               className="relative flex h-9 items-center overflow-hidden rounded-full ring-1 ring-white/25 backdrop-blur-md"
               style={{ backgroundColor: CTA_GLASS, boxShadow: CTA_LIP }}
             >
-              <span className="whitespace-nowrap px-4 font-body text-xs font-medium text-[#f4f4ef] sm:px-5 sm:text-sm">
+              <motion.div
+                variants={ctaWash}
+                className="absolute -inset-y-[1px] w-[999px] rounded-l-full"
+                style={{ backgroundColor: CTA_GREEN }}
+                aria-hidden="true"
+              />
+              <motion.span
+                variants={ctaLabel}
+                className="relative z-10 whitespace-nowrap px-4 font-body text-xs font-medium sm:px-5 sm:text-sm"
+              >
                 Get Started
-              </span>
+              </motion.span>
             </span>
 
-            <span
-              className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[#e6f5c0] text-[#0c1014]"
-              style={{ boxShadow: `inset 0 0 0 3px ${CTA_GLASS}, ${CTA_LIP}` }}
+            <motion.span
+              variants={ctaDisc}
+              className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full text-[#0c1014]"
+              style={{ backgroundColor: CTA_GREEN }}
             >
               <motion.span variants={navArrow} className="flex">
                 <svg
@@ -715,7 +742,7 @@ export default function Landing() {
                   <path d="m13 6 6 6-6 6" />
                 </svg>
               </motion.span>
-            </span>
+            </motion.span>
           </MotionLink>
 
           {/* Three lines that fold into an X: the outer bars meet in the middle
@@ -727,7 +754,7 @@ export default function Landing() {
             aria-expanded={menuOpen}
             aria-label={menuOpen ? "Close menu" : "Open menu"}
             className="absolute top-0 right-0 z-50 mt-6 mr-4 flex h-11 w-11 items-center justify-center sm:mt-8 sm:mr-8"
-            style={{ opacity: revealT, y: revealY, filter: revealFilter }}
+            style={{ opacity: revealT, transform: revealTransform, filter: revealFilter }}
           >
             <span className="relative block h-[14px] w-7">
               {[0, 1, 2].map((line) => (
@@ -904,7 +931,7 @@ export default function Landing() {
                       than under it; the translate biases it back towards the
                       icons. Translating rather than changing the margins keeps
                       the centring maths intact at every width. */}
-                  <p className="font-body text-xs tracking-[0.02em] text-[#f4f4ef]/40 sm:mx-auto sm:-translate-x-40">
+                  <p suppressHydrationWarning className="font-body text-xs tracking-[0.02em] text-[#f4f4ef]/40 sm:mx-auto sm:-translate-x-40">
                     © {new Date().getFullYear()} 180 Degrees Consulting Sheffield
                   </p>
                 </motion.div>
@@ -949,7 +976,7 @@ export default function Landing() {
             {/* z-10 makes this a stacking context, which is what lets the leaf
                 below sit behind the button while still covering the page. */}
             <motion.div
-              style={{ opacity: revealT, y: revealY, filter: revealFilter }}
+              style={{ opacity: revealT, transform: revealTransform, filter: revealFilter }}
               className="relative z-10 flex justify-center pt-8 sm:pt-10"
             >
               {/* A crop pulled up out of the scatter below and parked under the

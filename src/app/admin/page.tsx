@@ -24,8 +24,7 @@ export default async function AdminPage() {
     <main className="min-h-screen bg-[#f1f2f4] p-6">
       <section className="mx-auto max-w-5xl rounded-2xl bg-white p-8 shadow-sm">
         <div>
-          <p className="text-sm font-bold text-brand">Admin workspace</p>
-          <h1 className="mt-2 text-3xl font-bold">Platform management</h1>
+          <h1 className="text-3xl font-bold">Platform management</h1>
           <p className="mt-3 max-w-2xl text-sm text-foreground/65">
             Manage team access and open privileged workflows. Every admin
             action is checked again on the server.

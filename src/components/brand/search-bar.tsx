@@ -151,7 +151,16 @@ export function BrandSearchBar({
   const FILTER_PARAMS: Record<string, string> = paramNames || DEFAULT_PARAMS;
 
   const submitSearch = (filters = selectedFilters, q = query, closePanel = true) => {
-    const params = new URLSearchParams();
+    // Start from the address bar, not from empty: the host page may carry state
+    // this bar knows nothing about (the client list's funnel stage and breakdown
+    // sort), and rebuilding the query string from scratch silently reset it.
+    // Read via `window` rather than `useSearchParams` — the hook would opt every
+    // page holding this bar out of static rendering, and this only runs on submit.
+    const params = new URLSearchParams(window.location.search);
+    params.delete("q");
+    params.delete("page");
+    Object.values(FILTER_PARAMS).forEach((name) => params.delete(name));
+
     if (q) params.set("q", q);
 
     filters.forEach(f => {

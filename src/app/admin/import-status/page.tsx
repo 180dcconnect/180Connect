@@ -125,10 +125,7 @@ export default async function AdminImportStatusPage({
         stageClassName="space-y-10"
         heading={
           <>
-            <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-              Admin workspace
-            </p>
-            <h1 className="mt-2 text-[clamp(2rem,4vw,2.75rem)] font-black leading-[1] tracking-[-0.03em]">
+            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-black leading-[1] tracking-[-0.03em]">
               Import status
             </h1>
             <p className="mt-3 max-w-xl text-sm leading-[1.7] text-foreground/65">

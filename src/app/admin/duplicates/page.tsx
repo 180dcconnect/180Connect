@@ -27,8 +27,7 @@ export default async function DuplicatesPage() {
   return (
     <main className="min-h-screen bg-[#f1f2f4] p-6">
       <section className="mx-auto w-full max-w-4xl rounded-2xl bg-white p-8 shadow-sm">
-        <p className="text-sm font-bold text-brand">Admin workspace</p>
-        <h1 className="mt-2 text-2xl font-bold">Possible duplicate charities</h1>
+        <h1 className="text-2xl font-bold">Possible duplicate charities</h1>
         <p className="mt-3 text-sm text-foreground/65">
           The import pipeline flags a new record here instead of saving it whenever it
           looks like a charity already in the system — matched on registration number,

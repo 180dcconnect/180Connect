@@ -20,14 +20,48 @@ import { ClaimButton } from "./[id]/claim-button";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 import { Group, Rise } from "@/components/dashboard-stage";
 import { SearchRail } from "@/components/search-rail";
+import {
+  SOURCE_LABELS,
+  breakdown,
+  parseDirection,
+  parseField,
+  parseStage,
+  pipelineFunnel,
+  type BreakdownRow,
+  type FunnelStageKey,
+} from "./client-insights";
+import { PipelineReport } from "./pipeline-report";
 
 type TeamMember = { id: string; full_name: string | null };
 
 // Next.js 16: searchParams is a Promise on App Router pages — same pattern as
 // src/app/admin/audit-log/page.tsx.
-type SearchParams = Promise<{ owner?: string; q?: string; page?: string; city?: string; status?: string; source?: string }>;
+type SearchParams = Promise<{
+  owner?: string;
+  q?: string;
+  page?: string;
+  city?: string;
+  status?: string;
+  source?: string;
+  /** Funnel stage the breakdown counts. */
+  stage?: string;
+  /** Field the breakdown groups by, and which end of it to show. */
+  sort?: string;
+  dir?: string;
+}>;
 
 const PAGE_SIZE = 25;
+
+/**
+ * The list's column track, shared by the header row and every row under it, so
+ * the two can't drift apart. Columns only exist from `lg`: below that the row
+ * folds back into name-over-subline, which is the only thing that fits.
+ */
+const ROW_GRID =
+  "lg:grid lg:grid-cols-[2rem_minmax(0,1fr)_9rem_10rem_10rem_1rem] lg:items-center lg:gap-4";
+
+/** Reserved width for the claim button, held whether or not the row has one. */
+const CLAIM_SLOT = "w-[6.5rem] shrink-0";
 
 /**
  * F051 — the charity list view. Every organisation regardless of import method
@@ -64,7 +98,17 @@ export default async function ClientsPage({
   const authorization = await getCurrentActor("client:view", { route: "/clients" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
-  const { owner: ownerFilter, q: search, page: pageParam, city, status, source } = await searchParams;
+  const {
+    owner: ownerFilter,
+    q: search,
+    page: pageParam,
+    city,
+    status,
+    source,
+    stage: stageParam,
+    sort: sortParam,
+    dir: dirParam,
+  } = await searchParams;
 
   const supabase = await createClient();
   const canClaim = hasPermission(authorization.actor.role, "client:edit");
@@ -105,14 +149,8 @@ export default async function ClientsPage({
   const uniqueCities = Array.from(new Set(allVisibleClients.map(c => c.city).filter(Boolean))).sort() as string[];
   const uniqueStatuses = Array.from(new Set(allVisibleClients.map(c => c.outreachStatusLabel).filter(Boolean))).sort() as string[];
   
-  const sourceLabels: Record<string, string> = {
-    company: "Companies House",
-    charity: "Charity Commission",
-    both: "Dual-registered",
-    other: "Other"
-  };
   const uniqueSourceTypes = Array.from(new Set(allVisibleClients.map(c => c.organisation_type).filter(Boolean)));
-  const uniqueSources = uniqueSourceTypes.map(t => sourceLabels[t] || t).sort();
+  const uniqueSources = uniqueSourceTypes.map(t => SOURCE_LABELS[t] || t).sort();
 
   let matchingClients = allVisibleClients;
   matchingClients = filterByOwner(matchingClients, ownerFilter);
@@ -138,17 +176,65 @@ export default async function ClientsPage({
     currentPage * PAGE_SIZE,
   );
 
-  const pageHref = (targetPage: number) => {
+  /**
+   * Every link on this page is the current URL with one thing changed, so they
+   * all go through here rather than each rebuilding the query string and quietly
+   * dropping the parameters it doesn't know about. `undefined` clears a key.
+   */
+  const hrefWith = (changes: Record<string, string | number | undefined>) => {
+    const base: Record<string, string | number | undefined> = {
+      owner: ownerFilter,
+      q: search,
+      city,
+      status,
+      source,
+      stage: stageParam,
+      sort: sortParam,
+      dir: dirParam,
+      // Not carried over: a link that changes what the list holds has to start at
+      // page one. Pagination opts back in explicitly.
+      page: undefined,
+      ...changes,
+    };
+
     const params = new URLSearchParams();
-    if (ownerFilter) params.set("owner", ownerFilter);
-    if (search) params.set("q", search);
-    if (city) params.set("city", city);
-    if (status) params.set("status", status);
-    if (source) params.set("source", source);
-    if (targetPage > 1) params.set("page", String(targetPage));
+    for (const [key, value] of Object.entries(base)) {
+      if (value === undefined || value === "") continue;
+      if (key === "page" && Number(value) <= 1) continue;
+      params.set(key, String(value));
+    }
     const qs = params.toString();
     return qs ? `/clients?${qs}` : "/clients";
   };
+
+  const pageHref = (targetPage: number) => hrefWith({ page: targetPage });
+
+  // The insight band reads the list you are actually looking at: filter to your
+  // own clients and the funnel is yours, not the platform's. `caption` says which
+  // of the two it is, so the numbers are never ambiguous.
+  const stage: FunnelStageKey = parseStage(stageParam);
+  const breakdownField = parseField(sortParam);
+  const breakdownDirection = parseDirection(dirParam);
+  const funnel = pipelineFunnel(matchingClients);
+  // Every group carries all four stage counts, so the table reads across as that
+  // group's own funnel; `stage` only decides which column the top three is
+  // ranked on.
+  const breakdownRows = breakdown(
+    matchingClients,
+    breakdownField,
+    breakdownDirection,
+    stage,
+  );
+  const funnelCaption = filterActive
+    ? `${matchingClients.length.toLocaleString()} filtered`
+    : "All clients";
+  // A group's row lands on the list filtered to that group, from page one. The
+  // funnel stage rides along: it only ever counts the panels, never the list, so
+  // "converted, by city" stays selected while the list narrows to that city.
+  const rowHref = (filter: NonNullable<BreakdownRow["filter"]>) =>
+    hrefWith({ [filter.param]: filter.value });
+  const stageHref = (key: FunnelStageKey) =>
+    hrefWith({ stage: key === "all" ? undefined : key });
 
   // F255 step 2 — "review your assigned clients" is complete when the CAM has looked
   // at their own list, which is this page filtered to themselves. Recording it here
@@ -160,6 +246,7 @@ export default async function ClientsPage({
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       {reviewingOwnClients && <RecordOnboardingStep step="review_clients" />}
       <SearchRail
+        className="max-w-6xl"
         headingClassName="mb-8"
         bar={
           <BrandSearchBar
@@ -190,10 +277,7 @@ export default async function ClientsPage({
         }
         heading={
           <>
-            <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-              {isOwnedView ? "Filtered to you" : "Client records"}
-            </p>
-            <h1 className="mt-2 text-[clamp(2rem,4vw,2.75rem)] font-black leading-[1] tracking-[-0.03em]">
+            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-black leading-[1] tracking-[-0.03em]">
               {isOwnedView ? "My clients" : "Clients"}
             </h1>
             <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
@@ -228,8 +312,24 @@ export default async function ClientsPage({
         )}
 
         <Group className="space-y-4">
+          {/* Where the pipeline stands before the list of it: the four stage
+              totals, the stream between them, and the top three groups. Counts
+              whatever the list is currently showing. */}
+          <Rise>
+            <PipelineReport
+              stages={funnel}
+              selected={stage}
+              stageHref={stageHref}
+              caption={funnelCaption}
+              field={breakdownField}
+              direction={breakdownDirection}
+              rows={breakdownRows}
+              rowHref={rowHref}
+            />
+          </Rise>
+
           {matchingClients.length > 0 && (
-            <Rise className="flex items-baseline justify-between gap-4">
+            <Rise className="flex items-baseline justify-between gap-4 pt-4">
               <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
                 {matchingClients.length} client{matchingClients.length === 1 ? "" : "s"}
                 {isOwnedView ? " you own" : ""}
@@ -254,65 +354,129 @@ export default async function ClientsPage({
                 </p>
               </div>
             ) : (
-              <ul className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm">
-                {clients.map((client, index) => (
-                  <li
-                    key={client.id}
-                    className="flex items-center gap-4 border-b border-black/[0.06] px-5 py-4 last:border-b-0"
-                  >
-                    <Link
-                      className="group flex min-w-0 flex-1 items-center gap-4 rounded-xl -m-2 p-2 transition-colors hover:bg-black/[0.02] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand"
-                      href={`/clients/${client.id}`}
+              <div className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm">
+                {/* The column key, on the widths the rows use. Hidden below lg,
+                    where the row folds back into name-over-subline. */}
+                <div
+                  aria-hidden="true"
+                  className="hidden items-center gap-4 border-b border-black/[0.06] bg-black/[0.015] px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em] text-foreground/30 lg:flex"
+                >
+                  <span className={`${ROW_GRID} min-w-0 flex-1`}>
+                    <span />
+                    <span>Client</span>
+                    <span>Location</span>
+                    <span>Status</span>
+                    <span>Owner</span>
+                    <span />
+                  </span>
+                  {canClaim && <span className={CLAIM_SLOT} />}
+                </div>
+
+                <ul>
+                  {clients.map((client, index) => (
+                    <li
+                      key={client.id}
+                      className="flex items-center gap-4 border-b border-black/[0.06] px-5 py-3.5 last:border-b-0"
                     >
-                      <span
-                        aria-hidden="true"
-                        className="w-6 shrink-0 text-[11px] font-bold tabular-nums text-foreground/25"
+                      <Link
+                        className={`group -m-2 min-w-0 flex-1 rounded-xl p-2 transition-colors hover:bg-black/[0.02] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand flex items-center gap-4 ${ROW_GRID}`}
+                        href={`/clients/${client.id}`}
                       >
-                        {String((currentPage - 1) * PAGE_SIZE + index + 1).padStart(2, "0")}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        {/* Two lines on a phone rather than a hard truncate:
-                            "1066 BATTL…" identifies nothing, and the column is
-                            ~200px once the claim button has its share. */}
-                        <span className="line-clamp-2 text-[15px] font-bold sm:block sm:truncate">
-                          {client.legal_name}
+                        <span
+                          aria-hidden="true"
+                          className="w-6 shrink-0 text-[11px] font-bold tabular-nums text-foreground/25 lg:w-auto"
+                        >
+                          {String((currentPage - 1) * PAGE_SIZE + index + 1).padStart(2, "0")}
                         </span>
-                        <span className="block truncate text-sm text-foreground/50">
-                          {client.organisation_type} · {client.location}
+
+                        <span className="min-w-0 flex-1 lg:flex-none">
+                          {/* Two lines on a phone rather than a hard truncate:
+                              "1066 BATTL…" identifies nothing, and the column is
+                              ~200px once the claim button has its share. */}
+                          <span className="line-clamp-2 text-[15px] font-bold sm:block sm:truncate">
+                            {client.legal_name}
+                          </span>
+                          {/* Below lg the row has no columns, so the subline
+                              carries what those columns would have said. */}
+                          <span className="block truncate text-sm text-foreground/50 lg:hidden">
+                            {client.organisation_type} · {client.location}
+                          </span>
+                          <span className="hidden truncate text-[12px] text-foreground/40 lg:block">
+                            {SOURCE_LABELS[client.organisation_type] ?? client.organisation_type}
+                          </span>
                         </span>
-                      </span>
-                      <span className="hidden shrink-0 items-center gap-2 sm:flex">
-                        <span className="rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/55">
-                          {client.outreachStatusLabel}
+
+                        <span className="hidden min-w-0 truncate text-[13px] text-foreground/60 lg:block">
+                          {client.location}
                         </span>
-                        {client.ownerName ? (
-                          <span className="rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-brand-hover">
-                            {client.ownerName}
+
+                        <span className="hidden min-w-0 lg:block">
+                          <span className="inline-block max-w-full truncate rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/55">
+                            {client.outreachStatusLabel}
                           </span>
-                        ) : (
-                          <span className="rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/40">
-                            Unassigned
+                          {client.suppressionPending && (
+                            <span className="mt-1 block max-w-full truncate rounded-full bg-amber-50 px-2.5 py-1 text-center text-[11px] font-bold uppercase tracking-[0.08em] text-amber-800">
+                              Suppression requested
+                            </span>
+                          )}
+                        </span>
+
+                        <span className="hidden min-w-0 lg:block">
+                          {client.ownerName ? (
+                            <span className="inline-block max-w-full truncate rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-brand-hover">
+                              {client.ownerName}
+                            </span>
+                          ) : (
+                            <span className="inline-block rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/40">
+                              Unassigned
+                            </span>
+                          )}
+                        </span>
+
+                        {/* Between sm and lg there are no columns but there is
+                            room for the two pills that matter. */}
+                        <span className="hidden shrink-0 items-center gap-2 sm:flex lg:hidden">
+                          <span className="rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/55">
+                            {client.outreachStatusLabel}
                           </span>
-                        )}
-                        {client.suppressionPending && (
-                          <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-amber-800">
-                            Suppression requested
-                          </span>
-                        )}
-                      </span>
-                      <span
-                        aria-hidden="true"
-                        className="hidden shrink-0 text-foreground/25 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-foreground/55 sm:block"
-                      >
-                        →
-                      </span>
-                    </Link>
-                    {canClaim && !client.ownerName && (
-                      <ClaimButton compact organisationId={client.id} />
-                    )}
-                  </li>
-                ))}
-              </ul>
+                          {client.ownerName ? (
+                            <span className="rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-brand-hover">
+                              {client.ownerName}
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/40">
+                              Unassigned
+                            </span>
+                          )}
+                          {client.suppressionPending && (
+                            <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-amber-800">
+                              Suppression requested
+                            </span>
+                          )}
+                        </span>
+
+                        <span
+                          aria-hidden="true"
+                          className="hidden shrink-0 text-foreground/25 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-foreground/55 sm:block"
+                        >
+                          →
+                        </span>
+                      </Link>
+
+                      {/* A fixed slot rather than a conditional child: an owned
+                          row still reserves the width, so no column shifts as
+                          the list changes hands. */}
+                      {canClaim && (
+                        <span className={`${CLAIM_SLOT} flex justify-end`}>
+                          {!client.ownerName && (
+                            <ClaimButton compact organisationId={client.id} />
+                          )}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </Rise>
 

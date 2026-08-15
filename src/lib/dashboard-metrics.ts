@@ -39,6 +39,15 @@ const NEEDS_ATTENTION_STATUSES = new Set([
   "no_response",
 ]);
 
+/**
+ * The three pipeline readings above, as predicates over a single status. Exported
+ * so the client list's funnel (src/app/clients/client-insights.ts) draws the same
+ * stages this dashboard counts rather than re-deciding what "contacted" means.
+ */
+export const isContacted = (status: string) => status !== "not_contacted";
+export const hasResponded = (status: string) => RESPONSE_STATUSES.has(status);
+export const isConverted = (status: string) => status === "converted";
+
 /** F022-F025 — platform-wide totals, shown to every role regardless of ownership. */
 export function computeDashboardMetrics(rows: DashboardOrgRow[]): DashboardMetrics {
   let contacted = 0;
@@ -46,9 +55,9 @@ export function computeDashboardMetrics(rows: DashboardOrgRow[]): DashboardMetri
   let converted = 0;
 
   for (const row of rows) {
-    if (row.outreach_status !== "not_contacted") contacted += 1;
-    if (RESPONSE_STATUSES.has(row.outreach_status)) responsesReceived += 1;
-    if (row.outreach_status === "converted") converted += 1;
+    if (isContacted(row.outreach_status)) contacted += 1;
+    if (hasResponded(row.outreach_status)) responsesReceived += 1;
+    if (isConverted(row.outreach_status)) converted += 1;
   }
 
   return {

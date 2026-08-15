@@ -15,6 +15,11 @@ import { PanelLeftOpen } from "@/components/animate-ui/icons/panel-left-open";
 import { Users } from "@/components/animate-ui/icons/users";
 import UsersGroupIcon from "@/components/ui/users-group-icon";
 import { SidebarAccountMenu } from "@/components/sidebar-account-menu";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/animate-ui/components/radix/tooltip";
 
 export type SidebarIconName = "dashboard" | "admin" | "users" | "audit" | "import" | "clients";
 
@@ -203,30 +208,46 @@ export function Sidebar({
               {section.items.map((item) => {
                 const active = pathname === item.href;
                 const Icon = ICONS[item.icon];
+                const link = (
+                  <AnimateIcon animateOnHover={!reduceMotion} asChild>
+                    <MotionLink
+                      href={item.href}
+                      aria-current={active ? "page" : undefined}
+                      initial="rest"
+                      animate="rest"
+                      whileHover="hover"
+                      className={`flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm text-black transition-all hover:bg-black/10 ${
+                        active ? "bg-black/12 font-bold text-black" : "font-semibold text-black/85 hover:text-black"
+                      }`}
+                    >
+                      <motion.span
+                        className="flex shrink-0"
+                        variants={iconVariants(ICON_MOTION[item.icon])}
+                        transition={ICON_SPRING}
+                      >
+                        {Icon ? <Icon className="h-5 w-5" strokeWidth={1.75} aria-hidden={true} /> : null}
+                      </motion.span>
+                      {!collapsed && <span className="truncate">{item.label}</span>}
+                    </MotionLink>
+                  </AnimateIcon>
+                );
                 return (
                   <li key={item.href}>
-                    <AnimateIcon animateOnHover={!reduceMotion} asChild>
-                      <MotionLink
-                        href={item.href}
-                        title={collapsed ? item.label : undefined}
-                        aria-current={active ? "page" : undefined}
-                        initial="rest"
-                        animate="rest"
-                        whileHover="hover"
-                        className={`flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm text-black transition-all hover:bg-black/10 ${
-                          active ? "bg-black/12 font-bold text-black" : "font-semibold text-black/85 hover:text-black"
-                        }`}
-                      >
-                        <motion.span
-                          className="flex shrink-0"
-                          variants={iconVariants(ICON_MOTION[item.icon])}
-                          transition={ICON_SPRING}
+                    {collapsed ? (
+                      <Tooltip delayDuration={400}>
+                        <TooltipTrigger asChild>{link}</TooltipTrigger>
+                        <TooltipContent
+                          side="right"
+                          sideOffset={10}
+                          showArrow={false}
+                          className="rounded-xl bg-neutral-900 px-3.5 py-2 text-sm font-semibold text-white shadow-lg"
                         >
-                          {Icon ? <Icon className="h-5 w-5" strokeWidth={1.75} aria-hidden={true} /> : null}
-                        </motion.span>
-                        {!collapsed && <span className="truncate">{item.label}</span>}
-                      </MotionLink>
-                    </AnimateIcon>
+                          {item.label}
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      link
+                    )}
                   </li>
                 );
               })}

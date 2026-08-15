@@ -31,11 +31,8 @@ export default async function ResetPasswordPage({
         className="w-full max-w-md rounded-2xl p-7 sm:p-9 shadow-xl border border-[#0c1014]/8 bg-white"
         style={fieldVars("light", "#ffffff")}
       >
-        <p className="font-body text-[11px] font-bold uppercase tracking-[0.12em] text-[#0c1014]/40">
-          {isInvite ? "Welcome to 180Connect" : "Account Security"}
-        </p>
         <h1
-          className="mt-2.5 font-body text-[clamp(1.75rem,4vw,2.25rem)] font-black leading-[1.05] tracking-[-0.03em]"
+          className="font-body text-[clamp(1.75rem,4vw,2.25rem)] font-black leading-[1.05] tracking-[-0.03em]"
           style={{ color: INK }}
         >
           {isInvite ? "Create your account" : "Choose a new password"}

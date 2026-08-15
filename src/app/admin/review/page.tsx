@@ -45,8 +45,7 @@ export default async function ReviewQueuePage() {
       <section className="mx-auto max-w-5xl rounded-2xl bg-white p-8 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-bold text-brand">Data quality</p>
-            <h1 className="mt-2 text-3xl font-bold">Review queue</h1>
+            <h1 className="text-3xl font-bold">Review queue</h1>
             <p className="mt-3 max-w-2xl text-sm text-foreground/65">
               Records held for human review before joining the working list, and
               organisations whose Companies House or Charity Commission status

@@ -23,13 +23,6 @@ import {
   type OnboardingUser,
 } from "@/lib/onboarding";
 
-/** Eyebrow copy per role. Falls back to a neutral label if a new role lands. */
-const WORKSPACE_LABEL: Record<string, string> = {
-  admin: "Admin workspace",
-  cam: "CAM workspace",
-  viewer: "Viewer workspace",
-};
-
 /**
  * F021 — first screen after login. The sidebar (AppShell/F030) already wraps this
  * route via dashboard/layout.tsx; this page adds the top-level metrics (F022-F025)
@@ -180,13 +173,7 @@ export default async function DashboardPage({
       <Stage className="mx-auto w-full max-w-6xl space-y-10">
         <Rise className="flex flex-wrap items-end justify-between gap-x-8 gap-y-5">
           <div className="min-w-0">
-            {/* Not the product name — the sidebar already carries that two
-                inches to the left. The eyebrow says whose workspace this is,
-                matching /admin's "Admin workspace". */}
-            <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-              {WORKSPACE_LABEL[actor.role] ?? "Workspace"}
-            </p>
-            <h1 className="mt-2 text-[clamp(2rem,4vw,2.75rem)] font-black leading-[1] tracking-[-0.03em]">
+            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-black leading-[1] tracking-[-0.03em]">
               Dashboard
             </h1>
             

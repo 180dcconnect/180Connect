@@ -119,7 +119,7 @@ export function BrandSearchBar({
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [filterQuery, setFilterQuery] = useState("");
   const [selectedFilters, setSelectedFilters] = useState<{ category: string; label: string; value: string }[]>(defaultFilters);
-  const [pending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
 
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);

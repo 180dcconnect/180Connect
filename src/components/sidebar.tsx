@@ -69,8 +69,6 @@ const ICON_MOTION: Partial<Record<SidebarIconName, Variants>> = {
   // two gestures.
 };
 
-const TOGGLE_MOTION: Variants = { rest: { x: 0 }, hover: { x: -2 } };
-
 /**
  * Persistent app sidebar. The caller builds `sections` from `hasPermission`,
  * so a role only ever sees links it can actually open — mirrors the
@@ -103,40 +101,31 @@ export function Sidebar({
         collapsed ? "w-16" : "w-64"
       }`}
     >
-      <div className="flex items-center justify-between gap-2 px-3 py-4">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <Image
-            src="/180dc-globe.png"
-            alt="180Connect"
-            width={24}
-            height={24}
-            className="h-6 w-6 shrink-0 object-contain"
-          />
-          {!collapsed && (
-            <span className="truncate text-sm font-bold text-black">180Connect</span>
-          )}
-        </div>
-        <motion.button
+      <div className={`flex items-center gap-2.5 py-4 ${collapsed ? "justify-center px-2" : "px-3"}`}>
+        <button
           type="button"
           onClick={() => setCollapsed((value) => !value)}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          initial="rest"
-          animate="rest"
-          whileHover="hover"
-          className="ml-auto shrink-0 rounded-xl p-1.5 text-black/70 transition-colors hover:bg-black/10 hover:text-black"
+          className="group relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-all hover:bg-black/10 focus-visible:outline-none"
         >
-          <motion.span
-            className="flex"
-            variants={iconVariants(TOGGLE_MOTION)}
-            transition={ICON_SPRING}
-          >
+          <Image
+            src="/180dc-globe.png"
+            alt="180Connect"
+            width={32}
+            height={32}
+            className="h-8 w-8 object-contain transition-opacity duration-200 group-hover:opacity-0"
+          />
+          <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100 text-black">
             {collapsed ? (
-              <PanelLeftOpen className="h-4.5 w-4.5" strokeWidth={1.75} aria-hidden="true" />
+              <PanelLeftOpen className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
             ) : (
-              <PanelLeftClose className="h-4.5 w-4.5" strokeWidth={1.75} aria-hidden="true" />
+              <PanelLeftClose className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
             )}
-          </motion.span>
-        </motion.button>
+          </span>
+        </button>
+        {!collapsed && (
+          <span className="truncate text-sm font-bold text-black">180Connect</span>
+        )}
       </div>
 
       <nav className="flex-1 space-y-6 overflow-y-auto px-2 py-2" aria-label="Primary">

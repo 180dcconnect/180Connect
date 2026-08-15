@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState, type ComponentType } from "react";
 import { motion, useReducedMotion, type Variants } from "motion/react";
@@ -103,9 +104,18 @@ export function Sidebar({
       }`}
     >
       <div className="flex items-center justify-between gap-2 px-3 py-4">
-        {!collapsed && (
-          <span className="truncate px-1 text-sm font-bold text-black">180Connect</span>
-        )}
+        <div className="flex items-center gap-2.5 min-w-0">
+          <Image
+            src="/180dc-globe.png"
+            alt="180Connect"
+            width={24}
+            height={24}
+            className="h-6 w-6 shrink-0 object-contain"
+          />
+          {!collapsed && (
+            <span className="truncate text-sm font-bold text-black">180Connect</span>
+          )}
+        </div>
         <motion.button
           type="button"
           onClick={() => setCollapsed((value) => !value)}

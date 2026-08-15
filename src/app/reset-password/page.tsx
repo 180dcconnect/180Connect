@@ -23,7 +23,7 @@ export default async function ResetPasswordPage({
     >
       <div className="mb-6">
         <Link href="/" className="inline-block transition-opacity hover:opacity-80">
-          <Wordmark size="h-6" color="dark" />
+          <Wordmark tone="dark" />
         </Link>
       </div>
 

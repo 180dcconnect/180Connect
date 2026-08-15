@@ -4,13 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ComponentType } from "react";
 import { motion, useReducedMotion, type Variants } from "motion/react";
-import { PanelLeftClose, PanelLeftOpen, ScrollText, ShieldCheck } from "lucide-react";
+import { ArrowDownToLine, PanelLeftClose, PanelLeftOpen, ScrollText, ShieldCheck } from "lucide-react";
 import { Compass } from "@/components/animate-ui/icons/compass";
 import { AnimateIcon } from "@/components/animate-ui/icons/icon";
 import { Users } from "@/components/animate-ui/icons/users";
 import { SidebarAccountMenu } from "@/components/sidebar-account-menu";
 
-export type SidebarIconName = "dashboard" | "admin" | "users" | "audit";
+export type SidebarIconName = "dashboard" | "admin" | "users" | "audit" | "import";
 
 export type SidebarNavItem = {
   href: string;
@@ -42,6 +42,7 @@ const ICONS: Record<SidebarIconName, RailIcon> = {
   admin: ShieldCheck,
   users: Users,
   audit: ScrollText,
+  import: ArrowDownToLine,
 };
 
 const MotionLink = motion.create(Link);
@@ -61,6 +62,7 @@ const ICON_SPRING = { type: "spring", stiffness: 420, damping: 17, mass: 0.6 } a
 const ICON_MOTION: Partial<Record<SidebarIconName, Variants>> = {
   admin: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: -6 } },
   audit: { rest: { rotate: 0, y: 0 }, hover: { rotate: -8, y: -1 } },
+  import: { rest: { y: 0 }, hover: { y: 2 } },
   // `dashboard` and `users` are deliberately absent: those animate-ui glyphs
   // animate their own interiors, so a wrapper transform on top would read as
   // two gestures.
@@ -82,8 +84,8 @@ export function Sidebar({
   onLogout,
 }: {
   sections: SidebarSection[];
-  userName: string | null;
-  userEmail: string | null;
+  userName?: string | null;
+  userEmail?: string | null;
   roleLabel: string;
   onLogout: () => Promise<void>;
 }) {
@@ -158,7 +160,7 @@ export function Sidebar({
                           variants={iconVariants(ICON_MOTION[item.icon])}
                           transition={ICON_SPRING}
                         >
-                          <Icon className="h-5 w-5" strokeWidth={1.75} aria-hidden={true} />
+                          {Icon ? <Icon className="h-5 w-5" strokeWidth={1.75} aria-hidden={true} /> : null}
                         </motion.span>
                         {!collapsed && <span className="truncate">{item.label}</span>}
                       </MotionLink>
@@ -173,8 +175,8 @@ export function Sidebar({
 
       <div className="border-t border-white/70 p-2">
         <SidebarAccountMenu
-          name={userName}
-          email={userEmail}
+          name={userName ?? null}
+          email={userEmail ?? null}
           roleLabel={roleLabel}
           collapsed={collapsed}
           onLogout={onLogout}

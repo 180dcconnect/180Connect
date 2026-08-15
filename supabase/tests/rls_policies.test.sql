@@ -1830,6 +1830,85 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Assign Client Owner (F163) — the admin path through reassign_ownership, and the
+-- direct owner_id UPDATE it replaces (20260810110000)
+-- ---------------------------------------------------------------------------
+create or replace function tests.suite_assign_client_owner()
+returns setof text language plpgsql as $$
+declare
+  v_admin    uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a    uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b    uuid := '00000000-0000-4000-a000-000000000003';
+  v_org      uuid := '00000000-0000-4000-d000-000000000003';
+  v_owner    uuid;
+  v_detail   jsonb;
+begin
+  if not tests.tables_exist('organisations', 'users', 'audit_log')
+     or to_regprocedure('public.reassign_ownership(uuid[], uuid, text, uuid)') is null then
+    return next skip(5, 'F163 assign-owner path not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  insert into public.organisations (id, legal_name, entry_method, organisation_type, owner_id)
+  values (v_org, 'Assign Owner Fixture Ltd', 'manual', 'other', null)
+  on conflict (id) do update set owner_id = null;
+
+  -- The gap this migration closes: 20260806140000 already removed a CAM's own
+  -- direct-claim branch; this one removes the admin's, so no role can move owner_id
+  -- outside claim_organisation/reassign_ownership. USING blocks this before WITH
+  -- CHECK, same as the CAM case above, so assert the resulting row, not the SQLSTATE.
+  perform tests.sqlstate_of(v_admin, format(
+    'update public.organisations set owner_id = %L where id = %L', v_cam_a, v_org));
+  select owner_id into v_owner from public.organisations where id = v_org;
+  return next is(v_owner, null::uuid,
+    'a direct UPDATE no longer lets an admin set owner_id; reassign_ownership is the only path'
+  );
+
+  return next ok(
+    not has_column_privilege('authenticated', 'public.organisations', 'owner_id', 'UPDATE'),
+    'authenticated holds no UPDATE privilege on organisations.owner_id'
+  );
+  return next ok(
+    has_column_privilege('authenticated', 'public.organisations', 'legal_name', 'UPDATE'),
+    'authenticated can still update other organisations columns (canonical editing works)'
+  );
+
+  -- The actual F163 flow: an admin assigns an unowned client to a CAM, from the
+  -- client profile, no p_from_user_id (the client has no current owner to guard
+  -- against). AC1/AC3.
+  perform tests.sqlstate_of(v_admin, format(
+    'select public.reassign_ownership(array[%L]::uuid[], %L, ''initial assignment'', null)',
+    v_org, v_cam_a));
+  select owner_id into v_owner from public.organisations where id = v_org;
+  return next is(v_owner, v_cam_a, 'admin assigns an unowned client to a CAM via reassign_ownership');
+
+  -- AC2: reassigning a client that already has an owner is not silent — it is
+  -- audited with both the outgoing and incoming CAM, same shape whether the client
+  -- started unowned or owned. The UI shows the conflict warning before this call;
+  -- the audit row is what proves it actually happened.
+  perform tests.sqlstate_of(v_admin, format(
+    'select public.reassign_ownership(array[%L]::uuid[], %L, ''reassigning to CAM B'', null)',
+    v_org, v_cam_b));
+  -- Not `order by created_at desc`: both calls run in this same test transaction,
+  -- so now() — and every audit row's created_at — is identical between them
+  -- (Postgres freezes now() for the transaction's duration). The reason string is
+  -- the only thing that tells the two rows apart here.
+  select detail into v_detail
+    from public.audit_log
+   where action = 'ownership_reassigned'
+     and target_id = v_org
+     and detail->>'reason' = 'reassigning to CAM B';
+  return next is(
+    jsonb_build_object('from', v_detail->>'from', 'to', v_detail->>'to'),
+    jsonb_build_object('from', v_cam_a::text, 'to', v_cam_b::text),
+    'reassigning an already-owned client is audited with both the outgoing and incoming owner'
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- claim_organisation — a CAM taking ownership of an unowned client (F162)
 -- ---------------------------------------------------------------------------
 -- Own fixture organisations (e000 prefix) rather than the shared 'Unowned Org Ltd':
@@ -2512,6 +2591,216 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- onboarding state (F255)
+-- ---------------------------------------------------------------------------
+-- Spec: docs/rls-permission-matrix.md §3.12. This is the one place in the schema
+-- where a state-changing write is governed by RLS and a column grant rather than a
+-- SECURITY DEFINER RPC, so the policies are the whole enforcement — there is no
+-- function re-checking anything behind them. Two properties matter most: a CAM can
+-- only ever write their own progress, and nobody can delete progress to walk a
+-- dismissed guide back into view.
+
+create or replace function tests.suite_onboarding()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b  uuid := '00000000-0000-4000-a000-000000000003';
+  v_admin  uuid := '00000000-0000-4000-a000-000000000001';
+  v_count  bigint;
+  v_marker timestamptz;
+begin
+  if not tests.tables_exist('user_onboarding_steps') then
+    return next skip(9, 'F255 onboarding state not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- The guide's own writes: a CAM records their own progress and reads it back.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.user_onboarding_steps (user_id, step_key) values (%L, %L)',
+      v_cam_a, 'outreach_preferences')),
+    null,
+    'a CAM records their own completed step'
+  );
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.user_onboarding_steps;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'a CAM sees their own progress');
+
+  -- The property the whole table hangs on: progress is per-user and unforgeable.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.user_onboarding_steps (user_id, step_key) values (%L, %L)',
+      v_cam_b, 'outreach_preferences')),
+    '42501',
+    'a CAM cannot record progress on another CAM''s behalf'
+  );
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.user_onboarding_steps;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a CAM cannot read another CAM''s progress');
+
+  -- Admins are deliberately not granted a read here. F187 (admin views a CAM's
+  -- settings) can add one with a stated reason when it is actually built; until
+  -- then this asserts the absence is intentional rather than forgotten.
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.user_onboarding_steps;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'an admin has no read on onboarding progress until F187 asks for one');
+
+  -- Append-only. A user who could delete their own rows could make a dismissed
+  -- guide reappear step by step, which is the failure AC5 exists to prevent.
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      'delete from public.user_onboarding_steps'),
+    '42501',
+    'progress cannot be deleted, by its owner or anyone else'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      'update public.user_onboarding_steps set completed_at = now()'),
+    '42501',
+    'progress cannot be rewritten after the fact'
+  );
+
+  -- The guide-level state on USERS: writable by its owner through the column grant
+  -- added in 20260805100000, and by nobody else. The row policy
+  -- (users_update_self_or_admin) is what confines it; the grant is what permits it
+  -- at all.
+  perform tests.login_as(v_cam_a);
+  update public.users set onboarding_dismissed_at = now() where id = v_cam_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select onboarding_dismissed_at into v_marker from public.users where id = v_cam_a;
+  return next ok(v_marker is not null, 'a CAM can dismiss their own guide');
+
+  perform tests.login_as(v_cam_a);
+  update public.users set onboarding_dismissed_at = now() where id = v_cam_b;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select onboarding_dismissed_at into v_marker from public.users where id = v_cam_b;
+  -- A blocked UPDATE removes zero rows and raises nothing (§4), so this asserts the
+  -- absence of the write rather than an error code.
+  return next ok(v_marker is null, 'a CAM cannot dismiss another CAM''s guide');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- client criteria review persistence (F047)
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_client_criteria()
+returns setof text language plpgsql as $$
+declare
+  v_admin uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam uuid := '00000000-0000-4000-a000-000000000002';
+  v_run uuid := '47000000-0000-4000-a000-000000000001';
+  v_review uuid := '47000000-0000-4000-a000-000000000002';
+  v_fail uuid := '47000000-0000-4000-a000-000000000003';
+  v_flip uuid := '47000000-0000-4000-a000-000000000004';
+  v_count bigint;
+  v_detail jsonb;
+  v_actor uuid;
+  v_resolved boolean;
+  v_events_before bigint;
+begin
+  if not tests.tables_exist('data_quality_events', 'raw_source_records', 'ingestion_runs') then
+    return next skip(11, 'F047 data quality migration not yet applied');
+    return;
+  end if;
+  perform tests.seed();
+
+  return next ok(
+    not has_function_privilege('authenticated',
+      'public.record_client_criteria_outcome(uuid,text,text,text,text,boolean)', 'EXECUTE'),
+    'authenticated users cannot forge client-criteria outcomes');
+
+  insert into public.ingestion_runs (id, api_source, triggered_by, job_status)
+  values (v_run, 'companies_house', 'manual', 'completed') on conflict (id) do nothing;
+  insert into public.raw_source_records
+    (id, ingestion_run_id, record_source, source_record_id, raw_payload, checksum)
+  values
+    (v_review, v_run, 'companies_house', 'f047-review', '{}'::jsonb, 'f047-review'),
+    (v_fail, v_run, 'companies_house', 'f047-fail', '{}'::jsonb, 'f047-fail'),
+    (v_flip, v_run, 'companies_house', 'f047-flip', '{}'::jsonb, 'f047-flip')
+  on conflict (record_source, source_record_id) do nothing;
+
+  perform public.record_client_criteria_outcome(
+    v_review, 'needs_review', 'company', 'Needs social-purpose evidence.', 'standard', false);
+  perform public.record_client_criteria_outcome(
+    v_fail, 'does_not_meet', 'commercial', 'Outside configured criteria.', 'south_yorkshire', true);
+
+  return next is((select rule_name from public.data_quality_events where raw_source_record_id = v_review),
+    'client_criteria_needs_review', 'ambiguous candidates retain a queryable review flag');
+  return next is((select rule_name from public.data_quality_events where raw_source_record_id = v_fail),
+    'client_criteria_does_not_meet', 'definite failures retain a distinct queryable flag');
+
+  -- AGENTS.md / docs/audit-log-pattern.md: excluding a record from the active
+  -- client list is a status change and must be audited in the same transaction.
+  select actor_user_id, detail into v_actor, v_detail
+    from public.audit_log
+   where action = 'client_criteria_rejected' and target_id = v_fail
+   order by created_at desc limit 1;
+  return next is(v_actor, null, 'the import pipeline has no end-user actor, so actor_user_id is null');
+  return next is(
+    jsonb_build_object('outcome', v_detail->>'outcome', 'priority', v_detail->>'priority',
+      'healthcare_aligned', (v_detail->>'healthcare_aligned')::boolean),
+    jsonb_build_object('outcome', 'does_not_meet', 'priority', 'south_yorkshire', 'healthcare_aligned', true),
+    'the audit row carries the outcome plus the priority/healthcare-alignment signals'
+  );
+
+  -- Re-running the same outcome with unchanged reasons is a no-op: it must not
+  -- reset an admin's prior resolution of that exact issue, and must not audit
+  -- a second time.
+  update public.data_quality_events set resolved = true, resolved_at = now(), resolved_by_user_id = v_admin
+   where raw_source_record_id = v_review and rule_name = 'client_criteria_needs_review';
+  select count(*) into v_events_before from public.audit_log where action = 'client_criteria_rejected';
+  perform public.record_client_criteria_outcome(
+    v_review, 'needs_review', 'company', 'Needs social-purpose evidence.', 'standard', false);
+  select resolved into v_resolved from public.data_quality_events
+   where raw_source_record_id = v_review and rule_name = 'client_criteria_needs_review';
+  return next is(v_resolved, true, 're-recording an unchanged outcome does not un-resolve an admin''s review');
+  return next is(
+    (select count(*) from public.audit_log where action = 'client_criteria_rejected'),
+    v_events_before, 'an unchanged no-op re-evaluation is not audited a second time');
+
+  -- Flipping outcome (needs_review -> does_not_meet) on re-evaluation must not
+  -- leave the old outcome's row dangling open forever.
+  perform public.record_client_criteria_outcome(
+    v_flip, 'needs_review', 'company', 'Needs social-purpose evidence.', 'standard', false);
+  perform public.record_client_criteria_outcome(
+    v_flip, 'does_not_meet', 'commercial', 'Confirmed outside criteria.', 'standard', false);
+  return next is(
+    (select resolved from public.data_quality_events
+      where raw_source_record_id = v_flip and rule_name = 'client_criteria_needs_review'),
+    true, 'the superseded outcome from before a re-evaluation flip is closed out, not left dangling');
+  return next is(
+    (select resolved from public.data_quality_events
+      where raw_source_record_id = v_flip and rule_name = 'client_criteria_does_not_meet'),
+    false, 'the current outcome after a flip is still open for review');
+
+  perform tests.login_as(v_cam);
+  select count(*) into v_count from public.data_quality_events where raw_source_record_id in (v_review, v_fail);
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'CAM cannot read the admin quality-review queue');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.data_quality_events where raw_source_record_id in (v_review, v_fail);
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 2::bigint, 'admin can find both distinct criteria outcomes');
+end;
+$$;
 
 select * from tests.suite_core();
 select * from tests.suite_viewer();
@@ -2528,11 +2817,14 @@ select * from tests.suite_default_role();
 select * from tests.suite_views();
 select * from tests.suite_actions();
 select * from tests.suite_reassign();
+select * from tests.suite_assign_client_owner();
 select * from tests.suite_claim_ownership();
 select * from tests.suite_outreach_status();
 select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
 select * from tests.suite_source_tracking();
+select * from tests.suite_onboarding();
+select * from tests.suite_client_criteria();
 
 select * from finish();
 

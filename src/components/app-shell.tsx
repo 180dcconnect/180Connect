@@ -5,6 +5,7 @@ import { logout } from "@/lib/auth/logout";
 import { Sidebar, type SidebarSection } from "./sidebar";
 
 /**
+/**
  * What the sidebar's frosted glass actually blurs: brand green, pooled at the
  * top-left where the navigation sits and lifted again along the bottom under
  * the account block, so the rail is brightest exactly where it is busiest.
@@ -55,6 +56,10 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     },
   ];
 
+  if (hasPermission(actor.role, "client:view")) {
+    sections[0].items.push({ href: "/clients", label: "Clients", icon: "users" });
+  }
+
   if (hasPermission(actor.role, "user:manage")) {
     sections.push({
       label: "Admin",
@@ -62,6 +67,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         { href: "/admin", label: "Overview", icon: "admin" },
         { href: "/admin/users", label: "Team management", icon: "users" },
         { href: "/admin/audit-log", label: "Audit log", icon: "audit" },
+        { href: "/admin/import-status", label: "Import status", icon: "import" },
       ],
     });
   }

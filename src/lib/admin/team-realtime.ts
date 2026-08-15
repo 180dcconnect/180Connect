@@ -1,3 +1,5 @@
+import { INVITE_EXPIRY_HOURS } from "../auth/invite.ts";
+
 export type TeamUser = {
   id: string;
   email: string;
@@ -12,6 +14,7 @@ export type PendingInvite = {
   id: string;
   email: string;
   invited_at: string;
+  role: TeamUser["role"];
 };
 
 export type TeamPanelState = {
@@ -58,6 +61,19 @@ function sortByInvitedAtDesc(invites: PendingInvite[]): PendingInvite[] {
 }
 
 /**
+ * Whether an invite link has likely expired, purely as a display hint —
+ * Supabase Auth (Authentication → Providers → Email → invite expiry) is the
+ * actual authority, this only mirrors the same `INVITE_EXPIRY_HOURS` the
+ * invite email already quotes (`src/lib/auth/invite.ts`). Resend stays
+ * available regardless: minting a fresh link is exactly the fix.
+ */
+export function isInviteExpired(invitedAt: string, now: Date = new Date()): boolean {
+  const invitedAtMs = new Date(invitedAt).getTime();
+  const expiryMs = invitedAtMs + INVITE_EXPIRY_HOURS * 60 * 60 * 1000;
+  return now.getTime() >= expiryMs;
+}
+
+/**
  * Folds one realtime change into the current split state. Pure and
  * framework-free so the row-classification and merge logic can be unit-tested
  * without mocking Supabase or React — the client component (team-panel.tsx)
@@ -84,10 +100,12 @@ export function applyRealtimeUserChange(
   if (!row.id) return state;
 
   if (isPendingInvite(row)) {
+    const existingInvite = state.pendingInvites.find((invite) => invite.id === row.id);
     const invite: PendingInvite = {
       id: row.id,
       email: row.email ?? "",
       invited_at: row.invited_at as string,
+      role: row.role ?? existingInvite?.role ?? "cam",
     };
     return {
       teamUsers: state.teamUsers.filter((user) => user.id !== row.id),

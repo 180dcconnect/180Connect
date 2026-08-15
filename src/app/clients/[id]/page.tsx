@@ -16,6 +16,7 @@ import { SuppressButton } from "./suppress-button";
 import { ComposeButton } from "./compose-button";
 import { BasicInfoPanel } from "./basic-info-panel";
 import { ClaimButton } from "./claim-button";
+import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
 
 type OrganisationRow = OrganisationDetailRow;
@@ -151,6 +152,22 @@ export default async function ClientDetailPage({
   const canSuppress = canEdit;
   const ownerId = ownerRow?.owner_id ?? null;
   const ownerName = ownerRow?.owner?.full_name ?? (ownerId ? "A former team member" : null);
+  const isAdmin = authorization.actor.role === "admin";
+
+  // F163: admin's CAM picker. Only fetched for an admin — a CAM can't reach the
+  // assign form, so the query would be wasted on every other page view.
+  let team: { id: string; full_name: string | null }[] = [];
+  if (isAdmin) {
+    const { data: teamData, error: teamError } = await supabase
+      .from("users")
+      .select("id, full_name")
+      .eq("role", "cam")
+      .order("full_name");
+    if (teamError) {
+      await reportError(teamError, { operation: "clients.detail_team", organisationId: id });
+    }
+    team = teamData ?? [];
+  }
 
   return (
     <main className="min-h-screen bg-[#f1f2f4] p-6">
@@ -183,6 +200,15 @@ export default async function ClientDetailPage({
             </div>
           ) : (
             <p className="mt-2 text-sm text-foreground/65">Unassigned.</p>
+          )}
+
+          {isAdmin && (
+            <AssignOwnerForm
+              organisationId={client.id}
+              currentOwnerId={ownerId}
+              currentOwnerName={ownerName}
+              team={team}
+            />
           )}
         </section>
 

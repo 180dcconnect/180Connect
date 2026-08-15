@@ -27,7 +27,7 @@
 import { z } from "zod";
 
 import { signValue, timingSafeEqual } from "../hmac.ts";
-import { emailField, nonEmptyTrimmed } from "../validation.ts";
+import { emailField } from "../validation.ts";
 import { MAX_PASSWORD_LENGTH, PASSWORD_RULES } from "./password-rules.ts";
 
 /**
@@ -61,18 +61,19 @@ export type ForgotPasswordState = {
 export type ResetPasswordState = {
   status: "idle" | "error";
   message?: string;
-  fieldErrors?: {
-    fullName?: string[];
-    password?: string[];
-    confirmPassword?: string[];
-  };
+  fieldErrors?: { password?: string[]; confirmPassword?: string[]; fullName?: string[] };
 };
 
 /** Cookie marking a session as being mid-recovery. */
 export const RECOVERY_COOKIE_NAME = "180connect-password-recovery";
 
-/** How long the marker lives when `PASSWORD_RESET_WINDOW_SECONDS` is unusable. */
-export const DEFAULT_RECOVERY_WINDOW_SECONDS = 3600;
+/**
+ * How long the marker lives when `PASSWORD_RESET_WINDOW_SECONDS` is unusable.
+ * 24 hours, matching the shared Supabase `otp_expiry` (F010) — see
+ * `invite-expiry.ts` for why recovery and invite links cannot have different
+ * lifetimes.
+ */
+export const DEFAULT_RECOVERY_WINDOW_SECONDS = 86400;
 
 export const emailSchema = emailField().pipe(z.string().max(254));
 
@@ -95,14 +96,19 @@ export const passwordSchema = z
     }
   });
 
-/** Matches the `full_name` column's practical limit (120) and the form's `maxLength`. */
-export const fullNameSchema = nonEmptyTrimmed(120, "Enter your name.");
+/**
+ * Optional here because whether a name is actually required depends on
+ * account state (does this user already have one?) that only the Server
+ * Action can see — it re-checks and fills in `fieldErrors.fullName` itself.
+ * See `setNewPassword` in `src/app/reset-password/actions.ts`.
+ */
+export const fullNameSchema = z.string().trim().max(120, "Name is too long.").optional();
 
 export const newPasswordSchema = z
   .object({
-    fullName: fullNameSchema,
     password: passwordSchema,
     confirmPassword: z.string(),
+    fullName: fullNameSchema,
   })
   .refine((values) => values.password === values.confirmPassword, {
     message: "Passwords do not match.",

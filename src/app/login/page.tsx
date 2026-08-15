@@ -18,12 +18,17 @@ export default async function LoginPage({
 }) {
   const params = await searchParams;
   const notice =
-    params["password-reset"] === "success"
+    params["invite-accepted"] === "success"
       ? {
           tone: "success" as const,
-          message: "Password updated. Log in with your new password.",
+          message: "Account created. Log in to get started.",
         }
-      : signedOutNotice(params.signed_out);
+      : params["password-reset"] === "success"
+        ? {
+            tone: "success" as const,
+            message: "Password updated. Log in with your new password.",
+          }
+        : signedOutNotice(params.signed_out);
 
   return <Landing skipIntro notice={notice} />;
 }

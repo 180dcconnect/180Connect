@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
   return completeRecoveryLanding(
     request,
     "password-recovery-code-exchange",
+    "recovery",
     async () => {
       const supabase = await createClient();
       return supabase.auth.exchangeCodeForSession(code);

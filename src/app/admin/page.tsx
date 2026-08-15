@@ -55,6 +55,24 @@ export default async function AdminPage() {
               Suppress a charity, or approve/reject a CAM&apos;s request.
             </p>
           </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/duplicates">
+            <h2 className="font-bold">Possible duplicates</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Review charities the import pipeline flagged as likely duplicates.
+            </p>
+          </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/charity-commission">
+            <h2 className="font-bold">Charity Commission import</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Bring UK charity registration and contact data into the ingestion pipeline.
+            </p>
+          </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/three-sixty-giving">
+            <h2 className="font-bold">360Giving import</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Attach grant and funding history to charities already in the pipeline.
+            </p>
+          </Link>
         </div>
       </section>
     </main>

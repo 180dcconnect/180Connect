@@ -13,9 +13,9 @@
  * action is blocked).
  *
  * Every other reason means the session itself cannot be used: there is no user,
- * the account is not approved, it has been suspended, or its profile row is
- * missing. `/dashboard` refuses all four and would bounce them onward, so they
- * go straight to `/login` instead of through a redirect they never see.
+ * it has been suspended, or its profile row is missing. `/dashboard` refuses
+ * all three and would bounce them onward, so they go straight to `/login`
+ * instead of through a redirect they never see.
  */
 
 import type { PermissionFailureReason } from "./permissions.ts";

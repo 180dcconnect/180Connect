@@ -3,10 +3,12 @@ import { describe, it } from "node:test";
 
 import {
   applyRealtimeUserChange,
+  isInviteExpired,
   type PendingInvite,
   type TeamPanelState,
   type TeamUser,
 } from "./team-realtime.ts";
+import { INVITE_EXPIRY_HOURS } from "../auth/invite.ts";
 
 function teamUser(overrides: Partial<TeamUser> = {}): TeamUser {
   return {
@@ -26,6 +28,7 @@ function pendingInvite(overrides: Partial<PendingInvite> = {}): PendingInvite {
     id: "u2",
     email: "b@180dc.org",
     invited_at: "2026-08-01T00:00:00.000Z",
+    role: "cam",
     ...overrides,
   };
 }
@@ -46,7 +49,7 @@ describe("applyRealtimeUserChange", () => {
     });
 
     assert.deepEqual(next.pendingInvites, [
-      { id: "u3", email: "new@180dc.org", invited_at: "2026-08-05T10:00:00.000Z" },
+      { id: "u3", email: "new@180dc.org", invited_at: "2026-08-05T10:00:00.000Z", role: "cam" },
     ]);
     assert.deepEqual(next.teamUsers, []);
   });
@@ -141,5 +144,46 @@ describe("applyRealtimeUserChange", () => {
       new: {},
     });
     assert.deepEqual(next, state);
+  });
+
+  it("carries the invited role through to the pending-invites list", () => {
+    const next = applyRealtimeUserChange(emptyState, {
+      eventType: "INSERT",
+      old: {},
+      new: {
+        id: "u4",
+        email: "admin-invite@180dc.org",
+        role: "admin",
+        invited_at: "2026-08-05T10:00:00.000Z",
+        invite_accepted_at: null,
+      },
+    });
+
+    assert.deepEqual(next.pendingInvites, [
+      pendingInvite({
+        id: "u4",
+        email: "admin-invite@180dc.org",
+        role: "admin",
+        invited_at: "2026-08-05T10:00:00.000Z",
+      }),
+    ]);
+  });
+});
+
+describe("isInviteExpired", () => {
+  const invitedAt = "2026-08-01T00:00:00.000Z";
+
+  it("is not expired before INVITE_EXPIRY_HOURS has passed", () => {
+    const justBefore = new Date(
+      new Date(invitedAt).getTime() + INVITE_EXPIRY_HOURS * 60 * 60 * 1000 - 1,
+    );
+    assert.equal(isInviteExpired(invitedAt, justBefore), false);
+  });
+
+  it("is expired once INVITE_EXPIRY_HOURS has passed", () => {
+    const atBoundary = new Date(
+      new Date(invitedAt).getTime() + INVITE_EXPIRY_HOURS * 60 * 60 * 1000,
+    );
+    assert.equal(isInviteExpired(invitedAt, atBoundary), true);
   });
 });

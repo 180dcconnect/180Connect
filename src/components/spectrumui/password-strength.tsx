@@ -131,6 +131,7 @@ export function PasswordStrengthInput({
   // The previous committed score decides which segments actually changed,
   // and the direction drives the label slide and the segment stagger order
   const prevScoreRef = useRef(score)
+  // eslint-disable-next-line react-hooks/refs
   const prevScore = prevScoreRef.current
   const direction = score >= prevScore ? 1 : -1
   useEffect(() => {
@@ -374,6 +375,7 @@ export function PasswordStrengthMeter({
   const fillColor = SCORE_COLORS[score]
 
   const prevScoreRef = useRef(score)
+  // eslint-disable-next-line react-hooks/refs
   const prevScore = prevScoreRef.current
   const direction = score >= prevScore ? 1 : -1
   useEffect(() => {

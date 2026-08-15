@@ -1,10 +1,10 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { hasPermission } from "@/lib/auth/permissions";
 import { logout } from "@/lib/auth/logout";
 import { Sidebar, type SidebarSection } from "./sidebar";
 
-/**
 /**
  * What the sidebar's frosted glass actually blurs: brand green, pooled at the
  * top-left where the navigation sits and lifted again along the bottom under
@@ -46,6 +46,8 @@ function ShellWash() {
  * decide what the sidebar should show, and bounces to `/login` otherwise.
  */
 export async function AppShell({ children }: { children: React.ReactNode }) {
+  const cookieStore = await cookies();
+  const initialCollapsed = cookieStore.get("sidebar_collapsed")?.value === "true";
   const actorResult = await getCurrentActor();
   if (!actorResult.ok) redirect("/login");
   const actor = actorResult.actor;
@@ -80,6 +82,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         userEmail={actor.email}
         roleLabel={actor.role}
         onLogout={logout}
+        initialCollapsed={initialCollapsed}
       />
       <main className="min-w-0 flex-1">{children}</main>
     </div>

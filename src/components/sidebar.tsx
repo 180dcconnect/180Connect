@@ -81,15 +81,17 @@ export function Sidebar({
   userEmail,
   roleLabel,
   onLogout,
+  initialCollapsed = false,
 }: {
   sections: SidebarSection[];
   userName?: string | null;
   userEmail?: string | null;
   roleLabel: string;
   onLogout: () => Promise<void>;
+  initialCollapsed?: boolean;
 }) {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
 
   useEffect(() => {
     try {

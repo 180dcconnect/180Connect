@@ -110,3 +110,45 @@ export function emptyStateMessage({
   }
   return filterActive ? "No clients match this filter." : "No clients to show.";
 }
+
+export function filterByCity(
+  clients: VisibleClient[],
+  cityFilter: string | null | undefined,
+): VisibleClient[] {
+  if (!cityFilter) return clients;
+  const term = cityFilter.toLowerCase();
+  return clients.filter((client) => client.city?.toLowerCase() === term);
+}
+
+export function filterByStatus(
+  clients: VisibleClient[],
+  statusFilter: string | null | undefined,
+): VisibleClient[] {
+  if (!statusFilter) return clients;
+  const term = statusFilter.toLowerCase();
+  // We match against the formatted label (e.g. "Meeting set")
+  return clients.filter((client) => client.outreachStatusLabel.toLowerCase() === term);
+}
+
+export function filterBySource(
+  clients: VisibleClient[],
+  sourceFilter: string | null | undefined,
+): VisibleClient[] {
+  if (!sourceFilter) return clients;
+  const term = sourceFilter.toLowerCase();
+  
+  if (term === "companies house") {
+    return clients.filter((c) => c.organisation_type === "company" || c.organisation_type === "both");
+  }
+  if (term === "charity commission") {
+    return clients.filter((c) => c.organisation_type === "charity" || c.organisation_type === "both");
+  }
+  if (term === "dual-registered") {
+    return clients.filter((c) => c.organisation_type === "both");
+  }
+  if (term === "other") {
+    return clients.filter((c) => c.organisation_type === "other");
+  }
+  
+  return clients;
+}

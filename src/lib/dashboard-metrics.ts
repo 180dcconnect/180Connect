@@ -14,6 +14,7 @@ export type DashboardOrgRow = {
   outreach_status: string;
   owner_id: string | null;
   updated_at: string;
+  created_at: string;
 };
 
 export type DashboardMetrics = {
@@ -38,6 +39,15 @@ const NEEDS_ATTENTION_STATUSES = new Set([
   "no_response",
 ]);
 
+/**
+ * The three pipeline readings above, as predicates over a single status. Exported
+ * so the client list's funnel (src/app/clients/client-insights.ts) draws the same
+ * stages this dashboard counts rather than re-deciding what "contacted" means.
+ */
+export const isContacted = (status: string) => status !== "not_contacted";
+export const hasResponded = (status: string) => RESPONSE_STATUSES.has(status);
+export const isConverted = (status: string) => status === "converted";
+
 /** F022-F025 — platform-wide totals, shown to every role regardless of ownership. */
 export function computeDashboardMetrics(rows: DashboardOrgRow[]): DashboardMetrics {
   let contacted = 0;
@@ -45,9 +55,9 @@ export function computeDashboardMetrics(rows: DashboardOrgRow[]): DashboardMetri
   let converted = 0;
 
   for (const row of rows) {
-    if (row.outreach_status !== "not_contacted") contacted += 1;
-    if (RESPONSE_STATUSES.has(row.outreach_status)) responsesReceived += 1;
-    if (row.outreach_status === "converted") converted += 1;
+    if (isContacted(row.outreach_status)) contacted += 1;
+    if (hasResponded(row.outreach_status)) responsesReceived += 1;
+    if (isConverted(row.outreach_status)) converted += 1;
   }
 
   return {
@@ -56,6 +66,57 @@ export function computeDashboardMetrics(rows: DashboardOrgRow[]): DashboardMetri
     responsesReceived,
     converted,
   };
+}
+
+export type GrowthPoint = { value: number; date: string };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const dayKey = (iso: string) => iso.slice(0, 10);
+
+/**
+ * F022 — how the total organisation count got to where it is. One point per UTC
+ * day over the trailing window, each the *cumulative* count at end of that day,
+ * so the last point equals computeDashboardMetrics().totalCharities.
+ *
+ * Records created before the window are folded into the first point rather than
+ * dropped: the line has to start at the real total, not at zero.
+ */
+export function organisationGrowthSeries(
+  rows: DashboardOrgRow[],
+  days = 30,
+  now = new Date(),
+): GrowthPoint[] {
+  if (days < 1) return [];
+
+  const end = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const start = end - (days - 1) * DAY_MS;
+
+  const perDay = new Map<string, number>();
+  let carried = 0;
+
+  for (const row of rows) {
+    const created = Date.parse(row.created_at);
+    // A row with an unparseable created_at still exists, so it counts as
+    // pre-window rather than vanishing from the total.
+    if (Number.isNaN(created) || created < start) {
+      carried += 1;
+      continue;
+    }
+    const key = dayKey(new Date(Math.min(created, end)).toISOString());
+    perDay.set(key, (perDay.get(key) ?? 0) + 1);
+  }
+
+  const points: GrowthPoint[] = [];
+  let running = carried;
+
+  for (let ms = start; ms <= end; ms += DAY_MS) {
+    const key = dayKey(new Date(ms).toISOString());
+    running += perDay.get(key) ?? 0;
+    points.push({ value: running, date: key });
+  }
+
+  return points;
 }
 
 export type NeedsAttentionItem = {

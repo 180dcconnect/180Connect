@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import {
   charityCommissionAdapter,
   createCharityCommissionLookupAdapter,
+  createCharityCommissionDiscoveryAdapter,
+  createCharityCommissionStatusRecheckAdapter,
 } from "./charity-commission.ts";
 
 const REAL_FETCH = globalThis.fetch;
@@ -337,6 +339,133 @@ describe("createCharityCommissionLookupAdapter — source tracking", () => {
       createCharityCommissionLookupAdapter({ registeredNumber: "1" }).onError(
         new Error("network down"),
       ),
+    );
+  });
+});
+
+describe("createCharityCommissionDiscoveryAdapter", () => {
+  it("applies a 7-day overlap buffer to the resolved watermark as the search start date", async () => {
+    let firstSearchUrl = "";
+    globalThis.fetch = routedFetch({
+      onSearch: (url) => {
+        firstSearchUrl ||= url;
+        return jsonResponse([]);
+      },
+    });
+
+    await createCharityCommissionDiscoveryAdapter({
+      resolveWatermark: async () => "2026-08-09",
+    }).fetch();
+
+    // Watermark minus 7 days, formatted as YYYY-MM-DD.
+    assert.ok(
+      firstSearchUrl.includes("/searchCharityRegDate/2026-08-02/"),
+      `expected the search to start 2026-08-02, got: ${firstSearchUrl}`,
+    );
+  });
+
+  it("falls back to a 30-days-ago start when no watermark is available", async () => {
+    let firstSearchUrl = "";
+    globalThis.fetch = routedFetch({
+      onSearch: (url) => {
+        firstSearchUrl ||= url;
+        return jsonResponse([]);
+      },
+    });
+
+    await createCharityCommissionDiscoveryAdapter({
+      resolveWatermark: async () => null,
+    }).fetch();
+
+    const expectedStart = new Date();
+    expectedStart.setUTCDate(expectedStart.getUTCDate() - 30);
+    const expectedStartDate = expectedStart.toISOString().slice(0, 10);
+
+    // Not the fixed CHARITY_COMMISSION_BACKFILL_START env var (that's the manual
+    // bulk-backfill button's range, deliberately not reused here — see the
+    // NEVER_RUN_FALLBACK_DAYS comment in charity-commission.ts).
+    assert.ok(
+      firstSearchUrl.includes(`/searchCharityRegDate/${expectedStartDate}/`),
+      `expected the search to start ${expectedStartDate}, got: ${firstSearchUrl}`,
+    );
+  });
+
+  it("returns full detail records, same as the fixed-range bulk adapter", async () => {
+    globalThis.fetch = routedFetch({});
+
+    const { records, truncated } = await createCharityCommissionDiscoveryAdapter({
+      resolveWatermark: async () => null,
+    }).fetch();
+
+    assert.equal(truncated, false);
+    assert.equal(records.length, 1);
+    assert.equal(records[0].source_record_id, "5254841");
+  });
+
+  it("reports its own name", () => {
+    assert.equal(createCharityCommissionDiscoveryAdapter().name, "charity_commission");
+  });
+
+  it("onError logs without throwing", () => {
+    assert.doesNotThrow(() =>
+      createCharityCommissionDiscoveryAdapter().onError(new Error("network down")),
+    );
+  });
+});
+
+describe("createCharityCommissionStatusRecheckAdapter", () => {
+  it("batches registered numbers into one details call", async () => {
+    const detailUrls: string[] = [];
+    globalThis.fetch = mock.fn(async (url: string | URL | Request) => {
+      detailUrls.push(String(url));
+      return jsonResponse([
+        { ...detailResult, reg_charity_number: 1 },
+        { ...detailResult, reg_charity_number: 2 },
+      ]);
+    });
+
+    const result = await createCharityCommissionStatusRecheckAdapter(["1", "2"]).fetch();
+
+    assert.equal(detailUrls.length, 1);
+    assert.equal(result.records.length, 2);
+    assert.equal(result.truncated, false);
+  });
+
+  it("skips a batch that fails to resolve instead of aborting the whole run", async () => {
+    let calls = 0;
+    // 404 (not 500): fetchWithRetry only retries 429/5xx, so a 404 fails on the
+    // first attempt with no retry backoff delay — same trick
+    // companieshouse.test.ts's equivalent test uses. The large batch's URL
+    // (comma-joined registration numbers) always 404s; the small batch's URL (a
+    // single, comma-free number) always succeeds.
+    globalThis.fetch = mock.fn(async (url: string | URL | Request) => {
+      calls++;
+      const isLargeBatch = String(url).includes(",");
+      if (isLargeBatch) return jsonResponse({ error: "not found" }, 404);
+      return jsonResponse([{ ...detailResult, reg_charity_number: 2 }]);
+    });
+
+    // Force two separate batches so one can fail independently of the other —
+    // DETAILS_BATCH_SIZE is 30, so 31 numbers split into a 30-item batch and a
+    // 1-item batch.
+    const manyNumbers = Array.from({ length: 30 }, (_, i) => String(i + 100));
+    const result = await createCharityCommissionStatusRecheckAdapter([
+      ...manyNumbers,
+      "2",
+    ]).fetch();
+
+    assert.equal(calls, 2);
+    assert.equal(result.records.length, 1);
+    assert.equal(result.records[0].source_record_id, String(detailResult.organisation_number));
+  });
+
+  it("reports its own name", () => {
+    assert.equal(createCharityCommissionStatusRecheckAdapter(["1"]).name, "charity_commission");
+  });
+
+  it("onError logs without throwing", () => {
+    assert.doesNotThrow(() =>
+      createCharityCommissionStatusRecheckAdapter(["1"]).onError(new Error("network down")),
     );
   });
 });

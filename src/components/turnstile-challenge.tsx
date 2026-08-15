@@ -69,6 +69,7 @@ export function TurnstileChallenge({
   action,
   gerund,
   resetKey,
+  tone = "light",
 }: {
   solved: boolean;
   onSolvedChange: (solved: boolean) => void;
@@ -85,6 +86,11 @@ export function TurnstileChallenge({
    * per attempt.
    */
   resetKey?: unknown;
+  /**
+   * Matches the surface the challenge sits on. Only the hint sentence changes —
+   * the widget itself is Cloudflare's iframe and is not ours to restyle.
+   */
+  tone?: "light" | "dark";
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<string | null>(null);
@@ -191,7 +197,15 @@ export function TurnstileChallenge({
       {!solved && (
         <p
           id={CAPTCHA_HINT_ID}
-          className={`text-xs ${unavailable ? "text-amber-900" : "text-foreground/55"}`}
+          className={`font-body text-xs ${
+            unavailable
+              ? tone === "dark"
+                ? "text-amber-200"
+                : "text-amber-900"
+              : tone === "dark"
+                ? "text-[#f4f4ef]/55"
+                : "text-foreground/55"
+          }`}
         >
           {unavailable
             ? `The security check could not load, so ${gerund} is not possible right now. Disable any ad or script blocker for this page and reload.`

@@ -74,7 +74,8 @@ export function BrandSearchBar({
   const FILTER_CATEGORIES: Record<string, string[]> = {
     "Filter by city": ["London", "Manchester", "Birmingham", "Edinburgh", "Glasgow"],
     "Filter by outreach status": ["Contacted", "Meeting set", "Proposal sent", "Closed won", "Closed lost"],
-    "Filter by owner": ["Bashir Bobboi", "Alice Smith", "Bob Jones", "Charlie Brown"]
+    "Filter by owner": ["Bashir Bobboi", "Alice Smith", "Bob Jones", "Charlie Brown"],
+    "Filter by source": ["Companies House", "Charity Commission", "360Giving"]
   };
 
   const close = () => {
@@ -126,7 +127,7 @@ export function BrandSearchBar({
         style={{ background: GLASS, boxShadow: LIP, borderRadius: ROW / 2 }}
       animate={{ height: open ? "auto" : ROW }}
       initial={false}
-      transition={{ duration: 0.55, ease: EASE }}
+      transition={{ duration: 0.7, ease: EASE }}
       onKeyDown={(e) => {
         if (e.key !== "Escape" || !open) return;
         e.stopPropagation();
@@ -243,14 +244,14 @@ export function BrandSearchBar({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, transition: { duration: 0.18, ease: EASE } }}
-            transition={{ duration: 0.3, ease: EASE, delay: 0.12 }}
+            transition={{ duration: 0.5, ease: EASE, delay: 0.2 }}
             className="relative z-10"
           >
             <AnimatePresence mode="wait">
               {activeFilter === null ? (
                 <motion.ul
                   key="categories"
-                  className="flex flex-col px-4 py-4"
+                  className="flex flex-col px-4 py-4 h-[280px] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
                   variants={stagger(0.05, 0.14)}
                   initial="hidden"
                   animate="show"
@@ -272,15 +273,15 @@ export function BrandSearchBar({
                   ))}
                 </motion.ul>
               ) : (
-                <motion.ul
+                <motion.div
                   key="options"
-                  className="flex flex-col px-4 py-4"
+                  className="flex flex-col h-[280px] pt-4"
                   variants={stagger(0.05, 0.14)}
                   initial="hidden"
                   animate="show"
                   exit={{ opacity: 0, transition: { duration: 0.15 } }}
                 >
-                  <motion.li variants={entranceSoft} className="mb-2">
+                  <motion.div variants={entranceSoft} className="mb-2 px-4 shrink-0">
                     <button
                       type="button"
                       onClick={() => {
@@ -292,9 +293,9 @@ export function BrandSearchBar({
                       <ChevronLeft className="h-4 w-4" />
                       Back to filters
                     </button>
-                  </motion.li>
+                  </motion.div>
 
-                  <motion.li variants={entranceSoft} className="mb-4 px-3">
+                  <motion.div variants={entranceSoft} className="mb-4 px-7 shrink-0">
                     <input
                       type="search"
                       placeholder={`Search ${activeFilter?.replace("Filter by ", "").toLowerCase()}...`}
@@ -302,31 +303,33 @@ export function BrandSearchBar({
                       onChange={(e) => setFilterQuery(e.target.value)}
                       className="font-body w-full bg-white/10 text-[15px] text-[#f4f4ef] placeholder:text-[#f4f4ef]/40 rounded-xl px-4 py-2 outline-none focus-visible:ring-2 focus-visible:ring-[#e6f5c0] [&::-webkit-search-cancel-button]:hidden"
                     />
-                  </motion.li>
+                  </motion.div>
 
-                  {activeOptions.map((option) => (
-                    <motion.li key={option} variants={entranceSoft}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!selectedFilters.includes(option)) {
-                            setSelectedFilters((prev) => [...prev, option]);
-                          }
-                          close();
-                        }}
-                        className="font-body block w-full text-left rounded-2xl px-3 py-2 text-lg font-medium text-[#f4f4ef]/70 transition-colors hover:bg-white/8 hover:text-[#f4f4ef] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
-                      >
-                        {option}
-                      </button>
-                    </motion.li>
-                  ))}
+                  <ul className="flex-1 flex flex-col px-4 pb-4 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                    {activeOptions.map((option) => (
+                      <motion.li key={option} variants={entranceSoft}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!selectedFilters.includes(option)) {
+                              setSelectedFilters((prev) => [...prev, option]);
+                            }
+                            close();
+                          }}
+                          className="font-body block w-full text-left rounded-2xl px-3 py-2 text-lg font-medium text-[#f4f4ef]/70 transition-colors hover:bg-white/8 hover:text-[#f4f4ef] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+                        >
+                          {option}
+                        </button>
+                      </motion.li>
+                    ))}
 
-                  {activeOptions.length === 0 && (
-                    <motion.li variants={entranceSoft} className="font-body px-3 py-2 text-[15px] text-[#f4f4ef]/40">
-                      No matches found.
-                    </motion.li>
-                  )}
-                </motion.ul>
+                    {activeOptions.length === 0 && (
+                      <motion.li variants={entranceSoft} className="font-body px-3 py-2 text-[15px] text-[#f4f4ef]/40">
+                        No matches found.
+                      </motion.li>
+                    )}
+                  </ul>
+                </motion.div>
               )}
             </AnimatePresence>
           </motion.div>

@@ -274,7 +274,7 @@ export default async function DashboardPage({
               <Rise className="flex items-baseline justify-between gap-4">
                 <h2 className="text-xl font-black tracking-[-0.02em]">Pipeline</h2>
                 <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                  Platform-wide
+                  Team-wide
                 </p>
               </Rise>
 

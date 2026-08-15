@@ -637,7 +637,7 @@ why that doesn't loop back to the same flag.
 ### 3.16 Field discrepancies — admin writes both sides, RPC only
 
 Backs F048 Data Discrepancy Detection (#49),
-`supabase/migrations/20260811090000_create_field_discrepancies.sql`. New table — unlike
+`supabase/migrations/20260815090000_create_field_discrepancies.sql`. New table — unlike
 `ENTITY_MATCH_CANDIDATES` (§3.15), `FIELD_DISCREPANCIES` was not previously reserved in
 the Data Model; added by this migration (Data Model spreadsheet update still owed
 alongside — see the migration header).
@@ -655,11 +655,32 @@ match), so `record_field_discrepancy` self-checks `app.is_admin()` the same way
 a flagged conflict identifies which third-party source said what, not CAM-visible data.
 
 `record_field_discrepancy(organisation_id, field_name, existing_value, existing_source,
-incoming_value, incoming_source, raw_source_record_id, entity_match_candidate_id)` — no
-end-user action, called only by the detection follow-up above; does not write
-`audit_log` (flagging is not itself a decision). No-ops if the same `incoming_value`
-was already resolved for that organisation+field, so a repeat import doesn't reopen an
-already-adjudicated conflict.
+incoming_value, incoming_source, raw_source_record_id, entity_match_candidate_id,
+auto_resolved_choice)` — no end-user action, called only by the detection follow-up
+above. No-ops if the same `incoming_value` was already resolved for that
+organisation+field, so a repeat import doesn't reopen an already-adjudicated conflict.
+
+It has two paths, and only the second is a decision:
+
+- `auto_resolved_choice` **null** — flag only. Writes a `pending` row and **no**
+  `audit_log` entry (flagging is not itself a decision).
+- `auto_resolved_choice` **set** — source priority settled the conflict (Companies
+  House outranks the Charity Commission; see `src/lib/standardize/source-priority.ts`).
+  Writes the row already `resolved`, applies the winning value onto `ORGANISATIONS`
+  through the same six-field allowlist as below, and writes `audit_log`
+  (`field_discrepancy_auto_resolved`) in the same transaction. `resolved_by_user_id` is
+  the admin whose duplicate confirmation triggered detection — the table's
+  `decision_consistent` constraint requires a real actor, and this runs inside their
+  request; "the rules decided, not the person" is carried by the distinct `audit_log`
+  action and by `notes`, not by a null actor.
+
+So the review queue (`status = 'pending'`) holds only what the priority rules could
+**not** settle: the same source on both sides, an unranked source, or an organisation
+whose originating raw record can no longer be identified (`existing_source =
+'unknown'`). Note the deliberate asymmetry with `ENTITY_MATCH_CANDIDATES.source_priority`,
+which falls back to `99` for an unranked source: a fallback number is safe to *store*,
+but is not sufficient grounds to *overwrite* a field, so the resolver declines rather
+than defaulting.
 
 `resolve_field_discrepancy(field_discrepancy_id, choice, note)` — the only end-user
 write. Admin only, `SECURITY DEFINER`, rejects a missing or already-resolved target,

@@ -95,7 +95,7 @@ function fakeStore(overrides: Partial<DiscrepancyDetectionStore> = {}): Discrepa
 }
 
 describe("detectAndFlagDiscrepancies", () => {
-  it("dispatches to the standardize function matching the raw record's source and flags each differing field", async () => {
+  it("dispatches to the standardize function matching the raw record's source and records each differing field", async () => {
     const store = fakeStore({
       async loadOrganisationForComparison() {
         return { organisation: org({ address_line_1: "99 Old Road" }), source: "charity_commission" };
@@ -104,13 +104,71 @@ describe("detectAndFlagDiscrepancies", () => {
 
     const result = await detectAndFlagDiscrepancies("candidate-1", store);
 
-    assert.equal(result.flagged, 1);
     assert.equal(store.recorded.length, 1);
     assert.equal(store.recorded[0].fieldName, "address_line_1");
     assert.equal(store.recorded[0].existingValue, "99 Old Road");
     assert.equal(store.recorded[0].incomingValue, "1 Test Street");
     assert.equal(store.recorded[0].existingSource, "charity_commission");
     assert.equal(store.recorded[0].incomingSource, "companies_house");
+
+    // Companies House outranks the Charity Commission, so this one never reaches
+    // a human: it counts as auto-resolved, not flagged.
+    assert.equal(store.recorded[0].autoResolvedChoice, "incoming");
+    assert.equal(result.autoResolved, 1);
+    assert.equal(result.flagged, 0);
+  });
+
+  it("keeps the existing value when the organisation's own source outranks the incoming one", async () => {
+    const store = fakeStore({
+      async loadRawSourceRecord() {
+        return {
+          recordSource: "charity_commission",
+          rawPayload: { charity_name: "Test Charity", address_line_one: "1 Test Street" },
+        };
+      },
+      async loadOrganisationForComparison() {
+        return { organisation: org({ address_line_1: "99 Old Road" }), source: "companies_house" };
+      },
+    });
+
+    const result = await detectAndFlagDiscrepancies("candidate-1", store);
+
+    assert.equal(store.recorded.length, 1);
+    assert.equal(store.recorded[0].autoResolvedChoice, "existing");
+    assert.equal(result.autoResolved, 1);
+    assert.equal(result.flagged, 0);
+  });
+
+  it("flags for manual review when both values came from the same source", async () => {
+    const store = fakeStore({
+      async loadOrganisationForComparison() {
+        return { organisation: org({ address_line_1: "99 Old Road" }), source: "companies_house" };
+      },
+    });
+
+    const result = await detectAndFlagDiscrepancies("candidate-1", store);
+
+    assert.equal(store.recorded[0].autoResolvedChoice, null);
+    assert.equal(result.flagged, 1);
+    assert.equal(result.autoResolved, 0);
+  });
+
+  it("flags for manual review rather than overwriting when the existing value's source is unknown", async () => {
+    // loadOrganisationForComparison returns "unknown" when the raw record that
+    // created the organisation can't be found. Treating that as least-priority
+    // would let the incoming source silently overwrite a value whose provenance
+    // nobody can establish — so it goes to a human instead.
+    const store = fakeStore({
+      async loadOrganisationForComparison() {
+        return { organisation: org({ address_line_1: "99 Old Road" }), source: "unknown" };
+      },
+    });
+
+    const result = await detectAndFlagDiscrepancies("candidate-1", store);
+
+    assert.equal(store.recorded[0].autoResolvedChoice, null);
+    assert.equal(result.flagged, 1);
+    assert.equal(result.autoResolved, 0);
   });
 
   it("flags nothing when the mapped incoming record agrees with the existing organisation", async () => {

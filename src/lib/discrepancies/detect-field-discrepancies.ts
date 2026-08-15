@@ -17,13 +17,23 @@
 //
 // MVP field scope: legal_name, website, contact_email, address_line_1, city,
 // postcode — see the migration header
-// (20260811090000_create_field_discrepancies.sql) for why these six and not the
+// (20260815090000_create_field_discrepancies.sql) for why these six and not the
 // rest of StandardOrganisation.
+//
+// Not every detected conflict reaches a human. Per Bashir's rule (13 Aug call,
+// and FIELD_DISCREPANCIES' own data-dictionary entry), a conflict between two
+// ranked sources is settled automatically by source priority — Companies House
+// over Charity Commission — and only what the ruleset can't settle is queued for
+// manual review. Auto-settled conflicts are still written to the table, as
+// already-resolved rows with an audit_log entry, so "the system decided this"
+// stays as visible and reviewable as "an admin decided this". See
+// standardize/source-priority.ts for the rule and when it declines to apply.
 
 import type { createClient } from "../supabase/server.ts";
 import { reportError } from "../error-logging.ts";
 import { standardizeCharityCommissionRecord } from "../standardize/charity-commission.ts";
 import { standardizeCompaniesHouseRecord } from "../standardize/companies-house.ts";
+import { resolveBySourcePriority } from "../standardize/source-priority.ts";
 import type { StandardOrganisation } from "../standardize/types.ts";
 
 export const DISCREPANCY_FIELDS = [
@@ -101,6 +111,13 @@ export interface DiscrepancyDetectionStore {
     incomingSource: string;
     rawSourceRecordId: string;
     entityMatchCandidateId: string;
+    /**
+     * Which side source priority picked, or null to queue the conflict for an
+     * admin. When set, the RPC writes the row already resolved, applies the
+     * winning value onto organisations and writes audit_log — the same end state
+     * an admin's own resolve_field_discrepancy call produces.
+     */
+    autoResolvedChoice: "existing" | "incoming" | null;
   }): Promise<{ error: string } | { ok: true }>;
 }
 
@@ -112,18 +129,23 @@ export interface DiscrepancyDetectionStore {
  * (malformed payload, unrecognised source) — those are reported and treated as
  * "nothing to flag", the same way write-organisations.ts's promote loop treats a
  * mapper failure as a per-record problem rather than crashing the whole batch.
+ *
+ * Returns the two outcomes separately: `flagged` is conflicts now waiting on an
+ * admin, `autoResolved` is conflicts source priority settled on its own. A caller
+ * that shows the admin "3 conflicts flagged" must not count the second kind —
+ * there is nothing for them to do about those.
  */
 export async function detectAndFlagDiscrepancies(
   entityMatchCandidateId: string,
   store: DiscrepancyDetectionStore,
-): Promise<{ flagged: number }> {
+): Promise<{ flagged: number; autoResolved: number }> {
   const candidate = await store.loadEntityMatchCandidate(entityMatchCandidateId);
   if (!candidate) {
     await reportError(new Error("Entity match candidate not found for discrepancy detection"), {
       operation: "discrepancies.detect",
       entityMatchCandidateId,
     });
-    return { flagged: 0 };
+    return { flagged: 0, autoResolved: 0 };
   }
 
   const rawRecord = await store.loadRawSourceRecord(candidate.rawSourceRecordId);
@@ -133,7 +155,7 @@ export async function detectAndFlagDiscrepancies(
       entityMatchCandidateId,
       rawSourceRecordId: candidate.rawSourceRecordId,
     });
-    return { flagged: 0 };
+    return { flagged: 0, autoResolved: 0 };
   }
 
   const standardize = STANDARDIZE_BY_SOURCE[rawRecord.recordSource];
@@ -145,7 +167,7 @@ export async function detectAndFlagDiscrepancies(
       entityMatchCandidateId,
       recordSource: rawRecord.recordSource,
     });
-    return { flagged: 0 };
+    return { flagged: 0, autoResolved: 0 };
   }
 
   let incoming: StandardOrganisation;
@@ -157,7 +179,7 @@ export async function detectAndFlagDiscrepancies(
       entityMatchCandidateId,
       rawSourceRecordId: candidate.rawSourceRecordId,
     });
-    return { flagged: 0 };
+    return { flagged: 0, autoResolved: 0 };
   }
 
   const existing = await store.loadOrganisationForComparison(candidate.candidateOrganisationId);
@@ -167,12 +189,17 @@ export async function detectAndFlagDiscrepancies(
       entityMatchCandidateId,
       organisationId: candidate.candidateOrganisationId,
     });
-    return { flagged: 0 };
+    return { flagged: 0, autoResolved: 0 };
   }
 
   const discrepancies = findFieldDiscrepancies(incoming, existing.organisation);
 
+  // One decision for the whole record: source priority compares the two sources,
+  // and both sides' sources are the same for every field of this comparison.
+  const autoResolvedChoice = resolveBySourcePriority(existing.source, rawRecord.recordSource);
+
   let flagged = 0;
+  let autoResolved = 0;
   for (const discrepancy of discrepancies) {
     const result = await store.recordDiscrepancy({
       organisationId: candidate.candidateOrganisationId,
@@ -183,6 +210,7 @@ export async function detectAndFlagDiscrepancies(
       incomingSource: rawRecord.recordSource,
       rawSourceRecordId: candidate.rawSourceRecordId,
       entityMatchCandidateId,
+      autoResolvedChoice,
     });
     if ("error" in result) {
       await reportError(new Error(result.error), {
@@ -192,10 +220,11 @@ export async function detectAndFlagDiscrepancies(
       });
       continue;
     }
-    flagged++;
+    if (autoResolvedChoice) autoResolved++;
+    else flagged++;
   }
 
-  return { flagged };
+  return { flagged, autoResolved };
 }
 
 /**
@@ -287,6 +316,7 @@ export function createDiscrepancyDetectionStore(
         p_incoming_source: input.incomingSource,
         p_raw_source_record_id: input.rawSourceRecordId,
         p_entity_match_candidate_id: input.entityMatchCandidateId,
+        p_auto_resolved_choice: input.autoResolvedChoice,
       });
 
       if (error) return { error: error.message };

@@ -42,7 +42,7 @@ const GENERIC_FAILURE = "The decision could not be saved. Refresh and try again.
  * Maps a Postgres error from resolve_field_discrepancy onto something safe to show
  * an admin. Every errcode below is one the RPC raises deliberately, with a message
  * written to be read by an admin (see
- * 20260811090000_create_field_discrepancies.sql) — no table or constraint names,
+ * 20260815090000_create_field_discrepancies.sql) — no table or constraint names,
  * nothing internal. Passing those through is safe; everything else gets the
  * generic string (DoD: no stack traces or internals in a user-facing error).
  */

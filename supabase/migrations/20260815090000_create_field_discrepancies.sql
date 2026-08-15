@@ -30,14 +30,37 @@
 --   without F044. Acceptable for MVP; closing it properly is F044's job, not this
 --   ticket's.
 --
+-- SOURCE PRIORITY DECIDES MOST CONFLICTS BEFORE A HUMAN SEES THEM:
+--   Bashir's rule (13 Aug 2026 call, and this table's own data-dictionary entry):
+--   Companies House outranks the Charity Commission, everything else is least
+--   priority, and manual flagging is reserved for what those rules can't settle.
+--   So the caller passes p_auto_resolved_choice when the two sources are both
+--   ranked and differ, and this function writes the row already resolved instead
+--   of pending — applying the winning value onto organisations and writing
+--   audit_log, exactly as an admin's own resolve_field_discrepancy call would.
+--   Only ties the ruleset can't break reach the review queue: the same source on
+--   both sides, an unranked source, or an organisation whose originating record
+--   can no longer be identified. See src/lib/standardize/source-priority.ts.
+--
+--   Why write the auto-settled rows at all, when the dictionary calls this table
+--   the queue for unresolvable conflicts: that description stays true of its
+--   *pending* rows, which is what the review UI shows. The resolved ones are the
+--   record that an automatic overwrite happened. Dropping them would mean a
+--   source could quietly change a client's registered address with no trace in
+--   the app at all — the opposite of what a discrepancy feature is for.
+--
 -- WHY TWO RPCS, NOT ONE:
---   record_field_discrepancy (the flag) and resolve_field_discrepancy (the decision)
---   are asymmetric on purpose. Flagging is not itself a decision — it happens once
---   per detected conflict, called from the same request that just confirmed a
---   duplicate match — so it does not write audit_log (see docs/audit-log-pattern.md:
---   the trail should record real transitions, not noise). Resolving is the admin's
---   AC3 decision and does write audit_log, in the same transaction as applying the
---   chosen value back onto organisations.
+--   record_field_discrepancy (the flag) and resolve_field_discrepancy (the
+--   admin's decision) are asymmetric on purpose. Flagging is not itself a
+--   decision — it happens once per detected conflict, called from the same
+--   request that just confirmed a duplicate match — so the flagging path does not
+--   write audit_log (see docs/audit-log-pattern.md: the trail should record real
+--   transitions, not noise). Both decision paths do write it, in the same
+--   transaction as applying the chosen value back onto organisations:
+--   'field_discrepancy_resolved' for the admin's own choice,
+--   'field_discrepancy_auto_resolved' for the priority rules'. Two actions rather
+--   than one flag on a shared action, so "what did a human actually decide" stays
+--   answerable with a single query.
 --
 -- WHY record_field_discrepancy IS CALLED WITH THE ADMIN'S OWN SESSION, NOT
 --   service_role: unlike entity_match_candidates (written by the ingestion pipeline
@@ -81,7 +104,7 @@
 --   Documentation | Data Model (03 Raw Data, 02 Data Dictionary) and
 --                 | docs/rls-permission-matrix.md §3.16 updated alongside this PR.
 --
--- Reversibility: paired rollback in ../rollback/20260811090000_create_field_discrepancies.down.sql
+-- Reversibility: paired rollback in ../rollback/20260815090000_create_field_discrepancies.down.sql
 
 create table public.field_discrepancies (
   id                          uuid primary key default gen_random_uuid(),
@@ -160,22 +183,35 @@ create or replace function public.record_field_discrepancy(
   p_incoming_value               text,
   p_incoming_source               text,
   p_raw_source_record_id        uuid,
-  p_entity_match_candidate_id   uuid default null
+  p_entity_match_candidate_id   uuid default null,
+  p_auto_resolved_choice        text default null
 )
 returns void
 language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  v_actor            uuid := (select auth.uid());
+  v_value            text;
+  v_existing_open_id uuid;
 begin
   if not app.is_admin() then
     raise exception 'only an admin may record a field discrepancy'
       using errcode = '42501';
   end if;
 
+  if p_auto_resolved_choice is not null
+     and p_auto_resolved_choice not in ('existing', 'incoming') then
+    raise exception 'auto-resolved choice must be ''existing'' or ''incoming'''
+      using errcode = '22023';
+  end if;
+
   -- AC3: a value already adjudicated for this organisation+field does not reopen
   -- the conflict on a later import that repeats it. Only a genuinely different
-  -- incoming value should flag again.
+  -- incoming value should flag again. Applies to both paths below: a repeat
+  -- import must not re-decide (and re-audit) a conflict already settled once,
+  -- whether it was settled by an admin or by the priority rules.
   if exists (
     select 1 from public.field_discrepancies
      where organisation_id = p_organisation_id
@@ -183,6 +219,101 @@ begin
        and status = 'resolved'
        and incoming_value = p_incoming_value
   ) then
+    return;
+  end if;
+
+  -- ---------------------------------------------------------------------
+  -- Auto-resolution path (F048, Bashir's rule confirmed 13 Aug 2026): both
+  -- sources are ranked and they differ, so source priority settles this without
+  -- a human. The row is still written — as an already-resolved row, with the
+  -- value applied to organisations and an audit_log entry — rather than being
+  -- silently dropped. The table's dictionary entry describes it as the queue for
+  -- what priority *can't* settle, and that stays true of its pending rows; the
+  -- resolved ones exist so an automatic overwrite is as accountable as a manual
+  -- one. Without them, a source quietly changing a client's address would leave
+  -- no trace anywhere.
+  --
+  -- resolved_by_user_id is the admin whose confirmation triggered detection, not
+  -- a service account: this runs inside their own PATCH /api/admin/duplicates
+  -- request, and field_discrepancies_decision_consistent requires a non-null
+  -- actor. The distinction between "they chose this" and "the rules chose this"
+  -- is carried by notes and by the audit_log action, which is
+  -- field_discrepancy_auto_resolved, not field_discrepancy_resolved.
+  -- ---------------------------------------------------------------------
+  if p_auto_resolved_choice is not null then
+    v_value := case when p_auto_resolved_choice = 'existing'
+                    then p_existing_value else p_incoming_value end;
+
+    -- Same six-column allowlist and same reasoning as resolve_field_discrepancy:
+    -- explicit case-per-column, never dynamic SQL built from a field name.
+    update public.organisations set
+      legal_name      = case when p_field_name = 'legal_name'      then v_value else legal_name end,
+      website          = case when p_field_name = 'website'          then v_value else website end,
+      contact_email    = case when p_field_name = 'contact_email'    then v_value else contact_email end,
+      address_line_1   = case when p_field_name = 'address_line_1'   then v_value else address_line_1 end,
+      city              = case when p_field_name = 'city'              then v_value else city end,
+      postcode          = case when p_field_name = 'postcode'          then v_value else postcode end
+    where id = p_organisation_id;
+
+    -- An open row for this field may already exist from an earlier import that
+    -- the rules couldn't settle (e.g. the existing value's source was unknown
+    -- then). Settle that row rather than leaving it pending beside a resolved
+    -- one — field_discrepancies_open_idx allows only one pending row per
+    -- organisation+field, and a stale one would misreport the queue.
+    select id into v_existing_open_id
+      from public.field_discrepancies
+     where organisation_id = p_organisation_id
+       and field_name = p_field_name
+       and status = 'pending';
+
+    if v_existing_open_id is not null then
+      update public.field_discrepancies
+         set existing_value = p_existing_value,
+             existing_source = p_existing_source,
+             incoming_value = p_incoming_value,
+             incoming_source = p_incoming_source,
+             raw_source_record_id = p_raw_source_record_id,
+             entity_match_candidate_id = p_entity_match_candidate_id,
+             status = 'resolved',
+             resolved_choice = p_auto_resolved_choice,
+             resolved_value = v_value,
+             resolved_by_user_id = v_actor,
+             resolved_at = now(),
+             notes = 'Resolved automatically by source priority ('
+                     || p_existing_source || ' vs ' || p_incoming_source || ').'
+       where id = v_existing_open_id;
+    else
+      insert into public.field_discrepancies (
+        organisation_id, field_name, existing_value, existing_source,
+        incoming_value, incoming_source, raw_source_record_id,
+        entity_match_candidate_id, status, resolved_choice, resolved_value,
+        resolved_by_user_id, resolved_at, notes
+      )
+      values (
+        p_organisation_id, p_field_name, p_existing_value, p_existing_source,
+        p_incoming_value, p_incoming_source, p_raw_source_record_id,
+        p_entity_match_candidate_id, 'resolved', p_auto_resolved_choice, v_value,
+        v_actor, now(),
+        'Resolved automatically by source priority ('
+          || p_existing_source || ' vs ' || p_incoming_source || ').'
+      );
+    end if;
+
+    insert into public.audit_log (actor_user_id, action, target_table, target_id, detail)
+    values (
+      v_actor,
+      'field_discrepancy_auto_resolved',
+      'organisations', p_organisation_id,
+      jsonb_build_object(
+        'field_name', p_field_name,
+        'choice', p_auto_resolved_choice,
+        'value', v_value,
+        'existing_source', p_existing_source,
+        'incoming_source', p_incoming_source,
+        'entity_match_candidate_id', p_entity_match_candidate_id
+      )
+    );
+
     return;
   end if;
 
@@ -205,16 +336,20 @@ begin
 end;
 $$;
 
-comment on function public.record_field_discrepancy(uuid, text, text, text, text, text, uuid, uuid) is
+comment on function public.record_field_discrepancy(uuid, text, text, text, text, text, uuid, uuid, text) is
   'F048: flags (or refreshes) an open conflict between an organisation''s current
   field value and an incoming source''s value. SECURITY DEFINER; self-checks
   app.is_admin(); no-ops if this incoming_value was already resolved for this
-  organisation+field. Does not write audit_log — flagging is not a decision, see
-  migration header.';
+  organisation+field. With p_auto_resolved_choice null this only flags, and writes
+  no audit_log — flagging is not a decision. With it set (source priority settled
+  the conflict) it instead writes an already-resolved row, applies the winning
+  value onto organisations and writes audit_log
+  (field_discrepancy_auto_resolved) in the same transaction — that path IS a
+  decision. See migration header.';
 
-revoke execute on function public.record_field_discrepancy(uuid, text, text, text, text, text, uuid, uuid) from public;
-revoke execute on function public.record_field_discrepancy(uuid, text, text, text, text, text, uuid, uuid) from anon;
-grant execute on function public.record_field_discrepancy(uuid, text, text, text, text, text, uuid, uuid) to authenticated;
+revoke execute on function public.record_field_discrepancy(uuid, text, text, text, text, text, uuid, uuid, text) from public;
+revoke execute on function public.record_field_discrepancy(uuid, text, text, text, text, text, uuid, uuid, text) from anon;
+grant execute on function public.record_field_discrepancy(uuid, text, text, text, text, text, uuid, uuid, text) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- resolve_field_discrepancy — admin's AC3 decision

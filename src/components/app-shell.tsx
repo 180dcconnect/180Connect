@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { hasPermission } from "@/lib/auth/permissions";
 import { logout } from "@/lib/auth/logout";
-import { Sidebar, type SidebarSection } from "./sidebar";
+import { AppShellFrame } from "./app-shell-frame";
+import type { SidebarSection } from "./sidebar";
 
 /**
  * What the sidebar's frosted glass actually blurs: brand green, pooled at the
@@ -74,17 +75,18 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-screen">
+    <>
       <ShellWash />
-      <Sidebar
+      <AppShellFrame
         sections={sections}
         userName={actor.fullName}
         userEmail={actor.email}
         roleLabel={actor.role}
         onLogout={logout}
         initialCollapsed={initialCollapsed}
-      />
-      <main className="min-w-0 flex-1">{children}</main>
-    </div>
+      >
+        {children}
+      </AppShellFrame>
+    </>
   );
 }

@@ -53,6 +53,8 @@ not a dashboard product page.
 #e6f5c0  lime        the accent — CTA disc and wash
 #72b744  brand       the 180DC globe green; logo and app UI only
 rgba(28,26,24,0.72)  glass    CTA capsule at rest
+rgba(28,26,24,0.40)  search glass        the search pill, collapsed
+rgba(24,22,20,0.94)  search glass open   the same pill once its panel is out
 rgba(255,255,255,0.25)  rim   ring on any glass surface
 inset 0 1px 0 rgba(255,255,255,0.3)   lip   lit top edge on glass
 ```
@@ -148,6 +150,30 @@ children are each antialiased against the rounded clip independently, which
 composites a dark hairline at the edge that no overshoot removes. An inset shadow
 rasterises with the background, so the element has exactly one antialiased edge.
 
+## The search bar
+
+`BrandSearchBar` is a glass pill that unfolds into a filter panel. It is shared —
+`/clients` and `/admin/audit-log` both mount it — so nothing about a host page's
+URL may be baked into it. A page passes:
+
+- `categories` — the filter groups and their options,
+- `params` — category label → the query parameter that choice writes,
+- `subjects` — the words that cycle behind the prompt, naming what *this* page
+  holds,
+- `defaultQuery` / `defaultFilters` — so a filtered URL renders its own chips.
+
+`params` is not optional in spirit. An earlier version mapped labels to
+parameters with an `if` chain inside the component, which meant a second page
+could not reuse it without editing it.
+
+**The pill is glass collapsed and a surface open.** Collapsed it sits over the
+page ground and 40% ink reads as a lens. Open it covers real content, and
+translucency that looked elegant over the bone ground left table rows legible
+straight through the filter names. It therefore steps to 94% on open, and the
+white sheen behind it drops to `/8` so the panel doesn't grey out. Don't lean on
+`backdrop-blur` for this — it is a compositor feature and degrades to nothing
+where the browser declines it, which is exactly when you'd notice.
+
 ## Motion
 
 One curve for everything: `EASE = [0.2, 0.7, 0.2, 1]`. Two exceptions, both
@@ -169,6 +195,12 @@ duration 0.75s, staggerChildren 0.09
 
 Elements arrive in reading order. A group of related items (nav links, sections)
 staggers `0.04`–`0.09` apart. Nothing snaps in.
+
+**A long list uses `entranceIndexed`, not `staggerChildren`.** A stagger has no
+ceiling: a hundred audit rows at 0.04s apart is a four-second cascade and the
+reader watches the bottom of the page fill in. `entranceIndexed` takes the row's
+index as Motion's `custom` and caps the delay, so the rows above the fold still
+arrive in order and everything below it is settled before it is scrolled to.
 
 **Every public page wraps in `<MotionConfig reducedMotion="user">`.** Transforms
 drop for anyone who asks; opacity fades survive, so the page still resolves rather
@@ -313,6 +345,42 @@ so there is no hydration mismatch. A few stay at `blur(4px)` permanently — tha
 depth of field, and it is what stops the scatter reading as a gallery.
 
 Regenerate crops with `scripts/` (see `public/crops/`), never by cropping in CSS.
+
+## Inside the app
+
+The logged-in app keeps the shadcn tokens — that exemption is at the top of this
+file — but it is not a different product. `/dashboard`, `/clients` and
+`/admin/audit-log` are the worked examples; a page being rebuilt should read like
+them.
+
+- **Bone ground, floating cards.** `bg-[#f4f4ef]` with white cards on it, not one
+  white box holding the screen. `rounded-2xl`, `border-black/[0.06]`,
+  `shadow-sm`. The page's root is a `div` — AppShell already renders the `main`.
+- **Big type, small chrome.** An 11px `uppercase tracking-[0.12em]` eyebrow over
+  a `clamp(2rem,4vw,2.75rem)` / 900 / `-0.03em` title. Nothing in between: the
+  jump is the effect, exactly as on the public pages.
+- **One accent.** `--brand` green marks a single action per screen (the app's
+  accent, not the landing's lime). Tone beyond that lands on something small —
+  an icon disc, a chip — never a row or card background.
+- **Below `md` the rail is a drawer.** 256px of a 390px screen is two thirds of
+  the viewport, so under that breakpoint the sidebar leaves the flow, slides in
+  over the page behind a scrim, and a bar with a burger takes its place
+  (`app-shell-frame.tsx`). Collapse is a desktop-only idea — a drawer you opened
+  on purpose does not show icons with no labels — and every collapsed-state
+  difference is written as a `md:` class rather than branched on in JS, so a
+  phone whose cookie says "collapsed" never flashes the wrong rail.
+- **Motion from `brand/`.** `Stage` / `Group` / `Rise` in
+  `components/dashboard-stage.tsx` wrap the shared variants; import those rather
+  than writing an entrance. `Stage` owns the reduced-motion contract.
+- **Icons may move, within a ceiling.** Hover gestures stay under ~10% scale and
+  ~8° and are triggered from the row, not the glyph — a 20px icon is a poor
+  target. The rail's `ICON_SPRING` (`stiffness: 420, damping: 17, mass: 0.6`) is
+  the one spring, so a hovered row and a hovered nav item feel like one control.
+- **Say it in English.** Nothing on screen should carry the database's spelling.
+  A status, a role, an enum value, an action token, a uuid — resolve or humanise
+  it, and keep the machine's version behind a disclosure for the person who
+  actually needs it. `src/lib/audit-log-format.ts` is the pattern: a pure,
+  tested module that the page imports, never formatting inline in JSX.
 
 ## Checklist for a new public page
 

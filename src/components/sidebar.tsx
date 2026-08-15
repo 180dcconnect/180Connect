@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ComponentType } from "react";
-import { motion, useReducedMotion, type Variants } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
 import { ShieldCheck } from "lucide-react";
 import { Cctv } from "@/components/animate-ui/icons/cctv";
 import { CloudDownload } from "@/components/animate-ui/icons/cloud-download";
@@ -128,42 +128,56 @@ export function Sidebar({
         collapsed ? "w-16" : "w-64"
       }`}
     >
-      {collapsed ? (
-        <div className="flex items-center justify-center px-2 py-4">
-          <AnimateIcon animateOnHover={!reduceMotion} asChild>
-            <button
-              type="button"
-              onClick={() => handleToggleCollapse(false)}
-              aria-label="Expand sidebar"
-              className="group relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-all hover:bg-black/10 focus-visible:outline-none"
-            >
-              <Image
-                src="/180dc-globe.png"
-                alt="180Connect"
-                width={32}
-                height={32}
-                className="h-8 w-8 object-contain transition-opacity duration-200 group-hover:opacity-0"
-              />
-              <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100 text-black">
-                <PanelLeftOpen className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
-              </span>
-            </button>
-          </AnimateIcon>
-        </div>
-      ) : (
-        <div className="flex items-center justify-between gap-2 px-3.5 py-4">
-          <div className="flex items-center gap-2.5 min-w-0">
+      {/*
+       * One logo button, always the same size and DOM node, whether collapsed
+       * or not — swapping to a differently-sized image per state read as two
+       * different globes crossfading rather than one shrinking. Row height is
+       * pinned to this button's 36px in both states too, so the nav list below
+       * doesn't shift when the button on its right appears/disappears.
+       */}
+      <div className="flex h-[68px] shrink-0 items-center justify-between gap-2.5 px-3.5 py-4">
+        <AnimateIcon animateOnHover={!reduceMotion} asChild>
+          <button
+            type="button"
+            onClick={() => collapsed && handleToggleCollapse(false)}
+            aria-label={collapsed ? "Expand sidebar" : undefined}
+            tabIndex={collapsed ? 0 : -1}
+            className={`group relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-all focus-visible:outline-none ${
+              collapsed ? "hover:bg-black/10" : "cursor-default"
+            }`}
+          >
             <Image
               src="/180dc-globe.png"
               alt="180Connect"
               width={32}
               height={32}
-              className="h-7 w-7 shrink-0 object-contain"
+              className={`h-8 w-8 object-contain transition-opacity duration-200 ${
+                collapsed ? "group-hover:opacity-0" : ""
+              }`}
             />
-            <span className="truncate text-base font-extrabold text-black tracking-tight">
+            {collapsed && (
+              <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100 text-black">
+                <PanelLeftOpen className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+              </span>
+            )}
+          </button>
+        </AnimateIcon>
+
+        <AnimatePresence initial={false}>
+          {!collapsed && (
+            <motion.span
+              initial={reduceMotion ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={reduceMotion ? undefined : { opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="min-w-0 flex-1 truncate text-base font-extrabold text-black tracking-tight"
+            >
               180Connect
-            </span>
-          </div>
+            </motion.span>
+          )}
+        </AnimatePresence>
+
+        {!collapsed && (
           <AnimateIcon animateOnHover={!reduceMotion} asChild>
             <button
               type="button"
@@ -174,10 +188,10 @@ export function Sidebar({
               <PanelLeftClose className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
             </button>
           </AnimateIcon>
-        </div>
-      )}
+        )}
+      </div>
 
-      <nav className="flex-1 space-y-6 overflow-y-auto px-2 py-2" aria-label="Primary">
+      <nav className="flex-1 space-y-6 overflow-y-auto overflow-x-hidden px-2 py-2" aria-label="Primary">
         {sections.map((section, index) => (
           <div key={section.label ?? index}>
             {section.label && !collapsed && (

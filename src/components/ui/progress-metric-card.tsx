@@ -69,25 +69,25 @@ const SIZES: Record<
   { minH: string; pad: string; footer: string; title: string; headline: string }
 > = {
   sm: {
-    minH: "min-h-[260px]",
-    pad: "px-6 pt-5",
-    footer: "px-6 py-3",
+    minH: "min-h-[220px] sm:min-h-[260px]",
+    pad: "px-5 pt-5 sm:px-6",
+    footer: "px-5 py-3 sm:px-6",
     title: "text-[15px]",
-    headline: "text-[46px]",
+    headline: "text-[38px] sm:text-[46px]",
   },
   md: {
-    minH: "min-h-[380px]",
-    pad: "px-8 pt-7",
-    footer: "px-8 py-4",
-    title: "text-[17px]",
-    headline: "text-[72px]",
+    minH: "min-h-[300px] sm:min-h-[380px]",
+    pad: "px-5 pt-6 sm:px-8 sm:pt-7",
+    footer: "px-5 py-3 sm:px-8 sm:py-4",
+    title: "text-[16px] sm:text-[17px]",
+    headline: "text-[46px] sm:text-[72px]",
   },
   lg: {
-    minH: "min-h-[460px]",
-    pad: "px-10 pt-9",
-    footer: "px-10 py-5",
-    title: "text-[19px]",
-    headline: "text-[88px]",
+    minH: "min-h-[320px] sm:min-h-[460px]",
+    pad: "px-5 pt-6 sm:px-10 sm:pt-9",
+    footer: "px-5 py-4 sm:px-10 sm:py-5",
+    title: "text-[16px] sm:text-[19px]",
+    headline: "text-[48px] sm:text-[88px]",
   },
 };
 
@@ -293,8 +293,11 @@ export default function ProgressMetricCard({
           !hasFooter ? (size === "lg" ? "pb-9" : size === "md" ? "pb-7" : "pb-5") : ""
         }`}
       >
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+        {/* Wraps rather than compressing: on a phone the title, the view toggle,
+            the delta and the period label do not fit on one line, and the row
+            was clipping the period off the right edge of the card. */}
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="flex min-w-0 items-center gap-3">
             <h3 className={`${sz.title} font-semibold tracking-tight text-foreground`}>{title}</h3>
             <ViewToggle value={view} onChange={setView} />
           </div>

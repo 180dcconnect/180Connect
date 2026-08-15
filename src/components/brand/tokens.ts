@@ -59,3 +59,23 @@ export const SHEET_TINT = "rgba(244, 244, 239, 0.08)";
 
 /** Label colour at rest on both tones; flips to INK once the wash is under it. */
 export const LABEL_REST = "#f4f4ef";
+
+/**
+ * The search pill collapsed. Lighter than GLASS on purpose: the pill sits over
+ * page content rather than over the ground, and at 72% it reads as a bar laid on
+ * top of the page instead of a lens over it.
+ */
+export const SEARCH_GLASS = "rgba(28, 26, 24, 0.4)";
+
+/**
+ * The same pill once its panel is open. It stays glass rather than turning into
+ * a solid card: the panel now floats over the client list wherever that list has
+ * been scrolled to, and the point of it opening *over* the page is that you can
+ * still see where you are. 0.72 is where the rows underneath read as texture but
+ * the filter names sit clearly on top of them.
+ *
+ * The tint has to carry most of that on its own — `backdrop-blur` is a compositor
+ * feature and degrades to nothing where the browser declines it, so anything at
+ * this opacity would be unreadable if the blur were doing the work.
+ */
+export const SEARCH_GLASS_OPEN = "rgba(24, 22, 20, 0.72)";

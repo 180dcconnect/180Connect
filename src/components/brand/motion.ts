@@ -56,6 +56,25 @@ export const entranceSoft: Variants = {
   },
 };
 
+/**
+ * `entranceSoft` for a list long enough that `staggerChildren` would run away
+ * with it — a hundred audit rows at 0.04s apart is a four-second cascade, and
+ * the reader is left watching the bottom of the page fill in.
+ *
+ * Pass the row's index as Motion's `custom`. The delay grows with the index and
+ * then stops: everything above the fold still arrives in reading order, and
+ * everything below it is already settled by the time it is scrolled to.
+ */
+export const entranceIndexed = (step = 0.035, cap = 0.6): Variants => ({
+  hidden: { opacity: 0, y: 16, filter: "blur(6px)" },
+  show: (index: number = 0) => ({
+    opacity: 1,
+    y: 0,
+    filter: "blur(0px)",
+    transition: { duration: 0.7, ease: EASE, delay: Math.min(index * step, cap) },
+  }),
+});
+
 /* ─── Menu sheet ───────────────────────────────────────────────────────── */
 
 /**

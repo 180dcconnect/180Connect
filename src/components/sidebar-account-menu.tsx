@@ -69,21 +69,19 @@ export function SidebarAccountMenu({
           className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-all hover:bg-black/10 data-[state=open]:bg-black/12"
         >
           <Avatar initials={initials} />
-          {!collapsed && (
-            <>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-bold text-black">{displayName}</span>
-                <span className="block truncate text-xs font-bold uppercase tracking-wide text-black/45">
-                  {roleLabel}
-                </span>
-              </span>
-              <ChevronsUpDown
-                className="size-4 shrink-0 text-black/40"
-                strokeWidth={1.75}
-                aria-hidden="true"
-              />
-            </>
-          )}
+          {/* Hidden by class rather than unmounted: `collapsed` is a desktop-only
+              state (see Sidebar), and below `md` this block always shows. */}
+          <span className={`min-w-0 flex-1 ${collapsed ? "md:hidden" : ""}`}>
+            <span className="block truncate text-sm font-bold text-black">{displayName}</span>
+            <span className="block truncate text-xs font-bold uppercase tracking-wide text-black/45">
+              {roleLabel}
+            </span>
+          </span>
+          <ChevronsUpDown
+            className={`size-4 shrink-0 text-black/40 ${collapsed ? "md:hidden" : ""}`}
+            strokeWidth={1.75}
+            aria-hidden="true"
+          />
         </button>
       </DropdownMenuTrigger>
 

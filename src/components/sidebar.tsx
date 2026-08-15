@@ -114,7 +114,7 @@ export function Sidebar({
               alt="180Connect"
               width={32}
               height={32}
-              className="h-8 w-8 object-contain transition-opacity duration-200 group-hover:opacity-0"
+              className="h-8 w-8 object-contain brightness-0 transition-opacity duration-200 group-hover:opacity-0"
             />
             <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100 text-black">
               <PanelLeftOpen className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
@@ -129,7 +129,7 @@ export function Sidebar({
               alt="180Connect"
               width={32}
               height={32}
-              className="h-7 w-7 shrink-0 object-contain"
+              className="h-7 w-7 shrink-0 object-contain brightness-0"
             />
             <span className="truncate text-base font-extrabold text-black tracking-tight">
               180Connect

@@ -113,7 +113,7 @@ export function Sidebar({
           initial="rest"
           animate="rest"
           whileHover="hover"
-          className="ml-auto shrink-0 rounded-lg p-1.5 text-black/60 transition-colors hover:bg-white/55 hover:text-black"
+          className="ml-auto shrink-0 rounded-xl p-1.5 text-black/70 transition-colors hover:bg-black/10 hover:text-black"
         >
           <motion.span
             className="flex"
@@ -151,8 +151,8 @@ export function Sidebar({
                         initial="rest"
                         animate="rest"
                         whileHover="hover"
-                        className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-black transition-colors hover:bg-white/55 ${
-                          active ? "bg-white/75 font-bold shadow-xs" : "font-medium"
+                        className={`flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm text-black transition-all hover:bg-black/10 ${
+                          active ? "bg-black/12 font-bold text-black" : "font-semibold text-black/85 hover:text-black"
                         }`}
                       >
                         <motion.span

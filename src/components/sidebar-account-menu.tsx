@@ -66,7 +66,7 @@ export function SidebarAccountMenu({
         <button
           type="button"
           title={collapsed ? displayName : undefined}
-          className="flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-white/55 data-[state=open]:bg-white/70"
+          className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-all hover:bg-black/10 data-[state=open]:bg-black/12"
         >
           <Avatar initials={initials} />
           {!collapsed && (

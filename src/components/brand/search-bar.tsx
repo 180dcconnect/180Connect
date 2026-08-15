@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion, type Variants } from "motion/react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { ArrowRight, SlidersHorizontal, X, ChevronLeft } from "lucide-react";
 
 import { EASE, entranceIndexed, entranceSoft, stagger } from "@/components/brand/motion";
@@ -119,6 +119,7 @@ export function BrandSearchBar({
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [filterQuery, setFilterQuery] = useState("");
   const [selectedFilters, setSelectedFilters] = useState<{ category: string; label: string; value: string }[]>(defaultFilters);
+  const [pending, startTransition] = useTransition();
 
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -150,6 +151,29 @@ export function BrandSearchBar({
   const FILTER_CATEGORIES: Record<string, FilterOption[]> = categories || DEFAULT_CATEGORIES;
   const FILTER_PARAMS: Record<string, string> = paramNames || DEFAULT_PARAMS;
 
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed === defaultQuery.trim()) return;
+
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      params.delete("q");
+      params.delete("page");
+      Object.values(FILTER_PARAMS).forEach((name) => params.delete(name));
+      
+      if (trimmed) params.set("q", trimmed);
+      selectedFilters.forEach(f => {
+        params.set(FILTER_PARAMS[f.category] ?? "filter", f.value);
+      });
+      
+      startTransition(() => {
+        router.replace(`?${params.toString()}`, { scroll: false });
+      });
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [query, defaultQuery, selectedFilters, router, FILTER_PARAMS]);
+
   const submitSearch = (filters = selectedFilters, q = query, closePanel = true) => {
     // Start from the address bar, not from empty: the host page may carry state
     // this bar knows nothing about (the client list's funnel stage and breakdown
@@ -167,7 +191,10 @@ export function BrandSearchBar({
       params.set(FILTER_PARAMS[f.category] ?? "filter", f.value);
     });
 
-    router.push(`?${params.toString()}`);
+    startTransition(() => {
+      router.replace(`?${params.toString()}`, { scroll: false });
+    });
+    
     if (closePanel) {
       setOpen(false);
     }

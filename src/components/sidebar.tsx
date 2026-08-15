@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useState, type ComponentType } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { motion, useReducedMotion, type Variants } from "motion/react";
 import { ArrowDownToLine, PanelLeftClose, PanelLeftOpen, ScrollText, ShieldCheck } from "lucide-react";
 import { Compass } from "@/components/animate-ui/icons/compass";
@@ -73,7 +73,7 @@ const ICON_MOTION: Partial<Record<SidebarIconName, Variants>> = {
  * Persistent app sidebar. The caller builds `sections` from `hasPermission`,
  * so a role only ever sees links it can actually open — mirrors the
  * server-side gate on each page rather than replacing it. Collapse state is
- * local and UI-only; it does not gate anything.
+ * persisted in localStorage so user preference is remembered across page switches.
  */
 export function Sidebar({
   sections,
@@ -90,6 +90,28 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("sidebar_collapsed");
+      if (saved !== null) {
+        setCollapsed(saved === "true");
+      }
+    } catch {
+      // Ignore localStorage read error
+    }
+  }, []);
+
+  const handleToggleCollapse = (nextState: boolean) => {
+    setCollapsed(nextState);
+    try {
+      localStorage.setItem("sidebar_collapsed", String(nextState));
+      document.cookie = `sidebar_collapsed=${nextState}; path=/; max-age=31536000; SameSite=Lax`;
+    } catch {
+      // Ignore localStorage write error
+    }
+  };
+
   // Someone who asked the OS for less motion gets the colour change only.
   const reduceMotion = useReducedMotion();
   const iconVariants = (variants: Variants | undefined) =>
@@ -105,7 +127,7 @@ export function Sidebar({
         <div className="flex items-center justify-center px-2 py-4">
           <button
             type="button"
-            onClick={() => setCollapsed(false)}
+            onClick={() => handleToggleCollapse(false)}
             aria-label="Expand sidebar"
             className="group relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-all hover:bg-black/10 focus-visible:outline-none"
           >
@@ -137,7 +159,7 @@ export function Sidebar({
           </div>
           <button
             type="button"
-            onClick={() => setCollapsed(true)}
+            onClick={() => handleToggleCollapse(true)}
             aria-label="Collapse sidebar"
             className="ml-auto shrink-0 rounded-xl p-1.5 text-black/70 transition-all hover:bg-black/10 hover:text-black focus-visible:outline-none"
           >

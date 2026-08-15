@@ -122,7 +122,7 @@ export default async function AdminImportStatusPage() {
                     <td className="py-2 pr-4">{run.records_failed}</td>
                     <td className="py-2 pr-4">{run.records_flagged}</td>
                     <td className="py-2 pr-4 text-foreground/60">
-                      {new Date(run.started_at).toLocaleString()}
+                      {new Date(run.started_at).toLocaleString("en-GB")}
                     </td>
                   </tr>
                   {run.job_status === "failed" && run.error_message && (

@@ -84,7 +84,7 @@ export function PendingInvitesList({
               </span>
               <div className="flex items-center gap-3">
                 <span className="text-foreground/60">
-                  Invited {new Date(invite.invited_at).toLocaleDateString()}
+                  Invited {new Date(invite.invited_at).toLocaleDateString("en-GB")}
                   {expired && <span className="ml-2 font-bold text-red-700">Expired</span>}
                 </span>
                 <button

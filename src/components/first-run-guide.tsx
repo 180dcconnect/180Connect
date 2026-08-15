@@ -77,7 +77,7 @@ export function FirstRunGuide({
   return (
     <section
       aria-labelledby="first-run-guide-heading"
-      className="mt-6 rounded-xl border border-brand/20 bg-brand/5 p-6"
+      className="rounded-2xl border border-brand/20 bg-brand/[0.05] p-6"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -102,7 +102,7 @@ export function FirstRunGuide({
         {steps.map((step) => (
           <li
             key={step.key}
-            className="flex flex-wrap items-start justify-between gap-4 rounded-lg bg-white p-4"
+            className="flex flex-wrap items-start justify-between gap-4 rounded-xl bg-white p-4"
           >
             <div className="min-w-0 flex-1">
               <p className="flex items-center gap-2 font-bold">
@@ -144,7 +144,7 @@ export function FirstRunGuide({
         {allDone ? (
           <button
             type="button"
-            className="rounded-lg bg-brand px-5 py-2.5 font-bold text-white disabled:opacity-50"
+            className="rounded-full bg-brand px-5 py-2.5 font-bold text-white disabled:opacity-50"
             disabled={pending}
             onClick={() => run(finishGuideAction)}
           >
@@ -160,7 +160,7 @@ export function FirstRunGuide({
             </p>
             <button
               type="button"
-              className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+              className="rounded-full bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
               disabled={pending}
               onClick={() => run(dismissGuideAction)}
             >

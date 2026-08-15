@@ -19,8 +19,11 @@
    */
   --popover: #ffffff;
   --popover-foreground: var(--foreground);
+  --card: #ffffff;
+  --card-foreground: var(--foreground);
   --accent: #eef6e9;
   --accent-foreground: var(--brand-hover);
+  --muted: #f1f1ef;
   --muted-foreground: #8a898b;
   --destructive: #b91c1c;
   --border: #e6e6e7;
@@ -33,8 +36,11 @@
   --color-brand-hover: var(--brand-hover);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-destructive: var(--destructive);
   --color-border: var(--border);

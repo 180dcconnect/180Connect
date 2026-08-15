@@ -5,13 +5,18 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ComponentType } from "react";
 import { motion, useReducedMotion, type Variants } from "motion/react";
-import { ArrowDownToLine, PanelLeftClose, PanelLeftOpen, ScrollText, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
+import { Cctv } from "@/components/animate-ui/icons/cctv";
+import { CloudDownload } from "@/components/animate-ui/icons/cloud-download";
 import { Compass } from "@/components/animate-ui/icons/compass";
 import { AnimateIcon } from "@/components/animate-ui/icons/icon";
+import { PanelLeftClose } from "@/components/animate-ui/icons/panel-left-close";
+import { PanelLeftOpen } from "@/components/animate-ui/icons/panel-left-open";
 import { Users } from "@/components/animate-ui/icons/users";
+import UsersGroupIcon from "@/components/ui/users-group-icon";
 import { SidebarAccountMenu } from "@/components/sidebar-account-menu";
 
-export type SidebarIconName = "dashboard" | "admin" | "users" | "audit" | "import";
+export type SidebarIconName = "dashboard" | "admin" | "users" | "audit" | "import" | "clients";
 
 export type SidebarNavItem = {
   href: string;
@@ -34,16 +39,16 @@ type RailIcon = ComponentType<{
  * Nav items name an icon rather than importing one, so the shell stays a plain
  * list of routes and every icon in the rail is drawn on the same grid.
  *
- * Dashboard and team management use animate-ui glyphs, which draw their own
- * motion from the `AnimateIcon` context on the row rather than the shared
- * spring below.
+ * Dashboard, clients, team management, audit log, and import status use animated glyphs,
+ * which draw their own motion on the row rather than the shared spring below.
  */
 const ICONS: Record<SidebarIconName, RailIcon> = {
   dashboard: Compass,
+  clients: UsersGroupIcon,
   admin: ShieldCheck,
   users: Users,
-  audit: ScrollText,
-  import: ArrowDownToLine,
+  audit: Cctv,
+  import: CloudDownload,
 };
 
 const MotionLink = motion.create(Link);
@@ -56,17 +61,15 @@ const ICON_SPRING = { type: "spring", stiffness: 420, damping: 17, mass: 0.6 } a
 
 /**
  * Hover motion per icon. Each gesture points at what the row *does* — the shield
- * braces, the log tilts like a page being read — but stays under ~10% scale and
- * ~8 degrees so a rail of them reads as one system rather than a toybox.
- * Triggered from the row, not the glyph, so the whole target responds.
+ * braces — but stays under ~10% scale and ~8 degrees so a rail of them reads
+ * as one system rather than a toybox. Triggered from the row, not the glyph, so
+ * the whole target responds.
  */
 const ICON_MOTION: Partial<Record<SidebarIconName, Variants>> = {
   admin: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: -6 } },
-  audit: { rest: { rotate: 0, y: 0 }, hover: { rotate: -8, y: -1 } },
-  import: { rest: { y: 0 }, hover: { y: 2 } },
-  // `dashboard` and `users` are deliberately absent: those animate-ui glyphs
-  // animate their own interiors, so a wrapper transform on top would read as
-  // two gestures.
+  // `dashboard`, `clients`, `users`, `audit`, and `import` are deliberately absent:
+  // those glyphs animate their own interiors, so a wrapper transform on top would
+  // read as two gestures.
 };
 
 /**
@@ -127,23 +130,25 @@ export function Sidebar({
     >
       {collapsed ? (
         <div className="flex items-center justify-center px-2 py-4">
-          <button
-            type="button"
-            onClick={() => handleToggleCollapse(false)}
-            aria-label="Expand sidebar"
-            className="group relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-all hover:bg-black/10 focus-visible:outline-none"
-          >
-            <Image
-              src="/180dc-globe.png"
-              alt="180Connect"
-              width={32}
-              height={32}
-              className="h-8 w-8 object-contain transition-opacity duration-200 group-hover:opacity-0"
-            />
-            <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100 text-black">
-              <PanelLeftOpen className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
-            </span>
-          </button>
+          <AnimateIcon animateOnHover={!reduceMotion} asChild>
+            <button
+              type="button"
+              onClick={() => handleToggleCollapse(false)}
+              aria-label="Expand sidebar"
+              className="group relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-all hover:bg-black/10 focus-visible:outline-none"
+            >
+              <Image
+                src="/180dc-globe.png"
+                alt="180Connect"
+                width={32}
+                height={32}
+                className="h-8 w-8 object-contain transition-opacity duration-200 group-hover:opacity-0"
+              />
+              <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100 text-black">
+                <PanelLeftOpen className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+              </span>
+            </button>
+          </AnimateIcon>
         </div>
       ) : (
         <div className="flex items-center justify-between gap-2 px-3.5 py-4">
@@ -159,14 +164,16 @@ export function Sidebar({
               180Connect
             </span>
           </div>
-          <button
-            type="button"
-            onClick={() => handleToggleCollapse(true)}
-            aria-label="Collapse sidebar"
-            className="ml-auto shrink-0 rounded-xl p-1.5 text-black/70 transition-all hover:bg-black/10 hover:text-black focus-visible:outline-none"
-          >
-            <PanelLeftClose className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
-          </button>
+          <AnimateIcon animateOnHover={!reduceMotion} asChild>
+            <button
+              type="button"
+              onClick={() => handleToggleCollapse(true)}
+              aria-label="Collapse sidebar"
+              className="ml-auto shrink-0 rounded-xl p-1.5 text-black/70 transition-all hover:bg-black/10 hover:text-black focus-visible:outline-none"
+            >
+              <PanelLeftClose className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+            </button>
+          </AnimateIcon>
         </div>
       )}
 

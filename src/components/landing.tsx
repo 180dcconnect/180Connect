@@ -224,6 +224,7 @@ function SheetsMark() {
 }
 
 function GmailMark() {
+  // eslint-disable-next-line @next/next/no-img-element
   return (
     <img
       src="/gmail.svg"

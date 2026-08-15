@@ -105,6 +105,7 @@ export function Sidebar({
     try {
       const saved = localStorage.getItem("sidebar_collapsed");
       if (saved !== null) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setCollapsed(saved === "true");
       }
     } catch {

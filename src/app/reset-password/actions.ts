@@ -19,9 +19,9 @@ export async function setNewPassword(
   formData: FormData,
 ): Promise<ResetPasswordState> {
   const parsed = safeValidate(newPasswordSchema, {
+    fullName: formData.get("fullName"),
     password: formData.get("password"),
     confirmPassword: formData.get("confirmPassword"),
-    fullName: formData.get("fullName"),
   });
   if (!parsed.success) {
     return {
@@ -42,8 +42,6 @@ export async function setNewPassword(
   if (!recoveryUserId) return { status: "error", message: RESET_LINK_ERROR };
 
   let supabase;
-  let currentFullName: string | null = null;
-  let submittedFullName = "";
   try {
     supabase = await createClient();
     const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -52,26 +50,6 @@ export async function setNewPassword(
     if (userError || !userData.user || userData.user.id !== recoveryUserId) {
       cookieStore.delete(RECOVERY_COOKIE_NAME);
       return { status: "error", message: RESET_LINK_ERROR };
-    }
-
-    // A name is only required here if the account does not already have one —
-    // an invite acceptance (F008), where nothing has ever set it, rather than
-    // an ordinary password reset for a named user. State, not flow identity,
-    // decides this, same as `mark_invite_accepted` deciding by column state
-    // below rather than by which link type was clicked.
-    const { data: profileRow } = await supabase
-      .from("users")
-      .select("full_name")
-      .eq("id", recoveryUserId)
-      .maybeSingle();
-    currentFullName = profileRow?.full_name?.trim() || null;
-    submittedFullName = parsed.data.fullName?.trim() || "";
-    if (!currentFullName && !submittedFullName) {
-      return {
-        status: "error",
-        message: "Check the highlighted fields and try again.",
-        fieldErrors: { fullName: ["Enter your name to finish setting up your account."] },
-      };
     }
 
     const startedAt = Date.now();
@@ -108,31 +86,17 @@ export async function setNewPassword(
   // again with the password that is now the right one.
   cookieStore.delete(RECOVERY_COOKIE_NAME);
 
-  if (submittedFullName && submittedFullName !== currentFullName) {
-    const { error: nameError } = await supabase
-      .from("users")
-      .update({ full_name: submittedFullName })
-      .eq("id", recoveryUserId);
-    if (nameError) {
-      logAuthError("user.full_name_update_failed", nameError);
-    }
-  }
-
-  // Read before mark_invite_accepted runs, so the redirect below can tell a
-  // first-time invite acceptance apart from an ordinary password reset.
-  // mark_invite_accepted() itself knows the difference internally but returns
-  // void either way (supabase/migrations/20260804090000_add_user_invite_tracking.sql)
-  // — it exists to be called blindly from the shared reset path, not to report
-  // back what it did. A plain read of the same columns it acts on is enough,
-  // and does not require touching that RPC's signature. If the read fails for
-  // any reason, this falls back to the password-reset copy — the safe default,
-  // and not worth blocking the redirect over.
-  const { data: profile } = await supabase
+  // Column grant is `update (full_name)` only (create_users migration), so this is
+  // the one field this session can write on its own row. Same non-blocking
+  // treatment as mark_invite_accepted below: the password already changed, so a
+  // failure here must not read to the user as the whole action having failed.
+  const { error: nameError } = await supabase
     .from("users")
-    .select("invited_at, invite_accepted_at")
-    .eq("id", recoveryUserId)
-    .maybeSingle<{ invited_at: string | null; invite_accepted_at: string | null }>();
-  const isInviteAcceptance = Boolean(profile?.invited_at) && !profile?.invite_accepted_at;
+    .update({ full_name: parsed.data.fullName })
+    .eq("id", recoveryUserId);
+  if (nameError) {
+    logAuthError("user.full_name_update_failed", nameError);
+  }
 
   // Setting a first password is what accepts an invite (F008) — not clicking the
   // emailed link, which only proves the mailbox is readable. This is the shared
@@ -151,5 +115,5 @@ export async function setNewPassword(
   // rather than throwing (F006) — the redirect below has to happen either way.
   await signOutAndReport(supabase);
 
-  redirect(isInviteAcceptance ? "/login?invite-accepted=success" : "/login?password-reset=success");
+  redirect("/login?password-reset=success");
 }

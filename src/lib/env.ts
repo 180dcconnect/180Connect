@@ -231,6 +231,17 @@ export const SCHEMA: readonly EnvVarSpec[] = [
       /^\d{4}-\d{2}-\d{2}$/.test(value) ? null : "must be in YYYY-MM-DD format",
   },
   {
+    name: "NEXT_PUBLIC_ENV",
+    required: false,
+    secret: false,
+    description:
+      "Environment label shown to users — 'staging' banners the app as a preview so external accounts know data can change or the environment can be briefly unstable. Unset (or 'production'/'local') shows no banner.",
+    validate: (value) =>
+      ["local", "staging", "production"].includes(value)
+        ? null
+        : "must be one of: local, staging, production",
+  },
+  {
     name: "CHARITY_COMMISSION_BACKFILL_END",
     required: false,
     secret: false,

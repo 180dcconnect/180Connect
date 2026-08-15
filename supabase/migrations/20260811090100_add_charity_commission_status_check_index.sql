@@ -1,0 +1,42 @@
+-- Migration: add_charity_commission_status_check_index
+-- Story: F049 — Weekly Data Refresh Job (Charity Commission half).
+-- Purpose: RAW_SOURCE_RECORDS.status_last_checked_at already exists (see
+--   20260809100100_add_companies_house_status_check_cursor.sql) as a generic,
+--   nullable cursor column — its comment explicitly documents it as
+--   "only meaningful for record_source = 'companies_house'; unused by every other
+--   source" at the time it was added. The Charity Commission status-recheck job
+--   (charity-commission-status-recheck.ts) now uses the same column, ordered
+--   ascending nulls-first, to pick its next batch — same "least recently
+--   rechecked first" pattern the Companies House job already uses. The existing
+--   partial index only covers record_source = 'companies_house' rows, so Charity
+--   Commission's batch-picker query would do a full scan without this second
+--   partial index.
+--
+-- Schema change approval record (SOP §7):
+--   Change        | Add a second partial index on RAW_SOURCE_RECORDS
+--                 | (status_last_checked_at) where record_source =
+--                 | 'charity_commission'. No column change — status_last_checked_at
+--                 | itself is untouched, this only widens which sources have an
+--                 | index-backed query path over it.
+--   Reason        | charity-commission-status-recheck.ts's batch picker query
+--                 | (order by status_last_checked_at nulls first, filtered to
+--                 | record_source = 'charity_commission') needs the same
+--                 | index-backed ordering the Companies House job already has.
+--   Compatibility | Additive only. No data migration, no RLS change (indexes carry
+--                 | no permissions of their own).
+--   Data migration| None.
+--   Security      | None — index only.
+--   Documentation | docs/data-model/03-raw-data.md is generated from the Data
+--                 | Model spreadsheet (SOP §7) — this PR does not hand-edit it; the
+--                 | spreadsheet's RAW_SOURCE_RECORDS.status_last_checked_at note
+--                 | still says "only meaningful for companies_house" and needs
+--                 | correcting by whoever holds edit access, then
+--                 | `npm run export:data-model` re-run. Reviewed by Bashir (Project
+--                 | Leader) as part of the F049 PR.
+--
+-- Reversibility: paired rollback in
+-- ../rollback/20260811090100_add_charity_commission_status_check_index.down.sql
+
+create index raw_source_records_charity_commission_status_check_idx
+  on public.raw_source_records (status_last_checked_at)
+  where record_source = 'charity_commission';

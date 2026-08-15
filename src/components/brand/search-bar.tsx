@@ -1,11 +1,10 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
+import { ArrowRight, SlidersHorizontal, X, ChevronLeft } from "lucide-react";
 
 import { EASE, entranceSoft, stagger } from "@/components/brand/motion";
-import { menuLinks } from "@/components/brand/nav";
 import { GLASS, LIP } from "@/components/brand/tokens";
 
 /**
@@ -41,6 +40,9 @@ export function BrandSearchBar({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [subject, setSubject] = useState(0);
+  const [activeFilter, setActiveFilter] = useState<string | null>(null);
+  const [filterQuery, setFilterQuery] = useState("");
+  const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -69,22 +71,59 @@ export function BrandSearchBar({
     return () => document.removeEventListener("pointerdown", onDown);
   }, [open]);
 
-  const results = menuLinks.filter((link) =>
-    link.label.toLowerCase().includes(query.trim().toLowerCase()),
-  );
+  const FILTER_CATEGORIES: Record<string, string[]> = {
+    "Filter by city": ["London", "Manchester", "Birmingham", "Edinburgh", "Glasgow"],
+    "Filter by outreach status": ["Contacted", "Meeting set", "Proposal sent", "Closed won", "Closed lost"],
+    "Filter by owner": ["Bashir Bobboi", "Alice Smith", "Bob Jones", "Charlie Brown"]
+  };
 
   const close = () => {
     setOpen(false);
     setQuery("");
+    setTimeout(() => {
+      setActiveFilter(null);
+      setFilterQuery("");
+    }, 300);
   };
 
+  const activeOptions = activeFilter
+    ? FILTER_CATEGORIES[activeFilter]?.filter((option) =>
+        option.toLowerCase().includes(filterQuery.trim().toLowerCase())
+      ) || []
+    : [];
+
   return (
-    <motion.div
-      ref={rootRef}
-      // A plain div, not a combobox: the panel holds links, not options, so the
-      // listbox pattern would promise arrow-key selection that isn't there.
-      className={`relative w-full max-w-[600px] overflow-hidden backdrop-blur-md ${className}`}
-      style={{ background: GLASS, boxShadow: LIP, borderRadius: ROW / 2 }}
+    <div className={`flex w-full max-w-[600px] flex-col gap-3 ${className}`}>
+      <div className="flex flex-wrap items-center gap-2 px-2 empty:hidden">
+        <AnimatePresence>
+          {selectedFilters.map((filter) => (
+            <motion.span
+              key={filter}
+              initial={{ opacity: 0, scale: 0.8, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: 10 }}
+              layout
+              className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#f4f4ef] text-[#1a1a1a] px-3 py-1.5 text-[14px] font-medium shadow-sm"
+            >
+              {filter}
+              <button
+                type="button"
+                onClick={() => setSelectedFilters((prev) => prev.filter((f) => f !== filter))}
+                className="hover:bg-black/10 focus:outline-none flex h-4 w-4 items-center justify-center rounded-full bg-black/5 transition-colors text-black/60"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </motion.span>
+          ))}
+        </AnimatePresence>
+      </div>
+
+      <motion.div
+        ref={rootRef}
+        // A plain div, not a combobox: the panel holds links, not options, so the
+        // listbox pattern would promise arrow-key selection that isn't there.
+        className="relative w-full overflow-hidden backdrop-blur-md"
+        style={{ background: GLASS, boxShadow: LIP, borderRadius: ROW / 2 }}
       animate={{ height: open ? "auto" : ROW }}
       initial={false}
       transition={{ duration: 0.55, ease: EASE }}
@@ -95,24 +134,27 @@ export function BrandSearchBar({
         inputRef.current?.blur();
       }}
     >
-      {/* The rim is drawn as its own layer so it tracks the box's radius while
-          the height animates, without a `ring` re-rendering on the motion div. */}
       <div
-        className="pointer-events-none absolute inset-0 z-10 rounded-[inherit] ring-1 ring-white/25 ring-inset"
+        className="pointer-events-none absolute inset-0 z-30 rounded-[inherit] ring-1 ring-white/25 ring-inset"
         aria-hidden="true"
       />
 
-      <div className="relative flex items-center gap-3 pr-3 pl-7" style={{ height: ROW }}>
-        <div className="relative min-w-0 flex-1">
+      <motion.div
+        className="pointer-events-none absolute inset-0 z-0 bg-white/25"
+        initial={false}
+        animate={{ opacity: open ? 1 : 0 }}
+        transition={{ duration: 0.3, ease: EASE }}
+      />
+
+      <div className="relative z-20 flex items-center pr-3 pl-7 rounded-[32px] bg-black/20" style={{ height: ROW }}>
+        <div className="relative min-w-0 flex-1 mr-3">
           <input
             ref={inputRef}
             type="search"
             value={query}
             aria-label={`${placeholder}…`}
-            onFocus={() => setOpen(true)}
             onChange={(e) => {
               setQuery(e.target.value);
-              setOpen(true);
             }}
             className="font-body w-full bg-transparent text-[15px] text-[#f4f4ef] caret-[#e6f5c0] outline-none focus-visible:outline-none sm:text-base [&::-webkit-search-cancel-button]:hidden"
           />
@@ -149,23 +191,49 @@ export function BrandSearchBar({
           )}
         </div>
 
-        <button
-          type="button"
-          aria-label={open ? "Close search" : "Open search"}
-          aria-expanded={open}
-          aria-controls={open ? listId : undefined}
-          onClick={() => {
-            if (open) {
-              close();
-              inputRef.current?.blur();
-            } else {
-              inputRef.current?.focus();
-            }
-          }}
-          className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white/12 text-[#f4f4ef] transition-colors hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
-        >
-          <DotsToX open={open} />
-        </button>
+        <AnimatePresence>
+          {(typing || selectedFilters.length > 0) && (
+            <motion.div
+              initial={{ width: 0, opacity: 0, scale: 0.8 }}
+              animate={{ width: 30, opacity: 1, scale: 1 }}
+              exit={{ width: 0, opacity: 0, scale: 0.8 }}
+              transition={{ duration: 0.2, ease: EASE }}
+              className="shrink-0 overflow-visible"
+            >
+              <button
+                type="button"
+                aria-label="Search"
+                onClick={() => {
+                  close();
+                  inputRef.current?.blur();
+                }}
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e6f5c0] text-[#1a1a1a] transition-colors hover:bg-[#d4e5a0] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+              >
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <div className="ml-3 shrink-0">
+          <button
+            type="button"
+            aria-label={open ? "Close filters" : "Open filters"}
+            aria-expanded={open}
+            aria-controls={open ? listId : undefined}
+            onClick={() => {
+              if (open) {
+                close();
+                inputRef.current?.blur();
+              } else {
+                setOpen(true);
+              }
+            }}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/12 text-[#f4f4ef] transition-colors hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+          >
+            {open ? <X className="h-5 w-5" /> : <SlidersHorizontal className="h-4 w-4" />}
+          </button>
+        </div>
       </div>
 
       <AnimatePresence initial={false}>
@@ -176,77 +244,97 @@ export function BrandSearchBar({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, transition: { duration: 0.18, ease: EASE } }}
             transition={{ duration: 0.3, ease: EASE, delay: 0.12 }}
+            className="relative z-10"
           >
-            <div className="mx-7 h-px bg-white/12" />
-
-            <motion.ul
-              className="flex flex-col px-4 py-4"
-              variants={stagger(0.05, 0.14)}
-              initial="hidden"
-              animate="show"
-            >
-              {results.map((link) => (
-                <motion.li key={link.href} variants={entranceSoft}>
-                  <Link
-                    href={link.href}
-                    onClick={close}
-                    className="font-body block rounded-2xl px-3 py-2 text-lg font-medium text-[#f4f4ef]/70 transition-colors hover:bg-white/8 hover:text-[#f4f4ef] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
-                  >
-                    {link.label}
-                  </Link>
-                </motion.li>
-              ))}
-
-              {results.length === 0 && (
-                <motion.li
-                  variants={entranceSoft}
-                  className="font-body px-3 py-2 text-[15px] text-[#f4f4ef]/40"
+            <AnimatePresence mode="wait">
+              {activeFilter === null ? (
+                <motion.ul
+                  key="categories"
+                  className="flex flex-col px-4 py-4"
+                  variants={stagger(0.05, 0.14)}
+                  initial="hidden"
+                  animate="show"
+                  exit={{ opacity: 0, transition: { duration: 0.15 } }}
                 >
-                  Nothing matches “{query.trim()}”.
-                </motion.li>
+                  {Object.keys(FILTER_CATEGORIES).map((filter) => (
+                    <motion.li key={filter} variants={entranceSoft}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveFilter(filter);
+                          setFilterQuery("");
+                        }}
+                        className="font-body block w-full text-left rounded-2xl px-3 py-2 text-lg font-medium text-[#f4f4ef]/70 transition-colors hover:bg-white/8 hover:text-[#f4f4ef] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+                      >
+                        {filter}
+                      </button>
+                    </motion.li>
+                  ))}
+                </motion.ul>
+              ) : (
+                <motion.ul
+                  key="options"
+                  className="flex flex-col px-4 py-4"
+                  variants={stagger(0.05, 0.14)}
+                  initial="hidden"
+                  animate="show"
+                  exit={{ opacity: 0, transition: { duration: 0.15 } }}
+                >
+                  <motion.li variants={entranceSoft} className="mb-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveFilter(null);
+                        setFilterQuery("");
+                      }}
+                      className="font-body flex items-center gap-2 w-full text-left rounded-2xl px-3 py-2 text-[15px] font-medium text-[#f4f4ef]/50 transition-colors hover:bg-white/8 hover:text-[#f4f4ef] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Back to filters
+                    </button>
+                  </motion.li>
+
+                  <motion.li variants={entranceSoft} className="mb-4 px-3">
+                    <input
+                      type="search"
+                      placeholder={`Search ${activeFilter?.replace("Filter by ", "").toLowerCase()}...`}
+                      value={filterQuery}
+                      onChange={(e) => setFilterQuery(e.target.value)}
+                      className="font-body w-full bg-white/10 text-[15px] text-[#f4f4ef] placeholder:text-[#f4f4ef]/40 rounded-xl px-4 py-2 outline-none focus-visible:ring-2 focus-visible:ring-[#e6f5c0] [&::-webkit-search-cancel-button]:hidden"
+                    />
+                  </motion.li>
+
+                  {activeOptions.map((option) => (
+                    <motion.li key={option} variants={entranceSoft}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!selectedFilters.includes(option)) {
+                            setSelectedFilters((prev) => [...prev, option]);
+                          }
+                          close();
+                        }}
+                        className="font-body block w-full text-left rounded-2xl px-3 py-2 text-lg font-medium text-[#f4f4ef]/70 transition-colors hover:bg-white/8 hover:text-[#f4f4ef] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+                      >
+                        {option}
+                      </button>
+                    </motion.li>
+                  ))}
+
+                  {activeOptions.length === 0 && (
+                    <motion.li variants={entranceSoft} className="font-body px-3 py-2 text-[15px] text-[#f4f4ef]/40">
+                      No matches found.
+                    </motion.li>
+                  )}
+                </motion.ul>
               )}
-            </motion.ul>
+            </AnimatePresence>
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.div>
+      </motion.div>
+    </div>
   );
 }
 
-/**
- * The three dots collapse inward one after another and the cross draws itself
- * out of the middle — staged, not a crossfade, so the glyph reads as the same
- * object changing state. Dots leave outside-in; the bars arrive as the last one
- * lands.
- */
-function DotsToX({ open }: { open: boolean }) {
-  return (
-    <span className="relative block h-4 w-4">
-      {[0, 1, 2].map((i) => (
-        <motion.span
-          key={i}
-          className="absolute top-1/2 h-[3px] w-[3px] rounded-full bg-current"
-          style={{ left: 1.5 + i * 5.5, y: "-50%" }}
-          animate={open ? { opacity: 0, scale: 0.3 } : { opacity: 1, scale: 1 }}
-          transition={{
-            duration: 0.2,
-            ease: EASE,
-            // Outer dots first on the way out; on the way back they refill in
-            // reading order behind the cross retracting.
-            delay: open ? Math.abs(1 - i) * 0.05 : 0.16 + i * 0.05,
-          }}
-        />
-      ))}
 
-      {[45, -45].map((angle) => (
-        <motion.span
-          key={angle}
-          className="absolute top-1/2 left-0 h-[1.5px] w-4 origin-center rounded-full bg-current"
-          style={{ y: "-50%", rotate: angle }}
-          animate={{ scaleX: open ? 1 : 0 }}
-          transition={{ duration: 0.28, ease: EASE, delay: open ? 0.14 : 0 }}
-        />
-      ))}
-    </span>
-  );
-}

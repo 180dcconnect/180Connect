@@ -72,27 +72,85 @@ export function formatCompact(value: number): string {
  * the bottom for its opaque footer — the chart sits behind both.
  */
 const BAND_TOP = 34;
-const BAND_BOTTOM = 78;
+const BAND_BOTTOM = 99.5;
 const X_INSET = 3;
 
 const toX = (i: number, len: number) =>
   len <= 1 ? 50 : X_INSET + (i / (len - 1)) * (100 - X_INSET * 2);
 
-/** Catmull-Rom through the points, converted to cubic beziers. */
+/**
+ * Monotone cubic spline (Fritsch-Carlson) through the points, converted to cubic Béziers.
+ * Guarantees that flat regions stay completely flat and slopes do not overshoot between data points.
+ */
 function curvePath(pts: { x: number; y: number }[]): string {
-  if (pts.length < 2) return "";
-  let d = `M ${pts[0].x} ${pts[0].y}`;
-  for (let i = 0; i < pts.length - 1; i += 1) {
-    const p0 = pts[i - 1] ?? pts[i];
-    const p1 = pts[i];
-    const p2 = pts[i + 1];
-    const p3 = pts[i + 2] ?? p2;
-    const c1x = p1.x + (p2.x - p0.x) / 6;
-    const c1y = p1.y + (p2.y - p0.y) / 6;
-    const c2x = p2.x - (p3.x - p1.x) / 6;
-    const c2y = p2.y - (p3.y - p1.y) / 6;
-    d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y}`;
+  const n = pts.length;
+  if (n < 2) return "";
+  if (n === 2) {
+    return `M ${pts[0].x} ${pts[0].y} L ${pts[1].x} ${pts[1].y}`;
   }
+
+  // 1. Calculate secants (slopes)
+  const deltas: number[] = new Array(n - 1);
+  const dxs: number[] = new Array(n - 1);
+  for (let i = 0; i < n - 1; i++) {
+    dxs[i] = pts[i + 1].x - pts[i].x;
+    deltas[i] = dxs[i] === 0 ? 0 : (pts[i + 1].y - pts[i].y) / dxs[i];
+  }
+
+  // 2. Calculate tangents at each point
+  const m: number[] = new Array(n);
+
+  // Interior tangents
+  for (let i = 1; i < n - 1; i++) {
+    const dPrev = deltas[i - 1];
+    const dNext = deltas[i];
+    if (dPrev * dNext <= 0) {
+      m[i] = 0;
+    } else {
+      const hPrev = dxs[i - 1];
+      const hNext = dxs[i];
+      m[i] = (3 * (hPrev + hNext)) / ((2 * hNext + hPrev) / dPrev + (hNext + 2 * hPrev) / dNext);
+    }
+  }
+
+  // Endpoints tangents
+  m[0] = deltas[0];
+  if (deltas.length > 1 && deltas[0] * deltas[1] <= 0) {
+    m[0] = 0;
+  }
+  m[n - 1] = deltas[n - 2];
+  if (deltas.length > 1 && deltas[n - 2] * deltas[n - 3] <= 0) {
+    m[n - 1] = 0;
+  }
+
+  // 3. Fritsch-Carlson monotonicity condition
+  for (let i = 0; i < n - 1; i++) {
+    if (deltas[i] === 0) {
+      m[i] = 0;
+      m[i + 1] = 0;
+    } else {
+      const alpha = m[i] / deltas[i];
+      const beta = m[i + 1] / deltas[i];
+      const dist = alpha * alpha + beta * beta;
+      if (dist > 9) {
+        const tau = 3 / Math.sqrt(dist);
+        m[i] = tau * alpha * deltas[i];
+        m[i + 1] = tau * beta * deltas[i];
+      }
+    }
+  }
+
+  // 4. Build cubic bezier SVG path
+  let d = `M ${pts[0].x} ${pts[0].y}`;
+  for (let i = 0; i < n - 1; i++) {
+    const dx = dxs[i];
+    const c1x = pts[i].x + dx / 3;
+    const c1y = pts[i].y + (m[i] * dx) / 3;
+    const c2x = pts[i + 1].x - dx / 3;
+    const c2y = pts[i + 1].y - (m[i + 1] * dx) / 3;
+    d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${pts[i + 1].x} ${pts[i + 1].y}`;
+  }
+
   return d;
 }
 
@@ -102,6 +160,8 @@ export function MetricChart({
   defaultIndex,
   valueFormatter,
   dateFormatter,
+  bandBottom = BAND_BOTTOM,
+  bandTop = BAND_TOP,
 }: {
   series: ChartSeries[];
   view: ChartView;
@@ -109,6 +169,8 @@ export function MetricChart({
   defaultIndex: number;
   valueFormatter: (value: number) => string;
   dateFormatter: (date: string) => string;
+  bandBottom?: number;
+  bandTop?: number;
 }) {
   const rawId = useId().replace(/:/g, "");
   const [hovered, setHovered] = useState<number | null>(null);
@@ -126,7 +188,7 @@ export function MetricChart({
   }, [series]);
 
   const toY = (value: number) =>
-    BAND_BOTTOM - ((value - min) / (max - min)) * (BAND_BOTTOM - BAND_TOP);
+    bandBottom - ((value - min) / (max - min)) * (bandBottom - bandTop);
 
   if (!length) return null;
 
@@ -161,8 +223,8 @@ export function MetricChart({
         <line
           x1={toX(active, length)}
           x2={toX(active, length)}
-          y1={BAND_TOP - 6}
-          y2={BAND_BOTTOM + 4}
+          y1={bandTop - 6}
+          y2={bandBottom}
           stroke="currentColor"
           strokeWidth={1}
           strokeDasharray="3 3"
@@ -187,7 +249,7 @@ export function MetricChart({
                     x={p.x + offset - width / 2}
                     y={p.y}
                     width={width}
-                    height={Math.max(BAND_BOTTOM - p.y, 0.5)}
+                    height={Math.max(bandBottom - p.y, 0.5)}
                     fill={s.color}
                     opacity={i === active ? 1 : 0.45}
                   />
@@ -200,7 +262,7 @@ export function MetricChart({
           return (
             <g key={s.name}>
               <path
-                d={`${line} L ${pts[pts.length - 1].x} ${BAND_BOTTOM} L ${pts[0].x} ${BAND_BOTTOM} Z`}
+                d={`${line} L ${pts[pts.length - 1].x} ${bandBottom} L ${pts[0].x} ${bandBottom} Z`}
                 fill={`url(#${rawId}-fill-${seriesIndex})`}
               />
               <path

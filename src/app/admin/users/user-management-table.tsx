@@ -143,7 +143,7 @@ export function UserManagementTable({
 
   return (
     <>
-      <p aria-live="polite" className="mt-5 min-h-6 text-sm font-bold">
+      <p aria-live="polite" className="mb-2 min-h-5 text-sm font-bold">
         {message}
       </p>
 
@@ -168,11 +168,11 @@ export function UserManagementTable({
         <table className="w-full border-collapse text-left text-sm">
           <thead>
             <tr className="border-b border-black/10">
-              <th className="p-3">Member</th>
-              <th className="p-3">Role</th>
-              <th className="p-3">Clients</th>
-              <th className="p-3">Status</th>
-              <th className="p-3">Access</th>
+              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Member</th>
+              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Role</th>
+              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Clients</th>
+              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Status</th>
+              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Access</th>
             </tr>
           </thead>
           <tbody>

@@ -42,6 +42,10 @@ export interface ProgressMetricCardProps {
   size?: CardSize;
   /** Show the secondary stats (peak / low / avg) in the footer. */
   showStats?: boolean;
+  /** Show the delta figure in the footer. */
+  showDelta?: boolean;
+  /** Show the bottom footer bar. If false, hides the line and all footer stats. */
+  showFooter?: boolean;
   /** Value formatting. Default: compact in the headline, exact in the tooltip. */
   valueFormatter?: (value: number) => string;
   dateFormatter?: (date: string) => string;
@@ -108,11 +112,14 @@ export default function ProgressMetricCard({
   defaultIndex,
   size = "md",
   showStats = true,
+  showDelta = true,
+  showFooter = true,
   valueFormatter,
   dateFormatter,
   loading = false,
   className = "",
 }: ProgressMetricCardProps) {
+  const hasFooter = showFooter && (showDelta || showStats);
   const gridId = `grid-${useId().replace(/:/g, "")}`;
   const sz = SIZES[size];
   const shell = `relative flex ${sz.minH} w-full flex-col overflow-hidden rounded-[28px] border border-border bg-card shadow-[0_2px_10px_rgba(0,0,0,0.04)] ${className}`;
@@ -281,7 +288,11 @@ export default function ProgressMetricCard({
       </div>
 
       {/* Main content */}
-      <div className={`pointer-events-none relative z-10 flex flex-1 flex-col ${sz.pad}`}>
+      <div
+        className={`pointer-events-none relative z-10 flex flex-1 flex-col ${sz.pad} ${
+          !hasFooter ? (size === "lg" ? "pb-9" : size === "md" ? "pb-7" : "pb-5") : ""
+        }`}
+      >
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <h3 className={`${sz.title} font-semibold tracking-tight text-foreground`}>{title}</h3>
@@ -324,34 +335,38 @@ export default function ProgressMetricCard({
       </div>
 
       {/* Opaque footer: delta on the left, secondary stats on the right */}
-      <div
-        className={`relative z-10 flex items-center justify-between gap-4 border-t border-foreground/[0.06] bg-card ${sz.footer} text-[14px]`}
-      >
-        <div>
-          <span className="font-medium" style={{ color: color.text }}>
-            {displayDelta}
-          </span>{" "}
-          <span className="text-muted-foreground">{deltaLabel}</span>
-        </div>
-        {showStats && (
-          <div className="flex items-center gap-2.5 text-[12px] text-muted-foreground">
-            <span>
-              <span className="font-medium text-foreground/80">{fmtCompact(stats.peak)}</span> peak
-            </span>
-            <span className="opacity-40">·</span>
-            <span>
-              <span className="font-medium text-foreground/80">{fmtCompact(stats.low)}</span> low
-            </span>
-            <span className="opacity-40">·</span>
-            <span>
-              <span className="font-medium text-foreground/80">
-                {fmtCompact(Math.round(stats.avg))}
+      {hasFooter && (
+        <div
+          className={`relative z-10 flex items-center justify-between gap-4 border-t border-foreground/[0.06] bg-card ${sz.footer} text-[14px]`}
+        >
+          {showDelta && (
+            <div>
+              <span className="font-medium" style={{ color: color.text }}>
+                {displayDelta}
               </span>{" "}
-              avg
-            </span>
-          </div>
-        )}
-      </div>
+              <span className="text-muted-foreground">{deltaLabel}</span>
+            </div>
+          )}
+          {showStats && (
+            <div className="ml-auto flex items-center gap-2.5 text-[12px] text-muted-foreground">
+              <span>
+                <span className="font-medium text-foreground/80">{fmtCompact(stats.peak)}</span> peak
+              </span>
+              <span className="opacity-40">·</span>
+              <span>
+                <span className="font-medium text-foreground/80">{fmtCompact(stats.low)}</span> low
+              </span>
+              <span className="opacity-40">·</span>
+              <span>
+                <span className="font-medium text-foreground/80">
+                  {fmtCompact(Math.round(stats.avg))}
+                </span>{" "}
+                avg
+              </span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

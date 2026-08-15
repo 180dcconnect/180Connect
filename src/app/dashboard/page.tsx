@@ -288,7 +288,6 @@ export default async function DashboardPage({
                   total={metrics.totalCharities.toLocaleString()}
                   unit="organisations"
                   accent="brand"
-                  deltaLabel="added today"
                   data={growth}
                   period="Past 30 days"
                   periodOptions={[
@@ -296,7 +295,7 @@ export default async function DashboardPage({
                     { label: "Past 14 days", points: 14 },
                     { label: "Past 30 days" },
                   ]}
-                  showStats={false}
+                  showFooter={false}
                   className="rounded-2xl border-black/[0.06] shadow-sm"
                 />
               </Rise>

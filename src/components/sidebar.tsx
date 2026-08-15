@@ -101,32 +101,50 @@ export function Sidebar({
         collapsed ? "w-16" : "w-64"
       }`}
     >
-      <div className={`flex items-center gap-2.5 py-4 ${collapsed ? "justify-center px-2" : "px-3"}`}>
-        <button
-          type="button"
-          onClick={() => setCollapsed((value) => !value)}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="group relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-all hover:bg-black/10 focus-visible:outline-none"
-        >
-          <Image
-            src="/180dc-globe.png"
-            alt="180Connect"
-            width={32}
-            height={32}
-            className="h-8 w-8 object-contain transition-opacity duration-200 group-hover:opacity-0"
-          />
-          <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100 text-black">
-            {collapsed ? (
+      {collapsed ? (
+        <div className="flex items-center justify-center px-2 py-4">
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            aria-label="Expand sidebar"
+            className="group relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-all hover:bg-black/10 focus-visible:outline-none"
+          >
+            <Image
+              src="/180dc-globe.png"
+              alt="180Connect"
+              width={32}
+              height={32}
+              className="h-8 w-8 object-contain transition-opacity duration-200 group-hover:opacity-0"
+            />
+            <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100 text-black">
               <PanelLeftOpen className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
-            ) : (
-              <PanelLeftClose className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
-            )}
-          </span>
-        </button>
-        {!collapsed && (
-          <span className="truncate text-sm font-bold text-black">180Connect</span>
-        )}
-      </div>
+            </span>
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2 px-3.5 py-4">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Image
+              src="/180dc-globe.png"
+              alt="180Connect"
+              width={32}
+              height={32}
+              className="h-7 w-7 shrink-0 object-contain"
+            />
+            <span className="truncate text-base font-extrabold text-black tracking-tight">
+              180Connect
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCollapsed(true)}
+            aria-label="Collapse sidebar"
+            className="ml-auto shrink-0 rounded-xl p-1.5 text-black/70 transition-all hover:bg-black/10 hover:text-black focus-visible:outline-none"
+          >
+            <PanelLeftClose className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+          </button>
+        </div>
+      )}
 
       <nav className="flex-1 space-y-6 overflow-y-auto px-2 py-2" aria-label="Primary">
         {sections.map((section, index) => (

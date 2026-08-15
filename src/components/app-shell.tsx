@@ -62,7 +62,6 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
 
   if (hasPermission(actor.role, "user:manage")) {
     sections.push({
-      label: "Admin",
       items: [
         { href: "/admin", label: "Overview", icon: "admin" },
         { href: "/admin/users", label: "Team management", icon: "users" },

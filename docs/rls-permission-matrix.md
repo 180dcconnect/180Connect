@@ -59,6 +59,7 @@ reviewers do not assume the matrix alone is sufficient.
 | CAM may edit own profile but **not** their own `role` | RLS is row-level; it cannot allow a row UPDATE while forbidding one column | `REVOKE` (§2.1) then column `GRANT` — `grant update (full_name) on public.users to authenticated`. `role`/`is_active` granted to nobody; an admin role change goes through an RPC (F012) | **shipped** in create_users (F233); F012 RPC still to build |
 | CAM claims an **unowned** organisation | Needs a write to `ORGANISATIONS.owner_id`, otherwise off-limits | `claim_organisation(org_id)`, a `SECURITY DEFINER` RPC (F162, `20260806140000_create_claim_organisation_rpc.sql`) locks the row, sets `owner_id` to the caller and writes an `audit_log` row in the same transaction; raises `55000` rather than overriding if someone else already owns it. The UPDATE policy's `owner_id is null` branch is gone — a CAM's direct UPDATE on an unowned row now matches zero rows, same as any other RLS-blocked write | **shipped**, F162 — see §3.2 |
 | "Set pipeline status — CAM (own client) or admin, no reason required" | RLS is row-level; it cannot let a client's owner write one column (`outreach_status`) while a general policy governs the rest of the row, and the write needs an audit row | `set_outreach_status(org_id, status)`, a `SECURITY DEFINER` RPC (F145, `20260807100000_redefine_outreach_status_pipeline.sql`) locks the row, checks the caller owns it or is admin, and writes an `audit_log` row (`status_changed`) in the same transaction. `outreach_status` is off the general `organisations` UPDATE grant entirely — see §3.2 | **shipped**, F145 — see §3.2 |
+| "Set pipeline status on several clients at once" (F064) | Nothing in RLS makes a multi-row write atomic *and* audited; the app doing it row by row is N transactions, so it can half-apply | `set_outreach_status_bulk(org_ids[], status)`, a `SECURITY DEFINER` RPC (F064, `20260816100000_create_bulk_outreach_status_rpc.sql`) locks every target row in id order, requires the caller own **all** of them or be admin, writes one `status_changed` audit row per real transition, and caps a batch at 500. Same rule as `set_outreach_status` — bulk is a convenience, never a wider permission | **shipped**, F064 — see §3.2 |
 | "Override pipeline stage — **reason required**" | Postgres cannot require a justification string as a condition of an UPDATE | `SECURITY DEFINER` RPC `override_outreach_status(org_id, status, reason)`. `reason` is `not null` and lands in the audit log. Distinct from `set_outreach_status` above — this is the admin escape hatch, not the ordinary path | to build (F224) |
 | "Reassign ownership: admin only" | Same column-level problem | `reassign_ownership(org_ids, new_owner_id, reason, from_user_id)` (F257, `20260802100000_create_reassign_ownership_rpc.sql`, unified `20260804170000`) is the only write path — the org UPDATE policy's admin branch could set any `owner_id` directly with no audit row until `20260810110000_close_admin_owner_id_direct_write.sql` revoked `owner_id` from the table's UPDATE grant entirely (same column-level-REVOKE mechanism as `outreach_status`, §3.2). F163's admin assign-owner form (`/clients/[id]`, `assign-owner-form.tsx`) calls it with a single organisation id and no `from_user_id`. The **offboarding** case is also covered: `deactivate_user` (F014) reassigns every organisation the departing user owns, with a required reason and one `ownership_reassigned` audit row per organisation, in the same transaction that closes the account, delegating to `reassign_ownership` so the departing user's **open actions travel with their clients**. See §3.2, §3.11 |
 | Audit entries are immutable | RLS controls who writes, not whether a row can later change | `AUDIT_LOG` gets **no** UPDATE or DELETE policy for any role. Append-only by omission | needs the table (§6) |
@@ -248,9 +249,23 @@ defaults to `not_contacted` (F146) via the column default. `override_outreach_st
 (§2, reason-required admin override) is a separate, not-yet-built RPC for a different
 case — this one is the everyday CAM/admin path.
 
+**Bulk pipeline status (F064).** `set_outreach_status_bulk(org_ids[], status)`
+(`20260816100000_create_bulk_outreach_status_rpc.sql`) is the same write over many rows
+in one transaction, and it grants nothing the single-row RPC does not: owner or admin,
+checked across the whole batch. Two properties are the point of it existing rather than
+the app looping over `set_outreach_status`. It is **atomic** — one client in the
+selection the caller does not own raises `42501` and *no* row moves, rather than the
+batch part-applying and leaving a CAM unable to tell which half took. And it is
+**bounded** — 500 rows per call, because the risk this feature carries is a mis-clicked
+status on a large selection, not a slow query. Audit behaviour is unchanged: one
+`status_changed` row per real transition, no-ops skipped, `detail.trigger = 'bulk_update'`
+distinguishing them from single edits without inventing a second action token. The list
+UI disables the checkbox on rows the actor could not change one at a time, so the
+permission exception is a backstop against a crafted request rather than the normal path.
+
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `ORGANISATIONS` | all roles | admin | admin any row; CAM may edit one they own (WITH CHECK pins `owner_id` to self) — claiming an **unowned** row is RPC-only, see below. `outreach_status` is excluded from this grant entirely — RPC-only (`set_outreach_status`), see above | admin |
+| `ORGANISATIONS` | all roles | admin | admin any row; CAM may edit one they own (WITH CHECK pins `owner_id` to self) — claiming an **unowned** row is RPC-only, see below. `outreach_status` is excluded from this grant entirely — RPC-only (`set_outreach_status` for one client, `set_outreach_status_bulk` for many), see above | admin |
 | `ORGANISATION_IDENTIFIERS` | all roles | admin | admin | admin |
 | `CONTACTS` | all roles | admin, cam | admin, cam | admin |
 | `FINANCIAL_PERIODS` | all roles | admin | admin | admin |

@@ -17,6 +17,9 @@ import {
 } from "./visible-clients.ts";
 import { BrandSearchBar } from "@/components/brand/search-bar";
 import { ClaimButton } from "./[id]/claim-button";
+import { bulkSelectionBlockedReason, canBulkUpdateStatus } from "@/lib/bulk-status";
+import { ClientSelectCheckbox, SelectPageCheckbox } from "./bulk-selection";
+import { BulkStatusBar } from "./bulk-status-bar";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 import { Group, Rise } from "@/components/dashboard-stage";
 import { SearchRail } from "@/components/search-rail";
@@ -64,6 +67,13 @@ const ROW_GRID =
 const CLAIM_SLOT = "w-[6.5rem] shrink-0";
 
 /**
+ * F062's checkbox column. Outside the row's Link, on the same reasoning the claim
+ * button is (a control nested in an anchor fires both), and a fixed slot so a row
+ * whose box is disabled still lines up with one whose box is not.
+ */
+const SELECT_SLOT = "flex w-5 shrink-0 justify-center";
+
+/**
  * F051 — the charity list view. Every organisation regardless of import method
  * or manual entry (F031/F032/F036) shows here, minus anything F251 has actively
  * suppressed. Row click leads to the F067/F068 detail page (src/app/clients/[id]).
@@ -83,6 +93,15 @@ const CLAIM_SLOT = "w-[6.5rem] shrink-0";
  * case. AC2 (updates without a manual refresh) is free: this page has no cache —
  * every visit re-queries organisations, so a reassignment shows up on the next
  * normal navigation here, same as any other filter change.
+ *
+ * F062 (#64) Bulk Select + F064 (#66) Bulk Update Status: a checkbox column, a
+ * header box that takes the page, and a bar that moves everything selected to one
+ * pipeline status through `set_outreach_status_bulk` — one request, one
+ * transaction. Only rows this actor could change one at a time are selectable
+ * (`canBulkUpdateStatus`), because that write is all-or-nothing: a selection that
+ * is certain to be refused should be impossible to build, not merely unlucky. The
+ * selection itself lives in sessionStorage rather than in this tree, since every
+ * filter and page link here is a real navigation (see ./bulk-selection).
  *
  * Restyled onto the same bone-ground/floating-card language as /dashboard
  * (docs/design-system.md's *character*, not its public palette — see that
@@ -175,6 +194,17 @@ export default async function ClientsPage({
     (currentPage - 1) * PAGE_SIZE,
     currentPage * PAGE_SIZE,
   );
+
+  // F062 (#64) / F064 (#66) — which rows on this page this actor may bulk-change.
+  // The header checkbox only ever selects these and every other row's box is
+  // disabled, so a selection the atomic bulk write would refuse cannot be built
+  // in the first place. `canClaim` is the same client:edit gate, so a viewer sees
+  // no checkbox column at all.
+  const selectableIds = canClaim
+    ? clients
+        .filter((client) => canBulkUpdateStatus(authorization.actor, client))
+        .map((client) => client.id)
+    : [];
 
   /**
    * Every link on this page is the current URL with one thing changed, so they
@@ -356,12 +386,18 @@ export default async function ClientsPage({
             ) : (
               <div className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm">
                 {/* The column key, on the widths the rows use. Hidden below lg,
-                    where the row folds back into name-over-subline. */}
-                <div
-                  aria-hidden="true"
-                  className="hidden items-center gap-4 border-b border-black/[0.06] bg-black/[0.015] px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em] text-foreground/30 lg:flex"
-                >
-                  <span className={`${ROW_GRID} min-w-0 flex-1`}>
+                    where the row folds back into name-over-subline. Not
+                    `aria-hidden` any more: the select-all checkbox lives here and
+                    hiding it from assistive tech would leave the whole bulk flow
+                    keyboard-reachable but unannounced. The labels are marked
+                    presentational individually instead. */}
+                <div className="hidden items-center gap-4 border-b border-black/[0.06] bg-black/[0.015] px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em] text-foreground/30 lg:flex">
+                  {canClaim && (
+                    <span className={SELECT_SLOT}>
+                      <SelectPageCheckbox selectableIds={selectableIds} />
+                    </span>
+                  )}
+                  <span aria-hidden="true" className={`${ROW_GRID} min-w-0 flex-1`}>
                     <span />
                     <span>Client</span>
                     <span>Location</span>
@@ -369,7 +405,7 @@ export default async function ClientsPage({
                     <span>Owner</span>
                     <span />
                   </span>
-                  {canClaim && <span className={CLAIM_SLOT} />}
+                  {canClaim && <span aria-hidden="true" className={CLAIM_SLOT} />}
                 </div>
 
                 <ul>
@@ -378,6 +414,18 @@ export default async function ClientsPage({
                       key={client.id}
                       className="flex items-center gap-4 border-b border-black/[0.06] px-5 py-3.5 last:border-b-0"
                     >
+                      {canClaim && (
+                        <span className={SELECT_SLOT}>
+                          <ClientSelectCheckbox
+                            clientId={client.id}
+                            clientName={client.legal_name}
+                            blockedReason={bulkSelectionBlockedReason(
+                              authorization.actor,
+                              client,
+                            )}
+                          />
+                        </span>
+                      )}
                       <Link
                         className={`group -m-2 min-w-0 flex-1 rounded-xl p-2 transition-colors hover:bg-black/[0.02] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand flex items-center gap-4 ${ROW_GRID}`}
                         href={`/clients/${client.id}`}
@@ -479,6 +527,12 @@ export default async function ClientsPage({
               </div>
             )}
           </Rise>
+
+          {/* F064 — renders itself only once something is selected, so an
+              untouched list looks exactly as it did before this feature. The
+              selection it reads lives in sessionStorage, not in this tree, so it
+              survives every filter, sort and page link on this screen (F062 AC3). */}
+          {canClaim && <BulkStatusBar />}
 
           {totalPages > 1 && (
             <Rise className="flex items-center justify-between gap-4 pt-4">

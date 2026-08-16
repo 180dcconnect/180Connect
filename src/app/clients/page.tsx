@@ -15,6 +15,7 @@ import {
   type ClientListRow,
   type OpenSuppression,
 } from "./visible-clients.ts";
+import { Sparkles } from "lucide-react";
 import { BrandSearchBar } from "@/components/brand/search-bar";
 import { ClaimButton } from "./[id]/claim-button";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
@@ -62,6 +63,9 @@ const ROW_GRID =
 
 /** Reserved width for the claim button, held whether or not the row has one. */
 const CLAIM_SLOT = "w-[6.5rem] shrink-0";
+
+/** Reserved width for the booklet quick-action (F082), same reasoning as CLAIM_SLOT. */
+const BOOKLET_SLOT = "w-[7rem] shrink-0";
 
 /**
  * F051 — the charity list view. Every organisation regardless of import method
@@ -112,6 +116,7 @@ export default async function ClientsPage({
 
   const supabase = await createClient();
   const canClaim = hasPermission(authorization.actor.role, "client:edit");
+  const canGenerateBooklet = hasPermission(authorization.actor.role, "client:contact");
 
   const [organisations, openSuppressions, team] = await Promise.all([
     supabase
@@ -369,7 +374,12 @@ export default async function ClientsPage({
                     <span>Owner</span>
                     <span />
                   </span>
-                  {canClaim && <span className={CLAIM_SLOT} />}
+                  {(canGenerateBooklet || canClaim) && (
+                    <span className="flex shrink-0 gap-2">
+                      {canGenerateBooklet && <span className={BOOKLET_SLOT} />}
+                      {canClaim && <span className={CLAIM_SLOT} />}
+                    </span>
+                  )}
                 </div>
 
                 <ul>
@@ -466,10 +476,30 @@ export default async function ClientsPage({
                       {/* A fixed slot rather than a conditional child: an owned
                           row still reserves the width, so no column shifts as
                           the list changes hands. */}
-                      {canClaim && (
-                        <span className={`${CLAIM_SLOT} flex justify-end`}>
-                          {!client.ownerName && (
-                            <ClaimButton compact organisationId={client.id} />
+                      {(canGenerateBooklet || canClaim) && (
+                        <span className="flex shrink-0 items-center gap-2">
+                          {/* F082 quick action: straight to the detail page's
+                              booklet section, already generating — see
+                              booklet-panel.tsx's ?booklet=generate handling.
+                              Always shown (not owner-gated like Claim), so no
+                              placeholder-vs-content split is needed here. */}
+                          {canGenerateBooklet && (
+                            <span className={`${BOOKLET_SLOT} flex justify-end`}>
+                              <Link
+                                className="flex items-center gap-1 rounded-full border border-brand/30 px-3 py-1 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
+                                href={`/clients/${client.id}?booklet=generate`}
+                              >
+                                <Sparkles aria-hidden="true" className="h-3 w-3" />
+                                Booklet
+                              </Link>
+                            </span>
+                          )}
+                          {canClaim && (
+                            <span className={`${CLAIM_SLOT} flex justify-end`}>
+                              {!client.ownerName && (
+                                <ClaimButton compact organisationId={client.id} />
+                              )}
+                            </span>
                           )}
                         </span>
                       )}

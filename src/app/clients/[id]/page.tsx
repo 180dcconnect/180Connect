@@ -18,6 +18,7 @@ import { BasicInfoPanel } from "./basic-info-panel";
 import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
+import { BookletPanel } from "./booklet-panel";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -182,6 +183,10 @@ export default async function ClientDetailPage({
           missionStatement={enrichment?.mission_statement ?? null}
           missionEnrichedAt={enrichment?.enriched_at ?? null}
         />
+
+        {hasPermission(authorization.actor.role, "client:contact") && (
+          <BookletPanel organisationId={client.id} />
+        )}
 
         <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="ownership-heading">
           <h2 id="ownership-heading" className="text-sm font-bold">Ownership</h2>

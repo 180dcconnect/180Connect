@@ -341,3 +341,87 @@ comment on function public.set_data_handling_rule_active is
 
 revoke execute on function public.set_data_handling_rule_active from public, anon;
 grant execute on function public.set_data_handling_rule_active to authenticated;
+
+------------------------------------------------------------------------
+-- 5. READ RPCs — what the rules actually did
+------------------------------------------------------------------------
+-- Without these, the rules are a control an admin can configure but never see
+-- the effect of: excluded_fields is written on every row and read by nobody.
+-- Aggregating a jsonb array is not something PostgREST can express, so the two
+-- questions an admin actually has get one function each.
+
+-- 5a. Per-field: which rules are earning their place, and when they last fired.
+create or replace function public.data_handling_filter_summary()
+returns table (
+  field_path       text,
+  records_affected bigint,
+  last_applied     timestamptz
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not (app.is_admin() and app.is_active_user()) then
+    raise exception 'Only admins can read the data handling filter summary';
+  end if;
+
+  return query
+    select
+      excluded.path,
+      count(*),
+      max(r.received_at)
+    from public.raw_source_records r
+      cross join lateral jsonb_array_elements_text(r.excluded_fields) as excluded(path)
+    where r.excluded_fields is not null
+    group by excluded.path
+    order by count(*) desc, excluded.path;
+end;
+$$;
+
+comment on function public.data_handling_filter_summary is
+  'Per-field count of what the data handling rules have stripped from stored '
+  'payloads (F246). Admin-only. Drives the admin screen: a rule that has never '
+  'matched anything and one that strips thousands of rows a week look identical '
+  'in the rules table itself.';
+
+revoke execute on function public.data_handling_filter_summary from public, anon;
+grant execute on function public.data_handling_filter_summary to authenticated;
+
+-- 5b. Coverage: how much of the stored corpus the rules have actually been
+-- applied to. `records_checked` counts rows the rules ran against — this is
+-- where the null / [] distinction on excluded_fields earns its keep, since a
+-- row the rules never saw and a row they saw and passed are different facts.
+create or replace function public.data_handling_coverage()
+returns table (
+  records_total    bigint,
+  records_checked  bigint,
+  records_stripped bigint,
+  rule_version     integer
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not (app.is_admin() and app.is_active_user()) then
+    raise exception 'Only admins can read data handling coverage';
+  end if;
+
+  return query
+    select
+      count(*),
+      count(*) filter (where r.excluded_fields is not null),
+      count(*) filter (where jsonb_array_length(coalesce(r.excluded_fields, '[]'::jsonb)) > 0),
+      (select v.current_version from public.data_handling_rule_versions v where v.id = true)
+    from public.raw_source_records r;
+end;
+$$;
+
+comment on function public.data_handling_coverage is
+  'How many stored records the data handling rules have been applied to (F246). '
+  'records_total - records_checked is the backlog for '
+  'scripts/backfill-data-handling-rules.mts.';
+
+revoke execute on function public.data_handling_coverage from public, anon;
+grant execute on function public.data_handling_coverage to authenticated;

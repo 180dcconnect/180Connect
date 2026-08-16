@@ -2,6 +2,8 @@
 -- Reverses F246 Public Data Handling Rules migration.
 
 -- Drop RPCs first (depend on the table)
+drop function if exists public.data_handling_coverage();
+drop function if exists public.data_handling_filter_summary();
 drop function if exists public.set_data_handling_rule_active(uuid, boolean, text);
 drop function if exists public.create_data_handling_rule(text, text, text, text);
 

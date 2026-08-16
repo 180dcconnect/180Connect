@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
-import { loadRules } from "./actions";
+import { loadFilterActivity, loadRules } from "./actions";
+import { FilterActivityPanel } from "./filter-activity";
 import { RulesPanel } from "./rules-panel";
 
 /**
@@ -22,7 +23,10 @@ export default async function DataHandlingRulesPage() {
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
-  const { rules, version, error } = await loadRules();
+  const [{ rules, version, error }, activity] = await Promise.all([
+    loadRules(),
+    loadFilterActivity(),
+  ]);
 
   return (
     <main className="min-h-screen bg-[#f1f2f4] p-6">
@@ -46,6 +50,8 @@ export default async function DataHandlingRulesPage() {
         )}
 
         <RulesPanel initialRules={rules} initialVersion={version} />
+
+        <FilterActivityPanel activity={activity} />
       </section>
     </main>
   );

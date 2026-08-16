@@ -2773,6 +2773,134 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- saved filter views (F066) — own rows only, matrix §3.17
+-- ---------------------------------------------------------------------------
+-- The property this table hangs on: a saved view is private to its author. It holds
+-- no client data, so the interesting failures are not "who can read a charity" but
+-- "can one CAM see, plant, or delete another CAM's shortcuts" — and, because the
+-- filter set lives in jsonb, "can a row hold something that is not a filter set".
+
+create or replace function tests.suite_saved_views()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
+  v_count       bigint;
+begin
+  if not tests.tables_exist('saved_views') then
+    return next skip(11, 'F066 saved views not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.saved_views (user_id, name, filters) values (%L, %L, %L::jsonb)',
+      v_cam_a, 'Leeds prospects', '{"city":["Leeds"]}')),
+    null,
+    'a CAM saves their own filter view'
+  );
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'a CAM sees their own saved views');
+
+  -- Unforgeable ownership: the insert policy's with-check is what stops a view being
+  -- planted in someone else's list.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.saved_views (user_id, name, filters) values (%L, %L, %L::jsonb)',
+      v_cam_b, 'Not mine', '{}')),
+    '42501',
+    'a CAM cannot save a view onto another CAM'
+  );
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a CAM cannot read another CAM''s saved views');
+
+  -- Admins are deliberately not granted a read. F187 (admin views a CAM's settings)
+  -- can add one with a stated reason; until then this asserts the absence is
+  -- intentional rather than forgotten — same call as §3.12 and §3.13.
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'an admin has no read on saved views until F187 asks for one');
+
+  -- A blocked DELETE removes zero rows and raises nothing (§4), so the assertion is
+  -- that the row survives someone else trying.
+  perform tests.login_as(v_cam_b);
+  delete from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.saved_views where user_id = v_cam_a;
+  return next is(v_count, 1::bigint, 'a CAM cannot delete another CAM''s saved view');
+
+  -- An admin has no delete either: a purely destructive power over another user's
+  -- workspace, with no story asking for it.
+  perform tests.login_as(v_admin);
+  delete from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.saved_views where user_id = v_cam_a;
+  return next is(v_count, 1::bigint, 'an admin cannot delete a CAM''s saved view');
+
+  -- Deactivation bites immediately: every policy ANDs in app.is_active_user(), so a
+  -- suspended account's own views stop being readable without any row being touched.
+  perform tests.login_as(v_deactivated);
+  select count(*) into v_count from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a deactivated user reads no saved views');
+
+  -- Column constraints, which are what stop a nameless or unusable row existing at
+  -- all. The server action turns each of these into a form message rather than a
+  -- 500, but the table refuses them whatever calls it.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.saved_views (user_id, name) values (%L, %L)',
+      v_cam_a, 'Leeds prospects')),
+    '23505',
+    'two views by one name cannot exist for the same CAM'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.saved_views (user_id, name) values (%L, %L)',
+      v_cam_a, '   ')),
+    '23514',
+    'a blank name is refused by the table, not just by the form'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.saved_views (user_id, name, filters) values (%L, %L, %L::jsonb)',
+      v_cam_a, 'Array filters', '["city"]')),
+    '23514',
+    'filters must be an object, not any old json'
+  );
+
+  -- AC3: the author can remove one they no longer need. Last, so the rows above are
+  -- still standing for the assertions that need them.
+  perform tests.login_as(v_cam_a);
+  delete from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.saved_views where user_id = v_cam_a;
+  return next is(v_count, 0::bigint, 'a CAM deletes their own saved view');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- client criteria review persistence (F047)
 -- ---------------------------------------------------------------------------
 
@@ -3956,6 +4084,7 @@ select * from tests.suite_manual_entries();
 select * from tests.suite_url_import();
 select * from tests.suite_onboarding();
 select * from tests.suite_outreach_preferences();
+select * from tests.suite_saved_views();
 select * from tests.suite_client_criteria();
 select * from tests.suite_data_handling_rules();
 select * from tests.suite_personal_data_exclusion();

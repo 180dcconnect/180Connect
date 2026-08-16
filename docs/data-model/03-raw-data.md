@@ -138,3 +138,16 @@
 | review_notes | text |  | Yes | Admin notes explaining the review decision | Human | Written by admin at review time | Null if approved without comment |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last updated timestamp | System | Auto-updated on any change |  |
+
+## FIELD_SOURCES
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| organisation_id | uuid | ORGANISATIONS | No | Organisation this field value belongs to | System | Set when field is written |  |
+| field_name | text |  | No | Which ORGANISATIONS column this value is for | System | Identified by the write path | legal_name, website, contact_email, address_line_1, city, postcode (mission is explicitly excluded) |
+| value | text |  | No | Value written for this field by this source | System | Taken from raw payload or manual entry | Null if source provided no value |
+| source | text |  | No | Which source produced this value | System | Inherited from raw source record or manual entry | Reuse RAW_SOURCE_RECORDS.record_source enum + "manual" |
+| raw_source_record_id | uuid | RAW_SOURCE_RECORDS | Yes | The raw record this value was taken from | System | Set for API-sourced values | Null for manual entries |
+| is_current | boolean |  | No | Whether this is the value currently live on ORGANISATIONS for this field | System | Set true on write, flipped false when superseded | Default true |
+| recorded_at | timestamp |  | No | When this field value was recorded | System | Auto-generated on row creation |  |

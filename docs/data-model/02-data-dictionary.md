@@ -428,3 +428,11 @@
 | 03 Raw Data | FIELD_DISCREPANCIES | resolved_at | timestamp |  | When resolved |
 | 03 Raw Data | FIELD_DISCREPANCIES | notes | text |  | Reviewer notes explaining the decision |
 | 03 Raw Data | FIELD_DISCREPANCIES | created_at | timestamp |  | Row creation timestamp |
+| 03 Raw Data | FIELD_SOURCES | id | uuid |  | Primary key |
+| 03 Raw Data | FIELD_SOURCES | organisation_id | uuid | ORGANISATIONS | Organisation this field value belongs to |
+| 03 Raw Data | FIELD_SOURCES | field_name | text |  | Which ORGANISATIONS column this value is for |
+| 03 Raw Data | FIELD_SOURCES | value | text |  | Value written for this field by this source |
+| 03 Raw Data | FIELD_SOURCES | source | text |  | Which source produced this value |
+| 03 Raw Data | FIELD_SOURCES | raw_source_record_id | uuid | RAW_SOURCE_RECORDS | The raw record this value was taken from |
+| 03 Raw Data | FIELD_SOURCES | is_current | boolean |  | Whether this is the value currently live on ORGANISATIONS for this field |
+| 03 Raw Data | FIELD_SOURCES | recorded_at | timestamp |  | When this field value was recorded |

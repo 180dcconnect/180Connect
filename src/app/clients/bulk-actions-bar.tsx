@@ -260,10 +260,21 @@ export function BulkActionsBar() {
             </p>
           )}
 
-          {overStatusLimit && (
+          {/* The two ceilings are the same number today, but the sentence names
+              whichever one is actually being exceeded rather than assuming they
+              stay equal — a message that says "status" while the comment button
+              is the disabled one is worse than no message. */}
+          {(overStatusLimit || overNoteLimit) && (
             <p className="w-full text-sm font-bold text-amber-800">
-              A single bulk change covers at most {MAX_BULK_STATUS_CLIENTS} clients. Deselect{" "}
-              {count - MAX_BULK_STATUS_CLIENTS} to continue.
+              A single bulk{" "}
+              {overStatusLimit && overNoteLimit
+                ? "action"
+                : overStatusLimit
+                  ? "status change"
+                  : "comment"}{" "}
+              covers at most {Math.min(MAX_BULK_STATUS_CLIENTS, MAX_BULK_NOTE_CLIENTS)} clients.
+              Deselect {count - Math.min(MAX_BULK_STATUS_CLIENTS, MAX_BULK_NOTE_CLIENTS)} to
+              continue.
             </p>
           )}
 

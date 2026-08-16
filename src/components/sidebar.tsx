@@ -4,8 +4,25 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ComponentType } from "react";
-import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
-import { ShieldCheck } from "lucide-react";
+import { motion, useReducedMotion, type Variants } from "motion/react";
+import {
+  Ban,
+  Building2,
+  ClipboardCheck,
+  Copy,
+  Gift,
+  HeartHandshake,
+  ListChecks,
+  ShieldCheck,
+  X,
+} from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/animate-ui/components/radix/dialog";
 import { Cctv } from "@/components/animate-ui/icons/cctv";
 import { CloudDownload } from "@/components/animate-ui/icons/cloud-download";
 import { Compass } from "@/components/animate-ui/icons/compass";
@@ -21,12 +38,27 @@ import {
   TooltipContent,
 } from "@/components/animate-ui/components/radix/tooltip";
 
-export type SidebarIconName = "dashboard" | "admin" | "users" | "audit" | "import" | "clients";
+export type SidebarIconName =
+  | "dashboard"
+  | "admin"
+  | "users"
+  | "audit"
+  | "import"
+  | "clients"
+  | "actions"
+  | "review"
+  | "duplicates"
+  | "suppressions"
+  | "companies-house"
+  | "charity-commission"
+  | "three-sixty-giving";
 
 export type SidebarNavItem = {
   href: string;
   label: string;
   icon: SidebarIconName;
+  // See docs/unfinished-work/README.md — set when `href` has no route yet.
+  plannedFeatureId?: string;
 };
 
 export type SidebarSection = {
@@ -54,6 +86,13 @@ const ICONS: Record<SidebarIconName, RailIcon> = {
   users: Users,
   audit: Cctv,
   import: CloudDownload,
+  actions: ListChecks,
+  review: ClipboardCheck,
+  duplicates: Copy,
+  suppressions: Ban,
+  "companies-house": Building2,
+  "charity-commission": HeartHandshake,
+  "three-sixty-giving": Gift,
 };
 
 const MotionLink = motion.create(Link);
@@ -90,6 +129,8 @@ export function Sidebar({
   roleLabel,
   onLogout,
   initialCollapsed = false,
+  mobileOpen = false,
+  onMobileClose,
 }: {
   sections: SidebarSection[];
   userName?: string | null;
@@ -97,9 +138,15 @@ export function Sidebar({
   roleLabel: string;
   onLogout: () => Promise<void>;
   initialCollapsed?: boolean;
+  // Below `md` the rail is a drawer, not a rail — `AppShellFrame` owns the
+  // open/close state (the burger that opens it lives in its mobile bar, not
+  // in here) and passes it down.
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
+  const [plannedItem, setPlannedItem] = useState<SidebarNavItem | null>(null);
 
   useEffect(() => {
     try {
@@ -130,9 +177,9 @@ export function Sidebar({
 
   return (
     <aside
-      className={`sticky top-0 z-20 flex h-screen shrink-0 flex-col bg-white/55 backdrop-blur-2xl backdrop-saturate-150 transition-[width] duration-200 after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-linear-to-b after:from-white/90 after:via-black/12 after:to-white/50 ${
-        collapsed ? "w-16" : "w-64"
-      }`}
+      className={`fixed inset-y-0 left-0 z-50 flex h-screen w-64 shrink-0 flex-col bg-white/55 backdrop-blur-2xl backdrop-saturate-150 transition-transform duration-200 after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-linear-to-b after:from-white/90 after:via-black/12 after:to-white/50 md:sticky md:top-0 md:translate-x-0 md:transition-[width] ${
+        mobileOpen ? "translate-x-0" : "-translate-x-full"
+      } ${collapsed ? "md:w-16" : "md:w-64"}`}
     >
       {/*
        * One logo button, always the same size and DOM node, whether collapsed
@@ -169,19 +216,15 @@ export function Sidebar({
           </button>
         </AnimateIcon>
 
-        <AnimatePresence initial={false}>
-          {!collapsed && (
-            <motion.span
-              initial={reduceMotion ? false : { opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={reduceMotion ? undefined : { opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="min-w-0 flex-1 truncate text-base font-extrabold text-black tracking-tight"
-            >
-              180Connect
-            </motion.span>
-          )}
-        </AnimatePresence>
+        {/* Hidden by class rather than unmounted: `collapsed` is a desktop-only
+            state (see below `md`), and below `md` this always shows. */}
+        <span
+          className={`min-w-0 flex-1 truncate text-base font-extrabold text-black tracking-tight transition-opacity duration-150 ${
+            collapsed ? "md:hidden" : ""
+          }`}
+        >
+          180Connect
+        </span>
 
         {!collapsed && (
           <AnimateIcon animateOnHover={!reduceMotion} asChild>
@@ -189,19 +232,34 @@ export function Sidebar({
               type="button"
               onClick={() => handleToggleCollapse(true)}
               aria-label="Collapse sidebar"
-              className="ml-auto shrink-0 rounded-xl p-1.5 text-black/70 transition-all hover:bg-black/10 hover:text-black focus-visible:outline-none"
+              className="ml-auto hidden shrink-0 rounded-xl p-1.5 text-black/70 transition-all hover:bg-black/10 hover:text-black focus-visible:outline-none md:inline-flex"
             >
               <PanelLeftClose className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
             </button>
           </AnimateIcon>
         )}
+
+        {/* Drawer close — mobile only. Collapse is a desktop idea; a drawer
+            you opened on purpose is dismissed, not shrunk to icons. */}
+        <button
+          type="button"
+          onClick={onMobileClose}
+          aria-label="Close navigation"
+          className="ml-auto shrink-0 rounded-xl p-1.5 text-black/70 transition-all hover:bg-black/10 hover:text-black focus-visible:outline-none md:hidden"
+        >
+          <X className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+        </button>
       </div>
 
       <nav className="flex-1 space-y-6 overflow-y-auto overflow-x-hidden px-2 py-2" aria-label="Primary">
         {sections.map((section, index) => (
           <div key={section.label ?? index}>
-            {section.label && !collapsed && (
-              <p className="px-3 pb-1 text-xs font-bold uppercase tracking-wide text-black/40">
+            {section.label && (
+              <p
+                className={`px-3 pb-1 text-xs font-bold uppercase tracking-wide text-black/40 ${
+                  collapsed ? "md:hidden" : ""
+                }`}
+              >
                 {section.label}
               </p>
             )}
@@ -209,27 +267,62 @@ export function Sidebar({
               {section.items.map((item) => {
                 const active = pathname === item.href;
                 const Icon = ICONS[item.icon];
+                const planned = Boolean(item.plannedFeatureId);
+                const rowClassName = `flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm transition-all hover:bg-black/10 ${
+                  active
+                    ? "bg-black/12 font-bold text-black"
+                    : planned
+                      ? "font-semibold text-black/50 hover:text-black/70"
+                      : "font-semibold text-black/85 hover:text-black"
+                }`;
+                const rowContent = (
+                  <>
+                    <motion.span
+                      className="flex shrink-0"
+                      variants={iconVariants(ICON_MOTION[item.icon])}
+                      transition={ICON_SPRING}
+                    >
+                      {Icon ? <Icon className="h-5 w-5" strokeWidth={1.75} aria-hidden={true} /> : null}
+                    </motion.span>
+                    <span className={`min-w-0 flex-1 truncate ${collapsed ? "md:hidden" : ""}`}>
+                      {item.label}
+                    </span>
+                    {planned && (
+                      <span
+                        className={`shrink-0 rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-black/50 ${
+                          collapsed ? "md:hidden" : ""
+                        }`}
+                      >
+                        Soon
+                      </span>
+                    )}
+                  </>
+                );
                 const link = (
                   <AnimateIcon animateOnHover={!reduceMotion} asChild>
-                    <MotionLink
-                      href={item.href}
-                      aria-current={active ? "page" : undefined}
-                      initial="rest"
-                      animate="rest"
-                      whileHover="hover"
-                      className={`flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm text-black transition-all hover:bg-black/10 ${
-                        active ? "bg-black/12 font-bold text-black" : "font-semibold text-black/85 hover:text-black"
-                      }`}
-                    >
-                      <motion.span
-                        className="flex shrink-0"
-                        variants={iconVariants(ICON_MOTION[item.icon])}
-                        transition={ICON_SPRING}
+                    {planned ? (
+                      <motion.button
+                        type="button"
+                        onClick={() => setPlannedItem(item)}
+                        initial="rest"
+                        animate="rest"
+                        whileHover="hover"
+                        className={`w-full ${rowClassName}`}
                       >
-                        {Icon ? <Icon className="h-5 w-5" strokeWidth={1.75} aria-hidden={true} /> : null}
-                      </motion.span>
-                      {!collapsed && <span className="truncate">{item.label}</span>}
-                    </MotionLink>
+                        {rowContent}
+                      </motion.button>
+                    ) : (
+                      <MotionLink
+                        href={item.href}
+                        aria-current={active ? "page" : undefined}
+                        initial="rest"
+                        animate="rest"
+                        whileHover="hover"
+                        className={rowClassName}
+                      >
+                        {rowContent}
+                      </MotionLink>
+                    )}
                   </AnimateIcon>
                 );
                 return (
@@ -266,6 +359,19 @@ export function Sidebar({
           onLogout={onLogout}
         />
       </div>
+
+      <Dialog open={plannedItem !== null} onOpenChange={(open) => !open && setPlannedItem(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{plannedItem?.label} isn&apos;t built yet</DialogTitle>
+            <DialogDescription>
+              This part of the platform is on the roadmap
+              {plannedItem?.plannedFeatureId ? ` (${plannedItem.plannedFeatureId})` : ""} but doesn&apos;t
+              have a page yet. Check back once it ships.
+            </DialogDescription>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
     </aside>
   );
 }

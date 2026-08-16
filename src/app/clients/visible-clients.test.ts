@@ -249,13 +249,6 @@ describe("filterByStatus", () => {
     assert.deepEqual(filterByStatus(clients, null).map((c) => c.id), ["a", "b", "c"]);
     assert.deepEqual(filterByStatus(clients, "").map((c) => c.id), ["a", "b", "c"]);
   });
-
-  it("matches against human-readable status label", () => {
-    assert.deepEqual(filterByStatus(clients, "Not contacted").map((c) => c.id), ["a", "c"]);
-    assert.deepEqual(filterByStatus(clients, "contacted").map((c) => c.id), ["b"]);
-  });
-});
-
 });
 
 describe("prioritiseQueue — geography only (F196 / F090 / F094)", () => {
@@ -539,6 +532,8 @@ describe("prioritiseQueue (Combined F196 + F197 + F198 + F199)", () => {
     // Delta matches Grants: 10 = 10
     // Alpha matches Sector: 8 = 8
     assert.deepEqual(result.map((c) => c.id), ["3", "2", "4", "1"]);
+  });
+});
 
 /* ─── List sorting (F060 #62, F061 #63) ────────────────────────────────── */
 

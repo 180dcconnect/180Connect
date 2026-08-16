@@ -5,6 +5,7 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import { validateClientEmail } from "@/lib/client-email-validation";
 import {
   formatOrganisationSources,
@@ -362,9 +363,7 @@ export default async function ClientDetailPage({
                 hint="Where the information in this client record came from."
               >
                 {sourcesError ? (
-                  <p className="mt-4 text-sm font-bold text-destructive" role="alert">
-                    Source information could not be loaded. Refresh and try again.
-                  </p>
+                  <InlineAlert message="Source information could not be loaded. Refresh and try again." />
                 ) : sources.length === 0 ? (
                   <p className="mt-4 text-sm leading-[1.7] text-foreground/45">
                     No source information recorded.

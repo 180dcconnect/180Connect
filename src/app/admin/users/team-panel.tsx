@@ -11,6 +11,7 @@ import {
 import { PendingInvitesList } from "./pending-invites-list";
 import { UserManagementTable } from "./user-management-table";
 import { Group, Rise } from "@/components/dashboard-stage";
+import { InlineAlert } from "@/components/ui/inline-alert";
 
 export function TeamPanel({
   currentUserId,
@@ -31,6 +32,7 @@ export function TeamPanel({
     teamUsers: initialTeamUsers,
     pendingInvites: initialPendingInvites,
   });
+  const [connectionLost, setConnectionLost] = useState(false);
 
   // Keeps both lists live: a role change or suspension from another admin (F012,
   // F013), a deactivation (F014), or a new invite being sent or accepted (F008)
@@ -70,7 +72,13 @@ export function TeamPanel({
             );
           },
         )
-        .subscribe();
+        .subscribe((status) => {
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+            setConnectionLost(true);
+          } else if (status === "SUBSCRIBED") {
+            setConnectionLost(false);
+          }
+        });
     }
 
     subscribe();
@@ -97,6 +105,11 @@ export function TeamPanel({
 
   return (
     <>
+      {connectionLost && (
+        <div className="mb-6">
+          <InlineAlert message="Live updates paused — refresh the page to see the latest changes." />
+        </div>
+      )}
       <Group className="space-y-4">
         <Rise>
           <div className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm overflow-hidden">

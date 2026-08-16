@@ -8,6 +8,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
+import { reportError } from "@/lib/error-logging";
 
 export type TeamUser = {
   id: string;
@@ -75,7 +78,7 @@ export function UserManagementTable({
   setUsers: Dispatch<SetStateAction<TeamUser[]>>;
   currentUserId: string;
 }) {
-  const [message, setMessage] = useState("");
+  const [status, setStatus] = useState<{ text: string; tone: "success" | "error" } | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   /** The user an offboarding is being composed for, or null when the form is closed. */
   const [offboarding, setOffboarding] = useState<TeamUser | null>(null);
@@ -118,7 +121,7 @@ export function UserManagementTable({
     successMessage: string,
   ) {
     setSavingId(userId);
-    setMessage("");
+    setStatus(null);
     try {
       const response = await fetch("/api/admin/users", {
         method: "PATCH",
@@ -127,7 +130,7 @@ export function UserManagementTable({
       });
       const result = await response.json();
       if (!response.ok) {
-        setMessage(result.error ?? "The change was blocked.");
+        setStatus({ text: result.error ?? "The change was blocked.", tone: "error" });
         return false;
       }
       setUsers((current) =>
@@ -137,15 +140,17 @@ export function UserManagementTable({
             : user,
         ),
       );
-      setMessage(
-        result.clientsMoved
+      setStatus({
+        text: result.clientsMoved
           ? `${successMessage} ${result.clientsMoved} client${result.clientsMoved === 1 ? "" : "s"} moved.`
           : successMessage,
-      );
+        tone: "success",
+      });
       if (result.clientsMoved) await refreshUsers();
       return true;
-    } catch {
-      setMessage("The change could not be saved. Check your connection and try again.");
+    } catch (err) {
+      void reportError(err, { operation: "admin.users.update_user_client" });
+      setStatus({ text: NETWORK_ERROR_MESSAGE, tone: "error" });
       return false;
     } finally {
       setSavingId(null);
@@ -169,9 +174,9 @@ export function UserManagementTable({
 
   return (
     <>
-      <p aria-live="polite" className="mb-2 min-h-5 text-sm font-bold">
-        {message}
-      </p>
+      <div className="mb-2 min-h-5">
+        {status && <InlineAlert tone={status.tone} message={status.text} />}
+      </div>
 
       {offboarding && (
         <OffboardingForm
@@ -298,7 +303,7 @@ export function UserManagementTable({
                             className="rounded-lg border border-red-700/40 bg-red-700/5 px-3 py-2 font-bold text-red-700 disabled:opacity-50"
                             disabled={savingId === user.id}
                             onClick={() => {
-                              setMessage("");
+                              setStatus(null);
                               setOffboarding(user);
                             }}
                             type="button"

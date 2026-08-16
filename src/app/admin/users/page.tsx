@@ -4,6 +4,7 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import type { PendingInvite } from "@/lib/admin/team-realtime";
 import { TeamPanel } from "./team-panel";
 import type { TeamUser } from "./user-management-table";
@@ -85,18 +86,21 @@ export default async function AdminUsersPage() {
 
         {error && (
           <Rise>
-            <p className="rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4 text-sm font-bold text-destructive" role="alert">
-              Team members could not be loaded. Please refresh and try again.
-            </p>
+            <InlineAlert
+              variant="page"
+              message="Team members could not be loaded. Please refresh and try again."
+            />
           </Rise>
         )}
 
-        <TeamPanel
-          currentUserId={authorization.actor.id}
-          initialPendingInvites={(pendingInvites as PendingInvite[] | null) ?? []}
-          initialTeamUsers={teamUsers}
-          pendingInvitesError={Boolean(pendingError)}
-        />
+        {!error && (
+          <TeamPanel
+            currentUserId={authorization.actor.id}
+            initialPendingInvites={(pendingInvites as PendingInvite[] | null) ?? []}
+            initialTeamUsers={teamUsers}
+            pendingInvitesError={Boolean(pendingError)}
+          />
+        )}
       </Stage>
     </div>
   );

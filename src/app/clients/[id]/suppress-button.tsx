@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { OriginButton } from "@/components/ui/origin-button";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
+import { reportError } from "@/lib/error-logging";
 
 export function SuppressButton({
   organisationId,
@@ -36,8 +39,9 @@ export function SuppressButton({
       // The server component re-reads suppression state and swaps this button for
       // the pending/active banner.
       router.refresh();
-    } catch {
-      setMessage("Could not reach the server. Check your connection and try again.");
+    } catch (err) {
+      void reportError(err, { operation: "clients.suppress_button_client", organisationId });
+      setMessage(NETWORK_ERROR_MESSAGE);
     } finally {
       setBusy(false);
     }
@@ -105,11 +109,9 @@ export function SuppressButton({
           Cancel
         </OriginButton>
       </div>
-      {message && (
-        <p aria-live="polite" role="alert" className="mt-3 text-[13px] font-bold text-destructive">
-          {message}
-        </p>
-      )}
+      <div className="mt-4 min-h-6">
+        {message && <InlineAlert message={message} />}
+      </div>
     </form>
   );
 }

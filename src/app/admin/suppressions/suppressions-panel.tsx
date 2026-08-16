@@ -10,6 +10,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { SuppressionRow } from "@/lib/suppressions";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
+import { reportError } from "@/lib/error-logging";
 
 type OrganisationOption = { id: string; legal_name: string };
 
@@ -36,7 +39,7 @@ export function SuppressionsPanel({
   const [organisationId, setOrganisationId] = useState("");
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState<Record<string, string>>({});
-  const [message, setMessage] = useState("");
+  const [status, setStatus] = useState<{ text: string; tone: "success" | "error" } | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function refresh() {
@@ -49,7 +52,7 @@ export function SuppressionsPanel({
   async function submitCreate(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
-    setMessage("");
+    setStatus(null);
     try {
       const response = await fetch("/api/admin/suppressions", {
         method: "POST",
@@ -58,15 +61,16 @@ export function SuppressionsPanel({
       });
       const body = await response.json();
       if (!response.ok) {
-        setMessage(body.error ?? "The charity could not be suppressed.");
+        setStatus({ text: body.error ?? "The charity could not be suppressed.", tone: "error" });
         return;
       }
-      setMessage("Suppressed. Outreach to this charity is now blocked.");
+      setStatus({ text: "Suppressed. Outreach to this charity is now blocked.", tone: "success" });
       setOrganisationId("");
       setReason("");
       await refresh();
-    } catch {
-      setMessage("Could not reach the server. Check your connection and try again.");
+    } catch (err) {
+      void reportError(err, { operation: "admin.suppressions.create_client" });
+      setStatus({ text: NETWORK_ERROR_MESSAGE, tone: "error" });
     } finally {
       setBusy(false);
     }
@@ -74,7 +78,7 @@ export function SuppressionsPanel({
 
   async function decide(suppressionId: string, approve: boolean) {
     setBusy(true);
-    setMessage("");
+    setStatus(null);
     try {
       const response = await fetch("/api/admin/suppressions", {
         method: "PATCH",
@@ -87,13 +91,17 @@ export function SuppressionsPanel({
       });
       const body = await response.json();
       if (!response.ok) {
-        setMessage(body.error ?? "The decision could not be saved.");
+        setStatus({ text: body.error ?? "The decision could not be saved.", tone: "error" });
         return;
       }
-      setMessage(approve ? "Request approved. Outreach is now blocked." : "Request rejected.");
+      setStatus({
+        text: approve ? "Request approved. Outreach is now blocked." : "Request rejected.",
+        tone: "success",
+      });
       await refresh();
-    } catch {
-      setMessage("Could not reach the server. Check your connection and try again.");
+    } catch (err) {
+      void reportError(err, { operation: "admin.suppressions.decide_client" });
+      setStatus({ text: NETWORK_ERROR_MESSAGE, tone: "error" });
     } finally {
       setBusy(false);
     }
@@ -145,9 +153,9 @@ export function SuppressionsPanel({
           {busy ? "Suppressing…" : "Suppress"}
         </OriginButton>
 
-        <p aria-live="polite" className="mt-4 min-h-6 text-sm font-bold">
-          {message}
-        </p>
+        <div className="mt-4 min-h-6">
+          {status && <InlineAlert tone={status.tone} message={status.text} />}
+        </div>
       </form>
 
       {pending.length > 0 && (

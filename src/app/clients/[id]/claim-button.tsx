@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { OriginButton } from "@/components/ui/origin-button";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
+import { reportError } from "@/lib/error-logging";
 
 /**
  * F162 — claims an unowned client for the signed-in CAM/admin. Used on both the
@@ -50,14 +53,13 @@ export function ClaimButton({
         return;
       }
       setError(body.error ?? "This client could not be claimed.");
-    } catch {
-      setError("Could not reach the server. Check your connection and try again.");
+    } catch (err) {
+      void reportError(err, { operation: "clients.claim_button_client", organisationId });
+      setError(NETWORK_ERROR_MESSAGE);
     } finally {
       setBusy(false);
     }
   }
-
-  const message = conflict ?? error;
 
   return (
     <div className={compact ? "text-right" : ""}>
@@ -70,18 +72,15 @@ export function ClaimButton({
       >
         {busy ? "Claiming…" : "Claim this client"}
       </OriginButton>
-      {message && (
-        <p
-          aria-live="polite"
-          role={conflict ? "alert" : undefined}
-          className={
-            (compact ? "mt-1 text-xs " : "mt-2.5 text-[13px] leading-[1.6] ") +
-            "font-bold " +
-            (conflict ? "text-amber-800" : "text-destructive")
-          }
-        >
-          {message}
-        </p>
+      {conflict && (
+        <div className={compact ? "mt-1" : "mt-3"}>
+          <InlineAlert tone="warning" message={conflict} className={compact ? "text-xs" : "text-sm"} />
+        </div>
+      )}
+      {error && (
+        <div className={compact ? "mt-1" : "mt-3"}>
+          <InlineAlert message={error} className={compact ? "text-xs" : "text-sm"} />
+        </div>
       )}
     </div>
   );

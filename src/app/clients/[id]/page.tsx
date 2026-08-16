@@ -10,6 +10,7 @@ import {
   formatOrganisationSources,
   type OrganisationSourceRow,
 } from "@/lib/source-tracking";
+import { groupFieldSources, type FieldSourceRow } from "@/lib/field-sources";
 import { checkWebsiteReachabilityCached } from "@/lib/website-reachability-cache";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
 import { SuppressButton } from "./suppress-button";
@@ -73,6 +74,7 @@ export default async function ClientDetailPage({
 }) {
   const authorization = await getCurrentActor("client:view", { route: "/clients/[id]" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
+  const isAdmin = authorization.actor.role === "admin";
 
   const { id } = await params;
   const supabase = await createClient();
@@ -124,6 +126,23 @@ export default async function ClientDetailPage({
     (rawSourceRows ?? []) as OrganisationSourceRow[],
   );
 
+  // F044: get_field_sources is admin-only (self-checks app.is_admin(), same as
+  // FIELD_DISCREPANCIES §3.16) — only fetched for an admin so a CAM view of this
+  // page doesn't spend a request on a call that's going to be refused anyway.
+  const { data: rawFieldSourceRows, error: fieldSourcesError } = isAdmin
+    ? await supabase.rpc("get_field_sources", { p_organisation_id: id })
+    : { data: null, error: null };
+
+  if (fieldSourcesError) {
+    await reportError(fieldSourcesError, {
+      operation: "clients.detail_field_sources",
+      organisationId: id,
+    });
+  }
+  const fieldSources = groupFieldSources(
+    (rawFieldSourceRows ?? []) as FieldSourceRow[],
+  );
+
   // Most recent suppression row for this org, whatever its status — pending shows a
   // waiting state, active shows the suppressed state, rejected/lifted/none all fall
   // through to the suppress button.
@@ -152,7 +171,6 @@ export default async function ClientDetailPage({
   const canSuppress = canEdit;
   const ownerId = ownerRow?.owner_id ?? null;
   const ownerName = ownerRow?.owner?.full_name ?? (ownerId ? "A former team member" : null);
-  const isAdmin = authorization.actor.role === "admin";
 
   // F163: admin's CAM picker. Only fetched for an admin — a CAM can't reach the
   // assign form, so the query would be wasted on every other page view.
@@ -246,6 +264,58 @@ export default async function ClientDetailPage({
             </ul>
           )}
         </section>
+
+        {isAdmin && (
+          <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="field-sources-heading">
+            <h2 id="field-sources-heading" className="text-sm font-bold">Field sources</h2>
+            <p className="mt-1 text-xs text-foreground/60">
+              Which source provided each field. Superseded values stay visible so a
+              conflict can be reviewed, not just the one that was kept.
+            </p>
+            {fieldSourcesError ? (
+              <p className="mt-3 text-sm font-medium text-red-800" role="alert">
+                Field source information could not be loaded. Refresh and try again.
+              </p>
+            ) : fieldSources.length === 0 ? (
+              <p className="mt-3 text-sm text-foreground/65">No field-level source information recorded.</p>
+            ) : (
+              <dl className="mt-3 divide-y divide-black/10">
+                {fieldSources.map((field) => (
+                  <div key={field.fieldName} className="py-3 first:pt-0 last:pb-0">
+                    <dt className="text-xs font-bold uppercase tracking-wide text-foreground/50">
+                      {field.fieldLabel}
+                    </dt>
+                    <dd className="mt-1 flex flex-wrap items-baseline gap-2">
+                      <span className="break-all text-sm text-foreground/85">
+                        {field.current?.value ?? "Not recorded"}
+                      </span>
+                      {field.current && (
+                        <span className="rounded-full bg-brand/10 px-2 py-0.5 text-xs font-bold text-brand-hover">
+                          {field.current.sourceLabel}
+                        </span>
+                      )}
+                    </dd>
+                    {field.history.length > 0 && (
+                      <div className="mt-2 rounded-lg bg-amber-50 p-2">
+                        <p className="text-xs font-bold text-amber-800">
+                          Also provided by other sources:
+                        </p>
+                        <ul className="mt-1 space-y-1">
+                          {field.history.map((entry, index) => (
+                            <li key={`${entry.source}-${index}`} className="flex flex-wrap items-baseline gap-2 text-xs text-amber-800/80">
+                              <span className="break-all">{entry.value}</span>
+                              <span className="font-bold">{entry.sourceLabel}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </dl>
+            )}
+          </section>
+        )}
 
         <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="email-heading">
           <div className="flex flex-wrap items-center justify-between gap-2">

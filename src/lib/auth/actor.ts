@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { logSecurityEvent } from "@/lib/log-security-event";
+import { reportError } from "@/lib/error-logging";
 import {
   authorizeUserProfile,
   type AppRole,
@@ -29,6 +30,14 @@ export type ActorResult =
  */
 export type ActorContext = { route?: string };
 
+/**
+ * How stale `last_seen_at` must be before this call bothers writing it. getCurrentActor
+ * runs on every signed-in page (AppShell) and every admin API route, so touching it
+ * unconditionally would be a write per request; this caps it at one every 5 minutes per
+ * user, which is plenty fresh for a "last active" label.
+ */
+const LAST_SEEN_THROTTLE_MS = 5 * 60 * 1000;
+
 export async function getCurrentActor(
   permission?: Permission,
   context: ActorContext = {},
@@ -42,9 +51,9 @@ export async function getCurrentActor(
 
   const { data, error } = await supabase
     .from("users")
-    .select("id, full_name, role, is_active")
+    .select("id, full_name, role, is_active, last_seen_at")
     .eq("id", user.id)
-    .maybeSingle<UserProfile>();
+    .maybeSingle<UserProfile & { last_seen_at: string | null }>();
 
   if (error) {
     logSecurityEvent("permission.denied", {
@@ -65,6 +74,23 @@ export async function getCurrentActor(
     });
     return authorization;
   }
+
+  // Not last login — last time this user was seen on any signed-in page or admin API
+  // call. Fire-and-await (not fire-and-forget: a serverless invocation can be frozen
+  // the moment the response is sent, which would drop an un-awaited write) but only
+  // when stale, so this is a rare write, not one per request. A failure here must never
+  // block the request it's riding along with.
+  const lastSeenAt = data!.last_seen_at ? new Date(data!.last_seen_at).getTime() : 0;
+  if (Date.now() - lastSeenAt > LAST_SEEN_THROTTLE_MS) {
+    const { error: touchError } = await supabase.rpc("touch_last_seen");
+    if (touchError) {
+      await reportError(touchError, {
+        operation: "auth.touch_last_seen",
+        userId: user.id,
+      });
+    }
+  }
+
   return {
     ok: true,
     actor: {

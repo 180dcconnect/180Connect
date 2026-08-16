@@ -181,6 +181,13 @@ future RPC. `deactivate_user` additionally refuses to close an account while it 
 owns organisations unless given a destination, and moves them in the same transaction —
 see §3.2.
 
+`last_seen_at` — "last active", not last login — is written only by
+`public.touch_last_seen()` (20260816230000), a SECURITY DEFINER RPC that updates only
+`auth.uid()`'s own row. Granted to no one directly (same column-grant lockout as `role`),
+so a client cannot forge or backdate it. `getCurrentActor()` calls it, throttled to once
+per 5 minutes per user, on every signed-in page and every admin API request — not just at
+login. Not audited: presence isn't an ownership/status/role/approval change.
+
 ### 3.2 Canonical organisation data — shared read, admin write
 
 Everyone authorised reads canonical data (§4.3 "View canonical organisations": all

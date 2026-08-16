@@ -17,9 +17,9 @@ import {
 } from "./visible-clients.ts";
 import { BrandSearchBar } from "@/components/brand/search-bar";
 import { ClaimButton } from "./[id]/claim-button";
-import { bulkSelectionBlockedReason, canBulkUpdateStatus } from "@/lib/bulk-status";
+import { bulkStatusBlockedReason, canBulkUpdateStatus } from "@/lib/bulk-status";
 import { ClientSelectCheckbox, SelectPageCheckbox } from "./bulk-selection";
-import { BulkStatusBar } from "./bulk-status-bar";
+import { BulkActionsBar } from "./bulk-actions-bar";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 import { Group, Rise } from "@/components/dashboard-stage";
 import { SearchRail } from "@/components/search-rail";
@@ -94,14 +94,17 @@ const SELECT_SLOT = "flex w-5 shrink-0 justify-center";
  * every visit re-queries organisations, so a reassignment shows up on the next
  * normal navigation here, same as any other filter change.
  *
- * F062 (#64) Bulk Select + F064 (#66) Bulk Update Status: a checkbox column, a
- * header box that takes the page, and a bar that moves everything selected to one
- * pipeline status through `set_outreach_status_bulk` — one request, one
- * transaction. Only rows this actor could change one at a time are selectable
- * (`canBulkUpdateStatus`), because that write is all-or-nothing: a selection that
- * is certain to be refused should be impossible to build, not merely unlucky. The
- * selection itself lives in sessionStorage rather than in this tree, since every
- * filter and page link here is a real navigation (see ./bulk-selection).
+ * F062 (#64) Bulk Select + F064 (#66) Bulk Update Status + F065 (#67) Bulk Add
+ * Comment: a checkbox column, a header box that takes the page, and a bar with two
+ * batch actions — move everything selected to one pipeline status through
+ * `set_outreach_status_bulk`, or write the same comment against every selected
+ * client as its own `notes` row. Each is one request and one transaction.
+ * Every row is selectable, because commenting is allowed on any client; the
+ * narrower status rule (`canBulkUpdateStatus`) rides along per row so the bar can
+ * refuse a status change with a count of the rows in the way rather than letting
+ * an all-or-nothing write be attempted and rejected. The selection itself lives in
+ * sessionStorage rather than in this tree, since every filter and page link here is
+ * a real navigation (see ./bulk-selection).
  *
  * Restyled onto the same bone-ground/floating-card language as /dashboard
  * (docs/design-system.md's *character*, not its public palette — see that
@@ -195,15 +198,18 @@ export default async function ClientsPage({
     currentPage * PAGE_SIZE,
   );
 
-  // F062 (#64) / F064 (#66) — which rows on this page this actor may bulk-change.
-  // The header checkbox only ever selects these and every other row's box is
-  // disabled, so a selection the atomic bulk write would refuse cannot be built
-  // in the first place. `canClaim` is the same client:edit gate, so a viewer sees
-  // no checkbox column at all.
-  const selectableIds = canClaim
-    ? clients
-        .filter((client) => canBulkUpdateStatus(authorization.actor, client))
-        .map((client) => client.id)
+  // F062 (#64) — which rows on this page can be selected, and what each one can
+  // then be part of. `canClaim` is the client:edit gate, so a viewer sees no
+  // checkbox column at all; everyone past it can comment on any client (F065,
+  // `notes_insert_author`), which is why every row is selectable. `canStatus` is
+  // the narrower F064 rule travelling with the id, so the bar can tell the CAM how
+  // many of *their whole selection* a status change would not cover — across
+  // pages and filters this render knows nothing about.
+  const selectableClients = canClaim
+    ? clients.map((client) => ({
+        id: client.id,
+        canStatus: canBulkUpdateStatus(authorization.actor, client),
+      }))
     : [];
 
   /**
@@ -394,7 +400,7 @@ export default async function ClientsPage({
                 <div className="hidden items-center gap-4 border-b border-black/[0.06] bg-black/[0.015] px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em] text-foreground/30 lg:flex">
                   {canClaim && (
                     <span className={SELECT_SLOT}>
-                      <SelectPageCheckbox selectableIds={selectableIds} />
+                      <SelectPageCheckbox clients={selectableClients} />
                     </span>
                   )}
                   <span aria-hidden="true" className={`${ROW_GRID} min-w-0 flex-1`}>
@@ -419,10 +425,8 @@ export default async function ClientsPage({
                           <ClientSelectCheckbox
                             clientId={client.id}
                             clientName={client.legal_name}
-                            blockedReason={bulkSelectionBlockedReason(
-                              authorization.actor,
-                              client,
-                            )}
+                            canStatus={canBulkUpdateStatus(authorization.actor, client)}
+                            statusNote={bulkStatusBlockedReason(authorization.actor, client)}
                           />
                         </span>
                       )}
@@ -532,7 +536,7 @@ export default async function ClientsPage({
               untouched list looks exactly as it did before this feature. The
               selection it reads lives in sessionStorage, not in this tree, so it
               survives every filter, sort and page link on this screen (F062 AC3). */}
-          {canClaim && <BulkStatusBar />}
+          {canClaim && <BulkActionsBar />}
 
           {totalPages > 1 && (
             <Rise className="flex items-center justify-between gap-4 pt-4">

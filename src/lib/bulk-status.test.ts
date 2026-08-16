@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   MAX_BULK_STATUS_CLIENTS,
-  bulkSelectionBlockedReason,
+  bulkStatusBlockedReason,
   bulkStatusSummary,
   canBulkUpdateStatus,
   parseBulkStatusResult,
@@ -148,26 +148,26 @@ describe("canBulkUpdateStatus", () => {
   });
 });
 
-describe("bulkSelectionBlockedReason", () => {
+describe("bulkStatusBlockedReason", () => {
   const cam = { id: "cam-1", role: "cam" };
 
   it("says nothing for a row the actor can act on", () => {
-    assert.equal(bulkSelectionBlockedReason(cam, { owner_id: "cam-1" }), null);
+    assert.equal(bulkStatusBlockedReason(cam, { owner_id: "cam-1" }), null);
   });
 
   it("points an unowned row at the claim flow rather than at ownership", () => {
-    assert.match(bulkSelectionBlockedReason(cam, { owner_id: null }) ?? "", /claim/i);
+    assert.match(bulkStatusBlockedReason(cam, { owner_id: null }) ?? "", /claim/i);
   });
 
   it("explains someone else's row without naming them", () => {
-    const reason = bulkSelectionBlockedReason(cam, { owner_id: "cam-2" }) ?? "";
+    const reason = bulkStatusBlockedReason(cam, { owner_id: "cam-2" }) ?? "";
     assert.match(reason, /owner or an admin/i);
     assert.doesNotMatch(reason, /cam-2/);
   });
 
   it("explains a read-only role", () => {
     assert.match(
-      bulkSelectionBlockedReason({ id: "v", role: "viewer" }, { owner_id: "v" }) ?? "",
+      bulkStatusBlockedReason({ id: "v", role: "viewer" }, { owner_id: "v" }) ?? "",
       /CAM or an admin/i,
     );
   });

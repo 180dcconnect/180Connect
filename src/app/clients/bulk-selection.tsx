@@ -4,7 +4,7 @@ import { useCallback, useSyncExternalStore } from "react";
 
 /**
  * F062 (#64) — selecting several clients on the list view, and the shared state
- * F064's bulk bar acts on.
+ * F064's and F065's bulk actions act on.
  *
  * WHY SESSION STORAGE RATHER THAN REACT STATE:
  * /clients is a server component and every filter, sort and page link on it is a
@@ -28,27 +28,65 @@ import { useCallback, useSyncExternalStore } from "react";
  * current filter does not show. That is the point — filter to Leeds, select four,
  * filter to Bristol, select three, apply to all seven — so the count in the bar is
  * the total selected rather than the number visible right now, and the bar says so.
+ *
+ * WHY THE SELECTION CARRIES A FLAG PER CLIENT (F065):
+ * It started as a plain set of ids because there was one bulk action and one
+ * permission rule behind it: F064's status change needs owner-or-admin, so a row
+ * the actor could not change was simply not selectable, and a selection that was
+ * certain to be refused could not be built. F065 added a second action with a
+ * *wider* rule — `notes_insert_author` lets any active CAM comment on any client,
+ * because F019 makes the record shared — and the two no longer agree on which
+ * rows belong in a selection. Gating the checkbox on the narrower rule would mean
+ * a CAM cannot comment on a client they do not own, which is a permission the
+ * database grants and the UI would be inventing a restriction on.
+ *
+ * So selectability is now the *wider* rule (anyone who can reach the checkbox at
+ * all), and the narrower one rides along per client as `canStatus`. F064's
+ * guarantee survives in the place it matters: the bar knows, for the whole
+ * selection and across every page and filter it spans, how many rows the actor
+ * cannot move, and refuses the status action with that count rather than letting
+ * an atomic write be attempted and refused. What changes is only *which control*
+ * says no, and it now says no with a number in it.
  */
 
 const STORAGE_KEY = "180connect:clients:bulk-selection";
 
-const EMPTY: ReadonlySet<string> = new Set<string>();
+/** id → whether this actor may also bulk-change that client's pipeline status. */
+export type SelectionMap = ReadonlyMap<string, boolean>;
+
+export type SelectableClient = { id: string; canStatus: boolean };
+
+const EMPTY: SelectionMap = new Map<string, boolean>();
 
 /**
  * Cached because `useSyncExternalStore` compares snapshots by identity: parsing
- * storage afresh on every render would hand React a new Set each time and loop.
+ * storage afresh on every render would hand React a new Map each time and loop.
  * Null means "not read yet"; every write replaces it and notifies.
  */
-let snapshot: ReadonlySet<string> | null = null;
+let snapshot: SelectionMap | null = null;
 const listeners = new Set<() => void>();
 
-function readStored(): ReadonlySet<string> {
+function readStored(): SelectionMap {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return EMPTY;
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return EMPTY;
-    return new Set(parsed.filter((id): id is string => typeof id === "string"));
+    // The array form is what F062 stored before F065 gave each entry a flag. A
+    // CAM mid-selection when the deploy lands still has one in their tab, and
+    // every id in it was status-capable by construction — that was the old
+    // selectability rule — so reading them back as `true` is not a guess.
+    if (Array.isArray(parsed)) {
+      return new Map(
+        parsed.filter((id): id is string => typeof id === "string").map((id) => [id, true]),
+      );
+    }
+    if (typeof parsed !== "object" || parsed === null) return EMPTY;
+    return new Map(
+      Object.entries(parsed as Record<string, unknown>).map(([id, canStatus]) => [
+        id,
+        canStatus === true,
+      ]),
+    );
   } catch {
     // Storage disabled, quota, or a value something else wrote. A selection is
     // not worth an error boundary — start empty and carry on.
@@ -56,13 +94,13 @@ function readStored(): ReadonlySet<string> {
   }
 }
 
-function getSnapshot(): ReadonlySet<string> {
+function getSnapshot(): SelectionMap {
   snapshot ??= readStored();
   return snapshot;
 }
 
 /** Matches the server-rendered HTML: nothing is selected until the client says so. */
-function getServerSnapshot(): ReadonlySet<string> {
+function getServerSnapshot(): SelectionMap {
   return EMPTY;
 }
 
@@ -73,11 +111,11 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-function write(next: ReadonlySet<string>): void {
+function write(next: SelectionMap): void {
   snapshot = next;
   try {
     if (next.size === 0) sessionStorage.removeItem(STORAGE_KEY);
-    else sessionStorage.setItem(STORAGE_KEY, JSON.stringify([...next]));
+    else sessionStorage.setItem(STORAGE_KEY, JSON.stringify(Object.fromEntries(next)));
   } catch {
     // Same reasoning as readStored: the in-memory selection still works, it just
     // will not survive the next navigation.
@@ -86,9 +124,13 @@ function write(next: ReadonlySet<string>): void {
 }
 
 export type BulkSelection = {
-  selected: ReadonlySet<string>;
-  toggle: (id: string) => void;
-  select: (ids: readonly string[]) => void;
+  selected: SelectionMap;
+  /** Every selected id, in insertion order. What a bulk request sends. */
+  ids: string[];
+  /** How many selected clients this actor may *not* bulk-change the status of. */
+  statusBlockedCount: number;
+  toggle: (client: SelectableClient) => void;
+  select: (clients: readonly SelectableClient[]) => void;
   deselect: (ids: readonly string[]) => void;
   clear: () => void;
 };
@@ -96,28 +138,32 @@ export type BulkSelection = {
 export function useBulkSelection(): BulkSelection {
   const selected = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
-  const toggle = useCallback((id: string) => {
-    const next = new Set(getSnapshot());
+  const toggle = useCallback(({ id, canStatus }: SelectableClient) => {
+    const next = new Map(getSnapshot());
     if (next.has(id)) next.delete(id);
-    else next.add(id);
+    else next.set(id, canStatus);
     write(next);
   }, []);
 
-  const select = useCallback((ids: readonly string[]) => {
-    const next = new Set(getSnapshot());
-    for (const id of ids) next.add(id);
+  const select = useCallback((clients: readonly SelectableClient[]) => {
+    const next = new Map(getSnapshot());
+    for (const { id, canStatus } of clients) next.set(id, canStatus);
     write(next);
   }, []);
 
   const deselect = useCallback((ids: readonly string[]) => {
-    const next = new Set(getSnapshot());
+    const next = new Map(getSnapshot());
     for (const id of ids) next.delete(id);
     write(next);
   }, []);
 
   const clear = useCallback(() => write(EMPTY), []);
 
-  return { selected, toggle, select, deselect, clear };
+  const ids = [...selected.keys()];
+  let statusBlockedCount = 0;
+  for (const canStatus of selected.values()) if (!canStatus) statusBlockedCount += 1;
+
+  return { selected, ids, statusBlockedCount, toggle, select, deselect, clear };
 }
 
 const BOX =
@@ -126,21 +172,22 @@ const BOX =
 /**
  * One row's checkbox.
  *
- * `blockedReason` non-null means this actor cannot change this client's status
- * (F064: owner or admin only), so the box is disabled rather than the selection
- * being allowed and refused later — the bulk write is all-or-nothing, so a
- * selection that cannot succeed has to be impossible to build, not merely
- * unlucky. The reason becomes the box's accessible name, so a screen reader gets
- * the same explanation the tooltip gives.
+ * Always enabled — the column only renders for actors who can act on clients at
+ * all, and every such actor can comment on every client (F065). `statusNote`,
+ * when set, says why the *status* action will not cover this row; it is a hint on
+ * a usable control rather than the reason a disabled one exists, so it goes into
+ * the accessible name after the client's own name rather than replacing it.
  */
 export function ClientSelectCheckbox({
   clientId,
   clientName,
-  blockedReason,
+  canStatus,
+  statusNote,
 }: {
   clientId: string;
   clientName: string;
-  blockedReason: string | null;
+  canStatus: boolean;
+  statusNote: string | null;
 }) {
   const { selected, toggle } = useBulkSelection();
 
@@ -149,16 +196,15 @@ export function ClientSelectCheckbox({
       type="checkbox"
       className={BOX}
       checked={selected.has(clientId)}
-      disabled={blockedReason !== null}
-      title={blockedReason ?? undefined}
-      aria-label={blockedReason ? `${clientName} — ${blockedReason}` : `Select ${clientName}`}
-      onChange={() => toggle(clientId)}
+      title={statusNote ?? undefined}
+      aria-label={statusNote ? `Select ${clientName} — ${statusNote}` : `Select ${clientName}`}
+      onChange={() => toggle({ id: clientId, canStatus })}
     />
   );
 }
 
 /**
- * The header checkbox: selects every selectable row **on this page**.
+ * The header checkbox: selects every row **on this page**.
  *
  * "Currently visible" (F062 AC1) is read literally as the rows on screen rather
  * than every row matching the filter. Two reasons: a filter can match thousands,
@@ -168,11 +214,11 @@ export function ClientSelectCheckbox({
  * number they have to take on trust. Accumulating across pages still works — the
  * selection survives the navigation.
  */
-export function SelectPageCheckbox({ selectableIds }: { selectableIds: readonly string[] }) {
+export function SelectPageCheckbox({ clients }: { clients: readonly SelectableClient[] }) {
   const { selected, select, deselect } = useBulkSelection();
 
-  const selectedHere = selectableIds.filter((id) => selected.has(id)).length;
-  const allSelected = selectableIds.length > 0 && selectedHere === selectableIds.length;
+  const selectedHere = clients.filter((client) => selected.has(client.id)).length;
+  const allSelected = clients.length > 0 && selectedHere === clients.length;
   const someSelected = selectedHere > 0 && !allSelected;
 
   return (
@@ -180,7 +226,7 @@ export function SelectPageCheckbox({ selectableIds }: { selectableIds: readonly 
       type="checkbox"
       className={BOX}
       checked={allSelected}
-      disabled={selectableIds.length === 0}
+      disabled={clients.length === 0}
       ref={(node) => {
         // Partial selection reads as a dash rather than as unchecked — otherwise
         // the header lies about a page where half the rows are picked. There is
@@ -188,15 +234,12 @@ export function SelectPageCheckbox({ selectableIds }: { selectableIds: readonly 
         // why this is a ref callback and not a prop.
         if (node) node.indeterminate = someSelected;
       }}
-      title={
-        selectableIds.length === 0
-          ? "None of the clients on this page are yours to change"
-          : undefined
-      }
       aria-label={
         allSelected ? "Deselect the clients on this page" : "Select the clients on this page"
       }
-      onChange={() => (allSelected ? deselect(selectableIds) : select(selectableIds))}
+      onChange={() =>
+        allSelected ? deselect(clients.map((client) => client.id)) : select(clients)
+      }
     />
   );
 }

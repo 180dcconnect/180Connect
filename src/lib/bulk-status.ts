@@ -108,11 +108,16 @@ export function bulkStatusSummary(result: BulkStatusResult, status: string): str
  *
  * F064's open question was "bulk update permission rules"; the answer is that
  * there are no bulk-specific rules. A CAM can change in bulk exactly what they
- * could change one at a time, so a row they cannot act on is not selectable in
- * the first place. Disabling the checkbox rather than letting the selection fail
- * at apply time is what keeps the batch atomic *and* usable: an all-or-nothing
- * write is only kind if you cannot accidentally build a selection that is
- * guaranteed to be refused.
+ * could change one at a time.
+ *
+ * F065 moved where this is enforced. It used to disable the row's checkbox, so a
+ * selection that was certain to be refused could not be built; then bulk comments
+ * arrived with a wider rule (any active CAM, any client), and gating selection on
+ * this narrower one would have blocked a comment the database permits. So the
+ * checkbox is now always available and this decides whether the *status action*
+ * covers the selection — the bar counts the rows that fail it and refuses with
+ * that number rather than attempting an atomic write it knows will be rejected.
+ * The protection is the same; it just names a quantity now.
  */
 export function canBulkUpdateStatus(
   actor: { id: string; role: string },
@@ -124,9 +129,11 @@ export function canBulkUpdateStatus(
 }
 
 /**
- * Why a row's checkbox is disabled, for the tooltip on it. Null when it is not.
+ * Why the status action will not cover this row, for the hint on its checkbox.
+ * Null when it will. The row stays selectable either way (F065) — this is a note
+ * on a usable control, not the reason a disabled one exists.
  */
-export function bulkSelectionBlockedReason(
+export function bulkStatusBlockedReason(
   actor: { id: string; role: string },
   client: { owner_id: string | null },
 ): string | null {

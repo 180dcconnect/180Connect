@@ -283,6 +283,17 @@ F019 (read-only shared client visibility) requires every CAM to read every note.
 |---|---|---|---|---|
 | `NOTES` | all roles | admin, cam (`author_id = auth.uid()`) | admin, own | admin, own |
 
+**F065 (bulk add comment) changes nothing in this row and adds no RPC.** It inserts N
+rows in one statement as the signed-in user, so `notes_insert_author` above is what
+authorises it — one transaction, and therefore the same all-or-nothing guarantee
+F064's `set_outreach_status_bulk` needed a `SECURITY DEFINER` function for. The
+contrast is worth stating because the two features look symmetrical and are not:
+F064 needed the RPC because direct writes to `organisations.outreach_status` are
+revoked (§3.2), so there was no policy to authorise it. Here there is one, and a
+definer function would have *bypassed* it to re-implement it. The permission path
+is asserted in `supabase/tests/rls_policies.test.sql` — a CAM may note another
+CAM's client (`suite_core`), a viewer may not note anything (`suite_viewer`).
+
 ### 3.4 Outreach — ownership-scoped
 
 The F018 contact-permission rule lives here. Read is shared (relationship history,

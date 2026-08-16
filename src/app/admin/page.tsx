@@ -42,6 +42,12 @@ export default async function AdminPage() {
             <h2 className="font-bold">Audit log</h2>
             <p className="mt-1 text-sm text-foreground/65">Every recorded action, most recent first.</p>
           </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/data-handling-rules">
+            <h2 className="font-bold">Data handling rules</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Manage which fields from external sources are stored or excluded.
+            </p>
+          </Link>
           <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/companies-house">
             <h2 className="font-bold">Companies House import</h2>
             <p className="mt-1 text-sm text-foreground/65">

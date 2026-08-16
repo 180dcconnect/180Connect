@@ -165,7 +165,7 @@
 | 04 Entities | USERS | role | enum |  |  |
 | 04 Entities | USERS | is_active | boolean |  |  |
 | 04 Entities | USERS | invited_by_user_id | uuid | USERS |  |
-| 04 Entities | USERS | last_seen_at | timestamp |  |  |
+| 04 Entities | USERS | last_seen_at | timestamp |  | When the user was last active on any signed-in page — not just login |
 | 04 Entities | USERS | created_at | timestamp |  |  |
 | 04 Entities | USERS | updated_at | timestamp |  |  |
 | 04 Entities | USERS | is_seed | boolean |  |  |

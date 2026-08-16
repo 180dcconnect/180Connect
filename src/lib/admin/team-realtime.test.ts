@@ -18,6 +18,7 @@ function teamUser(overrides: Partial<TeamUser> = {}): TeamUser {
     role: "cam",
     is_active: true,
     deactivated_at: null,
+    last_seen_at: null,
     owned_client_count: 2,
     ...overrides,
   };

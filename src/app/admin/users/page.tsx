@@ -23,7 +23,7 @@ export default async function AdminUsersPage() {
   // table, so the two lists stay mutually exclusive (F008 AC5).
   const { data: users, error } = await supabase
     .from("users")
-    .select("id, email, full_name, role, is_active, deactivated_at")
+    .select("id, email, full_name, role, is_active, deactivated_at, last_seen_at")
     .or("invited_at.is.null,invite_accepted_at.not.is.null")
     .order("full_name");
 

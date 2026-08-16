@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useCallback, useEffect, useId, useRef, useState } from "react"
+import React, { useCallback, useId, useState } from "react"
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion"
 import { Eye, EyeOff } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -129,14 +129,16 @@ export function PasswordStrengthInput({
   const fillColor = SCORE_COLORS[score]
 
   // The previous committed score decides which segments actually changed,
-  // and the direction drives the label slide and the segment stagger order
-  const prevScoreRef = useRef(score)
-  // eslint-disable-next-line react-hooks/refs
-  const prevScore = prevScoreRef.current
-  const direction = score >= prevScore ? 1 : -1
-  useEffect(() => {
-    prevScoreRef.current = score
-  }, [score])
+  // and the direction drives the label slide and the segment stagger order.
+  // Derived via the "adjust state during render" pattern rather than a ref
+  // read at render time (react-hooks/refs) — React explicitly supports a
+  // conditional setState here and bails out the extra render itself.
+  const [prevScore, setPrevScore] = useState(score)
+  const [direction, setDirection] = useState(1)
+  if (score !== prevScore) {
+    setDirection(score >= prevScore ? 1 : -1)
+    setPrevScore(score)
+  }
 
   const handleChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -374,13 +376,13 @@ export function PasswordStrengthMeter({
   const strengthLabel = STRENGTH_LABELS[score]
   const fillColor = SCORE_COLORS[score]
 
-  const prevScoreRef = useRef(score)
-  // eslint-disable-next-line react-hooks/refs
-  const prevScore = prevScoreRef.current
-  const direction = score >= prevScore ? 1 : -1
-  useEffect(() => {
-    prevScoreRef.current = score
-  }, [score])
+  // See PasswordStrengthInput above for why this is state, not a ref.
+  const [prevScore, setPrevScore] = useState(score)
+  const [direction, setDirection] = useState(1)
+  if (score !== prevScore) {
+    setDirection(score >= prevScore ? 1 : -1)
+    setPrevScore(score)
+  }
 
   return (
     <div className={cn("flex flex-col gap-1 mt-2.5", className)} role="status">

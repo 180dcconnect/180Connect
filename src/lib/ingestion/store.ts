@@ -107,6 +107,34 @@ export function createSupabaseIngestionStore(
 
       if (error) throw error;
     },
+
+    async loadDataHandlingRules() {
+      // Load active rules — service_role bypasses RLS.
+      const { data: rulesData, error: rulesError } = await supabase
+        .from("data_handling_rules")
+        .select("source, field_path, action")
+        .eq("is_active", true);
+
+      if (rulesError) throw rulesError;
+
+      // Load current version from the singleton.
+      const { data: versionData, error: versionError } = await supabase
+        .from("data_handling_rule_versions")
+        .select("current_version")
+        .eq("id", true)
+        .single();
+
+      if (versionError) throw versionError;
+
+      return {
+        rules: (rulesData ?? []).map((r) => ({
+          source: (r.source as string) ?? null,
+          field_path: r.field_path as string,
+          action: r.action as "allow" | "deny",
+        })),
+        version: (versionData?.current_version as number) ?? 0,
+      };
+    },
   };
 }
 

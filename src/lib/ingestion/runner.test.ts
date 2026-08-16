@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import { hashPayload } from "./checksum.ts";
 import { partitionRecords, runIngestion } from "./runner.ts";
+import type { FieldRule } from "./field-filter.ts";
 import type {
   CommonRecord,
   DataSourceAdapter,
@@ -32,6 +33,7 @@ type FinishedRun = {
 function fakeStore(
   overrides: Partial<IngestionStore> = {},
   seed: Record<string, { checksum: string; ingestion_attempt: number }> = {},
+  seedRules: { rules: FieldRule[]; version: number } = { rules: [], version: 0 },
 ) {
   const started: { source: DataSourceName; trigger: RunTrigger }[] = [];
   const finished: FinishedRun[] = [];
@@ -58,6 +60,9 @@ function fakeStore(
     },
     async finishRun(runId, status, counts, errorMessage) {
       finished.push({ runId, status, counts: { ...counts }, errorMessage });
+    },
+    async loadDataHandlingRules() {
+      return seedRules;
     },
     ...overrides,
   };
@@ -203,6 +208,79 @@ describe("partitionRecords", () => {
       result.rows.length + result.skipped + result.invalid.length,
       records.length,
     );
+  });
+
+  it("strips denied fields from raw_payload when rules are provided (F246)", () => {
+    const payload = {
+      company_name: "Acme",
+      officers: [
+        { name: "Alice", date_of_birth: "1990-01-01" },
+      ],
+    };
+    const rules: FieldRule[] = [
+      { source: "companies_house", field_path: "officers[*].date_of_birth", action: "deny" },
+    ];
+    const result = partitionRecords(
+      [record("A", payload)],
+      empty,
+      "run-1",
+      "companies_house",
+      rules,
+      1,
+    );
+    assert.equal(result.rows.length, 1);
+    const written = result.rows[0];
+    assert.deepEqual(written.raw_payload, {
+      company_name: "Acme",
+      officers: [{ name: "Alice" }],
+    });
+    assert.deepEqual(written.excluded_fields, ["officers[*].date_of_birth"]);
+    assert.equal(written.rule_version_applied, 1);
+  });
+
+  it("records an empty excluded_fields when the rules ran and matched nothing", () => {
+    // [] and null are not interchangeable here: [] is the evidence that the rules
+    // were applied to this record, which is what an audit of the policy asks for.
+    const payload = { company_name: "Acme" };
+    const rules: FieldRule[] = [
+      { source: "companies_house", field_path: "officers[*].date_of_birth", action: "deny" },
+    ];
+    const result = partitionRecords(
+      [record("A", payload)],
+      empty,
+      "run-1",
+      "companies_house",
+      rules,
+      1,
+    );
+    assert.equal(result.rows.length, 1);
+    assert.deepEqual(result.rows[0].excluded_fields, []);
+    assert.equal(result.rows[0].rule_version_applied, 1);
+  });
+
+  it("records null excluded_fields only when no rule version was applied", () => {
+    const result = partitionRecords(
+      [record("A", { company_name: "Acme" })],
+      empty,
+      "run-1",
+      "companies_house",
+    );
+    assert.equal(result.rows.length, 1);
+    assert.equal(result.rows[0].excluded_fields, null);
+    assert.equal(result.rows[0].rule_version_applied, null);
+  });
+
+  it("stamps the rule version even when no rules are seeded yet (version 0)", () => {
+    const result = partitionRecords(
+      [record("A", { company_name: "Acme" })],
+      empty,
+      "run-1",
+      "companies_house",
+      [],
+      0,
+    );
+    assert.deepEqual(result.rows[0].excluded_fields, []);
+    assert.equal(result.rows[0].rule_version_applied, 0);
   });
 });
 
@@ -376,5 +454,53 @@ describe("runIngestion", () => {
       () => runIngestion([], undefined, null),
       /SUPABASE_SERVICE_ROLE_KEY/,
     );
+  });
+
+  it("refuses to import anything when the data handling rules cannot be read (F246)", async () => {
+    // Fail-closed. Importing unfiltered would store exactly the personal data the
+    // rules exist to exclude, and would do it without anyone noticing.
+    const { store, started, written } = fakeStore({
+      async loadDataHandlingRules() {
+        throw new Error("relation \"data_handling_rules\" does not exist");
+      },
+    });
+    const source = adapter("companies_house", ok([record("A")]));
+
+    await assert.rejects(
+      () => runIngestion([source], undefined, store),
+      /Data handling rules could not be loaded/,
+    );
+
+    // No run row opened and nothing written — there is no half-run to reconcile.
+    assert.equal(started.length, 0);
+    assert.equal(written.length, 0);
+  });
+
+  it("passes the loaded rules and version through to the written rows (F246)", async () => {
+    const { store, written } = fakeStore(
+      {},
+      {},
+      {
+        rules: [
+          {
+            source: null,
+            field_path: "ethnicity",
+            action: "deny",
+          },
+        ],
+        version: 7,
+      },
+    );
+    const source = adapter(
+      "companies_house",
+      ok([record("A", { name: "Acme", ethnicity: "redacted-me" })]),
+    );
+
+    await runIngestion([source], undefined, store);
+
+    assert.equal(written.length, 1);
+    assert.deepEqual(written[0].raw_payload, { name: "Acme" });
+    assert.deepEqual(written[0].excluded_fields, ["ethnicity"]);
+    assert.equal(written[0].rule_version_applied, 7);
   });
 });

@@ -129,9 +129,19 @@ export function PasswordStrengthInput({
   const fillColor = SCORE_COLORS[score]
 
   // The previous committed score decides which segments actually changed,
-  // and the direction drives the label slide and the segment stagger order
+  // and the direction drives the label slide and the segment stagger order.
+  //
+  // WHY A REF, AND WHY THE SUPPRESSIONS BELOW:
+  // This is the one thing a ref is for that state cannot replace. React's
+  // documented "previous value" idiom adjusts state during render, but that
+  // *throws away the render that computed it* — and that discarded render is
+  // precisely the one that has to reach the DOM here, because it is the only
+  // render where prevScore != score and the stagger and slide direction exist.
+  // Committing the update in an effect instead trips react-hooks/set-state-in-effect.
+  // So: keep the ref, and mark the two reads. The staleness the rule warns about
+  // is the intended behaviour — prevScore is *meant* to lag one commit behind.
   const prevScoreRef = useRef(score)
-  // eslint-disable-next-line react-hooks/refs
+  // eslint-disable-next-line react-hooks/refs -- see above
   const prevScore = prevScoreRef.current
   const direction = score >= prevScore ? 1 : -1
   useEffect(() => {
@@ -208,6 +218,7 @@ export function PasswordStrengthInput({
           <span className="sr-only">Password strength: {strengthLabel}</span>
           <div className="flex items-center gap-3" aria-hidden="true">
             <div className="flex flex-1 gap-1.5">
+              {/* eslint-disable-next-line react-hooks/refs -- prevScore lags one commit by design; see the ref above */}
               {Array.from({ length: SEGMENT_COUNT }).map((_, index) => {
                 const filled = index < score
                 const wasFilled = index < prevScore
@@ -374,8 +385,10 @@ export function PasswordStrengthMeter({
   const strengthLabel = STRENGTH_LABELS[score]
   const fillColor = SCORE_COLORS[score]
 
+  // Same previous-score bookkeeping as PasswordStrengthInput above; the note
+  // there explains why this is a ref and why the reads are suppressed.
   const prevScoreRef = useRef(score)
-  // eslint-disable-next-line react-hooks/refs
+  // eslint-disable-next-line react-hooks/refs -- see PasswordStrengthInput
   const prevScore = prevScoreRef.current
   const direction = score >= prevScore ? 1 : -1
   useEffect(() => {
@@ -386,6 +399,7 @@ export function PasswordStrengthMeter({
     <div className={cn("flex flex-col gap-1 mt-2.5", className)} role="status">
       <div className="flex items-center gap-3">
         <div className="flex flex-1 gap-1.5">
+          {/* eslint-disable-next-line react-hooks/refs -- prevScore lags one commit by design; see the ref above */}
           {Array.from({ length: SEGMENT_COUNT }).map((_, index) => {
             const filled = index < score
             const wasFilled = index < prevScore

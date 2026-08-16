@@ -55,8 +55,19 @@ import { SortMenu as ListSortMenu } from "./sort-menu";
 import { BulkSelectProvider } from "./bulk-select-provider";
 import { ClientRowCheckbox, SelectAllCheckbox } from "./bulk-select-checkbox";
 import { BulkActionBar } from "./bulk-action-bar";
+import {
+  captureFilters,
+  describeFilters,
+  isCurrentView,
+  parseFilters,
+  savedViewHref,
+} from "./saved-view-filters";
+import { SavedViewsPanel, type SavedViewSummary } from "./saved-views-panel";
 
 type TeamMember = { id: string; full_name: string | null };
+
+/** F066 — a saved view as it comes out of the table. `filters` is jsonb. */
+type SavedViewRow = { id: string; name: string; filters: unknown };
 
 // Next.js 16: searchParams is a Promise on App Router pages — same pattern as
 // src/app/admin/audit-log/page.tsx.
@@ -173,7 +184,7 @@ export default async function ClientsPage({
   const canSelect = hasPermission(authorization.actor.role, "client:edit");
   const canBulkAssign = hasPermission(authorization.actor.role, "ownership:reassign");
 
-  const [organisations, openSuppressions, team] = await Promise.all([
+  const [organisations, openSuppressions, team, savedViews] = await Promise.all([
     supabase
       .from("organisations")
       .select(
@@ -192,6 +203,15 @@ export default async function ClientsPage({
       .eq("role", "cam")
       .order("full_name")
       .overrideTypes<TeamMember[], { merge: false }>(),
+    // F066 — this CAM's own saved views. The `user_id` filter is belt and braces:
+    // the select policy (matrix §3.17) already scopes the table to auth.uid(), so
+    // this query cannot see anyone else's views with or without it.
+    supabase
+      .from("saved_views")
+      .select("id, name, filters")
+      .eq("user_id", authorization.actor.id)
+      .order("created_at", { ascending: false })
+      .overrideTypes<SavedViewRow[], { merge: false }>(),
   ]);
 
   if (organisations.error) {
@@ -202,6 +222,11 @@ export default async function ClientsPage({
   }
   if (team.error) {
     await reportError(team.error, { operation: "clients.page_team" });
+  }
+  // A saved-views read that fails costs the CAM their shortcuts, not their list, so
+  // it is logged and the panel renders empty rather than taking the page down.
+  if (savedViews.error) {
+    await reportError(savedViews.error, { operation: "clients.page_saved_views" });
   }
 
   const allVisibleClients = visibleClients(organisations.data ?? [], openSuppressions.data ?? []);
@@ -276,6 +301,50 @@ export default async function ClientsPage({
   const listSortField = parseListSort(listSortParam);
   const listSortDirection = parseListDirection(listDirParam);
   const sortedClients = sortClients(matchingClients, listSortField, listSortDirection);
+
+  /**
+   * F066 (#68) — the filter combination this render was built from, and the CAM's
+   * saved views measured against it.
+   *
+   * `activeFilters` is what "save this view" stores: the same params the list above
+   * was filtered by (the multi-selects as the value arrays they filtered with),
+   * captured through the shared whitelist so the page and the server action cannot
+   * disagree about what a view is made of. `listSort`/`listDir` are deliberately
+   * not part of a view — ordering is how the same list is read, not what is in it.
+   *
+   * A view whose filters equal the active ones is marked as showing — that is the
+   * only thing this page interprets about a saved view. Everything else about it is
+   * a link built from what it stored.
+   */
+  const activeFilters = captureFilters({
+    q: search,
+    city: cityValues,
+    country: countryValues,
+    status: statusValues,
+    type: typeValues,
+    owner: ownerFilter,
+  });
+  const savedViewSummaries: SavedViewSummary[] = (savedViews.data ?? []).map((row) => {
+    const filters = parseFilters(row.filters);
+    // The owner filter stores a user id. Name it from the team list, or say "you"
+    // when it is the caller — an admin filtering to themselves is not in that list
+    // (it is CAMs only), and reading "a former team member" about yourself is worse
+    // than the raw id it replaces.
+    const ownerName =
+      filters.owner === authorization.actor.id
+        ? "You"
+        : (teamMembers.find((member) => member.id === filters.owner)?.full_name ??
+          allVisibleClients.find((client) => client.owner_id === filters.owner)?.ownerName ??
+          null);
+    return {
+      id: row.id,
+      name: row.name,
+      filters,
+      href: savedViewHref(filters),
+      description: describeFilters(filters, ownerName),
+      isCurrent: isCurrentView(filters, activeFilters),
+    };
+  });
 
   const totalPages = Math.max(1, Math.ceil(matchingClients.length / PAGE_SIZE));
   const requestedPage = Number.parseInt(pageParam ?? "1", 10);
@@ -467,6 +536,17 @@ export default async function ClientsPage({
           )}
 
           <Group className="space-y-4">
+            {/* F066 — the CAM's saved filter combinations, above the report they
+                change. Selecting one is a link; saving one posts the filters this
+                render used. */}
+            <Rise>
+              <SavedViewsPanel
+                views={savedViewSummaries}
+                activeFilters={activeFilters}
+                hasActiveFilters={filterActive}
+              />
+            </Rise>
+
             {/* Where the pipeline stands before the list of it: the four stage
                 totals, the stream between them, and the grouped breakdown under
                 them — a top three, or every owner when grouped by owner. Counts

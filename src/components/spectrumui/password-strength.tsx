@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useCallback, useEffect, useId, useRef, useState } from "react"
+import React, { useCallback, useId, useState } from "react"
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion"
 import { Eye, EyeOff } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -130,13 +130,13 @@ export function PasswordStrengthInput({
 
   // The previous committed score decides which segments actually changed,
   // and the direction drives the label slide and the segment stagger order
-  const prevScoreRef = useRef(score)
-  // eslint-disable-next-line react-hooks/refs
-  const prevScore = prevScoreRef.current
+  const [committedScore, setCommittedScore] = useState(score)
+  const [prevScore, setPrevScore] = useState(score)
+  if (score !== committedScore) {
+    setPrevScore(committedScore)
+    setCommittedScore(score)
+  }
   const direction = score >= prevScore ? 1 : -1
-  useEffect(() => {
-    prevScoreRef.current = score
-  }, [score])
 
   const handleChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -374,13 +374,13 @@ export function PasswordStrengthMeter({
   const strengthLabel = STRENGTH_LABELS[score]
   const fillColor = SCORE_COLORS[score]
 
-  const prevScoreRef = useRef(score)
-  // eslint-disable-next-line react-hooks/refs
-  const prevScore = prevScoreRef.current
+  const [committedScore, setCommittedScore] = useState(score)
+  const [prevScore, setPrevScore] = useState(score)
+  if (score !== committedScore) {
+    setPrevScore(committedScore)
+    setCommittedScore(score)
+  }
   const direction = score >= prevScore ? 1 : -1
-  useEffect(() => {
-    prevScoreRef.current = score
-  }, [score])
 
   return (
     <div className={cn("flex flex-col gap-1 mt-2.5", className)} role="status">

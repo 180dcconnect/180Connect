@@ -23,6 +23,10 @@ export const DATA_SOURCES = [
   "globalgiving",
   "candid",
   "charity_commission",
+  // Not an API: an organisation's own website, fetched one page at a time by a CAM
+  // through F037's manual URL import. It has no DataSourceAdapter because there is
+  // nothing to enumerate — see src/lib/import/fetch-page.ts.
+  "website",
 ] as const;
 
 export type DataSourceName = (typeof DATA_SOURCES)[number];

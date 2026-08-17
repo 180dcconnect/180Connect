@@ -931,6 +931,28 @@ withheld from authenticated users. `get_organisation_sources_with_actor` exposes
 only safe provenance metadata and the creating user's display name to active
 users; it does not expose the full draft or pending submission.
 
+# F037 manual URL import access
+
+A URL import writes through `create_url_import_draft`, which active CAMs and admins
+may execute and viewers may not. It always writes the caller as the submitter and
+always writes a `draft`: there is no parameter that submits, so an import cannot
+reach an organisation without the CAM opening the draft and pressing submit through
+F036's own path. It refuses to create a row without the URL the values came from,
+and audits as `url_import_drafted`.
+
+`set_url_import_provenance` narrows `imported_field_paths` only, and only for the
+submitter's own draft — a field can stop being labelled as imported when the CAM
+edits it, and can never start. `discard_manual_entry_draft` deletes the submitter's
+own `draft` row after writing `manual_entry_draft_discarded` to `AUDIT_LOG`; a
+submitted or reviewed entry cannot be discarded, and no DELETE privilege or policy
+is granted to authenticated users for the table. `get_organisation_import_origin`
+returns the source URL and the imported-field list to any active user, because "where
+did this client come from" is a question every CAM viewing a profile needs answered;
+it exposes nothing else from the submission.
+
+The fetched page is stored in `RAW_SOURCE_RECORDS` with `record_source = 'website'`,
+under the same admin-read, service-role-write rules as every API source.
+
 # F047 data-quality review flags
 
 `DATA_QUALITY_EVENTS` is readable only by active admins and writable only through

@@ -64,6 +64,28 @@ begin
 end;
 $$;
 
+-- The same guard one level down, for a suite that tests columns added to a table
+-- another migration created. tables_exist would pass on F036's table alone and the
+-- F037 suite would then fail with "column does not exist" instead of skipping.
+create or replace function tests.columns_exist(p_table text, variadic p_columns text[])
+returns boolean language plpgsql stable as $$
+declare c text;
+begin
+  if to_regclass(format('public.%I', p_table)) is null then
+    return false;
+  end if;
+  foreach c in array p_columns loop
+    if not exists (
+      select 1 from information_schema.columns
+       where table_schema = 'public' and table_name = p_table and column_name = c
+    ) then
+      return false;
+    end if;
+  end loop;
+  return true;
+end;
+$$;
+
 -- Run a statement as a user and report the SQLSTATE it raised, or null if it
 -- succeeded. Used for the misuse attempts, which must raise 42501.
 create or replace function tests.sqlstate_of(p_user_id uuid, p_sql text)
@@ -3017,6 +3039,168 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------------------
+-- F037 Manual URL Import: provenance columns and their RPCs.
+--
+-- The import writes through create_url_import_draft, so the questions here are the
+-- ones the flow depends on being true: an import can only ever produce a draft, only
+-- its own submitter can touch it, the provenance list can be narrowed but never
+-- widened, and every one of those writes leaves an audit row.
+-- ---------------------------------------------------------------------------
+create or replace function tests.suite_url_import()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b  uuid := '00000000-0000-4000-a000-000000000003';
+  v_viewer uuid := '00000000-0000-4000-a000-000000000005';
+  v_entry uuid;
+  v_typed_entry uuid;
+  v_submitted_entry uuid;
+  v_paths jsonb;
+  v_count bigint;
+begin
+  if not tests.columns_exist('manual_entry_records', 'source_url', 'imported_field_paths') then
+    return next skip(18, 'F037 URL import migration not yet applied');
+    return;
+  end if;
+  perform tests.seed();
+
+  return next is(
+    tests.sqlstate_of(v_viewer, $query$
+      select public.create_url_import_draft(
+        'https://example.org/', null, '["legal_name"]'::jsonb, '[]'::jsonb,
+        'Example Trust', null, null, null, null, null, 'GB', null, null, null, null
+      )
+    $query$),
+    '42501', 'a viewer cannot create a draft from a URL import');
+
+  perform tests.login_as(v_cam_a);
+  select public.create_url_import_draft(
+    'https://example.org/about',
+    null,
+    '["legal_name", "postcode", "country_code"]'::jsonb,
+    '["The company number on this website could not be confirmed."]'::jsonb,
+    'Example Trust', 'We do good things.', 'charity', '1 High Street', 'Sheffield',
+    'S1 1AA', 'GB', 'https://example.org', 'info@example.org',
+    'Charity Commission for England and Wales', '1101126'
+  ) into v_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  select count(*) into v_count from public.manual_entry_records
+   where id = v_entry and review_status = 'draft';
+  return next is(v_count, 1::bigint, 'an import produces a draft, never a submission');
+
+  select count(*) into v_count from public.manual_entry_records
+   where id = v_entry and source_url = 'https://example.org/about';
+  return next is(v_count, 1::bigint, 'the source URL is retained with the imported record');
+
+  select imported_field_paths into v_paths from public.manual_entry_records where id = v_entry;
+  return next is(
+    v_paths, '["legal_name", "postcode", "country_code"]'::jsonb,
+    'the imported fields are recorded so the CAM can tell them apart');
+
+  select count(*) into v_count from public.manual_entry_records
+   where id = v_entry and jsonb_array_length(import_notes) = 1;
+  return next is(v_count, 1::bigint, 'what the import could not confirm is kept with the draft');
+
+  select count(*) into v_count from public.audit_log
+   where target_id = v_entry and action = 'url_import_drafted';
+  return next is(v_count, 1::bigint, 'creating a draft from a URL is audited');
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, $query$
+      select public.create_url_import_draft(
+        '  ', null, '[]'::jsonb, '[]'::jsonb,
+        'No Origin', null, null, null, null, null, 'GB', null, null, null, null
+      )
+    $query$),
+    '22023', 'an imported draft cannot be created without the URL it came from');
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.manual_entry_records where id = v_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'another CAM cannot read the importing CAM''s draft');
+
+  -- The CAM corrected the name, so it is no longer the website's value.
+  perform tests.login_as(v_cam_a);
+  perform public.set_url_import_provenance(v_entry, '["postcode", "country_code"]'::jsonb);
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  select imported_field_paths into v_paths from public.manual_entry_records where id = v_entry;
+  return next is(
+    v_paths, '["postcode", "country_code"]'::jsonb,
+    'a field the CAM edits stops being labelled as imported');
+
+  -- A forged list must not be able to blame the website for the CAM's own typing.
+  perform tests.login_as(v_cam_a);
+  perform public.set_url_import_provenance(
+    v_entry, '["postcode", "country_code", "mission_statement", "contact_email"]'::jsonb);
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  select imported_field_paths into v_paths from public.manual_entry_records where id = v_entry;
+  return next is(
+    v_paths, '["postcode", "country_code"]'::jsonb,
+    'provenance can only ever be narrowed, never extended');
+
+  return next is(
+    tests.sqlstate_of(v_cam_b, format(
+      'select public.set_url_import_provenance(%L, ''[]''::jsonb)', v_entry)),
+    '42501', 'another CAM cannot rewrite the provenance of a draft that is not theirs');
+
+  perform tests.login_as(v_cam_a);
+  select public.save_manual_entry(
+    null, 'Typed By Hand', null, null, null, null, null, 'GB',
+    null, null, null, null, null, false
+  ) into v_typed_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.set_url_import_provenance(%L, ''["legal_name"]''::jsonb)', v_typed_entry)),
+    '22023', 'a hand-typed entry cannot be given import provenance');
+
+  return next throws_ok(
+    format(
+      'insert into public.manual_entry_records (submitted_by_user_id, legal_name, imported_field_paths) '
+      || 'values (%L, ''Orphan'', ''["legal_name"]''::jsonb)', v_cam_a),
+    '23514',
+    null,
+    'fields cannot be marked as imported without a URL to attribute them to'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_b, format('select public.discard_manual_entry_draft(%L)', v_entry)),
+    '42501', 'another CAM cannot discard a draft that is not theirs');
+
+  perform tests.login_as(v_cam_a);
+  perform public.discard_manual_entry_draft(v_entry);
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.manual_entry_records where id = v_entry;
+  return next is(v_count, 0::bigint, 'the importing CAM can reject and discard the import');
+
+  select count(*) into v_count from public.audit_log
+   where target_id = v_entry and action = 'manual_entry_draft_discarded';
+  return next is(v_count, 1::bigint, 'discarding an import is audited before the row goes');
+
+  perform tests.login_as(v_cam_a);
+  select public.save_manual_entry(
+    null, 'Submitted Entry', 'A mission.', 'charity', '1 High Street', 'Sheffield',
+    'S1 1AA', 'GB', 'https://example.org', 'info@example.org',
+    'Charity Commission for England and Wales', '1101126', 'Not found through any API.', true
+  ) into v_submitted_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.discard_manual_entry_draft(%L)', v_submitted_entry)),
+    '42501', 'a submitted entry is part of the audit trail and cannot be discarded');
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.get_organisation_import_origin(
+    '00000000-0000-4000-b000-000000000001'::uuid);
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(
+    v_count, 0::bigint,
+    'an organisation nobody imported reports no import origin');
+end;
+$$;
+
 select * from tests.suite_core();
 select * from tests.suite_viewer();
 select * from tests.suite_users();
@@ -3039,6 +3223,7 @@ select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
 select * from tests.suite_source_tracking();
 select * from tests.suite_manual_entries();
+select * from tests.suite_url_import();
 select * from tests.suite_onboarding();
 select * from tests.suite_client_criteria();
 

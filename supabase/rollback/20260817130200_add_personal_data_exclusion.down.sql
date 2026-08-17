@@ -1,4 +1,4 @@
--- Rollback for 20260817120000_add_personal_data_exclusion (F247 #242).
+-- Rollback for 20260817130200_add_personal_data_exclusion (F247 #242).
 --
 -- Reverses the schema and returns DATA_HANDLING_RULES to the state F246 left it
 -- in: 16 field_path rules, the F246 four-argument RPC, and the original unique

@@ -1,4 +1,4 @@
--- Rollback: 20260816220100_seed_data_handling_rules
+-- Rollback: 20260817130100_seed_data_handling_rules
 -- Removes the seeded data handling rules.
 --
 -- Matched on `created_by is null` rather than `rule_version = 1`: only the seed

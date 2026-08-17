@@ -1,5 +1,5 @@
 -- Migration: add_personal_data_exclusion
--- Sequence: extends the compliance layer added by 20260816220000_create_data_handling_rules
+-- Sequence: extends the compliance layer added by 20260817130000_create_data_handling_rules
 --   (F246). No new position in the Data Model sequence — same layer, second story.
 -- Story: F247 Personal Data Exclusion (#242)
 -- Spec: Technical Brief §5 Data & Legal Risks (1); docs/personal-data-exclusions.md
@@ -67,7 +67,7 @@
 --   Approved by   | Pending — raised with Bashir (Project Leader) on 2026-08-17.
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260817120000_add_personal_data_exclusion.down.sql
+-- ../rollback/20260817130200_add_personal_data_exclusion.down.sql
 
 ------------------------------------------------------------------------
 -- 1. RULE KINDS
@@ -256,7 +256,7 @@ comment on function app.is_personal_email is
 -- branch. F036 is open at #360 against dev; F246, which this story extends, was
 -- merged to main. No branch currently has both, so the trigger cannot be written
 -- anywhere that would compile. It ships as
--- 20260817120100_block_personal_email_manual_entry.sql the moment they meet —
+-- 20260817130300_block_personal_email_manual_entry.sql the moment they meet —
 -- written and reviewed alongside this migration, held back rather than guarded
 -- with a to_regclass check, because a conditionally-created compliance trigger is
 -- one that silently does not exist on a fresh database.
@@ -469,7 +469,7 @@ update public.data_handling_rule_versions
   where id = true;
 
 -- Names. created_by null throughout: a migration-seeded rule has no human author,
--- the convention 20260816220100 established.
+-- the convention 20260817130100 established.
 insert into public.data_handling_rules
   (rule_version, source, field_path, action, reason, rule_kind)
 select

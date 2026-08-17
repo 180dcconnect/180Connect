@@ -21,7 +21,7 @@ import {
   type PageFetchResult,
   type PageResponse,
 } from "./fetch-page.ts";
-import { IMPORT_USER_AGENT, IMPORT_USER_AGENT_TOKEN, isPathAllowedByRobots } from "./robots.ts";
+import { IMPORT_USER_AGENT, isPathAllowedByRobots } from "./robots.ts";
 
 const HTTP_TIMEOUT_MS = 8_000;
 const ROBOTS_TIMEOUT_MS = 4_000;

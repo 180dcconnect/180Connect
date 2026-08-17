@@ -1,58 +1,38 @@
-import { classifyCompaniesHouseTier } from "../src/lib/ingestion/sources/companies-house-criteria-config.ts";
-import { checkClientCriteria } from "../src/lib/client-criteria.ts";
-import { standardizeCompaniesHouseRecord, classifyCompaniesHouseSourceConfidence } from "../src/lib/standardize/companies-house.ts";
-import { standardizeCharityCommissionRecord } from "../src/lib/standardize/charity-commission.ts";
-
 const chApiKey = process.env.COMPANIES_HOUSE_API_KEY?.trim();
-const ccApiKey = process.env.CHARITY_COMMISSION_API_KEY?.trim();
 
 const chHeaders: Record<string, string> = chApiKey ? {
   Authorization: `Basic ${Buffer.from(`${chApiKey}:`).toString("base64")}`,
 } : {};
 
-const ccHeaders: Record<string, string> = ccApiKey ? {
-  "Ocp-Apim-Subscription-Key": ccApiKey,
-} : {};
+type SearchCompanyItem = {
+  title: string;
+  company_number: string;
+  company_type?: string;
+  company_status?: string;
+  address_snippet?: string;
+};
 
-async function searchCompaniesHouse(name: string) {
+type ReconcileResult = {
+  id: string;
+  name: string;
+  score?: number;
+  match?: boolean;
+};
+
+async function searchCompaniesHouse(name: string): Promise<SearchCompanyItem[]> {
   const url = `https://api.company-information.service.gov.uk/search/companies?q=${encodeURIComponent(name)}&items_per_page=10`;
   const res = await fetch(url, { headers: chHeaders });
   if (!res.ok) return [];
-  const json = await res.json();
+  const json = (await res.json()) as { items?: SearchCompanyItem[] };
   return json.items || [];
 }
 
-async function getCompanyProfile(companyNumber: string) {
-  const url = `https://api.company-information.service.gov.uk/company/${encodeURIComponent(companyNumber)}`;
-  const res = await fetch(url, { headers: chHeaders });
-  if (!res.ok) return null;
-  return await res.json();
-}
-
-async function searchCharityCommission(name: string) {
-  // Let's search Find That Charity
+async function searchCharityCommission(name: string): Promise<ReconcileResult[]> {
   const url = `https://findthatcharity.uk/reconcile?queries=${encodeURIComponent(JSON.stringify({ q0: { query: name } }))}`;
   const res = await fetch(url);
   if (!res.ok) return [];
-  const json = await res.json();
+  const json = (await res.json()) as { q0?: { result?: ReconcileResult[] } };
   return json.q0?.result || [];
-}
-
-async function getCharityDetails(regNumber: string) {
-  const url = `https://api.charitycommission.gov.uk/register/api/charitydetailsmulti/${encodeURIComponent(regNumber)}`;
-  const res = await fetch(url, { headers: ccHeaders });
-  if (!res.ok) return null;
-  const json = await res.json();
-  return Array.isArray(json) && json.length > 0 ? json[0] : null;
-}
-
-// Normalize profile so classifyCompaniesHouseTier works with either format
-function normalizeCHItem(profile: any) {
-  return {
-    ...profile,
-    company_type: profile.company_type || profile.type,
-    company_subtype: profile.company_subtype || profile.subtype,
-  };
 }
 
 async function investigateClient(clientQuery: string, extraTerms?: string[]) {
@@ -105,4 +85,4 @@ async function run() {
   await investigateClient("Tickets for Good", ["Tickets for Good Foundation"]);
 }
 
-run();
+await run();

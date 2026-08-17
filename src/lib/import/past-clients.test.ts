@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import { buildImportDraft } from "./build-draft.ts";
 import { extractOrganisation, isImportUsable } from "./extract-organisation.ts";
 import { isPathAllowedByRobots } from "./robots.ts";
-import { resolveRegistry, type RegistryMatch } from "./registry-lookup.ts";
+import { resolveRegistry } from "./registry-lookup.ts";
 
 /**
  * Real-world test suite covering 180Connect past client websites and import scenarios:

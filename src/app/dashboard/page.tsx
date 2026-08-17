@@ -7,9 +7,11 @@ import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
 import {
   computeDashboardMetrics,
+  filterActiveSuppressed,
   needsAttention,
   organisationGrowthSeries,
   type DashboardOrgRow,
+  type OpenSuppression,
 } from "@/lib/dashboard-metrics";
 import { StatCard } from "@/components/stat-card";
 import ProgressMetricCard from "@/components/ui/progress-metric-card";
@@ -80,16 +82,29 @@ export default async function DashboardPage({
 
   if (canViewClients) {
     const supabase = await createClient();
-    const organisations = await supabase
-      .from("organisations")
-      .select("id, legal_name, outreach_status, owner_id, updated_at, created_at")
-      .overrideTypes<DashboardOrgRow[], { merge: false }>();
+    const [organisations, openSuppressions] = await Promise.all([
+      supabase
+        .from("organisations")
+        .select("id, legal_name, outreach_status, owner_id, updated_at, created_at")
+        .overrideTypes<DashboardOrgRow[], { merge: false }>(),
+      supabase
+        .from("suppressions")
+        .select("organisation_id, status")
+        .in("status", ["pending", "active"])
+        .overrideTypes<OpenSuppression[], { merge: false }>(),
+    ]);
 
     if (organisations.error) {
       await reportError(organisations.error, { operation: "dashboard.page_metrics" });
       loadFailed = true;
-    } else {
-      rows = organisations.data ?? [];
+    }
+    if (openSuppressions.error) {
+      await reportError(openSuppressions.error, { operation: "dashboard.page_suppressions" });
+      loadFailed = true;
+    }
+
+    if (!loadFailed) {
+      rows = filterActiveSuppressed(organisations.data ?? [], openSuppressions.data ?? []);
     }
   }
 

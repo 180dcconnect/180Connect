@@ -12,12 +12,14 @@ import {
 } from "@/lib/source-tracking";
 import { checkWebsiteReachabilityCached } from "@/lib/website-reachability-cache";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
+import type { NoteRow } from "@/lib/note-history";
 import { SuppressButton } from "./suppress-button";
 import { ComposeButton } from "./compose-button";
 import { BasicInfoPanel } from "./basic-info-panel";
 import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
+import { NotesSection } from "./notes-section";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -40,6 +42,14 @@ type OwnerRow = {
  * F069-081) are still separate open tickets; each will slot in here as its own
  * `<section aria-labelledby>`, same shape as "Record sources" and this one, to
  * keep F067 AC2's "each reachable without excessive scrolling" true as they land.
+ *
+ * F071 (#73) View Notes is one such section: every `notes` row for this client,
+ * from any CAM (AC1), newest first (AC3) — see @/lib/note-history for the
+ * ordering/display logic and notes-section.tsx for the render. Gated on
+ * `client:view` like the rest of this page, not a narrower permission: RLS
+ * (`notes_select_active`) already shares read across every active role, and
+ * there is no author-scoped read policy to mirror. Adding a note (F072) is a
+ * separate, still-open ticket — this section is read-only.
  *
  * Started as F251 AC1/AC2's minimal client screen (name + suppression state only)
  * — see src/app/clients/page.tsx for that history. Extended here, not replaced.
@@ -146,6 +156,18 @@ export default async function ClientDetailPage({
 
   if (ownerError) {
     await reportError(ownerError, { operation: "clients.detail_owner", organisationId: id });
+  }
+
+  // F071: every note against this client, whoever wrote it (AC1). RLS
+  // (notes_select_active) shares read across every active role, so this needs
+  // no author filter — same reasoning as the outreach-history query below it.
+  const { data: noteRows, error: notesError } = await supabase
+    .from("notes")
+    .select("id, content, created_at, updated_at, author_id, author:users!notes_author_id_fkey(full_name)")
+    .eq("organisation_id", id);
+
+  if (notesError) {
+    await reportError(notesError, { operation: "clients.detail_notes", organisationId: id });
   }
 
   const canEdit = hasPermission(authorization.actor.role, "client:edit");
@@ -304,6 +326,17 @@ export default async function ClientDetailPage({
               {website.message} Booklet generation may use unreliable or missing website context.
             </p>
           )}
+        </section>
+
+        <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="notes-heading">
+          <h2 id="notes-heading" className="text-sm font-bold">Notes</h2>
+          <p className="mt-1 text-xs text-foreground/60">
+            Left by any team member — relationship history everyone can see.
+          </p>
+          <NotesSection
+            notes={(noteRows ?? []) as unknown as NoteRow[]}
+            error={Boolean(notesError)}
+          />
         </section>
 
         <div className="mt-8">

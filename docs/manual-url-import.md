@@ -132,19 +132,17 @@ server-side request, so it reuses F046's model rather than inventing one:
 - no HTTP status, host error or stack ever reaches the CAM — the real diagnostic goes
   to `ERROR_LOG` and the CAM gets a sentence about what to do next (AC11).
 
-## Failure states (F256)
+## Failure and edge-case states (F256)
 
-| Outcome | What the CAM sees |
-| --- | --- |
-| Malformed or unsafe address | "That does not look like a website address we can open…" |
-| Unreachable, or refused by robots | "We could not reach that website…" / "This website asks automated tools not to read that page…" |
-| Not a web page (PDF, image) | "That address is a file rather than a web page…" |
-| Empty page | "That page was empty, so there was nothing to import." |
-| Reached but unidentifiable | "We reached that website but could not find enough to identify the organisation." |
-| Register unavailable or number wrong | The draft is still created; a note says which number could not be confirmed. |
+F256 specifies three visually distinct states in the URL import flow:
 
-The first five leave the CAM on the same page as the manual form, so declining an
-import and typing the record are the same click apart.
+| State | Category & Tone | Trigger | What the CAM sees & Actions |
+| --- | --- | --- | --- |
+| **1. Unreachable / No Usable Data** | **Red Alert Card** | Malformed URL, DNS failure, unreachable host, timeout, robots.txt disallowed, non-HTML file (PDF/binary), or empty body. | Clear, non-technical explanation ("Couldn't retrieve data from this URL"). The pasted URL is preserved so the CAM can fix typos or proceed straight to manual entry below without losing context. |
+| **2. Insufficient Data** | **Amber Warning Card** | Website reached, but missing organisation name or lacking all secondary identifiers (no registration number, postcode, or email). | Informs the CAM that the profile is incomplete, displays summary of what was found vs missing, and provides a direct CTA button ("Fill in missing fields manually ↓") to complete the form below. |
+| **3. Duplicate Match** | **Indigo Prevention Card** | Extracted details match an existing active organisation in the database by registration number, name + postcode (F042), or website origin. | Duplicate creation is strictly prevented. Surfaces the existing client's details and prompts the CAM with two actions: **View existing client profile →** (`/clients/[id]`) or **Discard import**. |
+
+Each state is visually distinct in the UI with tailored color coding, icons, and contextual action buttons.
 
 ## Provenance (AC8, AC12)
 

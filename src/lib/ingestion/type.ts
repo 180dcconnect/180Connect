@@ -4,7 +4,7 @@
 // scripts in `scripts/` run through node's type stripping, which does not resolve
 // extensionless specifiers. See the note in tsconfig.json.
 
-import type { FieldRule } from "./field-filter.ts";
+import type { DataHandlingPolicy } from "./apply-data-handling.ts";
 
 /**
  * Every source the pipeline knows about, defined once.
@@ -115,13 +115,15 @@ export interface IngestionStore {
     errorMessage?: string,
   ): Promise<void>;
   /**
-   * Loads the active data handling rules and the current rule version (F246).
-   * Called once per ingestion run, not per record.
+   * Loads everything needed to clear a payload for storage (F246 + F247): the
+   * active field rules, the active redaction rules, the role email allow-list and
+   * the current rule version.
+   *
+   * Called once per ingestion run, not per record — so a rule change mid-run
+   * cannot produce a batch where some rows were filtered under one policy and
+   * some under another.
    */
-  loadDataHandlingRules(): Promise<{
-    rules: FieldRule[];
-    version: number;
-  }>;
+  loadDataHandlingPolicy(): Promise<DataHandlingPolicy>;
 }
 
 /** What `runIngestion` reports back for each source it was given. */

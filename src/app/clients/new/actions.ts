@@ -37,6 +37,45 @@ function manualEntryFormValues(formData: FormData) {
   };
 }
 
+/**
+ * Records which imported fields the CAM left alone (F037).
+ *
+ * Best-effort on purpose: the entry is already saved by the time this runs, and
+ * failing the whole save because a provenance label could not be updated would cost
+ * the CAM their work over a caption. The failure is reported, and the labels stay as
+ * they were — which over-claims what came from the website, so it is worth seeing in
+ * the logs rather than swallowing.
+ */
+async function narrowImportProvenance(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  formData: FormData,
+  entryId: string,
+  actorUserId: string,
+): Promise<void> {
+  const raw = formData.get("importedFieldPaths");
+  if (typeof raw !== "string" || !raw) return;
+
+  let paths: unknown;
+  try {
+    paths = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (!Array.isArray(paths) || paths.some((path) => typeof path !== "string")) return;
+
+  const { error } = await supabase.rpc("set_url_import_provenance", {
+    p_entry_id: entryId,
+    p_imported_field_paths: paths,
+  });
+  if (error) {
+    await reportError(error, {
+      operation: "manual_entry.narrow_import_provenance",
+      actorUserId,
+      manualEntryId: entryId,
+    });
+  }
+}
+
 export async function saveManualEntry(
   _previous: ManualEntryState,
   formData: FormData,
@@ -111,6 +150,12 @@ export async function saveManualEntry(
     });
     if (error) throw error;
     const savedEntryId = String(data);
+
+    // F037 AC8: a value the CAM has retyped is theirs, not the website's, and the
+    // review screen must stop labelling it as imported. Narrowing only — the RPC
+    // intersects with what was already recorded, so a forged list cannot mark a
+    // hand-typed field as coming from a website.
+    await narrowImportProvenance(supabase, formData, savedEntryId, authorization.actor.id);
 
     revalidatePath("/clients/new");
     if (intent === "draft") {

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useState, type FormEvent } from "react";
+import { discardImportDraft, type UrlImportState } from "./import-actions";
 import { saveManualEntry, type ManualEntryState } from "./actions";
 
 export type ManualEntryDraft = {
@@ -19,10 +20,46 @@ export type ManualEntryDraft = {
   registry_number: string | null;
   reason_for_manual_entry: string | null;
   updated_at: string;
+  /** F037: null for an entry the CAM typed from scratch. */
+  source_url: string | null;
+  imported_field_paths: string[];
+  import_notes: string[];
 };
 
 const initialState: ManualEntryState = { kind: "idle", message: "" };
+const initialImportState: UrlImportState = { kind: "idle", message: "" };
 const inputClass = "mt-1 w-full rounded-lg border border-black/20 px-3 py-2";
+
+/**
+ * Form field name to MANUAL_ENTRY_RECORDS column.
+ *
+ * The two differ because the form speaks the language of the action layer and
+ * imported_field_paths stores column names — the durable side of the pair. Keeping
+ * one map beats renaming either: the stored provenance stays readable in SQL, and the
+ * form keeps the names its own server action already parses.
+ */
+const FIELD_COLUMNS: Readonly<Record<string, string>> = {
+  legalName: "legal_name",
+  missionStatement: "mission_statement",
+  organisationType: "organisation_type",
+  addressLine1: "address_line_1",
+  city: "city",
+  postcode: "postcode",
+  countryCode: "country_code",
+  website: "website",
+  contactEmail: "contact_email",
+  registryName: "registry_name",
+  registryNumber: "registry_number",
+};
+
+/** F037 AC8: says, on the field itself, that this value is not the CAM's own. */
+function ImportedBadge() {
+  return (
+    <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-900">
+      From website
+    </span>
+  );
+}
 
 export function ManualEntryForm({
   initialEntry,
@@ -34,7 +71,42 @@ export function ManualEntryForm({
   isAdmin: boolean;
 }) {
   const [state, action, pending] = useActionState(saveManualEntry, initialState);
+  const [discardState, discardAction, discarding] = useActionState(
+    discardImportDraft,
+    initialImportState,
+  );
   const entryId = state.entryId ?? initialEntry?.id ?? "";
+
+  // Which imported values are still the imported ones. A field the CAM edits leaves
+  // this set immediately, so the badge disappears as they type rather than after a
+  // round trip — the label has to stop claiming the value came from the website at
+  // the moment it stops being true.
+  const [importedColumns, setImportedColumns] = useState<string[]>(
+    initialEntry?.imported_field_paths ?? [],
+  );
+
+  const isImported = (column: string) => importedColumns.includes(column);
+
+  // One handler on the form rather than eleven on the fields: change events bubble,
+  // and the alternative is threading a callback through every label on the page.
+  function handleFieldChange(event: FormEvent<HTMLFormElement>) {
+    const target = event.target;
+    if (
+      !(target instanceof HTMLInputElement)
+      && !(target instanceof HTMLTextAreaElement)
+      && !(target instanceof HTMLSelectElement)
+    ) {
+      return;
+    }
+
+    const column = FIELD_COLUMNS[target.name];
+    if (!column || !importedColumns.includes(column)) return;
+
+    const original = initialEntry?.[column as keyof ManualEntryDraft];
+    if (typeof original === "string" && original.trim() === target.value.trim()) return;
+
+    setImportedColumns((columns) => columns.filter((value) => value !== column));
+  }
 
   return (
     <>
@@ -48,6 +120,7 @@ export function ManualEntryForm({
                   {draft.legal_name || "Untitled manual entry"}
                 </Link>{" "}
                 <span className="text-foreground/55">
+                  {draft.source_url ? "imported, " : ""}
                   updated {new Date(draft.updated_at).toLocaleDateString("en-GB")}
                 </span>
               </li>
@@ -56,19 +129,67 @@ export function ManualEntryForm({
         </aside>
       )}
 
-      <form action={action} className="mt-6 space-y-5">
+      {initialEntry?.source_url && (
+        <section className="mt-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
+          <h2 className="font-bold">Imported from a website</h2>
+          <p className="mt-1">
+            The fields marked <span className="font-medium">From website</span> were read
+            from{" "}
+            <a
+              className="font-medium underline"
+              href={initialEntry.source_url}
+              rel="noreferrer nofollow noopener"
+              target="_blank"
+            >
+              {initialEntry.source_url}
+            </a>
+            . Check every one of them before you submit — nothing here is saved as a
+            client until you do.
+          </p>
+          {initialEntry.import_notes.length > 0 && (
+            <ul className="mt-3 list-disc space-y-1 pl-5">
+              {initialEntry.import_notes.map((note) => <li key={note}>{note}</li>)}
+            </ul>
+          )}
+          <form action={discardAction} className="mt-3">
+            <input name="entryId" type="hidden" value={initialEntry.id} />
+            <button
+              className="rounded-lg border border-blue-300 px-3 py-1.5 font-bold text-blue-900 disabled:opacity-50"
+              disabled={discarding}
+              type="submit"
+            >
+              {discarding ? "Discarding…" : "Discard this import"}
+            </button>
+          </form>
+          {discardState.message && (
+            <p className="mt-2 text-red-900" role="alert">{discardState.message}</p>
+          )}
+        </section>
+      )}
+
+      <form action={action} className="mt-6 space-y-5" onChange={handleFieldChange}>
         <input name="entryId" type="hidden" value={entryId} />
+        {initialEntry?.source_url && (
+          <input
+            name="importedFieldPaths"
+            type="hidden"
+            value={JSON.stringify(importedColumns)}
+          />
+        )}
 
         <label className="block text-sm font-bold">Organisation name
+          {isImported("legal_name") && <ImportedBadge />}
           <input className={inputClass} defaultValue={initialEntry?.legal_name ?? ""} maxLength={200} name="legalName" required />
         </label>
 
         <label className="block text-sm font-bold">Mission
+          {isImported("mission_statement") && <ImportedBadge />}
           <textarea className={inputClass} defaultValue={initialEntry?.mission_statement ?? ""} maxLength={5000} name="missionStatement" required rows={4} />
         </label>
 
         <div className="grid gap-5 sm:grid-cols-2">
           <label className="block text-sm font-bold">Organisation type
+            {isImported("organisation_type") && <ImportedBadge />}
             <select className={inputClass} defaultValue={initialEntry?.organisation_type ?? ""} name="organisationType" required>
               <option disabled value="">Choose a type</option>
               <option value="charity">Charity</option>
@@ -78,6 +199,7 @@ export function ManualEntryForm({
             </select>
           </label>
           <label className="block text-sm font-bold">Country code
+            {isImported("country_code") && <ImportedBadge />}
             <input className={inputClass} defaultValue={initialEntry?.country_code ?? "GB"} maxLength={2} name="countryCode" pattern="[A-Za-z]{2}" required />
           </label>
         </div>
@@ -86,12 +208,15 @@ export function ManualEntryForm({
           <legend className="px-1 text-sm font-bold">Full address</legend>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block text-sm font-bold sm:col-span-2">Address line 1
+              {isImported("address_line_1") && <ImportedBadge />}
               <input className={inputClass} defaultValue={initialEntry?.address_line_1 ?? ""} maxLength={300} name="addressLine1" required />
             </label>
             <label className="block text-sm font-bold">Town or city
+              {isImported("city") && <ImportedBadge />}
               <input className={inputClass} defaultValue={initialEntry?.city ?? ""} maxLength={200} name="city" required />
             </label>
             <label className="block text-sm font-bold">Postcode or postal code
+              {isImported("postcode") && <ImportedBadge />}
               <input className={inputClass} defaultValue={initialEntry?.postcode ?? ""} maxLength={32} name="postcode" required />
             </label>
           </div>
@@ -99,21 +224,38 @@ export function ManualEntryForm({
 
         <div className="grid gap-5 sm:grid-cols-2">
           <label className="block text-sm font-bold">Website
+            {isImported("website") && <ImportedBadge />}
             <input className={inputClass} defaultValue={initialEntry?.website ?? ""} maxLength={500} name="website" placeholder="https://example.org" required />
           </label>
           <label className="block text-sm font-bold">Contact email
+            {isImported("contact_email") && <ImportedBadge />}
             <input className={inputClass} defaultValue={initialEntry?.contact_email ?? ""} maxLength={320} name="contactEmail" type="text" required />
           </label>
           <label className="block text-sm font-bold">Registry name
+            {isImported("registry_name") && <ImportedBadge />}
             <input className={inputClass} defaultValue={initialEntry?.registry_name ?? ""} maxLength={200} name="registryName" required />
           </label>
           <label className="block text-sm font-bold">Registry number
+            {isImported("registry_number") && <ImportedBadge />}
             <input className={inputClass} defaultValue={initialEntry?.registry_number ?? ""} maxLength={200} name="registryNumber" required />
           </label>
         </div>
 
         <label className="block text-sm font-bold">Why is manual entry needed?
-          <textarea className={inputClass} defaultValue={initialEntry?.reason_for_manual_entry ?? ""} maxLength={2000} minLength={10} name="reason" required rows={4} />
+          <textarea
+            className={inputClass}
+            defaultValue={
+              initialEntry?.reason_for_manual_entry
+              ?? (initialEntry?.source_url
+                ? `Imported from ${initialEntry.source_url} and reviewed by hand.`
+                : "")
+            }
+            maxLength={2000}
+            minLength={10}
+            name="reason"
+            required
+            rows={4}
+          />
         </label>
 
         {isAdmin && (

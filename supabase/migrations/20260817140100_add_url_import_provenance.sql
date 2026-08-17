@@ -1,6 +1,6 @@
 -- Migration: add_url_import_provenance
 -- Sequence: extends step 7.0 (create_quality) — the MANUAL_ENTRY_RECORDS table
---   created by 20260811100000_create_manual_entry_records.sql (F036). No new table.
+--   created by 20260817130000_create_manual_entry_records.sql (F036). No new table.
 -- Story: F037 Manual URL Import. A URL import does not get its own staging table:
 --   it produces a MANUAL_ENTRY_RECORDS draft, which the CAM then reviews and
 --   submits through the F036 flow. That is what makes F037's acceptance criteria
@@ -38,7 +38,7 @@
 --   Approved by   | Pending — raised with Bashir (Project Leader) on 2026-08-17.
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260817100100_add_url_import_provenance.down.sql
+-- ../rollback/20260817140100_add_url_import_provenance.down.sql
 
 alter table public.manual_entry_records
   add column source_url text

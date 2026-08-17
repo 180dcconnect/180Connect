@@ -1,8 +1,8 @@
--- Reverses 20260817100100_add_url_import_provenance.sql.
+-- Reverses 20260817140100_add_url_import_provenance.sql.
 --
 -- Destructive: the provenance of every imported draft is dropped with the columns.
 -- The RAW_SOURCE_RECORDS rows the drafts pointed at are left in place — they are
--- evidence, and the separate rollback for 20260817100000 is what removes those.
+-- evidence, and the separate rollback for 20260817140000 is what removes those.
 drop function if exists public.get_organisation_import_origin(uuid);
 drop function if exists public.discard_manual_entry_draft(uuid);
 drop function if exists public.set_url_import_provenance(uuid, jsonb);

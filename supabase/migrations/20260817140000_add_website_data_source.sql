@@ -31,7 +31,7 @@
 -- the same concept, so the two agree.
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260817100000_add_website_data_source.down.sql
+-- ../rollback/20260817140000_add_website_data_source.down.sql
 
 alter domain public.data_source_name
   drop constraint data_source_name_check;

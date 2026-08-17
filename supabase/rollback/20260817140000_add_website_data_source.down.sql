@@ -1,4 +1,4 @@
--- Reverses 20260817100000_add_website_data_source.sql.
+-- Reverses 20260817140000_add_website_data_source.sql.
 --
 -- Rows with record_source = 'website' must be removed first, or the domain
 -- constraint cannot be re-added. That deletion is deliberate and destructive:

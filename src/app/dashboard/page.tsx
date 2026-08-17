@@ -13,9 +13,11 @@ import {
   type DashboardOrgRow,
   type OpenSuppression,
 } from "@/lib/dashboard-metrics";
+import { formatTeamActivities, type FormattedTeamActivity, type RawTeamActivityRow } from "@/lib/team-activity";
 import { StatCard } from "@/components/stat-card";
 import ProgressMetricCard from "@/components/ui/progress-metric-card";
 import { AttentionList } from "@/components/attention-list";
+import { TeamActivityFeed } from "@/components/team-activity-feed";
 import { FirstRunGuide } from "@/components/first-run-guide";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import {
@@ -78,11 +80,12 @@ export default async function DashboardPage({
   const canViewClients = hasPermission(actor.role, "client:view");
 
   let rows: DashboardOrgRow[] = [];
+  let teamActivities: FormattedTeamActivity[] = [];
   let loadFailed = false;
 
   if (canViewClients) {
     const supabase = await createClient();
-    const [organisations, openSuppressions] = await Promise.all([
+    const [organisations, openSuppressions, rawActivity] = await Promise.all([
       supabase
         .from("organisations")
         .select("id, legal_name, outreach_status, owner_id, updated_at, created_at")
@@ -92,6 +95,7 @@ export default async function DashboardPage({
         .select("organisation_id, status")
         .in("status", ["pending", "active"])
         .overrideTypes<OpenSuppression[], { merge: false }>(),
+      supabase.rpc("get_recent_team_activity", { p_limit: 10 }),
     ]);
 
     if (organisations.error) {
@@ -101,6 +105,14 @@ export default async function DashboardPage({
     if (openSuppressions.error) {
       await reportError(openSuppressions.error, { operation: "dashboard.page_suppressions" });
       loadFailed = true;
+    }
+    if (rawActivity.error) {
+      await reportError(rawActivity.error, { operation: "dashboard.team_activity" });
+    } else {
+      teamActivities = formatTeamActivities(
+        (rawActivity.data ?? []) as RawTeamActivityRow[],
+        actor.id,
+      );
     }
 
     if (!loadFailed) {
@@ -341,6 +353,19 @@ export default async function DashboardPage({
 
               <Rise>
                 <AttentionList items={attentionItems} />
+              </Rise>
+            </Group>
+
+            <Group className="space-y-4">
+              <Rise className="flex items-baseline justify-between gap-4">
+                <h2 className="text-xl font-black tracking-[-0.02em]">Recent team activity</h2>
+                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
+                  The team · latest actions
+                </p>
+              </Rise>
+
+              <Rise>
+                <TeamActivityFeed items={teamActivities} />
               </Rise>
             </Group>
           </>

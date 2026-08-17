@@ -112,7 +112,7 @@ export default async function ClientDetailPage({
   // The generated Supabase types do not know about this branch's new RPC until the
   // remote schema is regenerated, so narrow its table-shaped result at this boundary.
   const { data: rawSourceRows, error: sourcesError } = await supabase
-    .rpc("get_organisation_sources", { p_organisation_id: id });
+    .rpc("get_organisation_sources_with_actor", { p_organisation_id: id });
 
   if (sourcesError) {
     await reportError(sourcesError, {
@@ -241,6 +241,7 @@ export default async function ClientDetailPage({
                   title={`First recorded ${new Date(source.first_seen_at).toLocaleDateString("en-GB")}`}
                 >
                   {source.label}
+                  {source.source_actor_name ? ` · ${source.source_actor_name}` : ""}
                 </li>
               ))}
             </ul>

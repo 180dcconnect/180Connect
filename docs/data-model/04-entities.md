@@ -100,7 +100,7 @@
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
 | organisation_id | uuid | ORGANISATIONS | No | Organisation this enrichment belongs to | System | Set when enrichment runs |  |
-| mission_statement | text |  | Yes | Organisation's mission or purpose | LLM | Extracted from website and published materials |  |
+| mission_statement | text |  | Yes | Organisation's mission or purpose | LLM + Human | Extracted from published materials or supplied through an approved manual entry | Manual values preserve Manual Entry source attribution |
 | mission_keywords | text[] |  | Yes | Key themes extracted from the mission | LLM | Classified by LLM from mission text |  |
 | news_hooks | text[] |  | Yes | Recent news items relevant to outreach | LLM | Extracted from news sources |  |
 | sector | text |  | Yes | Primary sector classification | LLM | Classified from mission and activity data |  |

@@ -2802,6 +2802,221 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------------------
+-- manual client entry (F036)
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_manual_entries()
+returns setof text language plpgsql as $$
+declare
+  v_admin  uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b  uuid := '00000000-0000-4000-a000-000000000003';
+  v_viewer uuid := '00000000-0000-4000-a000-000000000005';
+  v_entry uuid;
+  v_approval_entry uuid;
+  v_duplicate_entry uuid;
+  v_company_entry uuid;
+  v_admin_entry uuid;
+  v_admin_org uuid;
+  v_created_org uuid;
+  v_linked_org uuid;
+  v_count bigint;
+begin
+  if not tests.tables_exist('manual_entry_records', 'users', 'audit_log') then
+    return next skip(21, 'F036 manual entry migration not yet applied');
+    return;
+  end if;
+  perform tests.seed();
+
+  return next is(
+    tests.sqlstate_of(v_viewer, $query$
+      select public.save_manual_entry(
+        null, 'No', null, null, null, null, null, null,
+        null, null, null, null, null, false
+      )
+    $query$),
+    '42501', 'viewer cannot save a manual-entry draft');
+
+  perform tests.login_as(v_cam_a);
+  select public.save_manual_entry(
+    null, 'Draft Charity', null, null, null, null, null, 'GB',
+    null, null, null, null, null, false
+  ) into v_entry;
+  select count(*) into v_count from public.manual_entry_records where id = v_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'CAM can save and read their own incomplete draft');
+
+  perform tests.login_as(v_cam_a);
+  perform public.save_manual_entry(
+    v_entry, 'Draft Charity Renamed', null, null, null, null, null, 'GB',
+    null, null, null, null, null, false
+  );
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.manual_entry_records
+   where id = v_entry and legal_name = 'Draft Charity Renamed' and review_status = 'draft';
+  return next is(v_count, 1::bigint, 'the creating CAM can resume and update their draft');
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.manual_entry_records where id = v_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'another CAM cannot read the submission');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.manual_entry_records where id = v_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'admin can review every manual entry');
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format($query$
+      select public.save_manual_entry(
+        %L, 'Incomplete', null, null, null, null, null, 'GB',
+        null, null, null, null, null, true
+      )
+    $query$, v_entry)),
+    '22023', 'an incomplete draft cannot be submitted');
+
+  perform tests.login_as(v_cam_a);
+  perform public.save_manual_entry(
+    v_entry, 'Manual Charity', 'Improves health outcomes in South Yorkshire.', 'charity',
+    '1 Example Street', 'Sheffield', 'S1 2AB', 'GB',
+    'https://manual.example.org', 'bad-email', 'Charity Commission', 'F036-REJECT',
+    'Not available from an API source', true
+  );
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.manual_entry_records
+   where id = v_entry and review_status = 'pending';
+  return next is(v_count, 1::bigint, 'a complete CAM draft can be submitted for admin review');
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format('update public.manual_entry_records set review_status = ''approved'' where id = %L', v_entry)),
+    '42501', 'CAM cannot approve their own submission directly');
+
+  perform tests.login_as(v_admin);
+  perform public.reject_manual_entry(v_entry, 'Does not meet the agreed criteria');
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.audit_log where target_id = v_entry and action = 'manual_entry_rejected';
+  return next is(v_count, 1::bigint, 'admin rejection and its audit record are written together');
+
+  perform tests.login_as(v_cam_a);
+  select public.save_manual_entry(
+    null, 'Unique F036 Charity', 'Provides international community services.', 'charity',
+    '10 Rue Exemple', 'Paris', '75001', 'FR', 'https://example.org', 'hello@example.org',
+    'International Registry', 'F036-001', 'Not available from an API source', true
+  ) into v_approval_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.approve_manual_entry(%L, false, ''create_new'', null, null)',
+      v_approval_entry
+    )),
+    '42501', 'CAM cannot call the manual approval RPC');
+
+  perform tests.login_as(v_admin);
+  select public.approve_manual_entry(
+    v_approval_entry, false, 'create_new', null, 'Meets the target criteria'
+  ) into v_created_org;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next ok(v_created_org is not null, 'admin can approve a distinct manual entry');
+
+  select count(*) into v_count
+    from public.organisations
+   where id = v_created_org and entry_method = 'manual' and country_code = 'FR'
+     and organisation_type = 'charity' and address_line_1 = '10 Rue Exemple'
+     and city = 'Paris' and postcode = '75001';
+  return next is(v_count, 1::bigint, 'approval creates the standard active manual organisation');
+
+  select count(*) into v_count
+    from public.enrichment_results
+   where organisation_id = v_created_org
+     and mission_statement = 'Provides international community services.';
+  return next is(v_count, 1::bigint, 'approval copies the required mission into the active profile');
+
+  select count(*) into v_count
+    from public.audit_log
+   where target_id = v_created_org and action = 'manual_entry_approved';
+  return next is(v_count, 1::bigint, 'manual approval and its audit record are written together');
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count
+    from public.get_organisation_sources_with_actor(v_created_org)
+   where source = 'manual' and source_actor_user_id = v_cam_a;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'manual source identifies the creating CAM to active users');
+
+  perform tests.login_as(v_cam_b);
+  select public.save_manual_entry(
+    null, 'Unique F036 Charity Limited', 'Provides related community services.', 'charity',
+    '20 Example Road', 'Sheffield', 'S2 3CD', 'GB', 'https://duplicate.example.org',
+    'duplicate@example.org', 'Charity Commission', 'F036-002',
+    'Submitted independently for duplicate review', true
+  ) into v_duplicate_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.approve_manual_entry(%L, false, ''create_new'', %L, null)',
+      v_duplicate_entry, v_created_org
+    )),
+    '22023', 'a likely duplicate cannot become a second client without a human explanation');
+
+  perform tests.login_as(v_admin);
+  select public.approve_manual_entry(
+    v_duplicate_entry, false, 'link_existing', v_created_org,
+    'Same organisation despite the formatting difference'
+  ) into v_linked_org;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_linked_org, v_created_org, 'confirmed duplicate links to the existing active client');
+
+  perform tests.login_as(v_cam_a);
+  select public.save_manual_entry(
+    null, 'Unconfirmed Social Company', 'Develops socially focused services.', 'company',
+    '30 Example Lane', 'Sheffield', 'S3 4EF', 'GB', 'https://social.example.org',
+    'social@example.org', 'Companies House', 'F036-COMPANY',
+    'May be a socially focused organisation', true
+  ) into v_company_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.approve_manual_entry(%L, true, null, null, null)',
+      v_company_entry
+    )),
+    '22023', 'a null duplicate decision cannot bypass the approval decision');
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.approve_manual_entry(%L, null, ''create_new'', null, null)',
+      v_company_entry
+    )),
+    '22023', 'a null eligibility confirmation cannot bypass F047');
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.approve_manual_entry(%L, false, ''create_new'', null, null)',
+      v_company_entry
+    )),
+    '22023', 'ambiguous company cannot bypass the F047 human eligibility decision');
+
+  perform tests.login_as(v_admin);
+  select public.save_manual_entry(
+    null, 'Admin Entered Charity', 'Supports people through direct services.', 'charity',
+    '40 Admin Street', 'Sheffield', 'S4 5GH', 'GB', 'https://admin.example.org',
+    'admin@example.org', 'Charity Commission', 'F036-ADMIN',
+    'Added directly by an administrator', true
+  ) into v_admin_entry;
+  select public.approve_manual_entry(
+    v_admin_entry, false, 'create_new', null, 'Submitted and self-approved by admin'
+  ) into v_admin_org;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.manual_entry_records
+   where id = v_admin_entry and review_status = 'approved'
+     and reviewed_by_user_id = v_admin and converted_to_organisation_id = v_admin_org;
+  return next is(v_count, 1::bigint, 'an admin can activate their own submission without another admin');
+end;
+$$;
+
 select * from tests.suite_core();
 select * from tests.suite_viewer();
 select * from tests.suite_users();
@@ -2823,6 +3038,7 @@ select * from tests.suite_outreach_status();
 select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
 select * from tests.suite_source_tracking();
+select * from tests.suite_manual_entries();
 select * from tests.suite_onboarding();
 select * from tests.suite_client_criteria();
 

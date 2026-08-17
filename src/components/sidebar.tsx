@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ComponentType } from "react";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, UserPlus } from "lucide-react";
 import { Cctv } from "@/components/animate-ui/icons/cctv";
 import { CloudDownload } from "@/components/animate-ui/icons/cloud-download";
 import { Compass } from "@/components/animate-ui/icons/compass";
@@ -21,7 +21,7 @@ import {
   TooltipContent,
 } from "@/components/animate-ui/components/radix/tooltip";
 
-export type SidebarIconName = "dashboard" | "admin" | "users" | "audit" | "import" | "clients";
+export type SidebarIconName = "dashboard" | "admin" | "users" | "add" | "audit" | "import" | "clients";
 
 export type SidebarNavItem = {
   href: string;
@@ -52,6 +52,7 @@ const ICONS: Record<SidebarIconName, RailIcon> = {
   clients: UsersGroupIcon,
   admin: ShieldCheck,
   users: Users,
+  add: UserPlus,
   audit: Cctv,
   import: CloudDownload,
 };

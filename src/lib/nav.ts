@@ -26,6 +26,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     permission: "client:view",
   },
   {
+    href: "/clients/new",
+    label: "Add client manually",
+    description: "Submit an organisation that is not available from an API.",
+    permission: "client:edit",
+  },
+  {
     href: "/admin",
     label: "Admin workspace",
     description: "Manage users, audit activity and import Companies House data.",

@@ -52,6 +52,32 @@ export const manualEntrySchema = z.object({
 export type ManualEntryInput = z.infer<typeof manualEntrySchema>;
 export type ManualEntryDraftInput = z.infer<typeof manualEntryDraftSchema>;
 
+const MANUAL_ENTRY_SCHEMA_ERROR_CODES = new Set([
+  "42P01", // PostgreSQL: undefined table
+  "42703", // PostgreSQL: undefined column (an older F036 migration is applied)
+  "PGRST204", // PostgREST: selected column is absent from the schema cache
+  "PGRST205", // PostgREST: table is absent from the schema cache
+]);
+
+/**
+ * Keep production failures safe while making a stale local review database
+ * actionable. The full Supabase error is still sent through reportError.
+ */
+export function manualDraftLoadErrorMessage(
+  error: unknown,
+  isDevelopment: boolean,
+): string {
+  const code = error && typeof error === "object" && "code" in error
+    ? String((error as { code?: unknown }).code ?? "")
+    : "";
+
+  if (isDevelopment && MANUAL_ENTRY_SCHEMA_ERROR_CODES.has(code)) {
+    return "Your local database is missing the latest Manual Entry migration. Run npx supabase db reset, then reload this page.";
+  }
+
+  return "Saved drafts could not be loaded. The failure was recorded; you can still start a new entry.";
+}
+
 export type ManualEntryIntegrationResult =
   | { status: "passed" }
   | { status: "blocked"; message: string };

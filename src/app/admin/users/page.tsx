@@ -7,6 +7,8 @@ import { reportError } from "@/lib/error-logging";
 import type { PendingInvite } from "@/lib/admin/team-realtime";
 import { TeamPanel } from "./team-panel";
 import type { TeamUser } from "./user-management-table";
+import { Stage, Rise } from "@/components/dashboard-stage";
+import { InviteDialog } from "./invite-dialog";
 
 export default async function AdminUsersPage() {
   const authorization = await getCurrentActor("user:manage", {
@@ -21,7 +23,7 @@ export default async function AdminUsersPage() {
   // table, so the two lists stay mutually exclusive (F008 AC5).
   const { data: users, error } = await supabase
     .from("users")
-    .select("id, email, full_name, role, is_active, deactivated_at")
+    .select("id, email, full_name, role, is_active, deactivated_at, last_seen_at")
     .or("invited_at.is.null,invite_accepted_at.not.is.null")
     .order("full_name");
 
@@ -65,12 +67,11 @@ export default async function AdminUsersPage() {
   })) as TeamUser[];
 
   return (
-    <main className="min-h-screen bg-[#f1f2f4] p-6">
-      <section className="mx-auto max-w-5xl rounded-2xl bg-white p-8 shadow-sm">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-sm font-bold text-brand">Team management</p>
-            <h1 className="mt-2 text-3xl font-bold">Team members</h1>
+    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+      <Stage className="mx-auto w-full max-w-6xl space-y-10">
+        <Rise className="flex flex-wrap items-end justify-between gap-x-8 gap-y-5">
+          <div className="min-w-0">
+            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-black leading-[1] tracking-[-0.03em]">Team members</h1>
             <p className="mt-3 text-sm text-foreground/65">
               Role changes apply on the user&apos;s next request.{" "}
               <Link className="font-bold text-brand underline" href="/admin/offboard">
@@ -79,22 +80,24 @@ export default async function AdminUsersPage() {
               .
             </p>
           </div>
-          <Link className="text-sm font-bold text-brand hover:underline" href="/dashboard">
-            Back to dashboard
-          </Link>
-        </div>
+          <InviteDialog />
+        </Rise>
+
         {error && (
-          <p className="mt-5 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-800" role="alert">
-            Team members could not be loaded. Please refresh and try again.
-          </p>
+          <Rise>
+            <p className="rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4 text-sm font-bold text-destructive" role="alert">
+              Team members could not be loaded. Please refresh and try again.
+            </p>
+          </Rise>
         )}
+
         <TeamPanel
           currentUserId={authorization.actor.id}
           initialPendingInvites={(pendingInvites as PendingInvite[] | null) ?? []}
           initialTeamUsers={teamUsers}
           pendingInvitesError={Boolean(pendingError)}
         />
-      </section>
-    </main>
+      </Stage>
+    </div>
   );
 }

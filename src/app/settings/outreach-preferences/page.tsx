@@ -32,8 +32,7 @@ export default async function OutreachPreferencesPage() {
       <section className="mx-auto max-w-xl rounded-2xl bg-white p-8 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-bold text-brand">Settings</p>
-            <h1 className="mt-2 text-2xl font-bold">Outreach preferences</h1>
+            <h1 className="text-2xl font-bold">Outreach preferences</h1>
             <p className="mt-1 text-sm text-foreground/65">
               Set the geography, sector and size focus for your outreach queue.
             </p>

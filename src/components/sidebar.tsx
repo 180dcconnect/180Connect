@@ -1,11 +1,27 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ComponentType } from "react";
+import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
+import { ShieldCheck, UserPlus } from "lucide-react";
+import { Cctv } from "@/components/animate-ui/icons/cctv";
+import { CloudDownload } from "@/components/animate-ui/icons/cloud-download";
+import { Compass } from "@/components/animate-ui/icons/compass";
+import { AnimateIcon } from "@/components/animate-ui/icons/icon";
+import { PanelLeftClose } from "@/components/animate-ui/icons/panel-left-close";
+import { PanelLeftOpen } from "@/components/animate-ui/icons/panel-left-open";
+import { Users } from "@/components/animate-ui/icons/users";
+import UsersGroupIcon from "@/components/ui/users-group-icon";
+import { SidebarAccountMenu } from "@/components/sidebar-account-menu";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/animate-ui/components/radix/tooltip";
 
-export type SidebarIconName = "dashboard" | "admin" | "users" | "audit" | "import";
+export type SidebarIconName = "dashboard" | "admin" | "users" | "add" | "audit" | "import" | "clients";
 
 export type SidebarNavItem = {
   href: string;
@@ -18,137 +34,222 @@ export type SidebarSection = {
   items: SidebarNavItem[];
 };
 
-const ICONS: Record<SidebarIconName, ReactNode> = {
-  dashboard: (
-    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
-      <rect x="3" y="3" width="6" height="7" rx="1.25" stroke="currentColor" strokeWidth="1.5" />
-      <rect x="11" y="3" width="6" height="4" rx="1.25" stroke="currentColor" strokeWidth="1.5" />
-      <rect x="11" y="9" width="6" height="8" rx="1.25" stroke="currentColor" strokeWidth="1.5" />
-      <rect x="3" y="12" width="6" height="5" rx="1.25" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
-  ),
-  admin: (
-    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
-      <path
-        d="M10 2.5 4 5v4.5c0 4.14 2.7 7.6 6 8.5 3.3-.9 6-4.36 6-8.5V5l-6-2.5Z"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-    </svg>
-  ),
-  users: (
-    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
-      <circle cx="7.25" cy="6.5" r="2.5" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M2.5 16c.5-3 2.3-4.5 4.75-4.5S11.5 13 12 16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <circle cx="14" cy="7" r="2" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M13 11.2c1.9.1 3.3 1.5 3.7 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  ),
-  audit: (
-    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
-      <rect x="4" y="2.5" width="12" height="15" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M7 7h6M7 10h6M7 13h3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  ),
-  import: (
-    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
-      <path d="M10 3v9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <path d="M6.5 8.5 10 12l3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M3.5 14v1.5a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  ),
+type RailIcon = ComponentType<{
+  className?: string;
+  strokeWidth?: number;
+  "aria-hidden"?: boolean;
+}>;
+
+/**
+ * Nav items name an icon rather than importing one, so the shell stays a plain
+ * list of routes and every icon in the rail is drawn on the same grid.
+ *
+ * Dashboard, clients, team management, audit log, and import status use animated glyphs,
+ * which draw their own motion on the row rather than the shared spring below.
+ */
+const ICONS: Record<SidebarIconName, RailIcon> = {
+  dashboard: Compass,
+  clients: UsersGroupIcon,
+  admin: ShieldCheck,
+  users: Users,
+  add: UserPlus,
+  audit: Cctv,
+  import: CloudDownload,
 };
 
-function CollapseIcon({ collapsed }: { collapsed: boolean }) {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
-      <path
-        d={collapsed ? "M7.5 4.5 12.5 10l-5 5.5" : "M12.5 4.5 7.5 10l5 5.5"}
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
+const MotionLink = motion.create(Link);
 
-function LogoutIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
-      <path d="M8 17H4.5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1H8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <path d="M13 13.5 17 10l-4-3.5M17 10H7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
+/**
+ * One spring for every icon in the rail, so a row that nudges and a row that
+ * tilts still feel like the same control.
+ */
+const ICON_SPRING = { type: "spring", stiffness: 420, damping: 17, mass: 0.6 } as const;
+
+/**
+ * Hover motion per icon. Each gesture points at what the row *does* — the shield
+ * braces — but stays under ~10% scale and ~8 degrees so a rail of them reads
+ * as one system rather than a toybox. Triggered from the row, not the glyph, so
+ * the whole target responds.
+ */
+const ICON_MOTION: Partial<Record<SidebarIconName, Variants>> = {
+  admin: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: -6 } },
+  // `dashboard`, `clients`, `users`, `audit`, and `import` are deliberately absent:
+  // those glyphs animate their own interiors, so a wrapper transform on top would
+  // read as two gestures.
+};
 
 /**
  * Persistent app sidebar. The caller builds `sections` from `hasPermission`,
  * so a role only ever sees links it can actually open — mirrors the
  * server-side gate on each page rather than replacing it. Collapse state is
- * local and UI-only; it does not gate anything.
+ * persisted in localStorage so user preference is remembered across page switches.
  */
 export function Sidebar({
   sections,
-  userLabel,
+  userName,
+  userEmail,
   roleLabel,
   onLogout,
+  initialCollapsed = false,
 }: {
   sections: SidebarSection[];
-  userLabel: string;
+  userName?: string | null;
+  userEmail?: string | null;
   roleLabel: string;
   onLogout: () => Promise<void>;
+  initialCollapsed?: boolean;
 }) {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("sidebar_collapsed");
+      if (saved !== null) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setCollapsed(saved === "true");
+      }
+    } catch {
+      // Ignore localStorage read error
+    }
+  }, []);
+
+  const handleToggleCollapse = (nextState: boolean) => {
+    setCollapsed(nextState);
+    try {
+      localStorage.setItem("sidebar_collapsed", String(nextState));
+      document.cookie = `sidebar_collapsed=${nextState}; path=/; max-age=31536000; SameSite=Lax`;
+    } catch {
+      // Ignore localStorage write error
+    }
+  };
+
+  // Someone who asked the OS for less motion gets the colour change only.
+  const reduceMotion = useReducedMotion();
+  const iconVariants = (variants: Variants | undefined) =>
+    reduceMotion ? undefined : variants;
 
   return (
     <aside
-      className={`sticky top-0 flex h-screen shrink-0 flex-col border-r border-black/10 bg-white transition-[width] duration-200 ${
+      className={`sticky top-0 z-20 flex h-screen shrink-0 flex-col bg-white/55 backdrop-blur-2xl backdrop-saturate-150 transition-[width] duration-200 after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-linear-to-b after:from-white/90 after:via-black/12 after:to-white/50 ${
         collapsed ? "w-16" : "w-64"
       }`}
     >
-      <div className="flex items-center justify-between gap-2 px-3 py-4">
+      {/*
+       * One logo button, always the same size and DOM node, whether collapsed
+       * or not — swapping to a differently-sized image per state read as two
+       * different globes crossfading rather than one shrinking. Row height is
+       * pinned to this button's 36px in both states too, so the nav list below
+       * doesn't shift when the button on its right appears/disappears.
+       */}
+      <div className="flex h-[68px] shrink-0 items-center justify-between gap-2.5 px-3.5 py-4">
+        <AnimateIcon animateOnHover={!reduceMotion} asChild>
+          <button
+            type="button"
+            onClick={() => collapsed && handleToggleCollapse(false)}
+            aria-label={collapsed ? "Expand sidebar" : undefined}
+            tabIndex={collapsed ? 0 : -1}
+            className={`group relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-all focus-visible:outline-none ${
+              collapsed ? "hover:bg-black/10" : "cursor-default"
+            }`}
+          >
+            <Image
+              src="/180dc-globe.png"
+              alt="180Connect"
+              width={32}
+              height={32}
+              className={`h-8 w-8 object-contain transition-opacity duration-200 ${
+                collapsed ? "group-hover:opacity-0" : ""
+              }`}
+            />
+            {collapsed && (
+              <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100 text-black">
+                <PanelLeftOpen className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+              </span>
+            )}
+          </button>
+        </AnimateIcon>
+
+        <AnimatePresence initial={false}>
+          {!collapsed && (
+            <motion.span
+              initial={reduceMotion ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={reduceMotion ? undefined : { opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="min-w-0 flex-1 truncate text-base font-extrabold text-black tracking-tight"
+            >
+              180Connect
+            </motion.span>
+          )}
+        </AnimatePresence>
+
         {!collapsed && (
-          <span className="truncate px-1 text-sm font-bold text-brand">180Connect</span>
+          <AnimateIcon animateOnHover={!reduceMotion} asChild>
+            <button
+              type="button"
+              onClick={() => handleToggleCollapse(true)}
+              aria-label="Collapse sidebar"
+              className="ml-auto shrink-0 rounded-xl p-1.5 text-black/70 transition-all hover:bg-black/10 hover:text-black focus-visible:outline-none"
+            >
+              <PanelLeftClose className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+            </button>
+          </AnimateIcon>
         )}
-        <button
-          type="button"
-          onClick={() => setCollapsed((value) => !value)}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="ml-auto shrink-0 rounded-lg p-1.5 text-foreground/50 hover:bg-black/5 hover:text-foreground"
-        >
-          <CollapseIcon collapsed={collapsed} />
-        </button>
       </div>
 
-      <nav className="flex-1 space-y-6 overflow-y-auto px-2 py-2" aria-label="Primary">
+      <nav className="flex-1 space-y-6 overflow-y-auto overflow-x-hidden px-2 py-2" aria-label="Primary">
         {sections.map((section, index) => (
           <div key={section.label ?? index}>
             {section.label && !collapsed && (
-              <p className="px-3 pb-1 text-xs font-bold uppercase tracking-wide text-foreground/40">
+              <p className="px-3 pb-1 text-xs font-bold uppercase tracking-wide text-black/40">
                 {section.label}
               </p>
             )}
             <ul className="space-y-1">
               {section.items.map((item) => {
                 const active = pathname === item.href;
-                return (
-                  <li key={item.href}>
-                    <Link
+                const Icon = ICONS[item.icon];
+                const link = (
+                  <AnimateIcon animateOnHover={!reduceMotion} asChild>
+                    <MotionLink
                       href={item.href}
-                      title={collapsed ? item.label : undefined}
                       aria-current={active ? "page" : undefined}
-                      className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                        active
-                          ? "bg-brand/10 text-brand"
-                          : "text-foreground/70 hover:bg-black/5 hover:text-foreground"
+                      initial="rest"
+                      animate="rest"
+                      whileHover="hover"
+                      className={`flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm text-black transition-all hover:bg-black/10 ${
+                        active ? "bg-black/12 font-bold text-black" : "font-semibold text-black/85 hover:text-black"
                       }`}
                     >
-                      <span className="shrink-0">{ICONS[item.icon]}</span>
+                      <motion.span
+                        className="flex shrink-0"
+                        variants={iconVariants(ICON_MOTION[item.icon])}
+                        transition={ICON_SPRING}
+                      >
+                        {Icon ? <Icon className="h-5 w-5" strokeWidth={1.75} aria-hidden={true} /> : null}
+                      </motion.span>
                       {!collapsed && <span className="truncate">{item.label}</span>}
-                    </Link>
+                    </MotionLink>
+                  </AnimateIcon>
+                );
+                return (
+                  <li key={item.href}>
+                    {collapsed ? (
+                      <Tooltip delayDuration={400}>
+                        <TooltipTrigger asChild>{link}</TooltipTrigger>
+                        <TooltipContent
+                          side="right"
+                          sideOffset={10}
+                          showArrow={false}
+                          className="rounded-xl bg-neutral-900 px-3.5 py-2 text-sm font-semibold text-white shadow-lg"
+                        >
+                          {item.label}
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      link
+                    )}
                   </li>
                 );
               })}
@@ -157,25 +258,14 @@ export function Sidebar({
         ))}
       </nav>
 
-      <div className="border-t border-black/10 p-2">
-        {!collapsed && (
-          <div className="mb-1 px-2 pt-2">
-            <p className="truncate text-sm font-bold">{userLabel}</p>
-            <p className="text-xs font-bold uppercase tracking-wide text-foreground/45">
-              {roleLabel}
-            </p>
-          </div>
-        )}
-        <form action={onLogout}>
-          <button
-            type="submit"
-            title={collapsed ? "Log out" : undefined}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-bold text-foreground/70 hover:bg-black/5 hover:text-foreground"
-          >
-            <LogoutIcon />
-            {!collapsed && <span>Log out</span>}
-          </button>
-        </form>
+      <div className="border-t border-white/70 p-2">
+        <SidebarAccountMenu
+          name={userName ?? null}
+          email={userEmail ?? null}
+          roleLabel={roleLabel}
+          collapsed={collapsed}
+          onLogout={onLogout}
+        />
       </div>
     </aside>
   );

@@ -118,5 +118,12 @@ export type RunSummary = {
   counts: RunCounts;
   /** New rows vs rows rewritten because their payload changed. Logged, not stored. */
   written: { new: number; changed: number };
+  /**
+   * The ingestion_runs row this summary corresponds to. Null only when startRun
+   * itself failed — no row exists to reference. Callers that discover something
+   * worth recording against the run after runIngestion returns (e.g. a status-
+   * recheck job's flagged count, F049 AC3) update that row directly by this id.
+   */
+  runId: string | null;
   error?: string;
 };

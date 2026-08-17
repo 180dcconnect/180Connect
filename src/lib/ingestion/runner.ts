@@ -141,6 +141,7 @@ async function runOneSource(
       status: "failed",
       counts,
       written,
+      runId: null,
       error: errorMessage(err),
     };
   }
@@ -191,7 +192,7 @@ async function runOneSource(
         `${truncated ? " — hit the source's result ceiling" : ""}`,
     );
 
-    return { source: source.name, status, counts, written };
+    return { source: source.name, status, counts, written, runId: run.id };
   } catch (err) {
     // Anything not yet written failed with the batch.
     counts.failed = counts.fetched - counts.inserted - counts.skipped;
@@ -211,6 +212,7 @@ async function runOneSource(
       status: "failed",
       counts,
       written,
+      runId: run.id,
       error: message,
     };
   }
@@ -254,6 +256,7 @@ export async function runIngestion(
       status: "failed" as const,
       counts: { fetched: 0, inserted: 0, skipped: 0, failed: 0 },
       written: { new: 0, changed: 0 },
+      runId: null,
       error: String(result.reason),
     };
   });

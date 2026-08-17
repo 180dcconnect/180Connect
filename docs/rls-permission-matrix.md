@@ -181,6 +181,13 @@ future RPC. `deactivate_user` additionally refuses to close an account while it 
 owns organisations unless given a destination, and moves them in the same transaction —
 see §3.2.
 
+`last_seen_at` — "last active", not last login — is written only by
+`public.touch_last_seen()` (20260816230000), a SECURITY DEFINER RPC that updates only
+`auth.uid()`'s own row. Granted to no one directly (same column-grant lockout as `role`),
+so a client cannot forge or backdate it. `getCurrentActor()` calls it, throttled to once
+per 5 minutes per user, on every signed-in page and every admin API request — not just at
+login. Not audited: presence isn't an ownership/status/role/approval change.
+
 ### 3.2 Canonical organisation data — shared read, admin write
 
 Everyone authorised reads canonical data (§4.3 "View canonical organisations": all
@@ -317,15 +324,22 @@ records. The `SECURITY DEFINER` function checks `app.is_active_user()` itself an
 returns `raw_payload`; `anon` has no execute privilege.
 
 `ORGANISATION_STATUS_FLAGS` (`20260809100200_create_organisation_status_flags.sql`,
-F032/F260 follow-on) is the Companies House status-watch job's review flag — a
-tracked organisation's `company_status` drifted away from `active`. No
-INSERT/UPDATE policy, same reasoning as `AUDIT_LOG` (§3.8) and `SUPPRESSIONS`
-(§3.14): all writes go through two `SECURITY DEFINER` RPCs, each writing an
-`audit_log` row in the same transaction — `record_organisation_status_flag`
-(`service_role` only, called from the status-recheck job) and
-`acknowledge_organisation_status_flag` (admin only). Neither ever writes to
-`organisations.outreach_status` — an organisation flagged here may be mid-outreach,
-and only a human decides what a status change means for that pipeline state.
+F032/F260 follow-on; generalized to a `source` column covering both weekly
+status-recheck jobs by `20260811090000_generalize_organisation_status_flags.sql`,
+F049) is the weekly status-recheck jobs' review flag — a tracked organisation's
+status drifted away from its source's "alive" value (`company_status` away from
+`active` for Companies House, `reg_status` away from `R` for Charity Commission;
+`source` distinguishes which). No INSERT/UPDATE policy, same reasoning as
+`AUDIT_LOG` (§3.8) and `SUPPRESSIONS` (§3.14): all writes go through two
+`SECURITY DEFINER` RPCs, each writing an `audit_log` row in the same transaction —
+`record_organisation_status_flag` (`service_role` only, called from either
+status-recheck job) and `acknowledge_organisation_status_flag` (admin only).
+Neither ever writes to `organisations.outreach_status` — an organisation flagged
+here may be mid-outreach, and only a human decides what a status change means for
+that pipeline state. `company_number` keeps its name despite now holding either
+source's own identifier — MIGRATIONS.md bars a shared-field rename without
+Wednesday-call agreement, so the 20260811090000 migration only added `source`
+rather than renaming the column.
 
 ### 3.6 Model and scoring configuration — admin only
 
@@ -634,6 +648,66 @@ why that doesn't loop back to the same flag.
 
 **Known gap, not closed by this table** — see Open gap 5 below.
 
+### 3.16 Field discrepancies — admin writes both sides, RPC only
+
+Backs F048 Data Discrepancy Detection (#49),
+`supabase/migrations/20260815090000_create_field_discrepancies.sql`. New table — unlike
+`ENTITY_MATCH_CANDIDATES` (§3.15), `FIELD_DISCREPANCIES` was not previously reserved in
+the Data Model; added by this migration (Data Model spreadsheet update still owed
+alongside — see the migration header).
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `FIELD_DISCREPANCIES` | admin only | — (RPC only) | — (RPC only) | — (no grant) |
+
+Unlike §3.15, **both** writes here are RPC-only and both are callable by
+`authenticated`, not `service_role` — detection is not a machine-scheduled pipeline
+step, it's a synchronous follow-up inside the signed-in admin's own
+`PATCH /api/admin/duplicates` request (right after `decide_duplicate_flag` confirms a
+match), so `record_field_discrepancy` self-checks `app.is_admin()` the same way
+`resolve_field_discrepancy` does. SELECT is admin-only for the same reason as §3.15 —
+a flagged conflict identifies which third-party source said what, not CAM-visible data.
+
+`record_field_discrepancy(organisation_id, field_name, existing_value, existing_source,
+incoming_value, incoming_source, raw_source_record_id, entity_match_candidate_id,
+auto_resolved_choice)` — no end-user action, called only by the detection follow-up
+above. No-ops if the same `incoming_value` was already resolved for that
+organisation+field, so a repeat import doesn't reopen an already-adjudicated conflict.
+
+It has two paths, and only the second is a decision:
+
+- `auto_resolved_choice` **null** — flag only. Writes a `pending` row and **no**
+  `audit_log` entry (flagging is not itself a decision).
+- `auto_resolved_choice` **set** — source priority settled the conflict (Companies
+  House outranks the Charity Commission; see `src/lib/standardize/source-priority.ts`).
+  Writes the row already `resolved`, applies the winning value onto `ORGANISATIONS`
+  through the same six-field allowlist as below, and writes `audit_log`
+  (`field_discrepancy_auto_resolved`) in the same transaction. `resolved_by_user_id` is
+  the admin whose duplicate confirmation triggered detection — the table's
+  `decision_consistent` constraint requires a real actor, and this runs inside their
+  request; "the rules decided, not the person" is carried by the distinct `audit_log`
+  action and by `notes`, not by a null actor.
+
+So the review queue (`status = 'pending'`) holds only what the priority rules could
+**not** settle: the same source on both sides, an unranked source, or an organisation
+whose originating raw record can no longer be identified (`existing_source =
+'unknown'`). Note the deliberate asymmetry with `ENTITY_MATCH_CANDIDATES.source_priority`,
+which falls back to `99` for an unranked source: a fallback number is safe to *store*,
+but is not sufficient grounds to *overwrite* a field, so the resolver declines rather
+than defaulting.
+
+`resolve_field_discrepancy(field_discrepancy_id, choice, note)` — the only end-user
+write. Admin only, `SECURITY DEFINER`, rejects a missing or already-resolved target,
+applies the chosen value back onto `ORGANISATIONS` (six-field allowlist only — see
+migration) and writes `audit_log` (`field_discrepancy_resolved`) in the same
+transaction.
+
+**Known gap, not closed by this table**: `existing_source` approximates provenance as
+the source of the raw record that originally created the organisation, not true
+per-field tracking — a later manual edit through the org edit UI is misattributed to
+the original import source. Closing that properly is F044 (Field-Level Source
+Tracking, #45)'s job, not this table's.
+
 ---
 
 ## 4. Denial behaviour and feedback
@@ -802,6 +876,13 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    likely an `is_active`/`merged_into_organisation_id` column on `ORGANISATIONS`,
    following the same RPC-gated pattern as `SUPPRESSIONS` — raised rather than added
    unilaterally, since it changes the core entity every other table hangs off.
+10. **`FIELD_DISCREPANCIES.existing_source` is import-provenance, not per-field
+    tracking.** F048 (§3.16) approximates which source "owns" an organisation's
+    current field value as whichever `raw_source_records` row originally created it.
+    A later manual edit through the org edit UI is not distinguished from that
+    original import, so a discrepancy raised after such an edit will misattribute the
+    existing value's source. Properly closing this is F044 (Field-Level Source
+    Tracking, #45) — unbuilt and unassigned as of this writing — not F048's job.
 
 ---
 

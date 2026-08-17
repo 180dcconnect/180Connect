@@ -1,20 +1,19 @@
 import type { Metadata } from "next";
-import { ForgotPasswordForm } from "./forgot-password-form";
+
+import Landing from "@/components/landing";
 
 export const metadata: Metadata = { title: "Reset password | 180Connect" };
 
+/**
+ * Resetting a password is a panel of the auth dialog, not a page of its own —
+ * the same door as signing in, one step further along.
+ *
+ * The route stays because the sign-in panel is not the only way here: it is on
+ * the allowlist in `lib/auth/password-reset.ts` (the paths a user with a pending
+ * reset is not trapped away from), and it is a link people are sent and bookmark.
+ * It renders the landing page with the dialog already open on the reset panel
+ * and the splash intro skipped.
+ */
 export default function ForgotPasswordPage() {
-  return (
-    <main className="flex flex-1 items-center justify-center bg-[#f1f2f4] p-4">
-      <section className="w-full max-w-md rounded-2xl bg-white p-8 shadow-sm">
-        <p className="text-sm font-bold text-brand">180Connect</p>
-        <h1 className="mt-3 text-2xl font-bold">Reset your password</h1>
-        <p className="mt-2 text-sm leading-relaxed text-foreground/60">
-          Enter your email and we’ll send instructions if an account is available.
-        </p>
-        <ForgotPasswordForm />
-      </section>
-    </main>
-  );
+  return <Landing skipIntro />;
 }
-

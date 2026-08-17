@@ -5,6 +5,7 @@ import {
   canApproveManualEntry,
   checkManualEntryCriteria,
   manualEntryDraftSchema,
+  manualDraftLoadErrorMessage,
   manualEntrySchema,
   reviewManualEntryFields,
   type ManualEntryApprovalChecks,
@@ -53,6 +54,30 @@ describe("manualEntrySchema", () => {
       registryNumber: "",
       reason: "",
     }).success, true);
+  });
+});
+
+describe("manualDraftLoadErrorMessage", () => {
+  it("explains how to update a stale local review database", () => {
+    assert.match(
+      manualDraftLoadErrorMessage({ code: "PGRST205" }, true),
+      /npx supabase db reset/,
+    );
+  });
+
+  it("does not expose database setup details in production", () => {
+    const message = manualDraftLoadErrorMessage({ code: "42P01" }, false);
+    assert.equal(
+      message,
+      "Saved drafts could not be loaded. The failure was recorded; you can still start a new entry.",
+    );
+  });
+
+  it("uses the safe generic message for unrelated failures", () => {
+    assert.doesNotMatch(
+      manualDraftLoadErrorMessage({ code: "42501" }, true),
+      /supabase db reset/,
+    );
   });
 });
 

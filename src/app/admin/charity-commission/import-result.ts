@@ -1,5 +1,26 @@
 import type { RunSummary } from "@/lib/ingestion/type";
+import type { PromoteCounts } from "@/lib/standardize/write-organisations";
 import type { CharityCommissionImportState } from "./actions";
+
+/**
+ * F049: a human-readable sentence for what happened during the promote step
+ * (raw_source_records -> organisations), appended after the ingestion
+ * message. Charity Commission records map to organisation_type "charity",
+ * which F047's criteria config treats as acceptedOrganisationTypes, so most
+ * successful lookups here should show up as "added", unlike Companies House.
+ */
+export function describePromotion(counts: PromoteCounts): string {
+  if (counts.read === 0) return "Nothing was waiting to be added to the client list.";
+
+  const parts: string[] = [];
+  if (counts.inserted > 0) parts.push(`${counts.inserted} added to the client list`);
+  if (counts.needsReview > 0) parts.push(`${counts.needsReview} flagged for review`);
+  if (counts.doesNotMeet > 0) parts.push(`${counts.doesNotMeet} did not meet the client criteria`);
+  if (counts.invalidData > 0) parts.push(`${counts.invalidData} had no usable name`);
+  if (counts.failed > 0) parts.push(`${counts.failed} failed to write`);
+
+  return parts.length > 0 ? `${parts.join(", ")}.` : "Nothing new to add.";
+}
 
 export function importStateFromSummary(
   summary: RunSummary,

@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-export type SidebarIconName = "dashboard" | "admin" | "users" | "audit" | "import";
+export type SidebarIconName = "dashboard" | "admin" | "users" | "add" | "audit" | "import";
 
 export type SidebarNavItem = {
   href: string;
@@ -43,6 +43,12 @@ const ICONS: Record<SidebarIconName, ReactNode> = {
       <path d="M2.5 16c.5-3 2.3-4.5 4.75-4.5S11.5 13 12 16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       <circle cx="14" cy="7" r="2" stroke="currentColor" strokeWidth="1.5" />
       <path d="M13 11.2c1.9.1 3.3 1.5 3.7 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  ),
+  add: (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M10 6.5v7M6.5 10h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   ),
   audit: (

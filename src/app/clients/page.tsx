@@ -133,7 +133,17 @@ export default async function ClientsPage({
       {reviewingOwnClients && <RecordOnboardingStep step="review_clients" />}
       <section className="mx-auto w-full max-w-3xl rounded-2xl bg-white p-8 shadow-sm">
         <p className="text-sm font-bold text-brand">180Connect</p>
-        <h1 className="mt-2 text-2xl font-bold">{isOwnedView ? "My clients" : "Clients"}</h1>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold">{isOwnedView ? "My clients" : "Clients"}</h1>
+          {canClaim && (
+            <Link
+              href="/clients/new"
+              className="rounded-full bg-brand px-5 py-2 text-sm font-bold text-white hover:bg-brand-hover"
+            >
+              Add client manually
+            </Link>
+          )}
+        </div>
         <p className="mt-3 text-sm text-foreground/65">
           {isOwnedView
             ? "Clients you currently own. Reassigned away from you, or to you, this list reflects it on your next visit."

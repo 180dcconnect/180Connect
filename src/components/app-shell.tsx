@@ -25,6 +25,10 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     sections[0].items.push({ href: "/clients", label: "Clients", icon: "users" });
   }
 
+  if (hasPermission(actor.role, "client:edit")) {
+    sections[0].items.push({ href: "/clients/new", label: "Add client", icon: "add" });
+  }
+
   if (hasPermission(actor.role, "user:manage")) {
     sections.push({
       label: "Admin",

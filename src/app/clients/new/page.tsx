@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { reportError } from "@/lib/error-logging";
+import { manualDraftLoadErrorMessage } from "@/lib/manual-entry";
 import { createClient } from "@/lib/supabase/server";
 import { ManualEntryForm, type ManualEntryDraft } from "./manual-entry-form";
 
@@ -32,6 +33,9 @@ export default async function NewManualClientPage({
     });
   }
   const drafts = (data ?? []) as ManualEntryDraft[];
+  const draftLoadMessage = error
+    ? manualDraftLoadErrorMessage(error, process.env.NODE_ENV === "development")
+    : null;
   const initialEntry = selectedId
     ? drafts.find((draft) => draft.id === selectedId) ?? null
     : null;
@@ -47,9 +51,9 @@ export default async function NewManualClientPage({
             ? "Your completed submission can activate immediately after the shared checks pass."
             : "A completed submission must be approved by an admin before it becomes active."}
         </p>
-        {error && (
+        {draftLoadMessage && (
           <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-900" role="alert">
-            Saved drafts could not be loaded. The failure was recorded; you can still start a new entry.
+            {draftLoadMessage}
           </p>
         )}
         <ManualEntryForm

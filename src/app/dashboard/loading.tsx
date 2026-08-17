@@ -44,6 +44,21 @@ export default function Loading() {
             </ul>
           </div>
         </div>
+
+        <div className="animate-pulse space-y-4" aria-hidden="true">
+          <span className="block h-4 w-36 rounded bg-black/10" />
+          <div className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm">
+            <ul className="divide-y divide-black/[0.06]">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <li key={index} className="flex items-center gap-4 px-5 py-4">
+                  <span className="h-3 w-6 shrink-0 rounded bg-black/10" />
+                  <span className="h-4 flex-1 rounded bg-black/10" />
+                  <span className="h-5 w-20 shrink-0 rounded-full bg-black/10" />
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
       </div>
     </div>
   );

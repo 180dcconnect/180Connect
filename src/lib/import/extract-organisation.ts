@@ -313,8 +313,8 @@ export function findCharityNumber(text: string): ExtractedCharityNumber | null {
   for (const pattern of [
     // "Registered charity number 225971", "Charity no. 225971", "charity #225971"
     /\b(?:registered\s+)?charity(?:\s+(?:registration|registered))?\s*(?:number|no\.?|#)?[:\s]*\(?(\d{6,7})\)?\b/i,
-    // "registered charity in England and Wales (225971)"
-    /\bcharity\b[^.]{0,40}?\b(?:england(?:\s+(?:and|&)\s+wales)?|e&w)\b[^.]{0,20}?\(?(\d{6,7})\)?\b/i,
+    // "registered charity in England and Wales (225971)", "charity in England and Wales no. 225971"
+    /\bcharity\b[^;\n\r]{0,40}?\b(?:england(?:\s+(?:and|&)\s+wales)?|e&w)\b[^;\n\r]{0,25}?\(?(\d{6,7})\)?\b/i,
     // "225971 is our registered charity number"
     /\b(\d{6,7})\b[^.]{0,20}?\bregistered\s+charity\b/i,
   ]) {

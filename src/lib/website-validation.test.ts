@@ -7,6 +7,7 @@ import {
   validateWebsiteFormat,
   type WebsiteCheckDependencies,
 } from "./website-validation.ts";
+import { pinnedLookup } from "./website-reachability.ts";
 
 const publicDns = async () => ["93.184.216.34"];
 
@@ -137,5 +138,47 @@ describe("checkWebsite", () => {
     assert.equal(result.status, "unreachable");
     assert.equal(failures.length, 1, "onFailure must be called exactly once");
     assert.equal(failures[0], "DNS unavailable");
+  });
+});
+
+describe("pinnedLookup", () => {
+  it("handles the 3-argument call shape with { all: true }", () => {
+    const lookup = pinnedLookup("93.184.216.34", 4);
+    let result: unknown;
+    lookup("example.org", { all: true }, (err, addresses) => {
+      assert.equal(err, null);
+      result = addresses;
+    });
+    assert.deepEqual(result, [{ address: "93.184.216.34", family: 4 }]);
+  });
+
+  it("handles the 3-argument call shape without all", () => {
+    const lookup = pinnedLookup("93.184.216.34", 4);
+    let resolvedAddress: string | undefined;
+    let resolvedFamily: number | undefined;
+    lookup("example.org", {}, (err, address, family) => {
+      assert.equal(err, null);
+      resolvedAddress = address as string;
+      resolvedFamily = family;
+    });
+    assert.equal(resolvedAddress, "93.184.216.34");
+    assert.equal(resolvedFamily, 4);
+  });
+
+  it("handles the 2-argument (hostname, callback) call shape", () => {
+    const lookup = pinnedLookup("2606:2800:220:1:248:1893:25c8:1946", 6);
+    let resolvedAddress: string | undefined;
+    let resolvedFamily: number | undefined;
+    // Calling with 2 args: lookup(hostname, callback)
+    (lookup as unknown as (hostname: string, cb: (err: null, addr: string, fam: number) => void) => void)(
+      "example.org",
+      (err, address, family) => {
+        assert.equal(err, null);
+        resolvedAddress = address;
+        resolvedFamily = family;
+      },
+    );
+    assert.equal(resolvedAddress, "2606:2800:220:1:248:1893:25c8:1946");
+    assert.equal(resolvedFamily, 6);
   });
 });

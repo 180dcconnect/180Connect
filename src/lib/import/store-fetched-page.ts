@@ -74,9 +74,21 @@ export async function storeFetchedPage(
     .single();
   if (runError) throw runError;
 
+  const checksum = hashPayload(payload);
+  const { data: existing } = await supabase
+    .from("raw_source_records")
+    .select("id, checksum, ingestion_attempt")
+    .eq("record_source", "website")
+    .eq("source_record_id", page.finalUrl)
+    .maybeSingle();
+
+  const isUnchanged = existing && existing.checksum === checksum;
+  const nextAttempt = existing
+    ? (isUnchanged ? existing.ingestion_attempt : existing.ingestion_attempt + 1)
+    : 1;
+
   // The URL is the identity of a website record, so a re-import of the same page
-  // updates the row the first import wrote rather than accumulating copies. The
-  // upsert has to name every column the unique constraint covers.
+  // updates the row the first import wrote rather than accumulating copies.
   const { data: record, error: recordError } = await supabase
     .from("raw_source_records")
     .upsert(
@@ -85,29 +97,31 @@ export async function storeFetchedPage(
         record_source: "website",
         source_record_id: page.finalUrl,
         raw_payload: payload,
-        checksum: hashPayload(payload),
+        checksum,
         source_country: null,
         source_registry_name: null,
-        processing_status: "validated",
+        processing_status: "pending",
+        ingestion_attempt: nextAttempt,
       },
       { onConflict: "record_source,source_record_id" },
     )
     .select("id")
     .single();
 
-  await supabase
+  const { error: updateError } = await supabase
     .from("ingestion_runs")
     .update({
       job_status: recordError ? "failed" : "completed",
       completed_at: new Date().toISOString(),
       records_fetched: 1,
-      records_inserted: recordError ? 0 : 1,
-      records_skipped: 0,
+      records_inserted: recordError ? 0 : (isUnchanged ? 0 : 1),
+      records_skipped: isUnchanged ? 1 : 0,
       records_failed: recordError ? 1 : 0,
       error_message: recordError ? recordError.message : null,
     })
     .eq("id", run.id);
 
   if (recordError) throw recordError;
+  if (updateError) throw updateError;
   return { rawRecordId: record.id as string };
 }

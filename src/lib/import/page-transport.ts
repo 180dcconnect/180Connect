@@ -148,7 +148,7 @@ async function robotsAllows(url: string): Promise<boolean> {
     return isPathAllowedByRobots(
       response.body,
       `${target.pathname}${target.search}`,
-      IMPORT_USER_AGENT_TOKEN,
+      IMPORT_USER_AGENT,
     );
   } catch {
     return true;

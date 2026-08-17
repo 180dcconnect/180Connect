@@ -56,7 +56,7 @@ const FIELD_COLUMNS: Readonly<Record<string, string>> = {
 function ImportedBadge() {
   return (
     <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-900">
-      From website
+      Imported
     </span>
   );
 }
@@ -79,8 +79,8 @@ export function ManualEntryForm({
 
   // Which imported values are still the imported ones. A field the CAM edits leaves
   // this set immediately, so the badge disappears as they type rather than after a
-  // round trip — the label has to stop claiming the value came from the website at
-  // the moment it stops being true.
+  // round trip — the label has to stop claiming the value was imported at the
+  // moment it stops being true.
   const [importedColumns, setImportedColumns] = useState<string[]>(
     initialEntry?.imported_field_paths ?? [],
   );
@@ -131,9 +131,9 @@ export function ManualEntryForm({
 
       {initialEntry?.source_url && (
         <section className="mt-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
-          <h2 className="font-bold">Imported from a website</h2>
+          <h2 className="font-bold">Imported client information</h2>
           <p className="mt-1">
-            The fields marked <span className="font-medium">From website</span> were read
+            The fields marked <span className="font-medium">Imported</span> were filled
             from{" "}
             <a
               className="font-medium underline"
@@ -142,8 +142,8 @@ export function ManualEntryForm({
               target="_blank"
             >
               {initialEntry.source_url}
-            </a>
-            . Check every one of them before you submit — nothing here is saved as a
+            </a>{" "}
+            and confirmed against public registers. Check every one of them before you submit — nothing here is saved as a
             client until you do.
           </p>
           {initialEntry.import_notes.length > 0 && (

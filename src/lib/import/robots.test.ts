@@ -55,4 +55,17 @@ describe("isPathAllowedByRobots", () => {
     assert.equal(isPathAllowedByRobots(robots, "/private"), false);
     assert.equal(isPathAllowedByRobots(robots, "/public"), true);
   });
+
+  it("matches versioned User-agent directives", () => {
+    const robots = [
+      "User-agent: *",
+      "Disallow: /",
+      "",
+      "User-agent: 180Connect-Import/1.0",
+      "Disallow: /versioned-disallow",
+    ].join("\n");
+
+    assert.equal(isPathAllowedByRobots(robots, "/allowed-page"), true);
+    assert.equal(isPathAllowedByRobots(robots, "/versioned-disallow"), false);
+  });
 });

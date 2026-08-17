@@ -84,13 +84,15 @@ function patternToRegExp(pattern: string): RegExp {
 export function isPathAllowedByRobots(
   robotsTxt: string,
   path: string,
-  userAgentToken: string = IMPORT_USER_AGENT_TOKEN,
+  userAgent: string = IMPORT_USER_AGENT,
 ): boolean {
   const groups = parseGroups(robotsTxt);
-  const token = userAgentToken.toLowerCase();
+  const token = userAgent.toLowerCase();
 
   const named = groups.filter((group) =>
-    group.agents.some((agent) => agent !== "*" && token.startsWith(agent)),
+    group.agents.some(
+      (agent) => agent !== "*" && (token.startsWith(agent) || agent.startsWith(token)),
+    ),
   );
   const applicable = named.length > 0
     ? named

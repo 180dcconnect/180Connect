@@ -43,8 +43,14 @@ export async function resolvePublicAddresses(hostname: string): Promise<readonly
     DNS_TIMEOUT_MS,
     "Website DNS lookup timed out",
   );
-  return [...ipv4, ...ipv6];
+  return [...ipv4, ...ipv6].filter((address) => !isPrivateAddress(address));
 }
+
+type LookupCallback = (
+  error: NodeJS.ErrnoException | null,
+  address: string | { address: string; family: number }[],
+  family?: number,
+) => void;
 
 /**
  * A `lookup` that resolves to one already-validated address, in both the shapes Node
@@ -62,18 +68,24 @@ export async function resolvePublicAddresses(hostname: string): Promise<readonly
  * Two copies of this would be two chances to get the callback contract wrong.
  */
 export function pinnedLookup(address: string, family: 4 | 6) {
-  return ((
+  return (
     _hostname: string,
-    options: { all?: boolean },
-    callback: (
-      error: null,
-      addresses: string | { address: string; family: number }[],
-      family?: number,
-    ) => void,
-  ) =>
-    options?.all
-      ? callback(null, [{ address, family }])
-      : callback(null, address, family)) as never;
+    optionsOrCallback: { all?: boolean } | LookupCallback,
+    maybeCallback?: LookupCallback,
+  ) => {
+    const callback =
+      typeof optionsOrCallback === "function" ? optionsOrCallback : maybeCallback;
+    const options =
+      typeof optionsOrCallback === "object" ? optionsOrCallback : undefined;
+
+    if (typeof callback !== "function") return;
+
+    if (options?.all) {
+      callback(null, [{ address, family }]);
+    } else {
+      callback(null, address, family);
+    }
+  };
 }
 
 /**

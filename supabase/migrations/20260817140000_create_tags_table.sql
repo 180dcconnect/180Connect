@@ -12,6 +12,7 @@
 --                 | active CAM or admin via app.can_write(), matching the
 --                 | notes table's write-role pattern. No UPDATE/DELETE grant
 --                 | here — those are F189 (Edit Tag) and F190 (Delete Tag).
+
 create table public.tags (
   id                  uuid primary key default gen_random_uuid(),
   name                text not null,
@@ -20,6 +21,7 @@ create table public.tags (
   created_at          timestamptz not null default now(),
   constraint tags_name_not_blank check (length(trim(name)) > 0)
 );
+alter table public.tags enable row level security;
 comment on table public.tags is
   'Reusable, shared labels CAMs and admins apply to organisations (F188). '
   'Platform-wide, not personal to the creator. colour is nullable here — '

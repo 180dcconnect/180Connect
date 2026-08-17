@@ -123,7 +123,7 @@
 | role | enum |  | No | User's role in the platform | Human | Set by admin at invite | cam / admin / viewer |
 | is_active | boolean |  | No | Whether the user can log in | System | True on activation; false if deactivated | Default true |
 | invited_by_user_id | uuid | USERS | Yes | Who sent the invite | System | Set when invite is created | Null for the first admin |
-| last_seen_at | timestamp |  | Yes | When the user last logged in | System | Updated on each login |  |
+| last_seen_at | timestamp |  | Yes | When the user was last active on any signed-in page — not just login | System | Updated by touch_last_seen(), throttled to once per 5 min per user, on every signed-in page load and admin API request |  |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last updated timestamp | System | Auto-updated on any change | Tracks when the account was last modified, used to audit role changes, name updates, and deactivations |
 | is_seed | boolean |  | No | Flag for seed data | System/Human | Set in the seed data script | False by default |
@@ -215,3 +215,14 @@
 | decided_at | timestamp |  | Yes | When decided | System | Set by decide_suppression_request | Null while pending |
 | decision_note | text |  | Yes | Optional admin note on the decision | Human | Typed by admin |  |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+
+## SAVED_VIEWS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated |  |
+| user_id | uuid | USERS | No | CAM the saved view belongs to | System | auth.uid() at save time | On delete cascade; a view is private to its owner |
+| name | text |  | No | Name the CAM gave the view | Human | Typed by CAM when saving | Required, cannot be blank; unique per user |
+| filters | jsonb |  | No | The client-list filter combination the view re-applies | System | Captured from the active list filters at save time | Keys mirror /clients search params: q, city, status, source, owner. jsonb rather than columns because the filter set grows (F055 sector, F058 priority, F193 tag) |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+| updated_at | timestamp |  | No | Last edit timestamp | System | Updated when the view is renamed or re-saved | Rename/overwrite is not built by F066; column exists so adding it later needs no schema change |

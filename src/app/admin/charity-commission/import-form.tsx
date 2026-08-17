@@ -28,8 +28,9 @@ export function CharityCommissionImportForm({ configured }: { configured: boolea
       <h2 className="text-lg font-bold">Run import</h2>
       <p className="mt-2 text-sm text-foreground/65">
         Imports charities registered within the configured date range,
-        including contact details where available. For a single known
-        charity, use the lookup below instead.
+        including contact details where available, standardises them, and
+        runs the client-criteria check (F047) — all in one step. For a
+        single known charity, use the lookup below instead.
       </p>
       {!configured && (
         <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm font-bold text-amber-900" role="alert">
@@ -43,7 +44,7 @@ export function CharityCommissionImportForm({ configured }: { configured: boolea
           disabled={!configured || pending}
           type="submit"
         >
-          {pending ? "Importing…" : "Import Charity Commission data"}
+          {pending ? "Importing…" : "Import and add to client list"}
         </button>
       </form>
       {state.kind !== "idle" && (
@@ -58,6 +59,23 @@ export function CharityCommissionImportForm({ configured }: { configured: boolea
                 </div>
               ))}
             </dl>
+          )}
+          {state.promoted && (
+            <>
+              <p className="mt-4 text-xs font-bold uppercase tracking-wide opacity-60">
+                Promoted to the client list
+              </p>
+              <dl className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-5">
+                {Object.entries(state.promoted).map(([label, value]) => (
+                  <div key={label}>
+                    <dt className="capitalize opacity-70">
+                      {label.replace(/([A-Z])/g, " $1")}
+                    </dt>
+                    <dd className="text-lg font-bold">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </>
           )}
         </div>
       )}

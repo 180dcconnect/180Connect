@@ -14,6 +14,8 @@ export type TeamUser = {
    * this only says which kind of inactive they are.
    */
   deactivated_at: string | null;
+  /** Last time this user was seen on any signed-in page — not last login. Null if never. */
+  last_seen_at: string | null;
   owned_client_count: number;
 };
 
@@ -32,6 +34,23 @@ const ACCESS_LABEL: Record<AccessState, string> = {
 
 function displayName(user: TeamUser) {
   return user.full_name ?? user.email;
+}
+
+/**
+ * "Last active" — not last login. `last_seen_at` is touched on every signed-in page
+ * and admin API request (getCurrentActor), throttled to once per 5 minutes per user.
+ */
+function lastActiveLabel(lastSeenAt: string | null): string {
+  if (!lastSeenAt) return "Never";
+  const elapsedMs = Date.now() - new Date(lastSeenAt).getTime();
+  if (elapsedMs < 60_000) return "Just now";
+  const minutes = Math.floor(elapsedMs / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(lastSeenAt).toLocaleDateString();
 }
 
 export function UserManagementTable({
@@ -143,7 +162,7 @@ export function UserManagementTable({
 
   return (
     <>
-      <p aria-live="polite" className="mt-5 min-h-6 text-sm font-bold">
+      <p aria-live="polite" className="mb-2 min-h-5 text-sm font-bold">
         {message}
       </p>
 
@@ -168,11 +187,12 @@ export function UserManagementTable({
         <table className="w-full border-collapse text-left text-sm">
           <thead>
             <tr className="border-b border-black/10">
-              <th className="p-3">Member</th>
-              <th className="p-3">Role</th>
-              <th className="p-3">Clients</th>
-              <th className="p-3">Status</th>
-              <th className="p-3">Access</th>
+              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Member</th>
+              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Role</th>
+              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Clients</th>
+              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Last active</th>
+              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Status</th>
+              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Access</th>
             </tr>
           </thead>
           <tbody>
@@ -204,6 +224,7 @@ export function UserManagementTable({
                     </select>
                   </td>
                   <td className="p-3">{user.owned_client_count}</td>
+                  <td className="p-3 text-foreground/60">{lastActiveLabel(user.last_seen_at)}</td>
                   <td className="p-3">
                     <span
                       className={

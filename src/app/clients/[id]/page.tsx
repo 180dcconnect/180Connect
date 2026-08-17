@@ -175,8 +175,7 @@ export default async function ClientDetailPage({
         <Link className="text-sm font-medium text-brand hover:underline" href="/clients">
           ← Clients
         </Link>
-        <p className="mt-4 text-sm font-bold text-brand">{client.organisation_type}</p>
-        <h1 className="mt-1 text-2xl font-bold">{client.legal_name}</h1>
+        <h1 className="mt-4 text-2xl font-bold">{client.legal_name}</h1>
 
         <BasicInfoPanel
           organisation={client}

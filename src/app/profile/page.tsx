@@ -15,8 +15,7 @@ export default async function ProfilePage() {
       <section className="mx-auto max-w-xl rounded-2xl bg-white p-8 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-bold text-brand">My profile</p>
-            <h1 className="mt-2 text-2xl font-bold">
+            <h1 className="text-2xl font-bold">
               {actor.fullName ?? "Unnamed user"}
             </h1>
           </div>

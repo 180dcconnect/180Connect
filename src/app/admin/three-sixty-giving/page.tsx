@@ -54,8 +54,7 @@ export default async function ThreeSixtyGivingPage() {
       <section className="mx-auto max-w-5xl rounded-2xl bg-white p-8 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-bold text-brand">Data ingestion</p>
-            <h1 className="mt-2 text-3xl font-bold">360Giving import</h1>
+            <h1 className="text-3xl font-bold">360Giving import</h1>
             <p className="mt-3 max-w-2xl text-sm text-foreground/65">
               Bring grant and funding history into charity records already in
               the pipeline, as an input to partnership prioritisation.

@@ -12,12 +12,14 @@ import {
 } from "@/lib/source-tracking";
 import { checkWebsiteReachabilityCached } from "@/lib/website-reachability-cache";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
+import { splitOutreachHistory, type OutreachMessageRow } from "@/lib/outreach-history";
 import { SuppressButton } from "./suppress-button";
 import { ComposeButton } from "./compose-button";
 import { BasicInfoPanel } from "./basic-info-panel";
 import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
+import { OutreachHistorySection } from "./outreach-history";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -40,6 +42,14 @@ type OwnerRow = {
  * F069-081) are still separate open tickets; each will slot in here as its own
  * `<section aria-labelledby>`, same shape as "Record sources" and this one, to
  * keep F067 AC2's "each reachable without excessive scrolling" true as they land.
+ *
+ * F070 (#72) View Previous Emails is one such section: the Outreach block below
+ * now shows every outreach_messages row for this client, split into "Sent" and
+ * "Drafts & scheduled" (AC3) — see @/lib/outreach-history for the split/order
+ * logic and outreach-history.tsx for the render. Gated on `client:view` like the
+ * rest of this page (matches outreach_messages_select_active — read is shared
+ * across all active roles, not ownership-scoped), not on `client:contact`, which
+ * still gates only ComposeButton within the same section.
  *
  * Started as F251 AC1/AC2's minimal client screen (name + suppression state only)
  * — see src/app/clients/page.tsx for that history. Extended here, not replaced.
@@ -147,6 +157,26 @@ export default async function ClientDetailPage({
   if (ownerError) {
     await reportError(ownerError, { operation: "clients.detail_owner", organisationId: id });
   }
+
+  // F070: every outreach message for this client, sent or not. RLS
+  // (outreach_messages_select_active) shares read across every active role, so
+  // this needs no ownership filter — same reasoning as the `client:view` gate
+  // above.
+  const { data: outreachRows, error: outreachError } = await supabase
+    .from("outreach_messages")
+    .select("id, subject, body, send_status, sent_at, scheduled_at, created_at")
+    .eq("organisation_id", id)
+    .order("created_at", { ascending: false });
+
+  if (outreachError) {
+    await reportError(outreachError, {
+      operation: "clients.detail_outreach",
+      organisationId: id,
+    });
+  }
+  const outreachHistory = splitOutreachHistory(
+    (outreachRows ?? []) as OutreachMessageRow[],
+  );
 
   const canEdit = hasPermission(authorization.actor.role, "client:edit");
   const canSuppress = canEdit;
@@ -332,14 +362,17 @@ export default async function ClientDetailPage({
           )}
         </div>
 
-        {hasPermission(authorization.actor.role, "client:contact") ? (
-          <div className="mt-8 border-t border-black/10 pt-8">
-            <p className="text-sm font-bold">Outreach</p>
-            <div className="mt-3">
+        <section className="mt-8 border-t border-black/10 pt-8" aria-labelledby="outreach-heading">
+          <h2 id="outreach-heading" className="text-sm font-bold">Outreach</h2>
+
+          <OutreachHistorySection history={outreachHistory} error={Boolean(outreachError)} />
+
+          {hasPermission(authorization.actor.role, "client:contact") && (
+            <div className="mt-6">
               <ComposeButton blocked={latest?.status === "active"} />
             </div>
-          </div>
-        ) : null}
+          )}
+        </section>
       </section>
     </main>
   );

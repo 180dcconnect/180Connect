@@ -2,6 +2,9 @@
   "name": "180connect",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -21,20 +24,28 @@
     "standardize:run-companies-house": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-standardize-companies-house.mts",
     "standardize:run-three-sixty-giving": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-standardize-three-sixty-giving.mts",
     "ingest:run-three-sixty-giving": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-three-sixty-giving.mts",
-    "ingest:check-isolation": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/test-isolation.mts"
+    "ingest:check-isolation": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/test-isolation.mts",
+    "backfill:data-handling-rules": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-data-handling-rules.mts"
   },
   "dependencies": {
+    "@base-ui/react": "^1.7.0",
     "@supabase/ssr": "^0.12.3",
     "@supabase/supabase-js": "^2.110.7",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "framer-motion": "^13.1.0",
+    "lucide-react": "^1.31.0",
     "motion": "^12.43.0",
     "next": "16.2.10",
+    "radix-ui": "^1.6.7",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "tailwind-merge": "^3.6.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^24",
     "@types/pg": "^8.20.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",

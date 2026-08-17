@@ -2802,6 +2802,289 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------------------
+-- F246: data handling rules — RLS, the two write RPCs, and the audit trail
+-- ---------------------------------------------------------------------------
+-- These rules decide what personal data the platform is allowed to store, so the
+-- interesting claims are all about who may change them. The node tests in
+-- src/lib/ingestion cover the filtering itself, but they run through a
+-- service_role client, which bypasses RLS — they cannot prove any of this.
+
+create or replace function tests.suite_data_handling_rules()
+returns setof text language plpgsql as $$
+declare
+  v_admin        uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam          uuid := '00000000-0000-4000-a000-000000000002';
+  v_viewer       uuid := '00000000-0000-4000-a000-000000000005';
+  v_dead_admin   uuid := '00000000-0000-4000-a000-000000000006';
+  v_backdated    timestamptz := timestamptz '2000-01-01';
+  v_rule_id      uuid;
+  v_count        bigint;
+  v_version_before integer;
+  v_version_after  integer;
+  v_audit_before bigint;
+begin
+  if not tests.tables_exist('data_handling_rules', 'data_handling_rule_versions', 'audit_log') then
+    return next skip(1, 'step 22.7 create_data_handling_rules not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- A deactivated *admin*, which the shared fixture does not have. Without one,
+  -- the is_active_user() branch of both RPCs is never exercised: the deactivated
+  -- CAM fails the is_admin() check first and the test would pass for the wrong
+  -- reason.
+  insert into auth.users (id, instance_id, aud, role, email)
+  values (v_dead_admin, '00000000-0000-0000-0000-000000000000',
+          'authenticated', 'authenticated', 'ex-admin@180dc.org')
+  on conflict (id) do nothing;
+  insert into public.users (id, email, full_name, role, is_active, created_at, updated_at)
+  values (v_dead_admin, 'ex-admin@180dc.org', 'Deactivated Admin', 'admin', false, v_backdated, v_backdated)
+  on conflict (id) do update
+    set role = excluded.role, is_active = excluded.is_active;
+
+  -- -- Reads -----------------------------------------------------------------
+  -- The rules name the fields the platform refuses to hold. That list is an
+  -- admin concern; a CAM has no reason to see it and no way to act on it.
+
+  perform tests.login_as(v_cam);
+  select count(*) into v_count from public.data_handling_rules;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'CAM cannot read the data handling rules');
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.data_handling_rules;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'viewer cannot read the data handling rules');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.data_handling_rules;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next ok(v_count > 0, 'admin can read the data handling rules');
+
+  perform tests.login_as(v_cam);
+  select count(*) into v_count from public.data_handling_rule_versions;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'CAM cannot read the rule version singleton');
+
+  -- -- Direct writes are closed off entirely -----------------------------------
+  -- There is no INSERT/UPDATE/DELETE policy for authenticated on either table, so
+  -- even an admin has to go through the RPCs. That is what keeps the audit write
+  -- and the version bump from being optional.
+
+  return next ok(
+    not has_table_privilege('authenticated', 'public.data_handling_rules', 'INSERT'),
+    'authenticated holds no INSERT privilege on data_handling_rules'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.data_handling_rules', 'DELETE'),
+    'authenticated holds no DELETE privilege on data_handling_rules'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.data_handling_rule_versions', 'UPDATE'),
+    'authenticated cannot bump the rule version directly'
+  );
+
+  return next isnt(
+    tests.sqlstate_of(v_admin,
+      'insert into public.data_handling_rules (rule_version, field_path, action, reason) ' ||
+      'values (99, ''smuggled'', ''deny'', ''bypassing the RPC'')'),
+    null,
+    'even an admin cannot insert a rule directly, bypassing the audit trail'
+  );
+
+  -- -- create_data_handling_rule ----------------------------------------------
+
+  return next is(
+    tests.sqlstate_of(v_cam,
+      'select public.create_data_handling_rule(''companies_house'', ''sneaky[*].path'', ''deny'', ''CAM attempt'')'),
+    'P0001',
+    'CAM cannot create a data handling rule'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_dead_admin,
+      'select public.create_data_handling_rule(''companies_house'', ''sneaky[*].path'', ''deny'', ''deactivated attempt'')'),
+    'P0001',
+    'a deactivated admin cannot create a data handling rule'
+  );
+
+  -- State, not just SQLSTATE: a raise that happened after the insert would still
+  -- report P0001 while leaving the row behind.
+  select count(*) into v_count
+    from public.data_handling_rules where field_path = 'sneaky[*].path';
+  return next is(v_count, 0::bigint,
+    'no rule survives the blocked create attempts');
+
+  -- A reason is mandatory — the rules are a compliance record, and one without a
+  -- stated justification is not reviewable by anyone later.
+  return next is(
+    tests.sqlstate_of(v_admin,
+      'select public.create_data_handling_rule(''companies_house'', ''some[*].path'', ''deny'', '''')'),
+    'P0001',
+    'a rule cannot be created without a reason'
+  );
+
+  select current_version into v_version_before from public.data_handling_rule_versions where id = true;
+  select count(*) into v_audit_before from public.audit_log where action = 'data_handling_rule_created';
+
+  perform tests.login_as(v_admin);
+  select public.create_data_handling_rule(
+    'companies_house', 'pgtap[*].secret', 'deny', 'pgTAP fixture rule'
+  ) into v_rule_id;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next ok(v_rule_id is not null, 'admin can create a data handling rule');
+
+  select current_version into v_version_after from public.data_handling_rule_versions where id = true;
+  return next is(v_version_after, v_version_before + 1,
+    'creating a rule bumps the global rule version');
+
+  -- The version stamped on the rule is the one ingestion will report against the
+  -- records it filters, so it has to be the post-bump number.
+  return next is(
+    (select rule_version from public.data_handling_rules where id = v_rule_id),
+    v_version_after,
+    'the new rule carries the version it was created at');
+
+  return next is(
+    (select created_by from public.data_handling_rules where id = v_rule_id),
+    v_admin,
+    'the rule records the admin who created it');
+
+  return next is(
+    (select count(*) from public.audit_log
+      where action = 'data_handling_rule_created' and target_id = v_rule_id),
+    1::bigint,
+    'creating a rule writes exactly one audit_log entry');
+
+  return next is(
+    (select actor_user_id from public.audit_log
+      where action = 'data_handling_rule_created' and target_id = v_rule_id),
+    v_admin,
+    'the audit entry names the acting admin');
+
+  -- The detail payload is what a reviewer actually reads months later.
+  return next is(
+    (select detail->>'field_path' from public.audit_log
+      where action = 'data_handling_rule_created' and target_id = v_rule_id),
+    'pgtap[*].secret',
+    'the audit entry records which field the rule governs');
+  return next is(
+    (select detail->>'reason' from public.audit_log
+      where action = 'data_handling_rule_created' and target_id = v_rule_id),
+    'pgTAP fixture rule',
+    'the audit entry records the stated reason');
+
+  -- One active rule per (source, field_path). Without this an admin could stack
+  -- a deny and an allow on the same field and the outcome would depend on row order.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.create_data_handling_rule(''companies_house'', ''pgtap[*].secret'', ''allow'', ''duplicate'')')),
+    '23505',
+    'a second active rule for the same source and field_path is rejected'
+  );
+
+  -- -- set_data_handling_rule_active -------------------------------------------
+
+  return next is(
+    tests.sqlstate_of(v_cam, format(
+      'select public.set_data_handling_rule_active(%L, false, ''CAM attempt'')', v_rule_id)),
+    'P0001',
+    'CAM cannot deactivate a data handling rule'
+  );
+
+  return next is(
+    (select is_active from public.data_handling_rules where id = v_rule_id),
+    true,
+    'the rule is genuinely still active after the blocked attempt');
+
+  select current_version into v_version_before from public.data_handling_rule_versions where id = true;
+
+  perform tests.login_as(v_admin);
+  perform public.set_data_handling_rule_active(v_rule_id, false, 'no longer required');
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next is(
+    (select is_active from public.data_handling_rules where id = v_rule_id),
+    false,
+    'admin can deactivate a rule');
+
+  select current_version into v_version_after from public.data_handling_rule_versions where id = true;
+  return next is(v_version_after, v_version_before + 1,
+    'deactivating a rule bumps the global rule version');
+
+  return next is(
+    (select count(*) from public.audit_log
+      where action = 'data_handling_rule_deactivated' and target_id = v_rule_id),
+    1::bigint,
+    'deactivating a rule writes an audit_log entry');
+
+  return next is(
+    (select detail->>'reason' from public.audit_log
+      where action = 'data_handling_rule_deactivated' and target_id = v_rule_id),
+    'no longer required',
+    'the deactivation audit entry records the reason given');
+
+  -- A no-op must stay a no-op. Bumping the version on an unchanged toggle would
+  -- invalidate every record stamped with the old one and trigger a pointless
+  -- re-ingestion of the entire table.
+  select current_version into v_version_before from public.data_handling_rule_versions where id = true;
+
+  perform tests.login_as(v_admin);
+  perform public.set_data_handling_rule_active(v_rule_id, false, 'again');
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  select current_version into v_version_after from public.data_handling_rule_versions where id = true;
+  return next is(v_version_after, v_version_before,
+    'toggling a rule to the state it already holds does not bump the version');
+
+  return next is(
+    (select count(*) from public.audit_log
+      where action = 'data_handling_rule_deactivated' and target_id = v_rule_id),
+    1::bigint,
+    'a no-op toggle writes no second audit entry');
+
+  -- Deactivating frees the (source, field_path) slot, so the policy can be
+  -- restated with a different action without deleting the history of the old one.
+  perform tests.login_as(v_admin);
+  select public.create_data_handling_rule(
+    'companies_house', 'pgtap[*].secret', 'allow', 'restated after review'
+  ) into v_rule_id;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next ok(v_rule_id is not null,
+    'the same field_path can be ruled on again once the old rule is inactive');
+
+  -- -- Read RPCs ---------------------------------------------------------------
+  -- These aggregate over raw_source_records, so they are SECURITY DEFINER and
+  -- carry their own admin check — without it they would be a way for any signed-in
+  -- user to read which fields the platform strips and how often.
+
+  return next is(
+    tests.sqlstate_of(v_cam, 'select * from public.data_handling_filter_summary()'),
+    'P0001',
+    'CAM cannot read the filter summary'
+  );
+  return next is(
+    tests.sqlstate_of(v_viewer, 'select * from public.data_handling_coverage()'),
+    'P0001',
+    'viewer cannot read data handling coverage'
+  );
+  return next is(
+    tests.sqlstate_of(v_dead_admin, 'select * from public.data_handling_coverage()'),
+    'P0001',
+    'a deactivated admin cannot read data handling coverage'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, 'select * from public.data_handling_coverage()'),
+    null,
+    'admin can read data handling coverage'
+  );
+end;
+$$;
+
 select * from tests.suite_core();
 select * from tests.suite_viewer();
 select * from tests.suite_users();
@@ -2825,6 +3108,7 @@ select * from tests.suite_suppressions();
 select * from tests.suite_source_tracking();
 select * from tests.suite_onboarding();
 select * from tests.suite_client_criteria();
+select * from tests.suite_data_handling_rules();
 
 select * from finish();
 

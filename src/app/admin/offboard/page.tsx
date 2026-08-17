@@ -31,8 +31,7 @@ export default async function AdminOffboardPage() {
   return (
     <main className="min-h-screen bg-[#f1f2f4] p-6">
       <section className="mx-auto max-w-3xl rounded-2xl bg-white p-8 shadow-sm">
-        <p className="text-sm font-bold text-brand">Admin workspace</p>
-        <h1 className="mt-2 text-3xl font-bold">Reassign a CAM&apos;s work</h1>
+        <h1 className="text-3xl font-bold">Reassign a CAM&apos;s work</h1>
         <p className="mt-3 text-sm text-foreground/65">
           Moves every client the outgoing CAM owns, and their open actions, to whoever
           takes over. Notes, emails, replies and drafts stay on the client and follow it

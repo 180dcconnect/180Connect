@@ -9,13 +9,18 @@ import {
   duplicateRpcFailure,
   type EntityMatchCandidateRow,
 } from "@/lib/duplicates";
+import {
+  createDiscrepancyDetectionStore,
+  detectAndFlagDiscrepancies,
+} from "@/lib/discrepancies/detect-field-discrepancies";
 
 /**
  * F042 — Deduplicate Clients, admin review queue.
  *
  * GET   list every potential duplicate (all statuses), most recent first. Rows are
  *       written by the ingestion pipeline (service_role), never by this route.
- * PATCH confirm or dismiss a pending flag — decide_duplicate_flag.
+ * PATCH confirm or dismiss a pending flag — decide_duplicate_flag. Confirming a
+ *       match also runs F048's discrepancy detection as a follow-up (see below).
  *
  * Admin-only route (approval:manage — same permission suppressions uses for its
  * admin-only decision queue).
@@ -99,5 +104,31 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: message }, { status });
   }
 
-  return NextResponse.json({ ok: true });
+  // F048: a confirmed match is the only point in the pipeline where two records
+  // are asserted to be the same client, so it's where a field-by-field conflict
+  // check runs. This is a separate DB round trip from decide_duplicate_flag above,
+  // not the same transaction — if it throws, the confirmation the admin just made
+  // is not rolled back (worse to block that on a secondary check), but the
+  // failure must still be visible, not swallowed. See
+  // detect-field-discrepancies.ts's own comment for the full reasoning.
+  let warning: string | undefined;
+  if (parsed.data.confirmed) {
+    try {
+      await detectAndFlagDiscrepancies(
+        parsed.data.entityMatchCandidateId,
+        createDiscrepancyDetectionStore(supabase),
+      );
+    } catch (detectionError) {
+      await reportError(
+        detectionError instanceof Error ? detectionError : new Error(String(detectionError)),
+        {
+          operation: "admin.duplicates.decide.detect_discrepancies",
+          entityMatchCandidateId: parsed.data.entityMatchCandidateId,
+        },
+      );
+      warning = "Confirmed, but the conflict check failed — review this client manually.";
+    }
+  }
+
+  return NextResponse.json({ ok: true, ...(warning ? { warning } : {}) });
 }

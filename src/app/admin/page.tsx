@@ -24,8 +24,7 @@ export default async function AdminPage() {
     <main className="min-h-screen bg-[#f1f2f4] p-6">
       <section className="mx-auto max-w-5xl rounded-2xl bg-white p-8 shadow-sm">
         <div>
-          <p className="text-sm font-bold text-brand">Admin workspace</p>
-          <h1 className="mt-2 text-3xl font-bold">Platform management</h1>
+          <h1 className="text-3xl font-bold">Platform management</h1>
           <p className="mt-3 max-w-2xl text-sm text-foreground/65">
             Manage team access and open privileged workflows. Every admin
             action is checked again on the server.
@@ -43,6 +42,12 @@ export default async function AdminPage() {
             <h2 className="font-bold">Audit log</h2>
             <p className="mt-1 text-sm text-foreground/65">Every recorded action, most recent first.</p>
           </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/data-handling-rules">
+            <h2 className="font-bold">Data handling rules</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Manage which fields from external sources are stored or excluded.
+            </p>
+          </Link>
           <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/companies-house">
             <h2 className="font-bold">Companies House import</h2>
             <p className="mt-1 text-sm text-foreground/65">
@@ -59,6 +64,12 @@ export default async function AdminPage() {
             <h2 className="font-bold">Possible duplicates</h2>
             <p className="mt-1 text-sm text-foreground/65">
               Review charities the import pipeline flagged as likely duplicates.
+            </p>
+          </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/discrepancies">
+            <h2 className="font-bold">Data discrepancies</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Review fields where two sources disagree and choose which value to keep.
             </p>
           </Link>
           <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/charity-commission">

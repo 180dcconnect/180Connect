@@ -4,7 +4,29 @@
   --background: #ffffff;
   --foreground: #414042;
   --brand: #72b744;
-  --brand-hover: #009647;
+  --brand-hover: #2E3C2F;
+
+  /**
+   * Tokens the shadcn/animate-ui components are written against. Derived from
+   * the palette above rather than copied from shadcn's default theme, so a
+   * generated component lands in 180DC's colours instead of neutral greys —
+   * `--accent` is the brand at 12% over white, `--border` matches the
+   * `border-black/10` used by hand throughout the app.
+   *
+   * `--background` and `--foreground` are deliberately absent: those names are
+   * already defined above with this project's values, and shadcn means the
+   * same thing by them.
+   */
+  --popover: #ffffff;
+  --popover-foreground: var(--foreground);
+  --card: #ffffff;
+  --card-foreground: var(--foreground);
+  --accent: #eef6e9;
+  --accent-foreground: var(--brand-hover);
+  --muted: #f1f1ef;
+  --muted-foreground: #8a898b;
+  --destructive: #b91c1c;
+  --border: #e6e6e7;
 }
 
 @theme inline {
@@ -12,9 +34,135 @@
   --color-foreground: var(--foreground);
   --color-brand: var(--brand);
   --color-brand-hover: var(--brand-hover);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-body: var(--font-lato);
+}
+
+/**
+ * Social icons as vertical sprite sheets (white artwork on transparent,
+ * generated from the source GIFs). Sprites rather than the GIFs themselves:
+ * their frames have an opaque white ground, and the CSS needed to knock that
+ * out (invert + screen) is neutralised by the stacking context the animated
+ * menu sheet creates. Stepping a background-position sidesteps all of that,
+ * restarts cleanly on every hover, and only animates while hovered.
+ */
+.icon-sprite {
+  width: 38px;
+  height: 38px;
+  background-repeat: no-repeat;
+  background-position: 0 0;
+}
+
+.ig-sprite {
+  background-image: url("/instagram-sprite.png");
+  background-size: 38px 608px; /* 38 * 16 frames */
+}
+
+.li-sprite {
+  background-image: url("/linkedin-sprite.png");
+  background-size: 38px 912px; /* 38 * 24 frames */
+}
+
+/* The envelope reads heavier than the others at the shared size, so it is set
+   a little smaller and nudged up to sit optically level with them.
+   Its sheet is drawn with the art inset inside each frame — the source art ran
+   to the frame's bottom edge, and that row bled across the seam and showed as a
+   stray line at the top of the icon. The box is 36px so the inset art still
+   reads at ~32px. */
+.mail-sprite {
+  width: 36px;
+  height: 36px;
+  background-image: url("/mail-sprite.png");
+  background-size: 36px 900px; /* 36 * 25 frames */
+  transform: translateY(-3px);
+}
+
+/** Linktree came as a still only, so it has no hover animation. */
+.lt-sprite {
+  background-image: url("/linktree-white.png");
+  background-size: 38px 38px;
+}
+
+/* ~45ms a frame across all three, so they feel like one set regardless of
+   frame count, rather than each running at its source GIF's own delay.
+   Each cycle is the run plus a 0.6s hold on the last frame, so a long hover
+   reads as the animation playing again rather than as a loop that never
+   settles. The hold is why the timing function lives in the keyframes: the
+   run needs steps(), the hold needs step-end, and one function on the
+   shorthand cannot do both. jump-none lands the run on the last real frame
+   (rather than one past the end of the sheet) so the hold has something to
+   show. */
+a:hover .ig-sprite {
+  animation: ig-sprite-play 1.32s infinite;
+}
+
+a:hover .li-sprite {
+  animation: li-sprite-play 1.68s infinite;
+}
+
+a:hover .mail-sprite {
+  animation: mail-sprite-play 1.72s infinite;
+}
+
+@keyframes ig-sprite-play {
+  0% {
+    background-position: 0 0;
+    animation-timing-function: steps(16, jump-none);
+  }
+  54.55% {
+    background-position: 0 -570px;
+    animation-timing-function: step-end;
+  }
+  100% {
+    background-position: 0 -570px;
+  }
+}
+
+@keyframes li-sprite-play {
+  0% {
+    background-position: 0 0;
+    animation-timing-function: steps(24, jump-none);
+  }
+  64.29% {
+    background-position: 0 -874px;
+    animation-timing-function: step-end;
+  }
+  100% {
+    background-position: 0 -874px;
+  }
+}
+
+@keyframes mail-sprite-play {
+  0% {
+    background-position: 0 0;
+    animation-timing-function: steps(25, jump-none);
+  }
+  65.12% {
+    background-position: 0 -864px;
+    animation-timing-function: step-end;
+  }
+  100% {
+    background-position: 0 -864px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  a:hover .ig-sprite,
+  a:hover .li-sprite,
+  a:hover .mail-sprite {
+    animation: none;
+  }
 }
 
 @layer base {
@@ -33,3 +181,4 @@
     font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
   }
 }
+

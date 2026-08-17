@@ -3085,6 +3085,166 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------------------
+-- F247: personal data exclusion — role email allow-list and app.is_personal_email
+-- ---------------------------------------------------------------------------
+-- rule_kind and the two redact_* kinds live on data_handling_rules itself, so
+-- they're covered by suite_data_handling_rules() above via the same RPC. What's
+-- new here is the second table F247 adds — PERSONAL_EMAIL_ROLE_PARTS — and the
+-- SQL half of the email detector, app.is_personal_email, which the node tests in
+-- personal-data.test.ts cannot reach: they run through a service_role client,
+-- which bypasses RLS.
+
+create or replace function tests.suite_personal_data_exclusion()
+returns setof text language plpgsql as $$
+declare
+  v_admin      uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam        uuid := '00000000-0000-4000-a000-000000000002';
+  v_viewer     uuid := '00000000-0000-4000-a000-000000000005';
+  v_dead_admin uuid := '00000000-0000-4000-a000-000000000006';
+  v_backdated  timestamptz := timestamptz '2000-01-01';
+  v_count      bigint;
+begin
+  if not tests.tables_exist('personal_email_role_parts', 'data_handling_rules') then
+    return next skip(1, 'F247 add_personal_data_exclusion not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Same deactivated-admin fixture suite_data_handling_rules() creates. Written
+  -- the same idempotent way so either suite can run alone.
+  insert into auth.users (id, instance_id, aud, role, email)
+  values (v_dead_admin, '00000000-0000-0000-0000-000000000000',
+          'authenticated', 'authenticated', 'ex-admin@180dc.org')
+  on conflict (id) do nothing;
+  insert into public.users (id, email, full_name, role, is_active, created_at, updated_at)
+  values (v_dead_admin, 'ex-admin@180dc.org', 'Deactivated Admin', 'admin', false, v_backdated, v_backdated)
+  on conflict (id) do update
+    set role = excluded.role, is_active = excluded.is_active;
+
+  -- -- Reads -----------------------------------------------------------------
+  -- The role list decides whose address the ingestion runner keeps, so it
+  -- carries the same read shape as data_handling_rules: admin only.
+
+  perform tests.login_as(v_cam);
+  select count(*) into v_count from public.personal_email_role_parts;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'CAM cannot read personal_email_role_parts');
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.personal_email_role_parts;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'viewer cannot read personal_email_role_parts');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.personal_email_role_parts;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next ok(v_count > 0, 'admin can read personal_email_role_parts');
+
+  -- -- Direct writes are closed off -------------------------------------------
+  -- No INSERT/UPDATE policy for authenticated; every write goes through
+  -- set_personal_email_role_part below, so the audit entry is never optional.
+
+  return next ok(
+    not has_table_privilege('authenticated', 'public.personal_email_role_parts', 'INSERT'),
+    'authenticated holds no INSERT privilege on personal_email_role_parts'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.personal_email_role_parts', 'UPDATE'),
+    'authenticated holds no UPDATE privilege on personal_email_role_parts'
+  );
+
+  -- -- Both RPCs refuse a CAM and a deactivated admin ---------------------------
+
+  return next is(
+    tests.sqlstate_of(v_cam,
+      'select public.create_data_handling_rule(null, ''*'', ''deny'', ''CAM attempt'', ''redact_personal_email'')'),
+    'P0001',
+    'CAM cannot create a redaction rule'
+  );
+  return next is(
+    tests.sqlstate_of(v_dead_admin,
+      'select public.create_data_handling_rule(null, ''*'', ''deny'', ''deactivated attempt'', ''redact_personal_email'')'),
+    'P0001',
+    'a deactivated admin cannot create a redaction rule'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam,
+      'select public.set_personal_email_role_part(''pgtap-role'', true, ''CAM attempt'')'),
+    'P0001',
+    'CAM cannot change the role email list'
+  );
+  return next is(
+    tests.sqlstate_of(v_dead_admin,
+      'select public.set_personal_email_role_part(''pgtap-role'', true, ''deactivated attempt'')'),
+    'P0001',
+    'a deactivated admin cannot change the role email list'
+  );
+
+  select count(*) into v_count
+    from public.personal_email_role_parts where local_part = 'pgtap-role';
+  return next is(v_count, 0::bigint,
+    'no role part survives the blocked set attempts');
+
+  -- Admin path: add, audit, no-op safety.
+  perform tests.login_as(v_admin);
+  perform public.set_personal_email_role_part('pgtap-role', true, 'pgTAP fixture role');
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next is(
+    (select is_active from public.personal_email_role_parts where local_part = 'pgtap-role'),
+    true,
+    'admin can add a role email local part');
+
+  return next is(
+    (select count(*) from public.audit_log
+      where action = 'personal_email_role_part_added' and detail->>'local_part' = 'pgtap-role'),
+    1::bigint,
+    'adding a role part writes an audit_log entry');
+
+  -- -- app.is_personal_email: role vs personal pairs ---------------------------
+  -- Same word-splitting rule personal-data.test.ts asserts in TypeScript; this
+  -- proves the SQL half agrees, run as admin so the read against
+  -- personal_email_role_parts the function depends on is not itself the thing
+  -- under test.
+
+  perform tests.login_as(v_admin);
+
+  return next ok(
+    not app.is_personal_email('info@example.org'),
+    'a bare role local part is not personal'
+  );
+  return next ok(
+    not app.is_personal_email('fundraising.team@example.org'),
+    'a role local part wearing a suffix is not personal'
+  );
+  return next ok(
+    not app.is_personal_email('no-reply@example.org'),
+    '''no-reply'' splits into ''no'' and ''reply'', and ''reply'' is a role part'
+  );
+  return next ok(
+    app.is_personal_email('joanne.smith@example.org'),
+    'a two-word personal name is personal'
+  );
+  return next ok(
+    app.is_personal_email('jsmith@example.org'),
+    'an unlisted local part is treated as personal, not role — the allow-list direction'
+  );
+  return next ok(
+    not app.is_personal_email('not-an-address'),
+    'a string with no @ is not something this function has an opinion about'
+  );
+  return next ok(
+    not app.is_personal_email(null),
+    'a null address is not personal'
+  );
+
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+end;
+$$;
+
 select * from tests.suite_core();
 select * from tests.suite_viewer();
 select * from tests.suite_users();
@@ -3109,6 +3269,7 @@ select * from tests.suite_source_tracking();
 select * from tests.suite_onboarding();
 select * from tests.suite_client_criteria();
 select * from tests.suite_data_handling_rules();
+select * from tests.suite_personal_data_exclusion();
 
 select * from finish();
 

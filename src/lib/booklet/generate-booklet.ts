@@ -19,10 +19,13 @@ import {
   type BookletOrganisationInput,
 } from "./build-prompt.ts";
 
-// AC2: generation "may take several seconds" — this is generous headroom above
-// that, not a target latency. Keeps a hung upstream call from leaving the CAM's
-// loading state stuck indefinitely (AC3).
-const TIMEOUT_MS = 30_000;
+// PRD §"Performance and Reliability Targets": Client Booklet generation is ordinarily
+// ≤45s, hard timeout 90s. This is the hard timeout, not the target — a legitimate
+// 46-89s generation must still succeed, not be cut off at an arbitrary tighter value.
+// Route.ts's own maxDuration must stay comfortably above this or the hosting
+// platform kills the request before this timeout gets the chance to return its own
+// clear error.
+const TIMEOUT_MS = 90_000;
 
 // Belt-and-suspenders with the system prompt's own "~250 words" instruction: the
 // prompt asks nicely, this caps it at the API level so a model that ignores the
@@ -53,14 +56,24 @@ export interface GenerateBookletDeps {
 }
 
 function realCallGemini(): CallGeminiFn {
-  const apiKey = process.env.GEMINI_API_KEY;
-  const model = process.env.GEMINI_MODEL;
-  if (!apiKey || !model) {
-    throw new Error("GEMINI_API_KEY and GEMINI_MODEL must both be set to generate a booklet.");
-  }
-  const google = createGoogleGenerativeAI({ apiKey });
-
+  // Deliberately not read/validated here: this factory runs at
+  // createDefaultGenerateBookletDeps() time, outside generateBooklet's own try/catch
+  // (route.ts constructs deps before calling generateBooklet). A missing env var
+  // used to throw right here, synchronously escaping that try/catch entirely — the
+  // route returned a raw 500 with no ERROR_LOG entry, no API_HEALTH_LOGS entry, and
+  // none of AC3's clear-error-plus-retry contract, exactly backwards from the
+  // point of this file. Reading and validating inside the returned closure instead
+  // means the throw happens when deps.callGemini(...) is actually invoked — inside
+  // generateBooklet's try block — so the existing catch handles it like any other
+  // upstream failure. Confirmed in review (PR #368) rather than caught locally.
   return async ({ system, prompt, timeoutMs }) => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    const model = process.env.GEMINI_MODEL;
+    if (!apiKey || !model) {
+      throw new Error("GEMINI_API_KEY and GEMINI_MODEL must both be set to generate a booklet.");
+    }
+    const google = createGoogleGenerativeAI({ apiKey });
+
     const { text } = await generateText({
       model: google(model),
       system,

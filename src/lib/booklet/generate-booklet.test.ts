@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { generateBooklet, type CallGeminiFn } from "./generate-booklet.ts";
+import {
+  createDefaultGenerateBookletDeps,
+  generateBooklet,
+  type CallGeminiFn,
+} from "./generate-booklet.ts";
 
 const INPUT = {
   organisationId: "org-1",
@@ -71,5 +75,48 @@ describe("generateBooklet", () => {
       }),
     );
     assert.deepEqual(result, { error: "The booklet could not be generated. Try again." });
+  });
+
+  // Review finding on PR #368: createDefaultGenerateBookletDeps() used to validate
+  // GEMINI_API_KEY/GEMINI_MODEL eagerly (at construction, before generateBooklet's
+  // own try/catch is ever entered), so a missing env var threw straight past this
+  // file's error handling — no ERROR_LOG, no API_HEALTH_LOGS, no clean {error}
+  // response, contradicting AC3. These prove the fix: construction never throws,
+  // and the missing-config failure is caught and reported exactly like any other
+  // upstream failure.
+  describe("missing Gemini configuration (PR #368 review)", () => {
+    const originalKey = process.env.GEMINI_API_KEY;
+    const originalModel = process.env.GEMINI_MODEL;
+
+    function withoutGeminiEnv(run: () => Promise<void>) {
+      return async () => {
+        delete process.env.GEMINI_API_KEY;
+        delete process.env.GEMINI_MODEL;
+        try {
+          await run();
+        } finally {
+          if (originalKey === undefined) delete process.env.GEMINI_API_KEY;
+          else process.env.GEMINI_API_KEY = originalKey;
+          if (originalModel === undefined) delete process.env.GEMINI_MODEL;
+          else process.env.GEMINI_MODEL = originalModel;
+        }
+      };
+    }
+
+    it(
+      "does not throw when constructing default deps with no env configured",
+      withoutGeminiEnv(async () => {
+        assert.doesNotThrow(() => createDefaultGenerateBookletDeps());
+      }),
+    );
+
+    it(
+      "surfaces missing configuration through the normal error contract, not an uncaught throw",
+      withoutGeminiEnv(async () => {
+        const deps = createDefaultGenerateBookletDeps();
+        const result = await generateBooklet(INPUT, deps);
+        assert.deepEqual(result, { error: "The booklet could not be generated. Try again." });
+      }),
+    );
   });
 });

@@ -21,11 +21,14 @@ import type {
  * client:contact, not client:view — this calls a paid external API on every click,
  * same reasoning as gating the Outreach section on the client detail page.
  *
- * Vercel's default function timeout can be shorter than generate-booklet.ts's own
- * 30s upstream timeout on some hosting tiers — raise this if a real generation gets
- * cut off before the upstream timeout has a chance to return its own clear error.
+ * generate-booklet.ts's own upstream timeout is 90s (PRD hard timeout for Client
+ * Booklet generation). maxDuration must stay comfortably above that or the hosting
+ * platform kills the request before the upstream timeout gets the chance to return
+ * its own clear error — 120s here; confirm against the actual Vercel plan this
+ * deploys to, since some tiers cap function duration below that regardless of what
+ * this value asks for.
  */
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
   const status = reason === "unauthenticated" ? 401 : 403;

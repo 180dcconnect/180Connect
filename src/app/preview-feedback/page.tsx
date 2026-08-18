@@ -7,6 +7,7 @@ import { RATING_LABELS, averageRating } from "@/lib/feedback";
 import { Stage, Rise, Group } from "@/components/dashboard-stage";
 import { OriginButton } from "@/components/ui/origin-button";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { X } from "lucide-react";
 
 const RATING_EMOJI = ["😡", "😕", "😐", "🙂", "😄"];
 
@@ -65,7 +66,7 @@ export default function PreviewFeedbackPage() {
     setPromptSubmitted(true);
     setTimeout(() => {
       setPromptOpen(false);
-    }, 1800);
+    }, 5000);
   };
 
   const handleResetPrompt = () => {
@@ -188,9 +189,20 @@ export default function PreviewFeedbackPage() {
                     transition={{ duration: 0.5, ease: [0.2, 0.7, 0.2, 1] }}
                     className="absolute bottom-6 right-6 z-10 w-[340px] sm:w-[360px]"
                   >
-                    <div className="rounded-2xl border border-black/[0.06] bg-white px-6 py-5 shadow-xl shadow-black/[0.06]">
+                    <div className="relative rounded-2xl border border-black/[0.06] bg-white px-6 py-5 shadow-lg shadow-black/[0.06]">
+                      {/* Close button */}
+                      <button
+                        type="button"
+                        onClick={() => setPromptOpen(false)}
+                        aria-label="Close"
+                        className="absolute right-3.5 top-3.5 flex h-7 w-7 items-center justify-center rounded-full text-foreground/40 transition-colors hover:bg-black/5 hover:text-foreground/80"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+
                       {promptSubmitted ? (
-                        <div className="flex flex-col items-center gap-2 py-3">
+                        /* ── Thank-you state ─────────────────────────────────── */
+                        <div className="flex flex-col items-center gap-2 py-3 pr-2">
                           <span className="text-2xl" role="img" aria-label="Thank you">
                             🙏
                           </span>

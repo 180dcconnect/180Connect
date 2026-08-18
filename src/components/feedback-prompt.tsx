@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { X } from "lucide-react";
 import { FaceRating } from "@/components/spectrumui/face-rating";
 import { submitFeedback, dismissFeedback } from "@/lib/feedback-actions";
 import { RATING_LABELS } from "@/lib/feedback";
@@ -15,7 +16,7 @@ import { OriginButton } from "@/components/ui/origin-button";
  * The face-rating component (Spectrum UI) provides the 1–5 scale; an optional
  * comment textarea sits beneath it.
  *
- * After submit: card animates out, feedback is saved, prompt snoozed 60 days.
+ * After submit: card stays on thank-you state for 5s (or until dismissed via X), then animates out.
  * After dismiss: card animates out, prompt snoozed 30 days. It comes back later.
  *
  * Motion follows the design system: entrance is a blur-up rise, exit reverses.
@@ -27,6 +28,7 @@ export function FeedbackPrompt({ pageContext }: { pageContext?: string }) {
   const [submitted, setSubmitted] = useState(false);
   const [isPending, startTransition] = useTransition();
   const reduceMotion = useReducedMotion();
+  const dismissTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleSubmit = () => {
     if (rating === 0) return;
@@ -38,15 +40,20 @@ export function FeedbackPrompt({ pageContext }: { pageContext?: string }) {
       );
       if (result.ok) {
         setSubmitted(true);
-        // Show the thank-you state for a beat, then exit
-        setTimeout(() => setVisible(false), 1800);
+        // Show the thank-you state for 5 seconds, then animate out
+        dismissTimerRef.current = setTimeout(() => setVisible(false), 5000);
       }
     });
   };
 
   const handleDismiss = () => {
+    if (dismissTimerRef.current) {
+      clearTimeout(dismissTimerRef.current);
+    }
     startTransition(async () => {
-      await dismissFeedback();
+      if (!submitted) {
+        await dismissFeedback();
+      }
       setVisible(false);
     });
   };
@@ -61,10 +68,20 @@ export function FeedbackPrompt({ pageContext }: { pageContext?: string }) {
           transition={{ duration: 0.5, ease: [0.2, 0.7, 0.2, 1] }}
           className="fixed bottom-6 right-6 z-30 w-[340px] sm:w-[360px]"
         >
-          <div className="rounded-2xl border border-black/[0.06] bg-white px-6 py-5 shadow-lg shadow-black/[0.06]">
+          <div className="relative rounded-2xl border border-black/[0.06] bg-white px-6 py-5 shadow-lg shadow-black/[0.06]">
+            {/* Close button */}
+            <button
+              type="button"
+              onClick={handleDismiss}
+              aria-label="Close"
+              className="absolute right-3.5 top-3.5 flex h-7 w-7 items-center justify-center rounded-full text-foreground/40 transition-colors hover:bg-black/5 hover:text-foreground/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black/20"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
             {submitted ? (
               /* ── Thank-you state ─────────────────────────────────── */
-              <div className="flex flex-col items-center gap-2 py-3">
+              <div className="flex flex-col items-center gap-2 py-3 pr-2">
                 <span className="text-2xl" role="img" aria-label="Thank you">
                   🙏
                 </span>

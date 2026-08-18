@@ -47,11 +47,7 @@
 --                 | RAW_SOURCE_RECORDS: existing policies unchanged.
 --   Documentation | Update Data Model tab 03 + tab 02 Data Dictionary.
 --
-<<<<<<<< HEAD:supabase/migrations/20260817130000_create_data_handling_rules.sql
--- Reversibility: paired rollback in ../rollback/20260817130000_create_data_handling_rules.down.sql
-========
 -- Reversibility: paired rollback in ../rollback/20260818100200_create_data_handling_rules.down.sql
->>>>>>>> origin/dev:supabase/migrations/20260818100200_create_data_handling_rules.sql
 
 ------------------------------------------------------------------------
 -- 1. VERSION TRACKER (singleton row)

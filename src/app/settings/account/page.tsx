@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
+import { Rise, Stage } from "@/components/dashboard-stage";
 import { AccountSettingsForm } from "./account-form";
 
 export default async function AccountSettingsPage() {
@@ -17,29 +17,25 @@ export default async function AccountSettingsPage() {
   const actor = authorization.actor;
 
   return (
-    <main className="min-h-screen bg-[#f1f2f4] p-6">
-      <section className="mx-auto max-w-xl rounded-2xl bg-white p-8 shadow-sm">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold">Account</h1>
-            <p className="mt-1 text-sm text-foreground/65">
-              Manage the details shown on your profile.
-            </p>
-          </div>
-          <Link
-            className="text-sm font-bold text-brand hover:underline"
-            href="/settings"
-          >
-            All settings
-          </Link>
-        </div>
+    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+      <Stage className="mx-auto w-full max-w-2xl space-y-10">
+        <Rise>
+          <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
+            Account
+          </h1>
+          <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
+            Manage the details shown on your profile.
+          </p>
+        </Rise>
 
-        <AccountSettingsForm
-          initialFullName={actor.fullName ?? ""}
-          email={actor.email}
-          role={actor.role}
-        />
-      </section>
-    </main>
+        <Rise>
+          <AccountSettingsForm
+            initialFullName={actor.fullName ?? ""}
+            email={actor.email}
+            role={actor.role}
+          />
+        </Rise>
+      </Stage>
+    </div>
   );
 }

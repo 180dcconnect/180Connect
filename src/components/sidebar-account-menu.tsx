@@ -113,7 +113,7 @@ export function SidebarAccountMenu({
          * prop, so an item cannot *be* an anchor. `logout` redirects, so
          * calling the action directly ends the same way the form post did.
          */}
-        <DropdownMenuItem onSelect={() => router.push("/profile")}>
+        <DropdownMenuItem onSelect={() => router.push("/settings/profile")}>
           <CircleUserRound aria-hidden="true" />
           Profile
         </DropdownMenuItem>

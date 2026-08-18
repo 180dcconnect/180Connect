@@ -1,7 +1,7 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
+import { Rise, Stage } from "@/components/dashboard-stage";
 import { OutreachPreferencesForm } from "./preferences-form";
 import type { GeographicReach, IncomeBand } from "./constants";
 
@@ -28,29 +28,25 @@ export default async function OutreachPreferencesPage() {
     .maybeSingle<OutreachPreferencesRow>();
 
   return (
-    <main className="min-h-screen bg-[#f1f2f4] p-6">
-      <section className="mx-auto max-w-xl rounded-2xl bg-white p-8 shadow-sm">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold">Outreach preferences</h1>
-            <p className="mt-1 text-sm text-foreground/65">
-              Set the geography, sector and size focus for your outreach queue.
-            </p>
-          </div>
-          <Link
-            className="text-sm font-bold text-brand hover:underline"
-            href="/settings"
-          >
-            All settings
-          </Link>
-        </div>
+    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+      <Stage className="mx-auto w-full max-w-2xl space-y-10">
+        <Rise>
+          <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
+            Outreach preferences
+          </h1>
+          <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
+            Set the geography, sector and size focus for your outreach queue.
+          </p>
+        </Rise>
 
-        <OutreachPreferencesForm
-          initialGeographicReach={data?.preferred_geographic_reach ?? []}
-          initialSectors={data?.preferred_sectors ?? []}
-          initialIncomeBands={data?.preferred_income_bands ?? []}
-        />
-      </section>
-    </main>
+        <Rise>
+          <OutreachPreferencesForm
+            initialGeographicReach={data?.preferred_geographic_reach ?? []}
+            initialSectors={data?.preferred_sectors ?? []}
+            initialIncomeBands={data?.preferred_income_bands ?? []}
+          />
+        </Rise>
+      </Stage>
+    </div>
   );
 }

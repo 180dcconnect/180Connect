@@ -181,6 +181,13 @@ future RPC. `deactivate_user` additionally refuses to close an account while it 
 owns organisations unless given a destination, and moves them in the same transaction —
 see §3.2.
 
+`last_seen_at` — "last active", not last login — is written only by
+`public.touch_last_seen()` (20260816230000), a SECURITY DEFINER RPC that updates only
+`auth.uid()`'s own row. Granted to no one directly (same column-grant lockout as `role`),
+so a client cannot forge or backdate it. `getCurrentActor()` calls it, throttled to once
+per 5 minutes per user, on every signed-in page and every admin API request — not just at
+login. Not audited: presence isn't an ownership/status/role/approval change.
+
 ### 3.2 Canonical organisation data — shared read, admin write
 
 Everyone authorised reads canonical data (§4.3 "View canonical organisations": all
@@ -908,6 +915,43 @@ process problem rather than a security one: nothing recreates it on `db reset`, 
 cannot reach production through the release process. It needs capturing as a migration
 by whoever owns F013/F014. Note also that `users.deactivated_at` is now in the Data
 Model but exists in neither the database nor a migration.
+# F036 manual entry access
+
+`MANUAL_ENTRY_RECORDS` is readable by its creating CAM/admin and by admins.
+Viewers cannot read it. All writes are RPC-only: active CAMs/admins call
+`save_manual_entry` to create or update their own draft and to submit it. Drafts
+may be incomplete; submission requires the confirmed standard field set. Only
+admins call `approve_manual_entry` or `reject_manual_entry`. An admin submission
+may immediately call the same approval RPC without a second admin, while a CAM
+submission remains pending. The RPCs self-authorise and write `AUDIT_LOG` in the
+same transaction as each draft/status/review change. Approval also re-runs F042's
+duplicate rule and requires the human link-existing/create-new decision before
+creating an active organisation. Direct INSERT, UPDATE and DELETE privileges are
+withheld from authenticated users. `get_organisation_sources_with_actor` exposes
+only safe provenance metadata and the creating user's display name to active
+users; it does not expose the full draft or pending submission.
+
+# F037 manual URL import access
+
+A URL import writes through `create_url_import_draft`, which active CAMs and admins
+may execute and viewers may not. It always writes the caller as the submitter and
+always writes a `draft`: there is no parameter that submits, so an import cannot
+reach an organisation without the CAM opening the draft and pressing submit through
+F036's own path. It refuses to create a row without the URL the values came from,
+and audits as `url_import_drafted`.
+
+`set_url_import_provenance` narrows `imported_field_paths` only, and only for the
+submitter's own draft — a field can stop being labelled as imported when the CAM
+edits it, and can never start. `discard_manual_entry_draft` deletes the submitter's
+own `draft` row after writing `manual_entry_draft_discarded` to `AUDIT_LOG`; a
+submitted or reviewed entry cannot be discarded, and no DELETE privilege or policy
+is granted to authenticated users for the table. `get_organisation_import_origin`
+returns the source URL and the imported-field list to any active user, because "where
+did this client come from" is a question every CAM viewing a profile needs answered;
+it exposes nothing else from the submission.
+
+The fetched page is stored in `RAW_SOURCE_RECORDS` with `record_source = 'website'`,
+under the same admin-read, service-role-write rules as every API source.
 
 # F047 data-quality review flags
 

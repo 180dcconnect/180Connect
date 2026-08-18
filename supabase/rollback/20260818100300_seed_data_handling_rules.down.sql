@@ -1,4 +1,8 @@
+<<<<<<<< HEAD:supabase/rollback/20260817130100_seed_data_handling_rules.down.sql
 -- Rollback: 20260817130100_seed_data_handling_rules
+========
+-- Rollback: 20260818100300_seed_data_handling_rules
+>>>>>>>> origin/dev:supabase/rollback/20260818100300_seed_data_handling_rules.down.sql
 -- Removes the seeded data handling rules.
 --
 -- Matched on `created_by is null` rather than `rule_version = 1`: only the seed

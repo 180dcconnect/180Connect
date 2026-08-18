@@ -1,4 +1,8 @@
+<<<<<<<< HEAD:supabase/rollback/20260817130000_create_data_handling_rules.down.sql
 -- Rollback: 20260817130000_create_data_handling_rules
+========
+-- Rollback: 20260818100200_create_data_handling_rules
+>>>>>>>> origin/dev:supabase/rollback/20260818100200_create_data_handling_rules.down.sql
 -- Reverses F246 Public Data Handling Rules migration.
 
 -- Drop RPCs first (depend on the table)

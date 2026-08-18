@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 import type { DiscrepancyChoice, FieldDiscrepancyRow } from "@/lib/discrepancies";
 
 const FIELD_LABEL: Record<string, string> = {
@@ -121,22 +122,23 @@ export function DiscrepanciesPanel({
                   value={notes[row.id] ?? ""}
                 />
                 <div className="mt-3 flex gap-3">
-                  <button
-                    className="rounded-lg border border-black/15 px-4 py-2 text-sm font-bold disabled:opacity-50"
+                  <OriginButton
+                    variant="outline"
+                    size="sm"
                     disabled={busy}
                     onClick={() => resolve(row.id, "existing")}
                     type="button"
                   >
                     Keep existing
-                  </button>
-                  <button
-                    className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                  </OriginButton>
+                  <OriginButton
+                    size="sm"
                     disabled={busy}
                     onClick={() => resolve(row.id, "incoming")}
                     type="button"
                   >
                     Use incoming
-                  </button>
+                  </OriginButton>
                 </div>
               </li>
             ))}

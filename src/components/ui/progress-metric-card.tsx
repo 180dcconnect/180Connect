@@ -2,6 +2,7 @@
 
 import { useId, useMemo, useState } from "react";
 import { ArrowDown, ArrowRight, ArrowUp } from "lucide-react";
+import { motion } from "motion/react";
 import {
   ACCENTS,
   formatCompact,
@@ -293,19 +294,24 @@ export default function ProgressMetricCard({
           !hasFooter ? (size === "lg" ? "pb-9" : size === "md" ? "pb-7" : "pb-5") : ""
         }`}
       >
-        {/* Wraps rather than compressing: on a phone the title, the view toggle,
-            the delta and the period label do not fit on one line, and the row
-            was clipping the period off the right edge of the card. */}
+        {/* Header row */}
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="flex min-w-0 items-center gap-3">
             <h3 className={`${sz.title} font-semibold tracking-tight text-foreground`}>{title}</h3>
             <ViewToggle value={view} onChange={setView} />
           </div>
           <div className="flex items-center gap-3.5 text-[14px]">
-            <span className="flex items-center gap-1 font-medium" style={{ color: color.text }}>
+            <motion.span
+              key={`trend-${selectedLabel}`}
+              initial={{ opacity: 0, y: -3 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.25 }}
+              className="flex items-center gap-1 font-medium"
+              style={{ color: color.text }}
+            >
               <TrendIcon size={16} strokeWidth={2.5} />
               {displayPercent}
-            </span>
+            </motion.span>
             <PeriodSelect
               value={selectedLabel}
               options={periods}
@@ -330,11 +336,16 @@ export default function ProgressMetricCard({
           </div>
         )}
 
-        <div
+        {/* Headline metric */}
+        <motion.div
+          key={`headline-${selectedLabel}`}
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, ease: [0.2, 0.7, 0.2, 1] }}
           className={`mt-5 ${sz.headline} font-medium leading-none tracking-tight text-foreground`}
         >
           {displayTotal}
-        </div>
+        </motion.div>
       </div>
 
       {/* Opaque footer: delta on the left, secondary stats on the right */}
@@ -344,9 +355,16 @@ export default function ProgressMetricCard({
         >
           {showDelta && (
             <div>
-              <span className="font-medium" style={{ color: color.text }}>
+              <motion.span
+                key={`delta-${selectedLabel}`}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.25 }}
+                className="font-medium"
+                style={{ color: color.text }}
+              >
                 {displayDelta}
-              </span>{" "}
+              </motion.span>{" "}
               <span className="text-muted-foreground">{deltaLabel}</span>
             </div>
           )}

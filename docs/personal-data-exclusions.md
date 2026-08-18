@@ -4,8 +4,8 @@
 information such name of trustees, personal email addresses, which shall not be
 stored or used in any way or form."
 
-**Enforced by:** `supabase/migrations/20260817130000_create_data_handling_rules.sql`
-(F246, field-level deny-list) and `20260817130200_add_personal_data_exclusion.sql`
+**Enforced by:** `supabase/migrations/20260818100200_create_data_handling_rules.sql`
+(F246, field-level deny-list) and `20260818100400_add_personal_data_exclusion.sql`
 (F247, adds `rule_kind`, the two `redact_*` kinds, and `personal_email_role_parts`).
 Applied at the single point external data enters the platform —
 `applyDataHandling` in `src/lib/ingestion/apply-data-handling.ts` — so no writer
@@ -80,7 +80,7 @@ Most of the table above says "No" under "Live today". That's by design, not
 a gap: a rule that exists before the endpoint it covers is the only version
 of this control that is ever ahead of the data it's meant to stop, rather
 than reacting after the fact. The seed migration
-(`20260817130200_add_personal_data_exclusion.sql` §5) makes the same point —
+(`20260818100400_add_personal_data_exclusion.sql` §5) makes the same point —
 the cost of a rule matching nothing is nothing, and the day an adapter starts
 calling an officers or trustees endpoint, the exclusion is already in force
 with no code change and no review cycle to catch up on.

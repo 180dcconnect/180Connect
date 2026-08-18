@@ -4,7 +4,7 @@ import { motion } from "motion/react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { CTA_FILL, LIFT, ctaArrow, ctaDisc, ctaLabel, ctaWash } from "./motion";
+import { CTA_FILL, CTA_WASH, LIFT, ctaArrow, ctaDisc, ctaLabel, ctaWash } from "./motion";
 import { GLASS, GROUND, INK, LABEL_REST, LIME, LIP, SHEET_TINT } from "./tokens";
 
 const MotionLink = motion.create(Link);
@@ -79,14 +79,25 @@ function CtaBody({
         className={`relative flex items-center overflow-hidden rounded-full ring-1 ring-white/25 ${t.blur} ${
           large ? "h-10 px-6" : "h-9 px-4 sm:px-5"
         }`}
-        style={{ backgroundColor: t.pill, boxShadow: LIP }}
+        style={{ boxShadow: LIP }}
       >
+        {/* Resting dark glass underlay: fades out on hover so dark pixels never bleed
+            through the antialiased pill boundary against the page ground. */}
+        <motion.span
+          className="pointer-events-none absolute inset-0 rounded-full"
+          style={{ backgroundColor: t.pill }}
+          variants={{
+            rest: { opacity: 1, transition: { duration: 0.2 } },
+            hover: { opacity: 0, transition: { duration: CTA_WASH, delay: CTA_FILL } },
+          }}
+          aria-hidden="true"
+        />
         {/* Wide enough that its square trailing edge never enters frame — only
             the rounded leading edge is ever on screen. The 1px vertical bleed is
             load-bearing; see ctaWash. */}
         <motion.span
           variants={ctaWash}
-          className="absolute -inset-y-[1px] block w-[999px] rounded-l-full"
+          className="absolute -inset-y-[2px] block w-[999px] rounded-l-full"
           style={{ backgroundColor: t.accent }}
           aria-hidden="true"
         />

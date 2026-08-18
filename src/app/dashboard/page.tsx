@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { getCurrentActor } from "@/lib/auth/actor";
@@ -7,14 +6,20 @@ import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
 import {
   computeDashboardMetrics,
+  filterActiveSuppressed,
   needsAttention,
   organisationGrowthSeries,
   type DashboardOrgRow,
+  type OpenSuppression,
 } from "@/lib/dashboard-metrics";
+import { formatTeamActivities, type FormattedTeamActivity, type RawTeamActivityRow } from "@/lib/team-activity";
 import { StatCard } from "@/components/stat-card";
 import ProgressMetricCard from "@/components/ui/progress-metric-card";
 import { AttentionList } from "@/components/attention-list";
+import { TeamActivityFeed } from "@/components/team-activity-feed";
 import { FirstRunGuide } from "@/components/first-run-guide";
+import { OriginButton } from "@/components/ui/origin-button";
+import { OnboardingPreviewBar } from "@/components/onboarding-preview-bar";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import {
   REVIEW_CLIENTS_EMPTY_STATE,
@@ -22,6 +27,8 @@ import {
   shouldShowGuide,
   type OnboardingUser,
 } from "@/lib/onboarding";
+import { FeedbackPrompt } from "@/components/feedback-prompt";
+import { shouldPromptFeedback } from "@/lib/feedback";
 
 /**
  * F021 — first screen after login. The sidebar (AppShell/F030) already wraps this
@@ -43,9 +50,9 @@ import {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; preview_guide?: string; preview_feedback?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, preview_guide, preview_feedback } = await searchParams;
   let user;
 
   try {
@@ -76,20 +83,43 @@ export default async function DashboardPage({
   const canViewClients = hasPermission(actor.role, "client:view");
 
   let rows: DashboardOrgRow[] = [];
+  let teamActivities: FormattedTeamActivity[] = [];
   let loadFailed = false;
 
   if (canViewClients) {
     const supabase = await createClient();
-    const organisations = await supabase
-      .from("organisations")
-      .select("id, legal_name, outreach_status, owner_id, updated_at, created_at")
-      .overrideTypes<DashboardOrgRow[], { merge: false }>();
+    const [organisations, openSuppressions, rawActivity] = await Promise.all([
+      supabase
+        .from("organisations")
+        .select("id, legal_name, outreach_status, owner_id, updated_at, created_at")
+        .overrideTypes<DashboardOrgRow[], { merge: false }>(),
+      supabase
+        .from("suppressions")
+        .select("organisation_id, status")
+        .in("status", ["pending", "active"])
+        .overrideTypes<OpenSuppression[], { merge: false }>(),
+      supabase.rpc("get_recent_team_activity", { p_limit: 10 }),
+    ]);
 
     if (organisations.error) {
       await reportError(organisations.error, { operation: "dashboard.page_metrics" });
       loadFailed = true;
+    }
+    if (openSuppressions.error) {
+      await reportError(openSuppressions.error, { operation: "dashboard.page_suppressions" });
+      loadFailed = true;
+    }
+    if (rawActivity.error) {
+      await reportError(rawActivity.error, { operation: "dashboard.team_activity" });
     } else {
-      rows = organisations.data ?? [];
+      teamActivities = formatTeamActivities(
+        (rawActivity.data ?? []) as RawTeamActivityRow[],
+        actor.id,
+      );
+    }
+
+    if (!loadFailed) {
+      rows = filterActiveSuppressed(organisations.data ?? [], openSuppressions.data ?? []);
     }
   }
 
@@ -113,10 +143,35 @@ export default async function DashboardPage({
   // (user_onboarding_steps). A failure to read either is not worth failing the
   // dashboard over — the guide simply doesn't render, and the CAM sees the normal
   // screen rather than an error about a checklist.
+  //
+  // In addition, if `preview_guide` is present in searchParams, we force the guide
+  // into one of several preview states for dev/testing regardless of account status.
   let guide: ReturnType<typeof guideProgress> | null = null;
   let ownsAnyClient = false;
 
-  if (actor.role === "cam") {
+  if (preview_guide !== undefined) {
+    if (preview_guide === "1") {
+      guide = guideProgress(["outreach_preferences"]);
+      ownsAnyClient = rows.some((row) => row.owner_id === actor.id);
+    } else if (preview_guide === "2" || preview_guide === "complete") {
+      guide = guideProgress(["outreach_preferences", "review_clients"]);
+      ownsAnyClient = true;
+    } else if (preview_guide === "empty") {
+      guide = guideProgress([]);
+      ownsAnyClient = false;
+    } else if (preview_guide === "live") {
+      const supabase = await createClient();
+      const completedSteps = await supabase.from("user_onboarding_steps").select("step_key");
+      guide = guideProgress(
+        (completedSteps.data ?? []).map((row: { step_key: string }) => row.step_key),
+      );
+      ownsAnyClient = rows.some((row) => row.owner_id === actor.id);
+    } else {
+      // preview_guide === "0" or "true" or default preview
+      guide = guideProgress([]);
+      ownsAnyClient = rows.some((row) => row.owner_id === actor.id);
+    }
+  } else if (actor.role === "cam") {
     const supabase = await createClient();
     const [profile, completedSteps] = await Promise.all([
       supabase
@@ -168,32 +223,50 @@ export default async function DashboardPage({
       : step,
   );
 
+  let showFeedback = false;
+  if (preview_feedback !== undefined) {
+    showFeedback = true;
+  } else {
+    try {
+      const supabase = await createClient();
+      const { data: userProfile } = await supabase
+        .from("users")
+        .select("invite_accepted_at, feedback_snoozed_until")
+        .eq("id", actor.id)
+        .maybeSingle();
+
+      if (userProfile) {
+        showFeedback = shouldPromptFeedback({
+          inviteAcceptedAt: userProfile.invite_accepted_at,
+          feedbackSnoozedUntil: userProfile.feedback_snoozed_until,
+        });
+      }
+    } catch {
+      // Non-fatal: prompt simply doesn't show
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="mx-auto w-full max-w-6xl space-y-10">
         <Rise className="flex flex-wrap items-end justify-between gap-x-8 gap-y-5">
           <div className="min-w-0">
-            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-black leading-[1] tracking-[-0.03em]">
+            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
               Dashboard
             </h1>
             
           </div>
 
-          {/* The one accent on the screen: a single pill, brand green, pointing at
+          {/* The one accent on the screen: a single pill, glass backdrop + lime hover fill, pointing at
               the screen where the work actually happens. */}
           {canViewClients && (
-            <Link
+            <OriginButton
               href="/clients"
-              className="group inline-flex shrink-0 items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-brand-hover focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand"
+              size="md"
+              className="shrink-0"
             >
               View all clients
-              <span
-                aria-hidden="true"
-                className="transition-transform duration-200 group-hover:translate-x-0.5"
-              >
-                →
-              </span>
-            </Link>
+            </OriginButton>
           )}
         </Rise>
 
@@ -258,12 +331,6 @@ export default async function DashboardPage({
         ) : (
           <>
             <Group className="space-y-4">
-              <Rise className="flex items-baseline justify-between gap-4">
-                <h2 className="text-xl font-black tracking-[-0.02em]">Pipeline</h2>
-                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                  Team-wide
-                </p>
-              </Rise>
 
               {/* The headline metric gets the whole width: it carries a 30-day
                   curve, and the three status counts read as its breakdown
@@ -318,7 +385,7 @@ export default async function DashboardPage({
 
             <Group className="space-y-4">
               <Rise className="flex items-baseline justify-between gap-4">
-                <h2 className="text-xl font-black tracking-[-0.02em]">Needs attention</h2>
+                <h2 className="text-xl font-semibold font-body tracking-[-0.02em]">Needs attention</h2>
                 <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
                   Yours · longest waiting first
                 </p>
@@ -328,9 +395,24 @@ export default async function DashboardPage({
                 <AttentionList items={attentionItems} />
               </Rise>
             </Group>
+
+            <Group className="space-y-4">
+              <Rise className="flex items-baseline justify-between gap-4">
+                <h2 className="text-xl font-semibold font-body tracking-[-0.02em]">Recent team activity</h2>
+                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
+                  The team · latest actions
+                </p>
+              </Rise>
+
+              <Rise>
+                <TeamActivityFeed items={teamActivities} />
+              </Rise>
+            </Group>
           </>
         )}
       </Stage>
+      {preview_guide !== undefined && <OnboardingPreviewBar currentMode={preview_guide} />}
+      {showFeedback && <FeedbackPrompt pageContext="/dashboard" />}
     </div>
   );
 }

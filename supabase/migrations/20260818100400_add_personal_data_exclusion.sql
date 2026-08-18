@@ -1,5 +1,5 @@
 -- Migration: add_personal_data_exclusion
--- Sequence: extends the compliance layer added by 20260817130000_create_data_handling_rules
+-- Sequence: extends the compliance layer added by 20260818100200_create_data_handling_rules
 --   (F246). No new position in the Data Model sequence — same layer, second story.
 -- Story: F247 Personal Data Exclusion (#242)
 -- Spec: Technical Brief §5 Data & Legal Risks (1); docs/personal-data-exclusions.md
@@ -67,7 +67,7 @@
 --   Approved by   | Pending — raised with Bashir (Project Leader) on 2026-08-17.
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260817130200_add_personal_data_exclusion.down.sql
+-- ../rollback/20260818100400_add_personal_data_exclusion.down.sql
 
 ------------------------------------------------------------------------
 -- 1. RULE KINDS
@@ -469,7 +469,7 @@ update public.data_handling_rule_versions
   where id = true;
 
 -- Names. created_by null throughout: a migration-seeded rule has no human author,
--- the convention 20260817130100 established.
+-- the convention 20260818100300 established.
 insert into public.data_handling_rules
   (rule_version, source, field_path, action, reason, rule_kind)
 select

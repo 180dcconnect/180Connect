@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 
 export type DataQualityEventRow = {
   id: string;
@@ -141,14 +142,15 @@ export function ReviewPanel({
                   rows={2}
                   value={notes[flag.id] ?? ""}
                 />
-                <button
-                  className="mt-3 rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                <OriginButton
+                  className="mt-3"
                   disabled={busy}
+                  size="sm"
                   onClick={() => decide("status_flag", flag.id, "Acknowledged.")}
                   type="button"
                 >
                   Acknowledge
-                </button>
+                </OriginButton>
               </li>
             ))}
           </ul>
@@ -188,14 +190,15 @@ export function ReviewPanel({
                   rows={2}
                   value={notes[event.id] ?? ""}
                 />
-                <button
-                  className="mt-3 rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                <OriginButton
+                  className="mt-3"
                   disabled={busy}
+                  size="sm"
                   onClick={() => decide("data_quality_event", event.id, "Marked reviewed.")}
                   type="button"
                 >
                   Mark reviewed
-                </button>
+                </OriginButton>
               </li>
             ))}
           </ul>

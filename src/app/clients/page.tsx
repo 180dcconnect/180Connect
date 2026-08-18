@@ -16,6 +16,7 @@ import {
   type OpenSuppression,
 } from "./visible-clients.ts";
 import { BrandSearchBar } from "@/components/brand/search-bar";
+import { ClaimButton } from "./[id]/claim-button";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 import { Group, Rise } from "@/components/dashboard-stage";
 import { OriginButton } from "@/components/ui/origin-button";

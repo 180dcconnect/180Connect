@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 
 export type HandoverUser = {
   id: string;
@@ -199,13 +200,15 @@ export function OffboardPanel({ users }: { users: HandoverUser[] }) {
             value={reason}
           />
 
-          <button
-            className="mt-6 rounded-lg bg-brand px-5 py-2.5 font-bold text-white disabled:opacity-50"
+          <OriginButton
+            className="mt-6"
             disabled={busy || !ready}
+            loading={busy}
+            size="md"
             type="submit"
           >
             {busy ? "Reassigning…" : "Reassign the work"}
-          </button>
+          </OriginButton>
         </>
       )}
 

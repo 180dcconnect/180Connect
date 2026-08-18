@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useActionState, useState, type FormEvent } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 import { discardImportDraft, type UrlImportState } from "./import-actions";
 import { saveManualEntry, type ManualEntryState } from "./actions";
 
@@ -291,8 +292,9 @@ export function ManualEntryForm({
         )}
 
         <div className="flex flex-wrap gap-3">
-          <button
-            className="rounded-lg border border-brand px-4 py-2 font-bold text-brand disabled:opacity-50"
+          <OriginButton
+            variant="outline"
+            size="md"
             disabled={pending}
             formNoValidate
             name="intent"
@@ -300,16 +302,17 @@ export function ManualEntryForm({
             value="draft"
           >
             {pending ? "Saving…" : "Save draft"}
-          </button>
-          <button
-            className="rounded-lg bg-brand px-4 py-2 font-bold text-white disabled:opacity-50"
+          </OriginButton>
+          <OriginButton
+            size="md"
             disabled={pending}
+            loading={pending}
             name="intent"
             type="submit"
             value="submit"
           >
             {pending ? "Submitting…" : isAdmin ? "Create active client" : "Submit for review"}
-          </button>
+          </OriginButton>
         </div>
       </form>
     </>

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useActionState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 import {
   approveManualEntry,
   checkAvailableManualEntryDependencies,
@@ -124,9 +125,10 @@ export function ManualEntryReviewForm({
             </>
           )}
 
-          <button
-            className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          <OriginButton
             disabled={approving}
+            loading={approving}
+            size="md"
             type="submit"
           >
             {approving
@@ -134,7 +136,7 @@ export function ManualEntryReviewForm({
               : state.approval.candidateOrganisationId
                 ? "Save decision and approve"
                 : "Approve and create client"}
-          </button>
+          </OriginButton>
         </form>
       )}
 

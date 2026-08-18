@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 import type { SuppressionRow } from "@/lib/suppressions";
 
 type OrganisationOption = { id: string; legal_name: string };
@@ -129,13 +130,15 @@ export function SuppressionsPanel({
           value={reason}
         />
 
-        <button
-          className="mt-4 rounded-lg bg-brand px-5 py-2.5 font-bold text-white disabled:opacity-50"
+        <OriginButton
           disabled={busy || !organisationId || reason.trim() === ""}
+          loading={busy}
+          size="md"
           type="submit"
+          className="mt-4"
         >
           {busy ? "Suppressing…" : "Suppress"}
-        </button>
+        </OriginButton>
 
         <p aria-live="polite" className="mt-4 min-h-6 text-sm font-bold">
           {message}
@@ -171,22 +174,23 @@ export function SuppressionsPanel({
                   value={notes[row.id] ?? ""}
                 />
                 <div className="mt-3 flex gap-3">
-                  <button
-                    className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                  <OriginButton
+                    size="sm"
                     disabled={busy}
                     onClick={() => decide(row.id, true)}
                     type="button"
                   >
                     Approve
-                  </button>
-                  <button
-                    className="rounded-lg border border-black/15 px-4 py-2 text-sm font-bold disabled:opacity-50"
+                  </OriginButton>
+                  <OriginButton
+                    variant="outline"
+                    size="sm"
                     disabled={busy}
                     onClick={() => decide(row.id, false)}
                     type="button"
                   >
                     Reject
-                  </button>
+                  </OriginButton>
                 </div>
               </li>
             ))}

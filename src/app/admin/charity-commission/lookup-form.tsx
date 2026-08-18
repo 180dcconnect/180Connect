@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 import { lookupCharity, type CharityCommissionImportState } from "./actions";
 
 const initialLookupState: CharityCommissionImportState = {
@@ -45,13 +46,14 @@ export function CharityCommissionLookupForm({ configured }: { configured: boolea
             placeholder="For example, 1218781"
           />
         </div>
-        <button
-          className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
+        <OriginButton
           disabled={!configured || pending}
+          loading={pending}
+          size="md"
           type="submit"
         >
           {pending ? "Looking up…" : "Look up charity"}
-        </button>
+        </OriginButton>
       </form>
 
       {state.kind !== "idle" && (

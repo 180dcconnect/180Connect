@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { OriginButton } from "@/components/ui/origin-button";
 import { FirstRunGuide, type GuideStep } from "@/components/first-run-guide";
 import { SidebarChecklist } from "@/components/sidebar-checklist";
 import { PlayfulTodolist } from "@/components/animate-ui/components/community/playful-todolist";
@@ -68,12 +69,12 @@ export default function PreviewGuidePage() {
             >
               OriginButton Showcase ✨
             </Link>
-            <Link
+            <OriginButton
               href="/dashboard?preview_guide=0"
-              className="rounded-full bg-brand px-4 py-2 text-xs font-bold text-white shadow-xs transition-colors hover:bg-brand-hover"
+              size="sm"
             >
               View on live Dashboard →
-            </Link>
+            </OriginButton>
           </div>
         </Rise>
 

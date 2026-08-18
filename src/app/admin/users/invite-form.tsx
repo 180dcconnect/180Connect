@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 import { sendInviteAction } from "./invite-actions";
 import type { InviteState } from "@/lib/auth/invite";
 
@@ -43,13 +44,15 @@ export function InviteForm() {
           <option value="viewer">Viewer</option>
         </select>
       </div>
-      <button
+      <OriginButton
         type="submit"
         disabled={pending}
-        className="mt-2 h-10 w-full rounded-lg bg-brand px-5 text-sm font-bold text-white transition-colors hover:bg-brand-hover disabled:cursor-wait disabled:opacity-60"
+        loading={pending}
+        size="md"
+        className="mt-2 w-full"
       >
         {pending ? "Sending..." : "Send invite"}
-      </button>
+      </OriginButton>
       <p aria-live="polite" className="w-full min-h-5 text-sm font-bold">
         {emailError ? (
           <span className="text-red-700">{emailError}</span>

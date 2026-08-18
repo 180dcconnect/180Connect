@@ -27,3 +27,10 @@ test("buildStageOnePrompt handles missing optional context", () => {
   assert.match(result.prompt, /Not provided/);
   assert.match(result.prompt, /do not mention that data is missing/i);
 });
+
+test("buildStageOnePrompt applies each selected email length", () => {
+  const context = { organisationName: "Example", organisationType: "charity" };
+  assert.match(buildStageOnePrompt(context, { length: "short" }).system, /70 and 110 words/);
+  assert.match(buildStageOnePrompt(context, { length: "standard" }).system, /120 and 180 words/);
+  assert.match(buildStageOnePrompt(context, { length: "detailed" }).system, /190 and 260 words/);
+});

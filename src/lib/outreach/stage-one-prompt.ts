@@ -13,6 +13,15 @@ export type StageOneContext = {
   newsHooks?: string[] | null;
 };
 
+export const EMAIL_LENGTHS = ["short", "standard", "detailed"] as const;
+export type EmailLength = (typeof EMAIL_LENGTHS)[number];
+
+const LENGTH_INSTRUCTIONS: Record<EmailLength, string> = {
+  short: "Keep the body between 70 and 110 words, with no more than three short paragraphs.",
+  standard: "Keep the body between 120 and 180 words, with clear, readable paragraphs.",
+  detailed: "Keep the body between 190 and 260 words, adding useful context without repetition.",
+};
+
 function value(value: string | null | undefined): string {
   return value?.trim() || "Not provided";
 }
@@ -21,11 +30,16 @@ function values(items: string[] | null | undefined): string {
   return items?.filter(Boolean).join(", ") || "Not provided";
 }
 
-export function buildStageOnePrompt(context: StageOneContext) {
+export function buildStageOnePrompt(
+  context: StageOneContext,
+  options: { length?: EmailLength } = {},
+) {
+  const length = options.length ?? "standard";
   return {
     system: `You draft initial charity outreach emails for 180 Degrees Consulting Sheffield.
 Use only facts supplied in the client context. Never invent achievements, needs, people, partnerships, or news.
 Write a concise, warm and professional first-contact email. Explain that 180 Degrees Consulting Sheffield is a student-led consultancy supporting socially minded organisations. Do not promise outcomes or imply an existing relationship.
+${LENGTH_INSTRUCTIONS[length]}
 Return exactly one JSON object with two string properties: "subject" and "body". Do not use markdown fences. The body must be plain text and must not include a sender signature.`,
     prompt: `Draft a Stage 1 outreach email using this reviewed client context.
 

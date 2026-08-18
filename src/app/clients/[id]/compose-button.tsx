@@ -7,6 +7,7 @@ import { OriginButton } from "@/components/ui/origin-button";
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
 type Draft = { id: string; subject: string; body: string };
+type EmailLength = "short" | "standard" | "detailed";
 
 /** F100 creates a review draft only, after the current outreach preflight passes. */
 export function ComposeButton({
@@ -33,6 +34,7 @@ export function ComposeButton({
         ? { text: ownershipWarning, tone: "conflict" }
         : null,
   );
+  const [length, setLength] = useState<EmailLength>("standard");
 
   async function generate() {
     setBusy(true);
@@ -53,6 +55,8 @@ export function ComposeButton({
 
       const response = await fetch(`/api/clients/${organisationId}/outreach-drafts/stage-one`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ length }),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -82,6 +86,19 @@ export function ComposeButton({
 
   return (
     <div className="space-y-4">
+      <label className="block max-w-xs text-xs font-bold text-foreground/65">
+        Email length
+        <select
+          className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+          disabled={busy}
+          onChange={(event) => setLength(event.target.value as EmailLength)}
+          value={length}
+        >
+          <option value="short">Short</option>
+          <option value="standard">Standard</option>
+          <option value="detailed">Detailed</option>
+        </select>
+      </label>
       <OriginButton variant="outline" size="sm" onClick={generate} disabled={busy} type="button">
         <Sparkles aria-hidden="true" className="h-4 w-4" />
         {busy ? "Checking and generating…" : draft ? "Regenerate Stage 1 email" : "Generate Stage 1 email"}

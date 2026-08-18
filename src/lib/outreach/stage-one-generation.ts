@@ -2,7 +2,11 @@ import { generateText } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { logApiHealth } from "../api-health-log.ts";
 import { reportError } from "../error-logging.ts";
-import { buildStageOnePrompt, type StageOneContext } from "./stage-one-prompt.ts";
+import {
+  buildStageOnePrompt,
+  type EmailLength,
+  type StageOneContext,
+} from "./stage-one-prompt.ts";
 
 const TIMEOUT_MS = 30_000;
 const MAX_OUTPUT_TOKENS = 1536;
@@ -45,8 +49,9 @@ export async function generateStageOneDraft(
   organisationId: string,
   context: StageOneContext,
   callModel: CallStageOneModel,
+  options: { length?: EmailLength } = {},
 ): Promise<{ draft: StageOneDraft } | { error: string }> {
-  const prompt = buildStageOnePrompt(context);
+  const prompt = buildStageOnePrompt(context, options);
   const startedAt = Date.now();
   try {
     const draft = parseDraft(await callModel(prompt));

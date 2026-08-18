@@ -4,6 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Sparkles } from "lucide-react";
 import { parseBookletSections } from "@/lib/booklet/parse-sections";
+import {
+  BOOKLET_GENERATED_EVENT,
+  type BookletGeneratedDetail,
+} from "@/lib/booklet/browser-event";
 
 /**
  * F082 — Generate Client Booklet. A one-shot user-triggered action, not the
@@ -136,7 +140,11 @@ export function BookletPanel({ organisationId }: { organisationId: string }) {
         setError(body.error ?? "The booklet could not be generated. Try again.");
         return;
       }
-      setBooklet(body.booklet as string);
+      const generatedBooklet = body.booklet as string;
+      setBooklet(generatedBooklet);
+      window.dispatchEvent(new CustomEvent<BookletGeneratedDetail>(BOOKLET_GENERATED_EVENT, {
+        detail: { organisationId, booklet: generatedBooklet },
+      }));
     } catch {
       setError("Could not reach the server. Check your connection and try again.");
     } finally {

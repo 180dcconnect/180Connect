@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
+import { BOOKLET_GENERATED_EVENT, type BookletGeneratedDetail } from "@/lib/booklet/browser-event";
 
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
@@ -43,6 +44,16 @@ export function ComposeButton({
   const [tone, setTone] = useState<EmailTone>("balanced");
   const [opening, setOpening] = useState<OpeningApproach>("mission_led");
   const [closing, setClosing] = useState<ClosingApproach>("soft_cta");
+  const [booklet, setBooklet] = useState<string | null>(null);
+
+  useEffect(() => {
+    function receiveBooklet(event: Event) {
+      const detail = (event as CustomEvent<BookletGeneratedDetail>).detail;
+      if (detail.organisationId === organisationId) setBooklet(detail.booklet);
+    }
+    window.addEventListener(BOOKLET_GENERATED_EVENT, receiveBooklet);
+    return () => window.removeEventListener(BOOKLET_GENERATED_EVENT, receiveBooklet);
+  }, [organisationId]);
 
   async function generate() {
     setBusy(true);
@@ -64,7 +75,7 @@ export function ComposeButton({
       const response = await fetch(`/api/clients/${organisationId}/outreach-drafts/stage-one`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ length, voice, tone, opening, closing }),
+        body: JSON.stringify({ length, voice, tone, opening, closing, booklet }),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -94,6 +105,11 @@ export function ComposeButton({
 
   return (
     <div className="space-y-4">
+      <p className="text-xs text-foreground/55" aria-live="polite">
+        {booklet
+          ? "The current generated client booklet will be used as additional context."
+          : "Generate the client booklet first to include its insights in this email."}
+      </p>
       <label className="block max-w-xs text-xs font-bold text-foreground/65">
         Email length
         <select

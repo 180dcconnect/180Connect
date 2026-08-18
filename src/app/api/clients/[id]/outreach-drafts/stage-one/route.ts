@@ -36,6 +36,7 @@ export async function POST(
     tone: z.enum(EMAIL_TONES).default("balanced"),
     opening: z.enum(OPENING_APPROACHES).default("mission_led"),
     closing: z.enum(CLOSING_APPROACHES).default("soft_cta"),
+    booklet: z.string().trim().min(1).max(20_000).nullable().optional(),
   }).safeParse(requestBody);
   if (!preferences.success) {
     return NextResponse.json({ error: "Choose a valid email length and try again." }, { status: 400 });
@@ -95,6 +96,7 @@ export async function POST(
       sector: enrichment?.sector,
       subSector: enrichment?.sub_sector,
       newsHooks: enrichment?.news_hooks,
+      booklet: preferences.data.booklet,
     },
     callModel,
     { length: preferences.data.length, voice: preferences.data.voice, tone: preferences.data.tone, opening: preferences.data.opening, closing: preferences.data.closing },

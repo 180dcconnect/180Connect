@@ -16,6 +16,7 @@ import { formatLocation, formatOutreachStatus } from "@/lib/organisation-format"
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
 import { SuppressButton } from "./suppress-button";
+import { LiftSuppressionButton } from "./lift-suppression-button";
 import { ComposeButton } from "./compose-button";
 import { BasicInfoPanel } from "./basic-info-panel";
 import { ClaimButton } from "./claim-button";
@@ -32,6 +33,7 @@ import { RequestOwnershipForm } from "./request-ownership-form";
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
 type LatestSuppression = {
+  id: string;
   status: "pending" | "active" | "rejected" | "lifted";
   reason: string;
   created_at: string;
@@ -143,7 +145,7 @@ export default async function ClientDetailPage({
   // through to the suppress button.
   const { data: latest } = await supabase
     .from("suppressions")
-    .select("status, reason, created_at")
+    .select("id, status, reason, created_at")
     .eq("organisation_id", id)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -284,6 +286,12 @@ export default async function ClientDetailPage({
                 Hidden from the active working list. Outreach is blocked. Only an admin
                 can lift this.
               </p>
+              {isAdmin && (
+                <LiftSuppressionButton
+                  organisationId={client.id}
+                  suppressionId={latest.id}
+                />
+              )}
             </div>
           </Rise>
         )}

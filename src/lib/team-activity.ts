@@ -90,6 +90,11 @@ export function formatTeamActivity(
         sentence = `${actorName} approved suppression of ${target}`;
         break;
 
+      case "suppression_lifted":
+        actionLabel = "Suppression";
+        sentence = `${actorName} lifted suppression of ${target}`;
+        break;
+
       case "invite_accepted":
         actionLabel = "Team";
         sentence = `${actorName} joined the team`;

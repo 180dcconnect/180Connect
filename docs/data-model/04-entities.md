@@ -100,7 +100,7 @@
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
 | organisation_id | uuid | ORGANISATIONS | No | Organisation this enrichment belongs to | System | Set when enrichment runs |  |
-| mission_statement | text |  | Yes | Organisation's mission or purpose | LLM + Human | Extracted from published materials or supplied through an approved manual entry | Manual values preserve Manual Entry source attribution |
+| mission_statement | text |  | Yes | Organisation's mission or purpose | LLM | Extracted from website and published materials |  |
 | mission_keywords | text[] |  | Yes | Key themes extracted from the mission | LLM | Classified by LLM from mission text |  |
 | news_hooks | text[] |  | Yes | Recent news items relevant to outreach | LLM | Extracted from news sources |  |
 | sector | text |  | Yes | Primary sector classification | LLM | Classified from mission and activity data |  |
@@ -226,3 +226,18 @@
 | filters | jsonb |  | No | The client-list filter combination the view re-applies | System | Captured from the active list filters at save time | Keys mirror /clients search params: q, city, status, source, owner. jsonb rather than columns because the filter set grows (F055 sector, F058 priority, F193 tag) |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last edit timestamp | System | Updated when the view is renamed or re-saved | Rename/overwrite is not built by F066; column exists so adding it later needs no schema change |
+
+## OWNERSHIP_REQUESTS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key |  |  | Auto-generated |
+| organisation_id | uuid | ORGANISATIONS | No | Client being asked for |  |  | On delete cascade |
+| requested_by | uuid | USERS | No | CAM making the ask |  |  | auth.uid() at request time |
+| current_owner_id | uuid | USERS | Yes | Owner at request time, snapshotted |  |  | Live owner can change while pending; admin needs to see what the CAM saw |
+| status | enum |  | No | pending, approved, rejected |  |  | pending at creation; only an admin moves it |
+| reason | text |  | No | Why this CAM should take it on |  |  | Required, cannot be blank |
+| decided_by | uuid | USERS | Yes | Admin who approved/rejected |  |  | Null while pending |
+| decided_at | timestamp |  | Yes | When decided |  |  | Null while pending |
+| decision_note | text |  | Yes | Optional admin note |  |  | Only reason is mandatory |
+| created_at | timestamp |  | No | Row creation timestamp |  |  | Auto-generated |

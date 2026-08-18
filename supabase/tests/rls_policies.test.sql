@@ -2971,7 +2971,7 @@ begin
   select public.save_manual_entry(
     null, 'Unique F036 Charity Limited', 'Provides related community services.', 'charity',
     '20 Example Road', 'Sheffield', 'S2 3CD', 'GB', 'https://duplicate.example.org',
-    'duplicate@example.org', 'Charity Commission', 'F036-002',
+    'info@duplicate.example.org', 'Charity Commission', 'F036-002',
     'Submitted independently for duplicate review', true
   ) into v_duplicate_entry;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
@@ -2995,7 +2995,7 @@ begin
   select public.save_manual_entry(
     null, 'Unconfirmed Social Company', 'Develops socially focused services.', 'company',
     '30 Example Lane', 'Sheffield', 'S3 4EF', 'GB', 'https://social.example.org',
-    'social@example.org', 'Companies House', 'F036-COMPANY',
+    'info@social.example.org', 'Companies House', 'F036-COMPANY',
     'May be a socially focused organisation', true
   ) into v_company_entry;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
@@ -3800,7 +3800,7 @@ begin
   return next is(v_owner, v_cam_a, 'approval moves the client to the requesting CAM');
 
   select count(*) into v_count from public.audit_log
-   where action = 'ownership_assigned' and target_id = v_org_cam_b;
+   where action = 'ownership_reassigned' and target_id = v_org_cam_b;
   return next is(v_count, 1::bigint,
     'the handover is audited as a normal ownership_assigned transition');
 

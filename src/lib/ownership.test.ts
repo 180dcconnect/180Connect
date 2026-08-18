@@ -4,6 +4,8 @@ import { describe, it } from "node:test";
 import {
   assignOwnerRpcFailure,
   claimOwnershipRpcFailure,
+  isNoOpReassignment,
+  NO_OP_REASSIGNMENT_MESSAGE,
   validateReassignOwnership,
 } from "./ownership.ts";
 
@@ -197,8 +199,41 @@ describe("validateReassignOwnership (F163/F164)", () => {
 
     assert.deepEqual(result, {
       ok: false,
-      error: "Choose a different team member to change ownership.",
+      error: NO_OP_REASSIGNMENT_MESSAGE,
     });
+  });
+
+  it("allows the same owner id when no current owner is supplied", () => {
+    const result = validateReassignOwnership({
+      organisationId: validOrgId,
+      newOwnerId: validOwnerId,
+      reason: "Handover",
+    });
+
+    assert.equal(result.ok, true);
   });
 });
 
+describe("isNoOpReassignment (F164)", () => {
+  const ownerId = "22222222-2222-4222-8222-222222222222";
+
+  it("is true when the chosen CAM already owns the client", () => {
+    assert.equal(isNoOpReassignment(ownerId, ownerId), true);
+  });
+
+  it("ignores case and surrounding whitespace", () => {
+    assert.equal(isNoOpReassignment(` ${ownerId.toUpperCase()} `, ownerId), true);
+  });
+
+  it("is false for a different CAM", () => {
+    assert.equal(
+      isNoOpReassignment(ownerId, "33333333-3333-4333-8333-333333333333"),
+      false,
+    );
+  });
+
+  it("is false for an unowned client, so a first assignment goes through", () => {
+    assert.equal(isNoOpReassignment(null, ownerId), false);
+    assert.equal(isNoOpReassignment(undefined, ownerId), false);
+  });
+});

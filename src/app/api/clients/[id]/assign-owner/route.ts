@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
-import { assignOwnerRpcFailure, validateReassignOwnership } from "@/lib/ownership";
+import {
+  assignOwnerRpcFailure,
+  isNoOpReassignment,
+  NO_OP_REASSIGNMENT_MESSAGE,
+  validateReassignOwnership,
+} from "@/lib/ownership";
 
 /**
  * F163/F164 — admin assigns (F163) or changes/reassigns (F164) a client's owner, from the client profile.
@@ -38,7 +43,6 @@ export async function POST(
     organisationId,
     newOwnerId: json?.ownerId,
     reason: json?.reason,
-    currentOwnerId: json?.currentOwnerId,
   });
 
   if (!validation.ok) {
@@ -46,6 +50,20 @@ export async function POST(
   }
 
   const supabase = await createClient();
+
+  // The no-op check runs against the owner the *database* holds, not one the
+  // request supplied: the form's idea of the current owner can be a refresh out
+  // of date, and a hand-rolled request can claim anything. A missing row falls
+  // through to the RPC, which reports it as a skip rather than a 404 here.
+  const { data: organisation } = await supabase
+    .from("organisations")
+    .select("owner_id")
+    .eq("id", validation.data.organisationId)
+    .maybeSingle();
+
+  if (isNoOpReassignment(organisation?.owner_id, validation.data.newOwnerId)) {
+    return NextResponse.json({ error: NO_OP_REASSIGNMENT_MESSAGE }, { status: 400 });
+  }
 
   const { data, error } = await supabase.rpc("reassign_ownership", {
     p_organisation_ids: [validation.data.organisationId],
@@ -62,4 +80,3 @@ export async function POST(
 
   return NextResponse.json(data, { status: 200 });
 }
-

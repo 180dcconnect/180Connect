@@ -67,7 +67,7 @@ export function AssignOwnerForm({
       const response = await fetch(`/api/clients/${organisationId}/assign-owner`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ownerId, reason, currentOwnerId }),
+        body: JSON.stringify({ ownerId, reason }),
       });
       if (response.ok) {
         setReason("");
@@ -141,14 +141,25 @@ export function AssignOwnerForm({
         />
       </label>
 
-      <OriginButton
-        type="submit"
-        size="sm"
-        loading={busy}
-        disabled={busy || isSameOwnerSelected}
-      >
-        {busy ? "Updating…" : isReassignment ? "Reassign owner" : "Assign owner"}
-      </OriginButton>
+      <div className="flex flex-col gap-1.5">
+        <OriginButton
+          type="submit"
+          size="sm"
+          loading={busy}
+          disabled={busy || isSameOwnerSelected}
+        >
+          {busy ? "Updating…" : isReassignment ? "Reassign owner" : "Assign owner"}
+        </OriginButton>
+
+        {/* The picker opens on the current owner, so the button starts disabled on
+            an owned client — say why, rather than leaving a dead control. */}
+        {isSameOwnerSelected && (
+          <p className="text-[13px] leading-[1.6] text-foreground/50">
+            {currentOwnerName ?? "This team member"} already owns this client. Choose a
+            different CAM to change ownership.
+          </p>
+        )}
+      </div>
 
       {error && (
         <p aria-live="polite" role="alert" className="text-[13px] font-bold text-destructive">
@@ -158,4 +169,3 @@ export function AssignOwnerForm({
     </form>
   );
 }
-

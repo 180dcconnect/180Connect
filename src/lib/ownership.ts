@@ -4,18 +4,45 @@
  * @/lib/suppressions).
  */
 
+import { z } from "zod";
+
 export type RpcFailure = { status: number; error: string };
 
 const GENERIC_FAILURE = "This client could not be claimed. Refresh and try again.";
 const GENERIC_ASSIGN_FAILURE = "This client could not be assigned. Refresh and try again.";
 
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const Uuid = z.uuid();
+
+/**
+ * Shown when the CAM picked already owns the client. reassign_ownership would
+ * happily run and write an audit row saying ownership moved from a CAM to
+ * themselves, which is noise in the very history F164 exists to keep readable.
+ */
+export const NO_OP_REASSIGNMENT_MESSAGE =
+  "Choose a different team member to change ownership.";
+
+/**
+ * True when reassigning would leave the client exactly where it is.
+ *
+ * `currentOwnerId` must be the owner the *database* holds. The route reads it
+ * back before calling the RPC rather than trusting the request body, which a
+ * stale page can get wrong and a crafted request can lie about. The form runs
+ * the same check against its rendered owner, where being one refresh out of
+ * date only costs a redundant round trip.
+ */
+export function isNoOpReassignment(
+  currentOwnerId: string | null | undefined,
+  newOwnerId: string,
+): boolean {
+  if (typeof currentOwnerId !== "string") return false;
+  return currentOwnerId.trim().toLowerCase() === newOwnerId.trim().toLowerCase();
+}
 
 export type ValidateReassignOwnershipInput = {
   organisationId: unknown;
   newOwnerId: unknown;
   reason: unknown;
+  /** Optional: when given, a no-op reassignment is rejected too. */
   currentOwnerId?: unknown;
 };
 
@@ -34,16 +61,19 @@ export type ValidateReassignOwnershipResult =
     };
 
 /**
- * Validates inputs for assigning (F163) or changing (F164) client ownership.
+ * Validates the shape of an assign (F163) or change-owner (F164) request:
+ * a real client, a chosen CAM, and a reason the handover can be read back from.
  */
 export function validateReassignOwnership(
   input: ValidateReassignOwnershipInput,
 ): ValidateReassignOwnershipResult {
-  if (typeof input.organisationId !== "string" || !UUID_REGEX.test(input.organisationId)) {
+  const organisationId = Uuid.safeParse(input.organisationId);
+  if (!organisationId.success) {
     return { ok: false, error: "That client could not be found." };
   }
 
-  if (typeof input.newOwnerId !== "string" || !UUID_REGEX.test(input.newOwnerId)) {
+  const newOwnerId = Uuid.safeParse(input.newOwnerId);
+  if (!newOwnerId.success) {
     return { ok: false, error: "Choose a CAM to assign." };
   }
 
@@ -57,19 +87,16 @@ export function validateReassignOwnership(
 
   if (
     typeof input.currentOwnerId === "string" &&
-    input.currentOwnerId.trim().toLowerCase() === input.newOwnerId.trim().toLowerCase()
+    isNoOpReassignment(input.currentOwnerId, newOwnerId.data)
   ) {
-    return {
-      ok: false,
-      error: "Choose a different team member to change ownership.",
-    };
+    return { ok: false, error: NO_OP_REASSIGNMENT_MESSAGE };
   }
 
   return {
     ok: true,
     data: {
-      organisationId: input.organisationId,
-      newOwnerId: input.newOwnerId,
+      organisationId: organisationId.data,
+      newOwnerId: newOwnerId.data,
       reason,
     },
   };
@@ -134,4 +161,3 @@ export function assignOwnerRpcFailure(error: {
       return { status: 500, error: GENERIC_ASSIGN_FAILURE };
   }
 }
-

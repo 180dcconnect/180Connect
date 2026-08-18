@@ -1,6 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { SuppressionRow } from "@/lib/suppressions";
 
 type OrganisationOption = { id: string; legal_name: string };
@@ -101,20 +109,18 @@ export function SuppressionsPanel({
         <label className="mt-3 block text-sm font-bold" htmlFor="organisation">
           Charity
         </label>
-        <select
-          className="mt-2 w-full rounded-lg border border-black/15 bg-white px-3 py-2"
-          disabled={busy}
-          id="organisation"
-          onChange={(event) => setOrganisationId(event.target.value)}
-          value={organisationId}
-        >
-          <option value="">Select a charity…</option>
-          {organisations.map((organisation) => (
-            <option key={organisation.id} value={organisation.id}>
-              {organisation.legal_name}
-            </option>
-          ))}
-        </select>
+        <Select disabled={busy} onValueChange={setOrganisationId} value={organisationId}>
+          <SelectTrigger id="organisation" className="mt-2 w-full text-sm">
+            <SelectValue placeholder="Select a charity…" />
+          </SelectTrigger>
+          <SelectContent>
+            {organisations.map((organisation) => (
+              <SelectItem key={organisation.id} value={organisation.id}>
+                {organisation.legal_name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         <label className="mt-4 block text-sm font-bold" htmlFor="reason">
           Reason
@@ -129,13 +135,15 @@ export function SuppressionsPanel({
           value={reason}
         />
 
-        <button
-          className="mt-4 rounded-lg bg-brand px-5 py-2.5 font-bold text-white disabled:opacity-50"
+        <OriginButton
           disabled={busy || !organisationId || reason.trim() === ""}
+          loading={busy}
+          size="md"
           type="submit"
+          className="mt-4"
         >
           {busy ? "Suppressing…" : "Suppress"}
-        </button>
+        </OriginButton>
 
         <p aria-live="polite" className="mt-4 min-h-6 text-sm font-bold">
           {message}
@@ -171,22 +179,23 @@ export function SuppressionsPanel({
                   value={notes[row.id] ?? ""}
                 />
                 <div className="mt-3 flex gap-3">
-                  <button
-                    className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                  <OriginButton
+                    size="sm"
                     disabled={busy}
                     onClick={() => decide(row.id, true)}
                     type="button"
                   >
                     Approve
-                  </button>
-                  <button
-                    className="rounded-lg border border-black/15 px-4 py-2 text-sm font-bold disabled:opacity-50"
+                  </OriginButton>
+                  <OriginButton
+                    variant="outline"
+                    size="sm"
                     disabled={busy}
                     onClick={() => decide(row.id, false)}
                     type="button"
                   >
                     Reject
-                  </button>
+                  </OriginButton>
                 </div>
               </li>
             ))}

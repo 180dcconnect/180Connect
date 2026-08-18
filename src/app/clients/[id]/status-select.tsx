@@ -3,6 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { PIPELINE_STATUSES, formatOutreachStatus, type PipelineStatus } from "@/lib/organisation-format";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { OriginButton } from "@/components/ui/origin-button";
 
 /**
  * F145 — lets the client's owner (CAM) or an admin move it through the pipeline.
@@ -51,33 +59,37 @@ export function StatusSelect({
   }
 
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-3">
+    <div className="mt-4 flex flex-wrap items-center gap-2.5">
       <label className="sr-only" htmlFor={`status-${organisationId}`}>
         Pipeline status
       </label>
-      <select
-        id={`status-${organisationId}`}
-        className="rounded-lg border border-black/10 px-3 py-2 text-sm"
+      <Select
         value={selected}
         disabled={busy}
-        onChange={(event) => setSelected(event.target.value as PipelineStatus)}
+        onValueChange={(value) => setSelected(value as PipelineStatus)}
       >
-        {PIPELINE_STATUSES.map((status) => (
-          <option key={status} value={status}>
-            {formatOutreachStatus(status)}
-          </option>
-        ))}
-      </select>
-      <button
+        <SelectTrigger id={`status-${organisationId}`} className="w-fit rounded-full bg-white text-sm">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {PIPELINE_STATUSES.map((status) => (
+            <SelectItem key={status} value={status}>
+              {formatOutreachStatus(status)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <OriginButton
         type="button"
-        className="rounded-full border border-brand/30 px-4 py-2 text-xs font-bold text-brand hover:bg-brand/5 disabled:opacity-50"
+        size="sm"
+        loading={busy}
         disabled={busy || !dirty}
         onClick={save}
       >
         {busy ? "Saving…" : "Save status"}
-      </button>
+      </OriginButton>
       {error && (
-        <p aria-live="polite" role="alert" className="w-full text-sm font-bold text-red-800">
+        <p aria-live="polite" role="alert" className="w-full text-[13px] font-bold text-destructive">
           {error}
         </p>
       )}

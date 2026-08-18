@@ -43,6 +43,8 @@
 | source_country | text |  | Yes | Country the record came from | System | Set from API source or API response | Null if source has no country context |
 | source_registry_name | text |  | Yes | Name of the specific registry this record came from | System | Set by ingestion worker | e.g. "Netherlands KVK", "France RNA" |
 | status_last_checked_at | timestamp |  | Yes | When the Companies House status-recheck job last refetched this record's company_status | System | Set after each recheck | Null = never rechecked, sorts first |
+| excluded_fields | jsonb |  | Yes | Fields excluded from this record based on data handling rules | System | Applied during ingestion based on rules |  |
+| rule_version_applied | int |  | Yes | The rule version applied to this record | System | Set when rules are applied |  |
 
 ## DATA_QUALITY_EVENTS
 
@@ -123,18 +125,59 @@
 | Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
-| submitted_by_user_id | uuid | USERS | No | CAM who submitted this record | System | Set to logged-in user at submission time |  |
-| legal_name | text |  | No | Organisation name as entered by CAM | Human | Typed by CAM |  |
-| country_code | text |  | No | Country the organisation operates in | Human | Selected by CAM from country list | ISO code — default GB |
-| website | text |  | Yes | Organisation website | Human | Typed by CAM | Null if unknown |
-| contact_email | text |  | Yes | Known contact email address | Human | Typed by CAM | Null if unknown |
-| registry_name | text |  | Yes | Name of the registry if CAM knows it | Human | Typed by CAM | e.g. France RNA, Netherlands KVK — Null if not registered |
-| registry_number | text |  | Yes | Registry number if CAM knows it | Human | Typed by CAM | Null if not registered or unknown |
-| reason_for_manual_entry | text |  | No | Why this organisation is not in any API source | Human | Typed by CAM | Required — forces CAM to justify the manual entry |
-| converted_to_organisation_id | uuid | ORGANISATIONS | Yes | The ORGANISATIONS record created from this entry | System | Set when manual entry is approved and converted | Null until approved |
-| review_status | enum |  | No | Current status of the manual review | System + Human | Updated as entry moves through review queue | pending / approved / rejected |
-| reviewed_by_user_id | uuid | USERS | Yes | Admin who reviewed this entry | System | Set to logged-in admin at review time | Null until reviewed |
-| reviewed_at | timestamp |  | Yes | When the review decision was made | System | Written when review_status is updated | Null until reviewed |
-| review_notes | text |  | Yes | Admin notes explaining the review decision | Human | Written by admin at review time | Null if approved without comment |
+| submitted_by_user_id | uuid | USERS | No | User who created this manual record | System | Set to the logged-in user when the draft is first saved |  |
+| legal_name | text |  | Yes | Organisation name | Human | Typed by the user | Required before submission; nullable only while draft |
+| mission_statement | text |  | Yes | Organisation's mission or purpose | Human | Typed by the user | Required before submission; copied to ENRICHMENT_RESULTS on activation |
+| organisation_type | enum |  | Yes | Type of organisation | Human | Selected by the user | Required before submission: charity / company / both / other |
+| address_line_1 | text |  | Yes | Primary street address | Human | Typed by the user | Required before submission; nullable only while draft |
+| city | text |  | Yes | Town or city | Human | Typed by the user | Required before submission; nullable only while draft |
+| postcode | text |  | Yes | Postcode or postal code | Human | Typed by the user | Required before submission; nullable only while draft |
+| country_code | text |  | Yes | Country the organisation operates in | Human | Selected by the user | Required before submission; ISO code; form defaults to GB |
+| website | text |  | Yes | Organisation website | Human | Typed by the user | Required before submission; format/reachability warnings do not prevent saving |
+| contact_email | text |  | Yes | Contact email address | Human | Typed by the user | Required before submission; invalid format is flagged without discarding the record |
+| registry_name | text |  | Yes | Name of the organisation registry | Human | Typed by the user | Required before submission |
+| registry_number | text |  | Yes | Organisation registry number | Human | Typed by the user | Required before submission and used for duplicate detection |
+| reason_for_manual_entry | text |  | Yes | Why this organisation is not in an API source | Human | Typed by the user | Required before submission; nullable only while draft |
+| converted_to_organisation_id | uuid | ORGANISATIONS | Yes | The active organisation created or linked from this entry | System | Set when the entry is approved and converted | Null until approved |
+| review_status | enum |  | No | Current manual-entry workflow status | System + Human | Updated as the record moves through draft, review and activation | draft / pending / approved / rejected |
+| reviewed_by_user_id | uuid | USERS | Yes | Admin who reviewed or self-approved the entry | System | Set to the approving or rejecting admin | Null while draft or pending |
+| reviewed_at | timestamp |  | Yes | When the review decision was made | System | Written when the entry is approved or rejected | Null while draft or pending |
+| review_notes | text |  | Yes | Admin notes explaining the decision | Human | Written by the reviewing admin | Null if approved without comment |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
-| updated_at | timestamp |  | No | Last updated timestamp | System | Auto-updated on any change |  |
+| updated_at | timestamp |  | No | Last update timestamp | System | Auto-updated on any change |  |
+
+## FIELD_SOURCES
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| organisation_id | uuid | ORGANISATIONS | No | Organisation this field value belongs to | System | Set when field is written |  |
+| field_name | text |  | No | Which ORGANISATIONS column this value is for | System | Identified by the write path | legal_name, website, contact_email, address_line_1, city, postcode (mission is explicitly excluded) |
+| value | text |  | No | Value written for this field by this source | System | Taken from raw payload or manual entry | Null if source provided no value |
+| source | text |  | No | Which source produced this value | System | Inherited from raw source record or manual entry | Reuse RAW_SOURCE_RECORDS.record_source enum + "manual" |
+| raw_source_record_id | uuid | RAW_SOURCE_RECORDS | Yes | The raw record this value was taken from | System | Set for API-sourced values | Null for manual entries |
+| is_current | boolean |  | No | Whether this is the value currently live on ORGANISATIONS for this field | System | Set true on write, flipped false when superseded | Default true |
+| recorded_at | timestamp |  | No | When this field value was recorded | System | Auto-generated on row creation |  |
+
+## DATA_HANDLING_RULES
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| rule_version | int |  | No | Version of the ruleset this rule belongs to | System | Set on creation |  |
+| source | text |  | Yes | Data source the rule applies to | Human | Set by admin |  |
+| action | enum |  | No | Action to take | Human | Set by admin |  |
+| field_path | text |  | No | The rule (field path) | Human | Set by admin |  |
+| reason | text |  | No | Compliance reason | Human | Set by admin |  |
+| is_active | boolean |  | No | Whether the rule is currently active | Human | Set by admin |  |
+| created_by | uuid | USERS | Yes | Admin who created the rule | System | Set on creation |  |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+| updated_at | timestamp |  | No | Last update timestamp | System | Auto-updated |  |
+
+## DATA_HANDLING_RULE_VERSIONS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | boolean |  | No | Primary key pinned to one row by a check constraint | System | Auto-generated |  |
+| current_version | int |  | No | Global current version | System | Auto-updated |  |
+| updated_at | timestamp |  | No | Last update timestamp | System | Auto-updated |  |

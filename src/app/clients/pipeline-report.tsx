@@ -84,7 +84,7 @@ export function PipelineReport({
     <section className="overflow-hidden rounded-3xl bg-white text-foreground ring-1 ring-black/[0.06] shadow-[0_20px_60px_-45px_rgba(12,16,20,0.55)]">
       <div className="px-6 pt-6 sm:px-8 sm:pt-8">
         <div className="flex items-baseline justify-between gap-4">
-          <h2 className="text-[19px] font-black tracking-[-0.02em]">Pipeline report</h2>
+          <h2 className="text-[19px] font-semibold font-body tracking-[-0.02em]">Pipeline report</h2>
           <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
             {caption}
           </p>

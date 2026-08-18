@@ -193,11 +193,12 @@ This policy is reviewed every six months, or whenever a new data source, process
 **Accountability Records maintained by the controller:**
 * **ICO Data Protection Fee Self-Assessment:** 180 Degrees Consulting Sheffield CIC completed the ICO data protection fee self-assessment on 18 August 2026. Based on the CIC's current processing activities, the ICO determined that the organisation is required to register and pay the Tier 1 data protection fee of £52 (£47 by Direct Debit) (recorded in [`docs/ico-fee-self-assessment.md`](ico-fee-self-assessment.md)).
 * **ICO Registration & Fee Payment:** Registration and annual fee payment tracked by the controller in accordance with ICO requirements.
-* **Record of Processing Activities (ROPA):** Documented under Article 30.
+* **Record of Processing Activities (ROPA):** Completed 18 August 2026 under Article 30 (recorded in [`docs/ropa.md`](ropa.md)).
 * **Legitimate Interest Assessment (LIA):** Completed 18 August 2026; confirmed Article 6(1)(f) lawful basis for prospective client outreach (recorded in [`docs/legitimate-interest-assessment.md`](legitimate-interest-assessment.md)).
 * **Data Protection Impact Assessment (DPIA):** Completed 18 August 2026; concluded acceptable subject to pre-live governance conditions (recorded in [`docs/dpia.md`](dpia.md)).
 * **Public Data Handling Rules Specification:** [`docs/personal-data-exclusions.md`](personal-data-exclusions.md).
 * **Article 14 Transparency & Privacy Notice:** Documented in [`docs/privacy-notice.md`](privacy-notice.md).
+* **Pre-Live Compliance Checklist:** Documented in [`docs/pre-live-compliance-checklist.md`](pre-live-compliance-checklist.md).
 * **Internal Breach Log:** Documented under Article 33(5).
 
 ---
@@ -212,4 +213,4 @@ This policy is reviewed every six months, or whenever a new data source, process
 | **4** | **Finalise LLM provider selection and DPA** | Requires confirmation of processing region (UK/EU pinned), zero-data-retention for training, and incoming reply redaction safeguards. | Project Manager |
 | **5** | **Verify sending domain for auth and platform emails** | Ensure domain verification is complete on Resend for `180dc.org` / subdomains. | Engineering |
 | **6** | **Publish and link Article 14 Privacy Notice** | Article 14 Privacy Notice drafted ([`docs/privacy-notice.md`](privacy-notice.md)); must be hosted on public domain and linked in outreach email footers prior to live launch. | Project Manager / Engineering |
-| **7** | **Complete standalone Article 30 ROPA document** | Finalise the complete formal Record of Processing Activities alongside the processor register. | Project Manager |
+| **7** | **ROPA and Pre-Live Compliance Verification** | Formal Article 30 ROPA ([`docs/ropa.md`](ropa.md)) and Pre-Live Sanity Checklist ([`docs/pre-live-compliance-checklist.md`](pre-live-compliance-checklist.md)) compiled; pending final pre-live sign-off. | Project Manager |

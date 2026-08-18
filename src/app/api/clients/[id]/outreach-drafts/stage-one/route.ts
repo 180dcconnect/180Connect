@@ -8,7 +8,7 @@ import {
   createStageOneModelCall,
   generateStageOneDraft,
 } from "@/lib/outreach/stage-one-generation";
-import { EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES } from "@/lib/outreach/stage-one-prompt";
+import { EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES } from "@/lib/outreach/stage-one-prompt";
 
 export const maxDuration = 60;
 
@@ -34,6 +34,7 @@ export async function POST(
     length: z.enum(EMAIL_LENGTHS).default("standard"),
     voice: z.enum(EMAIL_VOICES).default("180dc"),
     tone: z.enum(EMAIL_TONES).default("balanced"),
+    opening: z.enum(OPENING_APPROACHES).default("mission_led"),
   }).safeParse(requestBody);
   if (!preferences.success) {
     return NextResponse.json({ error: "Choose a valid email length and try again." }, { status: 400 });
@@ -93,7 +94,7 @@ export async function POST(
       newsHooks: enrichment?.news_hooks,
     },
     callModel,
-    { length: preferences.data.length, voice: preferences.data.voice, tone: preferences.data.tone },
+    { length: preferences.data.length, voice: preferences.data.voice, tone: preferences.data.tone, opening: preferences.data.opening },
   );
   if ("error" in result) return NextResponse.json({ error: result.error }, { status: 502 });
 

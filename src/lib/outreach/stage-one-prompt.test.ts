@@ -49,3 +49,10 @@ test("buildStageOnePrompt applies each selected email tone", () => {
   assert.match(buildStageOnePrompt(context, { tone: "formal" }).system, /formal, respectful tone/);
   assert.match(buildStageOnePrompt(context, { tone: "concise" }).system, /action-oriented tone/);
 });
+
+test("buildStageOnePrompt applies each opening approach safely", () => {
+  const context = { organisationName: "Example", organisationType: "charity" };
+  assert.match(buildStageOnePrompt(context, { opening: "mission_led" }).system, /supplied mission/);
+  assert.match(buildStageOnePrompt(context, { opening: "direct_intro" }).system, /direct introduction/);
+  assert.match(buildStageOnePrompt(context, { opening: "news_hook" }).system, /without inventing news/);
+});

@@ -10,6 +10,7 @@ import {
   filterByCity,
   filterByStatus,
   filterBySource,
+  prioritiseByGeography,
   searchClients,
   visibleClients,
   type ClientListRow,
@@ -114,11 +115,11 @@ export default async function ClientsPage({
   const supabase = await createClient();
   const canClaim = hasPermission(authorization.actor.role, "client:edit");
 
-  const [organisations, openSuppressions, team] = await Promise.all([
+  const [organisations, openSuppressions, team, outreachPrefs] = await Promise.all([
     supabase
       .from("organisations")
       .select(
-        "id, legal_name, organisation_type, city, country_code, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
+        "id, legal_name, organisation_type, city, country_code, geographic_reach, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
       )
       .order("legal_name")
       .overrideTypes<ClientListRow[], { merge: false }>(),
@@ -133,6 +134,10 @@ export default async function ClientsPage({
       .eq("role", "cam")
       .order("full_name")
       .overrideTypes<TeamMember[], { merge: false }>(),
+    supabase
+      .from("outreach_preferences")
+      .select("preferred_geographic_reach, preferred_cities")
+      .maybeSingle<{ preferred_geographic_reach: string[] | null; preferred_cities: string[] | null }>(),
   ]);
 
   if (organisations.error) {
@@ -159,6 +164,9 @@ export default async function ClientsPage({
   matchingClients = filterByStatus(matchingClients, status);
   matchingClients = filterBySource(matchingClients, source);
   matchingClients = searchClients(matchingClients, search);
+
+  // F196 / F094: Prioritise matching clients based on the CAM's geographic preferences
+  matchingClients = prioritiseByGeography(matchingClients, outreachPrefs.data);
   const teamMembers = team.data ?? [];
   const filterActive = Boolean(ownerFilter || search || city || status || source);
   // F166 AC1/AC3: this is the CAM viewing their own filter, not just any owner

@@ -4,6 +4,7 @@ import {
   filterByOwner,
   formatLocation,
   formatOutreachStatus,
+  prioritiseByGeography,
   searchClients,
   visibleClients,
   type ClientListRow,
@@ -164,5 +165,69 @@ describe("searchClients", () => {
 
   it("returns an empty list when nothing matches", () => {
     assert.deepEqual(searchClients(clients, "nonexistent"), []);
+  });
+});
+
+describe("prioritiseByGeography (F196 / F090 / F094)", () => {
+  const clients = visibleClients(
+    [
+      org({ id: "1", legal_name: "Action for Children", city: "London", country_code: "GB", geographic_reach: "national" }),
+      org({ id: "2", legal_name: "Barnsley Community Hub", city: "Barnsley", country_code: "GB", geographic_reach: "regional" }),
+      org({ id: "3", legal_name: "Leeds Arts Trust", city: "Leeds", country_code: "GB", geographic_reach: "regional" }),
+      org({ id: "4", legal_name: "Sheffield Wildlife Fund", city: "Sheffield", country_code: "GB", geographic_reach: "local" }),
+      org({ id: "5", legal_name: "Yorkshire Wildlife Trust", city: "York", country_code: "GB", geographic_reach: "regional" }),
+    ],
+    [],
+  );
+
+  it("returns the unweighted default order when no preferences are passed", () => {
+    assert.deepEqual(
+      prioritiseByGeography(clients, undefined).map((c) => c.id),
+      ["1", "2", "3", "4", "5"],
+    );
+    assert.deepEqual(
+      prioritiseByGeography(clients, null).map((c) => c.id),
+      ["1", "2", "3", "4", "5"],
+    );
+    assert.deepEqual(
+      prioritiseByGeography(clients, { preferred_geographic_reach: [], preferred_cities: [] }).map((c) => c.id),
+      ["1", "2", "3", "4", "5"],
+    );
+  });
+
+  it("prioritises organisations matching preferred target cities", () => {
+    const result = prioritiseByGeography(clients, {
+      preferred_cities: ["Leeds", "Barnsley"],
+      preferred_geographic_reach: [],
+    });
+    // Barnsley and Leeds appear at the top, sorted alphabetically by legal_name
+    assert.deepEqual(result.map((c) => c.id), ["2", "3", "1", "4", "5"]);
+  });
+
+  it("prioritises Sheffield when local reach or Sheffield city is preferred", () => {
+    const result = prioritiseByGeography(clients, {
+      preferred_cities: ["Sheffield"],
+      preferred_geographic_reach: ["local"],
+    });
+    assert.equal(result[0].id, "4");
+  });
+
+  it("boosts South Yorkshire cities when South Yorkshire regional preference is set", () => {
+    const result = prioritiseByGeography(clients, {
+      preferred_cities: ["South Yorkshire"],
+      preferred_geographic_reach: [],
+    });
+    // Sheffield and Barnsley are South Yorkshire cities
+    assert.ok(result.findIndex((c) => c.id === "4") < 2);
+    assert.ok(result.findIndex((c) => c.id === "2") < 2);
+  });
+
+  it("prioritises matching geographic reach", () => {
+    const result = prioritiseByGeography(clients, {
+      preferred_geographic_reach: ["national"],
+      preferred_cities: [],
+    });
+    // National reaches first
+    assert.equal(result[0].id, "1");
   });
 });

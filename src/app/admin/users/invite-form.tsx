@@ -22,7 +22,10 @@ export function InviteForm() {
   return (
     <form action={formAction} className="flex flex-col gap-4" noValidate>
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="invite-email" className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/70">
+        <label
+          htmlFor="invite-email"
+          className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/70"
+        >
           Email address
         </label>
         <input
@@ -36,9 +39,18 @@ export function InviteForm() {
           className="h-10 w-full rounded-lg border border-black/15 bg-white px-3 text-sm outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/20 aria-invalid:border-red-500"
           required
         />
+        {emailError && (
+          <p id="invite-email-error" className="text-xs font-semibold text-red-600">
+            {emailError}
+          </p>
+        )}
       </div>
+
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="invite-role" className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/70">
+        <label
+          htmlFor="invite-role"
+          className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/70"
+        >
           Role
         </label>
         <input type="hidden" name="role" value={role} />
@@ -47,12 +59,13 @@ export function InviteForm() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="cam">CAM</SelectItem>
+            <SelectItem value="cam">CAM (Client Acquisition Manager)</SelectItem>
             <SelectItem value="admin">Admin</SelectItem>
             <SelectItem value="viewer">Viewer</SelectItem>
           </SelectContent>
         </Select>
       </div>
+
       <OriginButton
         type="submit"
         disabled={pending}
@@ -62,25 +75,21 @@ export function InviteForm() {
       >
         {pending ? "Sending..." : "Send invite"}
       </OriginButton>
+
       <p aria-live="polite" className="w-full min-h-5 text-sm font-bold">
-        {emailError ? (
-          <span className="text-red-700">{emailError}</span>
-        ) : state.message ? (
+        {state.message && (
           <span
             className={
               state.status === "error"
                 ? "text-red-700"
-                : // The account exists but no email went out. Amber rather than the
-                  // success green, because the admin has to do something about it —
-                  // the invited person is waiting for a link that never arrived.
-                  state.status === "warning"
-                  ? "text-amber-700"
-                  : "text-brand"
+                : state.status === "warning"
+                ? "text-amber-700"
+                : "text-brand"
             }
           >
             {state.message}
           </span>
-        ) : null}
+        )}
       </p>
     </form>
   );

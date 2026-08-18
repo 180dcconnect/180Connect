@@ -13,6 +13,7 @@ export type ClientListRow = {
   organisation_type: string;
   city: string | null;
   country_code: string;
+  geographic_reach?: string | null;
   outreach_status: string;
   owner_id: string | null;
   owner: { full_name: string | null } | null;
@@ -111,12 +112,16 @@ export function filterBySource(
 ): VisibleClient[] {
   if (!sourceFilter) return clients;
   const term = sourceFilter.toLowerCase();
-  
+
   if (term === "companies house") {
-    return clients.filter((c) => c.organisation_type === "company" || c.organisation_type === "both");
+    return clients.filter(
+      (c) => c.organisation_type === "company" || c.organisation_type === "both",
+    );
   }
   if (term === "charity commission") {
-    return clients.filter((c) => c.organisation_type === "charity" || c.organisation_type === "both");
+    return clients.filter(
+      (c) => c.organisation_type === "charity" || c.organisation_type === "both",
+    );
   }
   if (term === "dual-registered") {
     return clients.filter((c) => c.organisation_type === "both");
@@ -124,7 +129,85 @@ export function filterBySource(
   if (term === "other") {
     return clients.filter((c) => c.organisation_type === "other");
   }
-  
+
   return clients;
+}
+
+export type GeographicPreference = {
+  preferred_geographic_reach?: string[] | null;
+  preferred_cities?: string[] | null;
+};
+
+const SOUTH_YORKSHIRE_CITIES = new Set(["sheffield", "rotherham", "barnsley", "doncaster"]);
+
+/**
+ * F196 / F090 / F094 — Personalised CAM queue geographic weighting.
+ *
+ * Re-orders clients so that organisations matching the CAM's geographic reach
+ * (local, regional, national, international) and/or preferred target cities
+ * (e.g. Sheffield, South Yorkshire, Leeds, etc.) are prioritised higher in the
+ * CAM's queue.
+ *
+ * If no geographic preference is active (or when cleared), returns the unmodified
+ * list in its default unweighted order.
+ */
+export function prioritiseByGeography(
+  clients: VisibleClient[],
+  preferences?: GeographicPreference | null,
+): VisibleClient[] {
+  if (!preferences) return clients;
+
+  const preferredReach = (preferences.preferred_geographic_reach ?? []).map((r) =>
+    r.toLowerCase().trim(),
+  );
+  const preferredCities = (preferences.preferred_cities ?? []).map((c) =>
+    c.toLowerCase().trim(),
+  );
+
+  if (preferredReach.length === 0 && preferredCities.length === 0) {
+    return clients;
+  }
+
+  const wantsSouthYorkshire =
+    preferredCities.some((c) => c === "south yorkshire" || c === "south yorks") ||
+    preferredReach.includes("regional");
+  const wantsLocalSheffield =
+    preferredCities.some((c) => c === "sheffield") || preferredReach.includes("local");
+
+  function getGeographicPriorityScore(client: VisibleClient): number {
+    let score = 0;
+    const clientCity = client.city?.toLowerCase().trim();
+
+    if (clientCity && preferredCities.includes(clientCity)) {
+      score += 10;
+    }
+
+    if (clientCity && SOUTH_YORKSHIRE_CITIES.has(clientCity) && wantsSouthYorkshire) {
+      score += 8;
+    }
+
+    if (clientCity === "sheffield" && wantsLocalSheffield) {
+      score += 10;
+    }
+
+    if (client.geographic_reach && preferredReach.includes(client.geographic_reach.toLowerCase())) {
+      score += 5;
+    }
+
+    if (preferredReach.includes("national") && client.country_code === "GB") {
+      score += 3;
+    }
+
+    return score;
+  }
+
+  return [...clients].sort((a, b) => {
+    const scoreA = getGeographicPriorityScore(a);
+    const scoreB = getGeographicPriorityScore(b);
+    if (scoreB !== scoreA) {
+      return scoreB - scoreA;
+    }
+    return a.legal_name.localeCompare(b.legal_name);
+  });
 }
 

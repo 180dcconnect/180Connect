@@ -109,17 +109,26 @@ export default async function DashboardPage({
       await reportError(openSuppressions.error, { operation: "dashboard.page_suppressions" });
       loadFailed = true;
     }
+    if (!loadFailed) {
+      rows = filterActiveSuppressed(organisations.data ?? [], openSuppressions.data ?? []);
+    }
+
+    const ownedCounts = new Map<string, number>();
+    for (const org of organisations.data ?? []) {
+      if (org.owner_id) {
+        ownedCounts.set(org.owner_id, (ownedCounts.get(org.owner_id) ?? 0) + 1);
+      }
+    }
+
     if (rawActivity.error) {
       await reportError(rawActivity.error, { operation: "dashboard.team_activity" });
     } else {
       teamActivities = formatTeamActivities(
         (rawActivity.data ?? []) as RawTeamActivityRow[],
         actor.id,
+        new Date(),
+        ownedCounts,
       );
-    }
-
-    if (!loadFailed) {
-      rows = filterActiveSuppressed(organisations.data ?? [], openSuppressions.data ?? []);
     }
   }
 

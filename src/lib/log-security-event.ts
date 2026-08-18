@@ -26,6 +26,7 @@ export type SecurityEvent =
   | "user.invite_rejected"
   | "user.invite_failed"
   | "user.invite_role_failed"
+  | "user.invite_client_assignment_failed"
   | "user.invite_cancel_audit_failed"
   | "user.invite_accept_failed"
   | "user.full_name_update_failed";

@@ -37,6 +37,24 @@ export const INCOME_BAND_LABELS: Record<IncomeBand, string> = {
   over_1m: "Over £1m",
 };
 
+export const INCOME_BAND_DESCRIPTIONS: Record<IncomeBand, string> = {
+  under_10k: "Micro / grassroots (< £10k)",
+  "10k_100k": "Small non-profit (£10k – £100k)",
+  "100k_1m": "Medium charity (£100k – £1m)",
+  over_1m: "Large institution (> £1m)",
+};
+
+/** Converts a numeric total income into the standard public.income_band enum value. */
+export function deriveIncomeBand(totalIncome: number | null | undefined): IncomeBand | null {
+  if (totalIncome === null || totalIncome === undefined || Number.isNaN(totalIncome)) {
+    return null;
+  }
+  if (totalIncome < 10_000) return "under_10k";
+  if (totalIncome <= 100_000) return "10k_100k";
+  if (totalIncome <= 1_000_000) return "100k_1m";
+  return "over_1m";
+}
+
 // ORGANISATIONS.sector has no enum yet (LLM-classified free text, F089/F041/F055 not
 // built — see docs/data-model/04-entities.md), so sector preference is free text
 // rather than a checkbox list. This cap just keeps a single tag reasonable; it is not

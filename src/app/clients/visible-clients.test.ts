@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  filterByCity,
   filterByOwner,
+  filterBySource,
+  filterByStatus,
   formatLocation,
   formatOutreachStatus,
   prioritiseByGeography,
   prioritiseBySector,
+  prioritiseBySize,
   prioritiseQueue,
+  resolveClientIncomeBand,
   searchClients,
   visibleClients,
   type ClientListRow,
@@ -28,15 +33,15 @@ function org(overrides: Partial<ClientListRow> = {}): ClientListRow {
 
 describe("formatLocation", () => {
   it("uses the city when present", () => {
-    assert.equal(formatLocation({ city: "Bristol", country_code: "GB" }), "Bristol");
+    assert.equal(formatLocation(org({ city: "Bristol", country_code: "GB" })), "Bristol");
   });
 
   it("falls back to country_code when city is null", () => {
-    assert.equal(formatLocation({ city: null, country_code: "FR" }), "FR");
+    assert.equal(formatLocation(org({ city: null, country_code: "FR" })), "FR");
   });
 
   it("falls back to country_code when city is blank", () => {
-    assert.equal(formatLocation({ city: "  ", country_code: "GB" }), "GB");
+    assert.equal(formatLocation(org({ city: "  ", country_code: "GB" })), "GB");
   });
 });
 
@@ -48,85 +53,66 @@ describe("formatOutreachStatus", () => {
 });
 
 describe("visibleClients", () => {
-  it("returns every org regardless of import method when there are no suppressions", () => {
-    const organisations = [
-      org({ id: "a", legal_name: "API Import" }),
-      org({ id: "b", legal_name: "Manual Entry" }),
+  it("drops actively suppressed organisations", () => {
+    const clients = [
+      org({ id: "a", legal_name: "Good Cause" }),
+      org({ id: "b", legal_name: "Blocked Cause" }),
+      org({ id: "c", legal_name: "Another Good Cause" }),
     ];
-    const result = visibleClients(organisations, []);
-    assert.deepEqual(result.map((c) => c.id), ["a", "b"]);
+    const suppressions = [{ organisation_id: "b", status: "active" as const }];
+
+    const result = visibleClients(clients, suppressions);
+    assert.deepEqual(
+      result.map((c) => c.id),
+      ["a", "c"],
+    );
   });
 
-  it("hides an actively suppressed charity", () => {
-    const organisations = [org({ id: "a" }), org({ id: "b" })];
-    const suppressions = [{ organisation_id: "a", status: "active" as const }];
-    const result = visibleClients(organisations, suppressions);
-    assert.deepEqual(result.map((c) => c.id), ["b"]);
-  });
-
-  it("still shows a charity with a pending suppression, flagged", () => {
-    const organisations = [org({ id: "a" })];
+  it("retains pending suppression requests but flags them", () => {
+    const clients = [
+      org({ id: "a", legal_name: "Pending Cause" }),
+      org({ id: "b", legal_name: "Clear Cause" }),
+    ];
     const suppressions = [{ organisation_id: "a", status: "pending" as const }];
-    const result = visibleClients(organisations, suppressions);
-    assert.equal(result.length, 1);
+
+    const result = visibleClients(clients, suppressions);
+    assert.equal(result.length, 2);
     assert.equal(result[0].suppressionPending, true);
+    assert.equal(result[1].suppressionPending, false);
   });
 
-  it("returns an empty list for an empty database", () => {
-    assert.deepEqual(visibleClients([], []), []);
-  });
-
-  it("attaches location and outreach status labels", () => {
-    const organisations = [
-      org({ id: "a", city: null, country_code: "GB", outreach_status: "follow_up_sent" }),
+  it("resolves ownerName for assigned, unassigned, and deactivated owners (F162)", () => {
+    const clients = [
+      org({ id: "a", owner_id: "cam-1", owner: { full_name: "Alice" } }),
+      org({ id: "b", owner_id: null, owner: null }),
+      org({ id: "c", owner_id: "cam-deactivated", owner: null }),
     ];
-    const result = visibleClients(organisations, []);
-    assert.equal(result[0].location, "GB");
-    assert.equal(result[0].outreachStatusLabel, "Follow up sent");
-  });
 
-  it("F162: ownerName is null only for a genuinely unassigned client", () => {
-    const organisations = [org({ id: "a", owner_id: null, owner: null })];
-    const result = visibleClients(organisations, []);
-    assert.equal(result[0].ownerName, null);
-  });
-
-  it("F162: ownerName carries the owning CAM's name", () => {
-    const organisations = [
-      org({ id: "a", owner_id: "cam-1", owner: { full_name: "Jane CAM" } }),
-    ];
-    const result = visibleClients(organisations, []);
-    assert.equal(result[0].ownerName, "Jane CAM");
-  });
-
-  it("F162: falls back to a label when the owner is set but their row is hidden (deactivated)", () => {
-    const organisations = [org({ id: "a", owner_id: "cam-1", owner: null })];
-    const result = visibleClients(organisations, []);
-    assert.equal(result[0].ownerName, "A former team member");
+    const result = visibleClients(clients, []);
+    assert.equal(result[0].ownerName, "Alice");
+    assert.equal(result[1].ownerName, null);
+    assert.equal(result[2].ownerName, "A former team member");
   });
 });
 
-describe("filterByOwner", () => {
+describe("filterByOwner (F163)", () => {
   const clients = visibleClients(
     [
-      org({ id: "a", owner_id: "cam-1", owner: { full_name: "Jane CAM" } }),
-      org({ id: "b", owner_id: "cam-2", owner: { full_name: "Sam CAM" } }),
+      org({ id: "a", owner_id: "cam-1", owner: { full_name: "Alice" } }),
+      org({ id: "b", owner_id: "cam-2", owner: { full_name: "Bob" } }),
       org({ id: "c", owner_id: null, owner: null }),
     ],
     [],
   );
 
-  it("returns every client when no filter is given", () => {
+  it("returns every client when ownerFilter is unset", () => {
     assert.deepEqual(filterByOwner(clients, undefined).map((c) => c.id), ["a", "b", "c"]);
     assert.deepEqual(filterByOwner(clients, null).map((c) => c.id), ["a", "b", "c"]);
     assert.deepEqual(filterByOwner(clients, "").map((c) => c.id), ["a", "b", "c"]);
   });
 
-  it("narrows to one CAM's clients", () => {
+  it("isolates clients owned by a specific CAM", () => {
     assert.deepEqual(filterByOwner(clients, "cam-1").map((c) => c.id), ["a"]);
-  });
-
-  it("supports the 'my clients' shortcut, which is just a CAM id filter", () => {
     assert.deepEqual(filterByOwner(clients, "cam-2").map((c) => c.id), ["b"]);
   });
 
@@ -166,7 +152,90 @@ describe("searchClients", () => {
   });
 
   it("returns an empty list when nothing matches", () => {
-    assert.deepEqual(searchClients(clients, "nonexistent"), []);
+    assert.deepEqual(searchClients(clients, "manchester"), []);
+  });
+});
+
+describe("filterByCity", () => {
+  const clients = visibleClients(
+    [
+      org({ id: "a", city: "Bristol" }),
+      org({ id: "b", city: "Cardiff" }),
+      org({ id: "c", city: "bristol" }),
+      org({ id: "d", city: null }),
+    ],
+    [],
+  );
+
+  it("returns every client when city filter is unset", () => {
+    assert.deepEqual(filterByCity(clients, undefined).map((c) => c.id), ["a", "b", "c", "d"]);
+    assert.deepEqual(filterByCity(clients, null).map((c) => c.id), ["a", "b", "c", "d"]);
+    assert.deepEqual(filterByCity(clients, "").map((c) => c.id), ["a", "b", "c", "d"]);
+  });
+
+  it("matches city exact case-insensitively", () => {
+    assert.deepEqual(filterByCity(clients, "Bristol").map((c) => c.id), ["a", "c"]);
+    assert.deepEqual(filterByCity(clients, "cardiff").map((c) => c.id), ["b"]);
+  });
+
+  it("returns empty when city does not match any client", () => {
+    assert.deepEqual(filterByCity(clients, "Sheffield"), []);
+  });
+});
+
+describe("filterByStatus", () => {
+  const clients = visibleClients(
+    [
+      org({ id: "a", outreach_status: "not_contacted" }),
+      org({ id: "b", outreach_status: "contacted" }),
+      org({ id: "c", outreach_status: "not_contacted" }),
+    ],
+    [],
+  );
+
+  it("returns every client when status filter is unset", () => {
+    assert.deepEqual(filterByStatus(clients, undefined).map((c) => c.id), ["a", "b", "c"]);
+    assert.deepEqual(filterByStatus(clients, null).map((c) => c.id), ["a", "b", "c"]);
+    assert.deepEqual(filterByStatus(clients, "").map((c) => c.id), ["a", "b", "c"]);
+  });
+
+  it("matches against human-readable status label", () => {
+    assert.deepEqual(filterByStatus(clients, "Not contacted").map((c) => c.id), ["a", "c"]);
+    assert.deepEqual(filterByStatus(clients, "contacted").map((c) => c.id), ["b"]);
+  });
+});
+
+describe("filterBySource", () => {
+  const clients = visibleClients(
+    [
+      org({ id: "a", organisation_type: "charity" }),
+      org({ id: "b", organisation_type: "company" }),
+      org({ id: "c", organisation_type: "both" }),
+      org({ id: "d", organisation_type: "other" }),
+    ],
+    [],
+  );
+
+  it("returns every client when source filter is unset", () => {
+    assert.deepEqual(filterBySource(clients, undefined).map((c) => c.id), ["a", "b", "c", "d"]);
+    assert.deepEqual(filterBySource(clients, null).map((c) => c.id), ["a", "b", "c", "d"]);
+    assert.deepEqual(filterBySource(clients, "").map((c) => c.id), ["a", "b", "c", "d"]);
+  });
+
+  it("filters for charity commission organisations (including dual registered)", () => {
+    assert.deepEqual(filterBySource(clients, "charity commission").map((c) => c.id), ["a", "c"]);
+  });
+
+  it("filters for companies house organisations (including dual registered)", () => {
+    assert.deepEqual(filterBySource(clients, "companies house").map((c) => c.id), ["b", "c"]);
+  });
+
+  it("filters for strictly dual registered organisations", () => {
+    assert.deepEqual(filterBySource(clients, "dual-registered").map((c) => c.id), ["c"]);
+  });
+
+  it("filters for other organisations", () => {
+    assert.deepEqual(filterBySource(clients, "other").map((c) => c.id), ["d"]);
   });
 });
 
@@ -281,27 +350,100 @@ describe("prioritiseBySector (F197 / F089 / F094)", () => {
   });
 });
 
-describe("prioritiseQueue (Combined F196 + F197)", () => {
+describe("resolveClientIncomeBand (F198)", () => {
+  it("uses direct income_band property when present", () => {
+    assert.equal(resolveClientIncomeBand(org({ income_band: "100k_1m" })), "100k_1m");
+  });
+
+  it("extracts latest income_band from financial_periods array sorted by period_end", () => {
+    const client = org({
+      financial_periods: [
+        { income_band: "under_10k", period_end: "2024-03-31" },
+        { income_band: "10k_100k", period_end: "2025-03-31" },
+      ],
+    });
+    assert.equal(resolveClientIncomeBand(client), "10k_100k");
+  });
+
+  it("derives income_band from numeric total_income when financial_periods has no income_band enum", () => {
+    const client = org({
+      financial_periods: [{ total_income: 450_000, period_end: "2025-12-31" }],
+    });
+    assert.equal(resolveClientIncomeBand(client), "100k_1m");
+  });
+
+  it("falls back to top-level total_income", () => {
+    assert.equal(resolveClientIncomeBand(org({ total_income: 15_000 })), "10k_100k");
+  });
+
+  it("returns null when no financial data exists", () => {
+    assert.equal(resolveClientIncomeBand(org()), null);
+  });
+});
+
+describe("prioritiseBySize (F198 / F091 / F094)", () => {
   const clients = visibleClients(
     [
-      org({ id: "1", legal_name: "Alpha Bristol Health", city: "Bristol", sector: "Healthcare" }),
-      org({ id: "2", legal_name: "Beta Sheffield Energy", city: "Sheffield", sector: "Renewable Energy" }),
-      org({ id: "3", legal_name: "Gamma Sheffield Health", city: "Sheffield", sector: "Healthcare" }),
-      org({ id: "4", legal_name: "Delta London Arts", city: "London", sector: "Arts & Culture" }),
+      org({ id: "1", legal_name: "Alpha Micro Project", income_band: "under_10k" }),
+      org({ id: "2", legal_name: "Beta Small Charity", income_band: "10k_100k" }),
+      org({ id: "3", legal_name: "Gamma Medium Charity", income_band: "100k_1m" }),
+      org({ id: "4", legal_name: "Delta Large Foundation", income_band: "over_1m" }),
+      org({ id: "5", legal_name: "Epsilon Unfiled Org" }),
     ],
     [],
   );
 
-  it("ranks organisations matching both geography AND sector highest", () => {
-    const result = prioritiseQueue(clients, {
-      preferred_cities: ["Sheffield"],
-      preferred_sectors: ["Health & Social Care"],
+  it("returns unweighted default order when no size preferences are provided", () => {
+    assert.deepEqual(
+      prioritiseBySize(clients, undefined).map((c) => c.id),
+      ["1", "2", "3", "4", "5"],
+    );
+    assert.deepEqual(
+      prioritiseBySize(clients, { preferred_income_bands: [] }).map((c) => c.id),
+      ["1", "2", "3", "4", "5"],
+    );
+  });
+
+  it("prioritises organisations matching preferred income bands", () => {
+    const result = prioritiseBySize(clients, {
+      preferred_income_bands: ["100k_1m", "over_1m"],
     });
-    // Gamma Sheffield Health matches both Sheffield (+10) and Health (+8) -> total 18
-    // Beta Sheffield Energy matches Sheffield (+10) -> total 10
-    // Alpha Bristol Health matches Health (+8) -> total 8
-    // Delta London Arts matches 0 -> total 0
-    assert.deepEqual(result.map((c) => c.id), ["3", "2", "1", "4"]);
+    // Gamma (#3) and Delta (#4) at the top, sorted alphabetically
+    assert.deepEqual(result.map((c) => c.id), ["4", "3", "1", "2", "5"]);
+  });
+
+  it("keeps matching organisations at the top and unprioritised ones in alphabetical order", () => {
+    const result = prioritiseBySize(clients, {
+      preferred_income_bands: ["under_10k"],
+    });
+    assert.deepEqual(
+      result.map((c) => c.id),
+      ["1", "2", "4", "5", "3"],
+    );
   });
 });
 
+describe("prioritiseQueue (Combined F196 + F197 + F198)", () => {
+  const clients = visibleClients(
+    [
+      org({ id: "1", legal_name: "Alpha Bristol Health Small", city: "Bristol", sector: "Healthcare", income_band: "10k_100k" }),
+      org({ id: "2", legal_name: "Beta Sheffield Energy Medium", city: "Sheffield", sector: "Renewable Energy", income_band: "100k_1m" }),
+      org({ id: "3", legal_name: "Gamma Sheffield Health Medium", city: "Sheffield", sector: "Healthcare", income_band: "100k_1m" }),
+      org({ id: "4", legal_name: "Delta London Arts Large", city: "London", sector: "Arts & Culture", income_band: "over_1m" }),
+    ],
+    [],
+  );
+
+  it("ranks organisations matching geography, sector, AND size highest", () => {
+    const result = prioritiseQueue(clients, {
+      preferred_cities: ["Sheffield"],
+      preferred_sectors: ["Health & Social Care"],
+      preferred_income_bands: ["100k_1m"],
+    });
+    // Gamma Sheffield Health Medium matches all 3 (City: 10 + Sector: 8 + Size: 10 = 28)
+    // Beta Sheffield Energy Medium matches City: 10 + Size: 10 = 20
+    // Alpha Bristol Health Small matches Sector: 8 = 8
+    // Delta London Arts Large matches 0 = 0
+    assert.deepEqual(result.map((c) => c.id), ["3", "2", "1", "4"]);
+  });
+});

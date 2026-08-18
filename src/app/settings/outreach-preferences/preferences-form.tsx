@@ -17,6 +17,7 @@ import {
   GEOGRAPHIC_REACH_LABELS,
   INCOME_BAND_OPTIONS,
   INCOME_BAND_LABELS,
+  INCOME_BAND_DESCRIPTIONS,
   MAX_CITY_LENGTH,
   MAX_CITIES,
   MAX_SECTOR_LENGTH,
@@ -353,12 +354,15 @@ export function OutreachPreferencesForm({
 
         <fieldset>
           <legend className={LEGEND_CLASS}>Size (annual income)</legend>
-          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
+          <p className="mt-2 text-sm leading-[1.7] text-foreground/65">
+            Select organisation size tiers based on annual filed accounts from Charity Commission and Companies House.
+          </p>
+          <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
             {INCOME_BAND_OPTIONS.map((option) => (
               <label
                 key={option}
                 htmlFor={`band-${option}`}
-                className="flex cursor-pointer select-none items-center gap-3 text-sm"
+                className="flex cursor-pointer select-none items-start gap-3 rounded-xl border border-black/[0.08] bg-white p-3 transition-colors hover:border-brand/30"
               >
                 <Checkbox
                   id={`band-${option}`}
@@ -373,8 +377,12 @@ export function OutreachPreferencesForm({
                         : bands.filter((value) => value !== option),
                     )
                   }
+                  className="mt-0.5"
                 />
-                {INCOME_BAND_LABELS[option]}
+                <div className="space-y-0.5">
+                  <p className="text-sm font-medium text-foreground">{INCOME_BAND_LABELS[option]}</p>
+                  <p className="text-xs text-foreground/55">{INCOME_BAND_DESCRIPTIONS[option]}</p>
+                </div>
               </label>
             ))}
           </div>

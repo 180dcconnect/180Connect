@@ -119,7 +119,7 @@ export default async function ClientsPage({
     supabase
       .from("organisations")
       .select(
-        "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
+        "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), financial_periods(income_band, total_income, period_end)",
       )
       .order("legal_name")
       .overrideTypes<ClientListRow[], { merge: false }>(),

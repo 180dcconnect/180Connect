@@ -4,8 +4,15 @@
  */
 
 import { formatLocation, formatOutreachStatus } from "../../lib/organisation-format.ts";
+import { deriveIncomeBand } from "../settings/outreach-preferences/constants.ts";
 
 export { formatLocation, formatOutreachStatus };
+
+export type FinancialPeriodRow = {
+  income_band?: string | null;
+  total_income?: number | null;
+  period_end?: string | null;
+};
 
 export type ClientListRow = {
   id: string;
@@ -16,6 +23,9 @@ export type ClientListRow = {
   geographic_reach?: string | null;
   sector?: string | null;
   sub_sector?: string | null;
+  income_band?: string | null;
+  total_income?: number | null;
+  financial_periods?: FinancialPeriodRow[] | null;
   outreach_status: string;
   owner_id: string | null;
   owner: { full_name: string | null } | null;
@@ -32,7 +42,35 @@ export type VisibleClient = ClientListRow & {
    * (matrix §1, users_select_active hides their row) — falls back to a label rather
    * than reading as unassigned. */
   ownerName: string | null;
+  income_band: string | null;
 };
+
+/**
+ * Resolves the effective income band for an organisation from direct property,
+ * latest filed financial period, or numeric total income calculation.
+ */
+export function resolveClientIncomeBand(org: ClientListRow): string | null {
+  if (org.income_band) return org.income_band;
+
+  if (org.financial_periods && org.financial_periods.length > 0) {
+    const sorted = [...org.financial_periods].sort((a, b) => {
+      const dateA = a.period_end ? new Date(a.period_end).getTime() : 0;
+      const dateB = b.period_end ? new Date(b.period_end).getTime() : 0;
+      return dateB - dateA;
+    });
+    const latest = sorted[0];
+    if (latest.income_band) return latest.income_band;
+    if (latest.total_income !== null && latest.total_income !== undefined) {
+      return deriveIncomeBand(latest.total_income);
+    }
+  }
+
+  if (org.total_income !== null && org.total_income !== undefined) {
+    return deriveIncomeBand(org.total_income);
+  }
+
+  return null;
+}
 
 /**
  * The default list view (F051 AC4): actively suppressed charities (F251) never
@@ -53,6 +91,7 @@ export function visibleClients(
       outreachStatusLabel: formatOutreachStatus(org.outreach_status),
       suppressionPending: statusByOrg.get(org.id) === "pending",
       ownerName: org.owner_id ? (org.owner?.full_name ?? "A former team member") : null,
+      income_band: resolveClientIncomeBand(org),
     }));
 }
 
@@ -254,9 +293,52 @@ export function prioritiseBySector(
 }
 
 /**
- * F196 / F197 / F090 / F089 / F094 — Unified Personalised CAM Queue Prioritisation.
+ * Calculates size (income band) priority score for a client against CAM preferences.
+ */
+export function getSizePriorityScore(
+  client: VisibleClient,
+  preferredBands: string[],
+): number {
+  if (preferredBands.length === 0) return 0;
+  if (!client.income_band) return 0;
+
+  const clientBand = client.income_band.toLowerCase().trim();
+  if (preferredBands.includes(clientBand)) {
+    return 10;
+  }
+
+  return 0;
+}
+
+/**
+ * F198 / F091 / F094 — Personalised CAM queue size (income band) weighting.
  *
- * Combines geographic and sector preference weighting to rank matching clients
+ * Re-orders clients so that organisations matching the CAM's preferred size tiers
+ * are prioritised higher in the CAM's personal queue.
+ */
+export function prioritiseBySize(
+  clients: VisibleClient[],
+  preferences?: OutreachQueuePreferences | null,
+): VisibleClient[] {
+  if (!preferences) return clients;
+
+  const preferredBands = (preferences.preferred_income_bands ?? []).map((b) => b.toLowerCase().trim());
+  if (preferredBands.length === 0) return clients;
+
+  return [...clients].sort((a, b) => {
+    const scoreA = getSizePriorityScore(a, preferredBands);
+    const scoreB = getSizePriorityScore(b, preferredBands);
+    if (scoreB !== scoreA) {
+      return scoreB - scoreA;
+    }
+    return a.legal_name.localeCompare(b.legal_name);
+  });
+}
+
+/**
+ * F196 / F197 / F198 / F090 / F089 / F091 / F094 — Unified Personalised CAM Queue Prioritisation.
+ *
+ * Combines geographic, sector, and size preference weighting to rank matching clients
  * at the top of the CAM's queue without altering underlying base scores (F088).
  *
  * If no preferences are active (or when cleared), returns the unmodified list in
@@ -271,8 +353,14 @@ export function prioritiseQueue(
   const preferredReach = (preferences.preferred_geographic_reach ?? []).map((r) => r.toLowerCase().trim());
   const preferredCities = (preferences.preferred_cities ?? []).map((c) => c.toLowerCase().trim());
   const preferredSectors = (preferences.preferred_sectors ?? []).map((s) => s.toLowerCase().trim());
+  const preferredBands = (preferences.preferred_income_bands ?? []).map((b) => b.toLowerCase().trim());
 
-  if (preferredReach.length === 0 && preferredCities.length === 0 && preferredSectors.length === 0) {
+  if (
+    preferredReach.length === 0 &&
+    preferredCities.length === 0 &&
+    preferredSectors.length === 0 &&
+    preferredBands.length === 0
+  ) {
     return clients;
   }
 
@@ -281,9 +369,11 @@ export function prioritiseQueue(
     const geoScoreB = getGeographicPriorityScore(b, preferredReach, preferredCities);
     const secScoreA = getSectorPriorityScore(a, preferredSectors);
     const secScoreB = getSectorPriorityScore(b, preferredSectors);
+    const sizeScoreA = getSizePriorityScore(a, preferredBands);
+    const sizeScoreB = getSizePriorityScore(b, preferredBands);
 
-    const totalA = geoScoreA + secScoreA;
-    const totalB = geoScoreB + secScoreB;
+    const totalA = geoScoreA + secScoreA + sizeScoreA;
+    const totalB = geoScoreB + secScoreB + sizeScoreB;
 
     if (totalB !== totalA) {
       return totalB - totalA;

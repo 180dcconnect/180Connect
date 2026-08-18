@@ -62,7 +62,7 @@ export function ClaimButton({
   return (
     <div className={compact ? "text-right" : ""}>
       <OriginButton
-        size={compact ? "xs" : "md"}
+        size={compact ? "xs" : "sm"}
         loading={busy}
         disabled={busy}
         onClick={claim}
@@ -75,9 +75,9 @@ export function ClaimButton({
           aria-live="polite"
           role={conflict ? "alert" : undefined}
           className={
-            (compact ? "mt-1 text-xs " : "mt-3 text-sm ") +
+            (compact ? "mt-1 text-xs " : "mt-2.5 text-[13px] leading-[1.6] ") +
             "font-bold " +
-            (conflict ? "text-amber-800" : "text-red-800")
+            (conflict ? "text-amber-800" : "text-destructive")
           }
         >
           {message}

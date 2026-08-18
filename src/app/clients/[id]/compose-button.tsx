@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 
 /**
  * F050 (#52) placeholder send action — see the comment on ../page.tsx for why this
@@ -19,15 +20,16 @@ export function ComposeButton({ blocked }: { blocked: boolean }) {
   if (blocked) {
     return (
       <div>
-        <button
-          className="cursor-not-allowed rounded-lg border border-black/10 px-5 py-2.5 font-bold text-foreground/40"
+        <OriginButton
+          variant="outline"
+          size="sm"
           disabled
           title="Do Not Contact — outreach is blocked for this charity"
           type="button"
         >
           Compose email
-        </button>
-        <p className="mt-2 text-xs text-foreground/50">
+        </OriginButton>
+        <p className="mt-2.5 text-[13px] leading-[1.6] text-foreground/45">
           Blocked — see the Do Not Contact notice above.
         </p>
       </div>
@@ -36,15 +38,16 @@ export function ComposeButton({ blocked }: { blocked: boolean }) {
 
   return (
     <div>
-      <button
-        className="rounded-lg border border-black/15 px-5 py-2.5 font-bold hover:bg-black/[0.03]"
+      <OriginButton
+        variant="outline"
+        size="sm"
         onClick={() => setClicked(true)}
         type="button"
       >
         Compose email
-      </button>
+      </OriginButton>
       {clicked ? (
-        <p aria-live="polite" className="mt-2 text-xs text-foreground/50">
+        <p aria-live="polite" className="mt-2.5 text-[13px] leading-[1.6] text-foreground/45">
           Email generation isn&apos;t built yet (F094, F100) — this button is a
           placeholder so Do Not Contact protection (F050) can be demonstrated ahead
           of the real send flow.

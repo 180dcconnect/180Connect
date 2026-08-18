@@ -27,6 +27,19 @@
   --muted-foreground: #8a898b;
   --destructive: #b91c1c;
   --border: #e6e6e7;
+  /**
+   * `--input` and `--ring` are named by every generated form control
+   * (`border-input`, `focus-visible:ring-ring/50` in ui/input.tsx and
+   * ui/select.tsx). Without them Tailwind emits nothing for those utilities and
+   * the controls render with no border and no focus ring at all — `--input`
+   * therefore matches `--border`, and the focus ring is the brand green so a
+   * keyboard user lands on the same colour the rest of the app focuses in.
+   */
+  --input: #e6e6e7;
+  --ring: var(--brand);
+  /* Text selection inside those controls (`selection:bg-primary`). */
+  --primary: var(--brand);
+  --primary-foreground: #ffffff;
 }
 
 @theme inline {
@@ -44,6 +57,10 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-destructive: var(--destructive);
   --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-body: var(--font-lato);

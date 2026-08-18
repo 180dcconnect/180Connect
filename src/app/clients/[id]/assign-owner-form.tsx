@@ -9,6 +9,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { OriginButton } from "@/components/ui/origin-button";
 
 type TeamMember = { id: string; full_name: string | null };
 
@@ -72,21 +74,23 @@ export function AssignOwnerForm({
   }
 
   return (
-    <form className="mt-3 space-y-3" onSubmit={submit}>
+    <form className="mt-5 space-y-3 border-t border-black/[0.06] pt-5" onSubmit={submit}>
       {currentOwnerId && (
         <p
           role="alert"
-          className="rounded-lg bg-amber-50 p-3 text-xs font-bold text-amber-800"
+          className="rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-3.5 py-3 text-[13px] font-bold leading-[1.6] text-amber-800"
         >
           Currently owned by {currentOwnerName ?? "a former team member"}. Assigning a
           new owner moves this client away from them — this is not silent.
         </p>
       )}
 
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-foreground/65">Assign to</span>
+      <label className="flex flex-col gap-1.5 text-sm">
+        <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+          Assign to
+        </span>
         <Select value={ownerId} onValueChange={setOwnerId}>
-          <SelectTrigger className="w-full text-sm">
+          <SelectTrigger className="w-full rounded-xl bg-white text-sm">
             <SelectValue placeholder="Choose a CAM" />
           </SelectTrigger>
           <SelectContent>
@@ -100,27 +104,25 @@ export function AssignOwnerForm({
         </Select>
       </label>
 
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-foreground/65">Reason</span>
-        <input
+      <label className="flex flex-col gap-1.5 text-sm">
+        <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+          Reason
+        </span>
+        <Input
           type="text"
           value={reason}
           onChange={(event) => setReason(event.target.value)}
           placeholder="Why this handover is happening"
-          className="rounded-lg border border-black/10 px-3 py-2 text-sm"
+          className="rounded-xl bg-white"
         />
       </label>
 
-      <button
-        type="submit"
-        disabled={busy}
-        className="rounded-full border border-brand/30 px-4 py-1.5 text-xs font-bold text-brand hover:bg-brand/5 disabled:opacity-50"
-      >
+      <OriginButton type="submit" size="sm" loading={busy} disabled={busy}>
         {busy ? "Assigning…" : currentOwnerId ? "Reassign owner" : "Assign owner"}
-      </button>
+      </OriginButton>
 
       {error && (
-        <p aria-live="polite" role="alert" className="text-xs font-bold text-red-800">
+        <p aria-live="polite" role="alert" className="text-[13px] font-bold text-destructive">
           {error}
         </p>
       )}

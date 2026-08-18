@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   calculatePriorityScore,
-  PLACEHOLDER_WEIGHTS,
+  EQUAL_WEIGHTS,
   type PriorityFactors,
 } from "./calculate-priority-score.ts";
 
@@ -42,12 +42,12 @@ describe("calculatePriorityScore — boundary cases", () => {
 });
 
 describe("calculatePriorityScore — weighting", () => {
-  it("uses PLACEHOLDER_WEIGHTS, which sum to 1", () => {
+  it("uses EQUAL_WEIGHTS, which sum to 1", () => {
     const sum =
-      PLACEHOLDER_WEIGHTS.sector +
-      PLACEHOLDER_WEIGHTS.geography +
-      PLACEHOLDER_WEIGHTS.size +
-      PLACEHOLDER_WEIGHTS.previousContact;
+      EQUAL_WEIGHTS.sector +
+      EQUAL_WEIGHTS.geography +
+      EQUAL_WEIGHTS.size +
+      EQUAL_WEIGHTS.previousContact;
     assert.equal(sum, 1);
   });
 
@@ -56,8 +56,8 @@ describe("calculatePriorityScore — weighting", () => {
     // factor's own weight, confirming no factor is silently favoured.
     const onlySector = calculatePriorityScore({ ...zero, sector: 1 });
     const onlyGeography = calculatePriorityScore({ ...zero, geography: 1 });
-    assert.equal(onlySector, PLACEHOLDER_WEIGHTS.sector);
-    assert.equal(onlyGeography, PLACEHOLDER_WEIGHTS.geography);
+    assert.equal(onlySector, EQUAL_WEIGHTS.sector);
+    assert.equal(onlyGeography, EQUAL_WEIGHTS.geography);
     assert.equal(onlySector, onlyGeography);
   });
 });

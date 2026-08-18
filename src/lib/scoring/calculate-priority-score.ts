@@ -21,12 +21,14 @@ export type PriorityFactors = {
 };
 
 /**
- * TODO: placeholder, equal weighting — NOT the real formula. The ticket
- * itself flags "Initial weighting formula" as an open question. Replace
- * this object once the team confirms real weights; nothing else in this
- * file, or any caller, needs to change.
+ * CONFIRMED with team lead: equal weighting for the MVP, matching the
+ * ticket's own scope ("Rule-based MVP", the simple sector/geography/size/
+ * previous-contact formula described in the ticket, not the larger
+ * LATEST_SCORES/MODEL_VERSIONS system found in the Data Model). No longer
+ * a placeholder pending a decision — this is the real, agreed formula for
+ * now, and can be revisited later if the team wants a weighted version.
  */
-export const PLACEHOLDER_WEIGHTS: PriorityFactors = {
+export const EQUAL_WEIGHTS: PriorityFactors = {
   sector: 0.25,
   geography: 0.25,
   size: 0.25,
@@ -40,13 +42,13 @@ function clamp01(value: number): number {
 
 /**
  * Combines the four factors into a single 0-1 priority score using
- * PLACEHOLDER_WEIGHTS. Each input is clamped to [0, 1] defensively — an
+ * EQUAL_WEIGHTS. Each input is clamped to [0, 1] defensively — an
  * out-of-range factor (e.g. a bug in one of F089-F093's not-yet-built
  * logic) degrades to the nearest valid value rather than producing a score
  * outside the documented 0-1 range.
  */
 export function calculatePriorityScore(factors: PriorityFactors): number {
-  const weights = PLACEHOLDER_WEIGHTS;
+  const weights = EQUAL_WEIGHTS;
   const weighted =
     clamp01(factors.sector) * weights.sector +
     clamp01(factors.geography) * weights.geography +

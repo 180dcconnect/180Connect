@@ -119,3 +119,10 @@ test("buildStageOnePrompt defaults to a mission-led opening when no options are 
   const context = { organisationName: "Example", organisationType: "charity" };
   assert.match(buildStageOnePrompt(context).system, /supplied mission/);
 });
+
+test("buildStageOnePrompt applies each closing approach safely", () => {
+  const context = { organisationName: "Example", organisationType: "charity" };
+  assert.match(buildStageOnePrompt(context, { closing: "soft_cta" }).system, /low-pressure invitation/);
+  assert.match(buildStageOnePrompt(context, { closing: "meeting_request" }).system, /without proposing invented dates/);
+  assert.match(buildStageOnePrompt(context, { closing: "open_question" }).system, /one clear, open question/);
+});

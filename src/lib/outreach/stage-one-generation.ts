@@ -8,6 +8,7 @@ import {
   type EmailVoice,
   type EmailTone,
   type OpeningApproach,
+  type ClosingApproach,
   type StageOneContext,
 } from "./stage-one-prompt.ts";
 
@@ -52,7 +53,7 @@ export async function generateStageOneDraft(
   organisationId: string,
   context: StageOneContext,
   callModel: CallStageOneModel,
-  options: { length?: EmailLength; voice?: EmailVoice; tone?: EmailTone; opening?: OpeningApproach } = {},
+  options: { length?: EmailLength; voice?: EmailVoice; tone?: EmailTone; opening?: OpeningApproach; closing?: ClosingApproach } = {},
 ): Promise<{ draft: StageOneDraft } | { error: string }> {
   const prompt = buildStageOnePrompt(context, options);
   const startedAt = Date.now();

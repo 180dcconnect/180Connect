@@ -47,6 +47,40 @@ describe("formatTeamActivity (F029)", () => {
     assert.equal(activity.actionLabel, "Ownership");
   });
 
+  it("formats admin ownership assignments", () => {
+    const activity = formatTeamActivity(
+      row({
+        actor_name: "Bashir Admin",
+        action: "ownership_assigned",
+        target_name: "Cancer Research UK",
+        detail: { to: "cam-1" },
+      }),
+      now,
+    );
+    assert.equal(
+      activity.sentence,
+      "Bashir Admin assigned ownership of Cancer Research UK",
+    );
+    assert.equal(activity.actionLabel, "Ownership");
+  });
+
+  it("formats admin ownership reassignments (F164)", () => {
+    const activity = formatTeamActivity(
+      row({
+        actor_name: "Bashir Admin",
+        action: "ownership_reassigned",
+        target_name: "Cancer Research UK",
+        detail: { from: "cam-1", to: "cam-2", reason: "Workload rebalance" },
+      }),
+      now,
+    );
+    assert.equal(
+      activity.sentence,
+      "Bashir Admin reassigned ownership of Cancer Research UK",
+    );
+    assert.equal(activity.actionLabel, "Ownership");
+  });
+
   it("formats pipeline status changes", () => {
     const activity = formatTeamActivity(
       row({

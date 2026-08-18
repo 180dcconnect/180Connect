@@ -61,6 +61,8 @@ export function formatTeamActivity(
         actionLabel = "Ownership";
         if (detail.self_claim === true) {
           sentence = `${actorName} claimed ownership of ${target}`;
+        } else if (row.action === "ownership_reassigned") {
+          sentence = `${actorName} reassigned ownership of ${target}`;
         } else {
           sentence = `${actorName} assigned ownership of ${target}`;
         }

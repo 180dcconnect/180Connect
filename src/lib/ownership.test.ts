@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { assignOwnerRpcFailure, claimOwnershipRpcFailure } from "./ownership.ts";
+import {
+  assignOwnerRpcFailure,
+  claimOwnershipRpcFailure,
+  validateReassignOwnership,
+} from "./ownership.ts";
 
 describe("claimOwnershipRpcFailure", () => {
   it("passes through the RPC's own message for a permission failure", () => {
@@ -109,3 +113,92 @@ describe("assignOwnerRpcFailure", () => {
     assert.match(result.error, /\S/);
   });
 });
+
+describe("validateReassignOwnership (F163/F164)", () => {
+  const validOrgId = "11111111-1111-4111-8111-111111111111";
+  const validOwnerId = "22222222-2222-4222-8222-222222222222";
+  const differentOwnerId = "33333333-3333-4333-8333-333333333333";
+
+  it("validates successful reassignment input", () => {
+    const result = validateReassignOwnership({
+      organisationId: validOrgId,
+      newOwnerId: validOwnerId,
+      reason: "Handing over to new CAM",
+      currentOwnerId: differentOwnerId,
+    });
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.data.organisationId, validOrgId);
+      assert.equal(result.data.newOwnerId, validOwnerId);
+      assert.equal(result.data.reason, "Handing over to new CAM");
+    }
+  });
+
+  it("trims whitespace from reason", () => {
+    const result = validateReassignOwnership({
+      organisationId: validOrgId,
+      newOwnerId: validOwnerId,
+      reason: "   Workload rebalance   ",
+    });
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.data.reason, "Workload rebalance");
+    }
+  });
+
+  it("rejects invalid organisation ID", () => {
+    const result = validateReassignOwnership({
+      organisationId: "not-a-uuid",
+      newOwnerId: validOwnerId,
+      reason: "Handover",
+    });
+
+    assert.deepEqual(result, {
+      ok: false,
+      error: "That client could not be found.",
+    });
+  });
+
+  it("rejects invalid new owner ID", () => {
+    const result = validateReassignOwnership({
+      organisationId: validOrgId,
+      newOwnerId: "invalid-user",
+      reason: "Handover",
+    });
+
+    assert.deepEqual(result, {
+      ok: false,
+      error: "Choose a CAM to assign.",
+    });
+  });
+
+  it("rejects missing or empty reason", () => {
+    const result = validateReassignOwnership({
+      organisationId: validOrgId,
+      newOwnerId: validOwnerId,
+      reason: "    ",
+    });
+
+    assert.deepEqual(result, {
+      ok: false,
+      error: "A reason is required so the handover can be understood later.",
+    });
+  });
+
+  it("rejects selecting the exact same current owner", () => {
+    const result = validateReassignOwnership({
+      organisationId: validOrgId,
+      newOwnerId: validOwnerId,
+      reason: "Handover",
+      currentOwnerId: validOwnerId,
+    });
+
+    assert.deepEqual(result, {
+      ok: false,
+      error: "Choose a different team member to change ownership.",
+    });
+  });
+});
+

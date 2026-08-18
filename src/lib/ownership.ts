@@ -1,5 +1,5 @@
 /**
- * F162/F163 — decision logic behind claiming and assigning client ownership, kept
+ * F162/F163/F164 — decision logic behind claiming, assigning, and changing client ownership, kept
  * out of the route so it can be tested without a database (same split as
  * @/lib/suppressions).
  */
@@ -8,6 +8,72 @@ export type RpcFailure = { status: number; error: string };
 
 const GENERIC_FAILURE = "This client could not be claimed. Refresh and try again.";
 const GENERIC_ASSIGN_FAILURE = "This client could not be assigned. Refresh and try again.";
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export type ValidateReassignOwnershipInput = {
+  organisationId: unknown;
+  newOwnerId: unknown;
+  reason: unknown;
+  currentOwnerId?: unknown;
+};
+
+export type ValidateReassignOwnershipResult =
+  | {
+      ok: true;
+      data: {
+        organisationId: string;
+        newOwnerId: string;
+        reason: string;
+      };
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
+/**
+ * Validates inputs for assigning (F163) or changing (F164) client ownership.
+ */
+export function validateReassignOwnership(
+  input: ValidateReassignOwnershipInput,
+): ValidateReassignOwnershipResult {
+  if (typeof input.organisationId !== "string" || !UUID_REGEX.test(input.organisationId)) {
+    return { ok: false, error: "That client could not be found." };
+  }
+
+  if (typeof input.newOwnerId !== "string" || !UUID_REGEX.test(input.newOwnerId)) {
+    return { ok: false, error: "Choose a CAM to assign." };
+  }
+
+  const reason = typeof input.reason === "string" ? input.reason.trim() : "";
+  if (!reason) {
+    return {
+      ok: false,
+      error: "A reason is required so the handover can be understood later.",
+    };
+  }
+
+  if (
+    typeof input.currentOwnerId === "string" &&
+    input.currentOwnerId.trim().toLowerCase() === input.newOwnerId.trim().toLowerCase()
+  ) {
+    return {
+      ok: false,
+      error: "Choose a different team member to change ownership.",
+    };
+  }
+
+  return {
+    ok: true,
+    data: {
+      organisationId: input.organisationId,
+      newOwnerId: input.newOwnerId,
+      reason,
+    },
+  };
+}
 
 /**
  * Maps a Postgres error from claim_organisation onto something safe to show a CAM.
@@ -68,3 +134,4 @@ export function assignOwnerRpcFailure(error: {
       return { status: 500, error: GENERIC_ASSIGN_FAILURE };
   }
 }
+

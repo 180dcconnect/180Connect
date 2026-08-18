@@ -82,6 +82,7 @@ export function BrandSearchBar({
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [filterQuery, setFilterQuery] = useState("");
   const [selectedFilters, setSelectedFilters] = useState<{ category: string; label: string; value: string }[]>(defaultFilters);
+  const [isSearching, setIsSearching] = useState(false);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -114,11 +115,13 @@ export function BrandSearchBar({
   const FILTER_PARAMS: Record<string, string> = paramNames || DEFAULT_PARAMS;
 
   const submitSearch = (filters = selectedFilters, q = query, closePanel = true) => {
-    // Start from the address bar, not from empty: the host page may carry state
-    // this bar knows nothing about (the client list's funnel stage and breakdown
-    // sort), and rebuilding the query string from scratch silently reset it.
-    // Read via `window` rather than `useSearchParams` — the hook would opt every
-    // page holding this bar out of static rendering, and this only runs on submit.
+    if (isSearching) return;
+    setIsSearching(true);
+
+    if (closePanel) {
+      setOpen(false);
+    }
+
     const params = new URLSearchParams(window.location.search);
     params.delete("q");
     params.delete("page");
@@ -130,10 +133,13 @@ export function BrandSearchBar({
       params.set(FILTER_PARAMS[f.category] ?? "filter", f.value);
     });
 
-    router.push(`?${params.toString()}`);
-    if (closePanel) {
-      setOpen(false);
-    }
+    // Plays the rolling square animation before navigating
+    setTimeout(() => {
+      router.push(`?${params.toString()}`);
+      setTimeout(() => {
+        setIsSearching(false);
+      }, 400);
+    }, 1500);
   };
 
   const close = () => {
@@ -253,7 +259,7 @@ export function BrandSearchBar({
         </div>
 
         <AnimatePresence>
-          {(typing || selectedFilters.length > 0 || open) && (
+          {(typing || selectedFilters.length > 0 || open || isSearching) && (
             <motion.div
               initial={{ width: 0, opacity: 0, scale: 0.8 }}
               animate={{ width: 30, opacity: 1, scale: 1 }}
@@ -263,15 +269,27 @@ export function BrandSearchBar({
             >
               <button
                 type="button"
-                aria-label="Search"
-                title="Press Enter or click to search"
+                aria-label={isSearching ? "Searching…" : "Search"}
+                title={isSearching ? "Searching…" : "Press Enter or click to search"}
+                disabled={isSearching}
                 onClick={() => {
                   submitSearch();
                   inputRef.current?.blur();
                 }}
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e6f5c0] text-[#1a1a1a] transition-colors hover:bg-[#d4e5a0] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+                className={`grid h-8 w-8 shrink-0 place-items-center rounded-full transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0] ${
+                  isSearching
+                    ? "bg-transparent"
+                    : "bg-[#e6f5c0] text-[#1a1a1a] hover:bg-[#d4e5a0]"
+                }`}
               >
-                <ArrowRight className="h-4 w-4" />
+                {isSearching ? (
+                  <div
+                    className="h-4.5 w-4.5 rounded-[4px] bg-[#e6f5c0] animate-spin shadow-[0_0_10px_rgba(230,245,192,0.65)]"
+                    style={{ animationDuration: "2.5s" }}
+                  />
+                ) : (
+                  <ArrowRight className="h-4 w-4" />
+                )}
               </button>
             </motion.div>
           )}

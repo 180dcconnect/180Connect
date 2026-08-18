@@ -465,13 +465,6 @@ export default async function ClientsPage({
                             </span>
                           )}
                         </span>
-
-                        <span
-                          aria-hidden="true"
-                          className="hidden shrink-0 text-foreground/25 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-foreground/55 sm:block"
-                        >
-                          →
-                        </span>
                       </Link>
 
                       {/* A fixed slot rather than a conditional child: an owned

@@ -266,12 +266,6 @@ export default async function DashboardPage({
               className="shrink-0"
             >
               View all clients
-              <span
-                aria-hidden="true"
-                className="transition-transform duration-200 group-hover:translate-x-0.5"
-              >
-                →
-              </span>
             </OriginButton>
           )}
         </Rise>

@@ -110,6 +110,7 @@ Without processing this limited information, Sheffield CIC cannot identify suita
 
 ### 4.3 Reasonable Expectations of Data Subjects
 * **Public Availability:** Contact details are obtained from public statutory registers (Companies House, Charity Commission) or public charity websites where the organisation has published contact channels for external correspondence.
+* **Public Availability vs. Marketing Expectations:** Public availability alone is not treated as consent or as an unrestricted expectation of marketing. The balancing assessment relies on the professional context, relevance of the proposed communication, limited nature of the data processed, the absence of private contact information, transparency measures, and the individual's ability to object to direct marketing at any time.
 * **Contextual Relevance:** Outreach messages relate strictly to the professional activities, funding capacity, and operational objectives of the recipient's organisation.
 * **Foreseeability:** Individuals holding professional roles within corporate bodies reasonably expect to receive professional B2B inquiries, introductions, and partnership propositions relevant to their sector.
 
@@ -153,8 +154,8 @@ UK GDPR Article 6(1)(f) and the Privacy and Electronic Communications Regulation
 
 ### 6.2 Formal Assessment Decision
 
-> **DECISION:** **APPROVED.**  
-> **Article 6(1)(f) (Legitimate Interests) is confirmed as a valid, lawful basis for 180Connect's prospective client outreach and relationship management processing.**
+> **DECISION:** **APPROVED IN PRINCIPLE — SUBJECT TO CONTROLLER / LEADERSHIP SIGN-OFF.**  
+> **The three-part legitimate interests test has been completed and the assessment concludes that Article 6(1)(f) (Legitimate Interests) is an appropriate lawful basis for the defined processing activities, subject to the conditions set out in §6.3 and final approval by an authorised representative of 180 Degrees Consulting Sheffield CIC.**
 
 ### 6.3 Mandatory Conditions for Ongoing Compliance
 Reliance on this LIA is contingent upon the following controls remaining active:
@@ -171,4 +172,4 @@ Reliance on this LIA is contingent upon the following controls remaining active:
 | Role | Name | Signature / Approval | Date |
 | :--- | :--- | :--- | :--- |
 | **Lead Assessor / Project Manager** | Bashir Bobboi | *Bashir Bobboi* | 18 August 2026 |
-| **Data Protection Officer / Leadership Review** | 180DC Sheffield Leadership Team | *Pending Final Leadership Review* | — |
+| **Sheffield CIC Leadership / Authorised Controller Representative** | 180DC Sheffield Leadership Team | *Pending Final Leadership Review* | — |

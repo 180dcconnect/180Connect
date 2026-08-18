@@ -6,6 +6,7 @@ import {
   claimOwnershipRpcFailure,
   isNoOpReassignment,
   NO_OP_REASSIGNMENT_MESSAGE,
+  validateBulkReassignOwnership,
   validateReassignOwnership,
 } from "./ownership.ts";
 
@@ -235,5 +236,91 @@ describe("isNoOpReassignment (F164)", () => {
   it("is false for an unowned client, so a first assignment goes through", () => {
     assert.equal(isNoOpReassignment(null, ownerId), false);
     assert.equal(isNoOpReassignment(undefined, ownerId), false);
+  });
+});
+
+describe("validateBulkReassignOwnership (F253)", () => {
+  const validOrg1 = "11111111-1111-4111-8111-111111111111";
+  const validOrg2 = "22222222-2222-4222-8222-222222222222";
+  const validOwner = "33333333-3333-4333-8333-333333333333";
+
+  it("validates successful bulk reassignment input", () => {
+    const result = validateBulkReassignOwnership({
+      organisationIds: [validOrg1, validOrg2],
+      newOwnerId: validOwner,
+      reason: "Redistributing portfolio",
+    });
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.deepEqual(result.data.organisationIds, [validOrg1, validOrg2]);
+      assert.equal(result.data.newOwnerId, validOwner);
+      assert.equal(result.data.reason, "Redistributing portfolio");
+    }
+  });
+
+  it("rejects empty organisation IDs array", () => {
+    const result = validateBulkReassignOwnership({
+      organisationIds: [],
+      newOwnerId: validOwner,
+      reason: "Redistributing",
+    });
+
+    assert.deepEqual(result, {
+      ok: false,
+      error: "Select at least one client to reassign.",
+    });
+  });
+
+  it("rejects non-array organisation IDs", () => {
+    const result = validateBulkReassignOwnership({
+      organisationIds: null,
+      newOwnerId: validOwner,
+      reason: "Redistributing",
+    });
+
+    assert.deepEqual(result, {
+      ok: false,
+      error: "Select at least one client to reassign.",
+    });
+  });
+
+  it("rejects invalid organisation ID within the array", () => {
+    const result = validateBulkReassignOwnership({
+      organisationIds: [validOrg1, "invalid-uuid"],
+      newOwnerId: validOwner,
+      reason: "Redistributing",
+    });
+
+    assert.deepEqual(result, {
+      ok: false,
+      error: "One or more selected clients could not be found.",
+    });
+  });
+
+  it("rejects invalid new owner ID", () => {
+    const result = validateBulkReassignOwnership({
+      organisationIds: [validOrg1],
+      newOwnerId: "bad-owner",
+      reason: "Redistributing",
+    });
+
+    assert.deepEqual(result, {
+      ok: false,
+      error: "Choose a CAM to assign.",
+    });
+  });
+
+  it("rejects missing or empty reason", () => {
+    const result = validateBulkReassignOwnership({
+      organisationIds: [validOrg1],
+      newOwnerId: validOwner,
+      reason: "   ",
+    });
+
+    assert.deepEqual(result, {
+      ok: false,
+      error: "A reason is required so the handover can be understood later.",
+    });
   });
 });

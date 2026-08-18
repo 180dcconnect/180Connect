@@ -245,21 +245,13 @@ comment on function app.is_personal_email is
   'MANUAL_ENTRY_RECORDS trigger; the ingestion runner applies the same rule in '
   'TypeScript against the same table.';
 
--- NOT HERE: the MANUAL_ENTRY_RECORDS trigger.
+-- The MANUAL_ENTRY_RECORDS trigger follows in
+-- 20260818100500_block_personal_email_manual_entry.sql (F247 AC3).
 --
 -- F036 (a CAM types a contact address) and F037 (an import finds one) both write
 -- MANUAL_ENTRY_RECORDS.contact_email, and AC3's "not implemented differently per
 -- source" says the check belongs on the column both of them write, as a trigger —
 -- a CHECK constraint cannot query PERSONAL_EMAIL_ROLE_PARTS.
---
--- It is not in this migration because MANUAL_ENTRY_RECORDS does not exist on this
--- branch. F036 is open at #360 against dev; F246, which this story extends, was
--- merged to main. No branch currently has both, so the trigger cannot be written
--- anywhere that would compile. It ships as
--- 20260817130300_block_personal_email_manual_entry.sql the moment they meet —
--- written and reviewed alongside this migration, held back rather than guarded
--- with a to_regclass check, because a conditionally-created compliance trigger is
--- one that silently does not exist on a fresh database.
 --
 -- app.is_personal_email below is that trigger's dependency, and is created here so
 -- the detector lives with the table it reads.

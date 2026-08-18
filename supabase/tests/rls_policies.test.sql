@@ -3635,10 +3635,22 @@ begin
     not app.is_personal_email('not-an-address'),
     'a string with no @ is not something this function has an opinion about'
   );
-  return next ok(
-    not app.is_personal_email(null),
-    'a null address is not personal'
-  );
+  -- -- manual_entry_records trigger: personal email rejected (AC3) -------------
+  if tests.tables_exist('manual_entry_records') then
+    return next is(
+      tests.sqlstate_of(v_cam,
+        'select public.save_manual_entry(null, ''Personal Email Test'', null, null, null, null, null, ''GB'', null, ''joanne.smith@example.org'', null, null, null, false)'),
+      '22023',
+      'saving a manual entry with a personal email is rejected by trigger'
+    );
+
+    return next is(
+      tests.sqlstate_of(v_cam,
+        'select public.save_manual_entry(null, ''Role Email Test'', null, null, null, null, null, ''GB'', null, ''info@example.org'', null, null, null, false)'),
+      null,
+      'saving a manual entry with a role email is accepted'
+    );
+  end if;
 
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
 end;

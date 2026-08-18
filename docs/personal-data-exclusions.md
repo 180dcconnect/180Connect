@@ -62,17 +62,12 @@ calls yet; see "Rules ahead of the data" below for why that's deliberate.
 | `html` | *(global — `source` is null)* | Any source with an `html` field (today: F037's fetched-page payload, once that branch merges) | redact (phone) | §5(1), adjacent — a phone number on a scraped page is frequently a personal mobile or direct line, unlike a registry-supplied switchboard number | Not yet — `html` is the field F037 adds; the rule is inert until that field exists on a written payload, then active immediately with no further change |
 | `health_data`, `ethnicity`, `religion`, `political_affiliation`, `sexual_orientation` | *(global)* | Any | field_path (deny) | Data handling policy §2 (special category data), not §5 directly — carried here for completeness since they're seeded by the same migration family | No adapter returns these today |
 
-Personal email addresses that a **CAM types by hand**, rather than one an
-import fetches, are a gap this table doesn't close yet:
-`MANUAL_ENTRY_RECORDS.contact_email` needs its own trigger
-(`app.is_personal_email`, already shipped in the F247 migration, is that
-trigger's dependency), but the table it would guard doesn't exist on any one
-branch yet — F036 is open at #360 against `dev`, F246 (which created
-`data_handling_rules`) is merged to `main`, and no branch currently has both.
-The trigger is written and reviewed, held as
-`20260817130300_block_personal_email_manual_entry.sql`, ready to ship the
-moment `main` and `dev` meet. See the branch-reconciliation note the team is
-tracking separately.
+Personal email addresses that a **CAM types by hand** (F036) or that an
+import discovers into a manual entry draft (F037) are enforced at the database
+boundary on `MANUAL_ENTRY_RECORDS.contact_email` via the trigger in
+`20260818100500_block_personal_email_manual_entry.sql` calling `app.is_personal_email()`.
+Any attempt to save or submit a personal email address is rejected, ensuring
+consistent enforcement across automated and manual ingestion paths (AC3).
 
 ## Rules ahead of the data
 

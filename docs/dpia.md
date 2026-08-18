@@ -286,9 +286,8 @@ $$\text{Risk Score} = \text{Likelihood} \times \text{Severity}$$
 | **R8** | **Unscreened sensitive/health disclosures in email replies sent to LLM** | 3 | 4 | **12 (Med)** | Policy and architectural rule: Raw inbound email replies must not be transmitted to an LLM in the MVP. AI reply processing is deferred pending formal addendum. | 1 | 4 | **4** | Low | `Implemented policy restriction` ✅ | **PERMITTED (Rule Active)** ✅ |
 | **R9** | **Ungoverned international remote access from Australia** | 4 | 4 | **16 (High)** | Execution of Global Workspace Governance Agreement + UK IDTA / UK Addendum + completed Transfer Risk Assessment (TRA). | 2 | 3 | **6** | Low | `Pending agreement execution & TRA` ⏳ | **BLOCKED** 🛑 |
 | **R10** | **Personal data breach at cloud infrastructure level** | 2 | 5 | **10 (Med)** | Processor security controls, contractual security commitments, encryption at rest/in transit, access controls, daily backups, and incident-response procedures. | 1 | 4 | **4** | Low | `Implemented & verified` ✅ | **PERMITTED** ✅ |
-| **R11** | **Lack of transparency for indirect data subjects (Article 14)** | 3 | 3 | **9 (Med)** | Publication of clear Article 14 Privacy Notice linked in all email footers explaining source, lawful basis, profiling, and rights. | 1 | 2 | **2** | Low | `Pending notice publication` ⏳ | **BLOCKED** 🛑 |
+| **R11** | **Failure to provide Article 14 transparency within the applicable statutory timeframe** | 3 | 3 | **9 (Med)** | Source and collection date logged on all indirect records; an Article 14 privacy notice made publicly accessible and linked from the initial outreach communication, with the organisation's source, processing purpose, lawful basis, relevant rights and other required transparency information disclosed in accordance with the applicable Article 14 requirements. | 1 | 2 | **2** | Low | `Pending notice publication & linking` ⏳ | **BLOCKED** 🛑 |
 | **R12** | **Inaccurate or outdated professional contact information resulting in inappropriate outreach** | 3 | 3 | **9 (Med)** | CAM manual verification before outreach; source and collection date metadata; periodic data refreshes; manual record correction in UI; suppression handling. | 1 | 2 | **2** | Low | `Implemented & verified` ✅ | **PERMITTED** ✅ |
-| **R13** | **Article 14 privacy notice not provided within applicable statutory timeframe** | 3 | 3 | **9 (Med)** | Source and collection date logged on all indirect records; Article 14 notice published on public website and linked in initial email footers (provided at earliest direct communication). | 1 | 2 | **2** | Low | `Pending notice publication` ⏳ | **BLOCKED** 🛑 |
 
 ---
 
@@ -297,7 +296,7 @@ $$\text{Risk Score} = \text{Likelihood} \times \text{Severity}$$
 Following the application of the technical controls (F246/F247 filters, database triggers, RLS, suppressions) and organizational controls (human review, statutory disclosures, role governance):
 
 * **Implemented Controls:** All risks related to core data ingestion, data minimisation, manual entry protection, internal access control, suppression enforcement, and MVP reply restrictions (R1, R2, R3, R4, R5, R6, R8, R10, R12) are reduced to **Low Residual Risk (Score 2–4)** with active controls verified.
-* **Pending Governance & Pre-Live Controls:** Risks related to international Workspace access (R9), LLM integration (R7), and Article 14 transparency (R11, R13) have low numerical residual scores under the assessment methodology, but remain **deployment-blocking risks** because the required legal, contractual, and operational controls have not yet been implemented or formally verified.
+* **Pending Governance & Pre-Live Controls:** Risks related to international Workspace access (R9), LLM integration (R7), and Article 14 transparency (R11) have low numerical residual scores under the assessment methodology, but remain **deployment-blocking risks** because the required legal, contractual, and operational controls have not yet been implemented or formally verified.
 
 ---
 
@@ -310,7 +309,7 @@ To transition all residual risks to fully acceptable status, the following manda
 | **1** | **Execute Global Workspace Data Protection Agreement** | R9 (Australian access) | Project Manager / Leadership | Pre-Live Gate 1 |
 | **2** | **Complete Transfer Risk Assessment (TRA) for Australia** | R9 (International transfer) | Project Manager | Pre-Live Gate 2 |
 | **3** | **Pay ICO Tier 1 Data Protection Fee (£47/£52)** | Regulatory compliance | Project Manager | Pre-Live Gate 3 |
-| **4** | **Publish Article 14 Privacy Notice on web and email footers** | R11 (Transparency) | Project Manager / Engineering | Pre-Live Gate 4 |
+| **4** | **Publish and Link Article 14 Privacy Notice** | R11 (Transparency & timing) | Project Manager / Engineering | Pre-Live Gate 4 |
 | **5** | **Finalise LLM Provider Selection with Zero-Retention DPA** | R7, R8 (AI processing) | Project Manager / Engineering | Pre-Live Gate 5 |
 | **6** | **Implement Email Reply Screening for Special Category Data** | R8 (Sensitive reply data) | Engineering | Pre-Live Gate 6 |
 | **7** | **Finalise Article 30 Record of Processing Activities (ROPA)** | Accountability | Project Manager | Pre-Live Gate 7 |

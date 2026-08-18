@@ -3,7 +3,27 @@ import { describe, it } from "node:test";
 
 import { hashPayload } from "./checksum.ts";
 import { partitionRecords, runIngestion } from "./runner.ts";
+import type { DataHandlingPolicy } from "./apply-data-handling.ts";
 import type { FieldRule } from "./field-filter.ts";
+import type { RedactionRule } from "./personal-data.ts";
+
+/**
+ * A policy carrying only what a test needs. `roleLocalParts` is deliberately not
+ * empty: with no role parts every address is personal, which would let a broken
+ * allow-list pass every redaction assertion here.
+ */
+function policy(
+  fieldRules: FieldRule[] = [],
+  version = 1,
+  redactionRules: RedactionRule[] = [],
+): DataHandlingPolicy {
+  return {
+    fieldRules,
+    redactionRules,
+    roleLocalParts: new Set(["info", "fundraising", "enquiries"]),
+    version,
+  };
+}
 import type {
   CommonRecord,
   DataSourceAdapter,
@@ -33,7 +53,7 @@ type FinishedRun = {
 function fakeStore(
   overrides: Partial<IngestionStore> = {},
   seed: Record<string, { checksum: string; ingestion_attempt: number }> = {},
-  seedRules: { rules: FieldRule[]; version: number } = { rules: [], version: 0 },
+  seedPolicy: DataHandlingPolicy = policy([], 0),
 ) {
   const started: { source: DataSourceName; trigger: RunTrigger }[] = [];
   const finished: FinishedRun[] = [];
@@ -61,8 +81,8 @@ function fakeStore(
     async finishRun(runId, status, counts, errorMessage) {
       finished.push({ runId, status, counts: { ...counts }, errorMessage });
     },
-    async loadDataHandlingRules() {
-      return seedRules;
+    async loadDataHandlingPolicy() {
+      return seedPolicy;
     },
     ...overrides,
   };
@@ -225,8 +245,7 @@ describe("partitionRecords", () => {
       empty,
       "run-1",
       "companies_house",
-      rules,
-      1,
+      policy(rules, 1),
     );
     assert.equal(result.rows.length, 1);
     const written = result.rows[0];
@@ -250,8 +269,7 @@ describe("partitionRecords", () => {
       empty,
       "run-1",
       "companies_house",
-      rules,
-      1,
+      policy(rules, 1),
     );
     assert.equal(result.rows.length, 1);
     assert.deepEqual(result.rows[0].excluded_fields, []);
@@ -276,8 +294,7 @@ describe("partitionRecords", () => {
       empty,
       "run-1",
       "companies_house",
-      [],
-      0,
+      policy([], 0),
     );
     assert.deepEqual(result.rows[0].excluded_fields, []);
     assert.equal(result.rows[0].rule_version_applied, 0);
@@ -460,7 +477,7 @@ describe("runIngestion", () => {
     // Fail-closed. Importing unfiltered would store exactly the personal data the
     // rules exist to exclude, and would do it without anyone noticing.
     const { store, started, written } = fakeStore({
-      async loadDataHandlingRules() {
+      async loadDataHandlingPolicy() {
         throw new Error("relation \"data_handling_rules\" does not exist");
       },
     });
@@ -480,16 +497,7 @@ describe("runIngestion", () => {
     const { store, written } = fakeStore(
       {},
       {},
-      {
-        rules: [
-          {
-            source: null,
-            field_path: "ethnicity",
-            action: "deny",
-          },
-        ],
-        version: 7,
-      },
+      policy([{ source: null, field_path: "ethnicity", action: "deny" }], 7),
     );
     const source = adapter(
       "companies_house",

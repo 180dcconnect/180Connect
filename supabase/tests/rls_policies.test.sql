@@ -2971,7 +2971,7 @@ begin
   select public.save_manual_entry(
     null, 'Unique F036 Charity Limited', 'Provides related community services.', 'charity',
     '20 Example Road', 'Sheffield', 'S2 3CD', 'GB', 'https://duplicate.example.org',
-    'duplicate@example.org', 'Charity Commission', 'F036-002',
+    'contact@example.org', 'Charity Commission', 'F036-002',
     'Submitted independently for duplicate review', true
   ) into v_duplicate_entry;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
@@ -2995,7 +2995,7 @@ begin
   select public.save_manual_entry(
     null, 'Unconfirmed Social Company', 'Develops socially focused services.', 'company',
     '30 Example Lane', 'Sheffield', 'S3 4EF', 'GB', 'https://social.example.org',
-    'social@example.org', 'Companies House', 'F036-COMPANY',
+    'team@example.org', 'Companies House', 'F036-COMPANY',
     'May be a socially focused organisation', true
   ) into v_company_entry;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);

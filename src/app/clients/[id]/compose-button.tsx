@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
-import { EMAIL_LENGTHS, EMAIL_VOICES, type EmailLength, type EmailVoice } from "@/lib/outreach/stage-one-prompt";
+import { EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, type EmailLength, type EmailTone, type EmailVoice } from "@/lib/outreach/stage-one-prompt";
 
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
@@ -19,6 +19,13 @@ const EMAIL_VOICE_LABELS: Record<EmailVoice, string> = {
   "180dc": "180DC Sheffield",
   consultative: "Consultative",
   plain_language: "Plain language",
+};
+
+const EMAIL_TONE_LABELS: Record<EmailTone, string> = {
+  balanced: "Balanced",
+  warm: "Warm",
+  formal: "Formal",
+  concise: "Concise",
 };
 
 /** F100 creates a review draft only, after the current outreach preflight passes. */
@@ -48,6 +55,7 @@ export function ComposeButton({
   );
   const [length, setLength] = useState<EmailLength>("standard");
   const [voice, setVoice] = useState<EmailVoice>("180dc");
+  const [tone, setTone] = useState<EmailTone>("balanced");
 
   async function generate() {
     setBusy(true);
@@ -69,7 +77,7 @@ export function ComposeButton({
       const response = await fetch(`/api/clients/${organisationId}/outreach-drafts/stage-one`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ length, voice }),
+        body: JSON.stringify({ length, voice, tone }),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -110,6 +118,16 @@ export function ComposeButton({
           {EMAIL_LENGTHS.map((value) => (
             <option key={value} value={value}>
               {EMAIL_LENGTH_LABELS[value]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="block max-w-xs text-xs font-bold text-foreground/65">
+        Email tone
+        <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setTone(event.target.value as EmailTone)} value={tone}>
+          {EMAIL_TONES.map((value) => (
+            <option key={value} value={value}>
+              {EMAIL_TONE_LABELS[value]}
             </option>
           ))}
         </select>

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { z } from "zod";
-import { buildStageOnePrompt, EMAIL_LENGTHS, EMAIL_VOICES } from "./stage-one-prompt.ts";
+import { buildStageOnePrompt, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES } from "./stage-one-prompt.ts";
 
 test("buildStageOnePrompt includes real profile and booklet context", () => {
   const result = buildStageOnePrompt({
@@ -55,6 +55,14 @@ test("buildStageOnePrompt defaults to the 180DC voice when voice is omitted", ()
   assert.match(buildStageOnePrompt(context, {}).system, /collective voice/);
 });
 
+test("buildStageOnePrompt applies each selected email tone", () => {
+  const context = { organisationName: "Example", organisationType: "charity" };
+  assert.match(buildStageOnePrompt(context, { tone: "balanced" }).system, /balanced professional tone/);
+  assert.match(buildStageOnePrompt(context, { tone: "warm" }).system, /warm, encouraging tone/);
+  assert.match(buildStageOnePrompt(context, { tone: "formal" }).system, /formal, respectful tone/);
+  assert.match(buildStageOnePrompt(context, { tone: "concise" }).system, /action-oriented tone/);
+});
+
 test("email length validation rejects invalid values (route returns 400)", () => {
   const schema = z.object({ length: z.enum(EMAIL_LENGTHS).default("standard") });
   assert.equal(schema.safeParse({ length: "invalid" }).success, false);
@@ -77,4 +85,17 @@ test("email voice validation rejects invalid values (route returns 400)", () => 
   assert.equal(schema.safeParse({ voice: "plain_language" }).success, true);
   assert.equal(schema.safeParse({}).success, true);
   assert.equal(schema.safeParse({}).data?.voice, "180dc");
+});
+
+test("email tone validation rejects invalid values (route returns 400)", () => {
+  const schema = z.object({ tone: z.enum(EMAIL_TONES).default("balanced") });
+  assert.equal(schema.safeParse({ tone: "invalid" }).success, false);
+  assert.equal(schema.safeParse({ tone: "" }).success, false);
+  assert.equal(schema.safeParse({ tone: "Warm" }).success, false);
+  assert.equal(schema.safeParse({ tone: "balanced" }).success, true);
+  assert.equal(schema.safeParse({ tone: "warm" }).success, true);
+  assert.equal(schema.safeParse({ tone: "formal" }).success, true);
+  assert.equal(schema.safeParse({ tone: "concise" }).success, true);
+  assert.equal(schema.safeParse({}).success, true);
+  assert.equal(schema.safeParse({}).data?.tone, "balanced");
 });

@@ -59,6 +59,11 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: "Outreach preferences",
     description: "Set the geography, sector and size focus for your queue.",
   },
+  {
+    href: "/settings/accessibility",
+    label: "Accessibility settings",
+    description: "Adjust text size, contrast, and visual comfort across the platform.",
+  },
 ];
 
 export function navItemsFor(role: AppRole): NavItem[] {

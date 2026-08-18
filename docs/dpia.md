@@ -11,6 +11,7 @@
 > **Companion Documents:**
 > * [`docs/data-handling-policy.md`](data-handling-policy.md) — Controller-level data handling and processor framework (v0.3).
 > * [`docs/legitimate-interest-assessment.md`](legitimate-interest-assessment.md) — Three-part lawful basis assessment under Article 6(1)(f).
+> * [`docs/privacy-notice.md`](privacy-notice.md) — Article 14 Transparency & Privacy Notice for indirect outreach.
 > * [`docs/personal-data-exclusions.md`](personal-data-exclusions.md) — Technical field-level exclusion and regex redaction rules (F246/F247).
 > * [`docs/data-lifecycle-policy.md`](data-lifecycle-policy.md) — Data retention schedules, trust layers, and deletion procedures.
 > * [`docs/global-workspace-data-protection-agreement.md`](global-workspace-data-protection-agreement.md) — Shared Google Workspace governance proposal.

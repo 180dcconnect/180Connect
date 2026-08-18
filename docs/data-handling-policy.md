@@ -197,6 +197,7 @@ This policy is reviewed every six months, or whenever a new data source, process
 * **Legitimate Interest Assessment (LIA):** Completed 18 August 2026; confirmed Article 6(1)(f) lawful basis for prospective client outreach (recorded in [`docs/legitimate-interest-assessment.md`](legitimate-interest-assessment.md)).
 * **Data Protection Impact Assessment (DPIA):** Completed 18 August 2026; concluded acceptable subject to pre-live governance conditions (recorded in [`docs/dpia.md`](dpia.md)).
 * **Public Data Handling Rules Specification:** [`docs/personal-data-exclusions.md`](personal-data-exclusions.md).
+* **Article 14 Transparency & Privacy Notice:** Documented in [`docs/privacy-notice.md`](privacy-notice.md).
 * **Internal Breach Log:** Documented under Article 33(5).
 
 ---
@@ -210,5 +211,5 @@ This policy is reviewed every six months, or whenever a new data source, process
 | **3** | **Leadership sign-off on DPIA and LIA** | DPIA ([`docs/dpia.md`](dpia.md)) and LIA ([`docs/legitimate-interest-assessment.md`](legitimate-interest-assessment.md)) are drafted and approved by PM; formal controller/leadership sign-off is required before live outreach commences (§6). | Project Manager / Leadership |
 | **4** | **Finalise LLM provider selection and DPA** | Requires confirmation of processing region (UK/EU pinned), zero-data-retention for training, and incoming reply redaction safeguards. | Project Manager |
 | **5** | **Verify sending domain for auth and platform emails** | Ensure domain verification is complete on Resend for `180dc.org` / subdomains. | Engineering |
-| **6** | **Publish Article 14 Privacy Notice** | Publish and link an external-facing privacy notice explaining indirect collection, public sources, and marketing objection rights. | Project Manager |
+| **6** | **Publish and link Article 14 Privacy Notice** | Article 14 Privacy Notice drafted ([`docs/privacy-notice.md`](privacy-notice.md)); must be hosted on public domain and linked in outreach email footers prior to live launch. | Project Manager / Engineering |
 | **7** | **Complete standalone Article 30 ROPA document** | Finalise the complete formal Record of Processing Activities alongside the processor register. | Project Manager |

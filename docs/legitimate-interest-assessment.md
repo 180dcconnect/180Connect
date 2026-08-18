@@ -9,6 +9,7 @@
 
 > **Companion Documents:**
 > * [`docs/data-handling-policy.md`](data-handling-policy.md) owns the controller-level data protection and processor framework.
+> * [`docs/privacy-notice.md`](privacy-notice.md) provides the Article 14 transparency notice for indirect data subjects.
 > * [`docs/personal-data-exclusions.md`](personal-data-exclusions.md) defines the technical data-minimisation and field-exclusion rules (F246/F247).
 > * [`docs/data-lifecycle-policy.md`](data-lifecycle-policy.md) defines retention periods and deletion procedures.
 > * [`docs/global-workspace-data-protection-agreement.md`](global-workspace-data-protection-agreement.md) establishes shared Google Workspace governance.

@@ -43,6 +43,8 @@
 | source_country | text |  | Yes | Country the record came from | System | Set from API source or API response | Null if source has no country context |
 | source_registry_name | text |  | Yes | Name of the specific registry this record came from | System | Set by ingestion worker | e.g. "Netherlands KVK", "France RNA" |
 | status_last_checked_at | timestamp |  | Yes | When the Companies House status-recheck job last refetched this record's company_status | System | Set after each recheck | Null = never rechecked, sorts first |
+| excluded_fields | jsonb |  | Yes | Fields excluded from this record based on data handling rules | System | Applied during ingestion based on rules |  |
+| rule_version_applied | int |  | Yes | The rule version applied to this record | System | Set when rules are applied |  |
 
 ## DATA_QUALITY_EVENTS
 
@@ -143,3 +145,39 @@
 | review_notes | text |  | Yes | Admin notes explaining the decision | Human | Written by the reviewing admin | Null if approved without comment |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last update timestamp | System | Auto-updated on any change |  |
+
+## FIELD_SOURCES
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| organisation_id | uuid | ORGANISATIONS | No | Organisation this field value belongs to | System | Set when field is written |  |
+| field_name | text |  | No | Which ORGANISATIONS column this value is for | System | Identified by the write path | legal_name, website, contact_email, address_line_1, city, postcode (mission is explicitly excluded) |
+| value | text |  | No | Value written for this field by this source | System | Taken from raw payload or manual entry | Null if source provided no value |
+| source | text |  | No | Which source produced this value | System | Inherited from raw source record or manual entry | Reuse RAW_SOURCE_RECORDS.record_source enum + "manual" |
+| raw_source_record_id | uuid | RAW_SOURCE_RECORDS | Yes | The raw record this value was taken from | System | Set for API-sourced values | Null for manual entries |
+| is_current | boolean |  | No | Whether this is the value currently live on ORGANISATIONS for this field | System | Set true on write, flipped false when superseded | Default true |
+| recorded_at | timestamp |  | No | When this field value was recorded | System | Auto-generated on row creation |  |
+
+## DATA_HANDLING_RULES
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| rule_version | int |  | No | Version of the ruleset this rule belongs to | System | Set on creation |  |
+| source | text |  | Yes | Data source the rule applies to | Human | Set by admin |  |
+| action | enum |  | No | Action to take | Human | Set by admin |  |
+| field_path | text |  | No | The rule (field path) | Human | Set by admin |  |
+| reason | text |  | No | Compliance reason | Human | Set by admin |  |
+| is_active | boolean |  | No | Whether the rule is currently active | Human | Set by admin |  |
+| created_by | uuid | USERS | Yes | Admin who created the rule | System | Set on creation |  |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+| updated_at | timestamp |  | No | Last update timestamp | System | Auto-updated |  |
+
+## DATA_HANDLING_RULE_VERSIONS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | boolean |  | No | Primary key pinned to one row by a check constraint | System | Auto-generated |  |
+| current_version | int |  | No | Global current version | System | Auto-updated |  |
+| updated_at | timestamp |  | No | Last update timestamp | System | Auto-updated |  |

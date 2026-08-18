@@ -4,6 +4,8 @@
 // scripts in `scripts/` run through node's type stripping, which does not resolve
 // extensionless specifiers. See the note in tsconfig.json.
 
+import type { FieldRule } from "./field-filter.ts";
+
 /**
  * Every source the pipeline knows about, defined once.
  *
@@ -86,6 +88,13 @@ export type RawRecordRow = {
   source_country: string | null;
   source_registry_name: string | null;
   ingestion_attempt: number;
+  /**
+   * Field paths stripped by the data handling rules (F246). An empty array means
+   * the rules ran and matched nothing; null means they never ran against this row.
+   */
+  excluded_fields: string[] | null;
+  /** Which rule version was in force. Null means the rules never ran. */
+  rule_version_applied: number | null;
 };
 
 /**
@@ -109,6 +118,14 @@ export interface IngestionStore {
     counts: RunCounts,
     errorMessage?: string,
   ): Promise<void>;
+  /**
+   * Loads the active data handling rules and the current rule version (F246).
+   * Called once per ingestion run, not per record.
+   */
+  loadDataHandlingRules(): Promise<{
+    rules: FieldRule[];
+    version: number;
+  }>;
 }
 
 /** What `runIngestion` reports back for each source it was given. */

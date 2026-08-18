@@ -232,6 +232,16 @@ export function UserManagementTable({
                   <td className="p-3">
                     <span className="block font-bold">{user.full_name ?? "Unnamed user"}</span>
                     <span className="text-foreground/60">{user.email}</span>
+                    {user.role === "cam" && (
+                      <span className="block mt-1">
+                        <Link
+                          href={`/admin/cam-settings?user=${user.id}`}
+                          className="text-xs font-medium text-brand hover:underline"
+                        >
+                          Queue settings →
+                        </Link>
+                      </span>
+                    )}
                   </td>
                   <td className="p-3">
                     <Select

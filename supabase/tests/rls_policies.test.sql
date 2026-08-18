@@ -3712,17 +3712,6 @@ begin
 end;
 $$;
 
-select * from tests.suite_core();
-select * from tests.suite_viewer();
-select * from tests.suite_users();
-select * from tests.suite_sensitive();
-select * from tests.suite_ingestion();
-select * from tests.suite_audit();
-select * from tests.suite_role_rpc();
-select * from tests.suite_active_rpc();
-select * from tests.suite_deactivate_rpc();
-select * from tests.suite_invite_rpc();
-select * from tests.suite_signup_domain();
 -- ---------------------------------------------------------------------------
 -- ownership_requests (#408, F165 follow-up)
 -- ---------------------------------------------------------------------------
@@ -3874,6 +3863,84 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------------------
+-- outreach preferences (F195 / F187)
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_outreach_preferences()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b  uuid := '00000000-0000-4000-a000-000000000003';
+  v_admin  uuid := '00000000-0000-4000-a000-000000000001';
+  v_viewer uuid := '00000000-0000-4000-a000-000000000004';
+  v_count  bigint;
+begin
+  if not tests.tables_exist('outreach_preferences') then
+    return next skip(6, 'F195 outreach preferences table not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- CAM A writes their own preferences
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.outreach_preferences (user_id, preferred_geographic_reach, preferred_sectors, preferred_income_bands) values (%L, %L, %L, %L) on conflict (user_id) do nothing',
+      v_cam_a, '{local,regional}'::public.geographic_reach[], '{"Education","Health"}'::text[], '{under_10k,10k_100k}'::public.income_band[])),
+    null,
+    'a CAM can save their own outreach preferences (F195)'
+  );
+
+  -- CAM A reads their own preferences
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.outreach_preferences where user_id = v_cam_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'a CAM can view their own outreach preferences (F195)');
+
+  -- CAM B cannot read CAM A's preferences
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.outreach_preferences where user_id = v_cam_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a CAM cannot read another CAM''s outreach preferences');
+
+  -- CAM A cannot write CAM B's preferences
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.outreach_preferences (user_id) values (%L)', v_cam_b)),
+    '42501',
+    'a CAM cannot insert preferences on another CAM''s behalf'
+  );
+
+  -- F187: Admin CAN read any CAM's preferences to inspect their queue configuration
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.outreach_preferences where user_id = v_cam_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'an admin can view a CAM''s outreach preferences (F187)');
+
+  -- Viewer cannot read another CAM's preferences
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.outreach_preferences where user_id = v_cam_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a viewer cannot read a CAM''s outreach preferences');
+end;
+$$;
+
+select * from tests.suite_core();
+select * from tests.suite_viewer();
+select * from tests.suite_users();
+select * from tests.suite_sensitive();
+select * from tests.suite_ingestion();
+select * from tests.suite_audit();
+select * from tests.suite_role_rpc();
+select * from tests.suite_active_rpc();
+select * from tests.suite_deactivate_rpc();
+select * from tests.suite_invite_rpc();
+select * from tests.suite_signup_domain();
 select * from tests.suite_default_role();
 select * from tests.suite_views();
 select * from tests.suite_actions();
@@ -3888,6 +3955,7 @@ select * from tests.suite_source_tracking();
 select * from tests.suite_manual_entries();
 select * from tests.suite_url_import();
 select * from tests.suite_onboarding();
+select * from tests.suite_outreach_preferences();
 select * from tests.suite_client_criteria();
 select * from tests.suite_data_handling_rules();
 select * from tests.suite_personal_data_exclusion();

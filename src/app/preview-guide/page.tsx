@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { FirstRunGuide, type GuideStep } from "@/components/first-run-guide";
+import { SidebarChecklist } from "@/components/sidebar-checklist";
 import { PlayfulTodolist } from "@/components/animate-ui/components/community/playful-todolist";
 import {
   ONBOARDING_STEPS,
@@ -176,6 +177,65 @@ export default function PreviewGuidePage() {
             completedCount={completedCount}
             allDone={allDone}
           />
+        </Rise>
+
+        {/* Sidebar Checklist Variants (Dark Mode vs Light Mode) */}
+        <Rise className="space-y-4 pt-6 border-t border-black/[0.08]">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-brand">
+                Sidebar Component
+              </span>
+              <h2 className="text-lg font-black tracking-tight text-foreground">
+                Sidebar Checklist (Light vs Dark Mode)
+              </h2>
+              <p className="text-xs text-foreground/60">
+                Compact widget positioned above the user profile in the sidebar.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Dark Mode Card */}
+            <div className="rounded-3xl bg-[#0c1014] p-6 shadow-xl">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-white/50">
+                  Dark Mode (Landing & Sheet Style)
+                </span>
+                <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold text-white/80">
+                  Dark Ink (#161b21)
+                </span>
+              </div>
+              <div className="max-w-[240px]">
+                <SidebarChecklist
+                  steps={steps}
+                  completedCount={completedCount}
+                  totalCount={steps.length}
+                  forceTheme="dark"
+                />
+              </div>
+            </div>
+
+            {/* Light Mode Card */}
+            <div className="rounded-3xl bg-[#f4f4ef] border border-black/[0.08] p-6 shadow-sm">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-foreground/50">
+                  Light Mode (Clean Dashboard Style)
+                </span>
+                <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-bold text-foreground/70">
+                  Light Bone / White
+                </span>
+              </div>
+              <div className="max-w-[240px]">
+                <SidebarChecklist
+                  steps={steps}
+                  completedCount={completedCount}
+                  totalCount={steps.length}
+                  forceTheme="light"
+                />
+              </div>
+            </div>
+          </div>
         </Rise>
 
         {/* Reference: @animate-ui/components-community-playful-todolist */}

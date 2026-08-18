@@ -15,11 +15,19 @@ import { PanelLeftOpen } from "@/components/animate-ui/icons/panel-left-open";
 import { Users } from "@/components/animate-ui/icons/users";
 import UsersGroupIcon from "@/components/ui/users-group-icon";
 import { SidebarAccountMenu } from "@/components/sidebar-account-menu";
+import { SidebarChecklist, type SidebarChecklistStep } from "@/components/sidebar-checklist";
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
 } from "@/components/animate-ui/components/radix/tooltip";
+
+export type SidebarOnboarding = {
+  steps: SidebarChecklistStep[];
+  completedCount: number;
+  totalCount: number;
+  show?: boolean;
+};
 
 export type SidebarIconName = "dashboard" | "admin" | "users" | "add" | "audit" | "import" | "clients";
 
@@ -91,6 +99,7 @@ export function Sidebar({
   roleLabel,
   onLogout,
   initialCollapsed = false,
+  onboarding,
 }: {
   sections: SidebarSection[];
   userName?: string | null;
@@ -98,6 +107,7 @@ export function Sidebar({
   roleLabel: string;
   onLogout: () => Promise<void>;
   initialCollapsed?: boolean;
+  onboarding?: SidebarOnboarding;
 }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
@@ -257,6 +267,17 @@ export function Sidebar({
           </div>
         ))}
       </nav>
+
+      {onboarding && (onboarding.show ?? true) && (
+        <div className="px-2 pb-2">
+          <SidebarChecklist
+            steps={onboarding.steps}
+            completedCount={onboarding.completedCount}
+            totalCount={onboarding.totalCount}
+            collapsed={collapsed}
+          />
+        </div>
+      )}
 
       <div className="border-t border-white/70 p-2">
         <SidebarAccountMenu

@@ -4,6 +4,8 @@ import {
   CITY_PRESETS,
   GEOGRAPHIC_REACH_OPTIONS,
   GEOGRAPHIC_REACH_LABELS,
+  GRANT_PREFERENCE_LABELS,
+  GRANT_PREFERENCE_DESCRIPTIONS,
   INCOME_BAND_OPTIONS,
   INCOME_BAND_LABELS,
   INCOME_BAND_DESCRIPTIONS,
@@ -17,7 +19,11 @@ import {
   SECTOR_KEYWORD_ALIASES,
 } from "./constants.ts";
 
-describe("outreach preferences constants and configuration (F195 / F196 / F197 / F198)", () => {
+describe("outreach preferences constants and configuration (F195 / F196 / F197 / F198 / F199)", () => {
+  it("defines standard grant preference labels and descriptions (F199)", () => {
+    assert.ok(GRANT_PREFERENCE_LABELS.prioritise_grant_recipients.includes("360Giving"));
+    assert.ok(GRANT_PREFERENCE_DESCRIPTIONS.prioritise_grant_recipients.includes("grant funding"));
+  });
   it("defines standard geographic reach options and readable labels", () => {
     assert.deepEqual(GEOGRAPHIC_REACH_OPTIONS, ["local", "regional", "national", "international"]);
     assert.equal(GEOGRAPHIC_REACH_LABELS.local, "Local");

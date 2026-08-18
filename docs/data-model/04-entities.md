@@ -200,6 +200,7 @@
 | preferred_cities | text[] |  | No | City/location values to prioritise | Human | Chosen by CAM in settings | Free text, matched against ORGANISATIONS.city; empty array = no preference set |
 | preferred_sectors | text[] |  | No | Sector values to prioritise | Human | Chosen by CAM in settings | Free text, matched against ORGANISATIONS.sector; empty array = no preference set |
 | preferred_income_bands | enum[] |  | No | Subset of income_band values to prioritise | Human | Chosen by CAM in settings | Same enum as FINANCIAL_PERIODS.income_band; empty array = no preference set |
+| prioritise_grant_recipients | boolean |  | No | Prioritise organisations with previous grant/funding history | Human | Chosen by CAM in settings | Matched against GRANTS table (360Giving); default false |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last edit timestamp | System | Updated on save |  |
 

@@ -55,6 +55,15 @@ export function deriveIncomeBand(totalIncome: number | null | undefined): Income
   return "over_1m";
 }
 
+export const GRANT_PREFERENCE_LABELS = {
+  prioritise_grant_recipients: "Prioritise organisations with previous grant history (360Giving)",
+} as const;
+
+export const GRANT_PREFERENCE_DESCRIPTIONS = {
+  prioritise_grant_recipients:
+    "Gives higher priority in your personal queue to experienced organisations with recorded grant funding awards from UK grantmakers and philanthropic foundations.",
+} as const;
+
 // ORGANISATIONS.sector has no enum yet (LLM-classified free text, F089/F041/F055 not
 // built — see docs/data-model/04-entities.md), so sector preference is free text
 // rather than a checkbox list. This cap just keeps a single tag reasonable; it is not

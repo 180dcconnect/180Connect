@@ -217,6 +217,7 @@
 | 04 Entities | OUTREACH_PREFERENCES | preferred_cities | text[] |  | City/location values to prioritise, matched against ORGANISATIONS.city |
 | 04 Entities | OUTREACH_PREFERENCES | preferred_sectors | text[] |  | Sector values to prioritise, matched against ORGANISATIONS.sector |
 | 04 Entities | OUTREACH_PREFERENCES | preferred_income_bands | enum[] |  | Subset of income_band values to prioritise |
+| 04 Entities | OUTREACH_PREFERENCES | prioritise_grant_recipients | boolean |  | Prioritise organisations with previous grant/funding history (360Giving) |
 | 04 Entities | OUTREACH_PREFERENCES | created_at | timestamp |  | Row creation timestamp |
 | 04 Entities | OUTREACH_PREFERENCES | updated_at | timestamp |  | Last edit timestamp |
 | 04 Entities | SUPPRESSIONS | id | uuid |  | Primary key |

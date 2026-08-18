@@ -119,7 +119,7 @@ export default async function ClientsPage({
     supabase
       .from("organisations")
       .select(
-        "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), financial_periods(income_band, total_income, period_end)",
+        "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), financial_periods(income_band, total_income, period_end), grants(id, amount_awarded, funder_name, award_date)",
       )
       .order("legal_name")
       .overrideTypes<ClientListRow[], { merge: false }>(),
@@ -136,12 +136,13 @@ export default async function ClientsPage({
       .overrideTypes<TeamMember[], { merge: false }>(),
     supabase
       .from("outreach_preferences")
-      .select("preferred_geographic_reach, preferred_cities, preferred_sectors, preferred_income_bands")
+      .select("preferred_geographic_reach, preferred_cities, preferred_sectors, preferred_income_bands, prioritise_grant_recipients")
       .maybeSingle<{
         preferred_geographic_reach: string[] | null;
         preferred_cities: string[] | null;
         preferred_sectors: string[] | null;
         preferred_income_bands: string[] | null;
+        prioritise_grant_recipients: boolean | null;
       }>(),
   ]);
 

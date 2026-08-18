@@ -14,6 +14,14 @@ export type FinancialPeriodRow = {
   period_end?: string | null;
 };
 
+export type GrantRow = {
+  id: string;
+  amount_awarded?: number | null;
+  funder_name?: string | null;
+  award_date?: string | null;
+  grant_programme?: string | null;
+};
+
 export type ClientListRow = {
   id: string;
   legal_name: string;
@@ -26,6 +34,8 @@ export type ClientListRow = {
   income_band?: string | null;
   total_income?: number | null;
   financial_periods?: FinancialPeriodRow[] | null;
+  grants?: GrantRow[] | null;
+  has_grants?: boolean | null;
   outreach_status: string;
   owner_id: string | null;
   owner: { full_name: string | null } | null;
@@ -43,6 +53,7 @@ export type VisibleClient = ClientListRow & {
    * than reading as unassigned. */
   ownerName: string | null;
   income_band: string | null;
+  has_grants: boolean;
 };
 
 /**
@@ -92,6 +103,7 @@ export function visibleClients(
       suppressionPending: statusByOrg.get(org.id) === "pending",
       ownerName: org.owner_id ? (org.owner?.full_name ?? "A former team member") : null,
       income_band: resolveClientIncomeBand(org),
+      has_grants: Boolean(org.has_grants || (org.grants && org.grants.length > 0)),
     }));
 }
 
@@ -170,6 +182,7 @@ export type OutreachQueuePreferences = {
   preferred_cities?: string[] | null;
   preferred_sectors?: string[] | null;
   preferred_income_bands?: string[] | null;
+  prioritise_grant_recipients?: boolean | null;
 };
 
 export type GeographicPreference = OutreachQueuePreferences;
@@ -336,9 +349,42 @@ export function prioritiseBySize(
 }
 
 /**
- * F196 / F197 / F198 / F090 / F089 / F091 / F094 — Unified Personalised CAM Queue Prioritisation.
+ * Calculates grant / funding history priority score for a client (F199 / F092).
+ */
+export function getGrantPriorityScore(
+  client: VisibleClient,
+  prioritiseGrantRecipients?: boolean | null,
+): number {
+  if (!prioritiseGrantRecipients) return 0;
+  return client.has_grants ? 10 : 0;
+}
+
+/**
+ * F199 / F092 / F094 — Personalised CAM queue grant funding history weighting.
  *
- * Combines geographic, sector, and size preference weighting to rank matching clients
+ * Re-orders clients so that organisations with documented grant awards (360Giving)
+ * are prioritised higher in the CAM's personal queue.
+ */
+export function prioritiseByGrants(
+  clients: VisibleClient[],
+  preferences?: OutreachQueuePreferences | null,
+): VisibleClient[] {
+  if (!preferences?.prioritise_grant_recipients) return clients;
+
+  return [...clients].sort((a, b) => {
+    const scoreA = getGrantPriorityScore(a, preferences.prioritise_grant_recipients);
+    const scoreB = getGrantPriorityScore(b, preferences.prioritise_grant_recipients);
+    if (scoreB !== scoreA) {
+      return scoreB - scoreA;
+    }
+    return a.legal_name.localeCompare(b.legal_name);
+  });
+}
+
+/**
+ * F196 / F197 / F198 / F199 / F090 / F089 / F091 / F092 / F094 — Unified Personalised CAM Queue Prioritisation.
+ *
+ * Combines geographic, sector, size, and grant preference weighting to rank matching clients
  * at the top of the CAM's queue without altering underlying base scores (F088).
  *
  * If no preferences are active (or when cleared), returns the unmodified list in
@@ -354,12 +400,14 @@ export function prioritiseQueue(
   const preferredCities = (preferences.preferred_cities ?? []).map((c) => c.toLowerCase().trim());
   const preferredSectors = (preferences.preferred_sectors ?? []).map((s) => s.toLowerCase().trim());
   const preferredBands = (preferences.preferred_income_bands ?? []).map((b) => b.toLowerCase().trim());
+  const prioritiseGrants = Boolean(preferences.prioritise_grant_recipients);
 
   if (
     preferredReach.length === 0 &&
     preferredCities.length === 0 &&
     preferredSectors.length === 0 &&
-    preferredBands.length === 0
+    preferredBands.length === 0 &&
+    !prioritiseGrants
   ) {
     return clients;
   }
@@ -371,9 +419,11 @@ export function prioritiseQueue(
     const secScoreB = getSectorPriorityScore(b, preferredSectors);
     const sizeScoreA = getSizePriorityScore(a, preferredBands);
     const sizeScoreB = getSizePriorityScore(b, preferredBands);
+    const grantScoreA = getGrantPriorityScore(a, prioritiseGrants);
+    const grantScoreB = getGrantPriorityScore(b, prioritiseGrants);
 
-    const totalA = geoScoreA + secScoreA + sizeScoreA;
-    const totalB = geoScoreB + secScoreB + sizeScoreB;
+    const totalA = geoScoreA + secScoreA + sizeScoreA + grantScoreA;
+    const totalB = geoScoreB + secScoreB + sizeScoreB + grantScoreB;
 
     if (totalB !== totalA) {
       return totalB - totalA;

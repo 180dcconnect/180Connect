@@ -10,8 +10,10 @@ import {
   prioritiseByGeography,
   prioritiseBySector,
   prioritiseBySize,
+  prioritiseByGrants,
   prioritiseQueue,
   resolveClientIncomeBand,
+  getGrantPriorityScore,
   searchClients,
   visibleClients,
   type ClientListRow,
@@ -423,27 +425,66 @@ describe("prioritiseBySize (F198 / F091 / F094)", () => {
   });
 });
 
-describe("prioritiseQueue (Combined F196 + F197 + F198)", () => {
+describe("prioritiseByGrants (F199 / F092 / F094)", () => {
   const clients = visibleClients(
     [
-      org({ id: "1", legal_name: "Alpha Bristol Health Small", city: "Bristol", sector: "Healthcare", income_band: "10k_100k" }),
-      org({ id: "2", legal_name: "Beta Sheffield Energy Medium", city: "Sheffield", sector: "Renewable Energy", income_band: "100k_1m" }),
-      org({ id: "3", legal_name: "Gamma Sheffield Health Medium", city: "Sheffield", sector: "Healthcare", income_band: "100k_1m" }),
-      org({ id: "4", legal_name: "Delta London Arts Large", city: "London", sector: "Arts & Culture", income_band: "over_1m" }),
+      org({ id: "1", legal_name: "Alpha Grant Recipient", grants: [{ id: "g1", funder_name: "National Lottery", amount_awarded: 50_000 }] }),
+      org({ id: "2", legal_name: "Beta No Grants Org" }),
+      org({ id: "3", legal_name: "Gamma Multi Grant Org", grants: [{ id: "g2", funder_name: "Trusthouse", amount_awarded: 20_000 }] }),
+      org({ id: "4", legal_name: "Delta Unfunded Charity" }),
     ],
     [],
   );
 
-  it("ranks organisations matching geography, sector, AND size highest", () => {
+  it("returns unweighted default order when grant prioritisation is false or unset", () => {
+    assert.deepEqual(
+      prioritiseByGrants(clients, undefined).map((c) => c.id),
+      ["1", "2", "3", "4"],
+    );
+    assert.deepEqual(
+      prioritiseByGrants(clients, { prioritise_grant_recipients: false }).map((c) => c.id),
+      ["1", "2", "3", "4"],
+    );
+  });
+
+  it("computes grant priority score correctly", () => {
+    assert.equal(getGrantPriorityScore(clients[0], true), 10);
+    assert.equal(getGrantPriorityScore(clients[1], true), 0);
+    assert.equal(getGrantPriorityScore(clients[0], false), 0);
+    assert.equal(getGrantPriorityScore(clients[0], null), 0);
+  });
+
+  it("prioritises organisations with previous grant history when enabled", () => {
+    const result = prioritiseByGrants(clients, {
+      prioritise_grant_recipients: true,
+    });
+    // Alpha (#1) and Gamma (#3) have grants, sorted alphabetically
+    assert.deepEqual(result.map((c) => c.id), ["1", "3", "2", "4"]);
+  });
+});
+
+describe("prioritiseQueue (Combined F196 + F197 + F198 + F199)", () => {
+  const clients = visibleClients(
+    [
+      org({ id: "1", legal_name: "Alpha Bristol Health Small", city: "Bristol", sector: "Healthcare", income_band: "10k_100k", grants: [] }),
+      org({ id: "2", legal_name: "Beta Sheffield Energy Medium", city: "Sheffield", sector: "Renewable Energy", income_band: "100k_1m", grants: [] }),
+      org({ id: "3", legal_name: "Gamma Sheffield Health Medium Funded", city: "Sheffield", sector: "Healthcare", income_band: "100k_1m", grants: [{ id: "g1", funder_name: "Paul Hamlyn", amount_awarded: 100_000 }] }),
+      org({ id: "4", legal_name: "Delta London Arts Large Funded", city: "London", sector: "Arts & Culture", income_band: "over_1m", grants: [{ id: "g2", funder_name: "Arts Council", amount_awarded: 50_000 }] }),
+    ],
+    [],
+  );
+
+  it("ranks organisations matching geography, sector, size, AND grant history highest", () => {
     const result = prioritiseQueue(clients, {
       preferred_cities: ["Sheffield"],
       preferred_sectors: ["Health & Social Care"],
       preferred_income_bands: ["100k_1m"],
+      prioritise_grant_recipients: true,
     });
-    // Gamma Sheffield Health Medium matches all 3 (City: 10 + Sector: 8 + Size: 10 = 28)
-    // Beta Sheffield Energy Medium matches City: 10 + Size: 10 = 20
-    // Alpha Bristol Health Small matches Sector: 8 = 8
-    // Delta London Arts Large matches 0 = 0
-    assert.deepEqual(result.map((c) => c.id), ["3", "2", "1", "4"]);
+    // Gamma matches all 4 (City: 10 + Sector: 8 + Size: 10 + Grants: 10 = 38)
+    // Beta matches City: 10 + Size: 10 = 20
+    // Delta matches Grants: 10 = 10
+    // Alpha matches Sector: 8 = 8
+    assert.deepEqual(result.map((c) => c.id), ["3", "2", "4", "1"]);
   });
 });

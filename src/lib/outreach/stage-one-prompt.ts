@@ -6,6 +6,7 @@ export type StageOneContext = {
   city?: string | null;
   countryCode?: string | null;
   geographicReach?: string | null;
+  incomeBand?: "under_10k" | "10k_100k" | "100k_1m" | "over_1m" | null;
   contactName?: string | null;
   contactJobTitle?: string | null;
   missionStatement?: string | null;
@@ -58,6 +59,13 @@ const CLOSING_INSTRUCTIONS: Record<ClosingApproach, string> = {
   open_question: "Close with one clear, open question about whether external consulting support could be useful to their current priorities.",
 };
 
+const SIZE_TONE_INSTRUCTIONS: Record<NonNullable<StageOneContext["incomeBand"]>, string> = {
+  under_10k: "This is a very small charity. Be personal and practical, avoid corporate language, and do not imply that substantial budget or staff capacity is available.",
+  "10k_100k": "This is a small charity. Keep the approach approachable and resource-conscious, with practical language and a low-pressure invitation.",
+  "100k_1m": "This is an established medium-sized charity. Use a professional, collaborative tone and acknowledge that it may have defined priorities and stakeholders.",
+  over_1m: "This is a large charity. Use a polished, structured tone suitable for an established organisation, without assuming complex procurement or internal capacity.",
+};
+
 function value(value: string | null | undefined): string {
   return value?.trim() || "Not provided";
 }
@@ -75,6 +83,9 @@ export function buildStageOnePrompt(
   const tone = options.tone ?? "balanced";
   const opening = options.opening ?? "mission_led";
   const closing = options.closing ?? "soft_cta";
+  const sizeTone = context.incomeBand
+    ? SIZE_TONE_INSTRUCTIONS[context.incomeBand]
+    : "Charity size is not available. Use the selected tone without making assumptions about budget, staff or organisational capacity.";
   return {
     system: `You draft initial charity outreach emails for 180 Degrees Consulting Sheffield.
 Use only facts supplied in the client context. Never invent achievements, needs, people, partnerships, or news.
@@ -84,6 +95,7 @@ ${VOICE_INSTRUCTIONS[voice]}
 ${TONE_INSTRUCTIONS[tone]}
 ${OPENING_INSTRUCTIONS[opening]}
 ${CLOSING_INSTRUCTIONS[closing]}
+${sizeTone}
 Return exactly one JSON object with two string properties: "subject" and "body". Do not use markdown fences. The body must be plain text and must not include a sender signature.`,
     prompt: `Draft a Stage 1 outreach email using this reviewed client context.
 
@@ -93,6 +105,7 @@ Organisation type: ${value(context.organisationType)}
 Website: ${value(context.website)}
 Location: ${[context.city, context.countryCode].filter(Boolean).join(", ") || "Not provided"}
 Geographic reach: ${value(context.geographicReach)}
+Income band: ${value(context.incomeBand)}
 Primary contact: ${value(context.contactName)}
 Contact role: ${value(context.contactJobTitle)}
 

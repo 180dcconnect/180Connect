@@ -70,3 +70,12 @@ test("buildStageOnePrompt applies each closing approach safely", () => {
   assert.match(buildStageOnePrompt(context, { closing: "meeting_request" }).system, /without proposing invented dates/);
   assert.match(buildStageOnePrompt(context, { closing: "open_question" }).system, /one clear, open question/);
 });
+
+test("buildStageOnePrompt adapts its size guidance to the latest income band", () => {
+  const context = { organisationName: "Example", organisationType: "charity" };
+  assert.match(buildStageOnePrompt({ ...context, incomeBand: "under_10k" }).system, /very small charity/);
+  assert.match(buildStageOnePrompt({ ...context, incomeBand: "10k_100k" }).system, /small charity/);
+  assert.match(buildStageOnePrompt({ ...context, incomeBand: "100k_1m" }).system, /medium-sized charity/);
+  assert.match(buildStageOnePrompt({ ...context, incomeBand: "over_1m" }).system, /large charity/);
+  assert.match(buildStageOnePrompt(context).system, /Charity size is not available/);
+});

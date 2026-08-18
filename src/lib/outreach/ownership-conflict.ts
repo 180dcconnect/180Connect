@@ -1,4 +1,4 @@
-import type { AppRole } from "@/lib/auth/permissions";
+import { hasPermission, type AppRole } from "../auth/permissions.ts";
 
 export type OwnershipConflictParams = {
   ownerId: string | null;
@@ -23,13 +23,26 @@ export type OwnershipConflictResult =
  */
 export function ownershipConflictWarning(ownerName?: string | null): string {
   const name = ownerName?.trim() || "another team member";
-  return `This client is owned by ${name}. To prevent duplicate outreach, coordinate with them before contacting this client.`;
+  return `This client is owned by ${name}. Outreach is blocked to prevent duplicate contact — coordinate with them, or ask an admin to reassign this client.`;
 }
 
 /**
- * F165 — checks if a CAM is attempting outreach or actions on a client owned by someone else.
- * Admins have platform-wide oversight and do not trigger conflict blocks, while CAMs are
- * warned to avoid duplicate or uncoordinated client outreach (F165/F018).
+ * F165 AC2 — the claim-conflict warning has to name the current owner, not just
+ * report that a conflict exists. claim_organisation raises a nameless 55000 (it
+ * cannot read users), so the route resolves the name and formats it here.
+ */
+export function ownershipClaimConflictMessage(ownerName?: string | null): string {
+  const name = ownerName?.trim() || "another team member";
+  return `This client is already owned by ${name}. Self-assignment cannot override an existing owner — ask an admin to reassign it.`;
+}
+
+/**
+ * F165 — checks if a CAM is attempting outreach on a client owned by someone else.
+ * Admins have platform-wide oversight and do not trigger conflict blocks (F018 AC3),
+ * while CAMs are warned to avoid duplicate or uncoordinated client outreach.
+ *
+ * Gated on client:contact rather than `role !== "admin"`: a viewer can open a client
+ * profile but has no send path, so a contact-flavoured warning would be noise.
  */
 export function checkOwnershipConflict({
   ownerId,
@@ -37,18 +50,23 @@ export function checkOwnershipConflict({
   actorId,
   actorRole,
 }: OwnershipConflictParams): OwnershipConflictResult {
-  // Admins manage team-wide portfolio
+  // Admins manage the team-wide portfolio and may override.
   if (actorRole === "admin") {
     return { hasConflict: false };
   }
 
-  // Unowned clients have no conflict
+  // Roles with no outreach path have nothing to conflict over.
+  if (!hasPermission(actorRole, "client:contact")) {
+    return { hasConflict: false };
+  }
+
+  // Unowned clients have no conflict.
   if (!ownerId) {
     return { hasConflict: false };
   }
 
-  // If the actor is the owner, no conflict
-  if (ownerId.trim().toLowerCase() === actorId.trim().toLowerCase()) {
+  // If the actor is the owner, no conflict.
+  if (ownerId === actorId) {
     return { hasConflict: false };
   }
 

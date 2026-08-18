@@ -182,9 +182,11 @@ export default async function ClientDetailPage({
   const suppressed = latest?.status === "active";
   const suppressionPending = latest?.status === "pending";
 
+  // Deliberately not `ownerName`: that falls back to "A former team member" for a
+  // deleted owner, which the warning would read back as a person to go and talk to.
   const ownershipConflict = checkOwnershipConflict({
     ownerId,
-    ownerName,
+    ownerName: ownerRow?.owner?.full_name ?? null,
     actorId: authorization.actor.id,
     actorRole: authorization.actor.role,
   });
@@ -399,22 +401,10 @@ export default async function ClientDetailPage({
             <Rise>
               <SectionCard headingId="ownership-heading" title="Ownership">
                 {ownerId ? (
-                  <div className="mt-3 space-y-2">
-                    <p className="text-sm leading-[1.7] text-foreground/65">
-                      Owned by <span className="font-bold text-foreground/85">{ownerName}</span>
-                      {ownerId === authorization.actor.id ? " (you)" : ""}.
-                    </p>
-                    {ownershipConflict.hasConflict && (
-                      <p
-                        role="alert"
-                        className="rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-3.5 py-3 text-[13px] font-bold leading-[1.6] text-amber-800"
-                      >
-                        Ownership notice: This client is assigned to {ownershipConflict.ownerName}. To
-                        prevent duplicate outreach, please coordinate with them before contacting this
-                        charity.
-                      </p>
-                    )}
-                  </div>
+                  <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
+                    Owned by <span className="font-bold text-foreground/85">{ownerName}</span>
+                    {ownerId === authorization.actor.id ? " (you)" : ""}.
+                  </p>
                 ) : canEdit ? (
                   <div className="mt-3 space-y-3">
                     <p className="text-sm leading-[1.7] text-foreground/55">
@@ -456,20 +446,16 @@ export default async function ClientDetailPage({
             {hasPermission(authorization.actor.role, "client:contact") && (
               <Rise>
                 <SectionCard headingId="outreach-heading" title="Outreach">
-                  {ownershipConflict.hasConflict && (
-                    <p
-                      role="alert"
-                      className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-3.5 py-3 text-[13px] font-bold leading-[1.6] text-amber-800"
-                    >
-                      {ownershipConflict.warning}
-                    </p>
-                  )}
+                  {/* The conflict is shown by ComposeButton itself, so the one
+                      message survives a click and the re-check behind it. */}
                   <div className="mt-4">
                     <ComposeButton
                       blocked={suppressed}
                       organisationId={client.id}
                       suppressionReason={suppressed ? latest.reason : undefined}
-                      ownershipWarning={ownershipConflict.hasConflict ? ownershipConflict.warning : undefined}
+                      ownershipWarning={
+                        ownershipConflict.hasConflict ? ownershipConflict.warning : undefined
+                      }
                     />
                   </div>
                 </SectionCard>

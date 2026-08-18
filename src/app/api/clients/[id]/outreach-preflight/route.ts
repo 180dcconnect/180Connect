@@ -52,12 +52,21 @@ export async function POST(
       owner: { full_name: string | null } | null;
     }>();
 
+  // Fail closed, the same way the suppression lookup below does: this check is a
+  // permission gate, so an unreadable ownership row must not read as "no owner".
   if (orgError) {
     await reportError(orgError, {
       operation: "clients.outreach_preflight.org_lookup",
       organisationId,
       userId: authorization.actor.id,
     });
+    return NextResponse.json(
+      {
+        allowed: false,
+        error: "Ownership could not be checked. Nothing was sent. Please try again.",
+      },
+      { status: 503 },
+    );
   }
 
   const conflict = checkOwnershipConflict({
@@ -68,6 +77,11 @@ export async function POST(
   });
 
   if (conflict.hasConflict) {
+    logSecurityEvent("outreach.ownership_conflict_blocked", {
+      organisationId,
+      ownerId: conflict.ownerId,
+      userId: authorization.actor.id,
+    });
     return NextResponse.json(
       {
         allowed: false,
@@ -122,4 +136,3 @@ export async function POST(
 
   return NextResponse.json({ allowed: true });
 }
-

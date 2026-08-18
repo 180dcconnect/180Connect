@@ -5,9 +5,17 @@ import { OriginButton } from "@/components/ui/origin-button";
 
 /**
  * F249/F165 visible preflight while F123's provider send path is pending. Every click
- * re-reads suppression and ownership state; a page-open snapshot is not trusted. The future send
- * action must repeat the server check immediately before delivery.
+ * re-reads suppression and ownership state; a page-open snapshot is not trusted. The
+ * future send action must repeat the server check immediately before delivery.
+ *
+ * Tone is carried alongside the message rather than fixed on the element: a
+ * suppression block or a failed check stays red, and only an ownership conflict —
+ * which an admin can resolve by reassigning — reads amber. A hard block must never
+ * be styled as soft advice.
  */
+type Tone = "block" | "conflict";
+type Warning = { text: string; tone: Tone };
+
 export function ComposeButton({
   blocked,
   organisationId,
@@ -21,10 +29,15 @@ export function ComposeButton({
 }) {
   const [clicked, setClicked] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [warning, setWarning] = useState<string | null>(
+  const [warning, setWarning] = useState<Warning | null>(
     blocked
-      ? `This client is suppressed. Outreach is blocked. Reason: ${suppressionReason ?? "No reason was recorded."}`
-      : ownershipWarning ?? null,
+      ? {
+          text: `This client is suppressed. Outreach is blocked. Reason: ${suppressionReason ?? "No reason was recorded."}`,
+          tone: "block",
+        }
+      : ownershipWarning
+        ? { text: ownershipWarning, tone: "conflict" }
+        : null,
   );
 
   async function checkBeforeCompose() {
@@ -37,12 +50,18 @@ export function ComposeButton({
       });
       const body = await response.json();
       if (!response.ok || !body.allowed) {
-        setWarning(body.error ?? "Outreach permissions could not be verified. Nothing was sent.");
+        setWarning({
+          text: body.error ?? "Outreach permissions could not be verified. Nothing was sent.",
+          tone: body.kind === "ownership_conflict" ? "conflict" : "block",
+        });
         return;
       }
       setClicked(true);
     } catch {
-      setWarning("Outreach permissions could not be checked. Nothing was sent. Please try again.");
+      setWarning({
+        text: "Outreach permissions could not be checked. Nothing was sent. Please try again.",
+        tone: "block",
+      });
     } finally {
       setChecking(false);
     }
@@ -61,7 +80,7 @@ export function ComposeButton({
           Compose email
         </OriginButton>
         <p className="mt-2.5 text-[13px] font-bold leading-[1.6] text-red-800" role="alert">
-          {warning}
+          {warning?.text}
         </p>
       </div>
     );
@@ -81,10 +100,13 @@ export function ComposeButton({
       {warning ? (
         <p
           aria-live="assertive"
-          className="mt-2.5 text-[13px] font-bold leading-[1.6] text-amber-800"
+          className={
+            "mt-2.5 text-[13px] font-bold leading-[1.6] " +
+            (warning.tone === "conflict" ? "text-amber-800" : "text-red-800")
+          }
           role="alert"
         >
-          {warning}
+          {warning.text}
         </p>
       ) : null}
       {clicked ? (
@@ -96,4 +118,3 @@ export function ComposeButton({
     </div>
   );
 }
-

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   checkOwnershipConflict,
+  ownershipClaimConflictMessage,
   ownershipConflictWarning,
 } from "./ownership-conflict.ts";
 
@@ -44,7 +45,7 @@ describe("checkOwnershipConflict (F165)", () => {
       assert.equal(result.ownerName, "Mohammed Saeed");
       assert.equal(
         result.warning,
-        "This client is owned by Mohammed Saeed. To prevent duplicate outreach, coordinate with them before contacting this client.",
+        "This client is owned by Mohammed Saeed. Outreach is blocked to prevent duplicate contact — coordinate with them, or ask an admin to reassign this client.",
       );
     }
   });
@@ -60,9 +61,20 @@ describe("checkOwnershipConflict (F165)", () => {
     if (result.hasConflict) {
       assert.equal(
         result.warning,
-        "This client is owned by another team member. To prevent duplicate outreach, coordinate with them before contacting this client.",
+        "This client is owned by another team member. Outreach is blocked to prevent duplicate contact — coordinate with them, or ask an admin to reassign this client.",
       );
     }
+  });
+
+  it("returns no conflict for a viewer, who has no outreach path", () => {
+    const result = checkOwnershipConflict({
+      ownerId: otherCamId,
+      ownerName: "Mohammed Saeed",
+      actorId: actorCamId,
+      actorRole: "viewer",
+    });
+
+    assert.deepEqual(result, { hasConflict: false });
   });
 
   it("returns no conflict for admin user regardless of owner", () => {
@@ -82,7 +94,7 @@ describe("ownershipConflictWarning (F165)", () => {
     const warning = ownershipConflictWarning("Alex Chen");
     assert.equal(
       warning,
-      "This client is owned by Alex Chen. To prevent duplicate outreach, coordinate with them before contacting this client.",
+      "This client is owned by Alex Chen. Outreach is blocked to prevent duplicate contact — coordinate with them, or ask an admin to reassign this client.",
     );
   });
 
@@ -90,7 +102,23 @@ describe("ownershipConflictWarning (F165)", () => {
     const warning = ownershipConflictWarning(null);
     assert.equal(
       warning,
-      "This client is owned by another team member. To prevent duplicate outreach, coordinate with them before contacting this client.",
+      "This client is owned by another team member. Outreach is blocked to prevent duplicate contact — coordinate with them, or ask an admin to reassign this client.",
+    );
+  });
+});
+
+describe("ownershipClaimConflictMessage (F165 AC2)", () => {
+  it("names the current owner", () => {
+    assert.equal(
+      ownershipClaimConflictMessage("Alex Chen"),
+      "This client is already owned by Alex Chen. Self-assignment cannot override an existing owner — ask an admin to reassign it.",
+    );
+  });
+
+  it("falls back when the owner name cannot be resolved", () => {
+    assert.equal(
+      ownershipClaimConflictMessage(null),
+      "This client is already owned by another team member. Self-assignment cannot override an existing owner — ask an admin to reassign it.",
     );
   });
 });

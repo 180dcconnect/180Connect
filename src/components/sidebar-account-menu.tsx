@@ -1,7 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ChevronsUpDown, CircleUserRound, LogOut, Settings } from "lucide-react";
+import { ChevronsUpDown, CircleUserRound, LogOut } from "lucide-react";
+import { AnimateIcon } from "@/components/animate-ui/icons/icon";
+import { Settings } from "@/components/animate-ui/icons/settings";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -118,10 +120,12 @@ export function SidebarAccountMenu({
           Profile
         </DropdownMenuItem>
 
-        <DropdownMenuItem onSelect={() => router.push("/settings")}>
-          <Settings aria-hidden="true" />
-          Settings
-        </DropdownMenuItem>
+        <AnimateIcon animateOnHover asChild>
+          <DropdownMenuItem onSelect={() => router.push("/settings")}>
+            <Settings aria-hidden="true" />
+            Settings
+          </DropdownMenuItem>
+        </AnimateIcon>
 
         <DropdownMenuSeparator />
 

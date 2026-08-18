@@ -23,6 +23,11 @@ import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
 import { Pill, SectionCard } from "./section-card";
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
+import {
+  ownershipRequestAvailability,
+  type OwnershipRequestStatus,
+} from "@/lib/ownership-requests";
+import { RequestOwnershipForm } from "./request-ownership-form";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -191,6 +196,35 @@ export default async function ClientDetailPage({
     actorRole: authorization.actor.role,
   });
 
+  // #408: this CAM's own most recent request for this client, so the conflict warning
+  // can offer the escalation — or, if they have already asked, say so instead of
+  // inviting a second ask the RPC would refuse. Only fetched when a conflict exists;
+  // there is nothing to request otherwise.
+  let ownRequest: { status: OwnershipRequestStatus; decision_note: string | null } | null = null;
+  if (ownershipConflict.hasConflict) {
+    const { data: requestRow, error: requestError } = await supabase
+      .from("ownership_requests")
+      .select("status, decision_note")
+      .eq("organisation_id", id)
+      .eq("requested_by", authorization.actor.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<{ status: OwnershipRequestStatus; decision_note: string | null }>();
+    if (requestError) {
+      await reportError(requestError, {
+        operation: "clients.detail_ownership_request",
+        organisationId: id,
+      });
+    }
+    ownRequest = requestRow ?? null;
+  }
+
+  const requestAvailability = ownershipRequestAvailability({
+    ownerId,
+    actorId: authorization.actor.id,
+    actorRole: authorization.actor.role,
+    hasPendingRequest: ownRequest?.status === "pending",
+  });
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="mx-auto w-full max-w-5xl space-y-6">
@@ -401,10 +435,25 @@ export default async function ClientDetailPage({
             <Rise>
               <SectionCard headingId="ownership-heading" title="Ownership">
                 {ownerId ? (
-                  <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
-                    Owned by <span className="font-bold text-foreground/85">{ownerName}</span>
-                    {ownerId === authorization.actor.id ? " (you)" : ""}.
-                  </p>
+                  <>
+                    <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
+                      Owned by <span className="font-bold text-foreground/85">{ownerName}</span>
+                      {ownerId === authorization.actor.id ? " (you)" : ""}.
+                    </p>
+                    {/* #408: the only sanctioned route past a conflict. A CAM asks; an
+                        admin decides. There is no take-anyway action, here or in the
+                        RPC behind it. */}
+                    {(requestAvailability.available ||
+                      requestAvailability.reason === "already_pending" ||
+                      (ownershipConflict.hasConflict && ownRequest)) && (
+                      <RequestOwnershipForm
+                        organisationId={client.id}
+                        ownerName={ownerRow?.owner?.full_name ?? null}
+                        existingStatus={ownRequest?.status ?? null}
+                        decisionNote={ownRequest?.decision_note ?? null}
+                      />
+                    )}
+                  </>
                 ) : canEdit ? (
                   <div className="mt-3 space-y-3">
                     <p className="text-sm leading-[1.7] text-foreground/55">

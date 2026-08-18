@@ -3669,6 +3669,157 @@ select * from tests.suite_active_rpc();
 select * from tests.suite_deactivate_rpc();
 select * from tests.suite_invite_rpc();
 select * from tests.suite_signup_domain();
+-- ---------------------------------------------------------------------------
+-- ownership_requests (#408, F165 follow-up)
+-- ---------------------------------------------------------------------------
+-- Matrix §3.17. The point of this suite is the negative: a CAM has no path to a
+-- client another CAM owns except asking, and asking moves nothing on its own.
+
+create or replace function tests.suite_ownership_requests()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_org_unowned uuid := '00000000-0000-4000-b000-000000000001';
+  v_org_cam_b   uuid := '00000000-0000-4000-b000-000000000003';
+  v_req_id      uuid;
+  v_status      public.ownership_request_status;
+  v_owner       uuid;
+  v_count       bigint;
+begin
+  if not tests.tables_exist('organisations', 'users', 'audit_log', 'ownership_requests')
+     or to_regprocedure('public.request_client_ownership(uuid, text)') is null
+     or to_regprocedure('public.decide_ownership_request(uuid, boolean, text)') is null then
+    return next skip(18, 'ownership_requests table or RPCs not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Every write is RPC-only (recipe step 4), same shape as suppressions.
+  return next ok(
+    not has_table_privilege('authenticated', 'public.ownership_requests', 'INSERT'),
+    'authenticated holds no direct INSERT privilege on ownership_requests'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.ownership_requests', 'UPDATE'),
+    'authenticated holds no direct UPDATE privilege on ownership_requests'
+  );
+
+  -- A viewer has no ownership to request.
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.request_client_ownership(%L, ''viewer wants a client'')', v_org_cam_b)),
+    '42501',
+    'viewer cannot call request_client_ownership'
+  );
+
+  -- An admin reassigns directly rather than requesting from themselves.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.request_client_ownership(%L, ''admin asking'')', v_org_cam_b)),
+    '42501',
+    'an admin is refused: they hold reassign_ownership already'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.request_client_ownership(%L, ''   '')', v_org_cam_b)),
+    '23514',
+    'blank reason is rejected'
+  );
+
+  -- An unowned client is claimed, not requested.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.request_client_ownership(%L, ''nobody owns it'')', v_org_unowned)),
+    '55000',
+    'requesting an unowned client is refused — claim it instead'
+  );
+
+  -- CAM A asks for CAM B's client. This is the whole sanctioned path.
+  perform tests.login_as(v_cam_a);
+  select public.request_client_ownership(v_org_cam_b, 'I already run their sister charity')
+    into v_req_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status into v_status from public.ownership_requests where id = v_req_id;
+  return next is(v_status, 'pending'::public.ownership_request_status,
+    'a CAM''s request lands pending');
+
+  -- The request moved nothing. This is the acceptance criterion that matters.
+  select owner_id into v_owner from public.organisations where id = v_org_cam_b;
+  return next is(v_owner, v_cam_b, 'the client has not moved: a request is not a handover');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'ownership_requested' and target_id = v_org_cam_b;
+  return next is(v_count, 1::bigint, 'the request writes one ownership_requested audit row');
+
+  -- Still no direct route, request or no request.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.claim_organisation(%L)', v_org_cam_b)),
+    '55000',
+    'a pending request does not unlock claim_organisation on an owned client'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set owner_id = %L where id = %L', v_cam_a, v_org_cam_b)),
+    '42501',
+    'a CAM cannot write owner_id directly, request or no request'
+  );
+
+  -- The requester cannot approve their own ask.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.decide_ownership_request(%L, true, null)', v_req_id)),
+    '42501',
+    'the requesting CAM cannot decide their own request'
+  );
+
+  -- Nor can a second identical ask be queued.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.request_client_ownership(%L, ''asking again'')', v_org_cam_b)),
+    '23505',
+    'a second pending request from the same CAM for the same client is rejected'
+  );
+
+  -- Admin approves: this is what moves the client, through reassign_ownership.
+  perform tests.login_as(v_admin);
+  perform public.decide_ownership_request(v_req_id, true, 'agreed on the Wednesday call');
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status into v_status from public.ownership_requests where id = v_req_id;
+  return next is(v_status, 'approved'::public.ownership_request_status,
+    'admin approval marks the request approved');
+
+  select owner_id into v_owner from public.organisations where id = v_org_cam_b;
+  return next is(v_owner, v_cam_a, 'approval moves the client to the requesting CAM');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'ownership_reassigned' and target_id = v_org_cam_b;
+  return next is(v_count, 1::bigint,
+    'the handover is audited as a normal ownership_assigned transition');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'ownership_request_approved' and target_id = v_org_cam_b;
+  return next is(v_count, 1::bigint, 'the decision itself is audited too');
+
+  -- Deciding twice is refused, not silently re-applied.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.decide_ownership_request(%L, false, null)', v_req_id)),
+    '55000',
+    'deciding a request that is no longer pending is rejected'
+  );
+end;
+$$;
+
 select * from tests.suite_default_role();
 select * from tests.suite_views();
 select * from tests.suite_actions();
@@ -3678,6 +3829,7 @@ select * from tests.suite_claim_ownership();
 select * from tests.suite_outreach_status();
 select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
+select * from tests.suite_ownership_requests();
 select * from tests.suite_source_tracking();
 select * from tests.suite_manual_entries();
 select * from tests.suite_url_import();

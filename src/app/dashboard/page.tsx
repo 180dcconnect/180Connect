@@ -200,7 +200,7 @@ export default async function DashboardPage({
       <Stage className="mx-auto w-full max-w-6xl space-y-10">
         <Rise className="flex flex-wrap items-end justify-between gap-x-8 gap-y-5">
           <div className="min-w-0">
-            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-black leading-[1] tracking-[-0.03em]">
+            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-black font-semibold font-body leading-[1] tracking-[-0.03em]">
               Dashboard
             </h1>
             
@@ -285,12 +285,6 @@ export default async function DashboardPage({
         ) : (
           <>
             <Group className="space-y-4">
-              <Rise className="flex items-baseline justify-between gap-4">
-                <h2 className="text-xl font-black tracking-[-0.02em]">Pipeline</h2>
-                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                  Team-wide
-                </p>
-              </Rise>
 
               {/* The headline metric gets the whole width: it carries a 30-day
                   curve, and the three status counts read as its breakdown

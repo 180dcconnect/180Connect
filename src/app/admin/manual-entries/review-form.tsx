@@ -1,8 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { OriginButton } from "@/components/ui/origin-button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   approveManualEntry,
   checkAvailableManualEntryDependencies,
@@ -37,6 +44,7 @@ export function ManualEntryReviewForm({
     rejectManualEntry,
     initialState,
   );
+  const [duplicateDecision, setDuplicateDecision] = useState("link_existing");
 
   return (
     <div className="mt-4 rounded-xl border border-black/10 bg-gray-50 p-4">
@@ -105,10 +113,16 @@ export function ManualEntryReviewForm({
               </p>
               <label className="block text-sm font-bold">
                 Decision
-                <select className="mt-1 w-full rounded-lg border border-black/20 px-3 py-2" defaultValue="link_existing" name="duplicateDecision" required>
-                  <option value="link_existing">Same organisation — link existing client</option>
-                  <option value="create_new">Different organisation — create separate client</option>
-                </select>
+                <input name="duplicateDecision" type="hidden" value={duplicateDecision} />
+                <Select value={duplicateDecision} onValueChange={setDuplicateDecision}>
+                  <SelectTrigger className="mt-1 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="link_existing">Same organisation — link existing client</SelectItem>
+                    <SelectItem value="create_new">Different organisation — create separate client</SelectItem>
+                  </SelectContent>
+                </Select>
               </label>
               <label className="block text-sm font-bold">
                 Decision notes

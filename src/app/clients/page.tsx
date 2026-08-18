@@ -279,7 +279,7 @@ export default async function ClientsPage({
         heading={
           <>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-black font-semibold font-body leading-[1] tracking-[-0.03em]">
+              <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
                 {isOwnedView ? "My clients" : "Clients"}
               </h1>
               {canClaim && (

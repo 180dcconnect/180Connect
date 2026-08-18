@@ -3,6 +3,13 @@
 import Link from "next/link";
 import { useActionState, useState, type FormEvent } from "react";
 import { OriginButton } from "@/components/ui/origin-button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { discardImportDraft, type UrlImportState } from "./import-actions";
 import { saveManualEntry, type ManualEntryState } from "./actions";
 
@@ -87,6 +94,17 @@ export function ManualEntryForm({
   );
 
   const isImported = (column: string) => importedColumns.includes(column);
+
+  const [organisationType, setOrganisationType] = useState(
+    initialEntry?.organisation_type ?? "",
+  );
+
+  function handleOrganisationTypeChange(value: string) {
+    setOrganisationType(value);
+    if (!importedColumns.includes("organisation_type")) return;
+    if (initialEntry?.organisation_type === value) return;
+    setImportedColumns((columns) => columns.filter((column) => column !== "organisation_type"));
+  }
 
   // One handler on the form rather than eleven on the fields: change events bubble,
   // and the alternative is threading a callback through every label on the page.
@@ -191,13 +209,18 @@ export function ManualEntryForm({
         <div className="grid gap-5 sm:grid-cols-2">
           <label className="block text-sm font-bold">Organisation type
             {isImported("organisation_type") && <ImportedBadge />}
-            <select className={inputClass} defaultValue={initialEntry?.organisation_type ?? ""} name="organisationType" required>
-              <option disabled value="">Choose a type</option>
-              <option value="charity">Charity</option>
-              <option value="both">Charity and company</option>
-              <option value="company">Company</option>
-              <option value="other">Other organisation</option>
-            </select>
+            <input name="organisationType" type="hidden" value={organisationType} />
+            <Select value={organisationType} onValueChange={handleOrganisationTypeChange}>
+              <SelectTrigger className={`${inputClass} w-full`}>
+                <SelectValue placeholder="Choose a type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="charity">Charity</SelectItem>
+                <SelectItem value="both">Charity and company</SelectItem>
+                <SelectItem value="company">Company</SelectItem>
+                <SelectItem value="other">Other organisation</SelectItem>
+              </SelectContent>
+            </Select>
           </label>
           <label className="block text-sm font-bold">Country code
             {isImported("country_code") && <ImportedBadge />}

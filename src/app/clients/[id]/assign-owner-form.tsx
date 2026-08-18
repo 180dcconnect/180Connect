@@ -2,6 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type TeamMember = { id: string; full_name: string | null };
 
@@ -78,19 +85,19 @@ export function AssignOwnerForm({
 
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-foreground/65">Assign to</span>
-        <select
-          value={ownerId}
-          onChange={(event) => setOwnerId(event.target.value)}
-          className="rounded-lg border border-black/10 px-3 py-2 text-sm"
-        >
-          <option value="">Choose a CAM</option>
-          {team.map((member) => (
-            <option key={member.id} value={member.id}>
-              {member.full_name ?? "Unnamed CAM"}
-              {member.id === currentOwnerId ? " (current owner)" : ""}
-            </option>
-          ))}
-        </select>
+        <Select value={ownerId} onValueChange={setOwnerId}>
+          <SelectTrigger className="w-full text-sm">
+            <SelectValue placeholder="Choose a CAM" />
+          </SelectTrigger>
+          <SelectContent>
+            {team.map((member) => (
+              <SelectItem key={member.id} value={member.id}>
+                {member.full_name ?? "Unnamed CAM"}
+                {member.id === currentOwnerId ? " (current owner)" : ""}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </label>
 
       <label className="flex flex-col gap-1 text-sm">

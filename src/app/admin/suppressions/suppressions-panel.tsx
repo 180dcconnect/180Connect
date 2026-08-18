@@ -2,6 +2,13 @@
 
 import { useState } from "react";
 import { OriginButton } from "@/components/ui/origin-button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { SuppressionRow } from "@/lib/suppressions";
 
 type OrganisationOption = { id: string; legal_name: string };
@@ -102,20 +109,18 @@ export function SuppressionsPanel({
         <label className="mt-3 block text-sm font-bold" htmlFor="organisation">
           Charity
         </label>
-        <select
-          className="mt-2 w-full rounded-lg border border-black/15 bg-white px-3 py-2"
-          disabled={busy}
-          id="organisation"
-          onChange={(event) => setOrganisationId(event.target.value)}
-          value={organisationId}
-        >
-          <option value="">Select a charity…</option>
-          {organisations.map((organisation) => (
-            <option key={organisation.id} value={organisation.id}>
-              {organisation.legal_name}
-            </option>
-          ))}
-        </select>
+        <Select disabled={busy} onValueChange={setOrganisationId} value={organisationId}>
+          <SelectTrigger id="organisation" className="mt-2 w-full text-sm">
+            <SelectValue placeholder="Select a charity…" />
+          </SelectTrigger>
+          <SelectContent>
+            {organisations.map((organisation) => (
+              <SelectItem key={organisation.id} value={organisation.id}>
+                {organisation.legal_name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         <label className="mt-4 block text-sm font-bold" htmlFor="reason">
           Reason

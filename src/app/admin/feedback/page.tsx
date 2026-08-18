@@ -88,7 +88,7 @@ export default async function FeedbackPage() {
         <Group className="space-y-6">
           <Rise className="flex flex-wrap items-end justify-between gap-x-8 gap-y-5">
             <div className="min-w-0">
-              <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-black font-semibold font-body leading-[1] tracking-[-0.03em]">
+              <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
                 Feedback
               </h1>
               <p className="mt-3 max-w-xl text-sm leading-[1.7] text-foreground/65">

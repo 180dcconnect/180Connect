@@ -180,7 +180,7 @@ export default async function AuditLogPage({
         stageClassName="space-y-10"
         heading={
           <>
-            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-black font-semibold font-body leading-[1] tracking-[-0.03em]">
+            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
               Audit log
             </h1>
             <p className="mt-3 max-w-xl text-sm leading-[1.7] text-foreground/65">

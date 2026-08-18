@@ -16,6 +16,8 @@
 > * [`docs/global-workspace-data-protection-agreement.md`](global-workspace-data-protection-agreement.md) — Shared Google Workspace governance proposal.
 > * [`docs/ico-fee-self-assessment.md`](ico-fee-self-assessment.md) — Completed ICO Tier 1 fee determination.
 
+> **Important Status Statement:** 180Connect is currently in a pre-live implementation and governance phase. Controls marked "Planned", "In Progress", or "Pending" are conditions of live deployment and must not be treated as completed controls for the purposes of this assessment.
+
 ---
 
 ## 1. DPIA Overview
@@ -32,11 +34,13 @@ This DPIA systematically assesses the end-to-end processing lifecycle to answer 
 
 ---
 
-## 2. Why a DPIA is Required
+## 2. Why a DPIA is Conducted
 
-Under UK GDPR Article 35(1), a DPIA is mandatory where processing is "likely to result in a high risk to the rights and freedoms of natural persons." 
+Under UK GDPR Article 35(1), a DPIA is required where processing is "likely to result in a high risk to the rights and freedoms of natural persons."
 
-Screening against the Information Commissioner's Office (ICO) high-risk criteria indicates that 180Connect combines multiple triggers:
+Although the processing does not necessarily fall within a single mandatory DPIA category solely because it involves B2B outreach or decision-support scoring, Sheffield CIC has determined that a DPIA is appropriate as a proportionate risk-management measure because the project combines indirect collection, data aggregation, profiling/decision-support, cloud infrastructure, planned AI processing, and international administrative access.
+
+Specifically, the assessment evaluates the combination of the following factors:
 
 * **Evaluation and Scoring / Profiling:** Calculating automated data-completeness and priority scores to suggest prospective organisations for outreach.
 * **Data Matching & Aggregation Across Multiple Sources:** Combining records from public statutory registries (Charity Commission, Companies House, 360Giving, Find That Charity) with scraped web data and internal CRM history.
@@ -168,10 +172,10 @@ The following data categories are **strictly banned from storage and processing*
 ### 9.1 Nature of the Scoring Mechanism
 180Connect computes priority scores based on public organisational attributes (income band, sector relevance, location, data completeness).
 
-### 9.2 Article 22 Non-Applicability & Human Governance
+### 9.2 Article 22 Assessment and Human Governance
 Under UK GDPR Article 22, individuals have the right not to be subject to a decision based solely on automated processing, including profiling, which produces legal or similarly significant effects.
 
-180Connect operates strictly outside Article 22 scope because:
+The current scoring mechanism is not intended to produce legal or similarly significant effects on individuals and therefore is not expected to constitute solely automated decision-making within the scope of Article 22. Furthermore, priority scores evaluate organisations rather than natural persons. Nevertheless, Sheffield CIC has implemented human review controls as a precautionary governance measure:
 1. **Decision-Support Only:** The priority score is an internal recommendation signal to help CAMs manage their workload; it does not take any autonomous action.
 2. **No Legal or Significant Effect on the Individual:** The score only determines internal research priority for B2B consulting outreach; it does not deny services, impose financial burdens, or affect legal rights.
 3. **Mandatory Human Agency:** A CAM must independently review the organisation and contact details. The CAM has full authority to override, reprioritise, or dismiss any score.
@@ -191,7 +195,7 @@ The platform plans to incorporate LLM services for:
 
 | Specific AI Risk | Vulnerability / Impact | Mandatory DPIA Control & Gate | Status |
 | :--- | :--- | :--- | :--- |
-| **1. Personal Data Transmission to LLM** | Sending contact names/emails to third-party model endpoints | Prompts must be minimised; personal identifiers are stripped prior to LLM API call. | `Planned / pre-live requirement` |
+| **1. Personal Data Transmission to LLM** | Sending contact names/emails to third-party model endpoints | Where LLM processing is introduced, prompts must be minimised and personal identifiers removed wherever reasonably practicable before transmission. The exact permitted data fields will be documented following provider selection and the associated DPA/transfer assessment. | `Planned / pre-live requirement` |
 | **2. Provider Model Training on Client Data** | Third-party vendor retaining prompts to train foundation models | Mandatory zero-retention / no-training enterprise terms required in DPA before production use. | `Planned / pre-live requirement` |
 | **3. International Transfer via AI Vendor** | LLM inference executing outside UK/EEA | Pinned UK/EU hosting region and executed UK Addendum/SCCs required. | `In progress` |
 | **4. Sensitive Reply Disclosures in LLM** | Inbound email contains unprompted health/personal disclosure | Incoming replies must not be automatically fed to third-party LLMs without prior screening and redaction of special category text. | `Policy requirement` |
@@ -266,19 +270,19 @@ $$\text{Risk Score} = \text{Likelihood} \times \text{Severity}$$
 
 ## 15. Risk Register & Mitigations
 
-| ID | Identified Risk Description | Inherent L | Inherent S | Inherent Score | Applied Technical & Organisational Mitigations | Residual L | Residual S | Residual Score & Status |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **R1** | **Ingestion of private residential addresses or trustee personal data** | 4 | 4 | **16 (High)** | F246/F247 automated field filtering strips officer residential addresses, dates of birth, and trustee details at the ingestion boundary before persistence. | 1 | 3 | **3 (Low)** ✅ |
-| **R2** | **Accidental storage of personal email addresses** | 4 | 3 | **12 (Med)** | Role-based email allow-list (`personal_email_role_parts`), regex redactions, and database trigger `check_manual_entry_contact_email` on manual entries. | 1 | 3 | **3 (Low)** ✅ |
-| **R3** | **Unwanted direct marketing or PECR breach** | 3 | 3 | **9 (Med)** | Verification of corporate subscriber status; statutory company disclosures in every email; mandatory one-click opt-out link. | 2 | 2 | **4 (Low)** ✅ |
-| **R4** | **Re-contacting an individual after an opt-out / objection** | 2 | 5 | **10 (Med)** | Database-level `suppression_records` table automatically blocks delivery attempts to suppressed addresses across all users. | 1 | 4 | **4 (Low)** ✅ |
-| **R5** | **Over-reliance on automated priority scoring (Article 22)** | 3 | 3 | **9 (Med)** | Scores are strictly decision-support; CAM must independently review prospect details; CAM has full authority to override scores. | 1 | 2 | **2 (Low)** ✅ |
-| **R6** | **Unauthorised access to platform records** | 2 | 5 | **10 (Med)** | Google Workspace domain-restricted login + explicit admin activation + Supabase Row Level Security (RLS) deny-by-default. | 1 | 4 | **4 (Low)** ✅ |
-| **R7** | **Inappropriate disclosure to third-party LLM provider** | 3 | 4 | **12 (Med)** | Mandatory prompt data minimisation; zero-retention / no-model-training contractual terms; UK/EU region pinning. | 2 | 3 | **6 (Low — Pending DPA)** ⏳ |
-| **R8** | **Unscreened sensitive/health disclosures in email replies sent to LLM** | 3 | 4 | **12 (Med)** | Policy and engineering restriction prohibiting automated submission of raw client replies to third-party LLMs without prior redaction. | 1 | 4 | **4 (Low — Pending control)** ⏳ |
-| **R9** | **Ungoverned international remote access from Australia** | 4 | 4 | **16 (High)** | Execution of Global Workspace Governance Agreement + UK IDTA / UK Addendum + completed Transfer Risk Assessment (TRA). | 2 | 3 | **6 (Low — Pending execution)** ⏳ |
-| **R10** | **Personal data breach at cloud infrastructure level** | 2 | 5 | **10 (Med)** | SOC2 certified processors (Supabase, Vercel, Google); encryption at rest/transit; daily backups; Article 33 72-hour breach protocol. | 1 | 4 | **4 (Low)** ✅ |
-| **R11** | **Lack of transparency for indirect data subjects (Article 14)** | 3 | 3 | **9 (Med)** | Publication of clear Article 14 Privacy Notice linked in all email footers explaining source, lawful basis, profiling, and rights. | 1 | 2 | **2 (Low — Pending notice)** ⏳ |
+| ID | Identified Risk Description | Inherent L | Inherent S | Inherent Score | Applied Technical & Organisational Mitigations | Residual L | Residual S | Residual Score | Residual Status |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **R1** | **Ingestion of private residential addresses or trustee personal data** | 4 | 4 | **16 (High)** | F246/F247 automated field filtering strips officer residential addresses, dates of birth, and trustee details at the ingestion boundary before persistence. | 1 | 3 | **3 (Low)** | `Low — Implemented control active` ✅ |
+| **R2** | **Accidental storage of personal email addresses** | 4 | 3 | **12 (Med)** | Role-based email allow-list (`personal_email_role_parts`), regex redactions, and database trigger `check_manual_entry_contact_email` on manual entries. | 1 | 3 | **3 (Low)** | `Low — Implemented control active` ✅ |
+| **R3** | **Unwanted direct marketing or PECR breach** | 3 | 3 | **9 (Med)** | Verification of corporate subscriber status; statutory company disclosures in every email; mandatory one-click opt-out link. | 2 | 2 | **4 (Low)** | `Low — Implemented control active` ✅ |
+| **R4** | **Re-contacting an individual after an opt-out / objection** | 2 | 5 | **10 (Med)** | Database-level `suppression_records` table automatically blocks delivery attempts to suppressed addresses across all users. | 1 | 4 | **4 (Low)** | `Low — Implemented control active` ✅ |
+| **R5** | **Over-reliance on automated priority scoring (Article 22)** | 3 | 3 | **9 (Med)** | Scores are strictly decision-support; CAM must independently review prospect details; CAM has full authority to override scores. | 1 | 2 | **2 (Low)** | `Low — Implemented control active` ✅ |
+| **R6** | **Unauthorised access to platform records** | 2 | 5 | **10 (Med)** | Google Workspace domain-restricted login + explicit admin activation + Supabase Row Level Security (RLS) deny-by-default. | 1 | 4 | **4 (Low)** | `Low — Implemented control active` ✅ |
+| **R7** | **Inappropriate disclosure to third-party LLM provider** | 3 | 4 | **12 (Med)** | Mandatory prompt data minimisation; zero-retention / no-model-training contractual terms; UK/EU region pinning. | 2 | 3 | **6 (Low)** | `Low — Control pending; not approved for live processing` ⏳ |
+| **R8** | **Unscreened sensitive/health disclosures in email replies sent to LLM** | 3 | 4 | **12 (Med)** | Policy and engineering restriction prohibiting automated submission of raw client replies to third-party LLMs without prior redaction. | 1 | 4 | **4 (Low)** | `Low — Control pending; not approved for live processing` ⏳ |
+| **R9** | **Ungoverned international remote access from Australia** | 4 | 4 | **16 (High)** | Execution of Global Workspace Governance Agreement + UK IDTA / UK Addendum + completed Transfer Risk Assessment (TRA). | 2 | 3 | **6 (Low)** | `Low — Control pending; not approved for live processing` ⏳ |
+| **R10** | **Personal data breach at cloud infrastructure level** | 2 | 5 | **10 (Med)** | Processor security controls, contractual security commitments, encryption at rest/in transit, access controls, daily backups, and incident-response procedures. | 1 | 4 | **4 (Low)** | `Low — Implemented control active` ✅ |
+| **R11** | **Lack of transparency for indirect data subjects (Article 14)** | 3 | 3 | **9 (Med)** | Publication of clear Article 14 Privacy Notice linked in all email footers explaining source, lawful basis, profiling, and rights. | 1 | 2 | **2 (Low)** | `Low — Control pending; not approved for live processing` ⏳ |
 
 ---
 
@@ -312,6 +316,18 @@ To transition all residual risks to fully acceptable status, the following manda
 * **Internal Stakeholders:** Consulted with 180DC Sheffield Project Management, CAM outreach volunteers, and technical leads to align workflows with data-minimisation controls.
 * **Global Entity Consultation:** Transmitted draft governance framework ([`docs/global-workspace-data-protection-agreement.md`](global-workspace-data-protection-agreement.md)) to 180 Degrees Consulting Limited for infrastructure alignment.
 * **Data Subject Perspective:** Assessed through the Legitimate Interest Assessment balancing test, ensuring that direct marketing remains targeted, professional, non-intrusive, and accompanied by transparent objection mechanisms.
+
+### 18.1 Consultation Outcomes
+
+The DPIA was reviewed against the proposed 180Connect architecture and operational workflow. Consultation identified the following key requirements:
+
+* **Mandatory Human Agency:** Human approval must remain mandatory before every outbound email.
+* **Boundary Exclusions:** Personal contact information must be excluded at the ingestion boundary before persistence.
+* **International Transfer Safeguards:** Australian Workspace administration must be subject to documented international-transfer safeguards and governance terms.
+* **LLM Gating:** LLM processing must not begin until the provider, contractual terms, retention settings, and transfer mechanism have been formally assessed and approved.
+* **Indirect Transparency:** An Article 14 privacy notice must be available to individuals whose professional contact information is obtained indirectly.
+
+These requirements have been incorporated into the pre-live controls and risk register contained in this DPIA.
 
 ---
 

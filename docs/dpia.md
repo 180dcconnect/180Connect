@@ -268,27 +268,27 @@ $$\text{Risk Score} = \text{Likelihood} \times \text{Severity}$$
 * **8–12:** Medium Risk (Mitigation required before live processing)
 * **15–25:** High Risk (Critical mitigation / blocking gate)
 
-> **Governance Principle:** A low numerical residual score does not by itself authorise deployment where a mandatory pre-live control has not yet been implemented or verified.
+> **Governance Principle:** Residual risk rating and deployment status are separate governance concepts. A risk may have a numerically Low residual rating while deployment remains blocked because a mandatory legal, contractual, transparency, or security control has not yet been implemented or verified.
 
 ---
 
 ## 15. Risk Register & Mitigations
 
-| ID | Identified Risk Description | Inherent L | Inherent S | Inherent Score | Applied Technical & Organisational Mitigations | Residual L | Residual S | Residual Score | Risk Rating | Deployment Status |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **R1** | **Ingestion of private residential addresses or trustee personal data** | 4 | 4 | **16 (High)** | F246/F247 automated field filtering strips officer residential addresses, dates of birth, and trustee details at the ingestion boundary before persistence. | 1 | 3 | **3** | Low | `Implemented control active` ✅ |
-| **R2** | **Accidental storage of personal email addresses** | 4 | 3 | **12 (Med)** | Role-based email allow-list (`personal_email_role_parts`), regex redactions, and database trigger `check_manual_entry_contact_email` on manual entries. | 1 | 3 | **3** | Low | `Implemented control active` ✅ |
-| **R3** | **Unwanted direct marketing or PECR breach** | 3 | 3 | **9 (Med)** | Verification of corporate subscriber status; statutory company disclosures in every email; mandatory one-click opt-out link. | 2 | 2 | **4** | Low | `Implemented control active` ✅ |
-| **R4** | **Re-contacting an individual after an opt-out / objection** | 2 | 5 | **10 (Med)** | Database-level `suppression_records` table automatically blocks delivery attempts to suppressed addresses across all users. | 1 | 4 | **4** | Low | `Implemented control active` ✅ |
-| **R5** | **Over-reliance on automated priority scoring (Article 22)** | 3 | 3 | **9 (Med)** | Scores are strictly decision-support; CAM must independently review prospect details; CAM has full authority to override scores. | 1 | 2 | **2** | Low | `Implemented control active` ✅ |
-| **R6** | **Unauthorised access to platform records** | 2 | 5 | **10 (Med)** | Google Workspace domain-restricted login + explicit admin activation + Supabase Row Level Security (RLS) deny-by-default. | 1 | 4 | **4** | Low | `Implemented control active` ✅ |
-| **R7** | **Inappropriate disclosure to third-party LLM provider** | 3 | 4 | **12 (Med)** | Mandatory prompt data minimisation; zero-retention / no-model-training contractual terms; UK/EU region pinning. | 2 | 3 | **6** | Low | `Blocked pending mandatory control completion` ⏳ |
-| **R8** | **Unscreened sensitive/health disclosures in email replies sent to LLM** | 3 | 4 | **12 (Med)** | Policy and architectural rule: Raw inbound email replies must not be transmitted to an LLM in the MVP. AI reply processing is deferred pending formal addendum. | 1 | 4 | **4** | Low | `Implemented policy restriction` ✅ |
-| **R9** | **Ungoverned international remote access from Australia** | 4 | 4 | **16 (High)** | Execution of Global Workspace Governance Agreement + UK IDTA / UK Addendum + completed Transfer Risk Assessment (TRA). | 2 | 3 | **6** | Low | `Blocked pending agreement execution & TRA` ⏳ |
-| **R10** | **Personal data breach at cloud infrastructure level** | 2 | 5 | **10 (Med)** | Processor security controls, contractual security commitments, encryption at rest/in transit, access controls, daily backups, and incident-response procedures. | 1 | 4 | **4** | Low | `Implemented control active` ✅ |
-| **R11** | **Lack of transparency for indirect data subjects (Article 14)** | 3 | 3 | **9 (Med)** | Publication of clear Article 14 Privacy Notice linked in all email footers explaining source, lawful basis, profiling, and rights. | 1 | 2 | **2** | Low | `Blocked pending notice publication` ⏳ |
-| **R12** | **Inaccurate or outdated professional contact information resulting in inappropriate outreach** | 3 | 3 | **9 (Med)** | CAM manual verification before outreach; source and collection date metadata; periodic data refreshes; manual record correction in UI; suppression handling. | 1 | 2 | **2** | Low | `Implemented control active` ✅ |
-| **R13** | **Article 14 privacy notice not provided within applicable statutory timeframe** | 3 | 3 | **9 (Med)** | Source and collection date logged on all indirect records; Article 14 notice published on public website and linked in initial email footers (provided at earliest direct communication). | 1 | 2 | **2** | Low | `Blocked pending notice publication` ⏳ |
+| ID | Identified Risk Description | Inherent L | Inherent S | Inherent Score | Applied Technical & Organisational Mitigations | Residual L | Residual S | Residual Score | Residual Risk | Control Status | Deployment Status |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **R1** | **Ingestion of private residential addresses or trustee personal data** | 4 | 4 | **16 (High)** | F246/F247 automated field filtering strips officer residential addresses, dates of birth, and trustee details at the ingestion boundary before persistence. | 1 | 3 | **3** | Low | `Implemented & verified` ✅ | **PERMITTED** ✅ |
+| **R2** | **Accidental storage of personal email addresses** | 4 | 3 | **12 (Med)** | Role-based email allow-list (`personal_email_role_parts`), regex redactions, and database trigger `check_manual_entry_contact_email` on manual entries. | 1 | 3 | **3** | Low | `Implemented & verified` ✅ | **PERMITTED** ✅ |
+| **R3** | **Unwanted direct marketing or PECR breach** | 3 | 3 | **9 (Med)** | Verification of corporate subscriber status; statutory company disclosures in every email; mandatory one-click opt-out link. | 2 | 2 | **4** | Low | `Implemented & verified` ✅ | **PERMITTED** ✅ |
+| **R4** | **Re-contacting an individual after an opt-out / objection** | 2 | 5 | **10 (Med)** | Database-level `suppression_records` table automatically blocks delivery attempts to suppressed addresses across all users. | 1 | 4 | **4** | Low | `Implemented & verified` ✅ | **PERMITTED** ✅ |
+| **R5** | **Over-reliance on automated priority scoring (Article 22)** | 3 | 3 | **9 (Med)** | Scores are strictly decision-support; CAM must independently review prospect details; CAM has full authority to override scores. | 1 | 2 | **2** | Low | `Implemented & verified` ✅ | **PERMITTED** ✅ |
+| **R6** | **Unauthorised access to platform records** | 2 | 5 | **10 (Med)** | Google Workspace domain-restricted login + explicit admin activation + Supabase Row Level Security (RLS) deny-by-default. | 1 | 4 | **4** | Low | `Implemented & verified` ✅ | **PERMITTED** ✅ |
+| **R7** | **Inappropriate disclosure to third-party LLM provider** | 3 | 4 | **12 (Med)** | Mandatory prompt data minimisation; zero-retention / no-model-training contractual terms; UK/EU region pinning. | 2 | 3 | **6** | Low | `Pending provider selection & DPA` ⏳ | **BLOCKED** 🛑 |
+| **R8** | **Unscreened sensitive/health disclosures in email replies sent to LLM** | 3 | 4 | **12 (Med)** | Policy and architectural rule: Raw inbound email replies must not be transmitted to an LLM in the MVP. AI reply processing is deferred pending formal addendum. | 1 | 4 | **4** | Low | `Implemented policy restriction` ✅ | **PERMITTED (Rule Active)** ✅ |
+| **R9** | **Ungoverned international remote access from Australia** | 4 | 4 | **16 (High)** | Execution of Global Workspace Governance Agreement + UK IDTA / UK Addendum + completed Transfer Risk Assessment (TRA). | 2 | 3 | **6** | Low | `Pending agreement execution & TRA` ⏳ | **BLOCKED** 🛑 |
+| **R10** | **Personal data breach at cloud infrastructure level** | 2 | 5 | **10 (Med)** | Processor security controls, contractual security commitments, encryption at rest/in transit, access controls, daily backups, and incident-response procedures. | 1 | 4 | **4** | Low | `Implemented & verified` ✅ | **PERMITTED** ✅ |
+| **R11** | **Lack of transparency for indirect data subjects (Article 14)** | 3 | 3 | **9 (Med)** | Publication of clear Article 14 Privacy Notice linked in all email footers explaining source, lawful basis, profiling, and rights. | 1 | 2 | **2** | Low | `Pending notice publication` ⏳ | **BLOCKED** 🛑 |
+| **R12** | **Inaccurate or outdated professional contact information resulting in inappropriate outreach** | 3 | 3 | **9 (Med)** | CAM manual verification before outreach; source and collection date metadata; periodic data refreshes; manual record correction in UI; suppression handling. | 1 | 2 | **2** | Low | `Implemented & verified` ✅ | **PERMITTED** ✅ |
+| **R13** | **Article 14 privacy notice not provided within applicable statutory timeframe** | 3 | 3 | **9 (Med)** | Source and collection date logged on all indirect records; Article 14 notice published on public website and linked in initial email footers (provided at earliest direct communication). | 1 | 2 | **2** | Low | `Pending notice publication` ⏳ | **BLOCKED** 🛑 |
 
 ---
 
@@ -296,8 +296,8 @@ $$\text{Risk Score} = \text{Likelihood} \times \text{Severity}$$
 
 Following the application of the technical controls (F246/F247 filters, database triggers, RLS, suppressions) and organizational controls (human review, statutory disclosures, role governance):
 
-* **Implemented Controls:** All risks related to core data ingestion, data minimisation, manual entry protection, internal access control, and suppression enforcement are reduced to **Low Residual Risk (Score 2–4)**.
-* **Pending Governance & Pre-Live Controls:** Risks related to international Workspace access (R9), LLM integration (R7, R8), and Article 14 transparency (R11) remain at **Medium Residual Risk (Score 6)** pending formal execution and deployment before live outreach.
+* **Implemented Controls:** All risks related to core data ingestion, data minimisation, manual entry protection, internal access control, suppression enforcement, and MVP reply restrictions (R1, R2, R3, R4, R5, R6, R8, R10, R12) are reduced to **Low Residual Risk (Score 2–4)** with active controls verified.
+* **Pending Governance & Pre-Live Controls:** Risks related to international Workspace access (R9), LLM integration (R7), and Article 14 transparency (R11, R13) have low numerical residual scores under the assessment methodology, but remain **deployment-blocking risks** because the required legal, contractual, and operational controls have not yet been implemented or formally verified.
 
 ---
 

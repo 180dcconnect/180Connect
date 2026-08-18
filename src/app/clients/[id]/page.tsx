@@ -15,6 +15,7 @@ import { websiteHref } from "@/lib/website-validation";
 import { formatLocation, formatOutreachStatus } from "@/lib/organisation-format";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
+import { buildNoteList, type NoteRow } from "@/lib/note-history";
 import { SuppressButton } from "./suppress-button";
 import { ComposeButton } from "./compose-button";
 import { BasicInfoPanel } from "./basic-info-panel";
@@ -22,6 +23,8 @@ import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
 import { Pill, SectionCard } from "./section-card";
+import { NotesSection } from "./notes-section";
+import { AddNoteForm } from "./add-note-form";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -44,6 +47,18 @@ type OwnerRow = {
  * F069-081) are still separate open tickets; each will slot in here as its own
  * `<section aria-labelledby>`, same shape as "Record sources" and this one, to
  * keep F067 AC2's "each reachable without excessive scrolling" true as they land.
+ *
+ * F071 (#73) View Notes / F072 (#74) Add Note / F073 (#75) Edit Own Note are one
+ * such section: every `notes` row for this client, from any CAM (F071 AC1),
+ * newest first (F071 AC3). AddNoteForm posts to /api/clients/[id]/notes;
+ * NotesSection's inline edit posts to /api/clients/[id]/notes/[noteId] — see
+ * @/lib/note-history for the ordering/permission logic shared by both. F073's
+ * own "blocked by" question (whether edits should preserve history) is settled
+ * by its AC3 ("updates the note in place rather than creating a duplicate"):
+ * no version history, `updated_at` is the only "this changed" signal, same
+ * mechanism F071's `edited` flag already used. Neither the add nor the edit
+ * route writes to `audit_log` — see either route's header comment for why a
+ * plain author-owned write doesn't follow docs/audit-log-pattern.md.
  *
  * Started as F251 AC1/AC2's minimal client screen (name + suppression state only)
  * — see src/app/clients/page.tsx for that history. Extended here, not replaced.
@@ -156,6 +171,18 @@ export default async function ClientDetailPage({
     await reportError(ownerError, { operation: "clients.detail_owner", organisationId: id });
   }
 
+  // F071/F072/F073: every note against this client, whoever wrote it (F071
+  // AC1). RLS (notes_select_active) shares read across every active role, so
+  // this needs no author filter — same reasoning as the sources query above.
+  const { data: noteRows, error: notesError } = await supabase
+    .from("notes")
+    .select("id, content, created_at, updated_at, author_id, author:users!notes_author_id_fkey(full_name)")
+    .eq("organisation_id", id);
+
+  if (notesError) {
+    await reportError(notesError, { operation: "clients.detail_notes", organisationId: id });
+  }
+
   const canEdit = hasPermission(authorization.actor.role, "client:edit");
   const canSuppress = canEdit;
   const ownerId = ownerRow?.owner_id ?? null;
@@ -176,6 +203,11 @@ export default async function ClientDetailPage({
     }
     team = teamData ?? [];
   }
+
+  const noteList = buildNoteList((noteRows ?? []) as unknown as NoteRow[], {
+    id: authorization.actor.id,
+    role: authorization.actor.role,
+  });
 
   const statusLabel = formatOutreachStatus(client.outreach_status);
   const suppressed = latest?.status === "active";
@@ -383,6 +415,21 @@ export default async function ClientDetailPage({
                     ))}
                   </ul>
                 )}
+              </SectionCard>
+            </Rise>
+
+            <Rise>
+              <SectionCard
+                headingId="notes-heading"
+                title="Notes"
+                hint="Left by any team member — relationship history everyone can see."
+              >
+                <NotesSection
+                  notes={noteList}
+                  error={Boolean(notesError)}
+                  organisationId={client.id}
+                />
+                {canEdit && <AddNoteForm organisationId={client.id} />}
               </SectionCard>
             </Rise>
           </Group>

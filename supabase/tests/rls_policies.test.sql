@@ -64,6 +64,28 @@ begin
 end;
 $$;
 
+-- The same guard one level down, for a suite that tests columns added to a table
+-- another migration created. tables_exist would pass on F036's table alone and the
+-- F037 suite would then fail with "column does not exist" instead of skipping.
+create or replace function tests.columns_exist(p_table text, variadic p_columns text[])
+returns boolean language plpgsql stable as $$
+declare c text;
+begin
+  if to_regclass(format('public.%I', p_table)) is null then
+    return false;
+  end if;
+  foreach c in array p_columns loop
+    if not exists (
+      select 1 from information_schema.columns
+       where table_schema = 'public' and table_name = p_table and column_name = c
+    ) then
+      return false;
+    end if;
+  end loop;
+  return true;
+end;
+$$;
+
 -- Run a statement as a user and report the SQLSTATE it raised, or null if it
 -- succeeded. Used for the misuse attempts, which must raise 42501.
 create or replace function tests.sqlstate_of(p_user_id uuid, p_sql text)
@@ -2802,6 +2824,838 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------------------
+-- manual client entry (F036)
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_manual_entries()
+returns setof text language plpgsql as $$
+declare
+  v_admin  uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b  uuid := '00000000-0000-4000-a000-000000000003';
+  v_viewer uuid := '00000000-0000-4000-a000-000000000005';
+  v_entry uuid;
+  v_approval_entry uuid;
+  v_duplicate_entry uuid;
+  v_company_entry uuid;
+  v_admin_entry uuid;
+  v_admin_org uuid;
+  v_created_org uuid;
+  v_linked_org uuid;
+  v_count bigint;
+begin
+  if not tests.tables_exist('manual_entry_records', 'users', 'audit_log') then
+    return next skip(21, 'F036 manual entry migration not yet applied');
+    return;
+  end if;
+  perform tests.seed();
+
+  return next is(
+    tests.sqlstate_of(v_viewer, $query$
+      select public.save_manual_entry(
+        null, 'No', null, null, null, null, null, null,
+        null, null, null, null, null, false
+      )
+    $query$),
+    '42501', 'viewer cannot save a manual-entry draft');
+
+  perform tests.login_as(v_cam_a);
+  select public.save_manual_entry(
+    null, 'Draft Charity', null, null, null, null, null, 'GB',
+    null, null, null, null, null, false
+  ) into v_entry;
+  select count(*) into v_count from public.manual_entry_records where id = v_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'CAM can save and read their own incomplete draft');
+
+  perform tests.login_as(v_cam_a);
+  perform public.save_manual_entry(
+    v_entry, 'Draft Charity Renamed', null, null, null, null, null, 'GB',
+    null, null, null, null, null, false
+  );
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.manual_entry_records
+   where id = v_entry and legal_name = 'Draft Charity Renamed' and review_status = 'draft';
+  return next is(v_count, 1::bigint, 'the creating CAM can resume and update their draft');
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.manual_entry_records where id = v_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'another CAM cannot read the submission');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.manual_entry_records where id = v_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'admin can review every manual entry');
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format($query$
+      select public.save_manual_entry(
+        %L, 'Incomplete', null, null, null, null, null, 'GB',
+        null, null, null, null, null, true
+      )
+    $query$, v_entry)),
+    '22023', 'an incomplete draft cannot be submitted');
+
+  perform tests.login_as(v_cam_a);
+  perform public.save_manual_entry(
+    v_entry, 'Manual Charity', 'Improves health outcomes in South Yorkshire.', 'charity',
+    '1 Example Street', 'Sheffield', 'S1 2AB', 'GB',
+    'https://manual.example.org', 'bad-email', 'Charity Commission', 'F036-REJECT',
+    'Not available from an API source', true
+  );
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.manual_entry_records
+   where id = v_entry and review_status = 'pending';
+  return next is(v_count, 1::bigint, 'a complete CAM draft can be submitted for admin review');
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format('update public.manual_entry_records set review_status = ''approved'' where id = %L', v_entry)),
+    '42501', 'CAM cannot approve their own submission directly');
+
+  perform tests.login_as(v_admin);
+  perform public.reject_manual_entry(v_entry, 'Does not meet the agreed criteria');
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.audit_log where target_id = v_entry and action = 'manual_entry_rejected';
+  return next is(v_count, 1::bigint, 'admin rejection and its audit record are written together');
+
+  perform tests.login_as(v_cam_a);
+  select public.save_manual_entry(
+    null, 'Unique F036 Charity', 'Provides international community services.', 'charity',
+    '10 Rue Exemple', 'Paris', '75001', 'FR', 'https://example.org', 'hello@example.org',
+    'International Registry', 'F036-001', 'Not available from an API source', true
+  ) into v_approval_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.approve_manual_entry(%L, false, ''create_new'', null, null)',
+      v_approval_entry
+    )),
+    '42501', 'CAM cannot call the manual approval RPC');
+
+  perform tests.login_as(v_admin);
+  select public.approve_manual_entry(
+    v_approval_entry, false, 'create_new', null, 'Meets the target criteria'
+  ) into v_created_org;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next ok(v_created_org is not null, 'admin can approve a distinct manual entry');
+
+  select count(*) into v_count
+    from public.organisations
+   where id = v_created_org and entry_method = 'manual' and country_code = 'FR'
+     and organisation_type = 'charity' and address_line_1 = '10 Rue Exemple'
+     and city = 'Paris' and postcode = '75001';
+  return next is(v_count, 1::bigint, 'approval creates the standard active manual organisation');
+
+  select count(*) into v_count
+    from public.enrichment_results
+   where organisation_id = v_created_org
+     and mission_statement = 'Provides international community services.';
+  return next is(v_count, 1::bigint, 'approval copies the required mission into the active profile');
+
+  select count(*) into v_count
+    from public.audit_log
+   where target_id = v_created_org and action = 'manual_entry_approved';
+  return next is(v_count, 1::bigint, 'manual approval and its audit record are written together');
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count
+    from public.get_organisation_sources_with_actor(v_created_org)
+   where source = 'manual' and source_actor_user_id = v_cam_a;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'manual source identifies the creating CAM to active users');
+
+  perform tests.login_as(v_cam_b);
+  select public.save_manual_entry(
+    null, 'Unique F036 Charity Limited', 'Provides related community services.', 'charity',
+    '20 Example Road', 'Sheffield', 'S2 3CD', 'GB', 'https://duplicate.example.org',
+    'duplicate@example.org', 'Charity Commission', 'F036-002',
+    'Submitted independently for duplicate review', true
+  ) into v_duplicate_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.approve_manual_entry(%L, false, ''create_new'', %L, null)',
+      v_duplicate_entry, v_created_org
+    )),
+    '22023', 'a likely duplicate cannot become a second client without a human explanation');
+
+  perform tests.login_as(v_admin);
+  select public.approve_manual_entry(
+    v_duplicate_entry, false, 'link_existing', v_created_org,
+    'Same organisation despite the formatting difference'
+  ) into v_linked_org;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_linked_org, v_created_org, 'confirmed duplicate links to the existing active client');
+
+  perform tests.login_as(v_cam_a);
+  select public.save_manual_entry(
+    null, 'Unconfirmed Social Company', 'Develops socially focused services.', 'company',
+    '30 Example Lane', 'Sheffield', 'S3 4EF', 'GB', 'https://social.example.org',
+    'social@example.org', 'Companies House', 'F036-COMPANY',
+    'May be a socially focused organisation', true
+  ) into v_company_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.approve_manual_entry(%L, true, null, null, null)',
+      v_company_entry
+    )),
+    '22023', 'a null duplicate decision cannot bypass the approval decision');
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.approve_manual_entry(%L, null, ''create_new'', null, null)',
+      v_company_entry
+    )),
+    '22023', 'a null eligibility confirmation cannot bypass F047');
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.approve_manual_entry(%L, false, ''create_new'', null, null)',
+      v_company_entry
+    )),
+    '22023', 'ambiguous company cannot bypass the F047 human eligibility decision');
+
+  perform tests.login_as(v_admin);
+  select public.save_manual_entry(
+    null, 'Admin Entered Charity', 'Supports people through direct services.', 'charity',
+    '40 Admin Street', 'Sheffield', 'S4 5GH', 'GB', 'https://admin.example.org',
+    'admin@example.org', 'Charity Commission', 'F036-ADMIN',
+    'Added directly by an administrator', true
+  ) into v_admin_entry;
+  select public.approve_manual_entry(
+    v_admin_entry, false, 'create_new', null, 'Submitted and self-approved by admin'
+  ) into v_admin_org;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.manual_entry_records
+   where id = v_admin_entry and review_status = 'approved'
+     and reviewed_by_user_id = v_admin and converted_to_organisation_id = v_admin_org;
+  return next is(v_count, 1::bigint, 'an admin can activate their own submission without another admin');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- F037 Manual URL Import: provenance columns and their RPCs.
+--
+-- The import writes through create_url_import_draft, so the questions here are the
+-- ones the flow depends on being true: an import can only ever produce a draft, only
+-- its own submitter can touch it, the provenance list can be narrowed but never
+-- widened, and every one of those writes leaves an audit row.
+-- ---------------------------------------------------------------------------
+create or replace function tests.suite_url_import()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b  uuid := '00000000-0000-4000-a000-000000000003';
+  v_viewer uuid := '00000000-0000-4000-a000-000000000005';
+  v_entry uuid;
+  v_typed_entry uuid;
+  v_submitted_entry uuid;
+  v_paths jsonb;
+  v_count bigint;
+begin
+  if not tests.columns_exist('manual_entry_records', 'source_url', 'imported_field_paths') then
+    return next skip(18, 'F037 URL import migration not yet applied');
+    return;
+  end if;
+  perform tests.seed();
+
+  return next is(
+    tests.sqlstate_of(v_viewer, $query$
+      select public.create_url_import_draft(
+        'https://example.org/', null, '["legal_name"]'::jsonb, '[]'::jsonb,
+        'Example Trust', null, null, null, null, null, 'GB', null, null, null, null
+      )
+    $query$),
+    '42501', 'a viewer cannot create a draft from a URL import');
+
+  perform tests.login_as(v_cam_a);
+  select public.create_url_import_draft(
+    'https://example.org/about',
+    null,
+    '["legal_name", "postcode", "country_code"]'::jsonb,
+    '["The company number on this website could not be confirmed."]'::jsonb,
+    'Example Trust', 'We do good things.', 'charity', '1 High Street', 'Sheffield',
+    'S1 1AA', 'GB', 'https://example.org', 'info@example.org',
+    'Charity Commission for England and Wales', '1101126'
+  ) into v_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  select count(*) into v_count from public.manual_entry_records
+   where id = v_entry and review_status = 'draft';
+  return next is(v_count, 1::bigint, 'an import produces a draft, never a submission');
+
+  select count(*) into v_count from public.manual_entry_records
+   where id = v_entry and source_url = 'https://example.org/about';
+  return next is(v_count, 1::bigint, 'the source URL is retained with the imported record');
+
+  select imported_field_paths into v_paths from public.manual_entry_records where id = v_entry;
+  return next is(
+    v_paths, '["legal_name", "postcode", "country_code"]'::jsonb,
+    'the imported fields are recorded so the CAM can tell them apart');
+
+  select count(*) into v_count from public.manual_entry_records
+   where id = v_entry and jsonb_array_length(import_notes) = 1;
+  return next is(v_count, 1::bigint, 'what the import could not confirm is kept with the draft');
+
+  select count(*) into v_count from public.audit_log
+   where target_id = v_entry and action = 'url_import_drafted';
+  return next is(v_count, 1::bigint, 'creating a draft from a URL is audited');
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, $query$
+      select public.create_url_import_draft(
+        '  ', null, '[]'::jsonb, '[]'::jsonb,
+        'No Origin', null, null, null, null, null, 'GB', null, null, null, null
+      )
+    $query$),
+    '22023', 'an imported draft cannot be created without the URL it came from');
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.manual_entry_records where id = v_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'another CAM cannot read the importing CAM''s draft');
+
+  -- The CAM corrected the name, so it is no longer the website's value.
+  perform tests.login_as(v_cam_a);
+  perform public.set_url_import_provenance(v_entry, '["postcode", "country_code"]'::jsonb);
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  select imported_field_paths into v_paths from public.manual_entry_records where id = v_entry;
+  return next is(
+    v_paths, '["postcode", "country_code"]'::jsonb,
+    'a field the CAM edits stops being labelled as imported');
+
+  -- A forged list must not be able to blame the website for the CAM's own typing.
+  perform tests.login_as(v_cam_a);
+  perform public.set_url_import_provenance(
+    v_entry, '["postcode", "country_code", "mission_statement", "contact_email"]'::jsonb);
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  select imported_field_paths into v_paths from public.manual_entry_records where id = v_entry;
+  return next is(
+    v_paths, '["postcode", "country_code"]'::jsonb,
+    'provenance can only ever be narrowed, never extended');
+
+  return next is(
+    tests.sqlstate_of(v_cam_b, format(
+      'select public.set_url_import_provenance(%L, ''[]''::jsonb)', v_entry)),
+    '42501', 'another CAM cannot rewrite the provenance of a draft that is not theirs');
+
+  perform tests.login_as(v_cam_a);
+  select public.save_manual_entry(
+    null, 'Typed By Hand', null, null, null, null, null, 'GB',
+    null, null, null, null, null, false
+  ) into v_typed_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.set_url_import_provenance(%L, ''["legal_name"]''::jsonb)', v_typed_entry)),
+    '22023', 'a hand-typed entry cannot be given import provenance');
+
+  return next throws_ok(
+    format(
+      'insert into public.manual_entry_records (submitted_by_user_id, legal_name, imported_field_paths) '
+      || 'values (%L, ''Orphan'', ''["legal_name"]''::jsonb)', v_cam_a),
+    '23514',
+    null,
+    'fields cannot be marked as imported without a URL to attribute them to'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_b, format('select public.discard_manual_entry_draft(%L)', v_entry)),
+    '42501', 'another CAM cannot discard a draft that is not theirs');
+
+  perform tests.login_as(v_cam_a);
+  perform public.discard_manual_entry_draft(v_entry);
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.manual_entry_records where id = v_entry;
+  return next is(v_count, 0::bigint, 'the importing CAM can reject and discard the import');
+
+  select count(*) into v_count from public.audit_log
+   where target_id = v_entry and action = 'manual_entry_draft_discarded';
+  return next is(v_count, 1::bigint, 'discarding an import is audited before the row goes');
+
+  perform tests.login_as(v_cam_a);
+  select public.save_manual_entry(
+    null, 'Submitted Entry', 'A mission.', 'charity', '1 High Street', 'Sheffield',
+    'S1 1AA', 'GB', 'https://example.org', 'info@example.org',
+    'Charity Commission for England and Wales', '1101126', 'Not found through any API.', true
+  ) into v_submitted_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.discard_manual_entry_draft(%L)', v_submitted_entry)),
+    '42501', 'a submitted entry is part of the audit trail and cannot be discarded');
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.get_organisation_import_origin(
+    '00000000-0000-4000-b000-000000000001'::uuid);
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(
+    v_count, 0::bigint,
+    'an organisation nobody imported reports no import origin');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- F246: data handling rules — RLS, the two write RPCs, and the audit trail
+-- ---------------------------------------------------------------------------
+-- These rules decide what personal data the platform is allowed to store, so the
+-- interesting claims are all about who may change them. The node tests in
+-- src/lib/ingestion cover the filtering itself, but they run through a
+-- service_role client, which bypasses RLS — they cannot prove any of this.
+
+create or replace function tests.suite_data_handling_rules()
+returns setof text language plpgsql as $$
+declare
+  v_admin        uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam          uuid := '00000000-0000-4000-a000-000000000002';
+  v_viewer       uuid := '00000000-0000-4000-a000-000000000005';
+  v_dead_admin   uuid := '00000000-0000-4000-a000-000000000006';
+  v_backdated    timestamptz := timestamptz '2000-01-01';
+  v_rule_id      uuid;
+  v_count        bigint;
+  v_version_before integer;
+  v_version_after  integer;
+  v_audit_before bigint;
+begin
+  if not tests.tables_exist('data_handling_rules', 'data_handling_rule_versions', 'audit_log') then
+    return next skip(1, 'step 22.7 create_data_handling_rules not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- A deactivated *admin*, which the shared fixture does not have. Without one,
+  -- the is_active_user() branch of both RPCs is never exercised: the deactivated
+  -- CAM fails the is_admin() check first and the test would pass for the wrong
+  -- reason.
+  insert into auth.users (id, instance_id, aud, role, email)
+  values (v_dead_admin, '00000000-0000-0000-0000-000000000000',
+          'authenticated', 'authenticated', 'ex-admin@180dc.org')
+  on conflict (id) do nothing;
+  insert into public.users (id, email, full_name, role, is_active, created_at, updated_at)
+  values (v_dead_admin, 'ex-admin@180dc.org', 'Deactivated Admin', 'admin', false, v_backdated, v_backdated)
+  on conflict (id) do update
+    set role = excluded.role, is_active = excluded.is_active;
+
+  -- -- Reads -----------------------------------------------------------------
+  -- The rules name the fields the platform refuses to hold. That list is an
+  -- admin concern; a CAM has no reason to see it and no way to act on it.
+
+  perform tests.login_as(v_cam);
+  select count(*) into v_count from public.data_handling_rules;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'CAM cannot read the data handling rules');
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.data_handling_rules;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'viewer cannot read the data handling rules');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.data_handling_rules;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next ok(v_count > 0, 'admin can read the data handling rules');
+
+  perform tests.login_as(v_cam);
+  select count(*) into v_count from public.data_handling_rule_versions;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'CAM cannot read the rule version singleton');
+
+  -- -- Direct writes are closed off entirely -----------------------------------
+  -- There is no INSERT/UPDATE/DELETE policy for authenticated on either table, so
+  -- even an admin has to go through the RPCs. That is what keeps the audit write
+  -- and the version bump from being optional.
+
+  return next ok(
+    not has_table_privilege('authenticated', 'public.data_handling_rules', 'INSERT'),
+    'authenticated holds no INSERT privilege on data_handling_rules'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.data_handling_rules', 'DELETE'),
+    'authenticated holds no DELETE privilege on data_handling_rules'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.data_handling_rule_versions', 'UPDATE'),
+    'authenticated cannot bump the rule version directly'
+  );
+
+  return next isnt(
+    tests.sqlstate_of(v_admin,
+      'insert into public.data_handling_rules (rule_version, field_path, action, reason) ' ||
+      'values (99, ''smuggled'', ''deny'', ''bypassing the RPC'')'),
+    null,
+    'even an admin cannot insert a rule directly, bypassing the audit trail'
+  );
+
+  -- -- create_data_handling_rule ----------------------------------------------
+
+  return next is(
+    tests.sqlstate_of(v_cam,
+      'select public.create_data_handling_rule(''companies_house'', ''sneaky[*].path'', ''deny'', ''CAM attempt'')'),
+    'P0001',
+    'CAM cannot create a data handling rule'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_dead_admin,
+      'select public.create_data_handling_rule(''companies_house'', ''sneaky[*].path'', ''deny'', ''deactivated attempt'')'),
+    'P0001',
+    'a deactivated admin cannot create a data handling rule'
+  );
+
+  -- State, not just SQLSTATE: a raise that happened after the insert would still
+  -- report P0001 while leaving the row behind.
+  select count(*) into v_count
+    from public.data_handling_rules where field_path = 'sneaky[*].path';
+  return next is(v_count, 0::bigint,
+    'no rule survives the blocked create attempts');
+
+  -- A reason is mandatory — the rules are a compliance record, and one without a
+  -- stated justification is not reviewable by anyone later.
+  return next is(
+    tests.sqlstate_of(v_admin,
+      'select public.create_data_handling_rule(''companies_house'', ''some[*].path'', ''deny'', '''')'),
+    'P0001',
+    'a rule cannot be created without a reason'
+  );
+
+  select current_version into v_version_before from public.data_handling_rule_versions where id = true;
+  select count(*) into v_audit_before from public.audit_log where action = 'data_handling_rule_created';
+
+  perform tests.login_as(v_admin);
+  select public.create_data_handling_rule(
+    'companies_house', 'pgtap[*].secret', 'deny', 'pgTAP fixture rule'
+  ) into v_rule_id;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next ok(v_rule_id is not null, 'admin can create a data handling rule');
+
+  select current_version into v_version_after from public.data_handling_rule_versions where id = true;
+  return next is(v_version_after, v_version_before + 1,
+    'creating a rule bumps the global rule version');
+
+  -- The version stamped on the rule is the one ingestion will report against the
+  -- records it filters, so it has to be the post-bump number.
+  return next is(
+    (select rule_version from public.data_handling_rules where id = v_rule_id),
+    v_version_after,
+    'the new rule carries the version it was created at');
+
+  return next is(
+    (select created_by from public.data_handling_rules where id = v_rule_id),
+    v_admin,
+    'the rule records the admin who created it');
+
+  return next is(
+    (select count(*) from public.audit_log
+      where action = 'data_handling_rule_created' and target_id = v_rule_id),
+    1::bigint,
+    'creating a rule writes exactly one audit_log entry');
+
+  return next is(
+    (select actor_user_id from public.audit_log
+      where action = 'data_handling_rule_created' and target_id = v_rule_id),
+    v_admin,
+    'the audit entry names the acting admin');
+
+  -- The detail payload is what a reviewer actually reads months later.
+  return next is(
+    (select detail->>'field_path' from public.audit_log
+      where action = 'data_handling_rule_created' and target_id = v_rule_id),
+    'pgtap[*].secret',
+    'the audit entry records which field the rule governs');
+  return next is(
+    (select detail->>'reason' from public.audit_log
+      where action = 'data_handling_rule_created' and target_id = v_rule_id),
+    'pgTAP fixture rule',
+    'the audit entry records the stated reason');
+
+  -- One active rule per (source, field_path). Without this an admin could stack
+  -- a deny and an allow on the same field and the outcome would depend on row order.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.create_data_handling_rule(''companies_house'', ''pgtap[*].secret'', ''allow'', ''duplicate'')')),
+    '23505',
+    'a second active rule for the same source and field_path is rejected'
+  );
+
+  -- -- set_data_handling_rule_active -------------------------------------------
+
+  return next is(
+    tests.sqlstate_of(v_cam, format(
+      'select public.set_data_handling_rule_active(%L, false, ''CAM attempt'')', v_rule_id)),
+    'P0001',
+    'CAM cannot deactivate a data handling rule'
+  );
+
+  return next is(
+    (select is_active from public.data_handling_rules where id = v_rule_id),
+    true,
+    'the rule is genuinely still active after the blocked attempt');
+
+  select current_version into v_version_before from public.data_handling_rule_versions where id = true;
+
+  perform tests.login_as(v_admin);
+  perform public.set_data_handling_rule_active(v_rule_id, false, 'no longer required');
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next is(
+    (select is_active from public.data_handling_rules where id = v_rule_id),
+    false,
+    'admin can deactivate a rule');
+
+  select current_version into v_version_after from public.data_handling_rule_versions where id = true;
+  return next is(v_version_after, v_version_before + 1,
+    'deactivating a rule bumps the global rule version');
+
+  return next is(
+    (select count(*) from public.audit_log
+      where action = 'data_handling_rule_deactivated' and target_id = v_rule_id),
+    1::bigint,
+    'deactivating a rule writes an audit_log entry');
+
+  return next is(
+    (select detail->>'reason' from public.audit_log
+      where action = 'data_handling_rule_deactivated' and target_id = v_rule_id),
+    'no longer required',
+    'the deactivation audit entry records the reason given');
+
+  -- A no-op must stay a no-op. Bumping the version on an unchanged toggle would
+  -- invalidate every record stamped with the old one and trigger a pointless
+  -- re-ingestion of the entire table.
+  select current_version into v_version_before from public.data_handling_rule_versions where id = true;
+
+  perform tests.login_as(v_admin);
+  perform public.set_data_handling_rule_active(v_rule_id, false, 'again');
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  select current_version into v_version_after from public.data_handling_rule_versions where id = true;
+  return next is(v_version_after, v_version_before,
+    'toggling a rule to the state it already holds does not bump the version');
+
+  return next is(
+    (select count(*) from public.audit_log
+      where action = 'data_handling_rule_deactivated' and target_id = v_rule_id),
+    1::bigint,
+    'a no-op toggle writes no second audit entry');
+
+  -- Deactivating frees the (source, field_path) slot, so the policy can be
+  -- restated with a different action without deleting the history of the old one.
+  perform tests.login_as(v_admin);
+  select public.create_data_handling_rule(
+    'companies_house', 'pgtap[*].secret', 'allow', 'restated after review'
+  ) into v_rule_id;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next ok(v_rule_id is not null,
+    'the same field_path can be ruled on again once the old rule is inactive');
+
+  -- -- Read RPCs ---------------------------------------------------------------
+  -- These aggregate over raw_source_records, so they are SECURITY DEFINER and
+  -- carry their own admin check — without it they would be a way for any signed-in
+  -- user to read which fields the platform strips and how often.
+
+  return next is(
+    tests.sqlstate_of(v_cam, 'select * from public.data_handling_filter_summary()'),
+    'P0001',
+    'CAM cannot read the filter summary'
+  );
+  return next is(
+    tests.sqlstate_of(v_viewer, 'select * from public.data_handling_coverage()'),
+    'P0001',
+    'viewer cannot read data handling coverage'
+  );
+  return next is(
+    tests.sqlstate_of(v_dead_admin, 'select * from public.data_handling_coverage()'),
+    'P0001',
+    'a deactivated admin cannot read data handling coverage'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, 'select * from public.data_handling_coverage()'),
+    null,
+    'admin can read data handling coverage'
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- F247: personal data exclusion — role email allow-list and app.is_personal_email
+-- ---------------------------------------------------------------------------
+-- rule_kind and the two redact_* kinds live on data_handling_rules itself, so
+-- they're covered by suite_data_handling_rules() above via the same RPC. What's
+-- new here is the second table F247 adds — PERSONAL_EMAIL_ROLE_PARTS — and the
+-- SQL half of the email detector, app.is_personal_email, which the node tests in
+-- personal-data.test.ts cannot reach: they run through a service_role client,
+-- which bypasses RLS.
+
+create or replace function tests.suite_personal_data_exclusion()
+returns setof text language plpgsql as $$
+declare
+  v_admin      uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam        uuid := '00000000-0000-4000-a000-000000000002';
+  v_viewer     uuid := '00000000-0000-4000-a000-000000000005';
+  v_dead_admin uuid := '00000000-0000-4000-a000-000000000006';
+  v_backdated  timestamptz := timestamptz '2000-01-01';
+  v_count      bigint;
+begin
+  if not tests.tables_exist('personal_email_role_parts', 'data_handling_rules') then
+    return next skip(1, 'F247 add_personal_data_exclusion not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Same deactivated-admin fixture suite_data_handling_rules() creates. Written
+  -- the same idempotent way so either suite can run alone.
+  insert into auth.users (id, instance_id, aud, role, email)
+  values (v_dead_admin, '00000000-0000-0000-0000-000000000000',
+          'authenticated', 'authenticated', 'ex-admin@180dc.org')
+  on conflict (id) do nothing;
+  insert into public.users (id, email, full_name, role, is_active, created_at, updated_at)
+  values (v_dead_admin, 'ex-admin@180dc.org', 'Deactivated Admin', 'admin', false, v_backdated, v_backdated)
+  on conflict (id) do update
+    set role = excluded.role, is_active = excluded.is_active;
+
+  -- -- Reads -----------------------------------------------------------------
+  -- The role list decides whose address the ingestion runner keeps, so it
+  -- carries the same read shape as data_handling_rules: admin only.
+
+  perform tests.login_as(v_cam);
+  select count(*) into v_count from public.personal_email_role_parts;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'CAM cannot read personal_email_role_parts');
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.personal_email_role_parts;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'viewer cannot read personal_email_role_parts');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.personal_email_role_parts;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next ok(v_count > 0, 'admin can read personal_email_role_parts');
+
+  -- -- Direct writes are closed off -------------------------------------------
+  -- No INSERT/UPDATE policy for authenticated; every write goes through
+  -- set_personal_email_role_part below, so the audit entry is never optional.
+
+  return next ok(
+    not has_table_privilege('authenticated', 'public.personal_email_role_parts', 'INSERT'),
+    'authenticated holds no INSERT privilege on personal_email_role_parts'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.personal_email_role_parts', 'UPDATE'),
+    'authenticated holds no UPDATE privilege on personal_email_role_parts'
+  );
+
+  -- -- Both RPCs refuse a CAM and a deactivated admin ---------------------------
+
+  return next is(
+    tests.sqlstate_of(v_cam,
+      'select public.create_data_handling_rule(null, ''*'', ''deny'', ''CAM attempt'', ''redact_personal_email'')'),
+    'P0001',
+    'CAM cannot create a redaction rule'
+  );
+  return next is(
+    tests.sqlstate_of(v_dead_admin,
+      'select public.create_data_handling_rule(null, ''*'', ''deny'', ''deactivated attempt'', ''redact_personal_email'')'),
+    'P0001',
+    'a deactivated admin cannot create a redaction rule'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam,
+      'select public.set_personal_email_role_part(''pgtap-role'', true, ''CAM attempt'')'),
+    'P0001',
+    'CAM cannot change the role email list'
+  );
+  return next is(
+    tests.sqlstate_of(v_dead_admin,
+      'select public.set_personal_email_role_part(''pgtap-role'', true, ''deactivated attempt'')'),
+    'P0001',
+    'a deactivated admin cannot change the role email list'
+  );
+
+  select count(*) into v_count
+    from public.personal_email_role_parts where local_part = 'pgtap-role';
+  return next is(v_count, 0::bigint,
+    'no role part survives the blocked set attempts');
+
+  -- Admin path: add, audit, no-op safety.
+  perform tests.login_as(v_admin);
+  perform public.set_personal_email_role_part('pgtap-role', true, 'pgTAP fixture role');
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next is(
+    (select is_active from public.personal_email_role_parts where local_part = 'pgtap-role'),
+    true,
+    'admin can add a role email local part');
+
+  return next is(
+    (select count(*) from public.audit_log
+      where action = 'personal_email_role_part_added' and detail->>'local_part' = 'pgtap-role'),
+    1::bigint,
+    'adding a role part writes an audit_log entry');
+
+  -- -- app.is_personal_email: role vs personal pairs ---------------------------
+  -- Same word-splitting rule personal-data.test.ts asserts in TypeScript; this
+  -- proves the SQL half agrees, run as admin so the read against
+  -- personal_email_role_parts the function depends on is not itself the thing
+  -- under test.
+
+  perform tests.login_as(v_admin);
+
+  return next ok(
+    not app.is_personal_email('info@example.org'),
+    'a bare role local part is not personal'
+  );
+  return next ok(
+    not app.is_personal_email('fundraising.team@example.org'),
+    'a role local part wearing a suffix is not personal'
+  );
+  return next ok(
+    not app.is_personal_email('no-reply@example.org'),
+    '''no-reply'' splits into ''no'' and ''reply'', and ''reply'' is a role part'
+  );
+  return next ok(
+    app.is_personal_email('joanne.smith@example.org'),
+    'a two-word personal name is personal'
+  );
+  return next ok(
+    app.is_personal_email('jsmith@example.org'),
+    'an unlisted local part is treated as personal, not role — the allow-list direction'
+  );
+  return next ok(
+    not app.is_personal_email('not-an-address'),
+    'a string with no @ is not something this function has an opinion about'
+  );
+  -- -- manual_entry_records trigger: personal email rejected (AC3) -------------
+  if tests.tables_exist('manual_entry_records') then
+    return next is(
+      tests.sqlstate_of(v_cam,
+        'select public.save_manual_entry(null, ''Personal Email Test'', null, null, null, null, null, ''GB'', null, ''joanne.smith@example.org'', null, null, null, false)'),
+      '22023',
+      'saving a manual entry with a personal email is rejected by trigger'
+    );
+
+    return next is(
+      tests.sqlstate_of(v_cam,
+        'select public.save_manual_entry(null, ''Role Email Test'', null, null, null, null, null, ''GB'', null, ''info@example.org'', null, null, null, false)'),
+      null,
+      'saving a manual entry with a role email is accepted'
+    );
+  end if;
+
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+end;
+$$;
+
 select * from tests.suite_core();
 select * from tests.suite_viewer();
 select * from tests.suite_users();
@@ -2823,8 +3677,12 @@ select * from tests.suite_outreach_status();
 select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
 select * from tests.suite_source_tracking();
+select * from tests.suite_manual_entries();
+select * from tests.suite_url_import();
 select * from tests.suite_onboarding();
 select * from tests.suite_client_criteria();
+select * from tests.suite_data_handling_rules();
+select * from tests.suite_personal_data_exclusion();
 
 select * from finish();
 

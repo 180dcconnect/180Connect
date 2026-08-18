@@ -68,6 +68,11 @@
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | id | uuid |  |  |
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | submitted_by_user_id | uuid | USERS |  |
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | legal_name | text |  |  |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | mission_statement | text |  |  |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | organisation_type | enum |  |  |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | address_line_1 | text |  |  |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | city | text |  |  |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | postcode | text |  |  |
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | country_code | text |  |  |
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | website | text |  |  |
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | contact_email | text |  |  |
@@ -222,50 +227,56 @@
 | 04 Entities | SUPPRESSIONS | decided_at | timestamp |  | When decided; null while pending |
 | 04 Entities | SUPPRESSIONS | decision_note | text |  | Optional admin note on the decision |
 | 04 Entities | SUPPRESSIONS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | SAVED_VIEWS | id | uuid |  | Primary key |
+| 04 Entities | SAVED_VIEWS | user_id | uuid | USERS | CAM the saved view belongs to |
+| 04 Entities | SAVED_VIEWS | name | text |  | Name the CAM gave the view; unique per user |
+| 04 Entities | SAVED_VIEWS | filters | jsonb |  | Filter combination the view re-applies (q, city, status, source, owner) |
+| 04 Entities | SAVED_VIEWS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | SAVED_VIEWS | updated_at | timestamp |  | Last edit timestamp |
 | 05 - Features | SCORING_WEIGHTS | id | model_name |  | feature_name |
-| 05 - Features | SCORING_WEIGHTS | 1.0 | SCOUT |  | south_yorkshire_flag |
-| 05 - Features | SCORING_WEIGHTS | 2.0 | SCOUT |  | mission_alignment_score |
-| 05 - Features | SCORING_WEIGHTS | 3.0 | SCOUT |  | service_fit_score |
-| 05 - Features | SCORING_WEIGHTS | 4.0 | SCOUT |  | never_contacted_flag |
-| 05 - Features | SCORING_WEIGHTS | 5.0 | SCOUT |  | income_band |
-| 05 - Features | SCORING_WEIGHTS | 6.0 | SCOUT |  | income_trend |
-| 05 - Features | SCORING_WEIGHTS | 7.0 | SCOUT |  | days_since_last_contact |
-| 05 - Features | SCORING_WEIGHTS | 8.0 | SCOUT |  | financial_stability_score |
-| 05 - Features | SCORING_WEIGHTS | 9.0 | SCOUT |  | has_recent_grant_flag |
-| 05 - Features | SCORING_WEIGHTS | 10.0 | SCOUT |  | digital_maturity_score |
-| 05 - Features | SCORING_WEIGHTS | 11.0 | SCOUT |  | data_completeness_score |
-| 05 - Features | SCORING_WEIGHTS | 12.0 | SCOUT |  | grant_count |
-| 05 - Features | SCORING_WEIGHTS | 13.0 | SCOUT |  | has_partnership_history_flag |
-| 05 - Features | SCORING_WEIGHTS | 14.0 | COMPASS |  | semester_fit_score |
-| 05 - Features | SCORING_WEIGHTS | 15.0 | COMPASS |  | project_complexity_score |
-| 05 - Features | SCORING_WEIGHTS | 16.0 | COMPASS |  | repeat_engagement_score |
-| 05 - Features | SCORING_WEIGHTS | 17.0 | COMPASS |  | case_study_potential_score |
-| 05 - Features | SCORING_WEIGHTS | 18.0 | COMPASS |  | portfolio_sector_score |
+| 05 - Features | SCORING_WEIGHTS | 1 | SCOUT |  | south_yorkshire_flag |
+| 05 - Features | SCORING_WEIGHTS | 2 | SCOUT |  | mission_alignment_score |
+| 05 - Features | SCORING_WEIGHTS | 3 | SCOUT |  | service_fit_score |
+| 05 - Features | SCORING_WEIGHTS | 4 | SCOUT |  | never_contacted_flag |
+| 05 - Features | SCORING_WEIGHTS | 5 | SCOUT |  | income_band |
+| 05 - Features | SCORING_WEIGHTS | 6 | SCOUT |  | income_trend |
+| 05 - Features | SCORING_WEIGHTS | 7 | SCOUT |  | days_since_last_contact |
+| 05 - Features | SCORING_WEIGHTS | 8 | SCOUT |  | financial_stability_score |
+| 05 - Features | SCORING_WEIGHTS | 9 | SCOUT |  | has_recent_grant_flag |
+| 05 - Features | SCORING_WEIGHTS | 10 | SCOUT |  | digital_maturity_score |
+| 05 - Features | SCORING_WEIGHTS | 11 | SCOUT |  | data_completeness_score |
+| 05 - Features | SCORING_WEIGHTS | 12 | SCOUT |  | grant_count |
+| 05 - Features | SCORING_WEIGHTS | 13 | SCOUT |  | has_partnership_history_flag |
+| 05 - Features | SCORING_WEIGHTS | 14 | COMPASS |  | semester_fit_score |
+| 05 - Features | SCORING_WEIGHTS | 15 | COMPASS |  | project_complexity_score |
+| 05 - Features | SCORING_WEIGHTS | 16 | COMPASS |  | repeat_engagement_score |
+| 05 - Features | SCORING_WEIGHTS | 17 | COMPASS |  | case_study_potential_score |
+| 05 - Features | SCORING_WEIGHTS | 18 | COMPASS |  | portfolio_sector_score |
 | 05 - Features | FEATURE_DEFINITIONS | id | feature_name |  | description |
-| 05 - Features | FEATURE_DEFINITIONS | 1.0 | south_yorkshire_flag |  | Whether the organisation is based in South Yorkshire |
-| 05 - Features | FEATURE_DEFINITIONS | 2.0 | mission_alignment_score |  | How well the organisation’s mission matches 180DC services |
-| 05 - Features | FEATURE_DEFINITIONS | 3.0 | service_fit_score |  | Highest score across all 180DC service-fit categories |
-| 05 - Features | FEATURE_DEFINITIONS | 4.0 | income_band |  | Bucketed organisation income level |
-| 05 - Features | FEATURE_DEFINITIONS | 5.0 | income_trend |  | Year-over-year income direction |
-| 05 - Features | FEATURE_DEFINITIONS | 6.0 | never_contacted_flag |  | Whether the organisation has never been sent an outreach email |
-| 05 - Features | FEATURE_DEFINITIONS | 7.0 | days_since_last_contact |  | Number of days since the most recent outreach |
-| 05 - Features | FEATURE_DEFINITIONS | 8.0 | financial_stability_score |  | Composite measure of overall financial health |
-| 05 - Features | FEATURE_DEFINITIONS | 9.0 | has_recent_grant_flag |  | Whether the organisation received a grant during the previous 24 months |
-| 05 - Features | FEATURE_DEFINITIONS | 10.0 | digital_maturity_score |  | How digitally developed the organisation is |
-| 05 - Features | FEATURE_DEFINITIONS | 11.0 | data_completeness_score |  | Percentage of required organisation fields that are populated |
-| 05 - Features | FEATURE_DEFINITIONS | 12.0 | grant_count |  | Total number of grants received |
-| 05 - Features | FEATURE_DEFINITIONS | 13.0 | has_partnership_history_flag |  | Whether the organisation previously converted to a 180DC client |
-| 05 - Features | FEATURE_DEFINITIONS | 14.0 | semester_fit_score |  | How well project timing aligns with the student semester |
-| 05 - Features | FEATURE_DEFINITIONS | 15.0 | project_complexity_score |  | Whether the project has suitable complexity for a student team |
-| 05 - Features | FEATURE_DEFINITIONS | 16.0 | repeat_engagement_score |  | Strength of the organisation’s prior relationship with 180DC |
-| 05 - Features | FEATURE_DEFINITIONS | 17.0 | case_study_potential_score |  | Potential for the engagement to produce a publishable case study |
-| 05 - Features | FEATURE_DEFINITIONS | 18.0 | portfolio_sector_score |  | How underrepresented the organisation’s sector is in the current portfolio |
-| 05 - Features | FEATURE_DEFINITIONS | 19.0 | performance_score |  | How well an email performed based on its confirmed outcome |
-| 05 - Features | FEATURE_DEFINITIONS | 20.0 | used_as_example_count |  | Number of times the email has been supplied to Gemini as a few-shot example |
+| 05 - Features | FEATURE_DEFINITIONS | 1 | south_yorkshire_flag |  | Whether the organisation is based in South Yorkshire |
+| 05 - Features | FEATURE_DEFINITIONS | 2 | mission_alignment_score |  | How well the organisation’s mission matches 180DC services |
+| 05 - Features | FEATURE_DEFINITIONS | 3 | service_fit_score |  | Highest score across all 180DC service-fit categories |
+| 05 - Features | FEATURE_DEFINITIONS | 4 | income_band |  | Bucketed organisation income level |
+| 05 - Features | FEATURE_DEFINITIONS | 5 | income_trend |  | Year-over-year income direction |
+| 05 - Features | FEATURE_DEFINITIONS | 6 | never_contacted_flag |  | Whether the organisation has never been sent an outreach email |
+| 05 - Features | FEATURE_DEFINITIONS | 7 | days_since_last_contact |  | Number of days since the most recent outreach |
+| 05 - Features | FEATURE_DEFINITIONS | 8 | financial_stability_score |  | Composite measure of overall financial health |
+| 05 - Features | FEATURE_DEFINITIONS | 9 | has_recent_grant_flag |  | Whether the organisation received a grant during the previous 24 months |
+| 05 - Features | FEATURE_DEFINITIONS | 10 | digital_maturity_score |  | How digitally developed the organisation is |
+| 05 - Features | FEATURE_DEFINITIONS | 11 | data_completeness_score |  | Percentage of required organisation fields that are populated |
+| 05 - Features | FEATURE_DEFINITIONS | 12 | grant_count |  | Total number of grants received |
+| 05 - Features | FEATURE_DEFINITIONS | 13 | has_partnership_history_flag |  | Whether the organisation previously converted to a 180DC client |
+| 05 - Features | FEATURE_DEFINITIONS | 14 | semester_fit_score |  | How well project timing aligns with the student semester |
+| 05 - Features | FEATURE_DEFINITIONS | 15 | project_complexity_score |  | Whether the project has suitable complexity for a student team |
+| 05 - Features | FEATURE_DEFINITIONS | 16 | repeat_engagement_score |  | Strength of the organisation’s prior relationship with 180DC |
+| 05 - Features | FEATURE_DEFINITIONS | 17 | case_study_potential_score |  | Potential for the engagement to produce a publishable case study |
+| 05 - Features | FEATURE_DEFINITIONS | 18 | portfolio_sector_score |  | How underrepresented the organisation’s sector is in the current portfolio |
+| 05 - Features | FEATURE_DEFINITIONS | 19 | performance_score |  | How well an email performed based on its confirmed outcome |
+| 05 - Features | FEATURE_DEFINITIONS | 20 | used_as_example_count |  | Number of times the email has been supplied to Gemini as a few-shot example |
 | 05 - Features | AGENT_PROMPTS | id | agent_name |  | prompt_template |
-| 05 - Features | AGENT_PROMPTS | 1.0 | SCOUT |  |  |
-| 05 - Features | AGENT_PROMPTS | 2.0 | COMPASS |  |  |
-| 05 - Features | AGENT_PROMPTS | 3.0 | VOICE |  | You are writing a cold outreach email for 180 Degrees Consulting Sheffield, a student consultancy at the University of Sheffield working with social enterprises and non-profits. Organisation profile: {org_profile}. Service to pitch: {service}. Tone: {tone}. Here are {n} emails that successfully converted or received replies from similar organisations: {examples}. Write a new email following similar patterns. Return JSON: { subject, body, tone_used, hook_type } |
+| 05 - Features | AGENT_PROMPTS | 1 | SCOUT |  |  |
+| 05 - Features | AGENT_PROMPTS | 2 | COMPASS |  |  |
+| 05 - Features | AGENT_PROMPTS | 3 | VOICE |  | You are writing a cold outreach email for 180 Degrees Consulting Sheffield, a student consultancy at the University of Sheffield working with social enterprises and non-profits. Organisation profile: {org_profile}. Service to pitch: {service}. Tone: {tone}. Here are {n} emails that successfully converted or received replies from similar organisations: {examples}. Write a new email following similar patterns. Return JSON: { subject, body, tone_used, hook_type } |
 | 05 - Features | EMAIL_PERFORMANCE_LIBRARY | id | outreach_message_id |  | organisation_id |
 | 05 - Features | EMAIL_PERFORMANCE_LIBRARY | — | links to OUTREACH_MESSAGES |  | which org |
 | 06 - Predictions | AGENT_RUNS | id | uuid |  | Primary key |
@@ -428,3 +439,26 @@
 | 03 Raw Data | FIELD_DISCREPANCIES | resolved_at | timestamp |  | When resolved |
 | 03 Raw Data | FIELD_DISCREPANCIES | notes | text |  | Reviewer notes explaining the decision |
 | 03 Raw Data | FIELD_DISCREPANCIES | created_at | timestamp |  | Row creation timestamp |
+| 03 Raw Data | FIELD_SOURCES | id | uuid |  | Primary key |
+| 03 Raw Data | FIELD_SOURCES | organisation_id | uuid | ORGANISATIONS | Organisation this field value belongs to |
+| 03 Raw Data | FIELD_SOURCES | field_name | text |  | Which ORGANISATIONS column this value is for |
+| 03 Raw Data | FIELD_SOURCES | value | text |  | Value written for this field by this source |
+| 03 Raw Data | FIELD_SOURCES | source | text |  | Which source produced this value |
+| 03 Raw Data | FIELD_SOURCES | raw_source_record_id | uuid | RAW_SOURCE_RECORDS | The raw record this value was taken from |
+| 03 Raw Data | FIELD_SOURCES | is_current | boolean |  | Whether this is the value currently live on ORGANISATIONS for this field |
+| 03 Raw Data | FIELD_SOURCES | recorded_at | timestamp |  | When this field value was recorded |
+| 03 Raw Data | RAW_SOURCE_RECORDS | excluded_fields | jsonb |  | Field paths stripped from raw_payload by the data handling rules before the record was written |
+| 03 Raw Data | RAW_SOURCE_RECORDS | rule_version_applied | integer |  | Which version of the data handling rule set was in force when this record was written |
+| 03 Raw Data | DATA_HANDLING_RULES | id | uuid |  | Primary key |
+| 03 Raw Data | DATA_HANDLING_RULES | rule_version | integer |  | The global rule version at the time this rule was created or last toggled |
+| 03 Raw Data | DATA_HANDLING_RULES | source | enum |  | Which source the rule applies to; null applies to every source |
+| 03 Raw Data | DATA_HANDLING_RULES | field_path | text |  | Dot-separated path into the raw_payload JSON that this rule governs |
+| 03 Raw Data | DATA_HANDLING_RULES | action | enum |  | Whether the field is stripped (deny) or explicitly permitted (allow) |
+| 03 Raw Data | DATA_HANDLING_RULES | reason | text |  | Why this rule exists, for the compliance record |
+| 03 Raw Data | DATA_HANDLING_RULES | created_by | uuid | USERS | The admin who created the rule; null when seeded by a migration |
+| 03 Raw Data | DATA_HANDLING_RULES | is_active | boolean |  | Whether the rule is currently enforced |
+| 03 Raw Data | DATA_HANDLING_RULES | created_at | timestamp |  | Row creation timestamp |
+| 03 Raw Data | DATA_HANDLING_RULES | updated_at | timestamp |  | Last updated timestamp |
+| 03 Raw Data | DATA_HANDLING_RULE_VERSIONS | id | boolean |  | Primary key, constrained to a single row |
+| 03 Raw Data | DATA_HANDLING_RULE_VERSIONS | current_version | integer |  | The version number of the rule set as it stands now |
+| 03 Raw Data | DATA_HANDLING_RULE_VERSIONS | updated_at | timestamp |  | When the version was last bumped |

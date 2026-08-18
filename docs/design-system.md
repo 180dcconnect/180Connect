@@ -174,6 +174,13 @@ white sheen behind it drops to `/8` so the panel doesn't grey out. Don't lean on
 `backdrop-blur` for this — it is a compositor feature and degrades to nothing
 where the browser declines it, which is exactly when you'd notice.
 
+**Search & filtering execution is explicit.** Typing query text or selecting/removing
+filter options in the panel stages selections locally and does not execute immediate
+queries or trigger route changes on each keystroke or click. The search executes and
+writes to the URL only when the user presses **Enter** or clicks the trailing search
+submit button (`ArrowRight`). Within the filter panel, options toggle cleanly with
+visual checkmarks before submission.
+
 ## Motion
 
 One curve for everything: `EASE = [0.2, 0.7, 0.2, 1]`. Two exceptions, both

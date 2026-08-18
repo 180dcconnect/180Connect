@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 
 /**
  * F249's visible preflight while F123's provider send path is pending. Every click
@@ -48,37 +49,41 @@ export function ComposeButton({
   if (blocked) {
     return (
       <div>
-        <button
-          className="cursor-not-allowed rounded-lg border border-black/10 px-5 py-2.5 font-bold text-foreground/40"
+        <OriginButton
+          variant="outline"
+          size="sm"
           disabled
           title="Do Not Contact — outreach is blocked for this charity"
           type="button"
         >
           Compose email
-        </button>
-        <p className="mt-2 text-sm font-bold text-red-800" role="alert">{warning}</p>
+        </OriginButton>
+        <p className="mt-2.5 text-[13px] font-bold leading-[1.6] text-red-800" role="alert">
+          {warning}
+        </p>
       </div>
     );
   }
 
   return (
     <div>
-      <button
-        className="rounded-lg border border-black/15 px-5 py-2.5 font-bold hover:bg-black/[0.03] disabled:cursor-wait disabled:opacity-60"
+      <OriginButton
+        variant="outline"
+        size="sm"
         disabled={checking}
         onClick={checkBeforeCompose}
         type="button"
       >
         {checking ? "Checking suppression…" : "Compose email"}
-      </button>
+      </OriginButton>
       {warning ? (
-        <p aria-live="assertive" className="mt-2 text-sm font-bold text-red-800" role="alert">
+        <p aria-live="assertive" className="mt-2.5 text-[13px] font-bold leading-[1.6] text-red-800" role="alert">
           {warning}
         </p>
       ) : null}
       {clicked ? (
-        <p aria-live="polite" className="mt-2 text-xs text-foreground/50">
-          Suppression check passed. Email generation is not built yet (F094, F100),
+        <p aria-live="polite" className="mt-2.5 text-[13px] leading-[1.6] text-foreground/45">
+          Suppression check passed. Email generation isn&apos;t built yet (F094, F100),
           so nothing was sent.
         </p>
       ) : null}

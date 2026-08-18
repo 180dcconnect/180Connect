@@ -1,6 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export type HandoverUser = {
   id: string;
@@ -104,18 +112,16 @@ export function OffboardPanel({ users }: { users: HandoverUser[] }) {
       <label className="block text-sm font-bold" htmlFor="from-user">
         Who is leaving
       </label>
-      <select
-        className="mt-2 w-full rounded-lg border border-black/15 bg-white px-3 py-2"
-        disabled={busy}
-        id="from-user"
-        onChange={(event) => loadPreview(event.target.value)}
-        value={fromUserId}
-      >
-        <option value="">Select a team member…</option>
-        {users.map((user) => (
-          <option key={user.id} value={user.id}>{label(user)}</option>
-        ))}
-      </select>
+      <Select disabled={busy} onValueChange={loadPreview} value={fromUserId}>
+        <SelectTrigger id="from-user" className="mt-2 w-full text-sm">
+          <SelectValue placeholder="Select a team member…" />
+        </SelectTrigger>
+        <SelectContent>
+          {users.map((user) => (
+            <SelectItem key={user.id} value={user.id}>{label(user)}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       {preview && (
         <div className="mt-6 rounded-xl bg-[#f1f2f4] p-4">
@@ -169,20 +175,18 @@ export function OffboardPanel({ users }: { users: HandoverUser[] }) {
           <label className="mt-6 block text-sm font-bold" htmlFor="to-user">
             Who takes over
           </label>
-          <select
-            className="mt-2 w-full rounded-lg border border-black/15 bg-white px-3 py-2"
-            disabled={busy}
-            id="to-user"
-            onChange={(event) => setToUserId(event.target.value)}
-            value={toUserId}
-          >
-            <option value="">Select a team member…</option>
-            {users
-              .filter((user) => user.is_active && user.id !== fromUserId)
-              .map((user) => (
-                <option key={user.id} value={user.id}>{label(user)}</option>
-              ))}
-          </select>
+          <Select disabled={busy} onValueChange={setToUserId} value={toUserId}>
+            <SelectTrigger id="to-user" className="mt-2 w-full text-sm">
+              <SelectValue placeholder="Select a team member…" />
+            </SelectTrigger>
+            <SelectContent>
+              {users
+                .filter((user) => user.is_active && user.id !== fromUserId)
+                .map((user) => (
+                  <SelectItem key={user.id} value={user.id}>{label(user)}</SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
 
           <label className="mt-6 block text-sm font-bold" htmlFor="reason">
             Reason
@@ -199,13 +203,15 @@ export function OffboardPanel({ users }: { users: HandoverUser[] }) {
             value={reason}
           />
 
-          <button
-            className="mt-6 rounded-lg bg-brand px-5 py-2.5 font-bold text-white disabled:opacity-50"
+          <OriginButton
+            className="mt-6"
             disabled={busy || !ready}
+            loading={busy}
+            size="md"
             type="submit"
           >
             {busy ? "Reassigning…" : "Reassign the work"}
-          </button>
+          </OriginButton>
         </>
       )}
 

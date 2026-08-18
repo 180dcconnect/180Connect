@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 import { lookupThreeSixtyGivingGrants, type ThreeSixtyGivingImportState } from "./actions";
 
 const initialLookupState: ThreeSixtyGivingImportState = {
@@ -51,13 +52,14 @@ export function ThreeSixtyGivingLookupForm() {
             placeholder="For example, 09668396"
           />
         </div>
-        <button
-          className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
+        <OriginButton
           disabled={pending}
+          loading={pending}
+          size="md"
           type="submit"
         >
           {pending ? "Looking up…" : "Look up grants"}
-        </button>
+        </OriginButton>
       </form>
 
       {state.kind !== "idle" && (

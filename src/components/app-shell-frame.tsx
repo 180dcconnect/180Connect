@@ -1,4 +1,4 @@
-import { Sidebar, type SidebarSection } from "./sidebar";
+import { Sidebar, type SidebarSection, type SidebarOnboarding } from "./sidebar";
 
 export function AppShellFrame({
   sections,
@@ -7,6 +7,7 @@ export function AppShellFrame({
   roleLabel,
   onLogout,
   initialCollapsed,
+  onboarding,
   children,
 }: {
   sections: SidebarSection[];
@@ -15,6 +16,7 @@ export function AppShellFrame({
   roleLabel: string;
   onLogout: () => Promise<void>;
   initialCollapsed?: boolean;
+  onboarding?: SidebarOnboarding;
   children: React.ReactNode;
 }) {
   return (
@@ -26,6 +28,7 @@ export function AppShellFrame({
         roleLabel={roleLabel}
         onLogout={onLogout}
         initialCollapsed={initialCollapsed}
+        onboarding={onboarding}
       />
       <main className="min-w-0 flex-1">{children}</main>
     </div>

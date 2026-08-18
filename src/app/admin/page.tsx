@@ -42,6 +42,12 @@ export default async function AdminPage() {
             <h2 className="font-bold">Audit log</h2>
             <p className="mt-1 text-sm text-foreground/65">Every recorded action, most recent first.</p>
           </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/data-handling-rules">
+            <h2 className="font-bold">Data handling rules</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Manage which fields from external sources are stored or excluded.
+            </p>
+          </Link>
           <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/companies-house">
             <h2 className="font-bold">Companies House import</h2>
             <p className="mt-1 text-sm text-foreground/65">
@@ -53,6 +59,10 @@ export default async function AdminPage() {
             <p className="mt-1 text-sm text-foreground/65">
               Suppress a charity, or approve/reject a CAM&apos;s request.
             </p>
+          </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/manual-entries">
+            <h2 className="font-bold">Manual client entries</h2>
+            <p className="mt-1 text-sm text-foreground/65">Review organisations submitted manually by CAMs.</p>
           </Link>
           <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/duplicates">
             <h2 className="font-bold">Possible duplicates</h2>

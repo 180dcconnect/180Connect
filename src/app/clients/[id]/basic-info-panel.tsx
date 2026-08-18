@@ -6,19 +6,30 @@ import {
   applyEnrichmentChange,
   applyOrganisationChange,
   buildBasicInfo,
+  NOT_PROVIDED,
   type BasicInfoState,
   type OrganisationDetailRow,
 } from "@/lib/client-basic-info";
+import { SectionCard } from "./section-card";
 
-const FIELDS: { key: keyof ReturnType<typeof buildBasicInfo>; label: string }[] = [
-  { key: "name", label: "Name" },
+/**
+ * Field order is reading order, not schema order. `wide` fields span both
+ * columns: mission is a sentence or two and looked broken wrapping inside a
+ * half-width cell beside a one-word Type.
+ */
+const FIELDS: {
+  key: keyof ReturnType<typeof buildBasicInfo>;
+  label: string;
+  wide?: boolean;
+}[] = [
+  { key: "name", label: "Name", wide: true },
+  { key: "mission", label: "Mission", wide: true },
   { key: "type", label: "Type" },
-  { key: "mission", label: "Mission" },
-  { key: "email", label: "Email" },
-  { key: "address", label: "Address" },
-  { key: "location", label: "Location" },
-  { key: "website", label: "Website" },
   { key: "status", label: "Status" },
+  { key: "email", label: "Email" },
+  { key: "location", label: "Location" },
+  { key: "address", label: "Address", wide: true },
+  { key: "website", label: "Website", wide: true },
 ];
 
 /**
@@ -117,16 +128,33 @@ export function BasicInfoPanel({
   const info = buildBasicInfo(state);
 
   return (
-    <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="basic-info-heading">
-      <h2 id="basic-info-heading" className="text-sm font-bold">Basic info</h2>
-      <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
-        {FIELDS.map(({ key, label }) => (
-          <div key={key}>
-            <dt className="text-xs font-bold uppercase tracking-wide text-foreground/50">{label}</dt>
-            <dd className="mt-0.5 text-sm text-foreground/85">{info[key]}</dd>
-          </div>
-        ))}
+    <SectionCard headingId="basic-info-heading" title="Basic info">
+      <dl className="mt-4 grid grid-cols-1 gap-x-8 sm:grid-cols-2">
+        {FIELDS.map(({ key, label, wide }) => {
+          // AC2: a field with no value still gets its row — greyed rather than
+          // dropped, so "we don't know" reads differently from "it's blank".
+          const missing = info[key] === NOT_PROVIDED;
+          return (
+            <div
+              key={key}
+              className={`border-b border-black/[0.05] py-3 last:border-b-0 ${
+                wide ? "sm:col-span-2" : ""
+              }`}
+            >
+              <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
+                {label}
+              </dt>
+              <dd
+                className={`mt-1 text-sm leading-[1.6] ${
+                  missing ? "text-foreground/35" : "text-foreground/80"
+                }`}
+              >
+                {info[key]}
+              </dd>
+            </div>
+          );
+        })}
       </dl>
-    </section>
+    </SectionCard>
   );
 }

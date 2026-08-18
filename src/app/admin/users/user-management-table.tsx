@@ -1,6 +1,13 @@
 "use client";
 
 import { useState, type Dispatch, type SetStateAction } from "react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export type TeamUser = {
   id: string;
@@ -205,23 +212,26 @@ export function UserManagementTable({
                     <span className="text-foreground/60">{user.email}</span>
                   </td>
                   <td className="p-3">
-                    <select
-                      aria-label={`Role for ${user.email}`}
-                      className="rounded-lg border border-black/15 bg-white px-3 py-2"
+                    <Select
                       disabled={savingId === user.id || user.id === currentUserId}
-                      onChange={(event) =>
+                      onValueChange={(value) =>
                         updateUser(
                           user.id,
-                          { role: event.target.value as TeamUser["role"] },
+                          { role: value as TeamUser["role"] },
                           "Role updated successfully.",
                         )
                       }
                       value={user.role}
                     >
-                      <option value="cam">CAM</option>
-                      <option value="admin">Admin</option>
-                      <option value="viewer">Viewer</option>
-                    </select>
+                      <SelectTrigger aria-label={`Role for ${user.email}`} className="w-fit bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cam">CAM</SelectItem>
+                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="viewer">Viewer</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </td>
                   <td className="p-3">{user.owned_client_count}</td>
                   <td className="p-3 text-foreground/60">{lastActiveLabel(user.last_seen_at)}</td>
@@ -397,22 +407,22 @@ function OffboardingForm({
                   value="reassign"
                 />
                 Reassign to
-                <select
-                  aria-label="New owner"
-                  className="rounded-lg border border-black/15 bg-white px-3 py-2"
+                <Select
                   disabled={effectiveDestination !== "reassign"}
-                  onChange={(event) => setReassignTo(event.target.value)}
+                  onValueChange={setReassignTo}
                   value={reassignTo}
                 >
-                  <option disabled value="">
-                    Choose a team member…
-                  </option>
-                  {eligibleOwners.map((owner) => (
-                    <option key={owner.id} value={owner.id}>
-                      {displayName(owner)}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger aria-label="New owner" className="w-fit bg-white">
+                    <SelectValue placeholder="Choose a team member…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {eligibleOwners.map((owner) => (
+                      <SelectItem key={owner.id} value={owner.id}>
+                        {displayName(owner)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </label>
               <label className="mt-2 flex items-center gap-2 text-sm">
                 <input

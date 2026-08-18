@@ -111,7 +111,7 @@ export function TeamPanel({
 
       <Group className="mt-10 space-y-4">
         <Rise className="flex items-baseline justify-between gap-4">
-          <h2 className="text-xl font-black tracking-[-0.02em]">Pending invites</h2>
+          <h2 className="text-xl font-semibold font-body tracking-[-0.02em]">Pending invites</h2>
         </Rise>
         <Rise>
           <div className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm">

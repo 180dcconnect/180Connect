@@ -1,14 +1,16 @@
 # 180Connect – Global Workspace Data Protection & Governance Agreement
 
-**Status:** Draft for Global Review · **Version:** 0.1  
+**Status:** Draft for Global Review and Approval · **Version:** 0.1  
 **Date:** 18 August 2026  
 **Governing Law:** England and Wales / UK GDPR  
+
+> **Purpose of this draft:** This document records Sheffield CIC's proposed understanding of the operational and data-protection relationship between the Parties in relation to the shared Google Workspace environment. It is subject to review, amendment, and formal approval by both Parties and does not create binding obligations until executed by authorised representatives of both Parties.
 
 ---
 
 ## 1. Parties
 
-This agreement is entered into between:
+This proposed agreement is between:
 
 1. **180 Degrees Consulting Sheffield CIC**  
    Company number: `15874544` (Registered in England and Wales)  
@@ -27,14 +29,14 @@ This agreement is entered into between:
 
 ## 2. Purpose of this Agreement
 
-This agreement establishes the data protection and governance arrangements between Sheffield CIC and 180DC Global in relation to:
+This proposed agreement establishes the data protection and governance arrangements between Sheffield CIC and 180DC Global in relation to:
 * The `180dc.org` Google Workspace environment;
 * The `sheffield@180dc.org` mailbox used by the Sheffield branch;
 * Personal data contained within that mailbox;
 * Personal data processed through 180Connect and transmitted to or from the mailbox; and
 * Global's administrative, technical, security, and support access to that environment.
 
-The purpose of this agreement is to ensure that the Parties have a clear understanding of:
+The purpose of this agreement is to ensure that the Parties have a clear and aligned understanding of:
 * Who is responsible for the processing;
 * What access Global has;
 * What Global may and may not do with Sheffield's data;
@@ -65,9 +67,7 @@ This includes decisions concerning:
 Accordingly, **Sheffield CIC is the data controller** for the 180Connect outreach processing described above.
 
 ### 3.2 Global's Role
-180DC Global administers the `180dc.org` Google Workspace tenant used by Sheffield.
-
-Global's responsibilities include:
+Based on the current operating arrangement, Global provides the following functions:
 * Workspace administration;
 * Account provisioning and management;
 * Technical support;
@@ -79,11 +79,9 @@ Global's responsibilities include:
 Global administrators have elevated administrative privileges within the Workspace environment and may technically access the Sheffield mailbox and its contents where required for these purposes.
 
 ### 3.3 Scope of Global's Access
-Global's administrative access does not by itself give Global authority to determine the purposes of Sheffield's 180Connect outreach.
+For the purposes of this proposed arrangement, Global's administrative access does not by itself determine the purposes of Sheffield's 180Connect outreach. Sheffield independently determines how 180Connect is used for its outreach activities.
 
-Sheffield independently determines how the mailbox and 180Connect are used for its outreach activities.
-
-Global's access to Sheffield outreach data is therefore strictly limited to what is reasonably necessary for:
+Global's access to Sheffield outreach data is therefore proposed to be limited to what is reasonably necessary for:
 * Workspace administration;
 * Technical support;
 * Cybersecurity;
@@ -96,9 +94,9 @@ Global's access to Sheffield outreach data is therefore strictly limited to what
 
 ## 4. Use of Sheffield Outreach Data by Global
 
-Global will not use Sheffield's 180Connect outreach data for an independent organisational purpose merely because Global has technical or administrative access to the Workspace environment.
+Subject to Global's review and approval of this agreement, Global will not use Sheffield's 180Connect outreach data for an independent organisational purpose merely because Global has technical or administrative access to the Workspace environment.
 
-In particular, Global will not, without prior assessment and formal agreement:
+In particular, Global will not, without prior assessment and agreement:
 * Use Sheffield outreach contacts for Global's own marketing;
 * Use the data to conduct separate outreach;
 * Add Sheffield outreach contacts to another branch's outreach database;
@@ -121,7 +119,7 @@ Where access to message contents is necessary:
 * Information must not be copied or reused for unrelated purposes; and
 * Information must not be disclosed to another organisation or 180DC branch unless authorised under an appropriate legal and data-protection basis.
 
-The Parties acknowledge that Global's super-admin privileges create a technical capability for access that cannot be fully removed by Sheffield. The purpose of this agreement is therefore to establish the legal, organisational, and procedural restrictions governing that capability.
+The Parties acknowledge that Global's super-admin privileges create a technical capability for access that cannot be fully removed by Sheffield. The purpose of this agreement is therefore to establish the legal, organisational, and procedural restrictions governing that capability, rather than to represent that the technical capability does not exist.
 
 ---
 
@@ -133,11 +131,9 @@ The Parties acknowledge that:
 * Global administrators who may access the Sheffield Workspace environment are located primarily in Australia, with at least one administrator located in the UK; and
 * Australian-based administrators may technically access personal information contained within the Sheffield mailbox.
 
-The Parties therefore acknowledge that access by a separate organisation located outside the UK constitutes a restricted transfer under the UK GDPR.
+The Parties acknowledge that remote access to UK personal data by Global personnel located in Australia may constitute a restricted transfer under UK data-protection law. The Parties will therefore assess and document the applicable transfer requirements before relying on Australian access as an ongoing processing arrangement.
 
-Before Australian-based access to Sheffield personal data is permitted as an ongoing processing arrangement, the Parties will execute an appropriate transfer mechanism:
-* An **International Data Transfer Agreement (IDTA)** or **International Data Transfer Addendum to EU SCCs**; and
-* A completed **Transfer Risk Assessment (TRA)**.
+Where a restricted transfer is identified, the Parties will implement the appropriate transfer mechanism required by applicable UK data-protection law, which may include an International Data Transfer Agreement (IDTA) or another applicable safeguard, supported by an appropriate transfer risk assessment where required.
 
 The final transfer documentation will specify:
 * The categories of personal data transferred;
@@ -195,7 +191,7 @@ Global is responsible for:
 
 ## 9. Data Subject Requests
 
-The Parties agree that **Sheffield CIC is the primary point of contact** for data-subject requests concerning Sheffield's 180Connect outreach processing.
+The Parties agree that **Sheffield CIC will be the primary point of contact** for data-subject requests concerning Sheffield's 180Connect outreach processing.
 
 Where an individual contacts Sheffield concerning personal information processed through 180Connect:
 * Sheffield will receive, log, and assess the request;
@@ -252,43 +248,55 @@ Global will maintain strict controls over its super-admin accounts:
 
 ---
 
-## 13. Onward Disclosure
+## 13. Changes to Workspace Administration
 
-Global must not disclose Sheffield's outreach personal data to another 180DC branch, external organisation, service provider, or Global team for a new or independent purpose unless the disclosure is authorized under applicable data protection law and appropriate transfer safeguards are in place.
+Global retains administrative authority over the `180dc.org` Google Workspace environment, including the ability to manage accounts, permissions, security controls, and other Workspace-level infrastructure.
+
+Where a material change to Workspace administration could materially affect Sheffield's processing of personal data, Global will, where reasonably practicable, notify Sheffield in advance or as soon as reasonably practicable after the change.
+
+This does not prevent Global from taking immediate action where necessary to protect the security, integrity, or availability of the Workspace environment.
+
+Where a Workspace-level change materially alters the international access, processing purposes, categories of data, or security arrangements applicable to Sheffield's personal data, the Parties will review this agreement and any associated transfer or data-protection documentation.
 
 ---
 
-## 14. Subprocessors and Third-Party Infrastructure
+## 14. Onward Disclosure
+
+Global must not disclose Sheffield's outreach personal data to another 180DC branch, external organisation, service provider, or Global team for a new or independent purpose unless the disclosure is authorised under applicable data protection law and appropriate transfer safeguards are in place.
+
+---
+
+## 15. Subprocessors and Third-Party Infrastructure
 
 Nothing in this agreement changes the existing processor arrangements between Sheffield and third-party infrastructure providers (such as Google LLC, Supabase Inc., Vercel Inc., Resend Inc., PostHog Inc.). Each provider is documented in Sheffield's processor register in accordance with the Data Handling Policy.
 
 ---
 
-## 15. Cooperation and Information
+## 16. Cooperation and Information
 
 The Parties will cooperate reasonably where necessary to demonstrate compliance with applicable data-protection requirements, including SARs, breaches, international transfers, audits, and regulatory inquiries.
 
 ---
 
-## 16. Changes to Processing
+## 17. Changes to Processing
 
 Sheffield will notify Global if a material change to 180Connect substantially alters the nature or scale of personal data processing within the Workspace environment. Global will similarly notify Sheffield if a material change to Workspace affects Sheffield's data processing.
 
 ---
 
-## 17. Independent Purposes
+## 18. Independent Purposes
 
 Nothing in this agreement prevents either organisation from acting as an independent controller for personal data that it processes for its own legitimate organisational purposes. However, using the other party's data for new independent purposes requires prior assessment of lawful bases, roles, and transfer safeguards.
 
 ---
 
-## 18. Review
+## 19. Review
 
 This agreement will be reviewed at least annually, upon material changes to Workspace or 180Connect, or following a significant security incident.
 
 ---
 
-## 19. Relationship with the 180Connect Data Handling Policy
+## 20. Relationship with the 180Connect Data Handling Policy
 
 This agreement should be read together with:
 * [`docs/data-handling-policy.md`](data-handling-policy.md)
@@ -298,7 +306,7 @@ This agreement should be read together with:
 
 ---
 
-## 20. Execution
+## 21. Execution
 
 **For 180 Degrees Consulting Sheffield CIC**  
 Name: ______________________________  
@@ -314,13 +322,13 @@ Date: ______________________________
 
 ---
 
-## Schedule 1 – Summary of Processing Arrangement
+## Schedule 1 – Summary of Proposed Processing Arrangement
 
 | Parameter | Operational Detail |
 | :--- | :--- |
 | **UK Controller** | 180 Degrees Consulting Sheffield CIC |
 | **Global Entity** | 180 Degrees Consulting Limited (Australia) |
-| **Workspace Tenant Owner** | 180 Degrees Consulting Limited |
+| **Workspace Tenant / Administrative Owner** | 180 Degrees Consulting Limited |
 | **Workspace Domain** | `180dc.org` Google Workspace |
 | **Sheffield Mailbox** | `sheffield@180dc.org` |
 | **Sheffield Operational Control** | Sheffield independently determines outreach purposes, sources, targets, and content |
@@ -329,7 +337,7 @@ Date: ______________________________
 | **Overseas Access Locations** | Australia (plus UK-based Global administrator) |
 | **Data Subject Requests** | Received and handled locally by Sheffield; escalated to Global only when Workspace-level access required |
 | **Security Incidents** | Handled by Sheffield; Workspace-level issues escalated to Global |
-| **International Transfer Safeguard** | UK International Data Transfer Agreement (IDTA) / Addendum + Transfer Risk Assessment (TRA) |
+| **International Transfer Safeguard** | To be determined following transfer assessment (e.g. UK IDTA / Addendum + TRA where required) |
 
 ---
 
@@ -342,4 +350,4 @@ Date: ______________________________
 * **Data Categories:** Professional names, business email addresses, correspondence history, organisation relationship details
 * **Data Subjects:** Representatives of prospective and client social-sector organisations, correspondence contacts
 * **Purpose of Access:** Workspace administration, technical support, cybersecurity, incident investigation
-* **Safeguard Instrument:** UK IDTA / UK Addendum to EU SCCs accompanied by a completed Transfer Risk Assessment (TRA)
+* **Safeguard Instrument:** To be determined following the transfer assessment. Where required, the Parties will implement an appropriate UK transfer mechanism, which may include the UK IDTA or UK Addendum to EU SCCs, together with any required transfer risk assessment.

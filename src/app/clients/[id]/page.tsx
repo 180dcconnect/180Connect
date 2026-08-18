@@ -225,7 +225,6 @@ export default async function ClientDetailPage({
     actorRole: authorization.actor.role,
     hasPendingRequest: ownRequest?.status === "pending",
   });
-
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="mx-auto w-full max-w-5xl space-y-6">

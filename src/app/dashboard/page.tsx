@@ -27,6 +27,8 @@ import {
   shouldShowGuide,
   type OnboardingUser,
 } from "@/lib/onboarding";
+import { FeedbackPrompt } from "@/components/feedback-prompt";
+import { shouldPromptFeedback, type FeedbackUser } from "@/lib/feedback";
 
 /**
  * F021 — first screen after login. The sidebar (AppShell/F030) already wraps this
@@ -48,9 +50,9 @@ import {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; preview_guide?: string }>;
+  searchParams: Promise<{ error?: string; preview_guide?: string; preview_feedback?: string }>;
 }) {
-  const { error, preview_guide } = await searchParams;
+  const { error, preview_guide, preview_feedback } = await searchParams;
   let user;
 
   try {
@@ -220,6 +222,29 @@ export default async function DashboardPage({
         }
       : step,
   );
+
+  let showFeedback = false;
+  if (preview_feedback !== undefined) {
+    showFeedback = true;
+  } else {
+    try {
+      const supabase = await createClient();
+      const { data: userProfile } = await supabase
+        .from("users")
+        .select("invite_accepted_at, feedback_snoozed_until")
+        .eq("id", actor.id)
+        .maybeSingle();
+
+      if (userProfile) {
+        showFeedback = shouldPromptFeedback({
+          inviteAcceptedAt: userProfile.invite_accepted_at,
+          feedbackSnoozedUntil: userProfile.feedback_snoozed_until,
+        });
+      }
+    } catch {
+      // Non-fatal: prompt simply doesn't show
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
@@ -393,6 +418,7 @@ export default async function DashboardPage({
         )}
       </Stage>
       {preview_guide !== undefined && <OnboardingPreviewBar currentMode={preview_guide} />}
+      {showFeedback && <FeedbackPrompt pageContext="/dashboard" />}
     </div>
   );
 }

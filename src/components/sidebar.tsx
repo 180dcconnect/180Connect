@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ComponentType } from "react";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
-import { ShieldCheck, UserPlus } from "lucide-react";
+import { MessageSquareHeart, ShieldCheck, UserPlus } from "lucide-react";
 import { Cctv } from "@/components/animate-ui/icons/cctv";
 import { CloudDownload } from "@/components/animate-ui/icons/cloud-download";
 import { Compass } from "@/components/animate-ui/icons/compass";
@@ -29,7 +29,7 @@ export type SidebarOnboarding = {
   show?: boolean;
 };
 
-export type SidebarIconName = "dashboard" | "admin" | "users" | "add" | "audit" | "import" | "clients";
+export type SidebarIconName = "dashboard" | "admin" | "users" | "add" | "audit" | "import" | "clients" | "feedback";
 
 export type SidebarNavItem = {
   href: string;
@@ -63,6 +63,7 @@ const ICONS: Record<SidebarIconName, RailIcon> = {
   add: UserPlus,
   audit: Cctv,
   import: CloudDownload,
+  feedback: MessageSquareHeart,
 };
 
 const MotionLink = motion.create(Link);
@@ -81,6 +82,7 @@ const ICON_SPRING = { type: "spring", stiffness: 420, damping: 17, mass: 0.6 } a
  */
 const ICON_MOTION: Partial<Record<SidebarIconName, Variants>> = {
   admin: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: -6 } },
+  feedback: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: 6 } },
   // `dashboard`, `clients`, `users`, `audit`, and `import` are deliberately absent:
   // those glyphs animate their own interiors, so a wrapper transform on top would
   // read as two gestures.

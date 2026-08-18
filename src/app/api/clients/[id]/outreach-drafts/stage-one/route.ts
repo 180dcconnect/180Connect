@@ -62,16 +62,18 @@ export async function POST(
   const { data: organisation, error: organisationError } = await supabase
     .from("organisations")
     .select(
-      "id, legal_name, organisation_type, website, city, country_code, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
+      "id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
     )
     .eq("id", organisationId)
     .maybeSingle<{
       id: string;
       legal_name: string;
+      trading_name: string | null;
       organisation_type: string;
       website: string | null;
       city: string | null;
       country_code: string | null;
+      geographic_reach: string | null;
       owner_id: string | null;
       owner: { full_name: string | null } | null;
     }>();
@@ -166,10 +168,12 @@ export async function POST(
     organisationId,
     {
       organisationName: organisation.legal_name,
+      tradingName: organisation.trading_name,
       organisationType: organisation.organisation_type,
       website: organisation.website,
       city: organisation.city,
       countryCode: organisation.country_code,
+      geographicReach: organisation.geographic_reach,
       contactName: contact ? [contact.first_name, contact.last_name].filter(Boolean).join(" ") : null,
       contactJobTitle: contact?.job_title,
       missionStatement: enrichment?.mission_statement,

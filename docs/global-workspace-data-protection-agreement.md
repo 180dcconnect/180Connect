@@ -64,7 +64,7 @@ This includes decisions concerning:
 * Retention and deletion of 180Connect records; and
 * The lawful basis and transparency arrangements applicable to Sheffield's outreach processing.
 
-Accordingly, **Sheffield CIC is the data controller** for the 180Connect outreach processing described above.
+Accordingly, **Sheffield CIC considers itself the data controller** for the 180Connect outreach processing described above, subject to confirmation of the Parties' respective roles through this agreement.
 
 ### 3.2 Global's Role
 Based on the current operating arrangement, Global provides the following functions:
@@ -90,11 +90,21 @@ Global's access to Sheffield outreach data is therefore proposed to be limited t
 * Compliance with applicable legal obligations; and
 * Other infrastructure-management purposes agreed between the Parties.
 
+### 3.4 Confirmation of Roles
+The Parties acknowledge that the precise data-protection roles applicable to Global's access to Sheffield personal data are to be confirmed through review of this agreement and the Parties' actual processing arrangements.
+
+The Parties will determine, for each relevant processing activity, whether Global is acting:
+* As a processor on behalf of Sheffield CIC;
+* As a separate controller for its own independent purposes; or
+* As a joint controller with Sheffield CIC where the Parties jointly determine the purposes and means of the relevant processing.
+
+The Parties will document the agreed position and, where required, update this agreement and any associated data-protection or international-transfer documentation before the relevant processing begins or materially changes. Nothing in this draft is intended to predetermine the legal classification before that review has been completed.
+
 ---
 
 ## 4. Use of Sheffield Outreach Data by Global
 
-Subject to Global's review and approval of this agreement, Global will not use Sheffield's 180Connect outreach data for an independent organisational purpose merely because Global has technical or administrative access to the Workspace environment.
+Subject to Global's review and approval of this agreement, the proposed arrangement is that Global will not use Sheffield's 180Connect outreach data for an independent organisational purpose merely because Global has technical or administrative access to the Workspace environment.
 
 In particular, Global will not, without prior assessment and agreement:
 * Use Sheffield outreach contacts for Global's own marketing;
@@ -344,7 +354,7 @@ Date: ______________________________
 ## Schedule 2 – International Data Transfer Details
 
 * **Exporter:** 180 Degrees Consulting Sheffield CIC (67 Barber Road, Sheffield, England, S10 1EB, UK)
-* **Importer:** 180 Degrees Consulting Limited (Australia)
+* **Australian recipient / accessing organisation:** 180 Degrees Consulting Limited (Australia)
 * **Transfer Destination:** Australia
 * **Transfer Type:** Remote administrative and support access to personal data in the `180dc.org` Workspace environment
 * **Data Categories:** Professional names, business email addresses, correspondence history, organisation relationship details

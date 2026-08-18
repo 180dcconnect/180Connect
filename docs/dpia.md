@@ -137,13 +137,15 @@ Specifically, the assessment evaluates the combination of the following factors:
 * **Derived Analytical Signals:** Data-completeness score and prospective client priority ranking.
 
 ### 6.2 Strictly Excluded Data Categories (Technical Brief §5 & F246/F247)
-The following data categories are **strictly banned from storage and processing**:
+The following categories are **prohibited from intentional ingestion into 180Connect's structured data stores**:
 * ❌ Personal residential/home addresses (including director/trustee usual residential addresses returned by Companies House);
 * ❌ Personal mobile numbers or private telephone lines;
 * ❌ Personal email addresses (Gmail, Hotmail, Yahoo, personal ISP addresses, non-role personal prefixes);
 * ❌ Dates of birth, nationality, and marital status of officers/trustees;
 * ❌ Special category data (health, racial/ethnic origin, political beliefs, religious beliefs, sexual orientation);
 * ❌ Criminal convictions or background checks.
+
+*Note on Inbound Correspondence:* Unsolicited personal or special-category information may nevertheless appear in inbound correspondence sent by third parties to `sheffield@180dc.org`. Such information is not intentionally collected for 180Connect purposes and must not be used for enrichment, scoring, profiling, or LLM processing. Where technically retained within the underlying Google Workspace mailbox, it remains subject to standard mailbox retention and access controls.
 
 ---
 
@@ -225,13 +227,13 @@ The platform plans to incorporate LLM services for:
 
 | Entity & Service | Role / Relationship | Hosting & Processing Region | International Transfer Mechanism | Security & Governance Controls | Deployment Status & Risk |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Supabase Inc.** | Data Processor (Database, auth, audit logs) | EU (Ireland, `eu-west-1`) | UK Adequacy (EEA storage); DPA includes SCCs/UK Addendum for support | DPA executed; RLS deny-by-default; daily backups | **Low** |
+| **Supabase Inc.** | Data Processor (Database, auth, audit logs) | EU (Ireland, `eu-west-1`) | EEA processing/storage; reliance on the UK's adequacy regulations for relevant restricted transfers from the UK to the EEA, subject to applicable contractual and processor arrangements | DPA executed; RLS deny-by-default; daily backups | **Low** |
 | **Vercel Inc.** | Data Processor (Application hosting & edge compute) | US / Global Edge | Vercel DPA with EU SCCs and UK Addendum | DPA executed; encrypted environment variables | **Low** |
 | **Resend Inc.** | Data Processor (System & auth email transport) | US | Resend DPA with EU SCCs and UK IDTA | DPA executed; minimal auth data | **Low** |
 | **Google LLC** | Data Processor / Service Provider (Workspace Mailbox) | US / Global | Google Workspace Cloud DPA (SCCs + UK Addendum) | Enterprise Workspace controls, MFA enforced | **Medium (Pending tenant governance)** |
-| **180 Degrees Consulting Limited** | Shared Workspace tenant administrator (Cross-entity governance; role classification to be finalised) | Australia / UK | IDTA / Addendum + TRA (In Progress) | Governance draft prepared ([`docs/global-workspace-data-protection-agreement.md`](global-workspace-data-protection-agreement.md)) | **Medium (Pending sign-off)** |
-| **PostHog Inc.** | Data Processor (Usage analytics) | EU (Frankfurt) | UK Adequacy (EEA storage); PostHog DPA | Planned; cookieless / minimised analytics | **Low** |
-| **Google Cloud (Gemini) / LLM** | Data Processor (AI Service Provider — to be selected) | To be pinned to UK/EU | Cloud DPA + zero-retention agreement required | Provider selection and DPA in progress | **Medium (Pending selection)** |
+| **180 Degrees Consulting Limited** | Shared Workspace tenant administrator. Role under UK GDPR: To be formally determined through inter-entity governance assessment. No unrestricted access to Sheffield outreach data permitted pending determination. | Australia / UK | IDTA / Addendum + TRA (In Progress) | Governance draft prepared ([`docs/global-workspace-data-protection-agreement.md`](global-workspace-data-protection-agreement.md)) | **Medium (Pending sign-off)** |
+| **PostHog Inc.** | Data Processor (Usage analytics) | EU (Frankfurt) | EEA processing/storage; reliance on the UK's adequacy regulations for relevant restricted transfers from the UK to the EEA, subject to applicable contractual and processor arrangements | Planned; cookieless / minimised analytics | **Low** |
+| **Third-Party LLM Provider (TBD)** | Data Processor (AI Service Provider — selection & DPA pending) | To be pinned to UK/EU | UK IDTA / UK Addendum + Zero-retention terms required | Provider evaluation, DPA execution, and zero-data-retention terms required before production use | **Medium (Pending selection & DPA)** |
 
 ---
 

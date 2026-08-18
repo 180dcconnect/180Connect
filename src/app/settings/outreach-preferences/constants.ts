@@ -162,4 +162,24 @@ export const CITY_PRESETS = [
 export const MAX_CITY_LENGTH = 60;
 export const MAX_CITIES = 20;
 
+// F202: Follow-Up Timing Settings (F160 / F161 / F202).
+export const DEFAULT_FIRST_FOLLOW_UP_DAYS = 7;
+export const DEFAULT_SECOND_FOLLOW_UP_DAYS = 14;
+export const MIN_FOLLOW_UP_DAYS = 1;
+export const MAX_FIRST_FOLLOW_UP_DAYS = 60;
+export const MAX_SECOND_FOLLOW_UP_DAYS = 90;
+
+export function clampFollowUpDays(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (value === null || value === undefined || value === "") return fallback;
+  const num = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(num) || Number.isNaN(num)) return fallback;
+  const rounded = Math.round(num);
+  return Math.min(Math.max(rounded, min), max);
+}
+
 

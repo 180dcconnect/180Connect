@@ -15,7 +15,10 @@ const CONTROL = "\u0001";
 
 test("accepts a normal name unchanged", () => {
   const result = parseAccountSettings({ fullName: "Alvia Zehra" });
-  assert.deepEqual(result, { ok: true, value: { fullName: "Alvia Zehra" } });
+  assert.deepEqual(result, {
+    ok: true,
+    value: { fullName: "Alvia Zehra", notificationFrequency: "immediate" },
+  });
 });
 
 test("trims surrounding whitespace and collapses internal runs", () => {
@@ -77,4 +80,34 @@ test("measures the length after normalisation, not before", () => {
   const name = `${"a".repeat(MAX_FULL_NAME_LENGTH)}${ZERO_WIDTH_SPACE.repeat(5)}`;
   const result = parseAccountSettings({ fullName: name });
   assert.equal(result.ok, true);
+});
+
+test("defaults notification frequency to immediate when not provided (F201)", () => {
+  const result = parseAccountSettings({ fullName: "Bashir" });
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.value.notificationFrequency, "immediate");
+  }
+});
+
+test("accepts valid notification delivery frequencies (F201)", () => {
+  const daily = parseAccountSettings({ fullName: "Bashir", notificationFrequency: "daily" });
+  assert.equal(daily.ok, true);
+  if (daily.ok) {
+    assert.equal(daily.value.notificationFrequency, "daily");
+  }
+
+  const weekly = parseAccountSettings({ fullName: "Bashir", notificationFrequency: "weekly" });
+  assert.equal(weekly.ok, true);
+  if (weekly.ok) {
+    assert.equal(weekly.value.notificationFrequency, "weekly");
+  }
+});
+
+test("falls back to immediate for invalid notification frequency", () => {
+  const invalid = parseAccountSettings({ fullName: "Bashir", notificationFrequency: "hourly" });
+  assert.equal(invalid.ok, true);
+  if (invalid.ok) {
+    assert.equal(invalid.value.notificationFrequency, "immediate");
+  }
 });

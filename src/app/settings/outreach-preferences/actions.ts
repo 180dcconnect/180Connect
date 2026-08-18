@@ -12,6 +12,12 @@ import {
   MAX_CITIES,
   MAX_SECTOR_LENGTH,
   MAX_SECTORS,
+  DEFAULT_FIRST_FOLLOW_UP_DAYS,
+  DEFAULT_SECOND_FOLLOW_UP_DAYS,
+  MIN_FOLLOW_UP_DAYS,
+  MAX_FIRST_FOLLOW_UP_DAYS,
+  MAX_SECOND_FOLLOW_UP_DAYS,
+  clampFollowUpDays,
   type GeographicReach,
   type IncomeBand,
 } from "./constants";
@@ -31,6 +37,8 @@ export type OutreachPreferencesState = {
     sectors: string[];
     incomeBands: IncomeBand[];
     prioritiseGrantRecipients: boolean;
+    firstFollowUpDays: number;
+    secondFollowUpDays: number;
   };
 };
 
@@ -50,6 +58,8 @@ function parsePreferences(formData: FormData): {
   sectors: string[];
   incomeBands: IncomeBand[];
   prioritiseGrantRecipients: boolean;
+  firstFollowUpDays: number;
+  secondFollowUpDays: number;
 } {
   const geographicReach = formData
     .getAll("geographic_reach")
@@ -90,7 +100,28 @@ function parsePreferences(formData: FormData): {
   const rawGrant = formData.get("prioritise_grant_recipients");
   const prioritiseGrantRecipients = rawGrant === "true" || rawGrant === "on" || rawGrant === "1";
 
-  return { geographicReach, cities, sectors, incomeBands, prioritiseGrantRecipients };
+  const firstFollowUpDays = clampFollowUpDays(
+    formData.get("first_follow_up_days"),
+    DEFAULT_FIRST_FOLLOW_UP_DAYS,
+    MIN_FOLLOW_UP_DAYS,
+    MAX_FIRST_FOLLOW_UP_DAYS,
+  );
+  const secondFollowUpDays = clampFollowUpDays(
+    formData.get("second_follow_up_days"),
+    DEFAULT_SECOND_FOLLOW_UP_DAYS,
+    MIN_FOLLOW_UP_DAYS,
+    MAX_SECOND_FOLLOW_UP_DAYS,
+  );
+
+  return {
+    geographicReach,
+    cities,
+    sectors,
+    incomeBands,
+    prioritiseGrantRecipients,
+    firstFollowUpDays,
+    secondFollowUpDays,
+  };
 }
 
 export async function saveOutreachPreferencesAction(
@@ -104,7 +135,15 @@ export async function saveOutreachPreferencesAction(
     return { status: "error", message: actorFailureMessage(authorization.reason) };
   }
 
-  const { geographicReach, cities, sectors, incomeBands, prioritiseGrantRecipients } = parsePreferences(formData);
+  const {
+    geographicReach,
+    cities,
+    sectors,
+    incomeBands,
+    prioritiseGrantRecipients,
+    firstFollowUpDays,
+    secondFollowUpDays,
+  } = parsePreferences(formData);
 
   const supabase = await createClient();
   const { error } = await supabase
@@ -117,6 +156,8 @@ export async function saveOutreachPreferencesAction(
         preferred_sectors: sectors,
         preferred_income_bands: incomeBands,
         prioritise_grant_recipients: prioritiseGrantRecipients,
+        first_follow_up_days: firstFollowUpDays,
+        second_follow_up_days: secondFollowUpDays,
       },
       { onConflict: "user_id" },
     );
@@ -146,6 +187,14 @@ export async function saveOutreachPreferencesAction(
   return {
     status: "success",
     message: "Preferences saved.",
-    saved: { geographicReach, cities, sectors, incomeBands, prioritiseGrantRecipients },
+    saved: {
+      geographicReach,
+      cities,
+      sectors,
+      incomeBands,
+      prioritiseGrantRecipients,
+      firstFollowUpDays,
+      secondFollowUpDays,
+    },
   };
 }

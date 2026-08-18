@@ -132,6 +132,7 @@
 | invite_accepted_at | timestamp |  | Yes | When the invited person first confirmed their email | System | Set by app.handle_auth_user_confirmed when email_confirmed_at goes non-null | Null while invite pending. Setting it moves the row out of the admin's pending-invites list |
 | onboarding_completed_at | timestamp |  | Yes | When the user finished the onboarding flow | System | Set when user completes onboarding | Null until completed |
 | onboarding_dismissed_at | timestamp |  | Yes | When the user dismissed the onboarding flow | System | Set when user dismisses onboarding | Null until dismissed |
+| notification_frequency | enum |  | No | Preferred notification delivery cadence | Human | Set by user in Account Settings | immediate / daily / weekly (default immediate) |
 
 ## NOTES
 
@@ -201,6 +202,8 @@
 | preferred_sectors | text[] |  | No | Sector values to prioritise | Human | Chosen by CAM in settings | Free text, matched against ORGANISATIONS.sector; empty array = no preference set |
 | preferred_income_bands | enum[] |  | No | Subset of income_band values to prioritise | Human | Chosen by CAM in settings | Same enum as FINANCIAL_PERIODS.income_band; empty array = no preference set |
 | prioritise_grant_recipients | boolean |  | No | Prioritise organisations with previous grant/funding history | Human | Chosen by CAM in settings | Matched against GRANTS table (360Giving); default false |
+| first_follow_up_days | integer |  | No | Days before first follow-up reminder | Human | Chosen by CAM in settings | Default 7 days (1–60) |
+| second_follow_up_days | integer |  | No | Days before second follow-up reminder | Human | Chosen by CAM in settings | Default 14 days (1–90) |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last edit timestamp | System | Updated on save |  |
 

@@ -48,8 +48,28 @@ export const fullNameSchema = z
       ),
   );
 
+export const NOTIFICATION_FREQUENCIES = ["immediate", "daily", "weekly"] as const;
+export type NotificationFrequency = (typeof NOTIFICATION_FREQUENCIES)[number];
+
+export const NOTIFICATION_FREQUENCY_LABELS: Record<NotificationFrequency, string> = {
+  immediate: "Immediate",
+  daily: "Daily digest",
+  weekly: "Weekly digest",
+};
+
+export const NOTIFICATION_FREQUENCY_DESCRIPTIONS: Record<NotificationFrequency, string> = {
+  immediate: "Receive alerts in real time as events and updates occur.",
+  daily: "Get a daily summary digest of relevant updates and follow-up reminders.",
+  weekly: "Receive a weekly roundup of team activity and pending items.",
+};
+
+export const notificationFrequencySchema = z
+  .enum(NOTIFICATION_FREQUENCIES)
+  .default("immediate");
+
 export const accountSettingsSchema = z.object({
   fullName: fullNameSchema,
+  notificationFrequency: notificationFrequencySchema,
 });
 
 export type AccountSettingsInput = z.infer<typeof accountSettingsSchema>;
@@ -59,7 +79,7 @@ export type ParsedAccountSettings =
   | { ok: false; message: string };
 
 /**
- * Parses the submitted form into the one field this screen may write.
+ * Parses the submitted form into the fields this screen may write (F200 / F201).
  *
  * A missing `full_name` entry is treated as an empty string rather than as a
  * separate "field absent" error: to the person filling in the form the two are
@@ -67,9 +87,17 @@ export type ParsedAccountSettings =
  */
 export function parseAccountSettings(input: {
   fullName: unknown;
+  notificationFrequency?: unknown;
 }): ParsedAccountSettings {
+  const rawFreq =
+    typeof input.notificationFrequency === "string" &&
+    NOTIFICATION_FREQUENCIES.includes(input.notificationFrequency as NotificationFrequency)
+      ? input.notificationFrequency
+      : "immediate";
+
   const result = accountSettingsSchema.safeParse({
     fullName: typeof input.fullName === "string" ? input.fullName : "",
+    notificationFrequency: rawFreq,
   });
 
   if (!result.success) {

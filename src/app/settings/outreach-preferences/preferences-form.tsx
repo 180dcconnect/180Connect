@@ -13,6 +13,8 @@ import { OriginButton } from "@/components/ui/origin-button";
 import { saveOutreachPreferencesAction, type OutreachPreferencesState } from "./actions";
 import {
   CITY_PRESETS,
+  DEFAULT_FIRST_FOLLOW_UP_DAYS,
+  DEFAULT_SECOND_FOLLOW_UP_DAYS,
   GEOGRAPHIC_REACH_OPTIONS,
   GEOGRAPHIC_REACH_LABELS,
   GRANT_PREFERENCE_LABELS,
@@ -22,8 +24,11 @@ import {
   INCOME_BAND_DESCRIPTIONS,
   MAX_CITY_LENGTH,
   MAX_CITIES,
+  MAX_FIRST_FOLLOW_UP_DAYS,
+  MAX_SECOND_FOLLOW_UP_DAYS,
   MAX_SECTOR_LENGTH,
   MAX_SECTORS,
+  MIN_FOLLOW_UP_DAYS,
   SECTOR_CATEGORY_GROUPS,
   type GeographicReach,
   type IncomeBand,
@@ -67,12 +72,16 @@ export function OutreachPreferencesForm({
   initialSectors,
   initialIncomeBands,
   initialPrioritiseGrants = false,
+  initialFirstFollowUpDays = DEFAULT_FIRST_FOLLOW_UP_DAYS,
+  initialSecondFollowUpDays = DEFAULT_SECOND_FOLLOW_UP_DAYS,
 }: {
   initialGeographicReach: GeographicReach[];
   initialCities?: string[];
   initialSectors: string[];
   initialIncomeBands: IncomeBand[];
   initialPrioritiseGrants?: boolean;
+  initialFirstFollowUpDays?: number;
+  initialSecondFollowUpDays?: number;
 }) {
   // Submitted through `useTransition` rather than `useActionState`, because this
   // form has to *do* something when the action returns — close the editor and
@@ -92,6 +101,8 @@ export function OutreachPreferencesForm({
   const [savedBands, setSavedBands] = useState<IncomeBand[]>(initialIncomeBands);
   const [savedSectors, setSavedSectors] = useState<string[]>(initialSectors);
   const [savedPrioritiseGrants, setSavedPrioritiseGrants] = useState<boolean>(initialPrioritiseGrants);
+  const [savedFirstDays, setSavedFirstDays] = useState<number>(initialFirstFollowUpDays);
+  const [savedSecondDays, setSavedSecondDays] = useState<number>(initialSecondFollowUpDays);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -105,6 +116,8 @@ export function OutreachPreferencesForm({
       setSavedBands(result.saved?.incomeBands ?? bands);
       setSavedSectors(result.saved?.sectors ?? sectors);
       setSavedPrioritiseGrants(result.saved?.prioritiseGrantRecipients ?? prioritiseGrants);
+      setSavedFirstDays(result.saved?.firstFollowUpDays ?? firstDays);
+      setSavedSecondDays(result.saved?.secondFollowUpDays ?? secondDays);
       setEditing(false);
     });
   }
@@ -117,6 +130,8 @@ export function OutreachPreferencesForm({
   const [sectors, setSectors] = useState<string[]>(initialSectors);
   const [sectorInput, setSectorInput] = useState("");
   const [prioritiseGrants, setPrioritiseGrants] = useState<boolean>(initialPrioritiseGrants);
+  const [firstDays, setFirstDays] = useState<number>(initialFirstFollowUpDays);
+  const [secondDays, setSecondDays] = useState<number>(initialSecondFollowUpDays);
 
   function startEditing() {
     setGeo(savedGeo);
@@ -126,6 +141,8 @@ export function OutreachPreferencesForm({
     setSectors(savedSectors);
     setSectorInput("");
     setPrioritiseGrants(savedPrioritiseGrants);
+    setFirstDays(savedFirstDays);
+    setSecondDays(savedSecondDays);
     // Clears a stale "Preferences saved." from the previous round, so the
     // banner cannot sit above a form that has unsaved changes in it.
     setState(initialState);
@@ -140,6 +157,8 @@ export function OutreachPreferencesForm({
     setSectors(savedSectors);
     setSectorInput("");
     setPrioritiseGrants(savedPrioritiseGrants);
+    setFirstDays(savedFirstDays);
+    setSecondDays(savedSecondDays);
     setEditing(false);
   }
 
@@ -252,6 +271,16 @@ export function OutreachPreferencesForm({
                   ? ["Prioritise grant recipients"]
                   : []
               }
+            />
+          </div>
+
+          <div>
+            <p className={LEGEND_CLASS}>Follow-Up Reminder Cadence (F202 / F161)</p>
+            <Chips
+              values={[
+                `1st reminder: ${savedFirstDays} days`,
+                `2nd reminder: ${savedSecondDays} days`,
+              ]}
             />
           </div>
 
@@ -436,6 +465,58 @@ export function OutreachPreferencesForm({
                 </p>
               </div>
             </label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend className={LEGEND_CLASS}>Follow-Up Timing & Reminder Cadence (F202 / F161)</legend>
+          <p className="mt-2 text-sm leading-[1.7] text-foreground/65">
+            Configure how many days after an initial outreach message follow-up recommendations and reminders are triggered for your workflow.
+          </p>
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-xl border border-black/[0.08] bg-white p-4">
+              <label htmlFor="first_follow_up_days" className="block text-sm font-semibold text-foreground">
+                First Follow-Up Threshold
+              </label>
+              <p className="mt-0.5 text-xs text-foreground/55">
+                Days after initial outreach before recommending first follow-up (default: {DEFAULT_FIRST_FOLLOW_UP_DAYS} days)
+              </p>
+              <div className="mt-2.5 flex items-center gap-2">
+                <Input
+                  id="first_follow_up_days"
+                  name="first_follow_up_days"
+                  type="number"
+                  min={MIN_FOLLOW_UP_DAYS}
+                  max={MAX_FIRST_FOLLOW_UP_DAYS}
+                  value={firstDays}
+                  onChange={(e) => setFirstDays(Number(e.target.value))}
+                  className="w-24 bg-white"
+                />
+                <span className="text-sm font-medium text-foreground/70">days</span>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-black/[0.08] bg-white p-4">
+              <label htmlFor="second_follow_up_days" className="block text-sm font-semibold text-foreground">
+                Second Follow-Up Threshold
+              </label>
+              <p className="mt-0.5 text-xs text-foreground/55">
+                Days after initial outreach before recommending second follow-up (default: {DEFAULT_SECOND_FOLLOW_UP_DAYS} days)
+              </p>
+              <div className="mt-2.5 flex items-center gap-2">
+                <Input
+                  id="second_follow_up_days"
+                  name="second_follow_up_days"
+                  type="number"
+                  min={MIN_FOLLOW_UP_DAYS}
+                  max={MAX_SECOND_FOLLOW_UP_DAYS}
+                  value={secondDays}
+                  onChange={(e) => setSecondDays(Number(e.target.value))}
+                  className="w-24 bg-white"
+                />
+                <span className="text-sm font-medium text-foreground/70">days</span>
+              </div>
+            </div>
           </div>
         </fieldset>
 

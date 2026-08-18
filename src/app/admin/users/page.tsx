@@ -98,6 +98,10 @@ export default async function AdminUsersPage() {
               <Link className="font-bold text-brand underline" href="/admin/offboard">
                 Reassign a leaver&apos;s clients
               </Link>
+              {" "}or{" "}
+              <Link className="font-bold text-brand underline" href="/admin/cam-settings">
+                view CAM queue settings
+              </Link>
               .
             </p>
           </div>

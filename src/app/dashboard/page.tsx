@@ -28,7 +28,7 @@ import {
   type OnboardingUser,
 } from "@/lib/onboarding";
 import { FeedbackPrompt } from "@/components/feedback-prompt";
-import { shouldPromptFeedback, type FeedbackUser } from "@/lib/feedback";
+import { shouldPromptFeedback } from "@/lib/feedback";
 
 /**
  * F021 — first screen after login. The sidebar (AppShell/F030) already wraps this

@@ -102,6 +102,69 @@ export function validateReassignOwnership(
   };
 }
 
+export type ValidateBulkReassignOwnershipInput = {
+  organisationIds: unknown;
+  newOwnerId: unknown;
+  reason: unknown;
+};
+
+export type ValidateBulkReassignOwnershipResult =
+  | {
+      ok: true;
+      data: {
+        organisationIds: string[];
+        newOwnerId: string;
+        reason: string;
+      };
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
+/**
+ * Validates the shape of a bulk assign (F253) request:
+ * at least one client selected, a valid target CAM, and a reason for the handover.
+ */
+export function validateBulkReassignOwnership(
+  input: ValidateBulkReassignOwnershipInput,
+): ValidateBulkReassignOwnershipResult {
+  if (!Array.isArray(input.organisationIds) || input.organisationIds.length === 0) {
+    return { ok: false, error: "Select at least one client to reassign." };
+  }
+
+  const parsedIds: string[] = [];
+  for (const rawId of input.organisationIds) {
+    const parsed = Uuid.safeParse(rawId);
+    if (!parsed.success) {
+      return { ok: false, error: "One or more selected clients could not be found." };
+    }
+    parsedIds.push(parsed.data);
+  }
+
+  const newOwnerId = Uuid.safeParse(input.newOwnerId);
+  if (!newOwnerId.success) {
+    return { ok: false, error: "Choose a CAM to assign." };
+  }
+
+  const reason = typeof input.reason === "string" ? input.reason.trim() : "";
+  if (!reason) {
+    return {
+      ok: false,
+      error: "A reason is required so the handover can be understood later.",
+    };
+  }
+
+  return {
+    ok: true,
+    data: {
+      organisationIds: parsedIds,
+      newOwnerId: newOwnerId.data,
+      reason,
+    },
+  };
+}
+
 /**
  * Maps a Postgres error from claim_organisation onto something safe to show a CAM.
  *

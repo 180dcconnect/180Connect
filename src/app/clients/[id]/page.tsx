@@ -12,12 +12,15 @@ import {
 } from "@/lib/source-tracking";
 import { checkWebsiteReachabilityCached } from "@/lib/website-reachability-cache";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
+import type { NoteRow } from "@/lib/note-history";
 import { SuppressButton } from "./suppress-button";
 import { ComposeButton } from "./compose-button";
 import { BasicInfoPanel } from "./basic-info-panel";
 import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
+import { NotesSection } from "./notes-section";
+import { AddNoteForm } from "./add-note-form";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -40,6 +43,23 @@ type OwnerRow = {
  * F069-081) are still separate open tickets; each will slot in here as its own
  * `<section aria-labelledby>`, same shape as "Record sources" and this one, to
  * keep F067 AC2's "each reachable without excessive scrolling" true as they land.
+ *
+ * F071 (#73) View Notes / F072 (#74) Add Note are one such section: every
+ * `notes` row for this client, from any CAM (F071 AC1), newest first (F071
+ * AC3) — see @/lib/note-history for the ordering/display logic and
+ * notes-section.tsx for the render. AddNoteForm posts to
+ * /api/clients/[id]/notes (F072 AC1-AC3) and calls router.refresh() on success
+ * so the new note appears in the list immediately (F072 AC4) without a plain
+ * `notes` write needing to become a SECURITY DEFINER RPC — see that route's
+ * header comment for why this one doesn't follow docs/audit-log-pattern.md.
+ * F075 Communication Timeline, also named in F072 AC4, is not built anywhere
+ * in this codebase yet; that half of the acceptance criterion cannot be
+ * satisfied until that ticket exists.
+ *
+ * Read is gated on `client:view` like the rest of this page (RLS's
+ * notes_select_active shares read across every active role); adding a note is
+ * gated on `client:edit` (canEdit, already computed below), matching
+ * `app.can_write()` — admin or CAM, not viewer.
  *
  * Started as F251 AC1/AC2's minimal client screen (name + suppression state only)
  * — see src/app/clients/page.tsx for that history. Extended here, not replaced.
@@ -146,6 +166,18 @@ export default async function ClientDetailPage({
 
   if (ownerError) {
     await reportError(ownerError, { operation: "clients.detail_owner", organisationId: id });
+  }
+
+  // F071/F072: every note against this client, whoever wrote it (F071 AC1).
+  // RLS (notes_select_active) shares read across every active role, so this
+  // needs no author filter — same reasoning as the sources query above it.
+  const { data: noteRows, error: notesError } = await supabase
+    .from("notes")
+    .select("id, content, created_at, updated_at, author_id, author:users!notes_author_id_fkey(full_name)")
+    .eq("organisation_id", id);
+
+  if (notesError) {
+    await reportError(notesError, { operation: "clients.detail_notes", organisationId: id });
   }
 
   const canEdit = hasPermission(authorization.actor.role, "client:edit");
@@ -305,6 +337,18 @@ export default async function ClientDetailPage({
               {website.message} Booklet generation may use unreliable or missing website context.
             </p>
           )}
+        </section>
+
+        <section className="mt-6 rounded-xl border border-black/10 p-4" aria-labelledby="notes-heading">
+          <h2 id="notes-heading" className="text-sm font-bold">Notes</h2>
+          <p className="mt-1 text-xs text-foreground/60">
+            Left by any team member — relationship history everyone can see.
+          </p>
+          <NotesSection
+            notes={(noteRows ?? []) as unknown as NoteRow[]}
+            error={Boolean(notesError)}
+          />
+          {canEdit && <AddNoteForm organisationId={client.id} />}
         </section>
 
         <div className="mt-8">

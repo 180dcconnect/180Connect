@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ChevronsUpDown, CircleUserRound, LogOut } from "lucide-react";
+import { ChevronsUpDown, CircleUserRound, LogOut, Settings } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -115,7 +115,12 @@ export function SidebarAccountMenu({
          */}
         <DropdownMenuItem onSelect={() => router.push("/profile")}>
           <CircleUserRound aria-hidden="true" />
-          Account
+          Profile
+        </DropdownMenuItem>
+
+        <DropdownMenuItem onSelect={() => router.push("/settings/account")}>
+          <Settings aria-hidden="true" />
+          Account settings
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />

@@ -81,6 +81,12 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     });
   }
 
+  // Its own trailing section, and ungated: settings are about the person rather
+  // than the work, and every role has an account to maintain (F200).
+  sections.push({
+    items: [{ href: "/settings", label: "Settings", icon: "settings" }],
+  });
+
   let onboarding: SidebarOnboarding | undefined = undefined;
 
   try {

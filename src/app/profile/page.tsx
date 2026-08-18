@@ -21,9 +21,9 @@ export default async function ProfilePage() {
           </div>
           <Link
             className="text-sm font-bold text-brand hover:underline"
-            href="/dashboard"
+            href="/settings/account"
           >
-            Back to dashboard
+            Edit details
           </Link>
         </div>
 
@@ -44,7 +44,11 @@ export default async function ProfilePage() {
 
         <p className="mt-6 text-sm text-foreground/65">
           Role changes are made by an administrator — you cannot edit your own
-          role here.
+          role here. Your display name is edited in{" "}
+          <Link className="font-bold text-brand hover:underline" href="/settings/account">
+            account settings
+          </Link>
+          .
         </p>
       </section>
     </main>

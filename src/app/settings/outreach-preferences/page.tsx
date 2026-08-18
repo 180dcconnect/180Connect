@@ -39,9 +39,9 @@ export default async function OutreachPreferencesPage() {
           </div>
           <Link
             className="text-sm font-bold text-brand hover:underline"
-            href="/dashboard"
+            href="/settings"
           >
-            Back to dashboard
+            All settings
           </Link>
         </div>
 

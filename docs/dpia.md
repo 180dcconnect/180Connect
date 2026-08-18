@@ -164,8 +164,8 @@ The following categories are **prohibited from intentional ingestion into 180Con
 | **Ingestion, enrichment, and prioritisation** | Identifying and evaluating prospective social-sector clients | Article 6(1)(f) Legitimate Interests (Documented in LIA) | N/A (Internal processing) |
 | **Cold B2B Email Outreach** | Initiating contact with prospective social-sector clients regarding consulting services | Article 6(1)(f) Legitimate Interests | PECR Regulation 22: no consent requirement for corporate subscribers; individual subscribers (including sole traders and certain partnerships) require consent or another applicable PECR route. |
 | **Suppression Management** | Enforcing do-not-contact requests and marketing objections | Article 6(1)(c) Legal Obligation & Art. 6(1)(f) | Reg. 22 & 23 PECR (Mandatory opt-out compliance) |
-| **Audit Logging** | Security, traceability, and accountability compliance | Article 6(1)(c) Legal Obligation & Art. 6(1)(f) | N/A |
-| **Internal User Authentication** | Provisioning access to authorised 180DC members | Article 6(1)(b) Contract / Member Agreement | N/A |
+| **Audit Logging** | Security, traceability, and accountability compliance | Article 6(1)(f) Legitimate Interests (Security, accountability, system governance and fraud prevention) | N/A |
+| **Internal User Authentication** | Provisioning access to authorised 180DC members | Article 6(1)(f) Legitimate Interests (Access control, system security and user governance) / Article 6(1)(b) where contractual terms apply | N/A |
 
 *Note on PECR Compliance:* Public availability of an email address does not constitute consent or an unrestricted right to send marketing. Outreach is targeted strictly at corporate bodies (incorporated charities, CICs, limited companies). Contacting unincorporated entities or sole traders requires prior consent or an applicable PECR route.
 
@@ -290,6 +290,7 @@ $$\text{Risk Score} = \text{Likelihood} \times \text{Severity}$$
 | **R10** | **Personal data breach at cloud infrastructure level** | 2 | 5 | **10 (Med)** | Processor security controls, contractual security commitments, encryption at rest/in transit, access controls, daily backups, and incident-response procedures. | 1 | 4 | **4** | Low | `Implemented & verified` ✅ | **PERMITTED** ✅ |
 | **R11** | **Failure to provide Article 14 transparency within the applicable statutory timeframe** | 3 | 3 | **9 (Med)** | Source and collection date logged on all indirect records; an Article 14 privacy notice made publicly accessible and linked from the initial outreach communication, with the organisation's source, processing purpose, lawful basis, relevant rights and other required transparency information disclosed in accordance with the applicable Article 14 requirements. | 1 | 2 | **2** | Low | `Pending notice publication & linking` ⏳ | **BLOCKED** 🛑 |
 | **R12** | **Inaccurate or outdated professional contact information resulting in inappropriate outreach** | 3 | 3 | **9 (Med)** | CAM manual verification before outreach; source and collection date metadata; periodic data refreshes; manual record correction in UI; suppression handling. | 1 | 2 | **2** | Low | `Implemented & verified` ✅ | **PERMITTED** ✅ |
+| **R14** | **Failure to appropriately respond to data subject rights requests (access, rectification, erasure, objection, restriction)** | 3 | 4 | **12 (Med)** | Documented rights-handling procedure; identifiable data source/record mapping; database suppression mechanism; manual UI record correction/deletion workflow; escalation to controller representative; audit logging of rights requests. | 1 | 3 | **3** | Low | `Implemented & verified` ✅ | **PERMITTED** ✅ |
 
 ---
 
@@ -297,24 +298,31 @@ $$\text{Risk Score} = \text{Likelihood} \times \text{Severity}$$
 
 Following the application of the technical controls (F246/F247 filters, database triggers, RLS, suppressions) and organizational controls (human review, statutory disclosures, role governance):
 
-* **Implemented Controls:** All risks related to core data ingestion, data minimisation, manual entry protection, internal access control, suppression enforcement, and MVP reply restrictions (R1, R2, R3, R4, R5, R6, R8, R10, R12) are reduced to **Low Residual Risk (Score 2–4)** with active controls verified.
+* **Implemented Controls:** All risks related to core data ingestion, data minimisation, manual entry protection, internal access control, suppression enforcement, data subject rights, and MVP reply restrictions (R1, R2, R3, R4, R5, R6, R8, R10, R12, R14) are reduced to **Low Residual Risk (Score 2–4)** with active controls verified.
 * **Pending Governance & Pre-Live Controls:** Risks related to international Workspace access (R9), LLM integration (R7), and Article 14 transparency (R11) have low numerical residual scores under the assessment methodology, but remain **deployment-blocking risks** because the required legal, contractual, and operational controls have not yet been implemented or formally verified.
 
 ---
 
 ## 17. Pre-Live Mandatory Governance Actions
 
-To transition all residual risks to fully acceptable status, the following mandatory actions must be completed prior to initiating live client outreach:
+### 17.1 Privacy & Technical Pre-Live Action Gates
+The following technical and governance actions mitigate identified privacy risks and must be completed prior to initiating live client outreach:
 
 | # | Action Item | Risk Mitigated | Responsible Owner | Target Gate |
 | :--- | :--- | :--- | :--- | :--- |
 | **1** | **Execute Global Workspace Data Protection Agreement** | R9 (Australian access) | Project Manager / Leadership | Pre-Live Gate 1 |
 | **2** | **Complete Transfer Risk Assessment (TRA) for Australia** | R9 (International transfer) | Project Manager | Pre-Live Gate 2 |
-| **3** | **Pay ICO Tier 1 Data Protection Fee (£47/£52)** | Regulatory compliance | Project Manager | Pre-Live Gate 3 |
-| **4** | **Publish and Link Article 14 Privacy Notice** | R11 (Transparency & timing) | Project Manager / Engineering | Pre-Live Gate 4 |
-| **5** | **Finalise LLM Provider Selection with Zero-Retention DPA** | R7, R8 (AI processing) | Project Manager / Engineering | Pre-Live Gate 5 |
-| **6** | **Implement Email Reply Screening for Special Category Data** | R8 (Sensitive reply data) | Engineering | Pre-Live Gate 6 |
-| **7** | **Finalise Article 30 Record of Processing Activities (ROPA)** | Accountability | Project Manager | Pre-Live Gate 7 |
+| **3** | **Publish and Link Article 14 Privacy Notice** | R11 (Transparency & timing) | Project Manager / Engineering | Pre-Live Gate 3 |
+| **4** | **Finalise LLM Provider Selection with Zero-Retention DPA** | R7 (AI processing) | Project Manager / Engineering | Pre-Live Gate 4 |
+| **5** | **Implement Email Reply Screening for Special Category Data** | R8 (Future reply processing) | Engineering | Pre-Live Gate 5 |
+| **6** | **Finalise Article 30 Record of Processing Activities (ROPA)** | Accountability | Project Manager | Pre-Live Gate 6 |
+
+### 17.2 Statutory & Regulatory Compliance Prerequisites
+Separate from technical privacy risk mitigations, the controller must satisfy standard statutory requirements:
+
+| Statutory Requirement | Legal Basis / Authority | Obligation Details | Status |
+| :--- | :--- | :--- | :--- |
+| **ICO Data Protection Registration & Fee** | Data (Charges and Information) Regulations 2018 | Complete controller-level Tier 1 registration and pay £47/£52 annual fee for Sheffield CIC. | Completed self-assessment; payment pending registration submission |
 
 ---
 
@@ -340,18 +348,38 @@ These requirements have been incorporated into the pre-live controls and risk re
 
 ## 19. DPIA Outcome & Decision
 
-### 19.1 Assessment Outcome Classification
+### 19.1 Pre-Live Deployment Gate Checklist
+
+180Connect must not commence live client outreach until the following conditions have been evidenced and approved by the authorised data controller representative:
+
+- [ ] Global Workspace governance agreement executed.
+- [ ] Australia transfer assessment completed and approved.
+- [ ] Appropriate transfer mechanism documented and executed where required.
+- [ ] Article 14 privacy notice published and operationally linked to outreach.
+- [ ] PECR corporate-subscriber eligibility controls verified.
+- [ ] Suppression / objection controls tested end-to-end.
+- [ ] Human-in-the-loop send gate tested.
+- [ ] LLM provider formally selected, if enabled.
+- [ ] LLM DPA and transfer assessment completed, if enabled.
+- [ ] LLM reply processing disabled in MVP unless separately approved.
+- [ ] Article 30 ROPA completed.
+- [ ] ICO registration/fee position confirmed and completed.
+- [ ] Final DPIA approved by authorised controller representative.
+
+**Deployment Decision:** **BLOCKED** until all mandatory gates are satisfied.
+
+### 19.2 Assessment Outcome Classification
 * [ ] **Acceptable without conditions**
 * [x] **Acceptable subject to implementation of pre-live conditions (Recommended)**
 * [ ] **Unacceptable / Prior consultation with ICO required**
 
-### 19.2 Formal DPIA Decision
+### 19.3 Formal DPIA Decision
 
 > **DPIA OUTCOME: ACCEPTABLE SUBJECT TO PRE-LIVE CONDITIONS.**  
 > 
 > **The Data Protection Impact Assessment concludes that 180Connect incorporates robust technical and architectural controls (notably F246/F247 automated data exclusions, RLS access boundaries, and permanent database suppressions) that effectively mitigate core privacy risks.**  
 > 
-> **Live client outreach is approved to proceed once the pre-live mandatory governance actions in §17 (Global Workspace agreement execution, Australian TRA, ICO fee payment, Article 14 privacy notice publication, and LLM DPA finalisation) are fully satisfied and approved by the data controller.**
+> **Live client outreach may proceed only after all mandatory pre-live conditions in §17 and §19.1 have been completed, evidenced, and approved by the authorised data controller representative.**
 
 ---
 

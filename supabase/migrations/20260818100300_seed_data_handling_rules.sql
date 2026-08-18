@@ -1,6 +1,6 @@
 -- Migration: seed_data_handling_rules
 -- Story: F246 Public Data Handling Rules (#241) — initial deny-list.
--- Depends on: 20260816220000_create_data_handling_rules
+-- Depends on: 20260818100200_create_data_handling_rules
 --
 -- Seeds the initial set of deny rules from the data handling policy §2
 -- ("What we do not collect"). These can be updated by an admin via the
@@ -25,7 +25,7 @@
 --   Security      | No change. service_role writes; admin reads via RLS.
 --   Documentation | Covered by F246 PR.
 --
--- Reversibility: paired rollback in ../rollback/20260816220100_seed_data_handling_rules.down.sql
+-- Reversibility: paired rollback in ../rollback/20260818100300_seed_data_handling_rules.down.sql
 
 -- Bump version to 1 (the initial rule set)
 update public.data_handling_rule_versions

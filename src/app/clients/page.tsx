@@ -16,9 +16,9 @@ import {
   type OpenSuppression,
 } from "./visible-clients.ts";
 import { BrandSearchBar } from "@/components/brand/search-bar";
-import { ClaimButton } from "./[id]/claim-button";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 import { Group, Rise } from "@/components/dashboard-stage";
+import { OriginButton } from "@/components/ui/origin-button";
 import { SearchRail } from "@/components/search-rail";
 import {
   SOURCE_LABELS,
@@ -282,12 +282,12 @@ export default async function ClientsPage({
                 {isOwnedView ? "My clients" : "Clients"}
               </h1>
               {canClaim && (
-                <Link
+                <OriginButton
                   href="/clients/new"
-                  className="rounded-full bg-brand px-5 py-2 text-sm font-bold text-white hover:bg-brand-hover"
+                  size="md"
                 >
                   Add client manually
-                </Link>
+                </OriginButton>
               )}
             </div>
             <p className="mt-3 text-sm leading-[1.7] text-foreground/65">

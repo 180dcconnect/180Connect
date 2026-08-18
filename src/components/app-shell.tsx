@@ -82,50 +82,63 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
 
   let onboarding: SidebarOnboarding | undefined = undefined;
 
-  if (actor.role === "cam") {
-    try {
-      const supabase = await createClient();
-      const [profile, completedSteps] = await Promise.all([
-        supabase
-          .from("users")
-          .select("role, invite_accepted_at, onboarding_completed_at, onboarding_dismissed_at")
-          .eq("id", actor.id)
-          .maybeSingle(),
-        supabase.from("user_onboarding_steps").select("step_key"),
-      ]);
+  try {
+    const supabase = await createClient();
+    const [profile, completedSteps] = await Promise.all([
+      supabase
+        .from("users")
+        .select("role, invite_accepted_at, onboarding_completed_at, onboarding_dismissed_at")
+        .eq("id", actor.id)
+        .maybeSingle(),
+      supabase.from("user_onboarding_steps").select("step_key"),
+    ]);
 
-      const isEligible = shouldShowGuide(
-        profile.data
-          ? ({
-              role: profile.data.role,
-              inviteAcceptedAt: profile.data.invite_accepted_at,
-              onboardingCompletedAt: profile.data.onboarding_completed_at,
-              onboardingDismissedAt: profile.data.onboarding_dismissed_at,
-            } satisfies OnboardingUser)
-          : null,
-      );
+    const isEligible = shouldShowGuide(
+      profile.data
+        ? ({
+            role: profile.data.role,
+            inviteAcceptedAt: profile.data.invite_accepted_at,
+            onboardingCompletedAt: profile.data.onboarding_completed_at,
+            onboardingDismissedAt: profile.data.onboarding_dismissed_at,
+          } satisfies OnboardingUser)
+        : null,
+    );
 
-      const doneKeys = new Set(
-        (completedSteps.data ?? []).map((row: { step_key: string }) => row.step_key),
-      );
+    const doneKeys = new Set(
+      (completedSteps.data ?? []).map((row: { step_key: string }) => row.step_key),
+    );
 
-      const steps = ONBOARDING_STEPS.map((s) => ({
-        key: s.key,
-        title: s.title,
-        href: s.href,
-        done: doneKeys.has(s.key),
-      }));
+    const steps = ONBOARDING_STEPS.map((s) => ({
+      key: s.key,
+      title: s.title,
+      href: s.href,
+      done: doneKeys.has(s.key),
+    }));
 
-      const completedCount = steps.filter((s) => s.done).length;
+    const completedCount = steps.filter((s) => s.done).length;
 
+    // Show whenever eligible, or always in development so you can see and test it live
+    const show = isEligible || process.env.NODE_ENV !== "production";
+
+    onboarding = {
+      steps,
+      completedCount,
+      totalCount: steps.length,
+      show,
+    };
+  } catch {
+    if (process.env.NODE_ENV !== "production") {
       onboarding = {
-        steps,
-        completedCount,
-        totalCount: steps.length,
-        show: isEligible,
+        steps: ONBOARDING_STEPS.map((s) => ({
+          key: s.key,
+          title: s.title,
+          href: s.href,
+          done: false,
+        })),
+        completedCount: 0,
+        totalCount: ONBOARDING_STEPS.length,
+        show: true,
       };
-    } catch {
-      // Ignore onboarding fetch errors for sidebar
     }
   }
 

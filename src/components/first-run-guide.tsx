@@ -2,8 +2,8 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { motion, type Transition } from "motion/react";
+import { OriginButton } from "@/components/ui/origin-button";
 import { dismissGuideAction, finishGuideAction } from "@/lib/onboarding-actions";
 
 const getPathAnimate = (isChecked: boolean) => ({
@@ -172,12 +172,13 @@ export function FirstRunGuide({
               <p className="mt-1.5 text-sm text-foreground/65">{step.description}</p>
             </div>
             {/* AC3 — every step leads to the screen that does the thing. */}
-            <Link
+            <OriginButton
               href={step.href}
-              className="shrink-0 rounded-full border border-brand/30 px-3 py-1 text-xs font-bold text-brand transition-colors hover:bg-brand/5"
+              size="sm"
+              className="shrink-0"
             >
               {step.cta}
-            </Link>
+            </OriginButton>
           </li>
         ))}
       </ol>
@@ -190,14 +191,14 @@ export function FirstRunGuide({
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
         {allDone ? (
-          <button
-            type="button"
-            className="rounded-full bg-brand px-5 py-2.5 font-bold text-white disabled:opacity-50"
+          <OriginButton
+            size="md"
+            loading={pending}
             disabled={pending}
             onClick={() => run(finishGuideAction)}
           >
             {pending ? "Finishing…" : "Finish setup"}
-          </button>
+          </OriginButton>
         ) : confirmingDismiss ? (
           <>
             {/* AC5 — dismissal is permanent, so it is stated before it happens rather
@@ -206,33 +207,34 @@ export function FirstRunGuide({
               Dismiss the setup guide? It won&apos;t come back, but you can still set your
               preferences from Settings at any time.
             </p>
-            <button
-              type="button"
-              className="rounded-full bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+            <OriginButton
+              size="sm"
+              variant="destructive"
+              loading={pending}
               disabled={pending}
               onClick={() => run(dismissGuideAction)}
             >
               {pending ? "Dismissing…" : "Dismiss"}
-            </button>
-            <button
-              type="button"
-              className="text-sm font-bold text-foreground/65 hover:underline"
+            </OriginButton>
+            <OriginButton
+              size="sm"
+              variant="ghost"
               disabled={pending}
               onClick={() => setConfirmingDismiss(false)}
             >
               Keep it
-            </button>
+            </OriginButton>
           </>
         ) : (
           /* A named control rather than a bare ✕: AC5 wants dismissal to be
              deliberate and findable, and an icon alone is neither. */
-          <button
-            type="button"
-            className="text-sm font-bold text-foreground/65 hover:underline"
+          <OriginButton
+            size="xs"
+            variant="ghost"
             onClick={() => setConfirmingDismiss(true)}
           >
             Dismiss
-          </button>
+          </OriginButton>
         )}
       </div>
     </section>

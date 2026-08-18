@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { motion, type Transition } from "motion/react";
-import { Sun, Moon, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import {
   Tooltip,
   TooltipTrigger,
@@ -56,7 +56,7 @@ export function SidebarChecklist({
   collapsed?: boolean;
   forceTheme?: "light" | "dark";
 }) {
-  const [theme, setTheme] = React.useState<"light" | "dark">(forceTheme ?? "dark");
+  const [theme, setTheme] = React.useState<"light" | "dark">(forceTheme ?? "light");
 
   React.useEffect(() => {
     if (forceTheme) return;
@@ -146,7 +146,7 @@ export function SidebarChecklist({
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
           <h3
-            className={`text-xs font-bold tracking-tight ${
+            className={`text-xs font-semibold font-body leading-[1.5] tracking-[-0.03em] ${
               isDark ? "text-white" : "text-foreground"
             }`}
           >
@@ -162,11 +162,6 @@ export function SidebarChecklist({
                 : "text-foreground/40 hover:bg-black/5 hover:text-foreground"
             }`}
           >
-            {isDark ? (
-              <Sun className="h-3 w-3" />
-            ) : (
-              <Moon className="h-3 w-3" />
-            )}
             <span className="sr-only">Toggle theme</span>
           </button>
         </div>

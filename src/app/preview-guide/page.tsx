@@ -63,6 +63,12 @@ export default function PreviewGuidePage() {
           </div>
           <div className="flex items-center gap-3">
             <Link
+              href="/preview-buttons"
+              className="rounded-full bg-black/5 px-4 py-2 text-xs font-bold text-foreground transition-colors hover:bg-black/10"
+            >
+              OriginButton Showcase ✨
+            </Link>
+            <Link
               href="/dashboard?preview_guide=0"
               className="rounded-full bg-brand px-4 py-2 text-xs font-bold text-white shadow-xs transition-colors hover:bg-brand-hover"
             >

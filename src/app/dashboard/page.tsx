@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { getCurrentActor } from "@/lib/auth/actor";
@@ -19,6 +18,7 @@ import ProgressMetricCard from "@/components/ui/progress-metric-card";
 import { AttentionList } from "@/components/attention-list";
 import { TeamActivityFeed } from "@/components/team-activity-feed";
 import { FirstRunGuide } from "@/components/first-run-guide";
+import { OriginButton } from "@/components/ui/origin-button";
 import { OnboardingPreviewBar } from "@/components/onboarding-preview-bar";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import {
@@ -232,12 +232,13 @@ export default async function DashboardPage({
             
           </div>
 
-          {/* The one accent on the screen: a single pill, brand green, pointing at
+          {/* The one accent on the screen: a single pill, glass backdrop + lime hover fill, pointing at
               the screen where the work actually happens. */}
           {canViewClients && (
-            <Link
+            <OriginButton
               href="/clients"
-              className="group inline-flex shrink-0 items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-brand-hover focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand"
+              size="md"
+              className="shrink-0"
             >
               View all clients
               <span
@@ -246,7 +247,7 @@ export default async function DashboardPage({
               >
                 →
               </span>
-            </Link>
+            </OriginButton>
           )}
         </Rise>
 

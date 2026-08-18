@@ -275,6 +275,7 @@ export function Sidebar({
             completedCount={onboarding.completedCount}
             totalCount={onboarding.totalCount}
             collapsed={collapsed}
+            forceTheme="light"
           />
         </div>
       )}

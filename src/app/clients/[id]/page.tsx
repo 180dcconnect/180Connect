@@ -22,6 +22,7 @@ import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
 import { Pill, SectionCard } from "./section-card";
+import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -180,6 +181,15 @@ export default async function ClientDetailPage({
   const statusLabel = formatOutreachStatus(client.outreach_status);
   const suppressed = latest?.status === "active";
   const suppressionPending = latest?.status === "pending";
+
+  // Deliberately not `ownerName`: that falls back to "A former team member" for a
+  // deleted owner, which the warning would read back as a person to go and talk to.
+  const ownershipConflict = checkOwnershipConflict({
+    ownerId,
+    ownerName: ownerRow?.owner?.full_name ?? null,
+    actorId: authorization.actor.id,
+    actorRole: authorization.actor.role,
+  });
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
@@ -436,11 +446,16 @@ export default async function ClientDetailPage({
             {hasPermission(authorization.actor.role, "client:contact") && (
               <Rise>
                 <SectionCard headingId="outreach-heading" title="Outreach">
+                  {/* The conflict is shown by ComposeButton itself, so the one
+                      message survives a click and the re-check behind it. */}
                   <div className="mt-4">
                     <ComposeButton
                       blocked={suppressed}
                       organisationId={client.id}
                       suppressionReason={suppressed ? latest.reason : undefined}
+                      ownershipWarning={
+                        ownershipConflict.hasConflict ? ownershipConflict.warning : undefined
+                      }
                     />
                   </div>
                 </SectionCard>

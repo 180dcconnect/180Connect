@@ -34,3 +34,10 @@ test("buildStageOnePrompt applies each selected email length", () => {
   assert.match(buildStageOnePrompt(context, { length: "standard" }).system, /120 and 180 words/);
   assert.match(buildStageOnePrompt(context, { length: "detailed" }).system, /190 and 260 words/);
 });
+
+test("buildStageOnePrompt applies each selected email voice", () => {
+  const context = { organisationName: "Example", organisationType: "charity" };
+  assert.match(buildStageOnePrompt(context, { voice: "180dc" }).system, /collective voice/);
+  assert.match(buildStageOnePrompt(context, { voice: "consultative" }).system, /curious, thoughtful/);
+  assert.match(buildStageOnePrompt(context, { voice: "plain_language" }).system, /free of consultancy jargon/);
+});

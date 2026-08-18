@@ -150,7 +150,7 @@ No personal data is sold or leased. Data is transferred only to the operational 
 | **Resend Inc.** | Auth & system emails (invites, password resets) | In use | US | US | Resend DPA incorporating EU SCCs and UK International Data Transfer Addendum | Yes |
 | **Vercel Inc.** | Application hosting & edge routing | In use | US | US / Global | Vercel DPA incorporating EU SCCs and UK Addendum | Yes |
 | **Google LLC** (Workspace / Gmail API) | Outreach email sending & thread sync | Planned / pre-live | US / Global | US / Global | Google Workspace Cloud Data Processing Addendum (SCCs + UK Addendum) | Pending tenant agreement |
-| **180 Degrees Consulting** (Global) | Administrator of shared `180dc.org` Workspace tenant | In use | Global (Australia/US) | Global | Governance arrangement & role assessment required (§11) | In progress |
+| **180 Degrees Consulting Limited** | Shared Google Workspace administration and technical/security support | In use | Global | Australia / UK | Access to Sheffield mailbox limited to administration, security, support, and authorised purposes; requires governance agreement + IDTA/TRA | In progress (governance draft in review: [`docs/global-workspace-data-protection-agreement.md`](global-workspace-data-protection-agreement.md)) |
 | **PostHog Inc.** | Product analytics | Planned | EU (Frankfurt) | US / Global support | UK Adequacy (EEA); PostHog DPA | Planned |
 | **Google Cloud** (Gemini) / LLM Provider | Drafting assistance & enrichment | In progress | To be pinned to EU/UK region | EU/UK | Cloud DPA with zero-retention / no-model-training terms required | In progress |
 
@@ -161,7 +161,7 @@ No personal data is sold or leased. Data is transferred only to the operational 
 4. **Incoming Correspondence Screening:** Incoming client correspondence (e.g. replies containing unprompted personal health disclosures or personal circumstances) is not automatically safe and must not be submitted to third-party LLMs without prior redaction.
 
 ### 180DC Global Shared Infrastructure
-The `180dc.org` Google Workspace tenant is administered by 180 Degrees Consulting globally. A formal role assessment will establish whether the arrangement is an Article 28 processor contract, an Article 26 joint-controller agreement, or a controller-to-controller transfer, with appropriate international transfer safeguards put in place prior to live outreach.
+The `180dc.org` Google Workspace tenant is administered by 180 Degrees Consulting globally. The governance agreement at [`docs/global-workspace-data-protection-agreement.md`](global-workspace-data-protection-agreement.md) establishes Sheffield as independent controller for 180Connect outreach, restricts Global's access to infrastructure administration, and mandates the UK IDTA / TRA for Australian-based administrator access.
 
 ---
 
@@ -206,7 +206,7 @@ This policy is reviewed every six months, or whenever a new data source, process
 | # | Item | Why it blocks | Owner |
 | :--- | :--- | :--- | :--- |
 | **1** | **Complete ICO data protection fee registration and payment** | The CIC's ICO self-assessment completed on **18 August 2026** determined that 180 Degrees Consulting Sheffield CIC is required to pay the **Tier 1 annual data protection fee of £52 (£47 by Direct Debit)**. Registration and payment must be completed as required by the ICO. The obligation relates to the CIC's overall processing of personal data, including processing carried out through 180Connect, rather than to 180Connect as a standalone product. | Project Manager |
-| **2** | **Execute written data protection arrangement with 180DC Global** | Formalise the controller/processor or joint-controller role assessment and execute an agreement covering administration of the shared `180dc.org` Workspace tenant. | Project Manager / Leadership |
+| **2** | **Review and execute Global Workspace Data Protection Agreement** | Governance draft ([`docs/global-workspace-data-protection-agreement.md`](global-workspace-data-protection-agreement.md)) is prepared for 180DC Global review, defining Sheffield as independent controller, limiting Global access to administration/support, and incorporating the UK IDTA and TRA for Australian-based access. | Project Manager / Leadership |
 | **3** | **Complete DPIA and LIA** | Both assessments are mandatory governance gates before live outreach commences (§6). | Project Manager |
 | **4** | **Finalise LLM provider selection and DPA** | Requires confirmation of processing region (UK/EU pinned), zero-data-retention for training, and incoming reply redaction safeguards. | Project Manager |
 | **5** | **Verify sending domain for auth and platform emails** | Ensure domain verification is complete on Resend for `180dc.org` / subdomains. | Engineering |

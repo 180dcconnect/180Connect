@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type Dispatch, type SetStateAction } from "react";
+import Link from "next/link";
 import {
   Select,
   SelectContent,
@@ -24,6 +25,13 @@ export type TeamUser = {
   /** Last time this user was seen on any signed-in page — not last login. Null if never. */
   last_seen_at: string | null;
   owned_client_count: number;
+  /**
+   * F167. The subset of `owned_client_count` that /clients actually lists —
+   * actively-suppressed clients are hidden there (F051 AC4). This is what the
+   * Clients column links through to; `owned_client_count` stays the number the
+   * reassignment gate reasons about, which has to include the suppressed ones.
+   */
+  listed_client_count: number;
 };
 
 type AccessState = "active" | "suspended" | "deactivated";
@@ -31,6 +39,20 @@ type AccessState = "active" | "suspended" | "deactivated";
 function accessState(user: TeamUser): AccessState {
   if (user.is_active) return "active";
   return user.deactivated_at ? "deactivated" : "suspended";
+}
+
+/**
+ * What the Clients cell promises before it is clicked. Suppressed clients are
+ * owned but not listed, so they are named rather than silently missing from the
+ * list the admin lands on.
+ */
+function clientsLinkTitle(user: TeamUser): string {
+  const listed = user.listed_client_count;
+  const hidden = user.owned_client_count - listed;
+  const base = `View ${listed} client${listed === 1 ? "" : "s"} owned by ${displayName(user)}`;
+  return hidden > 0
+    ? `${base} (${hidden} more suppressed, not listed)`
+    : base;
 }
 
 const ACCESS_LABEL: Record<AccessState, string> = {
@@ -133,7 +155,7 @@ export function UserManagementTable({
       setUsers((current) =>
         current.map((user) =>
           user.id === userId
-            ? { ...user, ...result.user, owned_client_count: 0 }
+            ? { ...user, ...result.user, owned_client_count: 0, listed_client_count: 0 }
             : user,
         ),
       );
@@ -233,7 +255,21 @@ export function UserManagementTable({
                       </SelectContent>
                     </Select>
                   </td>
-                  <td className="p-3">{user.owned_client_count}</td>
+                  <td className="p-3">
+                    {user.listed_client_count > 0 ? (
+                      <Link
+                        href={`/clients?owner=${user.id}`}
+                        className="font-bold text-brand hover:underline"
+                        title={clientsLinkTitle(user)}
+                      >
+                        {user.listed_client_count}
+                      </Link>
+                    ) : (
+                      <span className="text-foreground/40" title={clientsLinkTitle(user)}>
+                        {user.listed_client_count}
+                      </span>
+                    )}
+                  </td>
                   <td className="p-3 text-foreground/60">{lastActiveLabel(user.last_seen_at)}</td>
                   <td className="p-3">
                     <span

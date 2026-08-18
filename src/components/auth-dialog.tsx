@@ -13,6 +13,11 @@ import {
   DialogPortal,
   DialogTitle,
 } from "@/components/animate-ui/primitives/radix/dialog";
+import {
+  Tabs,
+  TabsContent,
+  TabsContents,
+} from "@/components/animate-ui/primitives/animate/tabs";
 
 import { bannerClass, fieldVars } from "@/components/brand/fields";
 import { GROUND, INK, INK_RAISED } from "@/components/brand/tokens";
@@ -81,9 +86,18 @@ const COPY = {
   },
   forgot: {
     title: "Forgot Password?",
-    body: "Enter your email and we'll send instructions if an account is available.",
+    body: "Enter your email and we\u2019ll send instructions if an account is available.",
   },
 } as const;
+
+/** Spring used by the sliding panels — matches the animate-ui tabs default. */
+const PANEL_SPRING = {
+  type: "spring" as const,
+  stiffness: 300,
+  damping: 30,
+  bounce: 0,
+  restDelta: 0.01,
+};
 
 /**
  * Signing in and resetting a password both happen here, over whichever public
@@ -117,14 +131,16 @@ export function AuthDialog({
   // the panel cannot flash the wrong copy for a frame.
   const [shown, setShown] = useState<AuthView>("signin");
   if (view && view !== shown) setShown(view);
-  const copy = COPY[shown];
 
   // Radix runs its autofocus once, when the dialog opens. Switching panels
   // replaces the form underneath it, so the field has to be claimed again.
   useEffect(() => {
     if (!view) return;
-    document.getElementById("email")?.focus();
-  }, [view]);
+    // Small delay lets the slide animation start before we steal focus,
+    // which prevents the browser from fighting the animated scroll position.
+    const id = setTimeout(() => document.getElementById("email")?.focus(), 120);
+    return () => clearTimeout(id);
+  }, [view, shown]);
 
   return (
     <Dialog open={view !== null} onOpenChange={onOpenChange}>
@@ -172,42 +188,74 @@ export function AuthDialog({
             </DialogClose>
           </AnimateIcon>
 
-          <DialogTitle
-            className="font-body text-[clamp(1.75rem,4vw,2.25rem)] font-black leading-[1.05] tracking-[-0.03em]"
-            style={{ color: t.heading }}
-          >
-            {copy.title}
-          </DialogTitle>
-
-          <DialogDescription
-            className={`mt-2 font-body text-sm leading-[1.65] ${t.body}`}
-          >
-            {copy.body}
-          </DialogDescription>
-
-          {notice && shown === "signin" && (
-            <div
-              role="status"
-              className={`mt-5 ${bannerClass(
-                tone,
-                notice.tone === "success" ? "success" : "pending",
-              )}`}
-            >
-              {notice.message}
-            </div>
-          )}
-
           {/*
-            No social sign-in and no sign-up link. Accounts are created by an
-            admin (PRD §4.2 prohibits public self-sign-up), so Google/Apple and a
-            "Sign up" route would be affordances for something the platform does
-            not do.
+            Animate-ui Tabs drives both the header copy and the form body. No
+            visible TabsList — the triggers are the "Forgot password?" and
+            "Back to log in" links already inside the forms. The Tabs component
+            just orchestrates the sliding + blur animation.
           */}
-          {shown === "signin" ? (
-            <LoginForm tone={tone} onForgotPassword={() => onShow("forgot")} />
-          ) : (
-            <ForgotPasswordForm tone={tone} onBack={() => onShow("signin")} />
-          )}
+          <Tabs
+            value={shown}
+            onValueChange={(v) => onShow(v as AuthView)}
+          >
+            {/* ── Animated heading ── */}
+            <TabsContents transition={PANEL_SPRING}>
+              <TabsContent value="signin">
+                <DialogTitle
+                  className="font-body text-[clamp(1.75rem,4vw,2.25rem)] font-black leading-[1.05] tracking-[-0.03em]"
+                  style={{ color: t.heading }}
+                >
+                  {COPY.signin.title}
+                </DialogTitle>
+                <DialogDescription
+                  className={`mt-2 font-body text-sm leading-[1.65] ${t.body}`}
+                >
+                  {COPY.signin.body}
+                </DialogDescription>
+                {notice && (
+                  <div
+                    role="status"
+                    className={`mt-5 ${bannerClass(
+                      tone,
+                      notice.tone === "success" ? "success" : "pending",
+                    )}`}
+                  >
+                    {notice.message}
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="forgot">
+                <DialogTitle
+                  className="font-body text-[clamp(1.75rem,4vw,2.25rem)] font-black leading-[1.05] tracking-[-0.03em]"
+                  style={{ color: t.heading }}
+                >
+                  {COPY.forgot.title}
+                </DialogTitle>
+                <DialogDescription
+                  className={`mt-2 font-body text-sm leading-[1.65] ${t.body}`}
+                >
+                  {COPY.forgot.body}
+                </DialogDescription>
+              </TabsContent>
+            </TabsContents>
+
+            {/* ── Animated form body ── */}
+            {/*
+              No social sign-in and no sign-up link. Accounts are created by an
+              admin (PRD §4.2 prohibits public self-sign-up), so Google/Apple and a
+              "Sign up" route would be affordances for something the platform does
+              not do.
+            */}
+            <TabsContents transition={PANEL_SPRING}>
+              <TabsContent value="signin">
+                <LoginForm tone={tone} onForgotPassword={() => onShow("forgot")} />
+              </TabsContent>
+              <TabsContent value="forgot">
+                <ForgotPasswordForm tone={tone} onBack={() => onShow("signin")} />
+              </TabsContent>
+            </TabsContents>
+          </Tabs>
         </DialogContent>
       </DialogPortal>
     </Dialog>

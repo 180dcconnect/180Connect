@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
@@ -34,12 +35,22 @@ export default async function AccessibilitySettingsPage() {
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="mx-auto w-full max-w-2xl space-y-10">
         <Rise>
-          <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
-            Accessibility Settings
-          </h1>
-          <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
-            Configure text size, contrast, line spacing, and motion across 180Connect.
-          </p>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
+                Accessibility Settings
+              </h1>
+              <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
+                Configure text size, contrast, line spacing, and motion across 180Connect.
+              </p>
+            </div>
+            <Link
+              className="text-sm font-bold text-brand hover:underline shrink-0"
+              href="/dashboard"
+            >
+              Back to dashboard
+            </Link>
+          </div>
         </Rise>
 
         <Rise>

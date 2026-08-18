@@ -437,7 +437,11 @@ export default async function ClientDetailPage({
               <Rise>
                 <SectionCard headingId="outreach-heading" title="Outreach">
                   <div className="mt-4">
-                    <ComposeButton blocked={suppressed} />
+                    <ComposeButton
+                      blocked={suppressed}
+                      organisationId={client.id}
+                      suppressionReason={suppressed ? latest.reason : undefined}
+                    />
                   </div>
                 </SectionCard>
               </Rise>

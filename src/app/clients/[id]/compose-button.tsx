@@ -4,18 +4,47 @@ import { useState } from "react";
 import { OriginButton } from "@/components/ui/origin-button";
 
 /**
- * F050 (#52) placeholder send action — see the comment on ../page.tsx for why this
- * exists ahead of the real F094/F100 outreach UI. Two states, no network call:
- *
- * - blocked: a real, non-dismissable disabled state. The "why" is the Do Not
- *   Contact banner already rendered above this component on the page — this button
- *   doesn't repeat it, just refuses to be clicked.
- * - not blocked: clickable, but clicking only reveals a message saying so. Nothing
- *   is sent, because nothing can be — there is no outreach_messages insert here at
- *   all, real or otherwise.
+ * F249's visible preflight while F123's provider send path is pending. Every click
+ * re-reads suppression state; a page-open snapshot is not trusted. The future send
+ * action must repeat the server check immediately before delivery.
  */
-export function ComposeButton({ blocked }: { blocked: boolean }) {
+export function ComposeButton({
+  blocked,
+  organisationId,
+  suppressionReason,
+}: {
+  blocked: boolean;
+  organisationId: string;
+  suppressionReason?: string;
+}) {
   const [clicked, setClicked] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [warning, setWarning] = useState<string | null>(
+    blocked
+      ? `This client is suppressed. Outreach is blocked. Reason: ${suppressionReason ?? "No reason was recorded."}`
+      : null,
+  );
+
+  async function checkBeforeCompose() {
+    setChecking(true);
+    setClicked(false);
+    setWarning(null);
+    try {
+      const response = await fetch(`/api/clients/${organisationId}/outreach-preflight`, {
+        method: "POST",
+      });
+      const body = await response.json();
+      if (!response.ok || !body.allowed) {
+        setWarning(body.error ?? "Suppression status could not be checked. Nothing was sent.");
+        return;
+      }
+      setClicked(true);
+    } catch {
+      setWarning("Suppression status could not be checked. Nothing was sent. Please try again.");
+    } finally {
+      setChecking(false);
+    }
+  }
 
   if (blocked) {
     return (
@@ -29,8 +58,8 @@ export function ComposeButton({ blocked }: { blocked: boolean }) {
         >
           Compose email
         </OriginButton>
-        <p className="mt-2.5 text-[13px] leading-[1.6] text-foreground/45">
-          Blocked — see the Do Not Contact notice above.
+        <p className="mt-2.5 text-[13px] font-bold leading-[1.6] text-red-800" role="alert">
+          {warning}
         </p>
       </div>
     );
@@ -41,16 +70,21 @@ export function ComposeButton({ blocked }: { blocked: boolean }) {
       <OriginButton
         variant="outline"
         size="sm"
-        onClick={() => setClicked(true)}
+        disabled={checking}
+        onClick={checkBeforeCompose}
         type="button"
       >
-        Compose email
+        {checking ? "Checking suppression…" : "Compose email"}
       </OriginButton>
+      {warning ? (
+        <p aria-live="assertive" className="mt-2.5 text-[13px] font-bold leading-[1.6] text-red-800" role="alert">
+          {warning}
+        </p>
+      ) : null}
       {clicked ? (
         <p aria-live="polite" className="mt-2.5 text-[13px] leading-[1.6] text-foreground/45">
-          Email generation isn&apos;t built yet (F094, F100) — this button is a
-          placeholder so Do Not Contact protection (F050) can be demonstrated ahead
-          of the real send flow.
+          Suppression check passed. Email generation isn&apos;t built yet (F094, F100),
+          so nothing was sent.
         </p>
       ) : null}
     </div>

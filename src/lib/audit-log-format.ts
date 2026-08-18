@@ -140,6 +140,12 @@ export const AUDIT_ACTIONS: Record<string, ActionSpec> = {
     tone: "positive",
     icon: "suppression",
   },
+  suppression_lifted: {
+    label: "Suppression lifted",
+    verb: "lifted the suppression of",
+    tone: "positive",
+    icon: "suppression",
+  },
 
   organisation_status_flagged: { label: "Flag raised", verb: "flagged", tone: "caution", icon: "flag" },
   organisation_status_flag_acknowledged: {

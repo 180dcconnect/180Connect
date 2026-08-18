@@ -168,6 +168,20 @@ describe("formatTeamActivity (F029)", () => {
       approved.sentence,
       "Admin User approved suppression of Amnesty International",
     );
+
+    const lifted = formatTeamActivity(
+      row({
+        actor_name: "Admin User",
+        action: "suppression_lifted",
+        target_name: "Amnesty International",
+      }),
+      now,
+    );
+    assert.equal(
+      lifted.sentence,
+      "Admin User lifted suppression of Amnesty International",
+    );
+    assert.equal(lifted.actionLabel, "Suppression");
   });
 
   it("links to the client profile when target is an organisation", () => {

@@ -2375,13 +2375,15 @@ declare
   v_status      public.suppression_status;
   v_decided_by  uuid;
   v_requested_by uuid;
+  v_reason      text;
   v_count       bigint;
   v_can_contact boolean;
 begin
   if not tests.tables_exist('organisations', 'users', 'audit_log', 'suppressions')
      or to_regprocedure('public.request_suppression(uuid, text)') is null
-     or to_regprocedure('public.decide_suppression_request(uuid, boolean, text)') is null then
-    return next skip(23, 'suppressions table or RPCs not yet migrated');
+     or to_regprocedure('public.decide_suppression_request(uuid, boolean, text)') is null
+     or to_regprocedure('public.lift_suppression(uuid, text)') is null then
+    return next skip(32, 'suppressions table or RPCs not yet migrated');
     return;
   end if;
 
@@ -2544,6 +2546,58 @@ begin
     'an admin''s own request lands active immediately, skipping pending');
   return next is(v_requested_by, v_admin, 'requested_by is the admin');
   return next is(v_decided_by, v_admin, 'decided_by is the same admin — self-approved');
+
+  -- F185 Remove Suppression (#181)
+  -- Non-admin cannot call lift_suppression
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.lift_suppression(%L, ''cam trying to unsuppress'')', v_req_id)),
+    '42501',
+    'CAM cannot call lift_suppression'
+  );
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.lift_suppression(%L, ''viewer trying to unsuppress'')', v_req_id)),
+    '42501',
+    'viewer cannot call lift_suppression'
+  );
+
+  -- Blank reason is rejected
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.lift_suppression(%L, ''   '')', v_req_id)),
+    '23514',
+    'blank reason for lifting suppression is rejected'
+  );
+
+  -- Admin lifts the active suppression with a valid reason
+  perform tests.login_as(v_admin);
+  perform public.lift_suppression(v_req_id, 'Mistakenly flagged by CAM, re-contact approved');
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status, decided_by, decision_note into v_status, v_decided_by, v_reason
+    from public.suppressions where id = v_req_id;
+  return next is(v_status, 'lifted'::public.suppression_status,
+    'lifting suppression moves status to lifted');
+  return next is(v_decided_by, v_admin, 'decided_by is updated to the lifting admin');
+  return next is(v_reason, 'Mistakenly flagged by CAM, re-contact approved',
+    'decision_note records the mandatory lift reason');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'suppression_lifted' and target_id = v_org_unowned;
+  return next is(v_count, 1::bigint, 'lifting writes one suppression_lifted audit row');
+
+  select app.organisation_is_suppressed(v_org_unowned) into v_can_contact;
+  return next is(v_can_contact, false,
+    'organisation is no longer considered suppressed after lifting');
+
+  perform tests.login_as(v_admin);
+  select app.can_contact_organisation(v_org_unowned) into v_can_contact;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_can_contact, true,
+    'lifting suppression re-enables outreach via app.can_contact_organisation()');
 end;
 $$;
 

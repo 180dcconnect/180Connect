@@ -2592,7 +2592,10 @@ begin
   return next is(v_can_contact, false,
     'organisation is no longer considered suppressed after lifting');
 
+  perform tests.login_as(v_admin);
   select app.can_contact_organisation(v_org_unowned) into v_can_contact;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
   return next is(v_can_contact, true,
     'lifting suppression re-enables outreach via app.can_contact_organisation()');
 end;

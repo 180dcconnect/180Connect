@@ -22,6 +22,7 @@ import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
 import { Pill, SectionCard } from "./section-card";
+import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -180,6 +181,13 @@ export default async function ClientDetailPage({
   const statusLabel = formatOutreachStatus(client.outreach_status);
   const suppressed = latest?.status === "active";
   const suppressionPending = latest?.status === "pending";
+
+  const ownershipConflict = checkOwnershipConflict({
+    ownerId,
+    ownerName,
+    actorId: authorization.actor.id,
+    actorRole: authorization.actor.role,
+  });
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
@@ -391,10 +399,22 @@ export default async function ClientDetailPage({
             <Rise>
               <SectionCard headingId="ownership-heading" title="Ownership">
                 {ownerId ? (
-                  <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
-                    Owned by <span className="font-bold text-foreground/85">{ownerName}</span>
-                    {ownerId === authorization.actor.id ? " (you)" : ""}.
-                  </p>
+                  <div className="mt-3 space-y-2">
+                    <p className="text-sm leading-[1.7] text-foreground/65">
+                      Owned by <span className="font-bold text-foreground/85">{ownerName}</span>
+                      {ownerId === authorization.actor.id ? " (you)" : ""}.
+                    </p>
+                    {ownershipConflict.hasConflict && (
+                      <p
+                        role="alert"
+                        className="rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-3.5 py-3 text-[13px] font-bold leading-[1.6] text-amber-800"
+                      >
+                        Ownership notice: This client is assigned to {ownershipConflict.ownerName}. To
+                        prevent duplicate outreach, please coordinate with them before contacting this
+                        charity.
+                      </p>
+                    )}
+                  </div>
                 ) : canEdit ? (
                   <div className="mt-3 space-y-3">
                     <p className="text-sm leading-[1.7] text-foreground/55">
@@ -436,11 +456,20 @@ export default async function ClientDetailPage({
             {hasPermission(authorization.actor.role, "client:contact") && (
               <Rise>
                 <SectionCard headingId="outreach-heading" title="Outreach">
+                  {ownershipConflict.hasConflict && (
+                    <p
+                      role="alert"
+                      className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-3.5 py-3 text-[13px] font-bold leading-[1.6] text-amber-800"
+                    >
+                      {ownershipConflict.warning}
+                    </p>
+                  )}
                   <div className="mt-4">
                     <ComposeButton
                       blocked={suppressed}
                       organisationId={client.id}
                       suppressionReason={suppressed ? latest.reason : undefined}
+                      ownershipWarning={ownershipConflict.hasConflict ? ownershipConflict.warning : undefined}
                     />
                   </div>
                 </SectionCard>

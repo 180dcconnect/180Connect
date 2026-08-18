@@ -8,6 +8,7 @@ import {
   suppressionBlockedMessage,
   type ActiveSuppression,
 } from "@/lib/outreach/suppression-check";
+import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import { createClient } from "@/lib/supabase/server";
 
 function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
@@ -18,7 +19,8 @@ function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
 }
 
 /**
- * F249 preflight. F123 must call checkSuppressionBeforeSend again immediately before
+ * F249 suppression preflight & F165 ownership conflict preflight.
+ * F123 must call checkSuppressionBeforeSend again immediately before
  * provider delivery; the outreach_messages RLS policy remains the final backstop.
  */
 export async function POST(
@@ -39,6 +41,44 @@ export async function POST(
   }
 
   const supabase = await createClient();
+
+  // F165: Check for ownership conflict (warn CAM if client is owned by another team member)
+  const { data: orgData, error: orgError } = await supabase
+    .from("organisations")
+    .select("owner_id, owner:users!organisations_owner_id_fkey(full_name)")
+    .eq("id", organisationId)
+    .maybeSingle<{
+      owner_id: string | null;
+      owner: { full_name: string | null } | null;
+    }>();
+
+  if (orgError) {
+    await reportError(orgError, {
+      operation: "clients.outreach_preflight.org_lookup",
+      organisationId,
+      userId: authorization.actor.id,
+    });
+  }
+
+  const conflict = checkOwnershipConflict({
+    ownerId: orgData?.owner_id ?? null,
+    ownerName: orgData?.owner?.full_name,
+    actorId: authorization.actor.id,
+    actorRole: authorization.actor.role,
+  });
+
+  if (conflict.hasConflict) {
+    return NextResponse.json(
+      {
+        allowed: false,
+        error: conflict.warning,
+        kind: "ownership_conflict",
+        ownerName: conflict.ownerName,
+      },
+      { status: 409 },
+    );
+  }
+
   let lookupError: unknown;
   const result = await checkSuppressionBeforeSend(organisationId, async () => {
     const { data, error } = await supabase
@@ -82,3 +122,4 @@ export async function POST(
 
   return NextResponse.json({ allowed: true });
 }
+

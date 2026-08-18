@@ -1,0 +1,96 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import {
+  checkOwnershipConflict,
+  ownershipConflictWarning,
+} from "./ownership-conflict.ts";
+
+describe("checkOwnershipConflict (F165)", () => {
+  const actorCamId = "00000000-0000-4000-a000-000000000001";
+  const otherCamId = "00000000-0000-4000-a000-000000000002";
+  const adminId = "00000000-0000-4000-a000-000000000003";
+
+  it("returns no conflict when client is unowned", () => {
+    const result = checkOwnershipConflict({
+      ownerId: null,
+      actorId: actorCamId,
+      actorRole: "cam",
+    });
+    assert.deepEqual(result, { hasConflict: false });
+  });
+
+  it("returns no conflict when CAM is the owner", () => {
+    const result = checkOwnershipConflict({
+      ownerId: actorCamId,
+      ownerName: "Sarah CAM",
+      actorId: actorCamId,
+      actorRole: "cam",
+    });
+    assert.deepEqual(result, { hasConflict: false });
+  });
+
+  it("returns conflict warning when CAM views client owned by another CAM", () => {
+    const result = checkOwnershipConflict({
+      ownerId: otherCamId,
+      ownerName: "Mohammed Saeed",
+      actorId: actorCamId,
+      actorRole: "cam",
+    });
+
+    assert.equal(result.hasConflict, true);
+    if (result.hasConflict) {
+      assert.equal(result.ownerId, otherCamId);
+      assert.equal(result.ownerName, "Mohammed Saeed");
+      assert.equal(
+        result.warning,
+        "This client is owned by Mohammed Saeed. To prevent duplicate outreach, coordinate with them before contacting this client.",
+      );
+    }
+  });
+
+  it("falls back to generic wording when ownerName is omitted", () => {
+    const result = checkOwnershipConflict({
+      ownerId: otherCamId,
+      actorId: actorCamId,
+      actorRole: "cam",
+    });
+
+    assert.equal(result.hasConflict, true);
+    if (result.hasConflict) {
+      assert.equal(
+        result.warning,
+        "This client is owned by another team member. To prevent duplicate outreach, coordinate with them before contacting this client.",
+      );
+    }
+  });
+
+  it("returns no conflict for admin user regardless of owner", () => {
+    const result = checkOwnershipConflict({
+      ownerId: otherCamId,
+      ownerName: "Mohammed Saeed",
+      actorId: adminId,
+      actorRole: "admin",
+    });
+
+    assert.deepEqual(result, { hasConflict: false });
+  });
+});
+
+describe("ownershipConflictWarning (F165)", () => {
+  it("formats warning with owner name", () => {
+    const warning = ownershipConflictWarning("Alex Chen");
+    assert.equal(
+      warning,
+      "This client is owned by Alex Chen. To prevent duplicate outreach, coordinate with them before contacting this client.",
+    );
+  });
+
+  it("handles empty or null name", () => {
+    const warning = ownershipConflictWarning(null);
+    assert.equal(
+      warning,
+      "This client is owned by another team member. To prevent duplicate outreach, coordinate with them before contacting this client.",
+    );
+  });
+});

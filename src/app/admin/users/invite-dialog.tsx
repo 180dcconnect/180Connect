@@ -9,6 +9,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/animate-ui/components/radix/dialog";
+import { OriginButton } from "@/components/ui/origin-button";
 import { InviteForm } from "./invite-form";
 
 export function InviteDialog() {
@@ -17,12 +18,9 @@ export function InviteDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <button
-          className="group inline-flex shrink-0 items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-brand-hover focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand"
-          type="button"
-        >
+        <OriginButton size="md" type="button">
           Invite a team member
-        </button>
+        </OriginButton>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>

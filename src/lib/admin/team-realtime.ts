@@ -7,6 +7,8 @@ export type TeamUser = {
   role: "cam" | "admin" | "viewer";
   is_active: boolean;
   deactivated_at: string | null;
+  /** Last time this user was seen on any signed-in page — not last login. Null if never. */
+  last_seen_at: string | null;
   owned_client_count: number;
 };
 
@@ -35,6 +37,7 @@ type RealtimeUserRow = {
   role?: TeamUser["role"];
   is_active?: boolean;
   deactivated_at?: string | null;
+  last_seen_at?: string | null;
   invited_at?: string | null;
   invite_accepted_at?: string | null;
 };
@@ -127,6 +130,7 @@ export function applyRealtimeUserChange(
     role: row.role ?? existing?.role ?? "cam",
     is_active: row.is_active ?? existing?.is_active ?? true,
     deactivated_at: row.deactivated_at ?? existing?.deactivated_at ?? null,
+    last_seen_at: row.last_seen_at ?? existing?.last_seen_at ?? null,
     owned_client_count: existing?.owned_client_count ?? 0,
   };
 

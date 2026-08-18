@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 import type { EntityMatchCandidateRow } from "@/lib/duplicates";
 
 // "rejected" is part of the underlying match_status enum (a future matcher's "this
@@ -136,22 +137,23 @@ export function DuplicatesPanel({
                   value={notes[row.id] ?? ""}
                 />
                 <div className="mt-3 flex gap-3">
-                  <button
-                    className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                  <OriginButton
+                    size="sm"
                     disabled={busy}
                     onClick={() => decide(row.id, true)}
                     type="button"
                   >
                     Same charity — keep existing
-                  </button>
-                  <button
-                    className="rounded-lg border border-black/15 px-4 py-2 text-sm font-bold disabled:opacity-50"
+                  </OriginButton>
+                  <OriginButton
+                    variant="outline"
+                    size="sm"
                     disabled={busy}
                     onClick={() => decide(row.id, false)}
                     type="button"
                   >
                     Different charities — add as new
-                  </button>
+                  </OriginButton>
                 </div>
               </li>
             ))}

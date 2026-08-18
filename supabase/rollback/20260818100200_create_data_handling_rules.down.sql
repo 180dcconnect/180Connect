@@ -1,4 +1,4 @@
--- Rollback: 20260816220000_create_data_handling_rules
+-- Rollback: 20260818100200_create_data_handling_rules
 -- Reverses F246 Public Data Handling Rules migration.
 
 -- Drop RPCs first (depend on the table)

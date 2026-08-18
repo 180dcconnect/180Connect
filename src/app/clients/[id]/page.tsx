@@ -336,7 +336,11 @@ export default async function ClientDetailPage({
           <div className="mt-8 border-t border-black/10 pt-8">
             <p className="text-sm font-bold">Outreach</p>
             <div className="mt-3">
-              <ComposeButton blocked={latest?.status === "active"} />
+              <ComposeButton
+                blocked={latest?.status === "active"}
+                organisationId={client.id}
+                suppressionReason={latest?.status === "active" ? latest.reason : undefined}
+              />
             </div>
           </div>
         ) : null}

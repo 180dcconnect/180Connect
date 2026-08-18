@@ -217,14 +217,15 @@ export default async function ClientsPage({
   const breakdownField = parseField(sortParam);
   const breakdownDirection = parseDirection(dirParam);
   const funnel = pipelineFunnel(matchingClients);
-  // Every group carries all four stage counts, so the table reads across as that
-  // group's own funnel; `stage` only decides which column the top three is
-  // ranked on.
+  // F167: When grouping by owner, show all active CAMs in the team (plus unassigned)
+  // so admins can see complete team ownership workload at a glance.
+  const breakdownLimit = breakdownField === "owner" ? Math.max(5, teamMembers.length + 1) : 3;
   const breakdownRows = breakdown(
     matchingClients,
     breakdownField,
     breakdownDirection,
     stage,
+    breakdownLimit,
   );
   const funnelCaption = filterActive
     ? `${matchingClients.length.toLocaleString()} filtered`

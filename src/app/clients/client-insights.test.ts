@@ -177,6 +177,50 @@ describe("breakdown", () => {
       ["Acton", "York"],
     );
   });
+
+  describe("team ownership breakdown (F167)", () => {
+    const teamClients = shape([
+      org({ id: "1", owner_id: "cam-1", owner: { full_name: "Sarah Jenkins" }, outreach_status: "converted" }),
+      org({ id: "2", owner_id: "cam-1", owner: { full_name: "Sarah Jenkins" }, outreach_status: "initial_outreach_sent" }),
+      org({ id: "3", owner_id: "cam-2", owner: { full_name: "Mohammed Saeed" }, outreach_status: "converted" }),
+      org({ id: "4", owner_id: null, owner: null, outreach_status: "not_contacted" }),
+      org({ id: "5", owner_id: null, owner: null, outreach_status: "not_contacted" }),
+      org({ id: "6", owner_id: null, owner: null, outreach_status: "not_contacted" }),
+    ]);
+
+    it("groups clients by team owner and tracks unassigned accounts", () => {
+      const rows = breakdown(teamClients, "owner", "descending", "all", 10);
+      assert.deepEqual(
+        rows.map((r) => [r.label, r.count]),
+        [
+          ["Unassigned", 3],
+          ["Sarah Jenkins", 2],
+          ["Mohammed Saeed", 1],
+        ],
+      );
+    });
+
+    it("calculates funnel stages per team member", () => {
+      const sarah = breakdown(teamClients, "owner", "descending", "all", 10).find(
+        (r) => r.label === "Sarah Jenkins",
+      );
+      assert.deepEqual(sarah?.counts, {
+        all: 2,
+        contacted: 2,
+        responded: 1,
+        converted: 1,
+      });
+    });
+
+    it("links team owner groups to their specific filter", () => {
+      const rows = breakdown(teamClients, "owner", "descending", "all", 10);
+      const unassigned = rows.find((r) => r.label === "Unassigned");
+      const sarah = rows.find((r) => r.label === "Sarah Jenkins");
+
+      assert.deepEqual(unassigned?.filter, { param: "owner", value: "unassigned" });
+      assert.deepEqual(sarah?.filter, { param: "owner", value: "cam-1" });
+    });
+  });
 });
 
 describe("parsing url state", () => {

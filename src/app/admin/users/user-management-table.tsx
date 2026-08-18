@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type Dispatch, type SetStateAction } from "react";
+import Link from "next/link";
 import {
   Select,
   SelectContent,
@@ -233,7 +234,19 @@ export function UserManagementTable({
                       </SelectContent>
                     </Select>
                   </td>
-                  <td className="p-3">{user.owned_client_count}</td>
+                  <td className="p-3">
+                    {user.owned_client_count > 0 ? (
+                      <Link
+                        href={`/clients?owner=${user.id}`}
+                        className="font-bold text-brand hover:underline"
+                        title={`View ${user.owned_client_count} client${user.owned_client_count === 1 ? "" : "s"} owned by ${displayName(user)}`}
+                      >
+                        {user.owned_client_count}
+                      </Link>
+                    ) : (
+                      <span className="text-foreground/40">0</span>
+                    )}
+                  </td>
                   <td className="p-3 text-foreground/60">{lastActiveLabel(user.last_seen_at)}</td>
                   <td className="p-3">
                     <span

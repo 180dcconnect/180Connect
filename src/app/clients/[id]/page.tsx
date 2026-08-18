@@ -19,6 +19,7 @@ import { SuppressButton } from "./suppress-button";
 import { LiftSuppressionButton } from "./lift-suppression-button";
 import { ComposeButton } from "./compose-button";
 import { BasicInfoPanel } from "./basic-info-panel";
+import { BookletPanel } from "./booklet-panel";
 import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
@@ -325,6 +326,12 @@ export default async function ClientDetailPage({
                 missionEnrichedAt={enrichment?.enriched_at ?? null}
               />
             </Rise>
+
+            {hasPermission(authorization.actor.role, "client:contact") && (
+              <Rise>
+                <BookletPanel organisationId={client.id} />
+              </Rise>
+            )}
 
             {/* Email and website were two near-identical cards — same
                 heading-plus-validity-pill shape, same failure copy — so they

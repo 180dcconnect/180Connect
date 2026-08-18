@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Sparkles } from "lucide-react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentActor } from "@/lib/auth/actor";
@@ -67,6 +68,7 @@ const ROW_GRID =
 
 /** Reserved width for the claim button, held whether or not the row has one. */
 const CLAIM_SLOT = "w-[6.5rem] shrink-0";
+const BOOKLET_SLOT = "w-[7rem] shrink-0";
 
 /**
  * F051 — the charity list view. Every organisation regardless of import method
@@ -117,6 +119,7 @@ export default async function ClientsPage({
 
   const supabase = await createClient();
   const canClaim = hasPermission(authorization.actor.role, "client:edit");
+  const canGenerateBooklet = hasPermission(authorization.actor.role, "client:contact");
   const isAdmin = authorization.actor.role === "admin";
 
   const [organisations, openSuppressions, team] = await Promise.all([
@@ -405,7 +408,12 @@ export default async function ClientsPage({
                       <span>Owner</span>
                       <span />
                     </span>
-                    {canClaim && <span className={CLAIM_SLOT} />}
+                    {(canGenerateBooklet || canClaim) && (
+                      <span className="flex shrink-0 items-center gap-2">
+                        {canGenerateBooklet && <span className={BOOKLET_SLOT} />}
+                        {canClaim && <span className={CLAIM_SLOT} />}
+                      </span>
+                    )}
                   </div>
 
                   <ul>
@@ -503,10 +511,25 @@ export default async function ClientsPage({
                         {/* A fixed slot rather than a conditional child: an owned
                             row still reserves the width, so no column shifts as
                             the list changes hands. */}
-                        {canClaim && (
-                          <span className={`${CLAIM_SLOT} flex justify-end`}>
-                            {!client.ownerName && (
-                              <ClaimButton compact organisationId={client.id} />
+                        {(canGenerateBooklet || canClaim) && (
+                          <span className="flex shrink-0 items-center gap-2">
+                            {canGenerateBooklet && (
+                              <span className={`${BOOKLET_SLOT} flex justify-end`}>
+                                <Link
+                                  className="flex items-center gap-1 rounded-full border border-brand/30 px-3 py-1 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
+                                  href={`/clients/${client.id}?booklet=generate`}
+                                >
+                                  <Sparkles aria-hidden="true" className="h-3 w-3" />
+                                  Booklet
+                                </Link>
+                              </span>
+                            )}
+                            {canClaim && (
+                              <span className={`${CLAIM_SLOT} flex justify-end`}>
+                                {!client.ownerName && (
+                                  <ClaimButton compact organisationId={client.id} />
+                                )}
+                              </span>
                             )}
                           </span>
                         )}

@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  DEFAULT_BREAKDOWN_LIMIT,
   breakdown,
+  breakdownLimit,
   clientsInStage,
   parseDirection,
   parseField,
@@ -212,6 +214,32 @@ describe("breakdown", () => {
       });
     });
 
+    it("keeps owners the CAM list does not contain, rather than truncating them", () => {
+      // The limit is not the size of the team: an admin owner and a deactivated
+      // former owner both hold clients without appearing in the CAM dropdown, and
+      // F167 AC1 says an admin sees every client's owner in the one view.
+      const mixed = shape([
+        org({ id: "1", owner_id: "cam-1", owner: { full_name: "Sarah Jenkins" } }),
+        org({ id: "2", owner_id: "cam-2", owner: { full_name: "Mohammed Saeed" } }),
+        org({ id: "3", owner_id: "admin-1", owner: { full_name: "Bashir Bobboi" } }),
+        // owner_id set, join empty — a deactivated member's row is hidden from `users`.
+        org({ id: "4", owner_id: "former-1", owner: null }),
+        org({ id: "5", owner_id: null, owner: null }),
+      ]);
+
+      const labels = breakdown(mixed, "owner", "descending", "all", breakdownLimit("owner")).map(
+        (row) => row.label,
+      );
+
+      assert.deepEqual(labels.sort(), [
+        "A former team member",
+        "Bashir Bobboi",
+        "Mohammed Saeed",
+        "Sarah Jenkins",
+        "Unassigned",
+      ]);
+    });
+
     it("links team owner groups to their specific filter", () => {
       const rows = breakdown(teamClients, "owner", "descending", "all", 10);
       const unassigned = rows.find((r) => r.label === "Unassigned");
@@ -220,6 +248,18 @@ describe("breakdown", () => {
       assert.deepEqual(unassigned?.filter, { param: "owner", value: "unassigned" });
       assert.deepEqual(sarah?.filter, { param: "owner", value: "cam-1" });
     });
+  });
+});
+
+describe("breakdownLimit", () => {
+  it("shows every group when grouped by owner", () => {
+    assert.equal(breakdownLimit("owner"), Number.POSITIVE_INFINITY);
+  });
+
+  it("stays a top three for every other field", () => {
+    for (const field of ["city", "type", "status"] as const) {
+      assert.equal(breakdownLimit(field), DEFAULT_BREAKDOWN_LIMIT);
+    }
   });
 });
 

@@ -24,6 +24,7 @@ import { SearchRail } from "@/components/search-rail";
 import {
   SOURCE_LABELS,
   breakdown,
+  breakdownLimit,
   parseDirection,
   parseField,
   parseStage,
@@ -160,6 +161,17 @@ export default async function ClientsPage({
   matchingClients = filterBySource(matchingClients, source);
   matchingClients = searchClients(matchingClients, search);
   const teamMembers = team.data ?? [];
+  // The owner dropdown lists CAMs only (F163), but `?owner=` can name anyone who
+  // holds clients — an admin, or a deactivated former member — because the team
+  // table links straight to this page (F167). Falling back to the name carried on
+  // the clients themselves keeps the filter chip visible, so the list always says
+  // whose it is and can always be cleared.
+  const ownerFilterLabel =
+    ownerFilter && ownerFilter !== "unassigned"
+      ? (teamMembers.find((member) => member.id === ownerFilter)?.full_name ??
+        allVisibleClients.find((client) => client.owner_id === ownerFilter)?.ownerName ??
+        "Unnamed team member")
+      : null;
   const filterActive = Boolean(ownerFilter || search || city || status || source);
   // F166 AC1/AC3: this is the CAM viewing their own filter, not just any owner
   // filter — the heading, count label and empty state read "your clients" so the
@@ -217,15 +229,16 @@ export default async function ClientsPage({
   const breakdownField = parseField(sortParam);
   const breakdownDirection = parseDirection(dirParam);
   const funnel = pipelineFunnel(matchingClients);
-  // F167: When grouping by owner, show all active CAMs in the team (plus unassigned)
-  // so admins can see complete team ownership workload at a glance.
-  const breakdownLimit = breakdownField === "owner" ? Math.max(5, teamMembers.length + 1) : 3;
+  // Every group carries all four stage counts, so the table reads across as that
+  // group's own funnel; `stage` only decides which column the top three is
+  // ranked on. Grouped by owner the list is not a top three at all (F167 AC1):
+  // every owner is shown, so the panel is the whole team's workload.
   const breakdownRows = breakdown(
     matchingClients,
     breakdownField,
     breakdownDirection,
     stage,
-    breakdownLimit,
+    breakdownLimit(breakdownField),
   );
   const funnelCaption = filterActive
     ? `${matchingClients.length.toLocaleString()} filtered`
@@ -258,7 +271,7 @@ export default async function ClientsPage({
               ...(status ? [{ category: "Filter by outreach status", label: status, value: status }] : []),
               ...(source ? [{ category: "Filter by source", label: source, value: source }] : []),
               ...(ownerFilter === "unassigned" ? [{ category: "Filter by owner", label: "Unassigned", value: "unassigned" }] : []),
-              ...(ownerFilter && ownerFilter !== "unassigned" && teamMembers.find(m => m.id === ownerFilter) ? [{ category: "Filter by owner", label: teamMembers.find(m => m.id === ownerFilter)?.full_name || "Unnamed CAM", value: ownerFilter }] : [])
+              ...(ownerFilterLabel ? [{ category: "Filter by owner", label: ownerFilterLabel, value: ownerFilter as string }] : [])
             ]}
             params={{
               "Filter by city": "city",
@@ -325,7 +338,8 @@ export default async function ClientsPage({
 
         <Group className="space-y-4">
           {/* Where the pipeline stands before the list of it: the four stage
-              totals, the stream between them, and the top three groups. Counts
+              totals, the stream between them, and the grouped breakdown under
+              them — a top three, or every owner when grouped by owner. Counts
               whatever the list is currently showing. */}
           <Rise>
             <PipelineReport
@@ -336,6 +350,7 @@ export default async function ClientsPage({
               field={breakdownField}
               direction={breakdownDirection}
               rows={breakdownRows}
+              rowsLabel={breakdownField === "owner" ? "Every owner" : undefined}
               rowHref={rowHref}
             />
           </Rise>

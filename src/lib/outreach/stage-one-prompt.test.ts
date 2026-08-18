@@ -41,3 +41,11 @@ test("buildStageOnePrompt applies each selected email voice", () => {
   assert.match(buildStageOnePrompt(context, { voice: "consultative" }).system, /curious, thoughtful/);
   assert.match(buildStageOnePrompt(context, { voice: "plain_language" }).system, /free of consultancy jargon/);
 });
+
+test("buildStageOnePrompt applies each selected email tone", () => {
+  const context = { organisationName: "Example", organisationType: "charity" };
+  assert.match(buildStageOnePrompt(context, { tone: "balanced" }).system, /balanced professional tone/);
+  assert.match(buildStageOnePrompt(context, { tone: "warm" }).system, /warm, encouraging tone/);
+  assert.match(buildStageOnePrompt(context, { tone: "formal" }).system, /formal, respectful tone/);
+  assert.match(buildStageOnePrompt(context, { tone: "concise" }).system, /action-oriented tone/);
+});

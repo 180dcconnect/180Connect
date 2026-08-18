@@ -9,6 +9,7 @@ type Warning = { text: string; tone: Tone };
 type Draft = { id: string; subject: string; body: string };
 type EmailLength = "short" | "standard" | "detailed";
 type EmailVoice = "180dc" | "consultative" | "plain_language";
+type EmailTone = "balanced" | "warm" | "formal" | "concise";
 
 /** F100 creates a review draft only, after the current outreach preflight passes. */
 export function ComposeButton({
@@ -37,6 +38,7 @@ export function ComposeButton({
   );
   const [length, setLength] = useState<EmailLength>("standard");
   const [voice, setVoice] = useState<EmailVoice>("180dc");
+  const [tone, setTone] = useState<EmailTone>("balanced");
 
   async function generate() {
     setBusy(true);
@@ -58,7 +60,7 @@ export function ComposeButton({
       const response = await fetch(`/api/clients/${organisationId}/outreach-drafts/stage-one`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ length, voice }),
+        body: JSON.stringify({ length, voice, tone }),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -99,6 +101,15 @@ export function ComposeButton({
           <option value="short">Short</option>
           <option value="standard">Standard</option>
           <option value="detailed">Detailed</option>
+        </select>
+      </label>
+      <label className="block max-w-xs text-xs font-bold text-foreground/65">
+        Email tone
+        <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setTone(event.target.value as EmailTone)} value={tone}>
+          <option value="balanced">Balanced</option>
+          <option value="warm">Warm</option>
+          <option value="formal">Formal</option>
+          <option value="concise">Concise</option>
         </select>
       </label>
       <label className="block max-w-xs text-xs font-bold text-foreground/65">

@@ -115,6 +115,7 @@ The full retention schedule is set out in [`docs/data-lifecycle-policy.md`](data
 ### Lawful Basis (UK GDPR & PECR)
 * **UK GDPR Article 6(1)(f) (Legitimate Interests):** Outreach to prospective social sector clients relies on legitimate interests, supported by a documented Legitimate Interest Assessment (LIA). The LIA evaluates the legitimate business interest of the CIC against the rights of individual contacts. The LIA must be signed off prior to live outreach.
 * **PECR (Direct Marketing):** PECR permits direct marketing communications to corporate bodies (including incorporated charities, CICs, and limited companies) without prior consent. Where communications address an identifiable individual at a corporate body, UK GDPR applies to that personal data.
+* **Sole traders and individual subscribers:** 180Connect must distinguish corporate subscribers from individual subscribers for PECR purposes. Sole traders and certain types of partnership are treated as individual subscribers and must not receive direct marketing emails unless an applicable PECR lawful route exists, such as valid consent or the applicable soft opt-in. Corporate subscribers may be contacted by email without prior consent under PECR, subject to the applicable UK GDPR requirements where personal data is processed.
 * **Trading Disclosures:** In accordance with company-law trading disclosure requirements, all outreach communications include the statutory company details (**180 Degrees Consulting Sheffield CIC**, company number **15874544**, registered in **England and Wales**, registered office address), sender identity, contact address, and a clear opt-out mechanism.
 
 ### Decision-Support & Article 22
@@ -190,8 +191,8 @@ In the event of a personal data breach, 180Connect will:
 This policy is reviewed every six months, or whenever a new data source, processor, or feature changes how personal data is processed.
 
 **Accountability Records maintained by the controller:**
-* **ICO Data Protection Fee Self-Assessment:** Completed 18 August 2026; confirmed Tier 1 fee requirement of £52 / £47 direct debit (recorded in [`docs/ico-fee-self-assessment.md`](ico-fee-self-assessment.md)).
-* **ICO Registration & Fee Payment:** Annual payment tracked before live outreach.
+* **ICO Data Protection Fee Self-Assessment:** 180 Degrees Consulting Sheffield CIC completed the ICO data protection fee self-assessment on 18 August 2026. Based on the CIC's current processing activities, the ICO determined that the organisation is required to register and pay the Tier 1 data protection fee of £52 (£47 by Direct Debit) (recorded in [`docs/ico-fee-self-assessment.md`](ico-fee-self-assessment.md)).
+* **ICO Registration & Fee Payment:** Registration and annual fee payment tracked by the controller in accordance with ICO requirements.
 * **Record of Processing Activities (ROPA):** Documented under Article 30.
 * **Legitimate Interest Assessment (LIA):** Documented under Article 6(1)(f).
 * **Data Protection Impact Assessment (DPIA):** Documented under Article 35.
@@ -204,7 +205,7 @@ This policy is reviewed every six months, or whenever a new data source, process
 
 | # | Item | Why it blocks | Owner |
 | :--- | :--- | :--- | :--- |
-| **1** | **Complete ICO data protection fee registration and payment** | The ICO self-assessment completed on **18 August 2026** determined that 180 Degrees Consulting Sheffield CIC falls in **Tier 1** and is required to pay the annual fee (**£52**, or **£47** by Direct Debit). Payment and registration must be completed before live outreach begins. | Project Manager |
+| **1** | **Complete ICO data protection fee registration and payment** | The CIC's ICO self-assessment completed on **18 August 2026** determined that 180 Degrees Consulting Sheffield CIC is required to pay the **Tier 1 annual data protection fee of £52 (£47 by Direct Debit)**. Registration and payment must be completed as required by the ICO. The obligation relates to the CIC's overall processing of personal data, including processing carried out through 180Connect, rather than to 180Connect as a standalone product. | Project Manager |
 | **2** | **Execute written data protection arrangement with 180DC Global** | Formalise the controller/processor or joint-controller role assessment and execute an agreement covering administration of the shared `180dc.org` Workspace tenant. | Project Manager / Leadership |
 | **3** | **Complete DPIA and LIA** | Both assessments are mandatory governance gates before live outreach commences (§6). | Project Manager |
 | **4** | **Finalise LLM provider selection and DPA** | Requires confirmation of processing region (UK/EU pinned), zero-data-retention for training, and incoming reply redaction safeguards. | Project Manager |

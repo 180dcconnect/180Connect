@@ -5,16 +5,20 @@ import { buildStageOnePrompt } from "./stage-one-prompt.ts";
 test("buildStageOnePrompt includes real profile and booklet context", () => {
   const result = buildStageOnePrompt({
     organisationName: "Example Charity",
+    tradingName: "Example Community",
     organisationType: "charity",
     contactName: "Alex Smith",
     missionStatement: "Supports young carers",
+    geographicReach: "regional",
     missionKeywords: ["young people", "care"],
     newsHooks: ["Opened a new support centre"],
   });
   assert.match(result.prompt, /Example Charity/);
+  assert.match(result.prompt, /Example Community/);
   assert.match(result.prompt, /Alex Smith/);
   assert.match(result.prompt, /Supports young carers/);
   assert.match(result.prompt, /Opened a new support centre/);
+  assert.match(result.prompt, /regional/);
   assert.match(result.system, /Never invent/);
 });
 

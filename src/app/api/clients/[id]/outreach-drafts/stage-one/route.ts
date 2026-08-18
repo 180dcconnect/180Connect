@@ -52,7 +52,7 @@ export async function POST(
   const supabase = await createClient();
   const { data: organisation, error: organisationError } = await supabase
     .from("organisations")
-    .select("id, legal_name, organisation_type, website, city, country_code")
+    .select("id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach")
     .eq("id", organisationId)
     .maybeSingle();
   if (organisationError || !organisation) {
@@ -82,10 +82,12 @@ export async function POST(
     organisationId,
     {
       organisationName: organisation.legal_name,
+      tradingName: organisation.trading_name,
       organisationType: organisation.organisation_type,
       website: organisation.website,
       city: organisation.city,
       countryCode: organisation.country_code,
+      geographicReach: organisation.geographic_reach,
       contactName: contact ? [contact.first_name, contact.last_name].filter(Boolean).join(" ") : null,
       contactJobTitle: contact?.job_title,
       missionStatement: enrichment?.mission_statement,

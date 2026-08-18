@@ -1,9 +1,11 @@
 export type StageOneContext = {
   organisationName: string;
+  tradingName?: string | null;
   organisationType: string;
   website?: string | null;
   city?: string | null;
   countryCode?: string | null;
+  geographicReach?: string | null;
   contactName?: string | null;
   contactJobTitle?: string | null;
   missionStatement?: string | null;
@@ -85,9 +87,11 @@ Return exactly one JSON object with two string properties: "subject" and "body".
     prompt: `Draft a Stage 1 outreach email using this reviewed client context.
 
 Organisation: ${value(context.organisationName)}
+Trading name: ${value(context.tradingName)}
 Organisation type: ${value(context.organisationType)}
 Website: ${value(context.website)}
 Location: ${[context.city, context.countryCode].filter(Boolean).join(", ") || "Not provided"}
+Geographic reach: ${value(context.geographicReach)}
 Primary contact: ${value(context.contactName)}
 Contact role: ${value(context.contactJobTitle)}
 

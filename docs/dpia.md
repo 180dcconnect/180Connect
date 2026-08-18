@@ -115,7 +115,7 @@ Specifically, the assessment evaluates the combination of the following factors:
 
 ## 5. Data Sources
 
-180Connect collects data strictly from verified, legitimate channels:
+180Connect obtains data from identified public, statutory, organisational and user-provided sources, subject to the source and validation controls described below:
 
 1. **Charity Commission for England and Wales API:** Public charity register details.
 2. **Companies House API:** Public company filings, SIC codes, and registered office details for CICs and limited entities.
@@ -160,25 +160,27 @@ The following data categories are **strictly banned from storage and processing*
 | Processing Activity | Purpose | UK GDPR Lawful Basis | PECR Basis |
 | :--- | :--- | :--- | :--- |
 | **Ingestion, enrichment, and prioritisation** | Identifying and evaluating prospective social-sector clients | Article 6(1)(f) Legitimate Interests (Documented in LIA) | N/A (Internal processing) |
-| **Cold B2B Email Outreach** | Initiating contact with prospective clients regarding consulting services | Article 6(1)(f) Legitimate Interests | Regulation 22 PECR (Corporate bodies permitted without prior opt-in) |
+| **Cold B2B Email Outreach** | Initiating contact with prospective social-sector clients regarding consulting services | Article 6(1)(f) Legitimate Interests | PECR Regulation 22: no consent requirement for corporate subscribers; individual subscribers (including sole traders and certain partnerships) require consent or another applicable PECR route. |
 | **Suppression Management** | Enforcing do-not-contact requests and marketing objections | Article 6(1)(c) Legal Obligation & Art. 6(1)(f) | Reg. 22 & 23 PECR (Mandatory opt-out compliance) |
 | **Audit Logging** | Security, traceability, and accountability compliance | Article 6(1)(c) Legal Obligation & Art. 6(1)(f) | N/A |
 | **Internal User Authentication** | Provisioning access to authorised 180DC members | Article 6(1)(b) Contract / Member Agreement | N/A |
 
+*Note on PECR Compliance:* Public availability of an email address does not constitute consent or an unrestricted right to send marketing. Outreach is targeted strictly at corporate bodies (incorporated charities, CICs, limited companies). Contacting unincorporated entities or sole traders requires prior consent or an applicable PECR route.
+
 ---
 
-## 9. Automated Decision-Support & Profiling (Article 22)
+## 9. Automated Decision-Support and Profiling
 
 ### 9.1 Nature of the Scoring Mechanism
 180Connect computes priority scores based on public organisational attributes (income band, sector relevance, location, data completeness).
 
-### 9.2 Article 22 Assessment and Human Governance
-Under UK GDPR Article 22, individuals have the right not to be subject to a decision based solely on automated processing, including profiling, which produces legal or similarly significant effects.
+### 9.2 Human Oversight and Non-Significant Effect
+The priority score is primarily calculated from organisational characteristics rather than characteristics of individual data subjects. It is used to prioritise CAM research and outreach activity and does not make decisions about an individual's eligibility, rights, access to services, employment, finances, or other similarly significant matters.
 
-The current scoring mechanism is not intended to produce legal or similarly significant effects on individuals and therefore is not expected to constitute solely automated decision-making within the scope of Article 22. Furthermore, priority scores evaluate organisations rather than natural persons. Nevertheless, Sheffield CIC has implemented human review controls as a precautionary governance measure:
+The platform operates strictly with human oversight:
 1. **Decision-Support Only:** The priority score is an internal recommendation signal to help CAMs manage their workload; it does not take any autonomous action.
-2. **No Legal or Significant Effect on the Individual:** The score only determines internal research priority for B2B consulting outreach; it does not deny services, impose financial burdens, or affect legal rights.
-3. **Mandatory Human Agency:** A CAM must independently review the organisation and contact details. The CAM has full authority to override, reprioritise, or dismiss any score.
+2. **Organisation-Level Focus:** Scores evaluate corporate/non-profit fit (income band, sector relevance, geographical reach) rather than personal profiling of natural persons.
+3. **Mandatory Human Agency:** A CAM must independently review the organisation and contact details. The CAM has full authority to override, reprioritise, or dismiss any recommendation.
 4. **No Autonomous Dispatch:** The system cannot dispatch emails autonomously. Every email must be explicitly reviewed and initiated by a logged-in CAM.
 
 ---
@@ -208,8 +210,8 @@ The platform plans to incorporate LLM services for:
 180Connect client outreach is dispatched from `sheffield@180dc.org`, hosted on the Google Workspace tenant (`180dc.org`) owned and administered by **180 Degrees Consulting Limited (Australia)**.
 
 ### 11.2 International Transfer Risk Analysis
-* **The Restricted Transfer:** Global super-administrators located in Australia have technical capabilities to access the Workspace environment, accounts, and mailbox contents for support, provisioning, and cybersecurity.
-* **Jurisdictional Gap:** Australia does not currently hold a UK adequacy regulation. Remote access by Australian personnel constitutes a restricted transfer under UK GDPR Article 44.
+* **The Potential Restricted Transfer:** Global super-administrators located in Australia have technical capabilities to access the Workspace environment, accounts, and mailbox contents for support, provisioning, and cybersecurity.
+* **Jurisdictional Assessment:** Australia does not currently hold a UK adequacy regulation. Where Australian personnel have remote access to personal data held in the Workspace environment, that access may constitute a restricted transfer under UK GDPR Article 44.
 
 ### 11.3 Controls & Governance Framework
 1. **Governance Agreement:** Execution of the proposed [`docs/global-workspace-data-protection-agreement.md`](global-workspace-data-protection-agreement.md), which establishes Sheffield as independent controller, restricts Global access strictly to infrastructure/security support, and prohibits Global repurposing of Sheffield outreach data.
@@ -219,17 +221,17 @@ The platform plans to incorporate LLM services for:
 
 ---
 
-## 12. Third-Party Processors & Infrastructure Assessment
+## 12. Third-Party Services, Recipients and Infrastructure
 
-| Processor & Entity | Role | Hosting & Processing Region | International Transfer Mechanism | Security & Contract Status | DPIA Risk Level |
+| Entity & Service | Role / Relationship | Hosting & Processing Region | International Transfer Mechanism | Security & Governance Controls | Deployment Status & Risk |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Supabase Inc.** | Core database, auth, audit log storage | EU (Ireland, `eu-west-1`) | UK Adequacy (EEA storage); DPA includes SCCs/UK Addendum for support | DPA executed; RLS deny-by-default; daily backups | **Low** |
-| **Vercel Inc.** | Application hosting & edge compute | US / Global Edge | Vercel DPA with EU SCCs and UK Addendum | DPA executed; encrypted environment variables | **Low** |
-| **Resend Inc.** | System & auth email transport | US | Resend DPA with EU SCCs and UK IDTA | DPA executed; minimal auth data | **Low** |
-| **Google LLC** | Outreach mailbox (`sheffield@180dc.org`) | US / Global | Google Workspace Cloud DPA (SCCs + UK Addendum) | Enterprise Workspace controls, MFA enforced | **Medium (Pending tenant governance)** |
-| **180 Degrees Consulting Limited** | Shared Workspace tenant administrator | Australia / UK | IDTA / Addendum + TRA (In Progress) | Governance draft prepared ([`docs/global-workspace-data-protection-agreement.md`](global-workspace-data-protection-agreement.md)) | **Medium (Pending sign-off)** |
-| **PostHog Inc.** | Usage analytics | EU (Frankfurt) | UK Adequacy (EEA storage); PostHog DPA | Planned; cookieless / minimised analytics | **Low** |
-| **Google Cloud (Gemini) / LLM** | AI drafting and summarisation | To be pinned to UK/EU | Cloud DPA + zero-retention agreement required | Provider selection and DPA in progress | **Medium (Pending selection)** |
+| **Supabase Inc.** | Data Processor (Database, auth, audit logs) | EU (Ireland, `eu-west-1`) | UK Adequacy (EEA storage); DPA includes SCCs/UK Addendum for support | DPA executed; RLS deny-by-default; daily backups | **Low** |
+| **Vercel Inc.** | Data Processor (Application hosting & edge compute) | US / Global Edge | Vercel DPA with EU SCCs and UK Addendum | DPA executed; encrypted environment variables | **Low** |
+| **Resend Inc.** | Data Processor (System & auth email transport) | US | Resend DPA with EU SCCs and UK IDTA | DPA executed; minimal auth data | **Low** |
+| **Google LLC** | Data Processor / Service Provider (Workspace Mailbox) | US / Global | Google Workspace Cloud DPA (SCCs + UK Addendum) | Enterprise Workspace controls, MFA enforced | **Medium (Pending tenant governance)** |
+| **180 Degrees Consulting Limited** | Shared Workspace tenant administrator (Cross-entity governance; role classification to be finalised) | Australia / UK | IDTA / Addendum + TRA (In Progress) | Governance draft prepared ([`docs/global-workspace-data-protection-agreement.md`](global-workspace-data-protection-agreement.md)) | **Medium (Pending sign-off)** |
+| **PostHog Inc.** | Data Processor (Usage analytics) | EU (Frankfurt) | UK Adequacy (EEA storage); PostHog DPA | Planned; cookieless / minimised analytics | **Low** |
+| **Google Cloud (Gemini) / LLM** | Data Processor (AI Service Provider — to be selected) | To be pinned to UK/EU | Cloud DPA + zero-retention agreement required | Provider selection and DPA in progress | **Medium (Pending selection)** |
 
 ---
 
@@ -262,27 +264,31 @@ Risks are evaluated using a standard 5 × 5 Likelihood and Severity matrix:
 
 $$\text{Risk Score} = \text{Likelihood} \times \text{Severity}$$
 
-* **1–6:** Low Risk (Acceptable)
-* **8–12:** Medium Risk (Mitigation required)
+* **1–6:** Low Risk (Acceptable once required controls are active)
+* **8–12:** Medium Risk (Mitigation required before live processing)
 * **15–25:** High Risk (Critical mitigation / blocking gate)
+
+> **Governance Principle:** A low numerical residual score does not by itself authorise deployment where a mandatory pre-live control has not yet been implemented or verified.
 
 ---
 
 ## 15. Risk Register & Mitigations
 
-| ID | Identified Risk Description | Inherent L | Inherent S | Inherent Score | Applied Technical & Organisational Mitigations | Residual L | Residual S | Residual Score | Residual Status |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **R1** | **Ingestion of private residential addresses or trustee personal data** | 4 | 4 | **16 (High)** | F246/F247 automated field filtering strips officer residential addresses, dates of birth, and trustee details at the ingestion boundary before persistence. | 1 | 3 | **3 (Low)** | `Low — Implemented control active` ✅ |
-| **R2** | **Accidental storage of personal email addresses** | 4 | 3 | **12 (Med)** | Role-based email allow-list (`personal_email_role_parts`), regex redactions, and database trigger `check_manual_entry_contact_email` on manual entries. | 1 | 3 | **3 (Low)** | `Low — Implemented control active` ✅ |
-| **R3** | **Unwanted direct marketing or PECR breach** | 3 | 3 | **9 (Med)** | Verification of corporate subscriber status; statutory company disclosures in every email; mandatory one-click opt-out link. | 2 | 2 | **4 (Low)** | `Low — Implemented control active` ✅ |
-| **R4** | **Re-contacting an individual after an opt-out / objection** | 2 | 5 | **10 (Med)** | Database-level `suppression_records` table automatically blocks delivery attempts to suppressed addresses across all users. | 1 | 4 | **4 (Low)** | `Low — Implemented control active` ✅ |
-| **R5** | **Over-reliance on automated priority scoring (Article 22)** | 3 | 3 | **9 (Med)** | Scores are strictly decision-support; CAM must independently review prospect details; CAM has full authority to override scores. | 1 | 2 | **2 (Low)** | `Low — Implemented control active` ✅ |
-| **R6** | **Unauthorised access to platform records** | 2 | 5 | **10 (Med)** | Google Workspace domain-restricted login + explicit admin activation + Supabase Row Level Security (RLS) deny-by-default. | 1 | 4 | **4 (Low)** | `Low — Implemented control active` ✅ |
-| **R7** | **Inappropriate disclosure to third-party LLM provider** | 3 | 4 | **12 (Med)** | Mandatory prompt data minimisation; zero-retention / no-model-training contractual terms; UK/EU region pinning. | 2 | 3 | **6 (Low)** | `Low — Control pending; not approved for live processing` ⏳ |
-| **R8** | **Unscreened sensitive/health disclosures in email replies sent to LLM** | 3 | 4 | **12 (Med)** | Policy and engineering restriction prohibiting automated submission of raw client replies to third-party LLMs without prior redaction. | 1 | 4 | **4 (Low)** | `Low — Control pending; not approved for live processing` ⏳ |
-| **R9** | **Ungoverned international remote access from Australia** | 4 | 4 | **16 (High)** | Execution of Global Workspace Governance Agreement + UK IDTA / UK Addendum + completed Transfer Risk Assessment (TRA). | 2 | 3 | **6 (Low)** | `Low — Control pending; not approved for live processing` ⏳ |
-| **R10** | **Personal data breach at cloud infrastructure level** | 2 | 5 | **10 (Med)** | Processor security controls, contractual security commitments, encryption at rest/in transit, access controls, daily backups, and incident-response procedures. | 1 | 4 | **4 (Low)** | `Low — Implemented control active` ✅ |
-| **R11** | **Lack of transparency for indirect data subjects (Article 14)** | 3 | 3 | **9 (Med)** | Publication of clear Article 14 Privacy Notice linked in all email footers explaining source, lawful basis, profiling, and rights. | 1 | 2 | **2 (Low)** | `Low — Control pending; not approved for live processing` ⏳ |
+| ID | Identified Risk Description | Inherent L | Inherent S | Inherent Score | Applied Technical & Organisational Mitigations | Residual L | Residual S | Residual Score | Risk Rating | Deployment Status |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **R1** | **Ingestion of private residential addresses or trustee personal data** | 4 | 4 | **16 (High)** | F246/F247 automated field filtering strips officer residential addresses, dates of birth, and trustee details at the ingestion boundary before persistence. | 1 | 3 | **3** | Low | `Implemented control active` ✅ |
+| **R2** | **Accidental storage of personal email addresses** | 4 | 3 | **12 (Med)** | Role-based email allow-list (`personal_email_role_parts`), regex redactions, and database trigger `check_manual_entry_contact_email` on manual entries. | 1 | 3 | **3** | Low | `Implemented control active` ✅ |
+| **R3** | **Unwanted direct marketing or PECR breach** | 3 | 3 | **9 (Med)** | Verification of corporate subscriber status; statutory company disclosures in every email; mandatory one-click opt-out link. | 2 | 2 | **4** | Low | `Implemented control active` ✅ |
+| **R4** | **Re-contacting an individual after an opt-out / objection** | 2 | 5 | **10 (Med)** | Database-level `suppression_records` table automatically blocks delivery attempts to suppressed addresses across all users. | 1 | 4 | **4** | Low | `Implemented control active` ✅ |
+| **R5** | **Over-reliance on automated priority scoring (Article 22)** | 3 | 3 | **9 (Med)** | Scores are strictly decision-support; CAM must independently review prospect details; CAM has full authority to override scores. | 1 | 2 | **2** | Low | `Implemented control active` ✅ |
+| **R6** | **Unauthorised access to platform records** | 2 | 5 | **10 (Med)** | Google Workspace domain-restricted login + explicit admin activation + Supabase Row Level Security (RLS) deny-by-default. | 1 | 4 | **4** | Low | `Implemented control active` ✅ |
+| **R7** | **Inappropriate disclosure to third-party LLM provider** | 3 | 4 | **12 (Med)** | Mandatory prompt data minimisation; zero-retention / no-model-training contractual terms; UK/EU region pinning. | 2 | 3 | **6** | Low | `Blocked pending mandatory control completion` ⏳ |
+| **R8** | **Unscreened sensitive/health disclosures in email replies sent to LLM** | 3 | 4 | **12 (Med)** | Policy and architectural rule: Raw inbound email replies must not be transmitted to an LLM in the MVP. AI reply processing is deferred pending formal addendum. | 1 | 4 | **4** | Low | `Implemented policy restriction` ✅ |
+| **R9** | **Ungoverned international remote access from Australia** | 4 | 4 | **16 (High)** | Execution of Global Workspace Governance Agreement + UK IDTA / UK Addendum + completed Transfer Risk Assessment (TRA). | 2 | 3 | **6** | Low | `Blocked pending agreement execution & TRA` ⏳ |
+| **R10** | **Personal data breach at cloud infrastructure level** | 2 | 5 | **10 (Med)** | Processor security controls, contractual security commitments, encryption at rest/in transit, access controls, daily backups, and incident-response procedures. | 1 | 4 | **4** | Low | `Implemented control active` ✅ |
+| **R11** | **Lack of transparency for indirect data subjects (Article 14)** | 3 | 3 | **9 (Med)** | Publication of clear Article 14 Privacy Notice linked in all email footers explaining source, lawful basis, profiling, and rights. | 1 | 2 | **2** | Low | `Blocked pending notice publication` ⏳ |
+| **R12** | **Inaccurate or outdated professional contact information resulting in inappropriate outreach** | 3 | 3 | **9 (Med)** | CAM manual verification before outreach; source and collection date metadata; periodic data refreshes; manual record correction in UI; suppression handling. | 1 | 2 | **2** | Low | `Implemented control active` ✅ |
+| **R13** | **Article 14 privacy notice not provided within applicable statutory timeframe** | 3 | 3 | **9 (Med)** | Source and collection date logged on all indirect records; Article 14 notice published on public website and linked in initial email footers (provided at earliest direct communication). | 1 | 2 | **2** | Low | `Blocked pending notice publication` ⏳ |
 
 ---
 

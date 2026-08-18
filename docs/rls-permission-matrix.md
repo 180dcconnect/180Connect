@@ -708,6 +708,47 @@ per-field tracking — a later manual edit through the org edit UI is misattribu
 the original import source. Closing that properly is F044 (Field-Level Source
 Tracking, #45)'s job, not this table's.
 
+### 3.17 Ownership requests — RPC-only, admin decides, narrow read
+
+Backs #408 Request Client Ownership (admin-approved handover),
+`supabase/migrations/20260818120000_create_ownership_requests.sql`. The escalation
+half of F165's conflict warning (§3.11's `claim_organisation` 55000): the warning
+says a CAM cannot take a client another CAM owns, and this is the only sanctioned
+next step. Decided by the Project Leader 18 Aug 2026 (on #406): **a CAM never
+overrides another CAM's ownership.** Worst case they ask, and an admin hands it over.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `OWNERSHIP_REQUESTS` | admin, the requester, or the client's current owner | — (RPC only) | — (RPC only) | — (no grant) |
+
+SELECT is deliberately narrower than `SUPPRESSIONS` (§3.14, all active users). A
+suppression is a fact about a charity the whole team needs in order to hide it; a
+request is a conversation between one CAM, one owner, and the admins. The current
+owner is included on purpose — someone asking for their client is something they
+should learn when it is asked, not when it moves.
+
+Both writes are `SECURITY DEFINER` RPCs that self-check the caller and write
+`audit_log` in the same transaction (docs/audit-log-pattern.md):
+
+- `request_client_ownership(organisation_id, reason)` — CAM only (`app.is_cam()` +
+  `app.is_active_user()`; an admin is refused, since they hold `reassign_ownership`
+  and would be requesting from themselves). Requires a reason, refuses an unowned
+  client ("claim it instead"), a client the caller already owns, and a second pending
+  request from the same CAM for the same client. Inserts `pending` and audits
+  `ownership_requested`. **It moves no ownership and grants no access** — the
+  requester's reach over the client is exactly what it was before they asked.
+- `decide_ownership_request(request_id, approve, note)` — admin only. Refuses an
+  already-decided request. On approval it delegates the move to `reassign_ownership`
+  (§3.11) rather than touching `organisations.owner_id`, so the handover is audited as
+  a normal `ownership_assigned` transition and the outgoing owner's open actions travel
+  with the client; `owner_id` still has exactly the two write paths §3.2 lists. Audits
+  `ownership_request_approved` / `ownership_request_rejected`.
+
+**What this does not do:** nothing here relaxes `claim_organisation` (a CAM claiming an
+owned client still raises 55000) or re-opens the direct `owner_id` write closed by
+`20260810110000`. A pending request is inert; the admin's decision is the only thing
+with an effect.
+
 ---
 
 ## 4. Denial behaviour and feedback

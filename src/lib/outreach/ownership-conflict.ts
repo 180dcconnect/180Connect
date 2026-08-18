@@ -23,7 +23,7 @@ export type OwnershipConflictResult =
  */
 export function ownershipConflictWarning(ownerName?: string | null): string {
   const name = ownerName?.trim() || "another team member";
-  return `This client is owned by ${name}. Outreach is blocked to prevent duplicate contact — coordinate with them, or ask an admin to reassign this client.`;
+  return `This client is owned by ${name}. Outreach is blocked to prevent duplicate contact — coordinate with them, or request this client from an admin (Ownership, below).`;
 }
 
 /**
@@ -33,7 +33,7 @@ export function ownershipConflictWarning(ownerName?: string | null): string {
  */
 export function ownershipClaimConflictMessage(ownerName?: string | null): string {
   const name = ownerName?.trim() || "another team member";
-  return `This client is already owned by ${name}. Self-assignment cannot override an existing owner — ask an admin to reassign it.`;
+  return `This client is already owned by ${name}. Self-assignment cannot override an existing owner — request it from an admin instead.`;
 }
 
 /**

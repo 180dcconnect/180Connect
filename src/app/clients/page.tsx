@@ -10,7 +10,7 @@ import {
   filterByCity,
   filterByStatus,
   filterBySource,
-  prioritiseByGeography,
+  prioritiseQueue,
   searchClients,
   visibleClients,
   type ClientListRow,
@@ -119,7 +119,7 @@ export default async function ClientsPage({
     supabase
       .from("organisations")
       .select(
-        "id, legal_name, organisation_type, city, country_code, geographic_reach, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
+        "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
       )
       .order("legal_name")
       .overrideTypes<ClientListRow[], { merge: false }>(),
@@ -136,8 +136,13 @@ export default async function ClientsPage({
       .overrideTypes<TeamMember[], { merge: false }>(),
     supabase
       .from("outreach_preferences")
-      .select("preferred_geographic_reach, preferred_cities")
-      .maybeSingle<{ preferred_geographic_reach: string[] | null; preferred_cities: string[] | null }>(),
+      .select("preferred_geographic_reach, preferred_cities, preferred_sectors, preferred_income_bands")
+      .maybeSingle<{
+        preferred_geographic_reach: string[] | null;
+        preferred_cities: string[] | null;
+        preferred_sectors: string[] | null;
+        preferred_income_bands: string[] | null;
+      }>(),
   ]);
 
   if (organisations.error) {
@@ -165,8 +170,8 @@ export default async function ClientsPage({
   matchingClients = filterBySource(matchingClients, source);
   matchingClients = searchClients(matchingClients, search);
 
-  // F196 / F094: Prioritise matching clients based on the CAM's geographic preferences
-  matchingClients = prioritiseByGeography(matchingClients, outreachPrefs.data);
+  // F196 / F197 / F094: Prioritise matching clients based on the CAM's geographic & sector preferences
+  matchingClients = prioritiseQueue(matchingClients, outreachPrefs.data);
   const teamMembers = team.data ?? [];
   const filterActive = Boolean(ownerFilter || search || city || status || source);
   // F166 AC1/AC3: this is the CAM viewing their own filter, not just any owner

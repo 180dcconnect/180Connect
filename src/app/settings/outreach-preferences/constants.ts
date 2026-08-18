@@ -44,6 +44,81 @@ export const INCOME_BAND_LABELS: Record<IncomeBand, string> = {
 export const MAX_SECTOR_LENGTH = 60;
 export const MAX_SECTORS = 20;
 
+// F197: Standard sector taxonomy synthesised from Charity Commission causes/themes,
+// Companies House SIC industry codes, and 180DC non-profit consulting focus areas.
+export const SECTOR_CATEGORY_GROUPS = [
+  {
+    category: "Health & Wellbeing",
+    presets: [
+      "Health & Social Care",
+      "Mental Health",
+      "Disability Support",
+      "Medical Research",
+    ],
+  },
+  {
+    category: "Education & Youth",
+    presets: [
+      "Education & Training",
+      "Youth & Children",
+      "Schools & Colleges",
+      "Skills & Employment",
+    ],
+  },
+  {
+    category: "Environment & Sustainability",
+    presets: [
+      "Environment & Conservation",
+      "Climate & Sustainability",
+      "Renewable Energy",
+      "Animal Welfare",
+    ],
+  },
+  {
+    category: "Poverty & Community",
+    presets: [
+      "Poverty Relief",
+      "Housing & Homelessness",
+      "Community Development",
+      "Social Inclusion",
+    ],
+  },
+  {
+    category: "Arts, Culture & Heritage",
+    presets: [
+      "Arts & Culture",
+      "Heritage & Museums",
+      "Sports & Recreation",
+    ],
+  },
+  {
+    category: "Social Justice & Enterprise",
+    presets: [
+      "Social Enterprise",
+      "International Aid",
+      "Human Rights & Justice",
+    ],
+  },
+] as const;
+
+export const SECTOR_PRESETS = SECTOR_CATEGORY_GROUPS.flatMap((g) => g.presets);
+
+/**
+ * Common keyword aliases to ensure matching against heterogeneous source
+ * data (Charity Commission cause strings, Companies House SIC descriptions,
+ * and LLM-classified sector tags).
+ */
+export const SECTOR_KEYWORD_ALIASES: Record<string, string[]> = {
+  health: ["health", "healthcare", "medical", "hospital", "care", "wellbeing", "mental health", "disability"],
+  education: ["education", "training", "school", "college", "university", "learning", "academic", "skills", "teaching"],
+  environment: ["environment", "conservation", "climate", "sustainability", "wildlife", "animal", "green", "energy", "nature"],
+  poverty: ["poverty", "relief", "food bank", "homeless", "housing", "hardship", "deprivation", "inclusion"],
+  community: ["community", "youth", "children", "welfare", "civic", "social", "neighbourhood"],
+  arts: ["arts", "culture", "heritage", "museum", "theatre", "music", "sport", "recreation", "creative"],
+  justice: ["justice", "rights", "international", "aid", "human rights", "legal", "equality"],
+  enterprise: ["enterprise", "social enterprise", "cic", "business", "impact"],
+};
+
 // F196: City and location presets for fast selection, plus caps to ensure
 // sensible bounds for custom-typed locations.
 export const CITY_PRESETS = [
@@ -59,4 +134,5 @@ export const CITY_PRESETS = [
 
 export const MAX_CITY_LENGTH = 60;
 export const MAX_CITIES = 20;
+
 

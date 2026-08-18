@@ -5,6 +5,8 @@ import {
   formatLocation,
   formatOutreachStatus,
   prioritiseByGeography,
+  prioritiseBySector,
+  prioritiseQueue,
   searchClients,
   visibleClients,
   type ClientListRow,
@@ -231,3 +233,75 @@ describe("prioritiseByGeography (F196 / F090 / F094)", () => {
     assert.equal(result[0].id, "1");
   });
 });
+
+describe("prioritiseBySector (F197 / F089 / F094)", () => {
+  const clients = visibleClients(
+    [
+      org({ id: "1", legal_name: "Action for Children", sector: "Youth & Children", sub_sector: "Family Support" }),
+      org({ id: "2", legal_name: "Barnsley Health Trust", sector: "Healthcare", sub_sector: "Hospital Services" }),
+      org({ id: "3", legal_name: "Green Earth Initiative", sector: "Environment & Conservation", sub_sector: "Renewable Energy" }),
+      org({ id: "4", legal_name: "Sheffield Literacy Project", sector: "Education & Training", sub_sector: "Adult Literacy" }),
+      org({ id: "5", legal_name: "Yorkshire Food Relief", sector: "Poverty Relief", sub_sector: "Food Bank" }),
+    ],
+    [],
+  );
+
+  it("returns unweighted default order when no sector preferences are passed", () => {
+    assert.deepEqual(
+      prioritiseBySector(clients, undefined).map((c) => c.id),
+      ["1", "2", "3", "4", "5"],
+    );
+    assert.deepEqual(
+      prioritiseBySector(clients, { preferred_sectors: [] }).map((c) => c.id),
+      ["1", "2", "3", "4", "5"],
+    );
+  });
+
+  it("prioritises organisations matching preferred sector exactly or via substring", () => {
+    const result = prioritiseBySector(clients, {
+      preferred_sectors: ["Education & Training", "Poverty Relief"],
+    });
+    // Education (#4) and Poverty (#5) appear at the top, alphabetically
+    assert.deepEqual(result.map((c) => c.id), ["4", "5", "1", "2", "3"]);
+  });
+
+  it("matches cross-source sector variations using keyword aliases (e.g. Health & Social Care -> Healthcare)", () => {
+    const result = prioritiseBySector(clients, {
+      preferred_sectors: ["Health & Social Care"],
+    });
+    // Barnsley Health Trust (#2 with sector: "Healthcare") matches alias
+    assert.equal(result[0].id, "2");
+  });
+
+  it("matches sub_sector classifications", () => {
+    const result = prioritiseBySector(clients, {
+      preferred_sectors: ["Renewable Energy"],
+    });
+    assert.equal(result[0].id, "3");
+  });
+});
+
+describe("prioritiseQueue (Combined F196 + F197)", () => {
+  const clients = visibleClients(
+    [
+      org({ id: "1", legal_name: "Alpha Bristol Health", city: "Bristol", sector: "Healthcare" }),
+      org({ id: "2", legal_name: "Beta Sheffield Energy", city: "Sheffield", sector: "Renewable Energy" }),
+      org({ id: "3", legal_name: "Gamma Sheffield Health", city: "Sheffield", sector: "Healthcare" }),
+      org({ id: "4", legal_name: "Delta London Arts", city: "London", sector: "Arts & Culture" }),
+    ],
+    [],
+  );
+
+  it("ranks organisations matching both geography AND sector highest", () => {
+    const result = prioritiseQueue(clients, {
+      preferred_cities: ["Sheffield"],
+      preferred_sectors: ["Health & Social Care"],
+    });
+    // Gamma Sheffield Health matches both Sheffield (+10) and Health (+8) -> total 18
+    // Beta Sheffield Energy matches Sheffield (+10) -> total 10
+    // Alpha Bristol Health matches Health (+8) -> total 8
+    // Delta London Arts matches 0 -> total 0
+    assert.deepEqual(result.map((c) => c.id), ["3", "2", "1", "4"]);
+  });
+});
+

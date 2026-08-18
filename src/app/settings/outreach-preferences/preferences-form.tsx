@@ -21,6 +21,7 @@ import {
   MAX_CITIES,
   MAX_SECTOR_LENGTH,
   MAX_SECTORS,
+  SECTOR_CATEGORY_GROUPS,
   type GeographicReach,
   type IncomeBand,
 } from "./constants";
@@ -180,6 +181,15 @@ export function OutreachPreferencesForm({
 
   function removeSector(sector: string) {
     setSectors(sectors.filter((s) => s !== sector));
+  }
+
+  function toggleSectorPreset(preset: string) {
+    if (sectors.some((s) => s.toLowerCase() === preset.toLowerCase())) {
+      setSectors(sectors.filter((s) => s.toLowerCase() !== preset.toLowerCase()));
+    } else {
+      if (sectors.length >= MAX_SECTORS) return;
+      setSectors([...sectors, preset]);
+    }
   }
 
   function handleSectorKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -373,41 +383,82 @@ export function OutreachPreferencesForm({
         <fieldset>
           <legend className={LEGEND_CLASS}>Sector</legend>
           <p className="mt-2 text-sm leading-[1.7] text-foreground/65">
-            Type a sector and press Enter to add it.
+            Select standard sector categories from Charity Commission & Companies House classifications, or type custom tags to prioritise matching organisations.
           </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {sectors.map((sector) => (
-              <span
-                key={sector}
-                className="flex items-center gap-1.5 rounded-full bg-brand/10 px-3 py-1 text-sm font-medium text-brand"
-              >
-                {sector}
-                <button
-                  type="button"
-                  onClick={() => removeSector(sector)}
-                  aria-label={`Remove ${sector}`}
-                  className="text-brand/70 hover:text-brand"
-                >
-                  ×
-                </button>
-                <input type="hidden" name="sector" value={sector} />
-              </span>
+
+          {/* Categorized Sector Presets */}
+          <div className="mt-4 space-y-3">
+            {SECTOR_CATEGORY_GROUPS.map((group) => (
+              <div key={group.category} className="space-y-1.5">
+                <p className="text-[11px] font-semibold text-foreground/60">{group.category}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {group.presets.map((preset) => {
+                    const isSelected = sectors.some((s) => s.toLowerCase() === preset.toLowerCase());
+                    return (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => toggleSectorPreset(preset)}
+                        className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                          isSelected
+                            ? "border-brand bg-brand text-white"
+                            : "border-black/15 bg-white text-foreground/70 hover:border-brand/40 hover:text-brand"
+                        }`}
+                      >
+                        {isSelected ? `✓ ${preset}` : `+ ${preset}`}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             ))}
           </div>
-          <Input
-            type="text"
-            value={sectorInput}
-            onChange={(event) => setSectorInput(event.target.value)}
-            onKeyDown={handleSectorKeyDown}
-            onBlur={addSector}
-            maxLength={MAX_SECTOR_LENGTH}
-            disabled={sectors.length >= MAX_SECTORS}
-            aria-label="Add a sector"
-            placeholder={
-              sectors.length >= MAX_SECTORS ? `Up to ${MAX_SECTORS} sectors` : "e.g. Education"
-            }
-            className="mt-3 bg-white"
-          />
+
+          {/* Active Selected Sectors */}
+          {sectors.length > 0 && (
+            <div className="mt-5 border-t border-black/[0.06] pt-4">
+              <p className="text-xs font-semibold text-foreground/75">Active sector focus ({sectors.length}/{MAX_SECTORS})</p>
+              <div className="mt-2.5 flex flex-wrap gap-2">
+                {sectors.map((sector) => (
+                  <span
+                    key={sector}
+                    className="flex items-center gap-1.5 rounded-full bg-brand/10 px-3 py-1 text-sm font-medium text-brand"
+                  >
+                    {sector}
+                    <button
+                      type="button"
+                      onClick={() => removeSector(sector)}
+                      aria-label={`Remove ${sector}`}
+                      className="text-brand/70 hover:text-brand"
+                    >
+                      ×
+                    </button>
+                    <input type="hidden" name="sector" value={sector} />
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Custom Sector Input */}
+          <div className="mt-4">
+            <Input
+              type="text"
+              value={sectorInput}
+              onChange={(event) => setSectorInput(event.target.value)}
+              onKeyDown={handleSectorKeyDown}
+              onBlur={addSector}
+              maxLength={MAX_SECTOR_LENGTH}
+              disabled={sectors.length >= MAX_SECTORS}
+              aria-label="Add a custom sector"
+              placeholder={
+                sectors.length >= MAX_SECTORS
+                  ? `Up to ${MAX_SECTORS} sectors`
+                  : "Type a custom sector (e.g. Mental Health) and press Enter"
+              }
+              className="bg-white"
+            />
+          </div>
         </fieldset>
       </div>
 

@@ -1,13 +1,12 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
-import { Group, Rise, Stage } from "@/components/dashboard-stage";
+import { Rise, Stage } from "@/components/dashboard-stage";
+import { ProfilePanel } from "./profile-panel";
 
 /**
- * The profile tab (F015): what the rest of the team sees about you, read-only.
- * Editing lives one row down in Account (F200) — this screen is the view, that
- * one is the form, and keeping them apart is what stops two controls for the
- * same field drifting out of sync.
+ * Profile (F015) and account settings (F200) are one screen, not two: the same
+ * three fields were on both, and a second copy of a field is how two controls
+ * for it drift apart. This is the view; the display name opens in place.
  */
 export default async function ProfileSettingsPage() {
   const authorization = await getCurrentActor(undefined, {
@@ -17,12 +16,10 @@ export default async function ProfileSettingsPage() {
     redirect("/login");
   }
 
+  // No permission argument: every signed-in role has a profile to maintain, and
+  // the write is confined to the caller's own row by RLS rather than by a role
+  // check here.
   const actor = authorization.actor;
-  const fields = [
-    { label: "Display name", value: actor.fullName?.trim() || "Not set" },
-    { label: "Email", value: actor.email ?? "—" },
-    { label: "Role", value: actor.role },
-  ];
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
@@ -36,37 +33,13 @@ export default async function ProfileSettingsPage() {
           </p>
         </Rise>
 
-        <Group className="space-y-3">
-          <Rise>
-            <dl className="divide-y divide-black/[0.06] rounded-2xl border border-black/[0.06] bg-white px-6 shadow-sm">
-              {fields.map((field) => (
-                <div
-                  key={field.label}
-                  className="flex flex-wrap items-baseline justify-between gap-x-8 gap-y-1 py-5"
-                >
-                  <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-                    {field.label}
-                  </dt>
-                  <dd className="text-sm text-foreground/85">{field.value}</dd>
-                </div>
-              ))}
-            </dl>
-          </Rise>
-
-          <Rise>
-            <p className="px-1 text-sm leading-[1.7] text-foreground/65">
-              Your display name is edited in{" "}
-              <Link
-                className="font-bold text-brand hover:underline"
-                href="/settings/account"
-              >
-                Account
-              </Link>
-              . Your email is changed through your login details, and your role is
-              set by an administrator.
-            </p>
-          </Rise>
-        </Group>
+        <Rise>
+          <ProfilePanel
+            initialFullName={actor.fullName ?? ""}
+            email={actor.email}
+            role={actor.role}
+          />
+        </Rise>
       </Stage>
     </div>
   );

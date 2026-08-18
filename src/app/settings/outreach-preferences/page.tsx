@@ -7,6 +7,7 @@ import type { GeographicReach, IncomeBand } from "./constants";
 
 type OutreachPreferencesRow = {
   preferred_geographic_reach: GeographicReach[] | null;
+  preferred_cities: string[] | null;
   preferred_sectors: string[] | null;
   preferred_income_bands: IncomeBand[] | null;
 };
@@ -24,7 +25,7 @@ export default async function OutreachPreferencesPage() {
   // no user_id filter needed here, there is nothing else this query could return.
   const { data } = await supabase
     .from("outreach_preferences")
-    .select("preferred_geographic_reach, preferred_sectors, preferred_income_bands")
+    .select("preferred_geographic_reach, preferred_cities, preferred_sectors, preferred_income_bands")
     .maybeSingle<OutreachPreferencesRow>();
 
   return (
@@ -42,6 +43,7 @@ export default async function OutreachPreferencesPage() {
         <Rise>
           <OutreachPreferencesForm
             initialGeographicReach={data?.preferred_geographic_reach ?? []}
+            initialCities={data?.preferred_cities ?? []}
             initialSectors={data?.preferred_sectors ?? []}
             initialIncomeBands={data?.preferred_income_bands ?? []}
           />

@@ -118,9 +118,9 @@ export function SidebarAccountMenu({
           Profile
         </DropdownMenuItem>
 
-        <DropdownMenuItem onSelect={() => router.push("/settings/account")}>
+        <DropdownMenuItem onSelect={() => router.push("/settings")}>
           <Settings aria-hidden="true" />
-          Account settings
+          Settings
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />

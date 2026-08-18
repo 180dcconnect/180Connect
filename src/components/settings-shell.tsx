@@ -20,10 +20,9 @@ export async function SettingsShell({ children }: { children: React.ReactNode })
 
   const personal: SettingsNavSection = {
     label: "Personal",
-    items: [
-      { href: "/settings/profile", label: "Profile" },
-      { href: "/settings/account", label: "Account" },
-    ],
+    // Profile is both the view and the edit surface — there is no separate
+    // Account row, because it held the same three fields.
+    items: [{ href: "/settings/profile", label: "Profile" }],
   };
 
   // Outreach preferences steer a CAM's own queue, so the row is only shown to

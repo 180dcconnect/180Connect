@@ -9,6 +9,12 @@ import { reportError } from "@/lib/error-logging";
 export type AccountSettingsState = {
   status: "idle" | "error" | "success";
   message?: string;
+  /**
+   * The name as actually stored, echoed back on success. The view row renders
+   * this rather than re-deriving it from the keystrokes, so the screen cannot
+   * disagree with the database about what normalisation did.
+   */
+  fullName?: string;
 };
 
 /**
@@ -26,7 +32,7 @@ export async function saveAccountSettingsAction(
   formData: FormData,
 ): Promise<AccountSettingsState> {
   const authorization = await getCurrentActor(undefined, {
-    route: "/settings/account",
+    route: "/settings/profile",
   });
   if (!authorization.ok) {
     return { status: "error", message: actorFailureMessage(authorization.reason) };
@@ -59,12 +65,15 @@ export async function saveAccountSettingsAction(
   }
 
   // AC3: the change has to show up immediately, without a logout. The name is
-  // rendered in two places outside this page — the profile screen (F015) and
-  // the sidebar account block, which lives in the shared layout — so the whole
-  // layout tree is revalidated rather than just this route. That also clears
-  // the client router cache, which is what would otherwise keep a stale name on
-  // screen after a client-side navigation back to /profile.
+  // rendered outside this page too — in the sidebar account block, which lives
+  // in the shared layout — so the whole layout tree is revalidated rather than
+  // just this route. That also clears the client router cache, which is what
+  // would otherwise keep a stale name on screen after a client-side navigation.
   revalidatePath("/", "layout");
 
-  return { status: "success", message: "Account details saved." };
+  return {
+    status: "success",
+    message: "Account details saved.",
+    fullName: parsed.value.fullName,
+  };
 }

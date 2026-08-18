@@ -5,6 +5,7 @@ import {
   checkWebsite,
   isPrivateAddress,
   validateWebsiteFormat,
+  websiteHref,
   type WebsiteCheckDependencies,
 } from "./website-validation.ts";
 import { pinnedLookup } from "./website-reachability.ts";
@@ -31,6 +32,33 @@ describe("validateWebsiteFormat", () => {
     assert.equal(result.url, "example dot org");
   });
 
+  // A registry import or a hand-typed entry very often stores the bare host.
+  // These were all reported "invalid format" for want of a scheme, which also
+  // meant the reachability check never ran on them.
+  it("accepts a bare host and assumes https", () => {
+    const result = validateWebsiteFormat("1-1coco.org");
+    assert.equal(result.status, "valid");
+    assert.equal(result.url, "https://1-1coco.org/");
+
+    assert.equal(validateWebsiteFormat("www.example.org/path").status, "valid");
+    assert.equal(validateWebsiteFormat(" example.org ").url, "https://example.org/");
+  });
+
+  it("does not invent a scheme for a host that carries a port", () => {
+    const result = validateWebsiteFormat("example.org:8080");
+    assert.equal(result.status, "valid");
+    assert.equal(result.url, "https://example.org:8080/");
+  });
+
+  it("leaves a non-HTTP scheme alone rather than rewriting it into a valid one", () => {
+    assert.equal(validateWebsiteFormat("javascript:alert(1)").status, "invalid");
+    assert.equal(validateWebsiteFormat("mailto:hello@example.org").status, "invalid");
+    assert.equal(validateWebsiteFormat("ftp://example.org").status, "invalid");
+    // Bare, but still local: assuming https must not smuggle it past the guard.
+    assert.equal(validateWebsiteFormat("localhost:54321").status, "invalid");
+    assert.equal(validateWebsiteFormat("127.0.0.1").status, "invalid");
+  });
+
   it("distinguishes a missing optional website", () => {
     assert.equal(validateWebsiteFormat(null).status, "missing");
   });
@@ -43,9 +71,27 @@ describe("validateWebsiteFormat", () => {
     assert.equal(isPrivateAddress("93.184.216.34"), false);
     assert.equal(validateWebsiteFormat("http://[::1]/").status, "invalid");
     assert.equal(validateWebsiteFormat("http://[fc00::1]/").status, "invalid");
+    assert.equal(validateWebsiteFormat("[::1]").status, "invalid");
     assert.equal(isPrivateAddress("::ffff:169.254.169.254"), true);
     assert.equal(isPrivateAddress("::ffff:172.20.1.2"), true);
     assert.equal(isPrivateAddress("::ffff:100.100.1.2"), true);
+  });
+});
+
+describe("websiteHref", () => {
+  // The invalid branch echoes the raw stored value back for display. Handing that
+  // to an `href` made the browser resolve it as a relative path.
+  it("refuses to hand back a malformed value as a link", () => {
+    assert.equal(websiteHref(validateWebsiteFormat("example dot org")), null);
+    assert.equal(websiteHref(validateWebsiteFormat(null)), null);
+  });
+
+  it("returns the normalised absolute URL for anything checkable", () => {
+    assert.equal(websiteHref(validateWebsiteFormat("1-1coco.org")), "https://1-1coco.org/");
+    assert.equal(
+      websiteHref({ status: "unreachable", url: "https://example.org/", message: "x" }),
+      "https://example.org/",
+    );
   });
 });
 

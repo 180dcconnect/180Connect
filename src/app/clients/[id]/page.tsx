@@ -11,6 +11,7 @@ import {
   type OrganisationSourceRow,
 } from "@/lib/source-tracking";
 import { checkWebsiteReachabilityCached } from "@/lib/website-reachability-cache";
+import { websiteHref } from "@/lib/website-validation";
 import { formatLocation, formatOutreachStatus } from "@/lib/organisation-format";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
@@ -93,6 +94,10 @@ export default async function ClientDetailPage({
   }
   if (!client) notFound();
   const website = await checkWebsiteReachabilityCached(client.website);
+  // Never `href={website.url}`: on the invalid branch that field is the raw
+  // stored text, and a browser resolves a scheme-less string as a path — the
+  // "link" to `1-1coco.org` navigated to /clients/1-1coco.org.
+  const websiteLink = websiteHref(website);
   const email = validateClientEmail(client.contact_email);
 
   // ENRICHMENT_RESULTS is append-only (20260804180000_create_org_children.sql), so
@@ -318,19 +323,23 @@ export default async function ClientDetailPage({
                             : "Unreachable"}
                     </Pill>
                     <dd className="w-full text-sm leading-[1.6]">
-                      {website.url ? (
+                      {websiteLink ? (
                         <a
                           className={`break-all underline underline-offset-2 transition-colors ${
                             website.status === "reachable"
                               ? "text-brand-hover hover:text-brand"
                               : "font-bold text-destructive"
                           }`}
-                          href={website.url}
+                          href={websiteLink}
                           rel="noreferrer"
                           target="_blank"
                         >
-                          {website.url}
+                          {websiteLink}
                         </a>
+                      ) : website.url ? (
+                        // Malformed: show what is stored, as text. There is
+                        // nowhere safe to send anyone.
+                        <span className="break-all font-bold text-destructive">{website.url}</span>
                       ) : (
                         <span className="text-foreground/35">Not provided</span>
                       )}

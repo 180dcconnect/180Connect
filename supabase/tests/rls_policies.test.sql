@@ -3658,17 +3658,6 @@ begin
 end;
 $$;
 
-select * from tests.suite_core();
-select * from tests.suite_viewer();
-select * from tests.suite_users();
-select * from tests.suite_sensitive();
-select * from tests.suite_ingestion();
-select * from tests.suite_audit();
-select * from tests.suite_role_rpc();
-select * from tests.suite_active_rpc();
-select * from tests.suite_deactivate_rpc();
-select * from tests.suite_invite_rpc();
-select * from tests.suite_signup_domain();
 -- ---------------------------------------------------------------------------
 -- ownership_requests (#408, F165 follow-up)
 -- ---------------------------------------------------------------------------
@@ -3887,6 +3876,17 @@ begin
 end;
 $$;
 
+select * from tests.suite_core();
+select * from tests.suite_viewer();
+select * from tests.suite_users();
+select * from tests.suite_sensitive();
+select * from tests.suite_ingestion();
+select * from tests.suite_audit();
+select * from tests.suite_role_rpc();
+select * from tests.suite_active_rpc();
+select * from tests.suite_deactivate_rpc();
+select * from tests.suite_invite_rpc();
+select * from tests.suite_signup_domain();
 select * from tests.suite_default_role();
 select * from tests.suite_views();
 select * from tests.suite_actions();

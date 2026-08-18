@@ -194,7 +194,7 @@ This policy is reviewed every six months, or whenever a new data source, process
 * **ICO Data Protection Fee Self-Assessment:** 180 Degrees Consulting Sheffield CIC completed the ICO data protection fee self-assessment on 18 August 2026. Based on the CIC's current processing activities, the ICO determined that the organisation is required to register and pay the Tier 1 data protection fee of £52 (£47 by Direct Debit) (recorded in [`docs/ico-fee-self-assessment.md`](ico-fee-self-assessment.md)).
 * **ICO Registration & Fee Payment:** Registration and annual fee payment tracked by the controller in accordance with ICO requirements.
 * **Record of Processing Activities (ROPA):** Documented under Article 30.
-* **Legitimate Interest Assessment (LIA):** Documented under Article 6(1)(f).
+* **Legitimate Interest Assessment (LIA):** Completed 18 August 2026; confirmed Article 6(1)(f) lawful basis for prospective client outreach (recorded in [`docs/legitimate-interest-assessment.md`](legitimate-interest-assessment.md)).
 * **Data Protection Impact Assessment (DPIA):** Documented under Article 35.
 * **Public Data Handling Rules Specification:** [`docs/personal-data-exclusions.md`](personal-data-exclusions.md).
 * **Internal Breach Log:** Documented under Article 33(5).
@@ -207,7 +207,7 @@ This policy is reviewed every six months, or whenever a new data source, process
 | :--- | :--- | :--- | :--- |
 | **1** | **Complete ICO data protection fee registration and payment** | The CIC's ICO self-assessment completed on **18 August 2026** determined that 180 Degrees Consulting Sheffield CIC is required to pay the **Tier 1 annual data protection fee of £52 (£47 by Direct Debit)**. Registration and payment must be completed as required by the ICO. The obligation relates to the CIC's overall processing of personal data, including processing carried out through 180Connect, rather than to 180Connect as a standalone product. | Project Manager |
 | **2** | **Review and execute Global Workspace Data Protection Agreement** | Governance draft ([`docs/global-workspace-data-protection-agreement.md`](global-workspace-data-protection-agreement.md)) is prepared for 180DC Global review, defining Sheffield as independent controller, limiting Global access to administration/support, and incorporating the UK IDTA and TRA for Australian-based access. | Project Manager / Leadership |
-| **3** | **Complete DPIA and LIA** | Both assessments are mandatory governance gates before live outreach commences (§6). | Project Manager |
+| **3** | **Complete DPIA and finalize LIA sign-off** | LIA is completed ([`docs/legitimate-interest-assessment.md`](legitimate-interest-assessment.md)); companion DPIA must be completed and signed off before live outreach commences (§6). | Project Manager |
 | **4** | **Finalise LLM provider selection and DPA** | Requires confirmation of processing region (UK/EU pinned), zero-data-retention for training, and incoming reply redaction safeguards. | Project Manager |
 | **5** | **Verify sending domain for auth and platform emails** | Ensure domain verification is complete on Resend for `180dc.org` / subdomains. | Engineering |
 | **6** | **Publish Article 14 Privacy Notice** | Publish and link an external-facing privacy notice explaining indirect collection, public sources, and marketing objection rights. | Project Manager |

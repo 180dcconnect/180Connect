@@ -76,6 +76,15 @@ const EMPTY_EXTRACTION: WebsiteExtraction = {
   socialLinks: [],
 };
 
+/**
+ * Named entities worth decoding: the structural ones, the punctuation a CMS
+ * silently substitutes, and the accented Latin letters that show up in real
+ * charity names and descriptions ("Café", "Fundación", "Kurdistán").
+ *
+ * Not the full HTML5 list — that is ~2200 names, nearly all of them irrelevant
+ * here. Anything unlisted is left as written rather than mangled, so a miss is
+ * visible ("Caf&eacute;") instead of silently wrong.
+ */
 const NAMED_ENTITIES: Readonly<Record<string, string>> = {
   amp: "&",
   lt: "<",
@@ -91,6 +100,74 @@ const NAMED_ENTITIES: Readonly<Record<string, string>> = {
   rdquo: "”",
   hellip: "…",
   pound: "£",
+  euro: "€",
+  cent: "¢",
+  copy: "©",
+  reg: "®",
+  trade: "™",
+  deg: "°",
+  middot: "·",
+  bull: "•",
+  times: "×",
+  frasl: "⁄",
+  eacute: "é",
+  egrave: "è",
+  ecirc: "ê",
+  euml: "ë",
+  aacute: "á",
+  agrave: "à",
+  acirc: "â",
+  auml: "ä",
+  atilde: "ã",
+  aring: "å",
+  aelig: "æ",
+  iacute: "í",
+  igrave: "ì",
+  icirc: "î",
+  iuml: "ï",
+  oacute: "ó",
+  ograve: "ò",
+  ocirc: "ô",
+  ouml: "ö",
+  otilde: "õ",
+  oslash: "ø",
+  uacute: "ú",
+  ugrave: "ù",
+  ucirc: "û",
+  uuml: "ü",
+  ntilde: "ñ",
+  ccedil: "ç",
+  yacute: "ý",
+  yuml: "ÿ",
+  szlig: "ß",
+  Eacute: "É",
+  Egrave: "È",
+  Ecirc: "Ê",
+  Euml: "Ë",
+  Aacute: "Á",
+  Agrave: "À",
+  Acirc: "Â",
+  Auml: "Ä",
+  Atilde: "Ã",
+  Aring: "Å",
+  AElig: "Æ",
+  Iacute: "Í",
+  Igrave: "Ì",
+  Icirc: "Î",
+  Iuml: "Ï",
+  Oacute: "Ó",
+  Ograve: "Ò",
+  Ocirc: "Ô",
+  Ouml: "Ö",
+  Otilde: "Õ",
+  Oslash: "Ø",
+  Uacute: "Ú",
+  Ugrave: "Ù",
+  Ucirc: "Û",
+  Uuml: "Ü",
+  Ntilde: "Ñ",
+  Ccedil: "Ç",
+  Yacute: "Ý",
 };
 
 export function decodeEntities(value: string): string {
@@ -103,7 +180,10 @@ export function decodeEntities(value: string): string {
         ? String.fromCodePoint(codePoint)
         : match;
     }
-    return NAMED_ENTITIES[body.toLowerCase()] ?? match;
+    // Exact match first: with accented letters in the table, case is meaning —
+    // `&Eacute;` is É, not é. The lowercase fallback keeps the structural
+    // entities case-insensitive, which is how they were already being read.
+    return NAMED_ENTITIES[body] ?? NAMED_ENTITIES[body.toLowerCase()] ?? match;
   });
 }
 

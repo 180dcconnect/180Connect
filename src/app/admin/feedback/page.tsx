@@ -92,9 +92,7 @@ export default async function FeedbackPage() {
                 Feedback
               </h1>
               <p className="mt-3 max-w-xl text-sm leading-[1.7] text-foreground/65">
-                What the team thinks about 180Connect. Ratings are collected
-                periodically via the in-app prompt. Responses are anonymous to
-                the submitter but visible here.
+                 Ratings are collected periodically via the in-app prompt. 
               </p>
             </div>
             <RequestFeedbackButton />

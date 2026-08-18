@@ -13,6 +13,7 @@ import { AnimateIcon } from "@/components/animate-ui/icons/icon";
 import { PanelLeftClose } from "@/components/animate-ui/icons/panel-left-close";
 import { PanelLeftOpen } from "@/components/animate-ui/icons/panel-left-open";
 import { Users } from "@/components/animate-ui/icons/users";
+import { ThumbsUp} from "@/components/animate-ui/icons/thumbs-up";
 import UsersGroupIcon from "@/components/ui/users-group-icon";
 import { SidebarAccountMenu } from "@/components/sidebar-account-menu";
 import { SidebarChecklist, type SidebarChecklistStep } from "@/components/sidebar-checklist";
@@ -63,7 +64,7 @@ const ICONS: Record<SidebarIconName, RailIcon> = {
   add: UserPlus,
   audit: Cctv,
   import: CloudDownload,
-  feedback: MessageSquareHeart,
+  feedback: ThumbsUp,
 };
 
 const MotionLink = motion.create(Link);

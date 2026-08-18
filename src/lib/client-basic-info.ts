@@ -8,7 +8,9 @@
 
 import { formatLocation, formatOutreachStatus } from "./organisation-format.ts";
 
-const NOT_PROVIDED = "Not provided";
+/** AC2's explicit blank. Exported so the UI can render it as muted rather than
+ * re-deriving "is this a real value?" from a string comparison of its own. */
+export const NOT_PROVIDED = "Not provided";
 
 export type OrganisationDetailRow = {
   id: string;

@@ -3635,6 +3635,10 @@ begin
     not app.is_personal_email('not-an-address'),
     'a string with no @ is not something this function has an opinion about'
   );
+
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
   -- -- manual_entry_records trigger: personal email rejected (AC3) -------------
   if tests.tables_exist('manual_entry_records') then
     return next is(
@@ -3651,8 +3655,6 @@ begin
       'saving a manual entry with a role email is accepted'
     );
   end if;
-
-  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
 end;
 $$;
 

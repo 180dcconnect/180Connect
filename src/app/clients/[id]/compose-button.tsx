@@ -11,6 +11,7 @@ type EmailLength = "short" | "standard" | "detailed";
 type EmailVoice = "180dc" | "consultative" | "plain_language";
 type EmailTone = "balanced" | "warm" | "formal" | "concise";
 type OpeningApproach = "mission_led" | "direct_intro" | "news_hook";
+type ClosingApproach = "soft_cta" | "meeting_request" | "open_question";
 
 /** F100 creates a review draft only, after the current outreach preflight passes. */
 export function ComposeButton({
@@ -41,6 +42,7 @@ export function ComposeButton({
   const [voice, setVoice] = useState<EmailVoice>("180dc");
   const [tone, setTone] = useState<EmailTone>("balanced");
   const [opening, setOpening] = useState<OpeningApproach>("mission_led");
+  const [closing, setClosing] = useState<ClosingApproach>("soft_cta");
 
   async function generate() {
     setBusy(true);
@@ -62,7 +64,7 @@ export function ComposeButton({
       const response = await fetch(`/api/clients/${organisationId}/outreach-drafts/stage-one`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ length, voice, tone, opening }),
+        body: JSON.stringify({ length, voice, tone, opening, closing }),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -103,6 +105,14 @@ export function ComposeButton({
           <option value="short">Short</option>
           <option value="standard">Standard</option>
           <option value="detailed">Detailed</option>
+        </select>
+      </label>
+      <label className="block max-w-xs text-xs font-bold text-foreground/65">
+        Closing approach
+        <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setClosing(event.target.value as ClosingApproach)} value={closing}>
+          <option value="soft_cta">Soft invitation</option>
+          <option value="meeting_request">Request a short call</option>
+          <option value="open_question">Open question</option>
         </select>
       </label>
       <label className="block max-w-xs text-xs font-bold text-foreground/65">

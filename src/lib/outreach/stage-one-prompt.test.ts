@@ -56,3 +56,10 @@ test("buildStageOnePrompt applies each opening approach safely", () => {
   assert.match(buildStageOnePrompt(context, { opening: "direct_intro" }).system, /direct introduction/);
   assert.match(buildStageOnePrompt(context, { opening: "news_hook" }).system, /without inventing news/);
 });
+
+test("buildStageOnePrompt applies each closing approach safely", () => {
+  const context = { organisationName: "Example", organisationType: "charity" };
+  assert.match(buildStageOnePrompt(context, { closing: "soft_cta" }).system, /low-pressure invitation/);
+  assert.match(buildStageOnePrompt(context, { closing: "meeting_request" }).system, /without proposing invented dates/);
+  assert.match(buildStageOnePrompt(context, { closing: "open_question" }).system, /one clear, open question/);
+});

@@ -3,7 +3,21 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { motion, type Transition } from "motion/react";
 import { dismissGuideAction, finishGuideAction } from "@/lib/onboarding-actions";
+
+const getPathAnimate = (isChecked: boolean) => ({
+  pathLength: isChecked ? 1 : 0,
+  opacity: isChecked ? 1 : 0,
+});
+
+const getPathTransition = (isChecked: boolean): Transition => ({
+  pathLength: { duration: 0.8, ease: "easeInOut" },
+  opacity: {
+    duration: 0.01,
+    delay: isChecked ? 0 : 0.8,
+  },
+});
 
 /**
  * F255 — the first-run checklist a new CAM sees on their dashboard.
@@ -102,21 +116,55 @@ export function FirstRunGuide({
         {steps.map((step) => (
           <li
             key={step.key}
-            className="flex flex-wrap items-start justify-between gap-4 rounded-xl bg-white p-4"
+            className="flex flex-wrap items-start justify-between gap-4 rounded-xl bg-white p-4 transition-all hover:shadow-xs"
           >
             <div className="min-w-0 flex-1">
-              <p className="flex items-center gap-2 font-bold">
+              <p className="flex items-center gap-2.5 font-bold">
                 <span
                   aria-hidden="true"
                   className={
-                    "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs " +
-                    (step.done ? "bg-brand text-white" : "border border-black/15 text-transparent")
+                    "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors duration-300 " +
+                    (step.done
+                      ? "bg-brand text-white"
+                      : "border border-black/20 text-transparent")
                   }
                 >
-                  ✓
+                  <motion.span
+                    initial={false}
+                    animate={{ scale: step.done ? 1 : 0, opacity: step.done ? 1 : 0 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                  >
+                    ✓
+                  </motion.span>
                 </span>
-                <span className={step.done ? "text-foreground/55 line-through" : undefined}>
-                  {step.title}
+                <span className="relative inline-block max-w-full">
+                  <span
+                    className={
+                      "transition-colors duration-300 " +
+                      (step.done ? "text-foreground/50" : "text-foreground")
+                    }
+                  >
+                    {step.title}
+                  </span>
+                  <motion.svg
+                    width="340"
+                    height="32"
+                    viewBox="0 0 340 32"
+                    className="pointer-events-none absolute left-0 top-1/2 z-20 h-7 w-full -translate-y-1/2"
+                  >
+                    <motion.path
+                      d="M 10 16.91 s 79.8 -11.36 98.1 -11.34 c 22.2 0.02 -47.82 14.25 -33.39 22.02 c 12.61 6.77 124.18 -27.98 133.31 -17.28 c 7.52 8.38 -26.8 20.02 4.61 22.05 c 24.55 1.93 113.37 -20.36 113.37 -20.36"
+                      vectorEffect="non-scaling-stroke"
+                      strokeWidth={2.2}
+                      strokeLinecap="round"
+                      strokeMiterlimit={10}
+                      fill="none"
+                      initial={false}
+                      animate={getPathAnimate(step.done)}
+                      transition={getPathTransition(step.done)}
+                      className="stroke-brand"
+                    />
+                  </motion.svg>
                 </span>
                 {/* The tick is decorative; screen readers get the state in words. */}
                 <span className="sr-only">{step.done ? "(complete)" : "(not started)"}</span>
@@ -126,7 +174,7 @@ export function FirstRunGuide({
             {/* AC3 — every step leads to the screen that does the thing. */}
             <Link
               href={step.href}
-              className="shrink-0 rounded-full border border-brand/30 px-3 py-1 text-xs font-bold text-brand hover:bg-brand/5"
+              className="shrink-0 rounded-full border border-brand/30 px-3 py-1 text-xs font-bold text-brand transition-colors hover:bg-brand/5"
             >
               {step.cta}
             </Link>

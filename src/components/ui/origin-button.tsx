@@ -200,10 +200,10 @@ const OriginButton = React.forwardRef<HTMLButtonElement, OriginButtonProps>(
 
     // Sizing
     const sizeClasses = {
-      xs: "h-7 px-3 text-xs rounded-full gap-1.5",
+      xs: "h-7 px-3 text-xs font-semibold rounded-full gap-1.5",
       sm: "h-8.5 px-4 text-xs font-semibold rounded-full gap-1.5",
-      md: "h-10 px-5 text-sm font-medium rounded-full gap-2",
-      lg: "h-12 px-7 font-medium text-[15px] rounded-full gap-2.5",
+      md: "h-10 px-5 text-sm font-semibold rounded-full gap-2",
+      lg: "h-12 px-7 font-semibold text-[15px] rounded-full gap-2.5",
     }[size];
 
     // Resting background layer (fades out on hover so dark pixels never bleed into anti-aliased curved caps)
@@ -249,10 +249,10 @@ const OriginButton = React.forwardRef<HTMLButtonElement, OriginButtonProps>(
 
     // Text color when radial fill is active
     const textFilledColor = {
-      default: "text-[#0c1014] font-semibold",
+      default: "text-[#0c1014]",
       card: "text-background dark:text-neutral-950",
       dark: "text-white dark:text-black",
-      outline: "text-[#0c1014] font-semibold",
+      outline: "text-[#0c1014]",
       ghost: "text-foreground",
       destructive: "text-white",
     }[variant];

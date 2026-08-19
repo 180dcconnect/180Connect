@@ -1,7 +1,28 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useSyncExternalStore } from "react";
 import { X } from "lucide-react";
+
+const STORAGE_KEY = "staging_banner_dismissed";
+
+const emptySubscribe = () => () => {};
+
+function subscribe(callback: () => void) {
+  window.addEventListener("storage", callback);
+  return () => window.removeEventListener("storage", callback);
+}
+
+function getSnapshot() {
+  try {
+    return sessionStorage.getItem(STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function getServerSnapshot() {
+  return false;
+}
 
 /**
  * Shown on every signed-in page when NEXT_PUBLIC_ENV=staging, so external
@@ -10,24 +31,18 @@ import { X } from "lucide-react";
  * Can be dismissed with the close ('X') button for the current session.
  */
 export function StagingBanner() {
-  const [dismissed, setDismissed] = useState(false);
+  const isDismissed = useSyncExternalStore(
+    typeof window !== "undefined" ? subscribe : emptySubscribe,
+    getSnapshot,
+    getServerSnapshot
+  );
 
-  useEffect(() => {
-    try {
-      if (sessionStorage.getItem("staging_banner_dismissed") === "true") {
-        setDismissed(true);
-      }
-    } catch {
-      // Ignore sessionStorage read errors
-    }
-  }, []);
-
-  if (process.env.NEXT_PUBLIC_ENV !== "staging" || dismissed) return null;
+  if (process.env.NEXT_PUBLIC_ENV !== "staging" || isDismissed) return null;
 
   const handleDismiss = () => {
-    setDismissed(true);
     try {
-      sessionStorage.setItem("staging_banner_dismissed", "true");
+      sessionStorage.setItem(STORAGE_KEY, "true");
+      window.dispatchEvent(new Event("storage"));
     } catch {
       // Ignore sessionStorage write errors
     }

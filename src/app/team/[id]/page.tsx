@@ -134,10 +134,10 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
         <Rise className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm text-foreground/60">
             <Link
-              href="/team"
+              href="/clients"
               className="font-bold hover:text-brand hover:underline"
             >
-              Team
+              Clients
             </Link>
             <span>/</span>
             <span className="text-foreground font-semibold">{displayName}</span>

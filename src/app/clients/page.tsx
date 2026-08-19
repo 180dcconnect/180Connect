@@ -66,7 +66,7 @@ const ROW_GRID =
   "lg:grid lg:grid-cols-[2rem_minmax(0,1fr)_9rem_10rem_10rem_1rem] lg:items-center lg:gap-4";
 
 /** Reserved width for the claim button, held whether or not the row has one. */
-const CLAIM_SLOT = "w-[6.5rem] shrink-0";
+const CLAIM_SLOT = "w-[8.5rem] shrink-0";
 
 /**
  * F051 — the charity list view. Every organisation regardless of import method
@@ -390,7 +390,7 @@ export default async function ClientsPage({
                   {/* The column key, on the widths the rows use. Hidden below lg,
                       where the row folds back into name-over-subline. */}
                   <div
-                    className="hidden items-center gap-4 border-b border-black/[0.06] bg-black/[0.015] px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em] text-foreground/30 lg:flex"
+                    className="group/header hidden items-center gap-4 border-b border-black/[0.06] bg-black/[0.015] px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em] text-foreground/30 lg:flex"
                   >
                     {isAdmin && (
                       <span className="flex w-6 shrink-0 items-center justify-center">
@@ -412,7 +412,7 @@ export default async function ClientsPage({
                     {clients.map((client, index) => (
                       <li
                         key={client.id}
-                        className="flex items-center gap-4 border-b border-black/[0.06] px-5 py-3.5 last:border-b-0"
+                        className="group/row flex items-center gap-4 border-b border-black/[0.06] px-5 py-3.5 last:border-b-0"
                       >
                         {isAdmin && (
                           <span className="flex w-6 shrink-0 items-center justify-center">

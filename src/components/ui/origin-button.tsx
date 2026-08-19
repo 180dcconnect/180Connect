@@ -258,7 +258,7 @@ const OriginButton = React.forwardRef<HTMLButtonElement, OriginButtonProps>(
     }[variant];
 
     const sharedClasses = cn(
-      "group relative inline-flex cursor-pointer touch-manipulation select-none items-center justify-center overflow-hidden tracking-[-0.02em] bg-transparent",
+      "group relative inline-flex cursor-pointer touch-manipulation select-none items-center justify-center overflow-hidden whitespace-nowrap tracking-[-0.02em] bg-transparent",
       sizeClasses,
       "transition-[color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-brand focus-visible:ring-offset-background",

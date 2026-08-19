@@ -17,6 +17,7 @@ import {
 } from "./visible-clients.ts";
 import { BrandSearchBar } from "@/components/brand/search-bar";
 import { ClaimButton } from "./[id]/claim-button";
+import { ClientOwnerBadge } from "./client-owner-badge";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 import { Group, Rise } from "@/components/dashboard-stage";
 import { OriginButton } from "@/components/ui/origin-button";
@@ -466,15 +467,10 @@ export default async function ClientsPage({
                           </span>
 
                           <span className="hidden min-w-0 lg:block">
-                            {client.ownerName ? (
-                              <span className="inline-block max-w-full truncate rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-brand-hover">
-                                {client.ownerName}
-                              </span>
-                            ) : (
-                              <span className="inline-block rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/40">
-                                Unassigned
-                              </span>
-                            )}
+                            <ClientOwnerBadge
+                              ownerId={client.owner_id}
+                              ownerName={client.ownerName}
+                            />
                           </span>
 
                           {/* Between sm and lg there are no columns but there is
@@ -483,15 +479,10 @@ export default async function ClientsPage({
                             <span className="rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/55">
                               {client.outreachStatusLabel}
                             </span>
-                            {client.ownerName ? (
-                              <span className="rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-brand-hover">
-                                {client.ownerName}
-                              </span>
-                            ) : (
-                              <span className="rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/40">
-                                Unassigned
-                              </span>
-                            )}
+                            <ClientOwnerBadge
+                              ownerId={client.owner_id}
+                              ownerName={client.ownerName}
+                            />
                             {client.suppressionPending && (
                               <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-amber-800">
                                 Suppression requested

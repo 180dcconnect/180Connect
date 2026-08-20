@@ -516,6 +516,7 @@ export default async function ClientDetailPage({
                     <ComposeButton
                       blocked={suppressed}
                       organisationId={client.id}
+                      outreachStatus={client.outreach_status}
                       suppressionReason={suppressed ? latest.reason : undefined}
                       ownershipWarning={
                         ownershipConflict.hasConflict ? ownershipConflict.warning : undefined

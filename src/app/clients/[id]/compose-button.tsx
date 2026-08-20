@@ -18,14 +18,17 @@ type ClosingApproach = "soft_cta" | "meeting_request" | "open_question";
 export function ComposeButton({
   blocked,
   organisationId,
+  outreachStatus,
   suppressionReason,
   ownershipWarning,
 }: {
   blocked: boolean;
   organisationId: string;
+  outreachStatus: string;
   suppressionReason?: string;
   ownershipWarning?: string;
 }) {
+  const isStageTwo = outreachStatus === "initial_outreach_sent";
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -72,7 +75,8 @@ export function ComposeButton({
         return;
       }
 
-      const response = await fetch(`/api/clients/${organisationId}/outreach-drafts/stage-one`, {
+      const stagePath = isStageTwo ? "stage-two" : "stage-one";
+      const response = await fetch(`/api/clients/${organisationId}/outreach-drafts/${stagePath}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ length, voice, tone, opening, closing, booklet }),
@@ -94,7 +98,7 @@ export function ComposeButton({
     return (
       <div>
         <OriginButton variant="outline" size="sm" disabled type="button">
-          Generate Stage 1 email
+          {isStageTwo ? "Generate Stage 2 follow-up" : "Generate Stage 1 email"}
         </OriginButton>
         <p className="mt-2.5 text-[13px] font-bold leading-[1.6] text-red-800" role="alert">
           {warning?.text}
@@ -131,14 +135,16 @@ export function ComposeButton({
           <option value="open_question">Open question</option>
         </select>
       </label>
-      <label className="block max-w-xs text-xs font-bold text-foreground/65">
-        Opening approach
-        <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setOpening(event.target.value as OpeningApproach)} value={opening}>
-          <option value="mission_led">Mission-led</option>
-          <option value="direct_intro">Direct introduction</option>
-          <option value="news_hook">Relevant news hook</option>
-        </select>
-      </label>
+      {!isStageTwo && (
+        <label className="block max-w-xs text-xs font-bold text-foreground/65">
+          Opening approach
+          <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setOpening(event.target.value as OpeningApproach)} value={opening}>
+            <option value="mission_led">Mission-led</option>
+            <option value="direct_intro">Direct introduction</option>
+            <option value="news_hook">Relevant news hook</option>
+          </select>
+        </label>
+      )}
       <label className="block max-w-xs text-xs font-bold text-foreground/65">
         Email tone
         <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setTone(event.target.value as EmailTone)} value={tone}>
@@ -163,7 +169,11 @@ export function ComposeButton({
       </label>
       <OriginButton variant="outline" size="sm" onClick={generate} disabled={busy} type="button">
         <Sparkles aria-hidden="true" className="h-4 w-4" />
-        {busy ? "Checking and generating…" : draft ? "Regenerate Stage 1 email" : "Generate Stage 1 email"}
+        {busy
+          ? "Checking and generating…"
+          : draft
+            ? `Regenerate ${isStageTwo ? "Stage 2 follow-up" : "Stage 1 email"}`
+            : `Generate ${isStageTwo ? "Stage 2 follow-up" : "Stage 1 email"}`}
       </OriginButton>
 
       {warning && (
@@ -185,9 +195,11 @@ export function ComposeButton({
       )}
 
       {draft && !busy && (
-        <section aria-labelledby="email-review-heading" className="space-y-3 rounded-xl border border-brand/20 bg-brand/[0.04] p-4">
+        <section key={draft.id} aria-labelledby="email-review-heading" className="space-y-3 rounded-xl border border-brand/20 bg-brand/[0.04] p-4">
           <div>
-            <h3 className="text-sm font-bold" id="email-review-heading">Review generated draft</h3>
+            <h3 className="text-sm font-bold" id="email-review-heading">
+              Review generated {isStageTwo ? "follow-up " : ""}draft
+            </h3>
             <p className="mt-1 text-xs text-foreground/55">
               Saved as a draft. Review and edit it before a separate human send action is made available.
             </p>

@@ -1,0 +1,29 @@
+-- Schema change approval record (SOP §7):
+--   Change        | Grant INSERT on public.ai_generations to service_role.
+--   Reason        | F100's stage-one generation route writes to AI_GENERATIONS
+--                 | through the service-role client (createAdminClient), same
+--                 | reasoning the table's own comment gives: "no end-user role may
+--                 | write it". 20260804190000_create_outreach.sql granted SELECT to
+--                 | authenticated but never granted service_role anything at all —
+--                 | the same class of gap already fixed once for `organisations`
+--                 | in 20260806110000_grant_service_role_organisations_insert.sql.
+--                 | F100 is the first code to ever actually write to this table
+--                 | (its own branch, not yet merged), so this was never exercised
+--                 | until now: every generation currently fails with "permission
+--                 | denied for table ai_generations" (42501), confirmed live against
+--                 | local Postgres, not a hypothetical.
+--   Compatibility | Additive only. Does not touch RLS policies or what an
+--                 | authenticated user can do — service_role already bypasses RLS
+--                 | by Postgres design regardless of this grant; this only lets the
+--                 | already-privileged role reach this specific table.
+--   Data migration| None.
+--   Security      | INSERT only, not SELECT/UPDATE/DELETE — the route's own insert
+--                 | doesn't chain `.select()` (no RETURNING), so nothing wider is
+--                 | needed right now. Add SELECT later in its own migration if a
+--                 | caller ever needs it, same reasoning the organisations grant's
+--                 | own header gives for why it needed both.
+--
+-- Reversibility: paired rollback in
+--   ../rollback/20260820100100_grant_service_role_ai_generations_insert.down.sql
+
+grant insert on public.ai_generations to service_role;

@@ -8,6 +8,7 @@ import {
   createStageOneModelCall,
   generateStageOneDraft,
 } from "@/lib/outreach/stage-one-generation";
+import { computeCostUsd } from "@/lib/outreach/generation-cost";
 
 export const maxDuration = 60;
 
@@ -55,8 +56,9 @@ export async function POST(
   if (enrichmentError) await reportError(enrichmentError, { operation: "outreach.stage_one.load_context", organisationId });
 
   let callModel;
+  let model: string;
   try {
-    callModel = createStageOneModelCall();
+    ({ callModel, model } = createStageOneModelCall());
   } catch (error) {
     await reportError(error, { operation: "outreach.stage_one.configure", organisationId });
     return NextResponse.json(
@@ -102,10 +104,37 @@ export async function POST(
     return NextResponse.json({ error: "The draft was generated but could not be saved. Try again." }, { status: 500 });
   }
 
+  // F213 — LLM Cost Tracking (#208) AC3: a pricing lookup failure must never block
+  // generation, which has already fully succeeded by this point — so this is a
+  // best-effort read, never a thrown error the request could fail on. A missing
+  // or errored rate prices as unknown (null), never a fabricated 0 — see
+  // generation-cost.ts and the model_pricing migration for why.
+  const { data: pricing } = await supabase
+    .from("model_pricing")
+    .select("input_usd_per_1k_tokens, output_usd_per_1k_tokens")
+    .eq("model", model)
+    .maybeSingle();
+  const costUsd = computeCostUsd(
+    { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens },
+    pricing
+      ? {
+          inputUsdPer1kTokens: pricing.input_usd_per_1k_tokens,
+          outputUsdPer1kTokens: pricing.output_usd_per_1k_tokens,
+        }
+      : null,
+  );
+
   const { error: generationError } = await admin.from("ai_generations").insert({
     outreach_message_id: message.id,
     generated_subject: result.draft.subject,
     generated_body: result.draft.body,
+    // F113: the model in force at generation time, not a live lookup of the current
+    // default — see the migration for why a later env change must never rewrite history.
+    model,
+    input_tokens: result.usage.inputTokens ?? null,
+    output_tokens: result.usage.outputTokens ?? null,
+    total_tokens: result.usage.totalTokens ?? null,
+    cost_usd: costUsd,
   });
   if (generationError) {
     await supabase.from("outreach_messages").delete().eq("id", message.id);

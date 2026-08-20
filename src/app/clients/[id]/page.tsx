@@ -333,6 +333,22 @@ export default async function ClientDetailPage({
               </Rise>
             )}
 
+            {/* Styled to match BookletPanel directly above it — both are
+                one-shot Gemini-backed actions, so they read as a pair rather
+                than one flagship feature and one plain bordered card. */}
+            {hasPermission(authorization.actor.role, "client:contact") && (
+              <Rise>
+                <ComposeButton
+                  blocked={suppressed}
+                  organisationId={client.id}
+                  suppressionReason={suppressed ? latest.reason : undefined}
+                  ownershipWarning={
+                    ownershipConflict.hasConflict ? ownershipConflict.warning : undefined
+                  }
+                />
+              </Rise>
+            )}
+
             {/* Email and website were two near-identical cards — same
                 heading-plus-validity-pill shape, same failure copy — so they
                 read as one "can we actually reach them?" card instead. */}
@@ -503,25 +519,6 @@ export default async function ClientDetailPage({
                     organisationId={client.id}
                     currentStatus={client.outreach_status}
                   />
-                </SectionCard>
-              </Rise>
-            )}
-
-            {hasPermission(authorization.actor.role, "client:contact") && (
-              <Rise>
-                <SectionCard headingId="outreach-heading" title="Outreach">
-                  {/* The conflict is shown by ComposeButton itself, so the one
-                      message survives a click and the re-check behind it. */}
-                  <div className="mt-4">
-                    <ComposeButton
-                      blocked={suppressed}
-                      organisationId={client.id}
-                      suppressionReason={suppressed ? latest.reason : undefined}
-                      ownershipWarning={
-                        ownershipConflict.hasConflict ? ownershipConflict.warning : undefined
-                      }
-                    />
-                  </div>
                 </SectionCard>
               </Rise>
             )}

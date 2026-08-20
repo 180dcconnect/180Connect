@@ -372,6 +372,7 @@ drives both the render and the preflight that remains the enforcement.
 |---|---|---|---|---|
 | `OUTREACH_MESSAGES` | all roles | admin: any not suppressed. cam: `sent_by_user_id = auth.uid()` **and** org is unowned or owned by self **and** not suppressed | admin, own drafts (`send_status = 'draft'`) | admin, own drafts |
 | `AI_GENERATIONS` | all roles | — (service role) | — | admin |
+| `MODEL_PRICING` | all roles | — (direct SQL only, no RPC yet — F213) | — | — |
 | `SEND_EVENTS` | all roles | — (service role, Gmail webhook) | — | — |
 | `REPLY_EVENTS` | all roles | — (service role) | — | — |
 | `OUTCOMES` | all roles | admin, cam (`recorded_by_user_id = auth.uid()`) | admin, own | admin |

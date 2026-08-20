@@ -7,11 +7,13 @@ import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
 import { validateClientEmail } from "@/lib/client-email-validation";
 import {
+  formatImportOrigin,
   formatOrganisationSources,
+  type ImportOriginRow,
   type OrganisationSourceRow,
 } from "@/lib/source-tracking";
 import { checkWebsiteReachabilityCached } from "@/lib/website-reachability-cache";
-import { websiteHref } from "@/lib/website-validation";
+import { validateWebsiteFormat, websiteHref } from "@/lib/website-validation";
 import { formatLocation, formatOutreachStatus } from "@/lib/organisation-format";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
@@ -139,6 +141,28 @@ export default async function ClientDetailPage({
   const sources = formatOrganisationSources(
     (rawSourceRows ?? []) as OrganisationSourceRow[],
   );
+
+  // F044/F069 AC3: field-level provenance, on top of F043's record-level sources
+  // above. Only organisations built through the F037 URL import have this — most
+  // rows simply have nothing here, which formatImportOrigin treats as "no import".
+  const { data: rawImportOriginRows, error: importOriginError } = await supabase
+    .rpc("get_organisation_import_origin", { p_organisation_id: id });
+
+  if (importOriginError) {
+    await reportError(importOriginError, {
+      operation: "clients.detail_import_origin",
+      organisationId: id,
+    });
+  }
+  const importOrigin = formatImportOrigin(
+    ((rawImportOriginRows ?? []) as ImportOriginRow[])[0] ?? null,
+  );
+  // Reuses the website link's own safety check (scheme-less strings resolving as
+  // a relative path, unsafe hostnames) rather than re-deriving it: source_url is
+  // free text captured from a CAM-followed link, same trust level as `website`.
+  const importSourceHref = importOrigin
+    ? websiteHref(validateWebsiteFormat(importOrigin.sourceUrl))
+    : null;
 
   // Most recent suppression row for this org, whatever its status — pending shows a
   // waiting state, active shows the suppressed state, rejected/lifted/none all fall
@@ -429,16 +453,46 @@ export default async function ClientDetailPage({
                 ) : (
                   <ul className="mt-4 flex flex-wrap gap-2">
                     {sources.map((source) => (
+                      // AC2: manual entry reads as a distinct grey pill instead of the
+                      // brand-green used for every API-matched source, so a CAM can
+                      // tell them apart without reading the label text.
                       <li
                         key={source.source}
-                        className="rounded-full bg-brand/10 px-3 py-1.5 text-[13px] font-bold text-brand-hover"
                         title={`First recorded ${new Date(source.first_seen_at).toLocaleDateString("en-GB")}`}
                       >
-                        {source.label}
-                        {source.source_actor_name ? ` · ${source.source_actor_name}` : ""}
+                        <Pill tone={source.source === "manual" ? "neutral" : "brand"}>
+                          {source.label}
+                          {source.source_actor_name ? ` · ${source.source_actor_name}` : ""}
+                        </Pill>
                       </li>
                     ))}
                   </ul>
+                )}
+                {importOrigin && importOrigin.fieldLabels.length > 0 && (
+                  // AC3: which fields specifically came from the import, not only
+                  // that an import contributed to the record somewhere.
+                  <p className="mt-3 text-[13px] leading-[1.6] text-foreground/50">
+                    <span className="font-bold text-foreground/65">
+                      {importOrigin.fieldLabels.length}{" "}
+                      field{importOrigin.fieldLabels.length === 1 ? "" : "s"}
+                    </span>{" "}
+                    imported from{" "}
+                    {importSourceHref ? (
+                      <a
+                        className="break-all font-bold text-brand-hover underline underline-offset-2 hover:text-brand"
+                        href={importSourceHref}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        {importOrigin.sourceUrl}
+                      </a>
+                    ) : (
+                      <span className="break-all font-bold text-foreground/65">
+                        {importOrigin.sourceUrl}
+                      </span>
+                    )}
+                    : {importOrigin.fieldLabels.join(", ")}.
+                  </p>
                 )}
               </SectionCard>
             </Rise>

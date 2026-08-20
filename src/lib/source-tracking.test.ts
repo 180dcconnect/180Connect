@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { formatOrganisationSources } from "./source-tracking.ts";
+import { formatImportOrigin, formatOrganisationSources } from "./source-tracking.ts";
 
 describe("formatOrganisationSources", () => {
   it("shows a valid API source with a friendly label", () => {
@@ -98,5 +98,55 @@ describe("formatOrganisationSources", () => {
 
     assert.equal(sources[0]?.label, "Manual Entry");
     assert.equal(sources[0]?.source_actor_name, "Alex CAM");
+  });
+});
+
+describe("formatImportOrigin", () => {
+  it("returns null when the organisation was never built from a URL import", () => {
+    assert.equal(formatImportOrigin(null), null);
+    assert.equal(
+      formatImportOrigin({ source_url: null, imported_field_paths: [], imported_at: null }),
+      null,
+    );
+  });
+
+  it("labels imported field paths with their profile field names", () => {
+    const origin = formatImportOrigin({
+      source_url: "https://example.org/about",
+      imported_field_paths: ["legal_name", "mission_statement", "website"],
+      imported_at: "2026-08-01T10:00:00Z",
+    });
+
+    assert.deepEqual(origin?.fieldLabels, ["Name", "Mission", "Website"]);
+    assert.equal(origin?.sourceUrl, "https://example.org/about");
+  });
+
+  it("falls back to the raw path for an unmapped field", () => {
+    const origin = formatImportOrigin({
+      source_url: "https://example.org",
+      imported_field_paths: ["some_future_column"],
+      imported_at: "2026-08-01T10:00:00Z",
+    });
+
+    assert.deepEqual(origin?.fieldLabels, ["some_future_column"]);
+  });
+
+  it("ignores malformed provenance rather than breaking the client profile", () => {
+    assert.equal(
+      formatImportOrigin({
+        source_url: "  ",
+        imported_field_paths: ["legal_name"],
+        imported_at: "2026-08-01T10:00:00Z",
+      }),
+      null,
+    );
+    assert.equal(
+      formatImportOrigin({
+        source_url: "https://example.org",
+        imported_field_paths: "not-an-array",
+        imported_at: "2026-08-01T10:00:00Z",
+      })?.fieldLabels.length,
+      0,
+    );
   });
 });

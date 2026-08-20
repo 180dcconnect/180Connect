@@ -259,7 +259,7 @@ export function BrandSearchBar({
         </div>
 
         <AnimatePresence>
-          {(typing || selectedFilters.length > 0 || open || isSearching) && (
+          {(typing || selectedFilters.length > 0 || isSearching) && (
             <motion.div
               initial={{ width: 0, opacity: 0, scale: 0.8 }}
               animate={{ width: 30, opacity: 1, scale: 1 }}

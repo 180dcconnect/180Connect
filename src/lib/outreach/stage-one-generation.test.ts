@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { generateStageOneDraft } from "./stage-one-generation.ts";
+import { buildStageOnePrompt } from "./stage-one-prompt.ts";
 
 const context = { organisationName: "Example Charity", organisationType: "charity" };
 const USAGE = { inputTokens: 120, outputTokens: 45, totalTokens: 165 };
+// The exact wording is stage-one-prompt.test.ts's concern — this just needs the
+// same shape generateStageOneDraft actually sends, to prove it comes back unchanged.
+const EXPECTED_PROMPT = buildStageOnePrompt(context);
 
-test("generateStageOneDraft returns a structured draft and the reported usage", async () => {
+test("generateStageOneDraft returns a structured draft, the reported usage, and the exact prompt sent", async () => {
   const result = await generateStageOneDraft("org-1", context, async () => ({
     text: JSON.stringify({ subject: "Working together", body: "Hello, we would like to introduce 180DC." }),
     usage: USAGE,
@@ -13,6 +17,7 @@ test("generateStageOneDraft returns a structured draft and the reported usage", 
   assert.deepEqual(result, {
     draft: { subject: "Working together", body: "Hello, we would like to introduce 180DC." },
     usage: USAGE,
+    prompt: { system: EXPECTED_PROMPT.system, user: EXPECTED_PROMPT.prompt },
   });
 });
 
@@ -33,5 +38,9 @@ test("generateStageOneDraft passes through a provider that omitted usage data", 
     text: JSON.stringify({ subject: "Hi", body: "Hello." }),
     usage: noUsage,
   }));
-  assert.deepEqual(result, { draft: { subject: "Hi", body: "Hello." }, usage: noUsage });
+  assert.deepEqual(result, {
+    draft: { subject: "Hi", body: "Hello." },
+    usage: noUsage,
+    prompt: { system: EXPECTED_PROMPT.system, user: EXPECTED_PROMPT.prompt },
+  });
 });

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
@@ -16,17 +17,21 @@ import { SpendOverTime } from "./spend-over-time";
 
 // Next.js 16: searchParams is a Promise on App Router pages — same pattern as
 // src/app/clients/page.tsx.
-type SearchParams = Promise<{ model?: string; metric?: string }>;
+type SearchParams = Promise<{ model?: string; metric?: string; client?: string }>;
 
 type GenerationRow = {
   id: string;
   model: string;
   generated_subject: string | null;
+  generated_body: string | null;
+  prompt_system: string;
+  prompt_user: string;
   cam_edited: boolean;
   created_at: string;
   total_tokens: number | null;
   cost_usd: number | null;
   outreach_message: {
+    organisation_id: string;
     organisation: { legal_name: string } | null;
     sent_by: { full_name: string | null } | null;
   } | null;
@@ -59,21 +64,31 @@ function formatCostCell(costUsd: number | null): string {
 }
 
 /**
- * F113 — Track Model Used (#110) / F213 — LLM Cost Tracking (#208). Admin-only
- * (platform-settings:manage, same fit as /admin/import-status — no dedicated
- * permission exists for either ticket yet).
+ * F113 — Track Model Used (#110) / F213 — LLM Cost Tracking (#208) / F112 — Save
+ * AI Prompt and Output (#109). Admin-only (platform-settings:manage, same fit as
+ * /admin/import-status — no dedicated permission exists for any of these yet).
  *
- * AC1/AC2 of F113 (which model, snapshotted at generation time) and F213's
- * token/cost figures are all satisfied upstream, at the point of generation —
- * every row already carries what actually happened, written once and never
- * re-derived (see the stage-one route). This page is purely the "let an admin
- * see and filter it" half: F113 AC3 and F213 AC2.
+ * AC1/AC2 of F113 (which model, snapshotted at generation time), F213's
+ * token/cost figures, and F112's exact prompt/output are all satisfied upstream,
+ * at the point of generation — every row already carries what actually happened,
+ * written once and never re-derived (see the stage-one route). This page is
+ * purely the "let an admin see and filter it without direct database access"
+ * half: F113 AC3, F213 AC2, and F112 AC3. The prompt/output for each row sits
+ * behind a <details> disclosure in the history list — full text, not a preview,
+ * since AC1 is specifically about the *exact* prompt and output.
  *
  * The spend-over-time chart and the model breakdown both always reflect every
  * generation regardless of the active `?model=` filter — they're "the whole
  * picture" the filter narrows the table against, not something the filter
  * itself re-shapes. `?metric=` (count/tokens/cost) governs both charts at once,
  * from one control, so they can't show two different metrics at the same time.
+ *
+ * `?client=<organisation id>` is different from `?model=`: it's a hard scope, not
+ * a lens, so it's applied before the charts/breakdown are computed rather than
+ * only narrowing the history table — arriving here from a specific client (via
+ * the shortcut on that client's page) means "show me this client's generations",
+ * not "explore everything, narrowed by client". `?model=` still applies on top
+ * of it as a further lens within that scope.
  */
 export default async function AiGenerationsPage({
   searchParams,
@@ -85,14 +100,15 @@ export default async function AiGenerationsPage({
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
-  const { model: modelFilter, metric: metricParam } = await searchParams;
+  const { model: modelFilter, metric: metricParam, client: clientParam } = await searchParams;
   const metric: GenerationMetric = isMetric(metricParam) ? metricParam : "count";
+  const clientFilter = clientParam && z.uuid().safeParse(clientParam).success ? clientParam : undefined;
 
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("ai_generations")
     .select(
-      "id, model, generated_subject, cam_edited, created_at, total_tokens, cost_usd, outreach_message:outreach_messages(organisation:organisations(legal_name), sent_by:users(full_name))",
+      "id, model, generated_subject, generated_body, prompt_system, prompt_user, cam_edited, created_at, total_tokens, cost_usd, outreach_message:outreach_messages(organisation_id, organisation:organisations(legal_name), sent_by:users(full_name))",
     )
     .order("created_at", { ascending: false })
     .overrideTypes<GenerationRow[], { merge: false }>();
@@ -101,7 +117,23 @@ export default async function AiGenerationsPage({
     await reportError(error, { operation: "admin.ai_generations.page_list" });
   }
 
-  const generations = data ?? [];
+  // Fetched separately so the client's name still shows in the header even when
+  // they have zero generations yet — the join above only has a name to offer for
+  // rows that already exist.
+  let clientName: string | null = null;
+  if (clientFilter) {
+    const { data: clientOrg } = await supabase
+      .from("organisations")
+      .select("legal_name")
+      .eq("id", clientFilter)
+      .maybeSingle();
+    clientName = clientOrg?.legal_name ?? null;
+  }
+
+  const allGenerations = data ?? [];
+  const generations = clientFilter
+    ? allGenerations.filter((row) => row.outreach_message?.organisation_id === clientFilter)
+    : allGenerations;
   const records: GenerationRecord[] = generations.map((row) => ({
     model: row.model,
     createdAt: row.created_at,
@@ -117,12 +149,17 @@ export default async function AiGenerationsPage({
   const models = breakdown.map((entry) => entry.model);
 
   const basePath = "/admin/ai-generations";
-  const hrefWith = (changes: { model?: string; metric?: string }) => {
+  // `"key" in changes` (not `!== undefined`) so that passing `{ model: undefined }`
+  // explicitly clears a filter — a plain `!== undefined` check can't tell that
+  // apart from the key being absent, and silently keeps the old value instead.
+  const hrefWith = (changes: { model?: string; metric?: string; client?: string }) => {
     const params = new URLSearchParams();
-    const nextModel = changes.model !== undefined ? changes.model : modelFilter;
-    const nextMetric = changes.metric !== undefined ? changes.metric : metric;
+    const nextModel = "model" in changes ? changes.model : modelFilter;
+    const nextMetric = "metric" in changes ? changes.metric : metric;
+    const nextClient = "client" in changes ? changes.client : clientFilter;
     if (nextModel) params.set("model", nextModel);
     if (nextMetric && nextMetric !== "count") params.set("metric", nextMetric);
+    if (nextClient) params.set("client", nextClient);
     const qs = params.toString();
     return qs ? `${basePath}?${qs}` : basePath;
   };
@@ -139,6 +176,20 @@ export default async function AiGenerationsPage({
             later change to the default model or a pricing rate never rewrites what
             an older row says actually happened.
           </p>
+
+          {clientFilter && (
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-brand/[0.06] px-4 py-3">
+              <p className="text-sm">
+                Showing <span className="font-bold text-brand-hover">{clientName ?? "this client"}</span> only.
+              </p>
+              <Link
+                className="text-xs font-bold uppercase tracking-[0.08em] text-brand-hover underline underline-offset-2 hover:text-brand"
+                href={hrefWith({ client: undefined })}
+              >
+                Show all clients
+              </Link>
+            </div>
+          )}
 
           {error && (
             <p className="mt-5 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-800" role="alert">
@@ -179,18 +230,29 @@ export default async function AiGenerationsPage({
                   Clear filter
                 </Link>
               )}
-              <ModelFilterSelect activeModel={modelFilter ?? null} basePath={basePath} models={models} />
+              <ModelFilterSelect
+                activeModel={modelFilter ?? null}
+                basePath={basePath}
+                clientFilter={clientFilter}
+                models={models}
+              />
             </div>
           </div>
           <div className="mt-5">
-            <ModelBreakdown activeModel={modelFilter ?? null} basePath={basePath} breakdown={breakdown} metric={metric} />
+            <ModelBreakdown
+              activeModel={modelFilter ?? null}
+              basePath={basePath}
+              breakdown={breakdown}
+              clientFilter={clientFilter}
+              metric={metric}
+            />
           </div>
         </div>
 
         <div className="mt-4 overflow-hidden rounded-2xl bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-black/[0.06] px-6 py-4">
             <h2 className="text-sm font-bold uppercase tracking-[0.08em] text-foreground/50">
-              {modelFilter ? `History — ${modelFilter}` : "History — all models"}
+              {modelFilter ? `History — ${modelFilter}` : "History"}
             </h2>
             <p className="text-xs font-bold text-foreground/35">
               {rows.length.toLocaleString()} generation{rows.length === 1 ? "" : "s"}
@@ -199,45 +261,87 @@ export default async function AiGenerationsPage({
 
           {rows.length === 0 ? (
             <p className="px-6 py-10 text-center text-sm text-foreground/50">
-              {modelFilter
-                ? `No generations recorded for ${modelFilter} yet.`
-                : "No generations recorded yet."}
+              {modelFilter && clientFilter
+                ? `No generations recorded for ${modelFilter} on this client yet.`
+                : modelFilter
+                  ? `No generations recorded for ${modelFilter} yet.`
+                  : clientFilter
+                    ? "No generations recorded for this client yet."
+                    : "No generations recorded yet."}
             </p>
           ) : (
             <ul>
               {rows.map((row) => (
-                <li
-                  className="flex flex-wrap items-start justify-between gap-x-6 gap-y-1.5 border-b border-black/[0.06] px-6 py-4 last:border-b-0"
-                  key={row.id}
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-bold">
-                      {row.outreach_message?.organisation?.legal_name ?? "Unknown client"}
-                    </p>
-                    <p className="mt-0.5 truncate text-sm text-foreground/60">
-                      {row.generated_subject ?? "(no subject)"}
-                    </p>
-                    <p className="mt-1 text-xs text-foreground/40">
-                      {formatGeneratedAt(row.created_at)}
-                      {row.outreach_message?.sent_by?.full_name
-                        ? ` · Generated for ${row.outreach_message.sent_by.full_name}`
-                        : ""}
-                      {" · "}
-                      {row.total_tokens !== null ? `${row.total_tokens.toLocaleString()} tokens` : "tokens unknown"}
-                      {" · "}
-                      {formatCostCell(row.cost_usd)}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                    <span className="rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.06em] text-brand-hover">
-                      {row.model}
-                    </span>
-                    {row.cam_edited && (
-                      <span className="rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.06em] text-foreground/55">
-                        Edited before send
+                <li className="border-b border-black/[0.06] px-6 py-4 last:border-b-0" key={row.id}>
+                  <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-1.5">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold">
+                        {row.outreach_message?.organisation?.legal_name ?? "Unknown client"}
+                      </p>
+                      <p className="mt-0.5 truncate text-sm text-foreground/60">
+                        {row.generated_subject ?? "(no subject)"}
+                      </p>
+                      <p className="mt-1 text-xs text-foreground/40">
+                        {formatGeneratedAt(row.created_at)}
+                        {row.outreach_message?.sent_by?.full_name
+                          ? ` · Generated for ${row.outreach_message.sent_by.full_name}`
+                          : ""}
+                        {" · "}
+                        {row.total_tokens !== null ? `${row.total_tokens.toLocaleString()} tokens` : "tokens unknown"}
+                        {" · "}
+                        {formatCostCell(row.cost_usd)}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                      <span className="rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.06em] text-brand-hover">
+                        {row.model}
                       </span>
-                    )}
+                      {row.cam_edited && (
+                        <span className="rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.06em] text-foreground/55">
+                          Edited before send
+                        </span>
+                      )}
+                    </div>
                   </div>
+
+                  {/* F112 AC3 — the exact prompt and output, accessible to an admin
+                      without needing direct database access. Collapsed by default:
+                      this is the raw record for the rare "why did it write that"
+                      question, not something scanned on every row. */}
+                  <details className="mt-2.5">
+                    <summary className="w-fit cursor-pointer list-none text-xs font-bold text-brand-hover underline underline-offset-2 [&::-webkit-details-marker]:hidden">
+                      View prompt &amp; output
+                    </summary>
+                    <div className="mt-3 space-y-4 rounded-xl border border-black/[0.06] bg-white p-5">
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-[0.08em] text-brand-hover">
+                          System prompt
+                        </p>
+                        <p className="mt-2 whitespace-pre-wrap text-[15px] leading-relaxed text-foreground/85">
+                          {row.prompt_system}
+                        </p>
+                      </div>
+                      <div className="border-t border-black/[0.06] pt-4">
+                        <p className="text-xs font-bold uppercase tracking-[0.08em] text-brand-hover">
+                          User prompt
+                        </p>
+                        <p className="mt-2 whitespace-pre-wrap text-[15px] leading-relaxed text-foreground/85">
+                          {row.prompt_user}
+                        </p>
+                      </div>
+                      <div className="rounded-lg bg-brand/[0.06] p-4">
+                        <p className="text-xs font-bold uppercase tracking-[0.08em] text-brand-hover">
+                          Output
+                        </p>
+                        <p className="mt-2 text-[15px] font-bold text-foreground/90">
+                          {row.generated_subject ?? "(no subject)"}
+                        </p>
+                        <p className="mt-2 whitespace-pre-wrap text-[15px] leading-relaxed text-foreground/85">
+                          {row.generated_body ?? "(no body)"}
+                        </p>
+                      </div>
+                    </div>
+                  </details>
                 </li>
               ))}
             </ul>

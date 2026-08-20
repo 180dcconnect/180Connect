@@ -64,18 +64,27 @@ export function createStageOneModelCall(): { callModel: CallStageOneModel; model
   return { callModel, model };
 }
 
+// F112 — Save AI Prompt and Output: the exact prompt sent travels back out
+// alongside the draft, the same way F113's `model` does — read once here, at the
+// point it's actually used, rather than re-built at the insert site where it could
+// in principle drift from what was really sent.
+export type StageOnePromptSent = { system: string; user: string };
+
 export async function generateStageOneDraft(
   organisationId: string,
   context: StageOneContext,
   callModel: CallStageOneModel,
-): Promise<{ draft: StageOneDraft; usage: StageOneUsage } | { error: string }> {
+): Promise<
+  | { draft: StageOneDraft; usage: StageOneUsage; prompt: StageOnePromptSent }
+  | { error: string }
+> {
   const prompt = buildStageOnePrompt(context);
   const startedAt = Date.now();
   try {
     const { text, usage } = await callModel(prompt);
     const draft = parseDraft(text);
     logApiHealth("gemini", "outreach.stage_one.generate", true, startedAt, { organisationId });
-    return { draft, usage };
+    return { draft, usage, prompt: { system: prompt.system, user: prompt.prompt } };
   } catch (error) {
     logApiHealth("gemini", "outreach.stage_one.generate", false, startedAt, { organisationId });
     await reportError(error, { operation: "outreach.stage_one.generate", organisationId });

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Sparkles } from "lucide-react";
+import Link from "next/link";
+import { History, Sparkles } from "lucide-react";
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
 
 type Tone = "block" | "conflict";
@@ -21,17 +22,28 @@ const STATUS_MESSAGES = [
  * Styled to match BookletPanel (booklet-panel.tsx), the app's other one-shot
  * Gemini-backed action: same brand-tinted card, same dashed empty-state box with
  * a prominent CTA, same small header pill once a result exists to regenerate.
+ *
+ * `historyHref`, when provided, links to this client's slice of
+ * /admin/ai-generations (F112 AC3's "accessible without direct database access"
+ * — this is the shortcut so nobody has to be walked through "go to the admin
+ * dashboard, open AI generation history, then find this client"). Only ever
+ * passed by page.tsx when the viewer actually has permission to land there —
+ * always shown regardless of local draft state, since this session's `draft` is
+ * null on every page load even when past generations exist from an earlier
+ * session or a different CAM.
  */
 export function ComposeButton({
   blocked,
   organisationId,
   suppressionReason,
   ownershipWarning,
+  historyHref,
 }: {
   blocked: boolean;
   organisationId: string;
   suppressionReason?: string;
   ownershipWarning?: string;
+  historyHref?: string;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [subjectValue, setSubjectValue] = useState("");
@@ -101,20 +113,33 @@ export function ComposeButton({
     }
   }
 
+  const historyLink = historyHref && (
+    <Link
+      className="flex shrink-0 items-center gap-1.5 rounded-full border border-brand/30 px-4 py-2 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
+      href={historyHref}
+    >
+      <History aria-hidden="true" className="h-3.5 w-3.5" />
+      History
+    </Link>
+  );
+
   if (blocked) {
     return (
       <section
         aria-labelledby="outreach-heading"
         className="overflow-hidden rounded-2xl border border-red-500/20 bg-gradient-to-br from-red-500/[0.05] via-white to-white p-6 shadow-sm"
       >
-        <div className="flex items-center gap-2.5">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-red-500/10 text-red-800">
-            <Sparkles aria-hidden="true" className="h-4 w-4" />
-          </span>
-          <div>
-            <h2 className="text-lg font-bold" id="outreach-heading">Stage 1 email</h2>
-            <p className="text-xs text-foreground/55">AI-generated outreach draft, for CAM review before sending</p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-red-500/10 text-red-800">
+              <Sparkles aria-hidden="true" className="h-4 w-4" />
+            </span>
+            <div>
+              <h2 className="text-lg font-bold" id="outreach-heading">Stage 1 email</h2>
+              <p className="text-xs text-foreground/55">AI-generated outreach draft, for CAM review before sending</p>
+            </div>
           </div>
+          {historyLink}
         </div>
         <p className="mt-4 text-[13px] font-bold leading-[1.6] text-red-800" role="alert">
           {warning?.text}
@@ -139,15 +164,18 @@ export function ComposeButton({
           </div>
         </div>
 
-        {(draft || error) && !busy && (
-          <button
-            className="shrink-0 rounded-full border border-brand/30 px-4 py-2 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
-            onClick={generate}
-            type="button"
-          >
-            Regenerate
-          </button>
-        )}
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {(draft || error) && !busy && (
+            <button
+              className="shrink-0 rounded-full border border-brand/30 px-4 py-2 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
+              onClick={generate}
+              type="button"
+            >
+              Regenerate
+            </button>
+          )}
+          {historyLink}
+        </div>
       </div>
 
       {warning && (

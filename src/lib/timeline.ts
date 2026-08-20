@@ -1,0 +1,254 @@
+/**
+ * F075 — merges four different row shapes (notes, outreach_messages,
+ * reply_events, audit_log) into one chronological feed for the client detail
+ * page, kept out of the route so it can be tested without a database (same
+ * split as @/lib/client-basic-info, @/lib/note-history, @/lib/outreach-history).
+ *
+ * This is the first place in this codebase that merges genuinely different
+ * tables into one sorted feed — @/lib/team-activity.ts and
+ * @/lib/audit-log-format.ts are single-source formatters over audit_log, not
+ * mergers, so there was no existing "merge N sources" utility to reuse.
+ *
+ * F076 (Timeline Event Types) has no schema/enum of its own anywhere in this
+ * codebase — it is purely this file's TimelineEventType union and the label
+ * map below, invented here rather than found.
+ */
+
+import { formatOutreachStatus } from "./organisation-format.ts";
+
+export type TimelineEventType =
+  | "email_sent"
+  | "reply_received"
+  | "note_added"
+  | "note_edited"
+  | "status_changed"
+  | "ownership_reassigned";
+
+/** F076 AC — each entry labelled by type, so one glance tells them apart. */
+export const TIMELINE_EVENT_LABEL: Record<TimelineEventType, string> = {
+  email_sent: "Email sent",
+  reply_received: "Reply received",
+  note_added: "Note added",
+  note_edited: "Note edited",
+  status_changed: "Status changed",
+  ownership_reassigned: "Ownership changed",
+};
+
+export type TimelineEntry = {
+  id: string;
+  type: TimelineEventType;
+  timestamp: string;
+  actorName: string;
+  summary: string;
+  /**
+   * Only set for `ownership_reassigned` (F257 AC5) — the UI shows these as
+   * distinct labelled fields (outgoing CAM, incoming CAM, reason), not folded
+   * into `summary` alone, since AC4 asks for each to be identifiable on its
+   * own, not just readable in a sentence.
+   */
+  handover?: { fromName: string; toName: string; reason: string };
+};
+
+/**
+ * Shown for an actor who can't be identified — an account later deleted, or
+ * (for `detail.from`/`detail.to`, which are bare uuids inside jsonb, not a
+ * foreign key) a reference that was never one to begin with. Same phrasing
+ * @/lib/note-history.ts already uses for the identical situation, for
+ * consistency across the page (F257 AC5's "former CAM" requirement).
+ */
+export const UNKNOWN_ACTOR = "A former team member";
+
+export type NoteRow = {
+  id: string;
+  content: string;
+  created_at: string;
+  updated_at: string | null;
+  author: { full_name: string | null } | null;
+};
+
+export type OutreachMessageRow = {
+  id: string;
+  subject: string;
+  send_status: "draft" | "scheduled" | "sent" | "failed";
+  sent_at: string | null;
+  sender: { full_name: string | null } | null;
+};
+
+export type ReplyEventRow = {
+  id: string;
+  reply_body: string;
+  received_at: string;
+};
+
+export type AuditRow = {
+  id: string;
+  actor_user_id: string | null;
+  action: string;
+  detail: Record<string, unknown>;
+  created_at: string;
+};
+
+/** `id` may be a real user id, or null (e.g. a "released" ownership's `to`). */
+function resolveName(id: string | null, names: ReadonlyMap<string, string | null>): string {
+  if (!id) return UNKNOWN_ACTOR;
+  const name = names.get(id);
+  return name && name.trim() ? name : UNKNOWN_ACTOR;
+}
+
+function detailString(detail: Record<string, unknown>, key: string): string | null {
+  const value = detail[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+/**
+ * A note produces one entry when written, and a second at `updated_at` if it
+ * has ever been edited (F073) — AC1 lists "notes added" and "edits made" as
+ * separate things a CAM should see, and an edit made today belongs near
+ * "today" in the timeline, not buried only under the note's original date.
+ * There is no per-edit history to show a diff from (F074's own note-history.ts
+ * doc explains why), so both entries show the note's current content.
+ */
+export function buildNoteEntries(row: NoteRow): TimelineEntry[] {
+  const actorName = row.author?.full_name ?? UNKNOWN_ACTOR;
+  const entries: TimelineEntry[] = [
+    {
+      id: `note-added-${row.id}`,
+      type: "note_added",
+      timestamp: row.created_at,
+      actorName,
+      summary: row.content,
+    },
+  ];
+
+  if (row.updated_at) {
+    entries.push({
+      id: `note-edited-${row.id}`,
+      type: "note_edited",
+      timestamp: row.updated_at,
+      actorName,
+      summary: row.content,
+    });
+  }
+
+  return entries;
+}
+
+/**
+ * Only an actually-delivered message is a timeline event — a draft or
+ * scheduled-but-unsent one is not something that "happened" yet. Matches
+ * @/lib/outreach-history.ts's identical "sent" vs "not sent" split.
+ */
+export function buildEmailSentEntry(row: OutreachMessageRow): TimelineEntry | null {
+  if (row.send_status !== "sent" || !row.sent_at) return null;
+  return {
+    id: `email-${row.id}`,
+    type: "email_sent",
+    timestamp: row.sent_at,
+    actorName: row.sender?.full_name ?? UNKNOWN_ACTOR,
+    summary: row.subject,
+  };
+}
+
+/** A reply comes from the client, not a team member — there is no author to resolve. */
+export function buildReplyReceivedEntry(row: ReplyEventRow): TimelineEntry {
+  return {
+    id: `reply-${row.id}`,
+    type: "reply_received",
+    timestamp: row.received_at,
+    actorName: "The client",
+    summary: row.reply_body,
+  };
+}
+
+/**
+ * set_outreach_status (20260807100000) writes `detail: {from, to}` with raw
+ * pipeline-status tokens — formatOutreachStatus is the same formatter
+ * StatusSelect already renders those tokens with, so the timeline reads the
+ * same labels as the picker that produced the change.
+ */
+export function buildStatusChangedEntry(
+  row: AuditRow,
+  names: ReadonlyMap<string, string | null>,
+): TimelineEntry {
+  const from = detailString(row.detail, "from");
+  const to = detailString(row.detail, "to");
+  return {
+    id: `status-${row.id}`,
+    type: "status_changed",
+    timestamp: row.created_at,
+    actorName: resolveName(row.actor_user_id, names),
+    summary: `Status changed from ${from ? formatOutreachStatus(from) : "—"} to ${
+      to ? formatOutreachStatus(to) : "—"
+    }.`,
+  };
+}
+
+/**
+ * reassign_ownership (20260804170000) writes `detail: {from, to, reason, ...}`
+ * — `to` is absent/null for a released (unassigned) client, which reads as
+ * "Unassigned" here rather than UNKNOWN_ACTOR: releasing ownership is a
+ * deliberate act, not a person who left (F257 AC5).
+ */
+export function buildOwnershipReassignedEntry(
+  row: AuditRow,
+  names: ReadonlyMap<string, string | null>,
+): TimelineEntry {
+  const fromId = typeof row.detail.from === "string" ? row.detail.from : null;
+  const toId = typeof row.detail.to === "string" ? row.detail.to : null;
+  const fromName = resolveName(fromId, names);
+  const toName = toId ? resolveName(toId, names) : "Unassigned";
+  const reason = detailString(row.detail, "reason") ?? "No reason given";
+
+  return {
+    id: `ownership-${row.id}`,
+    type: "ownership_reassigned",
+    timestamp: row.created_at,
+    actorName: resolveName(row.actor_user_id, names),
+    summary: `Ownership moved from ${fromName} to ${toName}.`,
+    handover: { fromName, toName, reason },
+  };
+}
+
+export type TimelineSources = {
+  notes: readonly NoteRow[];
+  outreachMessages: readonly OutreachMessageRow[];
+  replyEvents: readonly ReplyEventRow[];
+  auditRows: readonly AuditRow[];
+};
+
+/**
+ * Merges every source into one feed, newest first (matches
+ * @/lib/note-history.ts and @/lib/outreach-history.ts's identical choice, for
+ * one consistent "chronological order" across every list on this page).
+ * `auditRows` not matching a recognised `action` are silently dropped — the
+ * RLS policy behind this query (20260820090000) only ever returns
+ * `status_changed`/`ownership_reassigned` rows, but this stays defensive
+ * rather than assuming that never changes.
+ */
+export function buildTimeline(
+  sources: TimelineSources,
+  names: ReadonlyMap<string, string | null>,
+): TimelineEntry[] {
+  const entries: TimelineEntry[] = [];
+
+  for (const row of sources.notes) entries.push(...buildNoteEntries(row));
+
+  for (const row of sources.outreachMessages) {
+    const entry = buildEmailSentEntry(row);
+    if (entry) entries.push(entry);
+  }
+
+  for (const row of sources.replyEvents) entries.push(buildReplyReceivedEntry(row));
+
+  for (const row of sources.auditRows) {
+    if (row.action === "status_changed") {
+      entries.push(buildStatusChangedEntry(row, names));
+    } else if (row.action === "ownership_reassigned") {
+      entries.push(buildOwnershipReassignedEntry(row, names));
+    }
+  }
+
+  return entries.sort((a, b) =>
+    a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : 0,
+  );
+}

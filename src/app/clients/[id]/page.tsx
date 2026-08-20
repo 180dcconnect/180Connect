@@ -262,7 +262,12 @@ export default async function ClientDetailPage({
             {ownerId && (
               <p className="text-sm leading-[1.7] text-foreground/50">
                 Owned by{" "}
-                <span className="font-bold text-foreground/75">{ownerName}</span>
+                <Link
+                  href={`/team/${ownerId}`}
+                  className="font-bold text-foreground/75 hover:text-brand hover:underline"
+                >
+                  {ownerName}
+                </Link>
                 {ownerId === authorization.actor.id ? " (you)" : ""}
               </p>
             )}
@@ -452,7 +457,13 @@ export default async function ClientDetailPage({
                 {ownerId ? (
                   <>
                     <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
-                      Owned by <span className="font-bold text-foreground/85">{ownerName}</span>
+                      Owned by{" "}
+                      <Link
+                        href={`/team/${ownerId}`}
+                        className="font-bold text-foreground/85 hover:text-brand hover:underline"
+                      >
+                        {ownerName}
+                      </Link>
                       {ownerId === authorization.actor.id ? " (you)" : ""}.
                     </p>
                     {/* #408: the only sanctioned route past a conflict. A CAM asks; an

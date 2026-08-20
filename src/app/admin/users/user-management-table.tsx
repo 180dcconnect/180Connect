@@ -230,7 +230,12 @@ export function UserManagementTable({
               return (
                 <tr className="border-b border-black/5" key={user.id}>
                   <td className="p-3">
-                    <span className="block font-bold">{user.full_name ?? "Unnamed user"}</span>
+                    <Link
+                      href={`/team/${user.id}`}
+                      className="block font-bold hover:text-brand hover:underline"
+                    >
+                      {user.full_name ?? "Unnamed user"}
+                    </Link>
                     <span className="text-foreground/60">{user.email}</span>
                     {user.role === "cam" && (
                       <span className="block mt-1">

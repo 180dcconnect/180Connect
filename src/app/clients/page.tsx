@@ -18,6 +18,7 @@ import {
 } from "./visible-clients.ts";
 import { BrandSearchBar } from "@/components/brand/search-bar";
 import { ClaimButton } from "./[id]/claim-button";
+import { ClientOwnerBadge } from "./client-owner-badge";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 import { Group, Rise } from "@/components/dashboard-stage";
 import { OriginButton } from "@/components/ui/origin-button";
@@ -67,7 +68,7 @@ const ROW_GRID =
   "lg:grid lg:grid-cols-[2rem_minmax(0,1fr)_9rem_10rem_10rem_1rem] lg:items-center lg:gap-4";
 
 /** Reserved width for the claim button, held whether or not the row has one. */
-const CLAIM_SLOT = "w-[6.5rem] shrink-0";
+const CLAIM_SLOT = "w-[8.5rem] shrink-0";
 const BOOKLET_SLOT = "w-[7rem] shrink-0";
 
 /**
@@ -393,7 +394,7 @@ export default async function ClientsPage({
                   {/* The column key, on the widths the rows use. Hidden below lg,
                       where the row folds back into name-over-subline. */}
                   <div
-                    className="hidden items-center gap-4 border-b border-black/[0.06] bg-black/[0.015] px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em] text-foreground/30 lg:flex"
+                    className="group/header hidden items-center gap-4 border-b border-black/[0.06] bg-black/[0.015] px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em] text-foreground/30 lg:flex"
                   >
                     {isAdmin && (
                       <span className="flex w-6 shrink-0 items-center justify-center">
@@ -420,7 +421,7 @@ export default async function ClientsPage({
                     {clients.map((client, index) => (
                       <li
                         key={client.id}
-                        className="flex items-center gap-4 border-b border-black/[0.06] px-5 py-3.5 last:border-b-0"
+                        className="group/row flex items-center gap-4 border-b border-black/[0.06] px-5 py-3.5 last:border-b-0"
                       >
                         {isAdmin && (
                           <span className="flex w-6 shrink-0 items-center justify-center">
@@ -474,15 +475,10 @@ export default async function ClientsPage({
                           </span>
 
                           <span className="hidden min-w-0 lg:block">
-                            {client.ownerName ? (
-                              <span className="inline-block max-w-full truncate rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-brand-hover">
-                                {client.ownerName}
-                              </span>
-                            ) : (
-                              <span className="inline-block rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/40">
-                                Unassigned
-                              </span>
-                            )}
+                            <ClientOwnerBadge
+                              ownerId={client.owner_id}
+                              ownerName={client.ownerName}
+                            />
                           </span>
 
                           {/* Between sm and lg there are no columns but there is
@@ -491,15 +487,10 @@ export default async function ClientsPage({
                             <span className="rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/55">
                               {client.outreachStatusLabel}
                             </span>
-                            {client.ownerName ? (
-                              <span className="rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-brand-hover">
-                                {client.ownerName}
-                              </span>
-                            ) : (
-                              <span className="rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/40">
-                                Unassigned
-                              </span>
-                            )}
+                            <ClientOwnerBadge
+                              ownerId={client.owner_id}
+                              ownerName={client.ownerName}
+                            />
                             {client.suppressionPending && (
                               <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-amber-800">
                                 Suppression requested

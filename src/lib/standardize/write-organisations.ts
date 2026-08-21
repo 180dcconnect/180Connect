@@ -64,6 +64,7 @@ import {
   standardizeFindThatCharityRecord,
   type RawFindThatCharityRecord,
 } from "./find-that-charity.ts";
+import { sourcePriority } from "./source-priority.ts";
 import type { StandardOrganisation } from "./types.ts";
 
 export type PendingRecord = {
@@ -166,16 +167,9 @@ const MATCH_SCORE_BY_MATCHED_ON: Record<DuplicateMatch["matchedOn"], number> = {
   name_and_postcode: 0.7,
 };
 
-// entity_match_candidates.source_priority is NOT NULL; lower = higher priority. Per
-// docs/data-model/04-entities.md's legal_name note ("Companies House takes priority
-// over CharityBase"). Falls back to the least-priority value for any source this
-// list hasn't been updated for yet (e.g. find_that_charity has no documented
-// priority rule) rather than failing the insert outright.
-const SOURCE_PRIORITY: Record<string, number> = {
-  companies_house: 1,
-  charity_commission: 2,
-};
-const DEFAULT_SOURCE_PRIORITY = 99;
+// entity_match_candidates.source_priority is NOT NULL; lower = higher priority.
+// The ranking itself now lives in standardize/source-priority.ts, because F048
+// resolves field conflicts with the same rule and the two must not drift.
 
 /**
  * Repeatedly calls fetchPage(from, to) until a page comes back shorter than
@@ -297,7 +291,7 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
           match_method: MATCH_METHOD_BY_MATCHED_ON[matchedOn],
           match_score: MATCH_SCORE_BY_MATCHED_ON[matchedOn],
           match_fields: matchFields,
-          source_priority: SOURCE_PRIORITY[source] ?? DEFAULT_SOURCE_PRIORITY,
+          source_priority: sourcePriority(source),
         })
         .select("id")
         .single();

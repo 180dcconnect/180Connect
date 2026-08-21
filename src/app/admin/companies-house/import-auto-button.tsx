@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 import {
   importCompaniesHouseAuto,
   type CompaniesHouseImportState,
@@ -39,13 +40,14 @@ export function CompaniesHouseImportAutoButton({ configured }: { configured: boo
       )}
 
       <form action={action} className="mt-5">
-        <button
-          className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
+        <OriginButton
           disabled={!configured || pending}
+          loading={pending}
+          size="md"
           type="submit"
         >
           {pending ? "Importing…" : "Import Companies House data"}
-        </button>
+        </OriginButton>
       </form>
 
       {state.kind !== "idle" && (

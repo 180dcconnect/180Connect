@@ -5,7 +5,7 @@ export default function Loading() {
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <div className="mx-auto w-full max-w-4xl space-y-8">
         <div>
-          <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-black leading-[1] tracking-[-0.03em]">
+          <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
             Clients
           </h1>
         </div>

@@ -1,7 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 import type { EntityMatchCandidateRow } from "@/lib/duplicates";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
+import { reportError } from "@/lib/error-logging";
 
 // "rejected" is part of the underlying match_status enum (a future matcher's "this
 // candidate pairing was wrong" outcome) but decide_duplicate_flag never writes it — see
@@ -48,7 +52,7 @@ export function DuplicatesPanel({
 }) {
   const [rows, setRows] = useState(initialDuplicates);
   const [notes, setNotes] = useState<Record<string, string>>({});
-  const [message, setMessage] = useState("");
+  const [status, setStatus] = useState<{ text: string; tone: "success" | "error" } | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function refresh() {
@@ -60,7 +64,7 @@ export function DuplicatesPanel({
 
   async function decide(entityMatchCandidateId: string, confirmed: boolean) {
     setBusy(true);
-    setMessage("");
+    setStatus(null);
     try {
       const response = await fetch("/api/admin/duplicates", {
         method: "PATCH",
@@ -73,17 +77,19 @@ export function DuplicatesPanel({
       });
       const body = await response.json();
       if (!response.ok) {
-        setMessage(body.error ?? "The decision could not be saved.");
+        setStatus({ text: body.error ?? "The decision could not be saved.", tone: "error" });
         return;
       }
-      setMessage(
-        confirmed
+      setStatus({
+        text: confirmed
           ? "Confirmed as a duplicate — kept as one record."
           : "Dismissed — the incoming record will be added as a new charity.",
-      );
+        tone: "success",
+      });
       await refresh();
-    } catch {
-      setMessage("Could not reach the server. Check your connection and try again.");
+    } catch (err) {
+      void reportError(err, { operation: "admin.duplicates.decide_client" });
+      setStatus({ text: NETWORK_ERROR_MESSAGE, tone: "error" });
     } finally {
       setBusy(false);
     }
@@ -136,22 +142,23 @@ export function DuplicatesPanel({
                   value={notes[row.id] ?? ""}
                 />
                 <div className="mt-3 flex gap-3">
-                  <button
-                    className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                  <OriginButton
+                    size="sm"
                     disabled={busy}
                     onClick={() => decide(row.id, true)}
                     type="button"
                   >
                     Same charity — keep existing
-                  </button>
-                  <button
-                    className="rounded-lg border border-black/15 px-4 py-2 text-sm font-bold disabled:opacity-50"
+                  </OriginButton>
+                  <OriginButton
+                    variant="outline"
+                    size="sm"
                     disabled={busy}
                     onClick={() => decide(row.id, false)}
                     type="button"
                   >
                     Different charities — add as new
-                  </button>
+                  </OriginButton>
                 </div>
               </li>
             ))}
@@ -159,9 +166,9 @@ export function DuplicatesPanel({
         </div>
       )}
 
-      <p aria-live="polite" className="min-h-6 text-sm font-bold">
-        {message}
-      </p>
+      <div className="min-h-6">
+        {status && <InlineAlert tone={status.tone} message={status.text} />}
+      </div>
 
       <div>
         <h2 className="text-sm font-bold">History</h2>

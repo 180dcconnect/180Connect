@@ -2,23 +2,11 @@
 
 import { AnimatePresence, motion, type Variants } from "motion/react";
 import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
-import { ArrowRight, SlidersHorizontal, X, ChevronLeft } from "lucide-react";
+import { ArrowRight, Check, ChevronLeft, SlidersHorizontal, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 import { EASE, entranceIndexed, entranceSoft, stagger } from "@/components/brand/motion";
 import { LIP, SEARCH_GLASS, SEARCH_GLASS_OPEN } from "@/components/brand/tokens";
-
-/**
- * A glass pill that unfolds into a results panel. Collapsed it is one row —
- * prompt, cycling subject, trailing disc; open it keeps that row exactly where
- * it was and grows a panel underneath, so opening reads as the pill *extending*
- * rather than as a pill leaving and a card arriving. Same reasoning as the menu
- * sheet's twin chrome: nothing that was on screen may appear to move.
- *
- * The whole thing is one `overflow-hidden` box whose height animates. The panel
- * inside is laid out at full size from the first frame and simply clipped, so
- * its content never reflows mid-animation — a panel that animated its own height
- * re-wraps the link list on every frame and shimmers.
- */
 
 /** Cycles behind the prompt while the field is empty and unfocused. */
 const DEFAULT_SUBJECTS = ["Charities", "Companies", "Grants", "Clients"] as const;
@@ -29,43 +17,18 @@ const SUBJECT_HOLD = 2400;
  *  card's corner are the same number and the morph has nothing to interpolate. */
 const ROW = 64;
 
-/**
- * Hoisted, not built in the render body. `stagger()` returns a fresh object
- * every call, and a new `variants` identity makes Motion re-run the parent's
- * "show" transition — so typing in the option filter restarted the entrance
- * cascade on every keystroke.
- */
 const PANEL_STAGGER = stagger(0.05, 0.14);
 
-/**
- * The option list opts *out* of the panel's stagger. `staggerChildren` is
- * per-parent and this list can be hundreds of cities long: at 0.05s apart the
- * thirtieth row waited 1.6s to start fading in, which reads as the search being
- * slow rather than as an entrance. The rows below carry their own capped delay
- * instead — see `OPTION_ENTRANCE`.
- */
 const OPTION_LIST: Variants = { hidden: {}, show: {} };
 
-/** Capped at 0.3s, so the last match is never more than a beat behind the first. */
 const OPTION_ENTRANCE = entranceIndexed(0.025, 0.3);
 
-/**
- * Ranks a label against the typed query. Prefix beats word-start beats
- * anywhere-inside; a negative rank means no match at all.
- *
- * Ranking rather than plain filtering is the point: the city list is long and
- * alphabetical, so a bare `includes` left "Sheffield" buried under every city
- * that merely contains the letters, and the row you typed for was the one you
- * had to scroll to find.
- */
 function rankOption(label: string, query: string): number {
   const l = label.toLowerCase();
   if (l.startsWith(query)) return 0;
   if (l.includes(` ${query}`)) return 1;
   return l.includes(query) ? 2 : -1;
 }
-
-import { useRouter } from "next/navigation";
 
 export type FilterOption = { label: string; value: string };
 
@@ -120,6 +83,7 @@ export function BrandSearchBar({
   const [filterQuery, setFilterQuery] = useState("");
   const [selectedFilters, setSelectedFilters] = useState<{ category: string; label: string; value: string }[]>(defaultFilters);
   const [, startTransition] = useTransition();
+  const [isSearching, setIsSearching] = useState(false);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -154,11 +118,13 @@ export function BrandSearchBar({
   const FILTER_PARAMS: Record<string, string> = useMemo(() => paramNames || DEFAULT_PARAMS, [paramNames]);
 
   const submitSearch = (filters = selectedFilters, q = query, closePanel = true) => {
-    // Start from the address bar, not from empty: the host page may carry state
-    // this bar knows nothing about (the client list's funnel stage and breakdown
-    // sort), and rebuilding the query string from scratch silently reset it.
-    // Read via `window` rather than `useSearchParams` — the hook would opt every
-    // page holding this bar out of static rendering, and this only runs on submit.
+    if (isSearching) return;
+    setIsSearching(true);
+
+    if (closePanel) {
+      setOpen(false);
+    }
+
     const params = new URLSearchParams(window.location.search);
     params.delete("q");
     params.delete("page");
@@ -170,10 +136,17 @@ export function BrandSearchBar({
       params.set(FILTER_PARAMS[f.category] ?? "filter", f.value);
     });
 
+    // Navigate immediately (F052: applying or clearing must not reload the
+    // document, and a stalled list reads as broken); the spinner stays up for
+    // a beat so the submit still gets its feedback and double-submits stay
+    // guarded by `isSearching`.
     startTransition(() => {
       router.replace(`?${params.toString()}`, { scroll: false });
     });
-    
+    setTimeout(() => {
+      setIsSearching(false);
+    }, 400);
+
     if (closePanel) {
       setOpen(false);
     }
@@ -181,7 +154,6 @@ export function BrandSearchBar({
 
   const close = () => {
     setOpen(false);
-    // Don't clear query on close if it's integrated, or maybe just close the panel
     setTimeout(() => {
       setActiveFilter(null);
       setFilterQuery("");
@@ -210,10 +182,6 @@ export function BrandSearchBar({
       <div className="relative h-[64px] w-full z-50">
         <motion.div
           ref={rootRef}
-          // A plain div, not a combobox: the panel holds links, not options, so the
-          //
-          // The blur steps up on open. Collapsed, the pill floats over the page
-          // ground and 3px is enough to read as glass; open, it covers a list of
           className="absolute top-0 left-0 w-full overflow-hidden backdrop-blur-[3px]"
           style={{ boxShadow: LIP, borderRadius: ROW / 2 }}
           animate={{
@@ -223,10 +191,15 @@ export function BrandSearchBar({
           initial={false}
           transition={{ duration: 0.7, ease: EASE }}
           onKeyDown={(e) => {
-            if (e.key !== "Escape" || !open) return;
-            e.stopPropagation();
-            close();
-            inputRef.current?.blur();
+            if (e.key === "Escape" && open) {
+              e.stopPropagation();
+              close();
+              inputRef.current?.blur();
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              submitSearch();
+              inputRef.current?.blur();
+            }
           }}
         >
           <div
@@ -296,7 +269,7 @@ export function BrandSearchBar({
         </div>
 
         <AnimatePresence>
-          {(typing || selectedFilters.length > 0) && (
+          {(typing || selectedFilters.length > 0 || isSearching) && (
             <motion.div
               initial={{ width: 0, opacity: 0, scale: 0.8 }}
               animate={{ width: 30, opacity: 1, scale: 1 }}
@@ -306,14 +279,27 @@ export function BrandSearchBar({
             >
               <button
                 type="button"
-                aria-label="Search"
+                aria-label={isSearching ? "Searching…" : "Search"}
+                title={isSearching ? "Searching…" : "Press Enter or click to search"}
+                disabled={isSearching}
                 onClick={() => {
                   submitSearch();
                   inputRef.current?.blur();
                 }}
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e6f5c0] text-[#1a1a1a] transition-colors hover:bg-[#d4e5a0] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+                className={`grid h-8 w-8 shrink-0 place-items-center rounded-full transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0] ${
+                  isSearching
+                    ? "bg-transparent"
+                    : "bg-[#e6f5c0] text-[#1a1a1a] hover:bg-[#d4e5a0]"
+                }`}
               >
-                <ArrowRight className="h-4 w-4" />
+                {isSearching ? (
+                  <div
+                    className="h-4.5 w-4.5 rounded-[4px] bg-[#e6f5c0] animate-spin shadow-[0_0_10px_rgba(230,245,192,0.65)]"
+                    style={{ animationDuration: "2.5s" }}
+                  />
+                ) : (
+                  <ArrowRight className="h-4 w-4" />
+                )}
               </button>
             </motion.div>
           )}
@@ -360,20 +346,28 @@ export function BrandSearchBar({
                   animate="show"
                   exit={{ opacity: 0, transition: { duration: 0.15 } }}
                 >
-                  {Object.keys(FILTER_CATEGORIES).map((filter) => (
-                    <motion.li key={filter} variants={entranceSoft}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveFilter(filter);
-                          setFilterQuery("");
-                        }}
-                        className="font-body block w-full text-left rounded-2xl px-3 py-2 text-lg font-medium text-white transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
-                      >
-                        {filter}
-                      </button>
-                    </motion.li>
-                  ))}
+                  {Object.keys(FILTER_CATEGORIES).map((filter) => {
+                    const count = selectedFilters.filter((f) => f.category === filter).length;
+                    return (
+                      <motion.li key={filter} variants={entranceSoft}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveFilter(filter);
+                            setFilterQuery("");
+                          }}
+                          className="font-body flex w-full items-center justify-between rounded-2xl px-3 py-2 text-left text-lg font-medium text-white transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+                        >
+                          <span>{filter}</span>
+                          {count > 0 && (
+                            <span className="rounded-full bg-[#e6f5c0] px-2 py-0.5 text-xs font-bold text-[#1a1a1a]">
+                              {count}
+                            </span>
+                          )}
+                        </button>
+                      </motion.li>
+                    );
+                  })}
                 </motion.ul>
               ) : (
                 <motion.div
@@ -402,6 +396,13 @@ export function BrandSearchBar({
                       placeholder={`Search ${activeFilter?.replace("Filter by ", "").toLowerCase()}...`}
                       value={filterQuery}
                       onChange={(e) => setFilterQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          submitSearch();
+                          inputRef.current?.blur();
+                        }
+                      }}
                       className="font-body flex-1 min-w-0 bg-white/10 text-[15px] text-[#f4f4ef] placeholder:text-[#f4f4ef]/40 rounded-xl px-4 py-2 outline-none focus-visible:ring-2 focus-visible:ring-[#e6f5c0] [&::-webkit-search-cancel-button]:hidden"
                     />
                   </motion.div>
@@ -410,23 +411,46 @@ export function BrandSearchBar({
                     variants={OPTION_LIST}
                     className="flex-1 flex flex-col px-4 pb-4 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
                   >
-                    {activeOptions.map((option, index) => (
-                      <motion.li key={option.value} variants={OPTION_ENTRANCE} custom={index}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!selectedFilters.find(f => f.category === activeFilter && f.value === option.value)) {
-                              const newFilters = [...selectedFilters, { category: activeFilter as string, label: option.label, value: option.value }];
-                              setSelectedFilters(newFilters);
-                              submitSearch(newFilters, query, false);
-                            }
-                          }}
-                          className="font-body block w-full text-left rounded-2xl px-3 py-2 text-lg font-semibold text-white transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
-                        >
-                          {option.label}
-                        </button>
-                      </motion.li>
-                    ))}
+                    {activeOptions.map((option, index) => {
+                      const isSelected = selectedFilters.some(
+                        (f) => f.category === activeFilter && f.value === option.value
+                      );
+                      return (
+                        <motion.li key={option.value} variants={OPTION_ENTRANCE} custom={index}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isSelected) {
+                                setSelectedFilters((prev) =>
+                                  prev.filter(
+                                    (f) => !(f.category === activeFilter && f.value === option.value)
+                                  )
+                                );
+                              } else {
+                                setSelectedFilters((prev) => [
+                                  ...prev,
+                                  {
+                                    category: activeFilter as string,
+                                    label: option.label,
+                                    value: option.value,
+                                  },
+                                ]);
+                              }
+                            }}
+                            className={`font-body flex w-full items-center justify-between rounded-2xl px-3 py-2 text-lg font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0] ${
+                              isSelected
+                                ? "bg-white/15 text-[#e6f5c0]"
+                                : "text-white hover:bg-white/10 hover:text-white"
+                            }`}
+                          >
+                            <span>{option.label}</span>
+                            {isSelected && (
+                              <Check className="h-4 w-4 text-[#e6f5c0]" />
+                            )}
+                          </button>
+                        </motion.li>
+                      );
+                    })}
 
                     {/* Explicit `initial`/`animate` rather than a variant. An
                         empty result is the one row that must never wait on the
@@ -476,9 +500,9 @@ export function BrandSearchBar({
               <button
                 type="button"
                 onClick={() => {
-                  const newFilters = selectedFilters.filter((f) => f.value !== filter.value || f.category !== filter.category);
-                  setSelectedFilters(newFilters);
-                  submitSearch(newFilters, query, false);
+                  setSelectedFilters((prev) =>
+                    prev.filter((f) => f.value !== filter.value || f.category !== filter.category)
+                  );
                 }}
                 className="hover:bg-black/10 focus:outline-none flex h-4 w-4 items-center justify-center rounded-full bg-black/5 transition-colors text-black/60"
               >
@@ -493,8 +517,7 @@ export function BrandSearchBar({
             onClick={() => {
               setSelectedFilters([]);
               setQuery("");
-              router.push("?");
-              setOpen(false);
+              submitSearch([], "");
             }}
             className="text-[13px] font-medium text-black/40 hover:text-black transition-colors ml-1"
           >

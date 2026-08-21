@@ -208,7 +208,7 @@ function resolveSourcePath(argument: string | undefined): string {
 function main(): void {
   const sourcePath = resolveSourcePath(process.argv[2]);
   const sheets = readWorkbook(readFileSync(sourcePath));
-  const sourceLabel = sourcePath.replace(homedir(), "~");
+  const sourceLabel = sourcePath.replace(homedir(), "~").replaceAll("\\", "/");
 
   mkdirSync(OUTPUT_DIR, { recursive: true });
 

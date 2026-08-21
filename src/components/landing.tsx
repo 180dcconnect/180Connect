@@ -225,10 +225,11 @@ function SheetsMark() {
 
 function GmailMark() {
   return (
-    /* eslint-disable-next-line @next/next/no-img-element */
-    <img
+    <Image
       src="/gmail.svg"
       alt="Gmail"
+      width={24}
+      height={24}
       className="inline-block h-[0.6em] w-auto -translate-y-[0.06em] align-middle"
     />
   );

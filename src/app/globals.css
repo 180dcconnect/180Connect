@@ -27,6 +27,19 @@
   --muted-foreground: #8a898b;
   --destructive: #b91c1c;
   --border: #e6e6e7;
+  /**
+   * `--input` and `--ring` are named by every generated form control
+   * (`border-input`, `focus-visible:ring-ring/50` in ui/input.tsx and
+   * ui/select.tsx). Without them Tailwind emits nothing for those utilities and
+   * the controls render with no border and no focus ring at all — `--input`
+   * therefore matches `--border`, and the focus ring is the brand green so a
+   * keyboard user lands on the same colour the rest of the app focuses in.
+   */
+  --input: #e6e6e7;
+  --ring: var(--brand);
+  /* Text selection inside those controls (`selection:bg-primary`). */
+  --primary: var(--brand);
+  --primary-foreground: #ffffff;
 }
 
 @theme inline {
@@ -44,6 +57,10 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-destructive: var(--destructive);
   --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-body: var(--font-lato);
@@ -165,7 +182,35 @@ a:hover .mail-sprite {
   }
 }
 
+/* Entrance for popover-style overlays (Select, and anything else that only
+   mounts while open) — a tiny scale + rise rather than a hard pop-in. */
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-popover-in {
+  animation: popover-in 0.16s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-popover-in {
+    animation: none;
+  }
+}
+
 @layer base {
+  ::selection {
+    background: var(--brand);
+    color: #ffffff;
+  }
+
   body {
     background: var(--background);
     color: var(--foreground);
@@ -180,5 +225,88 @@ a:hover .mail-sprite {
   h6 {
     font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
   }
+}
+
+/**
+ * Text Accessibility Settings (F205)
+ * Root scaling, enhanced contrast, relaxed line height, and reduced motion modes.
+ */
+
+/* 1. Font Size Scaling (AC1 & AC2) */
+html[data-font-size="large"] {
+  font-size: 115%;
+}
+
+html[data-font-size="extra-large"] {
+  font-size: 130%;
+}
+
+/* 2. Line Spacing & Readability */
+html[data-line-spacing="relaxed"] body,
+html[data-line-spacing="relaxed"] p,
+html[data-line-spacing="relaxed"] dd,
+html[data-line-spacing="relaxed"] li {
+  line-height: 1.85 !important;
+  letter-spacing: 0.015em;
+}
+
+/* 3. High Contrast Mode (WCAG AAA 7:1+ contrast) */
+html[data-contrast="high"] {
+  --foreground: #000000;
+  --muted-foreground: #1c1a18;
+  --border: #2e3c2f;
+  --input: #2e3c2f;
+}
+
+html[data-contrast="high"] body {
+  color: #000000 !important;
+}
+
+html[data-contrast="high"] h1,
+html[data-contrast="high"] h2,
+html[data-contrast="high"] h3,
+html[data-contrast="high"] h4,
+html[data-contrast="high"] h5,
+html[data-contrast="high"] h6 {
+  color: #000000 !important;
+  font-weight: 700;
+}
+
+html[data-contrast="high"] .text-foreground\/65,
+html[data-contrast="high"] .text-foreground\/60,
+html[data-contrast="high"] .text-foreground\/55,
+html[data-contrast="high"] .text-foreground\/40,
+html[data-contrast="high"] .text-black\/55,
+html[data-contrast="high"] .text-black\/45,
+html[data-contrast="high"] .text-black\/40 {
+  color: #1a1a1a !important;
+}
+
+html[data-contrast="high"] .border-black\/\[0\.06\],
+html[data-contrast="high"] .border-black\/\[0\.08\],
+html[data-contrast="high"] .border-black\/10,
+html[data-contrast="high"] .border-black\/12 {
+  border-color: #333333 !important;
+}
+
+html[data-contrast="high"] input,
+html[data-contrast="high"] select,
+html[data-contrast="high"] textarea {
+  border-color: #000000 !important;
+  color: #000000 !important;
+}
+
+html[data-contrast="high"] *:focus-visible {
+  outline: 2px solid #000000 !important;
+  outline-offset: 2px !important;
+}
+
+/* 4. Reduced Motion */
+html[data-reduced-motion="reduced"] *,
+html[data-reduced-motion="reduced"] *::before,
+html[data-reduced-motion="reduced"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
 }
 

@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { EmptyState } from "@/components/ui/empty-state";
 import { BrandSearchBar } from "@/components/brand/search-bar";
 import { Group, Rise } from "@/components/dashboard-stage";
 import { SearchRail } from "@/components/search-rail";
@@ -180,7 +182,7 @@ export default async function AuditLogPage({
         stageClassName="space-y-10"
         heading={
           <>
-            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-black leading-[1] tracking-[-0.03em]">
+            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
               Audit log
             </h1>
             <p className="mt-3 max-w-xl text-sm leading-[1.7] text-foreground/65">
@@ -246,13 +248,10 @@ export default async function AuditLogPage({
       >
         {error ? (
           <Rise>
-            <p
-              role="alert"
-              className="rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4 text-sm font-bold text-destructive"
-            >
-              Something went wrong loading the audit log. This has been recorded —
-              try again shortly.
-            </p>
+            <InlineAlert
+              variant="page"
+              message="Something went wrong loading the audit log. This has been recorded — try again shortly."
+            />
           </Rise>
         ) : (
           <Group className="space-y-4">
@@ -280,13 +279,13 @@ export default async function AuditLogPage({
               <AuditFeed groups={groups} />
             ) : (
               <Rise>
-                <div className="rounded-2xl border border-black/[0.06] bg-white px-5 py-10 shadow-sm">
-                  <p className="text-center text-sm leading-[1.7] text-foreground/65">
-                    {filtersActive
+                <EmptyState
+                  message={
+                    filtersActive
                       ? "Nothing in the trail matches this filter."
-                      : "Nothing has been logged yet. Actions appear here the moment someone changes ownership, a status, a role, or an approval."}
-                  </p>
-                </div>
+                      : "Nothing has been logged yet. Actions appear here the moment someone changes ownership, a status, a role, or an approval."
+                  }
+                />
               </Rise>
             )}
           </Group>

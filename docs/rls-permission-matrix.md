@@ -181,6 +181,13 @@ future RPC. `deactivate_user` additionally refuses to close an account while it 
 owns organisations unless given a destination, and moves them in the same transaction —
 see §3.2.
 
+`last_seen_at` — "last active", not last login — is written only by
+`public.touch_last_seen()` (20260816230000), a SECURITY DEFINER RPC that updates only
+`auth.uid()`'s own row. Granted to no one directly (same column-grant lockout as `role`),
+so a client cannot forge or backdate it. `getCurrentActor()` calls it, throttled to once
+per 5 minutes per user, on every signed-in page and every admin API request — not just at
+login. Not audited: presence isn't an ownership/status/role/approval change.
+
 ### 3.2 Canonical organisation data — shared read, admin write
 
 Everyone authorised reads canonical data (§4.3 "View canonical organisations": all
@@ -523,16 +530,17 @@ which is the wrong test for a row a user writes about themselves.
 
 ---
 
-### 3.13 Outreach preferences — own row only
+### 3.13 Outreach preferences — own row or admin read
 
-Backs F195 (`supabase/migrations/20260805110000_create_outreach_preferences.sql`). Same
+Backs F195 (`supabase/migrations/20260805110000_create_outreach_preferences.sql`) and
+F187 (`supabase/migrations/20260819100000_allow_admin_read_outreach_preferences.sql`). Same
 shape as §3.12: a user's own settings, not ownership/status/role/approval state, so it
 is governed by RLS alone — no SECURITY DEFINER RPC, no `audit_log` row
 (`docs/audit-log-pattern.md` §1).
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `OUTREACH_PREFERENCES` | own row (`user_id = auth.uid()`) | own row | own row | — (no grant) |
+| `OUTREACH_PREFERENCES` | own row (`user_id = auth.uid()`) OR admin (`app.is_admin()`) | own row | own row | — (no grant) |
 
 One row per user (`unique (user_id)`), upserted by the settings form's server action.
 No DELETE grant to any role: clearing preferences is an UPDATE back to empty arrays,
@@ -540,9 +548,8 @@ not a row removal — this keeps "no preferences set" a single always-present st
 (empty arrays) instead of a row that may or may not exist, which is one fewer case for
 F094 (#93, not yet built) to handle when it reads this table.
 
-No admin read: nothing in #191 needs one, and F187 (admin views a CAM's settings, P3)
-can add it with a stated reason when it is actually built — same call already made for
-`USER_ONBOARDING_STEPS` (§3.12).
+Admin read added for F187 (admin views a CAM's settings, P3) via `outreach_preferences_select_admin`
+so an admin can understand how a CAM's queue is configured without notifying or restricting the CAM.
 
 Both policies AND in `app.is_active_user()`. No `app.can_write()` — that helper gates
 *client data* and excludes viewers (F258); this table is a user's own settings and is
@@ -564,7 +571,7 @@ which self-approves (no admin ever waits on their own request).
 No INSERT/UPDATE policy, by the same reasoning as `AUDIT_LOG` (§3.8) and
 `set_user_role` (§6): "reason required" plus a role-gated state transition is the RLS
 recipe's RPC case (MIGRATIONS.md step 4), not something a policy can express. All
-writes go through two `SECURITY DEFINER` RPCs, each self-checking the caller and each
+writes go through three `SECURITY DEFINER` RPCs, each self-checking the caller and each
 writing an `audit_log` row in the same transaction:
 
 - `request_suppression(organisation_id, reason)` — caller must satisfy
@@ -577,6 +584,11 @@ writing an `audit_log` row in the same transaction:
   `pending` row to `active` or `rejected`, records `decided_by`/`decided_at`, and
   writes `suppression_approved` or `suppression_rejected` to `audit_log`. Rejects a
   target that is not currently `pending`.
+- `lift_suppression(suppression_id, reason)` — admin only (F185, #181). Moves an
+  `active` row to `lifted`, records `decided_by`/`decided_at` and `decision_note = reason`
+  (mandatory written reason), and writes `suppression_lifted` to `audit_log`. Rejects a
+  target that is not currently `active` or a blank reason. Lifting unblocks outreach
+  and restores visibility on standard client lists.
 
 SELECT is open to every active user (not gated to admin/owner) because the working
 list needs to hide a suppressed organisation for everyone, not just the CAM who owns
@@ -597,11 +609,8 @@ contact-level story can extend this table rather than starting over. Built ahead
 F248 (#243, "a suppression list exists") with the Project Leader's agreement, since
 this table already satisfies that — see the migration header for the full note.
 
-`status` is `pending | active | rejected | lifted`. `lifted` is reserved now, not
-used by any RPC in this migration — F251's own AC commits to an admin being able to
-remove a suppression, and F185 (#181) is that RPC. Adding an enum value later is a
-one-way door in Postgres (`create_organisations.sql` precedent), so it is reserved
-up front rather than negotiated later.
+`status` is `pending | active | rejected | lifted`. `lifted` is implemented by F185
+(#181) via `lift_suppression` RPC (`20260818130000_create_lift_suppression_rpc.sql`).
 
 ### 3.15 Entity match candidates — service-role write, admin decides
 
@@ -640,6 +649,107 @@ next ingestion run promotes it as a new organisation — see the migration heade
 why that doesn't loop back to the same flag.
 
 **Known gap, not closed by this table** — see Open gap 5 below.
+
+### 3.16 Field discrepancies — admin writes both sides, RPC only
+
+Backs F048 Data Discrepancy Detection (#49),
+`supabase/migrations/20260815090000_create_field_discrepancies.sql`. New table — unlike
+`ENTITY_MATCH_CANDIDATES` (§3.15), `FIELD_DISCREPANCIES` was not previously reserved in
+the Data Model; added by this migration (Data Model spreadsheet update still owed
+alongside — see the migration header).
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `FIELD_DISCREPANCIES` | admin only | — (RPC only) | — (RPC only) | — (no grant) |
+
+Unlike §3.15, **both** writes here are RPC-only and both are callable by
+`authenticated`, not `service_role` — detection is not a machine-scheduled pipeline
+step, it's a synchronous follow-up inside the signed-in admin's own
+`PATCH /api/admin/duplicates` request (right after `decide_duplicate_flag` confirms a
+match), so `record_field_discrepancy` self-checks `app.is_admin()` the same way
+`resolve_field_discrepancy` does. SELECT is admin-only for the same reason as §3.15 —
+a flagged conflict identifies which third-party source said what, not CAM-visible data.
+
+`record_field_discrepancy(organisation_id, field_name, existing_value, existing_source,
+incoming_value, incoming_source, raw_source_record_id, entity_match_candidate_id,
+auto_resolved_choice)` — no end-user action, called only by the detection follow-up
+above. No-ops if the same `incoming_value` was already resolved for that
+organisation+field, so a repeat import doesn't reopen an already-adjudicated conflict.
+
+It has two paths, and only the second is a decision:
+
+- `auto_resolved_choice` **null** — flag only. Writes a `pending` row and **no**
+  `audit_log` entry (flagging is not itself a decision).
+- `auto_resolved_choice` **set** — source priority settled the conflict (Companies
+  House outranks the Charity Commission; see `src/lib/standardize/source-priority.ts`).
+  Writes the row already `resolved`, applies the winning value onto `ORGANISATIONS`
+  through the same six-field allowlist as below, and writes `audit_log`
+  (`field_discrepancy_auto_resolved`) in the same transaction. `resolved_by_user_id` is
+  the admin whose duplicate confirmation triggered detection — the table's
+  `decision_consistent` constraint requires a real actor, and this runs inside their
+  request; "the rules decided, not the person" is carried by the distinct `audit_log`
+  action and by `notes`, not by a null actor.
+
+So the review queue (`status = 'pending'`) holds only what the priority rules could
+**not** settle: the same source on both sides, an unranked source, or an organisation
+whose originating raw record can no longer be identified (`existing_source =
+'unknown'`). Note the deliberate asymmetry with `ENTITY_MATCH_CANDIDATES.source_priority`,
+which falls back to `99` for an unranked source: a fallback number is safe to *store*,
+but is not sufficient grounds to *overwrite* a field, so the resolver declines rather
+than defaulting.
+
+`resolve_field_discrepancy(field_discrepancy_id, choice, note)` — the only end-user
+write. Admin only, `SECURITY DEFINER`, rejects a missing or already-resolved target,
+applies the chosen value back onto `ORGANISATIONS` (six-field allowlist only — see
+migration) and writes `audit_log` (`field_discrepancy_resolved`) in the same
+transaction.
+
+**Known gap, not closed by this table**: `existing_source` approximates provenance as
+the source of the raw record that originally created the organisation, not true
+per-field tracking — a later manual edit through the org edit UI is misattributed to
+the original import source. Closing that properly is F044 (Field-Level Source
+Tracking, #45)'s job, not this table's.
+
+### 3.17 Ownership requests — RPC-only, admin decides, narrow read
+
+Backs #408 Request Client Ownership (admin-approved handover),
+`supabase/migrations/20260818120000_create_ownership_requests.sql`. The escalation
+half of F165's conflict warning (§3.11's `claim_organisation` 55000): the warning
+says a CAM cannot take a client another CAM owns, and this is the only sanctioned
+next step. Decided by the Project Leader 18 Aug 2026 (on #406): **a CAM never
+overrides another CAM's ownership.** Worst case they ask, and an admin hands it over.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `OWNERSHIP_REQUESTS` | admin, the requester, or the client's current owner | — (RPC only) | — (RPC only) | — (no grant) |
+
+SELECT is deliberately narrower than `SUPPRESSIONS` (§3.14, all active users). A
+suppression is a fact about a charity the whole team needs in order to hide it; a
+request is a conversation between one CAM, one owner, and the admins. The current
+owner is included on purpose — someone asking for their client is something they
+should learn when it is asked, not when it moves.
+
+Both writes are `SECURITY DEFINER` RPCs that self-check the caller and write
+`audit_log` in the same transaction (docs/audit-log-pattern.md):
+
+- `request_client_ownership(organisation_id, reason)` — CAM only (`app.is_cam()` +
+  `app.is_active_user()`; an admin is refused, since they hold `reassign_ownership`
+  and would be requesting from themselves). Requires a reason, refuses an unowned
+  client ("claim it instead"), a client the caller already owns, and a second pending
+  request from the same CAM for the same client. Inserts `pending` and audits
+  `ownership_requested`. **It moves no ownership and grants no access** — the
+  requester's reach over the client is exactly what it was before they asked.
+- `decide_ownership_request(request_id, approve, note)` — admin only. Refuses an
+  already-decided request. On approval it delegates the move to `reassign_ownership`
+  (§3.11) rather than touching `organisations.owner_id`, so the handover is audited as
+  a normal `ownership_assigned` transition and the outgoing owner's open actions travel
+  with the client; `owner_id` still has exactly the two write paths §3.2 lists. Audits
+  `ownership_request_approved` / `ownership_request_rejected`.
+
+**What this does not do:** nothing here relaxes `claim_organisation` (a CAM claiming an
+owned client still raises 55000) or re-opens the direct `owner_id` write closed by
+`20260810110000`. A pending request is inert; the admin's decision is the only thing
+with an effect.
 
 ---
 
@@ -721,10 +831,9 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
 2. **No suggestion table.** §4.3 grants CAMs "suggest organisation field correction"
    and F077 is a P1 story, but no table holds a suggestion. Without one the CAM path
    to changing canonical data does not exist, and 3.2 has no row for it.
-3. ~~**No suppression table.**~~ **RESOLVED — F251 (#82)**, 5 Aug 2026. §3.14 has
-   the table and RPCs. "Lift suppression: Admin, reason required" is now split into
-   *request* (CAM or admin, reason required) and *decide* (admin only) — see §3.14
-   for why. Lifting an active suppression is F185 (#181), not built yet.
+3. ~~**No suppression table.**~~ **RESOLVED — F251 (#82) & F185 (#181)**. §3.14 has
+   the table and RPCs (`request_suppression`, `decide_suppression_request`, `lift_suppression`).
+   "Lift suppression: Admin, mandatory reason required" is implemented by F185 (`lift_suppression`).
 4. ~~**Viewer role has no story.**~~ **RESOLVED — F258 (#268) owns it**, raised
    24 Jul 2026. The story also closed a live escalation this question had been
    hiding: `organisations_update_owner_or_admin` tested ownership and admin but
@@ -809,6 +918,13 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    likely an `is_active`/`merged_into_organisation_id` column on `ORGANISATIONS`,
    following the same RPC-gated pattern as `SUPPRESSIONS` — raised rather than added
    unilaterally, since it changes the core entity every other table hangs off.
+10. **`FIELD_DISCREPANCIES.existing_source` is import-provenance, not per-field
+    tracking.** F048 (§3.16) approximates which source "owns" an organisation's
+    current field value as whichever `raw_source_records` row originally created it.
+    A later manual edit through the org edit UI is not distinguished from that
+    original import, so a discrepancy raised after such an edit will misattribute the
+    existing value's source. Properly closing this is F044 (Field-Level Source
+    Tracking, #45) — unbuilt and unassigned as of this writing — not F048's job.
 
 ---
 
@@ -841,6 +957,43 @@ process problem rather than a security one: nothing recreates it on `db reset`, 
 cannot reach production through the release process. It needs capturing as a migration
 by whoever owns F013/F014. Note also that `users.deactivated_at` is now in the Data
 Model but exists in neither the database nor a migration.
+# F036 manual entry access
+
+`MANUAL_ENTRY_RECORDS` is readable by its creating CAM/admin and by admins.
+Viewers cannot read it. All writes are RPC-only: active CAMs/admins call
+`save_manual_entry` to create or update their own draft and to submit it. Drafts
+may be incomplete; submission requires the confirmed standard field set. Only
+admins call `approve_manual_entry` or `reject_manual_entry`. An admin submission
+may immediately call the same approval RPC without a second admin, while a CAM
+submission remains pending. The RPCs self-authorise and write `AUDIT_LOG` in the
+same transaction as each draft/status/review change. Approval also re-runs F042's
+duplicate rule and requires the human link-existing/create-new decision before
+creating an active organisation. Direct INSERT, UPDATE and DELETE privileges are
+withheld from authenticated users. `get_organisation_sources_with_actor` exposes
+only safe provenance metadata and the creating user's display name to active
+users; it does not expose the full draft or pending submission.
+
+# F037 manual URL import access
+
+A URL import writes through `create_url_import_draft`, which active CAMs and admins
+may execute and viewers may not. It always writes the caller as the submitter and
+always writes a `draft`: there is no parameter that submits, so an import cannot
+reach an organisation without the CAM opening the draft and pressing submit through
+F036's own path. It refuses to create a row without the URL the values came from,
+and audits as `url_import_drafted`.
+
+`set_url_import_provenance` narrows `imported_field_paths` only, and only for the
+submitter's own draft — a field can stop being labelled as imported when the CAM
+edits it, and can never start. `discard_manual_entry_draft` deletes the submitter's
+own `draft` row after writing `manual_entry_draft_discarded` to `AUDIT_LOG`; a
+submitted or reviewed entry cannot be discarded, and no DELETE privilege or policy
+is granted to authenticated users for the table. `get_organisation_import_origin`
+returns the source URL and the imported-field list to any active user, because "where
+did this client come from" is a question every CAM viewing a profile needs answered;
+it exposes nothing else from the submission.
+
+The fetched page is stored in `RAW_SOURCE_RECORDS` with `record_source = 'website'`,
+under the same admin-read, service-role-write rules as every API source.
 
 # F047 data-quality review flags
 

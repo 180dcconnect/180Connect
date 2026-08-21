@@ -19,6 +19,7 @@ import { BrandSearchBar } from "@/components/brand/search-bar";
 import { ClaimButton } from "./[id]/claim-button";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 import { Group, Rise } from "@/components/dashboard-stage";
+import { OriginButton } from "@/components/ui/origin-button";
 import { SearchRail } from "@/components/search-rail";
 import {
   SOURCE_LABELS,
@@ -277,9 +278,19 @@ export default async function ClientsPage({
         }
         heading={
           <>
-            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-black leading-[1] tracking-[-0.03em]">
-              {isOwnedView ? "My clients" : "Clients"}
-            </h1>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
+                {isOwnedView ? "My clients" : "Clients"}
+              </h1>
+              {canClaim && (
+                <OriginButton
+                  href="/clients/new"
+                  size="md"
+                >
+                  Add client manually
+                </OriginButton>
+              )}
+            </div>
             <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
               {isOwnedView
                 ? "Clients you currently own. Reassigned away from you, or to you, this list reflects it on your next visit."
@@ -453,13 +464,6 @@ export default async function ClientsPage({
                               Suppression requested
                             </span>
                           )}
-                        </span>
-
-                        <span
-                          aria-hidden="true"
-                          className="hidden shrink-0 text-foreground/25 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-foreground/55 sm:block"
-                        >
-                          →
                         </span>
                       </Link>
 

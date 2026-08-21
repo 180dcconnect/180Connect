@@ -23,7 +23,7 @@ export default async function AdminUsersPage() {
   // table, so the two lists stay mutually exclusive (F008 AC5).
   const { data: users, error } = await supabase
     .from("users")
-    .select("id, email, full_name, role, is_active, deactivated_at")
+    .select("id, email, full_name, role, is_active, deactivated_at, last_seen_at")
     .or("invited_at.is.null,invite_accepted_at.not.is.null")
     .order("full_name");
 
@@ -71,7 +71,7 @@ export default async function AdminUsersPage() {
       <Stage className="mx-auto w-full max-w-6xl space-y-10">
         <Rise className="flex flex-wrap items-end justify-between gap-x-8 gap-y-5">
           <div className="min-w-0">
-            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-black leading-[1] tracking-[-0.03em]">Team members</h1>
+            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">Team members</h1>
             <p className="mt-3 text-sm text-foreground/65">
               Role changes apply on the user&apos;s next request.{" "}
               <Link className="font-bold text-brand underline" href="/admin/offboard">

@@ -37,6 +37,7 @@ export const SIDEBAR_SECTIONS: readonly SidebarNavSection[] = [
     items: [
       { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
       { href: "/clients", label: "Clients", icon: "clients", permission: "client:view" },
+      { href: "/clients/new", label: "Add client", icon: "add", permission: "client:edit" },
       { href: "/actions", label: "Actions", icon: "actions", plannedFeatureId: "F168" },
     ],
   },
@@ -44,7 +45,10 @@ export const SIDEBAR_SECTIONS: readonly SidebarNavSection[] = [
     // Kept even though it's a thin, somewhat redundant hub next to the items
     // below — Bashir wants it removed later, not in this pass.
     label: "Admin",
-    items: [{ href: "/admin", label: "Overview", icon: "admin", permission: "user:manage" }],
+    items: [
+      { href: "/admin", label: "Overview", icon: "admin", permission: "user:manage" },
+      { href: "/admin/feedback", label: "Feedback", icon: "feedback", permission: "user:manage" },
+    ],
   },
   {
     label: "Data quality",

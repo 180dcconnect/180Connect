@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState, type KeyboardEvent } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 import { saveOutreachPreferencesAction, type OutreachPreferencesState } from "./actions";
 import {
   GEOGRAPHIC_REACH_OPTIONS,
@@ -143,13 +144,14 @@ export function OutreachPreferencesForm({
       </fieldset>
 
       <div className="flex items-center gap-4">
-        <button
+        <OriginButton
           type="submit"
+          loading={pending}
           disabled={pending}
-          className="h-10 rounded-full bg-brand px-5 text-sm font-bold text-white transition-colors hover:bg-brand-hover disabled:cursor-wait disabled:opacity-60"
+          size="md"
         >
           {pending ? "Saving..." : "Save preferences"}
-        </button>
+        </OriginButton>
         <p aria-live="polite" className="text-sm font-bold">
           {state.message ? (
             <span className={state.status === "error" ? "text-red-700" : "text-brand"}>

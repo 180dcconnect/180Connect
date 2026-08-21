@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { standardizeCharityCommissionRecord } from "./charity-commission.ts";
+import {
+  splitCharityCommissionAddress,
+  standardizeCharityCommissionRecord,
+} from "./charity-commission.ts";
 import type { RawCharityCommissionRecord } from "./charity-commission.ts";
 
 const minimalRecord: RawCharityCommissionRecord = {
@@ -128,5 +131,65 @@ describe("standardizeCharityCommissionRecord — out of scope for this module", 
     // This test exists to make that boundary explicit rather than silently
     // skip those testing notes.
     assert.ok(true);
+  });
+});
+
+describe("splitCharityCommissionAddress", () => {
+  it("drops a line that merely repeats the charity's name", () => {
+    // Charity 1201213, exactly as the register returns it.
+    assert.deepEqual(
+      splitCharityCommissionAddress({
+        charity_name: "ALWAYS AN ALTERNATIVE CIO",
+        address_line_one: "Always An Alternative CIO",
+        address_line_two: "The Campus",
+        address_line_three: "Pack Horse Lane",
+        address_line_four: "High Green",
+        address_line_five: "SHEFFIELD",
+      }),
+      { addressLine1: "Pack Horse Lane", city: "SHEFFIELD" },
+    );
+  });
+
+  it("treats the last line as the town", () => {
+    assert.deepEqual(
+      splitCharityCommissionAddress({
+        charity_name: "Some Trust",
+        address_line_one: "12 Mill Road",
+        address_line_two: "Rotherham",
+      }),
+      { addressLine1: "12 Mill Road", city: "Rotherham" },
+    );
+  });
+
+  it("prefers a line that looks like a street over an earlier building name", () => {
+    assert.deepEqual(
+      splitCharityCommissionAddress({
+        charity_name: "Some Trust",
+        address_line_one: "Trustees Office",
+        address_line_two: "45 Barber Road",
+        address_line_three: "Sheffield",
+      }),
+      { addressLine1: "45 Barber Road", city: "Sheffield" },
+    );
+  });
+
+  it("keeps a single usable line as the street and invents no town", () => {
+    assert.deepEqual(
+      splitCharityCommissionAddress({
+        charity_name: "Some Trust",
+        address_line_one: "The Old Vicarage",
+      }),
+      { addressLine1: "The Old Vicarage", city: "" },
+    );
+  });
+
+  it("returns empty fields when every line is the charity's own name", () => {
+    assert.deepEqual(
+      splitCharityCommissionAddress({
+        charity_name: "Some Trust",
+        address_line_one: "Some Trust",
+      }),
+      { addressLine1: "", city: "" },
+    );
   });
 });

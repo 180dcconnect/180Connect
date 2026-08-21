@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
-import { Sidebar, type SidebarSection } from "./sidebar";
+import { Sidebar, type SidebarSection, type SidebarOnboarding } from "./sidebar";
 
 /**
  * Below `md` the rail is a drawer: it leaves the flow, slides in over the
@@ -18,6 +18,7 @@ export function AppShellFrame({
   roleLabel,
   onLogout,
   initialCollapsed,
+  onboarding,
   children,
 }: {
   sections: SidebarSection[];
@@ -26,6 +27,7 @@ export function AppShellFrame({
   roleLabel: string;
   onLogout: () => Promise<void>;
   initialCollapsed?: boolean;
+  onboarding?: SidebarOnboarding;
   children: React.ReactNode;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -62,6 +64,7 @@ export function AppShellFrame({
         initialCollapsed={initialCollapsed}
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
+        onboarding={onboarding}
       />
 
       {mobileOpen && (

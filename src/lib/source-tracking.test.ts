@@ -85,4 +85,18 @@ describe("formatOrganisationSources", () => {
 
     assert.deepEqual(sources.map((source) => source.label), ["Manual Entry", "Companies House"]);
   });
+
+  it("preserves the CAM identified on a manual source", () => {
+    const sources = formatOrganisationSources([{
+      source: "manual",
+      source_record_id: "manual-1",
+      source_registry_name: null,
+      first_seen_at: "2026-08-01T10:00:00Z",
+      source_actor_user_id: "cam-1",
+      source_actor_name: "Alex CAM",
+    }]);
+
+    assert.equal(sources[0]?.label, "Manual Entry");
+    assert.equal(sources[0]?.source_actor_name, "Alex CAM");
+  });
 });

@@ -1,9 +1,12 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { sidebarSectionsFor } from "@/lib/nav";
 import { logout } from "@/lib/auth/logout";
+import { ONBOARDING_STEPS, shouldShowGuide, type OnboardingUser } from "@/lib/onboarding";
 import { AppShellFrame } from "./app-shell-frame";
+import type { SidebarOnboarding } from "./sidebar";
 
 /**
  * What the sidebar's frosted glass actually blurs: brand green, pooled at the
@@ -53,6 +56,68 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   const actor = actorResult.actor;
   const sections = sidebarSectionsFor(actor.role);
 
+  let onboarding: SidebarOnboarding | undefined = undefined;
+
+  try {
+    const supabase = await createClient();
+    const [profile, completedSteps] = await Promise.all([
+      supabase
+        .from("users")
+        .select("role, invite_accepted_at, onboarding_completed_at, onboarding_dismissed_at")
+        .eq("id", actor.id)
+        .maybeSingle(),
+      supabase.from("user_onboarding_steps").select("step_key"),
+    ]);
+
+    const isEligible = shouldShowGuide(
+      profile.data
+        ? ({
+            role: profile.data.role,
+            inviteAcceptedAt: profile.data.invite_accepted_at,
+            onboardingCompletedAt: profile.data.onboarding_completed_at,
+            onboardingDismissedAt: profile.data.onboarding_dismissed_at,
+          } satisfies OnboardingUser)
+        : null,
+    );
+
+    const doneKeys = new Set(
+      (completedSteps.data ?? []).map((row: { step_key: string }) => row.step_key),
+    );
+
+    const steps = ONBOARDING_STEPS.map((s) => ({
+      key: s.key,
+      title: s.title,
+      href: s.href,
+      done: doneKeys.has(s.key),
+    }));
+
+    const completedCount = steps.filter((s) => s.done).length;
+
+    // Show whenever eligible, or always in development so you can see and test it live
+    const show = isEligible || process.env.NODE_ENV !== "production";
+
+    onboarding = {
+      steps,
+      completedCount,
+      totalCount: steps.length,
+      show,
+    };
+  } catch {
+    if (process.env.NODE_ENV !== "production") {
+      onboarding = {
+        steps: ONBOARDING_STEPS.map((s) => ({
+          key: s.key,
+          title: s.title,
+          href: s.href,
+          done: false,
+        })),
+        completedCount: 0,
+        totalCount: ONBOARDING_STEPS.length,
+        show: true,
+      };
+    }
+  }
+
   return (
     <>
       <ShellWash />
@@ -63,6 +128,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         roleLabel={actor.role}
         onLogout={logout}
         initialCollapsed={initialCollapsed}
+        onboarding={onboarding}
       >
         {children}
       </AppShellFrame>

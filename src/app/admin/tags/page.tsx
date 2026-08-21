@@ -3,6 +3,7 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { CreateTagForm } from "./create-tag-form";
+import { EditableTagList } from "./editable-tag-list";
 
 export default async function TagsPage() {
   const authorization = await getCurrentActor("client:edit", {
@@ -54,20 +55,7 @@ export default async function TagsPage() {
           <h2 className="text-sm font-bold uppercase tracking-[0.08em] text-black/40">
             Existing tags
           </h2>
-          {!error && existingTags.length === 0 ? (
-            <p className="mt-3 text-sm text-black/50">No tags created yet.</p>
-          ) : (
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {existingTags.map((tag) => (
-                <span
-                  key={tag.id}
-                  className="rounded-full bg-[--brand]/10 px-2.5 py-1 text-xs font-medium text-[--brand]"
-                >
-                  {tag.name}
-                </span>
-              ))}
-            </div>
-          )}
+          {!error && <EditableTagList initialTags={existingTags} />}
         </div>
       </section>
     </div>

@@ -259,6 +259,7 @@ export default async function ClientsPage({
         headingClassName="mb-8"
         bar={
           <BrandSearchBar
+            live
             defaultQuery={search ?? ""}
             defaultFilters={[
               ...(city ? [{ category: "Filter by city", label: city, value: city }] : []),

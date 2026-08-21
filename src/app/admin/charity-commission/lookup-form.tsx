@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 import { lookupCharity, type CharityCommissionImportState } from "./actions";
 
 const initialLookupState: CharityCommissionImportState = {
@@ -45,13 +46,14 @@ export function CharityCommissionLookupForm({ configured }: { configured: boolea
             placeholder="For example, 1218781"
           />
         </div>
-        <button
-          className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
+        <OriginButton
           disabled={!configured || pending}
+          loading={pending}
+          size="md"
           type="submit"
         >
           {pending ? "Looking up…" : "Look up charity"}
-        </button>
+        </OriginButton>
       </form>
 
       {state.kind !== "idle" && (
@@ -66,6 +68,23 @@ export function CharityCommissionLookupForm({ configured }: { configured: boolea
                 </div>
               ))}
             </dl>
+          )}
+          {state.promoted && (
+            <>
+              <p className="mt-4 text-xs font-bold uppercase tracking-wide opacity-60">
+                Promoted to the client list
+              </p>
+              <dl className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-5">
+                {Object.entries(state.promoted).map(([label, value]) => (
+                  <div key={label}>
+                    <dt className="capitalize opacity-70">
+                      {label.replace(/([A-Z])/g, " $1")}
+                    </dt>
+                    <dd className="text-lg font-bold">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </>
           )}
         </div>
       )}

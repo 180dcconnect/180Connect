@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { isInviteExpired, type PendingInvite } from "@/lib/admin/team-realtime";
 import { cancelInviteAction, resendInviteAction } from "./invite-actions";
+import { InlineAlert } from "@/components/ui/inline-alert";
 
 type ActionResult = { text: string; status: "success" | "warning" | "error" };
 
@@ -57,18 +58,19 @@ export function PendingInvitesList({
 
   if (error) {
     return (
-      <p className="mt-3 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-800" role="alert">
-        Pending invites could not be loaded. Please refresh and try again.
-      </p>
+      <InlineAlert
+        variant="page"
+        message="Pending invites could not be loaded. Please refresh and try again."
+      />
     );
   }
 
   if (invites.length === 0) {
-    return <p className="mt-3 text-sm text-foreground/60">No pending invites.</p>;
+    return <p className="text-sm text-foreground/60">No pending invites.</p>;
   }
 
   return (
-    <ul className="mt-3 divide-y divide-black/5 text-sm">
+    <ul className="divide-y divide-black/5 text-sm">
       {invites.map((invite) => {
         const result = results[invite.id];
         const expired = isInviteExpired(invite.invited_at);
@@ -84,7 +86,7 @@ export function PendingInvitesList({
               </span>
               <div className="flex items-center gap-3">
                 <span className="text-foreground/60">
-                  Invited {new Date(invite.invited_at).toLocaleDateString()}
+                  Invited {new Date(invite.invited_at).toLocaleDateString("en-GB")}
                   {expired && <span className="ml-2 font-bold text-red-700">Expired</span>}
                 </span>
                 <button
@@ -105,20 +107,17 @@ export function PendingInvitesList({
                 </button>
               </div>
             </div>
-            {result && (
-              <p
-                aria-live="polite"
-                className={
-                  result.status === "error"
-                    ? "text-xs text-red-700"
-                    : result.status === "warning"
-                      ? "text-xs text-amber-700"
-                      : "text-xs text-brand"
-                }
-              >
-                {result.text}
-              </p>
-            )}
+            {result &&
+              (result.status === "error" ? (
+                <InlineAlert message={result.text} />
+              ) : (
+                <p
+                  aria-live="polite"
+                  className={result.status === "warning" ? "text-xs text-amber-700" : "text-xs text-brand"}
+                >
+                  {result.text}
+                </p>
+              ))}
           </li>
         );
       })}

@@ -26,9 +26,21 @@ export const NAV_ITEMS: readonly NavItem[] = [
     permission: "client:view",
   },
   {
+    href: "/clients/new",
+    label: "Add client manually",
+    description: "Submit an organisation that is not available from an API.",
+    permission: "client:edit",
+  },
+  {
     href: "/admin",
     label: "Admin workspace",
     description: "Manage users, audit activity and import Companies House data.",
+    permission: "user:manage",
+  },
+  {
+    href: "/admin/cam-settings",
+    label: "CAM queue settings",
+    description: "Inspect team members' outreach preferences and queue configuration.",
     permission: "user:manage",
   },
   {
@@ -46,6 +58,11 @@ export const NAV_ITEMS: readonly NavItem[] = [
     href: "/settings/outreach-preferences",
     label: "Outreach preferences",
     description: "Set the geography, sector and size focus for your queue.",
+  },
+  {
+    href: "/settings/accessibility",
+    label: "Accessibility settings",
+    description: "Adjust text size, contrast, and visual comfort across the platform.",
   },
 ];
 

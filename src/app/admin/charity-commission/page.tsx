@@ -3,7 +3,9 @@ import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import { CharityCommissionImportForm } from "./import-form";
+import { CharityCommissionImportAutoButton } from "./import-auto-button";
 import { CharityCommissionLookupForm } from "./lookup-form";
 
 // TODO: Companies House's admin trigger uses maxDuration = 60 (a single
@@ -58,27 +60,37 @@ export default async function CharityCommissionPage() {
       <section className="mx-auto max-w-5xl rounded-2xl bg-white p-8 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-bold text-brand">Data ingestion</p>
-            <h1 className="mt-2 text-3xl font-bold">Charity Commission import</h1>
+            <h1 className="text-3xl font-bold">Charity Commission import</h1>
             <p className="mt-3 max-w-2xl text-sm text-foreground/65">
               Bring UK charity registration and contact data into the
               validation and matching pipeline.
             </p>
           </div>
-          <Link className="text-sm font-bold text-brand hover:underline" href="/admin">
-            Back to admin
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link className="text-sm font-bold text-brand hover:underline" href="/admin/review">
+              Review queue
+            </Link>
+            <Link className="text-sm font-bold text-brand hover:underline" href="/admin">
+              Back to admin
+            </Link>
+          </div>
         </div>
 
+        <div className="mt-8">
+          <CharityCommissionImportAutoButton configured={configured} />
+        </div>
         <CharityCommissionImportForm configured={configured} />
         <CharityCommissionLookupForm configured={configured} />
 
         <div className="mt-8">
           <h2 className="text-lg font-bold">Recent imports</h2>
           {error ? (
-            <p className="mt-3 rounded-lg bg-red-50 p-4 text-sm font-bold text-red-900" role="alert">
-              Import history could not be loaded. Please refresh and try again.
-            </p>
+            <div className="mt-3">
+              <InlineAlert
+                variant="page"
+                message="Import history could not be loaded. Please refresh and try again."
+              />
+            </div>
           ) : runs.length === 0 ? (
             <p className="mt-3 text-sm text-foreground/65">No Charity Commission imports have run yet.</p>
           ) : (

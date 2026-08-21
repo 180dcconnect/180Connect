@@ -5,8 +5,10 @@ import {
   checkWebsite,
   isPrivateAddress,
   validateWebsiteFormat,
+  websiteHref,
   type WebsiteCheckDependencies,
 } from "./website-validation.ts";
+import { pinnedLookup } from "./website-reachability.ts";
 
 const publicDns = async () => ["93.184.216.34"];
 
@@ -30,6 +32,33 @@ describe("validateWebsiteFormat", () => {
     assert.equal(result.url, "example dot org");
   });
 
+  // A registry import or a hand-typed entry very often stores the bare host.
+  // These were all reported "invalid format" for want of a scheme, which also
+  // meant the reachability check never ran on them.
+  it("accepts a bare host and assumes https", () => {
+    const result = validateWebsiteFormat("1-1coco.org");
+    assert.equal(result.status, "valid");
+    assert.equal(result.url, "https://1-1coco.org/");
+
+    assert.equal(validateWebsiteFormat("www.example.org/path").status, "valid");
+    assert.equal(validateWebsiteFormat(" example.org ").url, "https://example.org/");
+  });
+
+  it("does not invent a scheme for a host that carries a port", () => {
+    const result = validateWebsiteFormat("example.org:8080");
+    assert.equal(result.status, "valid");
+    assert.equal(result.url, "https://example.org:8080/");
+  });
+
+  it("leaves a non-HTTP scheme alone rather than rewriting it into a valid one", () => {
+    assert.equal(validateWebsiteFormat("javascript:alert(1)").status, "invalid");
+    assert.equal(validateWebsiteFormat("mailto:hello@example.org").status, "invalid");
+    assert.equal(validateWebsiteFormat("ftp://example.org").status, "invalid");
+    // Bare, but still local: assuming https must not smuggle it past the guard.
+    assert.equal(validateWebsiteFormat("localhost:54321").status, "invalid");
+    assert.equal(validateWebsiteFormat("127.0.0.1").status, "invalid");
+  });
+
   it("distinguishes a missing optional website", () => {
     assert.equal(validateWebsiteFormat(null).status, "missing");
   });
@@ -42,9 +71,27 @@ describe("validateWebsiteFormat", () => {
     assert.equal(isPrivateAddress("93.184.216.34"), false);
     assert.equal(validateWebsiteFormat("http://[::1]/").status, "invalid");
     assert.equal(validateWebsiteFormat("http://[fc00::1]/").status, "invalid");
+    assert.equal(validateWebsiteFormat("[::1]").status, "invalid");
     assert.equal(isPrivateAddress("::ffff:169.254.169.254"), true);
     assert.equal(isPrivateAddress("::ffff:172.20.1.2"), true);
     assert.equal(isPrivateAddress("::ffff:100.100.1.2"), true);
+  });
+});
+
+describe("websiteHref", () => {
+  // The invalid branch echoes the raw stored value back for display. Handing that
+  // to an `href` made the browser resolve it as a relative path.
+  it("refuses to hand back a malformed value as a link", () => {
+    assert.equal(websiteHref(validateWebsiteFormat("example dot org")), null);
+    assert.equal(websiteHref(validateWebsiteFormat(null)), null);
+  });
+
+  it("returns the normalised absolute URL for anything checkable", () => {
+    assert.equal(websiteHref(validateWebsiteFormat("1-1coco.org")), "https://1-1coco.org/");
+    assert.equal(
+      websiteHref({ status: "unreachable", url: "https://example.org/", message: "x" }),
+      "https://example.org/",
+    );
   });
 });
 
@@ -137,5 +184,47 @@ describe("checkWebsite", () => {
     assert.equal(result.status, "unreachable");
     assert.equal(failures.length, 1, "onFailure must be called exactly once");
     assert.equal(failures[0], "DNS unavailable");
+  });
+});
+
+describe("pinnedLookup", () => {
+  it("handles the 3-argument call shape with { all: true }", () => {
+    const lookup = pinnedLookup("93.184.216.34", 4);
+    let result: unknown;
+    lookup("example.org", { all: true }, (err, addresses) => {
+      assert.equal(err, null);
+      result = addresses;
+    });
+    assert.deepEqual(result, [{ address: "93.184.216.34", family: 4 }]);
+  });
+
+  it("handles the 3-argument call shape without all", () => {
+    const lookup = pinnedLookup("93.184.216.34", 4);
+    let resolvedAddress: string | undefined;
+    let resolvedFamily: number | undefined;
+    lookup("example.org", {}, (err, address, family) => {
+      assert.equal(err, null);
+      resolvedAddress = address as string;
+      resolvedFamily = family;
+    });
+    assert.equal(resolvedAddress, "93.184.216.34");
+    assert.equal(resolvedFamily, 4);
+  });
+
+  it("handles the 2-argument (hostname, callback) call shape", () => {
+    const lookup = pinnedLookup("2606:2800:220:1:248:1893:25c8:1946", 6);
+    let resolvedAddress: string | undefined;
+    let resolvedFamily: number | undefined;
+    // Calling with 2 args: lookup(hostname, callback)
+    (lookup as unknown as (hostname: string, cb: (err: null, addr: string, fam: number) => void) => void)(
+      "example.org",
+      (err, address, family) => {
+        assert.equal(err, null);
+        resolvedAddress = address;
+        resolvedFamily = family;
+      },
+    );
+    assert.equal(resolvedAddress, "2606:2800:220:1:248:1893:25c8:1946");
+    assert.equal(resolvedFamily, 6);
   });
 });

@@ -34,6 +34,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         { href: "/admin/audit-log", label: "Audit log", icon: "audit" },
         { href: "/admin/import-status", label: "Import status", icon: "import" },
         { href: "/admin/tags", label: "Tags", icon: "users" },
+        { href: "/admin/feedback", label: "Feedback", icon: "feedback" },
       ],
     });
   }

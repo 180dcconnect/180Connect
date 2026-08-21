@@ -6,6 +6,7 @@ import { reportError } from "@/lib/error-logging";
 import {
   createDefaultGenerateBookletDeps,
   generateBooklet,
+  type GenerateBookletDeps,
 } from "@/lib/booklet/generate-booklet";
 import type {
   BookletEnrichmentInput,
@@ -83,9 +84,27 @@ export async function POST(
     });
   }
 
+  // createDefaultGenerateBookletDeps throws synchronously when the Gemini env
+  // vars are missing — catch it here so the route answers with a clear 503
+  // instead of the error escaping unhandled (same pattern as the stage-one
+  // outreach route).
+  let deps: GenerateBookletDeps;
+  try {
+    deps = createDefaultGenerateBookletDeps();
+  } catch (error) {
+    await reportError(error, {
+      operation: "clients.generate_booklet.configure",
+      organisationId,
+    });
+    return NextResponse.json(
+      { error: "Booklet generation is not configured. Contact an administrator." },
+      { status: 503 },
+    );
+  }
+
   const result = await generateBooklet(
     { organisationId, organisation, enrichment: enrichment ?? null },
-    createDefaultGenerateBookletDeps(),
+    deps,
   );
 
   if ("error" in result) {

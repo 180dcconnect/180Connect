@@ -110,16 +110,16 @@ export function ComposeButton({
           <div>
             <h3 className="text-sm font-bold" id="email-review-heading">Review generated draft</h3>
             <p className="mt-1 text-xs text-foreground/55">
-              Saved as a draft. Review and edit it before a separate human send action is made available.
+              Saved as a draft. Review it here — edits made in this preview are not saved yet, and a separate human send action arrives later.
             </p>
           </div>
           <label className="block text-xs font-bold text-foreground/65">
             Subject
-            <input className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" defaultValue={draft.subject} />
+            <input key={`subject-${draft.id}`} className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" defaultValue={draft.subject} />
           </label>
           <label className="block text-xs font-bold text-foreground/65">
             Body
-            <textarea className="mt-1 min-h-64 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm leading-relaxed" defaultValue={draft.body} />
+            <textarea key={`body-${draft.id}`} className="mt-1 min-h-64 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm leading-relaxed" defaultValue={draft.body} />
           </label>
           <p className="text-xs font-bold text-amber-800" role="status">
             Not sent — explicit human review and send are required.

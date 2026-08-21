@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/browser";
 /**
  * F075 AC3 — live updates without navigating away. Subscribes across all four
  * sources `buildTimeline` reads (notes, outreach_messages, reply_events,
- * audit_log; all four added to `supabase_realtime` in 20260820090000) and
+ * audit_log; all four added to `supabase_realtime` in 20260820110000) and
  * calls `router.refresh()` on any relevant change, rather than folding the
  * realtime payload into client state the way BasicInfoPanel does for a single
  * table.

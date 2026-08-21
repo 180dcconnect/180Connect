@@ -388,7 +388,7 @@ viewers both read every row; only the CAM path is scoped.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `AUDIT_LOG` | admin; **plus** any active user, but only `status_changed`/`ownership_reassigned` rows targeting `organisations` (F075, 20260820090000) | — (service role / `SECURITY DEFINER` RPC only) | **none** | **none** |
+| `AUDIT_LOG` | admin; **plus** any active user, but only `status_changed`/`ownership_reassigned` rows targeting `organisations` (F075, 20260820110000) | — (service role / `SECURITY DEFINER` RPC only) | **none** | **none** |
 
 No UPDATE or DELETE policy is written for any role, including admin. An audit trail
 an admin can edit is not an audit trail.

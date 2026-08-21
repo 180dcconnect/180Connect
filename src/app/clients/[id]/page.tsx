@@ -69,7 +69,7 @@ type OwnerRow = {
  * event-type label/style maps; timeline-section.tsx for the render;
  * timeline-realtime.tsx for AC3's live-update subscriber. Two things this
  * needed that weren't already in place, both closed by
- * 20260820090000_widen_audit_log_for_client_timeline.sql: `audit_log` was
+ * 20260820110000_widen_audit_log_for_client_timeline.sql: `audit_log` was
  * admin-only to SELECT (a CAM/viewer could not have read the
  * status_changed/ownership_reassigned rows at all), and none of
  * notes/outreach_messages/reply_events/audit_log were in the
@@ -226,7 +226,7 @@ export default async function ClientDetailPage({
     await reportError(replyError, { operation: "clients.timeline_replies", organisationId: id });
   }
 
-  // RLS (audit_log_select_client_timeline, 20260820090000) is what makes this
+  // RLS (audit_log_select_client_timeline, 20260820110000) is what makes this
   // readable by a CAM/viewer at all — without it every row here is invisible,
   // not merely filtered, to anyone but an admin.
   const { data: auditRows, error: auditError } = await supabase

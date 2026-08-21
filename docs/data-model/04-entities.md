@@ -223,7 +223,7 @@
 | id | uuid |  | No | Primary key | System | Auto-generated |  |
 | user_id | uuid | USERS | No | CAM the saved view belongs to | System | auth.uid() at save time | On delete cascade; a view is private to its owner |
 | name | text |  | No | Name the CAM gave the view | Human | Typed by CAM when saving | Required, cannot be blank; unique per user |
-| filters | jsonb |  | No | The client-list filter combination the view re-applies | System | Captured from the active list filters at save time | Keys mirror /clients search params: q, city, status, source, owner. jsonb rather than columns because the filter set grows (F055 sector, F058 priority, F193 tag) |
+| filters | jsonb |  | No | The client-list filter combination the view re-applies | System | Captured from the active list filters at save time | Keys mirror /clients search params: q, city, country, status, type, owner — arrays for the multi-selects. jsonb rather than columns because the filter set grows |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last edit timestamp | System | Updated when the view is renamed or re-saved | Rename/overwrite is not built by F066; column exists so adding it later needs no schema change |
 

@@ -8,6 +8,7 @@ import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
+  emptyStateMessage,
   filterByOwner,
   filterByCity,
   filterByStatus,
@@ -92,6 +93,13 @@ const CLAIM_SLOT = "w-[8.5rem] shrink-0";
  * every visit re-queries organisations, so a reassignment shows up on the next
  * normal navigation here, same as any other filter change.
  *
+ * F052 (#54) search by organisation name: `q` was already read here, but as part
+ * of a GET form, so applying or clearing it meant a full document reload — AC4
+ * asks for neither. The bar now soft-navigates on submit (Enter or click) via
+ * router.replace; this page keeps reading `q` from the URL exactly as before,
+ * so pagination, deep links and searchClients() are unchanged. Search fires on
+ * submit rather than per keystroke by design: deliberate over twitchy.
+ * 
  * Restyled onto the same bone-ground/floating-card language as /dashboard
  * (docs/design-system.md's *character*, not its public palette — see that
  * page's comment). Filter bar, list, and pagination are three separate cards
@@ -379,13 +387,7 @@ export default async function ClientsPage({
             <Rise>
               {clients.length === 0 ? (
                 <EmptyState
-                  message={
-                    isOwnedView
-                      ? "You don't own any clients yet. Claim one from the list, or ask an admin to assign you one."
-                      : filterActive
-                        ? "No clients match this filter."
-                        : "No clients to show."
-                  }
+                  message={emptyStateMessage({ isOwnedView, search, filterActive })}
                 />
               ) : (
                 <div className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm">

@@ -81,5 +81,7 @@ outcomes at the top, which is the useful direction for reviewing what happened.
 
 **If you add a status**, add it to `PIPELINE_STATUSES` in the right position and
 update the table above. A status missing from that list sorts to the **end** of
-the list, never the start — so a value that reaches the database before it
-reaches the code is visibly last rather than silently leading the list.
+the list in *either* direction — descending pins unknown ranks below known ones
+before reversing, so a value that reaches the database before it reaches the
+code is visibly last rather than silently leading the list (or floating to the
+top of a descending sort).

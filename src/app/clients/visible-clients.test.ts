@@ -394,6 +394,28 @@ describe("sortClients by outreach status (F061)", () => {
       "Unknown",
     ]);
   });
+
+  it("keeps an unrecognised status last on descending too — never first (regression)", () => {
+    const clients = listOf([
+      { legal_name: "Unknown", outreach_status: "invented_status" },
+      { legal_name: "Converted", outreach_status: "converted" },
+      { legal_name: "Not contacted", outreach_status: "not_contacted" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "status", "descending")), [
+      "Converted",
+      "Not contacted",
+      "Unknown",
+    ]);
+  });
+
+  it("ties two unrecognised statuses by name in either direction", () => {
+    const clients = listOf([
+      { legal_name: "Zeta", outreach_status: "invented_b" },
+      { legal_name: "Alpha", outreach_status: "invented_a" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "status", "ascending")), ["Alpha", "Zeta"]);
+    assert.deepEqual(names(sortClients(clients, "status", "descending")), ["Alpha", "Zeta"]);
+  });
 });
 
 describe("sortClients combined with filters (F060 AC3 / F061 AC2)", () => {

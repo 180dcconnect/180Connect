@@ -245,8 +245,12 @@ export default async function ClientsPage({
       stage: stageParam,
       sort: sortParam,
       dir: dirParam,
-      listSort: listSortParam,
-      listDir: listDirParam,
+      // The parsed values, not the raw params: a pasted `?listSort=banana`
+      // renders as name/ascending, and every link this page generates then
+      // carries the canonical value, so the junk leaves the URL on the next
+      // click instead of propagating forever.
+      listSort: listSortField,
+      listDir: listSortDirection,
       // Not carried over: a link that changes what the list holds has to start at
       // page one. Pagination opts back in explicitly.
       page: undefined,

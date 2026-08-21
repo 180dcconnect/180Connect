@@ -3,12 +3,15 @@
  * so it can be tested without a database (same split as @/lib/suppressions).
  */
 
+import { z } from "zod";
+
 import {
   PIPELINE_STATUSES,
   formatLocation,
   formatOutreachStatus,
   type PipelineStatus,
 } from "../../lib/organisation-format.ts";
+import { safeValidate } from "../../lib/validation.ts";
 
 export { formatLocation, formatOutreachStatus };
 
@@ -181,15 +184,23 @@ export const LIST_SORT_FIELDS: { key: ListSortField; label: string }[] = [
 export const LIST_SORT_DIRECTIONS: ListSortDirection[] = ["ascending", "descending"];
 
 /** `?listSort=` is user input, so anything unrecognised falls back to the
- * default the list has always used — alphabetical by name, ascending. */
+ * default the list has always used — alphabetical by name, ascending. Parsed
+ * through `safeValidate` (`src/lib/validation.ts`) like every other input,
+ * rather than hand-rolled comparison. */
+const LIST_SORT_FIELD_SCHEMA = z.enum(
+  LIST_SORT_FIELDS.map((field) => field.key) as [ListSortField, ...ListSortField[]],
+);
+
+const LIST_SORT_DIRECTION_SCHEMA = z.enum(["ascending", "descending"]);
+
 export function parseListSort(value: string | null | undefined): ListSortField {
-  return LIST_SORT_FIELDS.some((field) => field.key === value)
-    ? (value as ListSortField)
-    : "name";
+  const parsed = safeValidate(LIST_SORT_FIELD_SCHEMA, value);
+  return parsed.success ? parsed.data : "name";
 }
 
 export function parseListDirection(value: string | null | undefined): ListSortDirection {
-  return value === "descending" ? "descending" : "ascending";
+  const parsed = safeValidate(LIST_SORT_DIRECTION_SCHEMA, value);
+  return parsed.success ? parsed.data : "ascending";
 }
 
 /**
@@ -198,14 +209,18 @@ export function parseListDirection(value: string | null | undefined): ListSortDi
  * label — "Converted" would otherwise sort before "Initial outreach sent".
  * A status not in that list sorts to the end rather than to the front, so a
  * value added to the database before it is added here is visibly last instead
- * of silently leading the list.
+ * of silently leading the list. "Last" holds in *both* directions: the
+ * comparator pins unknown ranks below known ones before the direction sign is
+ * applied, so a descending sort cannot float an unrecognised status to the top.
  *
  * The order itself, and the reasoning for it, is written down in
  * docs/client-list-sorting.md — F061 AC3 asks for exactly that.
  */
+const UNKNOWN_STATUS_RANK = PIPELINE_STATUSES.length;
+
 function pipelineRank(status: string): number {
   const index = PIPELINE_STATUSES.indexOf(status as PipelineStatus);
-  return index === -1 ? PIPELINE_STATUSES.length : index;
+  return index === -1 ? UNKNOWN_STATUS_RANK : index;
 }
 
 /**
@@ -237,7 +252,15 @@ export function sortClients(
     if (field === "location") {
       primary = a.location.localeCompare(b.location, "en", { sensitivity: "base" });
     } else if (field === "status") {
-      primary = pipelineRank(a.outreach_status) - pipelineRank(b.outreach_status);
+      const rankA = pipelineRank(a.outreach_status);
+      const rankB = pipelineRank(b.outreach_status);
+      // Unknown ranks are pinned last *before* the direction sign is applied —
+      // otherwise a descending sort would reverse them to the top, which is the
+      // failure mode "visibly last" exists to prevent.
+      if ((rankA === UNKNOWN_STATUS_RANK) !== (rankB === UNKNOWN_STATUS_RANK)) {
+        return rankA === UNKNOWN_STATUS_RANK ? 1 : -1;
+      }
+      primary = rankA - rankB;
     } else {
       primary = byName(a, b);
     }

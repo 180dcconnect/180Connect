@@ -388,10 +388,20 @@ viewers both read every row; only the CAM path is scoped.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `AUDIT_LOG` | admin | — (service role / `SECURITY DEFINER` RPC only) | **none** | **none** |
+| `AUDIT_LOG` | admin; **plus** any active user, but only `status_changed`/`ownership_reassigned` rows targeting `organisations` (F075, 20260820110000) | — (service role / `SECURITY DEFINER` RPC only) | **none** | **none** |
 
 No UPDATE or DELETE policy is written for any role, including admin. An audit trail
 an admin can edit is not an audit trail.
+
+**F075's carve-out** (`audit_log_select_client_timeline`) is additive, not a
+replacement for `audit_log_select_admin` above — every other `action` token
+(`role_changed`, `user_suspended`, `invite_*`, etc.) stays admin-only. It exists
+because the client communication timeline needs a CAM/viewer to read the
+handover and status-change entries for a client they can already see everywhere
+else on that client's page (`notes`/`outreach_messages`/`reply_events` are
+already shared-read, §3.3/§3.4) — and because RLS gates `postgres_changes`
+delivery exactly like a SELECT, so without this, F075's realtime subscription
+would silently never receive these two event types for a non-admin.
 
 ### 3.9 Views
 

@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import {
   emptyStateMessage,
   filterByOwner,
+  filterByTags,
   filterByCity,
   filterByCountry,
   filterByStatus,
@@ -82,6 +83,7 @@ type SearchParams = Promise<{
   country?: string | string[];
   status?: string | string[];
   type?: string | string[];
+  tags?: string | string[];
   /** Funnel stage the breakdown counts. */
   stage?: string;
   /** Field the breakdown groups by, and which end of it to show. */
@@ -155,6 +157,7 @@ export default async function ClientsPage({
     owner: ownerFilter,
     q: search,
     page: pageParam,
+    tags: tagsParam,
     city,
     country,
     status,
@@ -184,11 +187,11 @@ export default async function ClientsPage({
   const canSelect = hasPermission(authorization.actor.role, "client:edit");
   const canBulkAssign = hasPermission(authorization.actor.role, "ownership:reassign");
 
-  const [organisations, openSuppressions, team, savedViews] = await Promise.all([
+  const [organisations, openSuppressions, team, savedViews, allTags] = await Promise.all([
     supabase
       .from("organisations")
       .select(
-        "id, legal_name, organisation_type, city, country_code, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
+        "id, legal_name, organisation_type, city, country_code, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id)",
       )
       .order("legal_name")
       .overrideTypes<ClientListRow[], { merge: false }>(),
@@ -212,6 +215,11 @@ export default async function ClientsPage({
       .eq("user_id", authorization.actor.id)
       .order("created_at", { ascending: false })
       .overrideTypes<SavedViewRow[], { merge: false }>(),
+    supabase
+      .from("tags")
+      .select("id, name")
+      .order("name")
+      .overrideTypes<{ id: string; name: string }[], { merge: false }>(),
   ]);
 
   if (organisations.error) {
@@ -227,6 +235,9 @@ export default async function ClientsPage({
   // it is logged and the panel renders empty rather than taking the page down.
   if (savedViews.error) {
     await reportError(savedViews.error, { operation: "clients.page_saved_views" });
+  }
+  if (allTags.error) {
+    await reportError(allTags.error, { operation: "clients.page_tags" });
   }
 
   const allVisibleClients = visibleClients(organisations.data ?? [], openSuppressions.data ?? []);
@@ -259,6 +270,7 @@ export default async function ClientsPage({
   const countryValues = filterValues(country);
   const statusValues = filterValues(status);
   const typeValues = filterValues(typeFilter);
+  const tagFilter = filterValues(tagsParam);
 
   let matchingClients = allVisibleClients;
   matchingClients = filterByOwner(matchingClients, ownerFilter);
@@ -266,6 +278,7 @@ export default async function ClientsPage({
   matchingClients = filterByCountry(matchingClients, countryValues);
   matchingClients = filterByStatus(matchingClients, statusValues);
   matchingClients = filterByType(matchingClients, typeValues);
+  matchingClients = filterByTags(matchingClients, tagFilter);
   matchingClients = searchClients(matchingClients, search);
   const teamMembers = team.data ?? [];
   // The owner dropdown lists CAMs only (F163), but `?owner=` can name anyone who
@@ -279,13 +292,15 @@ export default async function ClientsPage({
         allVisibleClients.find((client) => client.owner_id === ownerFilter)?.ownerName ??
         "Unnamed team member")
       : null;
+  const availableTags = allTags.data ?? [];
   const filterActive = Boolean(
     ownerFilter ||
       search ||
       cityValues.length ||
       countryValues.length ||
       statusValues.length ||
-      typeValues.length,
+      typeValues.length ||
+      tagFilter.length,
   );
   // F166 AC1/AC3: this is the CAM viewing their own filter, not just any owner
   // filter — the heading, count label and empty state read "your clients" so the
@@ -372,6 +387,7 @@ export default async function ClientsPage({
       country: countryValues,
       status: statusValues,
       type: typeValues,
+      tags: tagFilter,
       stage: stageParam,
       sort: sortParam,
       dir: dirParam,
@@ -469,7 +485,11 @@ export default async function ClientsPage({
                   value,
                 })),
                 ...(ownerFilter === "unassigned" ? [{ category: "Filter by owner", label: "Unassigned", value: "unassigned" }] : []),
-                ...(ownerFilterLabel ? [{ category: "Filter by owner", label: ownerFilterLabel, value: ownerFilter as string }] : [])
+                ...(ownerFilterLabel ? [{ category: "Filter by owner", label: ownerFilterLabel, value: ownerFilter as string }] : []),
+                ...tagFilter.map(t => {
+                   const tag = availableTags.find(x => x.id === t);
+                   return { category: "Filter by tag", label: tag ? tag.name : t, value: t };
+                })
               ]}
               params={{
                 "Filter by city": "city",
@@ -477,6 +497,7 @@ export default async function ClientsPage({
                 "Filter by outreach status": "status",
                 "Filter by organisation type": "type",
                 "Filter by owner": "owner",
+                "Filter by tag": "tags",
               }}
               categories={{
                 "Filter by city": uniqueCities.map(c => ({ label: c, value: c })),
@@ -486,7 +507,8 @@ export default async function ClientsPage({
                 "Filter by owner": [
                   { label: "Unassigned", value: "unassigned" },
                   ...teamMembers.map(m => ({ label: m.full_name || "Unnamed CAM", value: m.id }))
-                ]
+                ],
+                "Filter by tag": availableTags.map(t => ({ label: t.name, value: t.id }))
               }}
             />
           }

@@ -1,6 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
+import { reportError } from "@/lib/error-logging";
 
 export type DataQualityEventRow = {
   id: string;
@@ -64,7 +68,7 @@ export function ReviewPanel({
   const [events, setEvents] = useState(initialEvents);
   const [flags, setFlags] = useState(initialFlags);
   const [notes, setNotes] = useState<Record<string, string>>({});
-  const [message, setMessage] = useState("");
+  const [status, setStatus] = useState<{ text: string; tone: "success" | "error" } | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function refresh() {
@@ -77,7 +81,7 @@ export function ReviewPanel({
 
   async function decide(type: "data_quality_event" | "status_flag", id: string, successMessage: string) {
     setBusy(true);
-    setMessage("");
+    setStatus(null);
     try {
       const response = await fetch("/api/admin/review", {
         method: "PATCH",
@@ -86,13 +90,14 @@ export function ReviewPanel({
       });
       const body = await response.json();
       if (!response.ok) {
-        setMessage(body.error ?? "The request could not be completed.");
+        setStatus({ text: body.error ?? "The request could not be completed.", tone: "error" });
         return;
       }
-      setMessage(successMessage);
+      setStatus({ text: successMessage, tone: "success" });
       await refresh();
-    } catch {
-      setMessage("Could not reach the server. Check your connection and try again.");
+    } catch (err) {
+      void reportError(err, { operation: "admin.review.decide_client" });
+      setStatus({ text: NETWORK_ERROR_MESSAGE, tone: "error" });
     } finally {
       setBusy(false);
     }
@@ -105,7 +110,9 @@ export function ReviewPanel({
 
   return (
     <div className="mt-8 space-y-10">
-      <p aria-live="polite" className="min-h-6 text-sm font-bold">{message}</p>
+      <div className="min-h-6">
+        {status && <InlineAlert tone={status.tone} message={status.text} />}
+      </div>
 
       <div>
         <h2 className="text-sm font-bold">Status changes</h2>
@@ -116,7 +123,7 @@ export function ReviewPanel({
           in-progress outreach.
         </p>
         {openFlags.length === 0 ? (
-          <p className="mt-3 text-sm text-foreground/65">Nothing to review.</p>
+          <p className="mt-3 text-sm text-foreground/65">No status changes waiting for review.</p>
         ) : (
           <ul className="mt-4 space-y-4">
             {openFlags.map((flag) => (
@@ -141,14 +148,15 @@ export function ReviewPanel({
                   rows={2}
                   value={notes[flag.id] ?? ""}
                 />
-                <button
-                  className="mt-3 rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                <OriginButton
+                  className="mt-3"
                   disabled={busy}
+                  size="sm"
                   onClick={() => decide("status_flag", flag.id, "Acknowledged.")}
                   type="button"
                 >
                   Acknowledge
-                </button>
+                </OriginButton>
               </li>
             ))}
           </ul>
@@ -162,7 +170,7 @@ export function ReviewPanel({
           non-profit or social purpose (F047).
         </p>
         {openEvents.length === 0 ? (
-          <p className="mt-3 text-sm text-foreground/65">Nothing to review.</p>
+          <p className="mt-3 text-sm text-foreground/65">No records held for review.</p>
         ) : (
           <ul className="mt-4 space-y-4">
             {openEvents.map((event) => (
@@ -188,14 +196,15 @@ export function ReviewPanel({
                   rows={2}
                   value={notes[event.id] ?? ""}
                 />
-                <button
-                  className="mt-3 rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                <OriginButton
+                  className="mt-3"
                   disabled={busy}
+                  size="sm"
                   onClick={() => decide("data_quality_event", event.id, "Marked reviewed.")}
                   type="button"
                 >
                   Mark reviewed
-                </button>
+                </OriginButton>
               </li>
             ))}
           </ul>

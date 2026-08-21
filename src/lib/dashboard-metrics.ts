@@ -17,6 +17,21 @@ export type DashboardOrgRow = {
   created_at: string;
 };
 
+export type OpenSuppression = { organisation_id: string; status: "pending" | "active" };
+
+/**
+ * F022 AC3 — actively suppressed charities (F251) are excluded so they don't inflate
+ * the reported outreach pool or appear in the dashboard metrics. Charities with a
+ * pending suppression request remain included until an admin approves the suppression.
+ */
+export function filterActiveSuppressed(
+  rows: DashboardOrgRow[],
+  suppressions: OpenSuppression[],
+): DashboardOrgRow[] {
+  const statusByOrg = new Map(suppressions.map((row) => [row.organisation_id, row.status]));
+  return rows.filter((row) => statusByOrg.get(row.id) !== "active");
+}
+
 export type DashboardMetrics = {
   totalCharities: number;
   contacted: number;

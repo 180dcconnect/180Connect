@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { formatOrganisationSources } from "./source-tracking.ts";
+import { formatImportOrigin, formatOrganisationSources } from "./source-tracking.ts";
 
 describe("formatOrganisationSources", () => {
   it("shows a valid API source with a friendly label", () => {
@@ -84,5 +84,85 @@ describe("formatOrganisationSources", () => {
     ]);
 
     assert.deepEqual(sources.map((source) => source.label), ["Manual Entry", "Companies House"]);
+  });
+
+  it("preserves the CAM identified on a manual source", () => {
+    const sources = formatOrganisationSources([{
+      source: "manual",
+      source_record_id: "manual-1",
+      source_registry_name: null,
+      first_seen_at: "2026-08-01T10:00:00Z",
+      source_actor_user_id: "cam-1",
+      source_actor_name: "Alex CAM",
+    }]);
+
+    assert.equal(sources[0]?.label, "Manual Entry");
+    assert.equal(sources[0]?.source_actor_name, "Alex CAM");
+  });
+});
+
+describe("formatImportOrigin", () => {
+  it("returns null when the organisation was never built from a URL import", () => {
+    assert.equal(formatImportOrigin(null), null);
+    assert.equal(
+      formatImportOrigin({ source_url: null, imported_field_paths: [], imported_at: null }),
+      null,
+    );
+  });
+
+  it("labels imported field paths with their profile field names", () => {
+    const origin = formatImportOrigin({
+      source_url: "https://example.org/about",
+      imported_field_paths: ["legal_name", "mission_statement", "website"],
+      imported_at: "2026-08-01T10:00:00Z",
+    });
+
+    assert.deepEqual(origin?.fieldLabels, ["Name", "Mission", "Website"]);
+    assert.equal(origin?.sourceUrl, "https://example.org/about");
+  });
+
+  it("falls back to the raw path for an unmapped field", () => {
+    const origin = formatImportOrigin({
+      source_url: "https://example.org",
+      imported_field_paths: ["some_future_column"],
+      imported_at: "2026-08-01T10:00:00Z",
+    });
+
+    assert.deepEqual(origin?.fieldLabels, ["some_future_column"]);
+  });
+
+  it("keeps provenance when imported_at is missing or unparseable", () => {
+    // Nothing renders the timestamp yet, so a bad one must not throw away the
+    // source URL and field list a CAM does read.
+    for (const imported_at of [null, "not-a-date"]) {
+      const origin = formatImportOrigin({
+        source_url: "https://example.org",
+        imported_field_paths: ["legal_name"],
+        imported_at,
+      });
+
+      assert.equal(origin?.sourceUrl, "https://example.org");
+      assert.deepEqual(origin?.fieldLabels, ["Name"]);
+      assert.equal(origin?.importedAt, imported_at);
+    }
+  });
+
+  it("ignores malformed provenance rather than breaking the client profile", () => {
+    assert.equal(
+      formatImportOrigin({
+        source_url: "  ",
+        imported_field_paths: ["legal_name"],
+        imported_at: "2026-08-01T10:00:00Z",
+      }),
+      null,
+    );
+    assert.equal(
+      formatImportOrigin({
+        source_url: "https://example.org",
+        imported_field_paths: "not-an-array",
+        imported_at: "2026-08-01T10:00:00Z",
+      })?.fieldLabels.length,
+      0,
+    );
   });
 });

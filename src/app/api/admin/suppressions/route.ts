@@ -29,11 +29,20 @@ const createSchema = z.object({
   reason: z.string().trim().min(1, "Enter a reason for the suppression."),
 });
 
+const liftSchema = z.object({
+  action: z.literal("lift"),
+  suppressionId: z.uuid(),
+  reason: z.string().trim().min(1, "Enter a reason for lifting the suppression."),
+});
+
 const decideSchema = z.object({
+  action: z.literal("decide").optional(),
   suppressionId: z.uuid(),
   approve: z.boolean(),
   note: z.string().trim().optional(),
 });
+
+const patchSchema = z.union([liftSchema, decideSchema]);
 
 function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
   const status = reason === "unauthenticated" ? 401 : 403;
@@ -122,19 +131,37 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "The request body must be valid JSON." }, { status: 400 });
   }
 
-  const parsed = decideSchema.safeParse(input);
+  const parsed = patchSchema.safeParse(input);
   if (!parsed.success) {
     logSecurityEvent("validation.rejected", {
       route: "/api/admin/suppressions",
       fieldCount: parsed.error.issues.length,
     });
     return NextResponse.json(
-      { error: parsed.error.issues[0]?.message ?? "Check the decision details." },
+      { error: parsed.error.issues[0]?.message ?? "Check the suppression details." },
       { status: 400 },
     );
   }
 
   const supabase = await createClient();
+
+  if ("action" in parsed.data && parsed.data.action === "lift") {
+    const { error } = await supabase.rpc("lift_suppression", {
+      p_suppression_id: parsed.data.suppressionId,
+      p_reason: parsed.data.reason,
+    });
+
+    if (error) {
+      await reportError(error, {
+        operation: "admin.suppressions.lift",
+        suppressionId: parsed.data.suppressionId,
+      });
+      const { status, error: message } = suppressionRpcFailure(error);
+      return NextResponse.json({ error: message }, { status });
+    }
+
+    return NextResponse.json({ ok: true, lifted: true });
+  }
 
   const { error } = await supabase.rpc("decide_suppression_request", {
     p_suppression_id: parsed.data.suppressionId,

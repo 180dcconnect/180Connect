@@ -23,7 +23,12 @@ async function within<T>(promise: Promise<T>, milliseconds: number, message: str
   }
 }
 
-async function resolvePublicAddresses(hostname: string): Promise<readonly string[]> {
+/**
+ * Exported for src/lib/import/page-transport.ts (F037), which needs exactly this
+ * check before it opens a socket. Two copies of a DNS-safety rule is one copy too
+ * many: a fix applied to one and not the other is a hole nobody would notice.
+ */
+export async function resolvePublicAddresses(hostname: string): Promise<readonly string[]> {
   const literal = hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (isIP(literal)) {
     // isUnsafeHostname in website-validation.ts already rejects private IP literals at
@@ -38,7 +43,49 @@ async function resolvePublicAddresses(hostname: string): Promise<readonly string
     DNS_TIMEOUT_MS,
     "Website DNS lookup timed out",
   );
-  return [...ipv4, ...ipv6];
+  return [...ipv4, ...ipv6].filter((address) => !isPrivateAddress(address));
+}
+
+type LookupCallback = (
+  error: NodeJS.ErrnoException | null,
+  address: string | { address: string; family: number }[],
+  family?: number,
+) => void;
+
+/**
+ * A `lookup` that resolves to one already-validated address, in both the shapes Node
+ * asks for it.
+ *
+ * Node calls `lookup` two different ways. With `autoSelectFamily` on — the default
+ * since Node 20 — it passes `{ all: true }` and expects an array of candidates;
+ * otherwise it expects `(err, address, family)`. Answering only the second shape makes
+ * every connection fail with "Invalid IP address: undefined", which surfaces as the
+ * site being unreachable rather than as our own bug. Confirmed live on 2026-08-17:
+ * checkWebsiteReachability("https://www.bhf.org.uk") returned `unreachable` for a site
+ * that was up, and had been doing so for every site since the Node 24 upgrade.
+ *
+ * Exported so F037's page fetch (src/lib/import/page-transport.ts) pins the same way.
+ * Two copies of this would be two chances to get the callback contract wrong.
+ */
+export function pinnedLookup(address: string, family: 4 | 6) {
+  return (
+    _hostname: string,
+    optionsOrCallback: { all?: boolean } | LookupCallback,
+    maybeCallback?: LookupCallback,
+  ) => {
+    const callback =
+      typeof optionsOrCallback === "function" ? optionsOrCallback : maybeCallback;
+    const options =
+      typeof optionsOrCallback === "object" ? optionsOrCallback : undefined;
+
+    if (typeof callback !== "function") return;
+
+    if (options?.all) {
+      callback(null, [{ address, family }]);
+    } else {
+      callback(null, address, family);
+    }
+  };
 }
 
 /**
@@ -57,7 +104,7 @@ async function requestPinned(url: string, address: string) {
       {
         method: "HEAD",
         headers: { Host: target.host, "User-Agent": "180Connect-Website-Validator/1.0" },
-        lookup: (_hostname, _options, callback) => callback(null, address, family),
+        lookup: pinnedLookup(address, family),
       },
       (response) => {
         response.resume();

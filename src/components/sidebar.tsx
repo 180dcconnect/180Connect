@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ComponentType } from "react";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
-import { ShieldCheck } from "lucide-react";
+import { MessageSquareHeart, ShieldCheck, UserPlus } from "lucide-react";
 import { Cctv } from "@/components/animate-ui/icons/cctv";
 import { CloudDownload } from "@/components/animate-ui/icons/cloud-download";
 import { Compass } from "@/components/animate-ui/icons/compass";
@@ -13,15 +13,24 @@ import { AnimateIcon } from "@/components/animate-ui/icons/icon";
 import { PanelLeftClose } from "@/components/animate-ui/icons/panel-left-close";
 import { PanelLeftOpen } from "@/components/animate-ui/icons/panel-left-open";
 import { Users } from "@/components/animate-ui/icons/users";
+import { ThumbsUp} from "@/components/animate-ui/icons/thumbs-up";
 import UsersGroupIcon from "@/components/ui/users-group-icon";
 import { SidebarAccountMenu } from "@/components/sidebar-account-menu";
+import { SidebarChecklist, type SidebarChecklistStep } from "@/components/sidebar-checklist";
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
 } from "@/components/animate-ui/components/radix/tooltip";
 
-export type SidebarIconName = "dashboard" | "admin" | "users" | "audit" | "import" | "clients";
+export type SidebarOnboarding = {
+  steps: SidebarChecklistStep[];
+  completedCount: number;
+  totalCount: number;
+  show?: boolean;
+};
+
+export type SidebarIconName = "dashboard" | "admin" | "users" | "add" | "audit" | "import" | "clients" | "feedback";
 
 export type SidebarNavItem = {
   href: string;
@@ -52,8 +61,10 @@ const ICONS: Record<SidebarIconName, RailIcon> = {
   clients: UsersGroupIcon,
   admin: ShieldCheck,
   users: Users,
+  add: UserPlus,
   audit: Cctv,
   import: CloudDownload,
+  feedback: ThumbsUp,
 };
 
 const MotionLink = motion.create(Link);
@@ -72,6 +83,7 @@ const ICON_SPRING = { type: "spring", stiffness: 420, damping: 17, mass: 0.6 } a
  */
 const ICON_MOTION: Partial<Record<SidebarIconName, Variants>> = {
   admin: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: -6 } },
+  feedback: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: 6 } },
   // `dashboard`, `clients`, `users`, `audit`, and `import` are deliberately absent:
   // those glyphs animate their own interiors, so a wrapper transform on top would
   // read as two gestures.
@@ -90,6 +102,7 @@ export function Sidebar({
   roleLabel,
   onLogout,
   initialCollapsed = false,
+  onboarding,
 }: {
   sections: SidebarSection[];
   userName?: string | null;
@@ -97,6 +110,7 @@ export function Sidebar({
   roleLabel: string;
   onLogout: () => Promise<void>;
   initialCollapsed?: boolean;
+  onboarding?: SidebarOnboarding;
 }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
@@ -256,6 +270,18 @@ export function Sidebar({
           </div>
         ))}
       </nav>
+
+      {onboarding && (onboarding.show ?? true) && (
+        <div className="px-2 pb-2">
+          <SidebarChecklist
+            steps={onboarding.steps}
+            completedCount={onboarding.completedCount}
+            totalCount={onboarding.totalCount}
+            collapsed={collapsed}
+            forceTheme="light"
+          />
+        </div>
+      )}
 
       <div className="border-t border-white/70 p-2">
         <SidebarAccountMenu

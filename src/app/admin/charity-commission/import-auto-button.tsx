@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 import {
   importCharityCommissionAuto,
   type CharityCommissionImportState,
@@ -38,13 +39,14 @@ export function CharityCommissionImportAutoButton({ configured }: { configured: 
       )}
 
       <form action={action} className="mt-5">
-        <button
-          className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
+        <OriginButton
           disabled={!configured || pending}
+          loading={pending}
+          size="md"
           type="submit"
         >
           {pending ? "Importing…" : "Discover new charities"}
-        </button>
+        </OriginButton>
       </form>
 
       {state.kind !== "idle" && (

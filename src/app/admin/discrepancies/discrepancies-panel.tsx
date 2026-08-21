@@ -1,7 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 import type { DiscrepancyChoice, FieldDiscrepancyRow } from "@/lib/discrepancies";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
+import { reportError } from "@/lib/error-logging";
 
 const FIELD_LABEL: Record<string, string> = {
   legal_name: "Legal name",
@@ -33,7 +37,7 @@ export function DiscrepanciesPanel({
 }) {
   const [rows, setRows] = useState(initialDiscrepancies);
   const [notes, setNotes] = useState<Record<string, string>>({});
-  const [message, setMessage] = useState("");
+  const [status, setStatus] = useState<{ text: string; tone: "success" | "error" } | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function refresh() {
@@ -45,7 +49,7 @@ export function DiscrepanciesPanel({
 
   async function resolve(fieldDiscrepancyId: string, choice: DiscrepancyChoice) {
     setBusy(true);
-    setMessage("");
+    setStatus(null);
     try {
       const response = await fetch("/api/admin/discrepancies", {
         method: "PATCH",
@@ -58,17 +62,17 @@ export function DiscrepanciesPanel({
       });
       const body = await response.json();
       if (!response.ok) {
-        setMessage(body.error ?? "The decision could not be saved.");
+        setStatus({ text: body.error ?? "The decision could not be saved.", tone: "error" });
         return;
       }
-      setMessage(
-        choice === "existing"
-          ? "Kept the existing value."
-          : "Updated to the incoming value.",
-      );
+      setStatus({
+        text: choice === "existing" ? "Kept the existing value." : "Updated to the incoming value.",
+        tone: "success",
+      });
       await refresh();
-    } catch {
-      setMessage("Could not reach the server. Check your connection and try again.");
+    } catch (err) {
+      void reportError(err, { operation: "admin.discrepancies.resolve_client" });
+      setStatus({ text: NETWORK_ERROR_MESSAGE, tone: "error" });
     } finally {
       setBusy(false);
     }
@@ -121,22 +125,23 @@ export function DiscrepanciesPanel({
                   value={notes[row.id] ?? ""}
                 />
                 <div className="mt-3 flex gap-3">
-                  <button
-                    className="rounded-lg border border-black/15 px-4 py-2 text-sm font-bold disabled:opacity-50"
+                  <OriginButton
+                    variant="outline"
+                    size="sm"
                     disabled={busy}
                     onClick={() => resolve(row.id, "existing")}
                     type="button"
                   >
                     Keep existing
-                  </button>
-                  <button
-                    className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                  </OriginButton>
+                  <OriginButton
+                    size="sm"
                     disabled={busy}
                     onClick={() => resolve(row.id, "incoming")}
                     type="button"
                   >
                     Use incoming
-                  </button>
+                  </OriginButton>
                 </div>
               </li>
             ))}
@@ -144,9 +149,9 @@ export function DiscrepanciesPanel({
         </div>
       )}
 
-      <p aria-live="polite" className="min-h-6 text-sm font-bold">
-        {message}
-      </p>
+      <div className="min-h-6">
+        {status && <InlineAlert tone={status.tone} message={status.text} />}
+      </div>
 
       <div>
         <h2 className="text-sm font-bold">History</h2>

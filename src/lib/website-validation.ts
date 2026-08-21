@@ -12,6 +12,62 @@ export type WebsiteStatus =
   | { status: "unreachable"; url: string; message: string }
   | { status: "reachable"; url: string; message: null };
 
+/**
+ * Does this value already carry a scheme?
+ *
+ * Two alternatives, because "has a colon in it" is not the same question:
+ *
+ * - `scheme://…` — anything with the slashes is a real scheme, good or bad.
+ * - `scheme:…` with no slashes and **no dot before the colon** — `mailto:`,
+ *   `javascript:`. Real scheme names never contain a dot, so requiring one to be
+ *   absent is what keeps `example.org:8080` (a host and a port, not a scheme)
+ *   out of this branch.
+ *
+ * Anything matching is left exactly as typed, so a non-HTTP scheme still fails
+ * the check below rather than being rewritten into something that passes.
+ */
+const HAS_SCHEME = /^(?:[a-z][a-z0-9+.-]*:\/\/|[a-z][a-z0-9+-]*:)/i;
+
+/**
+ * The URL to actually parse, check and link to.
+ *
+ * Registry imports and hand-typed entries both routinely store a bare host —
+ * "1-1coco.org", "www.example.org" — and Zod's `z.url()` rejects those outright
+ * for want of a scheme. Marking a live charity's site "invalid format" because
+ * nobody typed `https://` is wrong twice over: the CAM sees a data-quality
+ * warning that isn't real, and the reachability check never runs, so a site that
+ * IS down looks identical to one that was merely written informally.
+ *
+ * Defaults to https, not http: a scheme had to be assumed either way, and
+ * assuming the encrypted one means a redirect at worst, never a downgrade.
+ */
+function normaliseWebsite(value: string): string {
+  return HAS_SCHEME.test(value) ? value : `https://${value}`;
+}
+
+/**
+ * The safe `href` for a checked website, or null when there is nothing linkable.
+ *
+ * `WebsiteFormatStatus.url` deliberately echoes back the *original* field on the
+ * invalid branch so the UI can show a CAM what is actually stored — which means
+ * it can be a bare fragment like "example dot org". Putting that in an `href`
+ * makes the browser resolve it as a relative path (`/clients/example dot org`),
+ * so callers must ask this rather than reading `.url` and hoping.
+ */
+export function websiteHref(status: WebsiteStatus): string | null {
+  return status.status === "invalid" || status.status === "missing" ? null : status.url;
+}
+
+/**
+ * One-call gate for rendering any stored free-text URL as a link: the safe
+ * `href`, or null when the value must degrade to plain text. Composing the two
+ * steps callers always need together — validate, then ask for the href — keeps
+ * the "never read `.url` and hope" rule above impossible to skip.
+ */
+export function safeWebsiteHref(value: string | null | undefined): string | null {
+  return websiteHref(validateWebsiteFormat(value));
+}
+
 export function validateWebsiteFormat(value: string | null | undefined): WebsiteFormatStatus {
   const original = value?.trim() ?? "";
   if (!original) {
@@ -22,7 +78,7 @@ export function validateWebsiteFormat(value: string | null | undefined): Website
     };
   }
 
-  const parsed = urlField().safeParse(original);
+  const parsed = urlField().safeParse(normaliseWebsite(original));
   if (!parsed.success) {
     return {
       status: "invalid",

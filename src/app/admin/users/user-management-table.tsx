@@ -1,6 +1,17 @@
 "use client";
 
 import { useState, type Dispatch, type SetStateAction } from "react";
+import Link from "next/link";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
+import { reportError } from "@/lib/error-logging";
 
 export type TeamUser = {
   id: string;
@@ -17,6 +28,13 @@ export type TeamUser = {
   /** Last time this user was seen on any signed-in page — not last login. Null if never. */
   last_seen_at: string | null;
   owned_client_count: number;
+  /**
+   * F167. The subset of `owned_client_count` that /clients actually lists —
+   * actively-suppressed clients are hidden there (F051 AC4). This is what the
+   * Clients column links through to; `owned_client_count` stays the number the
+   * reassignment gate reasons about, which has to include the suppressed ones.
+   */
+  listed_client_count: number;
 };
 
 type AccessState = "active" | "suspended" | "deactivated";
@@ -24,6 +42,20 @@ type AccessState = "active" | "suspended" | "deactivated";
 function accessState(user: TeamUser): AccessState {
   if (user.is_active) return "active";
   return user.deactivated_at ? "deactivated" : "suspended";
+}
+
+/**
+ * What the Clients cell promises before it is clicked. Suppressed clients are
+ * owned but not listed, so they are named rather than silently missing from the
+ * list the admin lands on.
+ */
+function clientsLinkTitle(user: TeamUser): string {
+  const listed = user.listed_client_count;
+  const hidden = user.owned_client_count - listed;
+  const base = `View ${listed} client${listed === 1 ? "" : "s"} owned by ${displayName(user)}`;
+  return hidden > 0
+    ? `${base} (${hidden} more suppressed, not listed)`
+    : base;
 }
 
 const ACCESS_LABEL: Record<AccessState, string> = {
@@ -68,7 +100,7 @@ export function UserManagementTable({
   setUsers: Dispatch<SetStateAction<TeamUser[]>>;
   currentUserId: string;
 }) {
-  const [message, setMessage] = useState("");
+  const [status, setStatus] = useState<{ text: string; tone: "success" | "error" } | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   /** The user an offboarding is being composed for, or null when the form is closed. */
   const [offboarding, setOffboarding] = useState<TeamUser | null>(null);
@@ -111,7 +143,7 @@ export function UserManagementTable({
     successMessage: string,
   ) {
     setSavingId(userId);
-    setMessage("");
+    setStatus(null);
     try {
       const response = await fetch("/api/admin/users", {
         method: "PATCH",
@@ -120,25 +152,27 @@ export function UserManagementTable({
       });
       const result = await response.json();
       if (!response.ok) {
-        setMessage(result.error ?? "The change was blocked.");
+        setStatus({ text: result.error ?? "The change was blocked.", tone: "error" });
         return false;
       }
       setUsers((current) =>
         current.map((user) =>
           user.id === userId
-            ? { ...user, ...result.user, owned_client_count: 0 }
+            ? { ...user, ...result.user, owned_client_count: 0, listed_client_count: 0 }
             : user,
         ),
       );
-      setMessage(
-        result.clientsMoved
+      setStatus({
+        text: result.clientsMoved
           ? `${successMessage} ${result.clientsMoved} client${result.clientsMoved === 1 ? "" : "s"} moved.`
           : successMessage,
-      );
+        tone: "success",
+      });
       if (result.clientsMoved) await refreshUsers();
       return true;
-    } catch {
-      setMessage("The change could not be saved. Check your connection and try again.");
+    } catch (err) {
+      void reportError(err, { operation: "admin.users.update_user_client" });
+      setStatus({ text: NETWORK_ERROR_MESSAGE, tone: "error" });
       return false;
     } finally {
       setSavingId(null);
@@ -162,9 +196,9 @@ export function UserManagementTable({
 
   return (
     <>
-      <p aria-live="polite" className="mb-2 min-h-5 text-sm font-bold">
-        {message}
-      </p>
+      <div className="mb-2 min-h-5">
+        {status && <InlineAlert tone={status.tone} message={status.text} />}
+      </div>
 
       {offboarding && (
         <OffboardingForm
@@ -201,29 +235,61 @@ export function UserManagementTable({
               return (
                 <tr className="border-b border-black/5" key={user.id}>
                   <td className="p-3">
-                    <span className="block font-bold">{user.full_name ?? "Unnamed user"}</span>
+                    <Link
+                      href={`/team/${user.id}`}
+                      className="block font-bold hover:text-brand hover:underline"
+                    >
+                      {user.full_name ?? "Unnamed user"}
+                    </Link>
                     <span className="text-foreground/60">{user.email}</span>
+                    {user.role === "cam" && (
+                      <span className="block mt-1">
+                        <Link
+                          href={`/admin/cam-settings?user=${user.id}`}
+                          className="text-xs font-medium text-brand hover:underline"
+                        >
+                          Queue settings →
+                        </Link>
+                      </span>
+                    )}
                   </td>
                   <td className="p-3">
-                    <select
-                      aria-label={`Role for ${user.email}`}
-                      className="rounded-lg border border-black/15 bg-white px-3 py-2"
+                    <Select
                       disabled={savingId === user.id || user.id === currentUserId}
-                      onChange={(event) =>
+                      onValueChange={(value) =>
                         updateUser(
                           user.id,
-                          { role: event.target.value as TeamUser["role"] },
+                          { role: value as TeamUser["role"] },
                           "Role updated successfully.",
                         )
                       }
                       value={user.role}
                     >
-                      <option value="cam">CAM</option>
-                      <option value="admin">Admin</option>
-                      <option value="viewer">Viewer</option>
-                    </select>
+                      <SelectTrigger aria-label={`Role for ${user.email}`} className="w-fit bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cam">CAM</SelectItem>
+                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="viewer">Viewer</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </td>
-                  <td className="p-3">{user.owned_client_count}</td>
+                  <td className="p-3">
+                    {user.listed_client_count > 0 ? (
+                      <Link
+                        href={`/clients?owner=${user.id}`}
+                        className="font-bold text-brand hover:underline"
+                        title={clientsLinkTitle(user)}
+                      >
+                        {user.listed_client_count}
+                      </Link>
+                    ) : (
+                      <span className="text-foreground/40" title={clientsLinkTitle(user)}>
+                        {user.listed_client_count}
+                      </span>
+                    )}
+                  </td>
                   <td className="p-3 text-foreground/60">{lastActiveLabel(user.last_seen_at)}</td>
                   <td className="p-3">
                     <span
@@ -288,7 +354,7 @@ export function UserManagementTable({
                             className="rounded-lg border border-red-700/40 bg-red-700/5 px-3 py-2 font-bold text-red-700 disabled:opacity-50"
                             disabled={savingId === user.id}
                             onClick={() => {
-                              setMessage("");
+                              setStatus(null);
                               setOffboarding(user);
                             }}
                             type="button"
@@ -397,22 +463,22 @@ function OffboardingForm({
                   value="reassign"
                 />
                 Reassign to
-                <select
-                  aria-label="New owner"
-                  className="rounded-lg border border-black/15 bg-white px-3 py-2"
+                <Select
                   disabled={effectiveDestination !== "reassign"}
-                  onChange={(event) => setReassignTo(event.target.value)}
+                  onValueChange={setReassignTo}
                   value={reassignTo}
                 >
-                  <option disabled value="">
-                    Choose a team member…
-                  </option>
-                  {eligibleOwners.map((owner) => (
-                    <option key={owner.id} value={owner.id}>
-                      {displayName(owner)}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger aria-label="New owner" className="w-fit bg-white">
+                    <SelectValue placeholder="Choose a team member…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {eligibleOwners.map((owner) => (
+                      <SelectItem key={owner.id} value={owner.id}>
+                        {displayName(owner)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </label>
               <label className="mt-2 flex items-center gap-2 text-sm">
                 <input

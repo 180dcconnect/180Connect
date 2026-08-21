@@ -81,6 +81,10 @@
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | review_notes | text |  |  |
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | created_at | timestamp |  |  |
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | updated_at | timestamp |  |  |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | source_url | text |  | Source URL for the manual entry |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | imported_field_paths | jsonb |  | Paths of imported fields |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | import_notes | jsonb |  | Notes about the import |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | import_raw_record_id | uuid | RAW_SOURCE_RECORDS | Raw record ID for the import |
 | 04 Entities | ORGANISATIONS | id | uuid |  |  |
 | 04 Entities | ORGANISATIONS | legal_name | text |  |  |
 | 04 Entities | ORGANISATIONS | trading_name | text |  |  |
@@ -222,6 +226,22 @@
 | 04 Entities | SUPPRESSIONS | decided_at | timestamp |  | When decided; null while pending |
 | 04 Entities | SUPPRESSIONS | decision_note | text |  | Optional admin note on the decision |
 | 04 Entities | SUPPRESSIONS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | SAVED_VIEWS | id | uuid |  | Primary key |
+| 04 Entities | SAVED_VIEWS | user_id | uuid | USERS | CAM the saved view belongs to |
+| 04 Entities | SAVED_VIEWS | name | text |  | Name the CAM gave the view; unique per user |
+| 04 Entities | SAVED_VIEWS | filters | jsonb |  | Filter combination the view re-applies (q, city, status, source, owner) |
+| 04 Entities | SAVED_VIEWS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | SAVED_VIEWS | updated_at | timestamp |  | Last edit timestamp |
+| 04 Entities | OWNERSHIP_REQUESTS | id | uuid |  | Primary key |
+| 04 Entities | OWNERSHIP_REQUESTS | organisation_id | uuid | ORGANISATIONS | Client being asked for |
+| 04 Entities | OWNERSHIP_REQUESTS | requested_by | uuid | USERS | CAM making the ask |
+| 04 Entities | OWNERSHIP_REQUESTS | current_owner_id | uuid | USERS | Owner at request time, snapshotted |
+| 04 Entities | OWNERSHIP_REQUESTS | status | enum |  | pending, approved, rejected |
+| 04 Entities | OWNERSHIP_REQUESTS | reason | text |  | Why this CAM should take it on |
+| 04 Entities | OWNERSHIP_REQUESTS | decided_by | uuid | USERS | Admin who approved/rejected |
+| 04 Entities | OWNERSHIP_REQUESTS | decided_at | timestamp |  | When decided |
+| 04 Entities | OWNERSHIP_REQUESTS | decision_note | text |  | Optional admin note |
+| 04 Entities | OWNERSHIP_REQUESTS | created_at | timestamp |  | Row creation timestamp |
 | 05 - Features | SCORING_WEIGHTS | id | model_name |  | feature_name |
 | 05 - Features | SCORING_WEIGHTS | 1.0 | SCOUT |  | south_yorkshire_flag |
 | 05 - Features | SCORING_WEIGHTS | 2.0 | SCOUT |  | mission_alignment_score |
@@ -428,3 +448,16 @@
 | 03 Raw Data | FIELD_DISCREPANCIES | resolved_at | timestamp |  | When resolved |
 | 03 Raw Data | FIELD_DISCREPANCIES | notes | text |  | Reviewer notes explaining the decision |
 | 03 Raw Data | FIELD_DISCREPANCIES | created_at | timestamp |  | Row creation timestamp |
+| 03 Raw Data | FIELD_SOURCES | id | uuid |  | Primary key |
+| 03 Raw Data | FIELD_SOURCES | organisation_id | uuid | ORGANISATIONS | Organisation this field value belongs to |
+| 03 Raw Data | FIELD_SOURCES | field_name | text |  | Which ORGANISATIONS column this value is for |
+| 03 Raw Data | FIELD_SOURCES | value | text |  | Value written for this field by this source |
+| 03 Raw Data | FIELD_SOURCES | source | text |  | Which source produced this value |
+| 03 Raw Data | FIELD_SOURCES | raw_source_record_id | uuid | RAW_SOURCE_RECORDS | The raw record this value was taken from |
+| 03 Raw Data | FIELD_SOURCES | is_current | boolean |  | Whether this is the value currently live on ORGANISATIONS for this field |
+| 03 Raw Data | FIELD_SOURCES | recorded_at | timestamp |  | When this field value was recorded |
+| 03 Raw Data | RAW_SOURCE_RECORDS | excluded_fields | jsonb |  | Field paths stripped from raw_payload by the data handling rules before the record was written |
+| 03 Raw Data | RAW_SOURCE_RECORDS | rule_version_applied | integer |  | Which version of the data handling rule set was in force when this record was written |
+| 03 Raw Data | DATA_HANDLING_RULES | id | uuid |  | Primary key |
+| 03 Raw Data | DATA_HANDLING_RULES | rule_version | integer |  | The global rule version at the time this rule was created or last toggled |
+| 03 Raw Data | DATA_HANDLING_RULES | source | enum |  | Which source the rule applies to; null applies to every source |

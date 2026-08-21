@@ -63,7 +63,7 @@ export function OutreachHistorySection({
       )}
 
       <h3 className="mt-6 text-xs font-bold uppercase tracking-wide text-foreground/60">
-        Drafts &amp; scheduled
+        Not sent
       </h3>
       {history.notSent.length === 0 ? (
         <p className="mt-2 text-sm text-foreground/65">Nothing waiting to be sent.</p>
@@ -74,8 +74,19 @@ export function OutreachHistorySection({
               <details className="py-2">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm">
                   <span className="font-medium">{message.subject}</span>
-                  <span className="shrink-0 rounded-full bg-black/5 px-2 py-0.5 text-xs font-bold text-foreground/70">
-                    {describeSendStatus(message.send_status)}
+                  {/* AC2's "send date", for something that has not gone out
+                      yet: a scheduled row shows when it is due, so a CAM can
+                      tell two hours from two weeks. Drafts and failures have
+                      no due date — the badge carries the state instead. */}
+                  <span className="flex shrink-0 items-center gap-2">
+                    {message.scheduled_at && (
+                      <span className="text-foreground/60">
+                        Due {formatDate(message.scheduled_at)}
+                      </span>
+                    )}
+                    <span className="rounded-full bg-black/5 px-2 py-0.5 text-xs font-bold text-foreground/70">
+                      {describeSendStatus(message.send_status)}
+                    </span>
                   </span>
                 </summary>
                 <p className="mt-2 whitespace-pre-wrap text-sm text-foreground/80">

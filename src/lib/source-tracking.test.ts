@@ -131,6 +131,22 @@ describe("formatImportOrigin", () => {
     assert.deepEqual(origin?.fieldLabels, ["some_future_column"]);
   });
 
+  it("keeps provenance when imported_at is missing or unparseable", () => {
+    // Nothing renders the timestamp yet, so a bad one must not throw away the
+    // source URL and field list a CAM does read.
+    for (const imported_at of [null, "not-a-date"]) {
+      const origin = formatImportOrigin({
+        source_url: "https://example.org",
+        imported_field_paths: ["legal_name"],
+        imported_at,
+      });
+
+      assert.equal(origin?.sourceUrl, "https://example.org");
+      assert.deepEqual(origin?.fieldLabels, ["Name"]);
+      assert.equal(origin?.importedAt, imported_at);
+    }
+  });
+
   it("ignores malformed provenance rather than breaking the client profile", () => {
     assert.equal(
       formatImportOrigin({

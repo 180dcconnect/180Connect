@@ -13,7 +13,7 @@ import {
   type OrganisationSourceRow,
 } from "@/lib/source-tracking";
 import { checkWebsiteReachabilityCached } from "@/lib/website-reachability-cache";
-import { validateWebsiteFormat, websiteHref } from "@/lib/website-validation";
+import { safeWebsiteHref, websiteHref } from "@/lib/website-validation";
 import { formatLocation, formatOutreachStatus } from "@/lib/organisation-format";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
@@ -160,9 +160,7 @@ export default async function ClientDetailPage({
   // Reuses the website link's own safety check (scheme-less strings resolving as
   // a relative path, unsafe hostnames) rather than re-deriving it: source_url is
   // free text captured from a CAM-followed link, same trust level as `website`.
-  const importSourceHref = importOrigin
-    ? websiteHref(validateWebsiteFormat(importOrigin.sourceUrl))
-    : null;
+  const importSourceHref = importOrigin ? safeWebsiteHref(importOrigin.sourceUrl) : null;
 
   // Most recent suppression row for this org, whatever its status — pending shows a
   // waiting state, active shows the suppressed state, rejected/lifted/none all fall
@@ -468,31 +466,40 @@ export default async function ClientDetailPage({
                     ))}
                   </ul>
                 )}
-                {importOrigin && importOrigin.fieldLabels.length > 0 && (
-                  // AC3: which fields specifically came from the import, not only
-                  // that an import contributed to the record somewhere.
-                  <p className="mt-3 text-[13px] leading-[1.6] text-foreground/50">
-                    <span className="font-bold text-foreground/65">
-                      {importOrigin.fieldLabels.length}{" "}
-                      field{importOrigin.fieldLabels.length === 1 ? "" : "s"}
-                    </span>{" "}
-                    imported from{" "}
-                    {importSourceHref ? (
-                      <a
-                        className="break-all font-bold text-brand-hover underline underline-offset-2 hover:text-brand"
-                        href={importSourceHref}
-                        rel="noreferrer"
-                        target="_blank"
-                      >
-                        {importOrigin.sourceUrl}
-                      </a>
-                    ) : (
-                      <span className="break-all font-bold text-foreground/65">
-                        {importOrigin.sourceUrl}
-                      </span>
-                    )}
-                    : {importOrigin.fieldLabels.join(", ")}.
+                {importOriginError ? (
+                  // Same visible-failure contract as `sourcesError` above: a broken
+                  // provenance lookup must not read as "this client was never imported".
+                  <p className="mt-3 text-sm font-bold text-destructive" role="alert">
+                    Import provenance could not be loaded. Refresh and try again.
                   </p>
+                ) : (
+                  importOrigin &&
+                  importOrigin.fieldLabels.length > 0 && (
+                    // AC3: which fields specifically came from the import, not only
+                    // that an import contributed to the record somewhere.
+                    <p className="mt-3 text-[13px] leading-[1.6] text-foreground/50">
+                      <span className="font-bold text-foreground/65">
+                        {importOrigin.fieldLabels.length}{" "}
+                        field{importOrigin.fieldLabels.length === 1 ? "" : "s"}
+                      </span>{" "}
+                      imported from{" "}
+                      {importSourceHref ? (
+                        <a
+                          className="break-all font-bold text-brand-hover underline underline-offset-2 hover:text-brand"
+                          href={importSourceHref}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          {importOrigin.sourceUrl}
+                        </a>
+                      ) : (
+                        <span className="break-all font-bold text-foreground/65">
+                          {importOrigin.sourceUrl}
+                        </span>
+                      )}
+                      : {importOrigin.fieldLabels.join(", ")}.
+                    </p>
+                  )
                 )}
               </SectionCard>
             </Rise>

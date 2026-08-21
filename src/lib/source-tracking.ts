@@ -30,6 +30,31 @@ const SOURCE_LABELS: Readonly<Record<string, string>> = {
  * show the same source twice, and the oldest link is the trustworthy first-seen
  * timestamp when duplicate rows do occur.
  */
+export function formatOrganisationSources(
+  rows: readonly OrganisationSourceRow[],
+): OrganisationSource[] {
+  const bySource = new Map<string, OrganisationSourceRow>();
+
+  for (const row of rows) {
+    const source = row.source?.trim().toLowerCase();
+    if (!source || !row.first_seen_at || Number.isNaN(Date.parse(row.first_seen_at))) {
+      continue;
+    }
+
+    const existing = bySource.get(source);
+    if (!existing || Date.parse(row.first_seen_at) < Date.parse(existing.first_seen_at)) {
+      bySource.set(source, { ...row, source });
+    }
+  }
+
+  return [...bySource.values()]
+    .sort((left, right) => Date.parse(left.first_seen_at) - Date.parse(right.first_seen_at))
+    .map((row) => ({
+      ...row,
+      label: SOURCE_LABELS[row.source] ?? row.source_registry_name?.trim() ?? row.source,
+    }));
+}
+
 /** Row shape of `get_organisation_import_origin` (F037 AC8/AC12). */
 export type ImportOriginRow = {
   source_url: string | null;
@@ -39,7 +64,12 @@ export type ImportOriginRow = {
 
 export type ImportOrigin = {
   sourceUrl: string;
-  importedAt: string;
+  /**
+   * Passed through for future use, never required: nothing renders it yet, so a
+   * missing or unparseable timestamp must not throw away the source URL and
+   * field list the CAM does read.
+   */
+  importedAt: string | null;
   fieldLabels: string[];
 };
 
@@ -69,7 +99,7 @@ const IMPORT_FIELD_LABELS: Readonly<Record<string, string>> = {
 export function formatImportOrigin(row: ImportOriginRow | null | undefined): ImportOrigin | null {
   if (!row) return null;
   const sourceUrl = row.source_url?.trim();
-  if (!sourceUrl || !row.imported_at || Number.isNaN(Date.parse(row.imported_at))) return null;
+  if (!sourceUrl) return null;
 
   const paths = Array.isArray(row.imported_field_paths)
     ? row.imported_field_paths.filter((path): path is string => typeof path === "string")
@@ -80,29 +110,4 @@ export function formatImportOrigin(row: ImportOriginRow | null | undefined): Imp
     importedAt: row.imported_at,
     fieldLabels: paths.map((path) => IMPORT_FIELD_LABELS[path] ?? path),
   };
-}
-
-export function formatOrganisationSources(
-  rows: readonly OrganisationSourceRow[],
-): OrganisationSource[] {
-  const bySource = new Map<string, OrganisationSourceRow>();
-
-  for (const row of rows) {
-    const source = row.source?.trim().toLowerCase();
-    if (!source || !row.first_seen_at || Number.isNaN(Date.parse(row.first_seen_at))) {
-      continue;
-    }
-
-    const existing = bySource.get(source);
-    if (!existing || Date.parse(row.first_seen_at) < Date.parse(existing.first_seen_at)) {
-      bySource.set(source, { ...row, source });
-    }
-  }
-
-  return [...bySource.values()]
-    .sort((left, right) => Date.parse(left.first_seen_at) - Date.parse(right.first_seen_at))
-    .map((row) => ({
-      ...row,
-      label: SOURCE_LABELS[row.source] ?? row.source_registry_name?.trim() ?? row.source,
-    }));
 }

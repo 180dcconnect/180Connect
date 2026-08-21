@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  emptyStateMessage,
   filterByOwner,
   formatLocation,
   formatOutreachStatus,
@@ -164,5 +165,61 @@ describe("searchClients", () => {
 
   it("returns an empty list when nothing matches", () => {
     assert.deepEqual(searchClients(clients, "nonexistent"), []);
+  });
+
+  // F052 AC2 — partial matches, not only a prefix or the whole name.
+  it("matches mid-name, not just from the start", () => {
+    assert.deepEqual(searchClients(clients, "Food").map((c) => c.id), ["a"]);
+    assert.deepEqual(searchClients(clients, "outh Tru").map((c) => c.id), ["b"]);
+  });
+
+  it("ignores whitespace around the term", () => {
+    assert.deepEqual(searchClients(clients, "  bristol  ").map((c) => c.id), ["a", "c"]);
+  });
+});
+
+describe("emptyStateMessage", () => {
+  it("names the search term when one is set", () => {
+    assert.equal(
+      emptyStateMessage({ isOwnedView: false, search: "bristol", filterActive: true }),
+      "No clients match “bristol”. Clear the search to see the full list.",
+    );
+  });
+
+  it("trims the term before quoting it back", () => {
+    assert.equal(
+      emptyStateMessage({ isOwnedView: false, search: "  bristol  ", filterActive: true }),
+      "No clients match “bristol”. Clear the search to see the full list.",
+    );
+  });
+
+  // F052 AC3 — the bug this ordering fixes: a CAM who owns clients but searches
+  // for one that isn't there must not be told they own none.
+  it("prefers the search message over the owned-view message", () => {
+    assert.equal(
+      emptyStateMessage({ isOwnedView: true, search: "bristol", filterActive: true }),
+      "No clients match “bristol”. Clear the search to see the full list.",
+    );
+  });
+
+  it("uses the owned-view message when the owned view has no search", () => {
+    assert.match(
+      emptyStateMessage({ isOwnedView: true, search: "   ", filterActive: true }),
+      /don't own any clients yet/,
+    );
+  });
+
+  it("falls back to the generic filter message for a non-search filter", () => {
+    assert.equal(
+      emptyStateMessage({ isOwnedView: false, search: null, filterActive: true }),
+      "No clients match this filter.",
+    );
+  });
+
+  it("says nothing to show when no filter is active at all", () => {
+    assert.equal(
+      emptyStateMessage({ isOwnedView: false, search: undefined, filterActive: false }),
+      "No clients to show.",
+    );
   });
 });

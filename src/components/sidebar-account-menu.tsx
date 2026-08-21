@@ -66,7 +66,9 @@ export function SidebarAccountMenu({
         <button
           type="button"
           title={collapsed ? displayName : undefined}
-          className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-all hover:bg-black/10 data-[state=open]:bg-black/12"
+          className={`flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-all hover:bg-black/10 data-[state=open]:bg-black/12 md:pl-1.5 ${
+            collapsed ? "md:pr-1.5" : ""
+          }`}
         >
           <Avatar initials={initials} />
           {/* Hidden by class rather than unmounted: `collapsed` is a desktop-only

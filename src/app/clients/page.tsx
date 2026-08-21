@@ -1,11 +1,15 @@
 import Link from "next/link";
+import { Sparkles } from "lucide-react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
+  emptyStateMessage,
   filterByOwner,
   filterByCity,
   filterByStatus,
@@ -17,6 +21,7 @@ import {
 } from "./visible-clients.ts";
 import { BrandSearchBar } from "@/components/brand/search-bar";
 import { ClaimButton } from "./[id]/claim-button";
+import { ClientOwnerBadge } from "./client-owner-badge";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 import { Group, Rise } from "@/components/dashboard-stage";
 import { OriginButton } from "@/components/ui/origin-button";
@@ -66,7 +71,9 @@ const ROW_GRID =
   "lg:grid lg:grid-cols-[2rem_minmax(0,1fr)_9rem_10rem_10rem_1rem] lg:items-center lg:gap-4";
 
 /** Reserved width for the claim button, held whether or not the row has one. */
-const CLAIM_SLOT = "w-[6.5rem] shrink-0";
+const CLAIM_SLOT = "w-[8.5rem] shrink-0";
+/** Reserved width for the booklet link, held whether or not the row has one. */
+const BOOKLET_SLOT = "w-[7rem] shrink-0";
 
 /**
  * F051 — the charity list view. Every organisation regardless of import method
@@ -89,6 +96,13 @@ const CLAIM_SLOT = "w-[6.5rem] shrink-0";
  * every visit re-queries organisations, so a reassignment shows up on the next
  * normal navigation here, same as any other filter change.
  *
+ * F052 (#54) search by organisation name: `q` was already read here, but as part
+ * of a GET form, so applying or clearing it meant a full document reload — AC4
+ * asks for neither. The bar now soft-navigates on submit (Enter or click) via
+ * router.replace; this page keeps reading `q` from the URL exactly as before,
+ * so pagination, deep links and searchClients() are unchanged. Search fires on
+ * submit rather than per keystroke by design: deliberate over twitchy.
+ * 
  * Restyled onto the same bone-ground/floating-card language as /dashboard
  * (docs/design-system.md's *character*, not its public palette — see that
  * page's comment). Filter bar, list, and pagination are three separate cards
@@ -117,6 +131,7 @@ export default async function ClientsPage({
 
   const supabase = await createClient();
   const canClaim = hasPermission(authorization.actor.role, "client:edit");
+  const canGenerateBooklet = hasPermission(authorization.actor.role, "client:contact");
   const isAdmin = authorization.actor.role === "admin";
 
   const [organisations, openSuppressions, team] = await Promise.all([
@@ -332,12 +347,11 @@ export default async function ClientsPage({
 
           {(organisations.error || openSuppressions.error) && (
             <Rise>
-              <p
-                role="alert"
-                className="rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4 text-sm font-bold text-destructive mb-8"
-              >
-                Some data could not be loaded. Refresh and try again.
-              </p>
+              <InlineAlert
+                variant="page"
+                className="mb-8"
+                message="Some data could not be loaded. Refresh and try again."
+              />
             </Rise>
           )}
 
@@ -376,21 +390,15 @@ export default async function ClientsPage({
 
             <Rise>
               {clients.length === 0 ? (
-                <div className="rounded-2xl border border-black/[0.06] bg-white px-5 py-8 shadow-sm">
-                  <p className="text-center text-sm leading-[1.7] text-foreground/65">
-                    {isOwnedView
-                      ? "You don't own any clients yet. Claim one from the list, or ask an admin to assign you one."
-                      : filterActive
-                        ? "No clients match this filter."
-                        : "No clients to show."}
-                  </p>
-                </div>
+                <EmptyState
+                  message={emptyStateMessage({ isOwnedView, search, filterActive })}
+                />
               ) : (
                 <div className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm">
                   {/* The column key, on the widths the rows use. Hidden below lg,
                       where the row folds back into name-over-subline. */}
                   <div
-                    className="hidden items-center gap-4 border-b border-black/[0.06] bg-black/[0.015] px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em] text-foreground/30 lg:flex"
+                    className="group/header hidden items-center gap-4 border-b border-black/[0.06] bg-black/[0.015] px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em] text-foreground/30 lg:flex"
                   >
                     {isAdmin && (
                       <span className="flex w-6 shrink-0 items-center justify-center">
@@ -405,14 +413,19 @@ export default async function ClientsPage({
                       <span>Owner</span>
                       <span />
                     </span>
-                    {canClaim && <span className={CLAIM_SLOT} />}
+                    {(canGenerateBooklet || canClaim) && (
+                      <span className="flex shrink-0 items-center gap-2">
+                        {canGenerateBooklet && <span className={BOOKLET_SLOT} />}
+                        {canClaim && <span className={CLAIM_SLOT} />}
+                      </span>
+                    )}
                   </div>
 
                   <ul>
                     {clients.map((client, index) => (
                       <li
                         key={client.id}
-                        className="flex items-center gap-4 border-b border-black/[0.06] px-5 py-3.5 last:border-b-0"
+                        className="group/row flex items-center gap-4 border-b border-black/[0.06] px-5 py-3.5 last:border-b-0"
                       >
                         {isAdmin && (
                           <span className="flex w-6 shrink-0 items-center justify-center">
@@ -466,15 +479,10 @@ export default async function ClientsPage({
                           </span>
 
                           <span className="hidden min-w-0 lg:block">
-                            {client.ownerName ? (
-                              <span className="inline-block max-w-full truncate rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-brand-hover">
-                                {client.ownerName}
-                              </span>
-                            ) : (
-                              <span className="inline-block rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/40">
-                                Unassigned
-                              </span>
-                            )}
+                            <ClientOwnerBadge
+                              ownerId={client.owner_id}
+                              ownerName={client.ownerName}
+                            />
                           </span>
 
                           {/* Between sm and lg there are no columns but there is
@@ -483,15 +491,10 @@ export default async function ClientsPage({
                             <span className="rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/55">
                               {client.outreachStatusLabel}
                             </span>
-                            {client.ownerName ? (
-                              <span className="rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-brand-hover">
-                                {client.ownerName}
-                              </span>
-                            ) : (
-                              <span className="rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/40">
-                                Unassigned
-                              </span>
-                            )}
+                            <ClientOwnerBadge
+                              ownerId={client.owner_id}
+                              ownerName={client.ownerName}
+                            />
                             {client.suppressionPending && (
                               <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-amber-800">
                                 Suppression requested
@@ -503,10 +506,25 @@ export default async function ClientsPage({
                         {/* A fixed slot rather than a conditional child: an owned
                             row still reserves the width, so no column shifts as
                             the list changes hands. */}
-                        {canClaim && (
-                          <span className={`${CLAIM_SLOT} flex justify-end`}>
-                            {!client.ownerName && (
-                              <ClaimButton compact organisationId={client.id} />
+                        {(canGenerateBooklet || canClaim) && (
+                          <span className="flex shrink-0 items-center gap-2">
+                            {canGenerateBooklet && (
+                              <span className={`${BOOKLET_SLOT} flex justify-end`}>
+                                <Link
+                                  className="flex items-center gap-1 rounded-full border border-brand/30 px-3 py-1 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
+                                  href={`/clients/${client.id}?booklet=generate`}
+                                >
+                                  <Sparkles aria-hidden="true" className="h-3 w-3" />
+                                  Booklet
+                                </Link>
+                              </span>
+                            )}
+                            {canClaim && (
+                              <span className={`${CLAIM_SLOT} flex justify-end`}>
+                                {!client.ownerName && (
+                                  <ClaimButton compact organisationId={client.id} />
+                                )}
+                              </span>
                             )}
                           </span>
                         )}

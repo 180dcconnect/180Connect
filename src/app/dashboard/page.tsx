@@ -4,6 +4,7 @@ import { logSecurityEvent } from "@/lib/log-security-event";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import {
   computeDashboardMetrics,
   filterActiveSuppressed,
@@ -272,12 +273,7 @@ export default async function DashboardPage({
 
         {error === "admin-access-required" && (
           <Rise>
-            <p
-              role="alert"
-              className="rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4 text-sm font-bold text-destructive"
-            >
-              That page is restricted to administrators.
-            </p>
+            <InlineAlert variant="page" message="That page is restricted to administrators." />
           </Rise>
         )}
 
@@ -321,12 +317,7 @@ export default async function DashboardPage({
           </Rise>
         ) : loadFailed ? (
           <Rise>
-            <p
-              role="alert"
-              className="rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4 text-sm font-bold text-destructive"
-            >
-              Some data could not be loaded. Refresh and try again.
-            </p>
+            <InlineAlert variant="page" message="Some data could not be loaded. Refresh and try again." />
           </Rise>
         ) : (
           <>

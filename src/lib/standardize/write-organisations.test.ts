@@ -33,6 +33,12 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
   }[] = [];
   let nextId = 1;
   const criteriaOutcomes: { rawRecordId: string; outcome: string; reasons: string[] }[] = [];
+  const fieldSources: {
+    organisationId: string;
+    org: StandardOrganisation;
+    source: string;
+    rawSourceRecordId: string;
+  }[] = [];
 
   const store: OrganisationWriteStore = {
     async loadPendingRecords() {
@@ -59,10 +65,13 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
       criteriaOutcomes.push({ rawRecordId, outcome: result.outcome, reasons: result.reasons });
       statusUpdates.push({ rawRecordId, status: "rejected" });
     },
+    async recordFieldSources(organisationId, org, source, rawSourceRecordId) {
+      fieldSources.push({ organisationId, org, source, rawSourceRecordId });
+    },
     ...overrides,
   };
 
-  return { store, inserted, flagged, statusUpdates, criteriaOutcomes };
+  return { store, inserted, flagged, statusUpdates, criteriaOutcomes, fieldSources };
 }
 
 function pendingRecord(id: string, charityName: string): PendingRecord {
@@ -288,6 +297,72 @@ describe("promotePendingCharityCommissionRecords — existing internal data pres
     await promotePendingCharityCommissionRecords(store);
 
     assert.equal(inserted.length, 1);
+  });
+});
+
+describe("promotePendingCharityCommissionRecords — field-level source tracking (F044)", () => {
+  it("records field provenance for the inserted organisation, tagged with its source", async () => {
+    const { store, fieldSources } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Oxfam")];
+      },
+    });
+
+    await promotePendingCharityCommissionRecords(store);
+
+    assert.equal(fieldSources.length, 1);
+    assert.equal(fieldSources[0].organisationId, "org-1");
+    assert.equal(fieldSources[0].source, "charity_commission");
+    assert.equal(fieldSources[0].rawSourceRecordId, "raw-1");
+    assert.equal(fieldSources[0].org.legal_name, "Oxfam");
+  });
+
+  it("does not record field sources for a rejected (invalid) record", async () => {
+    const { store, fieldSources } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "")];
+      },
+    });
+
+    await promotePendingCharityCommissionRecords(store);
+
+    assert.equal(fieldSources.length, 0);
+  });
+
+  it("does not record field sources for a record flagged as a duplicate candidate", async () => {
+    const { store, fieldSources } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Test Charity")];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [{ id: "org-existing", legal_name: "Test Charity", postcode: "" }];
+      },
+    });
+
+    await promotePendingCharityCommissionRecords(store);
+
+    assert.equal(fieldSources.length, 0);
+  });
+
+  it("does not fail the insert or the batch when recording field sources errors", async () => {
+    const { store, inserted, statusUpdates } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Oxfam"), pendingRecord("raw-2", "Shelter")];
+      },
+      async recordFieldSources() {
+        throw new Error("rpc unavailable");
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionRecords(store);
+
+    // The organisation itself is already committed by this point — a
+    // provenance-recording failure is logged (reportError), not a reason to mark
+    // an otherwise-successful insert as failed.
+    assert.equal(counts.inserted, 2);
+    assert.equal(counts.failed, 0);
+    assert.equal(inserted.length, 2);
+    assert.equal(statusUpdates[0].status, "validated");
   });
 });
 
@@ -574,6 +649,22 @@ describe("promotePendingCompaniesHouseRecords — existing internal data preserv
   });
 });
 
+describe("promotePendingCompaniesHouseRecords — field-level source tracking (F044)", () => {
+  it("records field provenance tagged with companies_house, not the other sources", async () => {
+    const { store, fieldSources } = fakeStore({
+      async loadPendingRecords() {
+        return [companiesHousePendingRecord("raw-1", "Acme Ltd")];
+      },
+    });
+
+    await promotePendingCompaniesHouseRecords(store, criteriaPass);
+
+    assert.equal(fieldSources.length, 1);
+    assert.equal(fieldSources[0].source, "companies_house");
+    assert.equal(fieldSources[0].organisationId, "org-1");
+  });
+});
+
 describe("promotePendingCompaniesHouseRecords — write failure", () => {
   it("marks a record 'error', not 'validated', when the insert fails", async () => {
     const { store, statusUpdates } = fakeStore({
@@ -836,6 +927,22 @@ describe("promotePendingFindThatCharityRecords — existing internal data preser
     await promotePendingFindThatCharityRecords(store, criteriaPass);
 
     assert.equal(inserted.length, 1);
+  });
+});
+
+describe("promotePendingFindThatCharityRecords — field-level source tracking (F044)", () => {
+  it("records field provenance tagged with find_that_charity, not the other sources", async () => {
+    const { store, fieldSources } = fakeStore({
+      async loadPendingRecords() {
+        return [findThatCharityPendingRecord("raw-1", "Oxfam", { ftcId: "GB-CHC-202918" })];
+      },
+    });
+
+    await promotePendingFindThatCharityRecords(store, criteriaPass);
+
+    assert.equal(fieldSources.length, 1);
+    assert.equal(fieldSources[0].source, "find_that_charity");
+    assert.equal(fieldSources[0].organisationId, "org-1");
   });
 });
 

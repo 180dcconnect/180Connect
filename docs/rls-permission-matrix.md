@@ -388,10 +388,20 @@ viewers both read every row; only the CAM path is scoped.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `AUDIT_LOG` | admin | — (service role / `SECURITY DEFINER` RPC only) | **none** | **none** |
+| `AUDIT_LOG` | admin; **plus** any active user, but only `status_changed`/`ownership_reassigned` rows targeting `organisations` (F075, 20260820110000) | — (service role / `SECURITY DEFINER` RPC only) | **none** | **none** |
 
 No UPDATE or DELETE policy is written for any role, including admin. An audit trail
 an admin can edit is not an audit trail.
+
+**F075's carve-out** (`audit_log_select_client_timeline`) is additive, not a
+replacement for `audit_log_select_admin` above — every other `action` token
+(`role_changed`, `user_suspended`, `invite_*`, etc.) stays admin-only. It exists
+because the client communication timeline needs a CAM/viewer to read the
+handover and status-change entries for a client they can already see everywhere
+else on that client's page (`notes`/`outreach_messages`/`reply_events` are
+already shared-read, §3.3/§3.4) — and because RLS gates `postgres_changes`
+delivery exactly like a SELECT, so without this, F075's realtime subscription
+would silently never receive these two event types for a non-admin.
 
 ### 3.9 Views
 
@@ -753,6 +763,55 @@ with an effect.
 
 ---
 
+### 3.18 Field sources — service-role write, admin read
+
+Backs F044 Field-Level Source Tracking (#45),
+`supabase/migrations/20260820100000_create_field_sources.sql`. New table — like
+`FIELD_DISCREPANCIES` (§3.16), not previously reserved in the Data Model. Real
+per-field provenance for `ORGANISATIONS`, closing the gap §3.16 and open-gap note
+10 both flagged: `FIELD_DISCREPANCIES.existing_source` only ever approximated
+which source "owns" a field's current value.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `FIELD_SOURCES` | admin only | — (`service_role` only) | — (`service_role` only, via same RPC) | — (no grant) |
+
+SELECT is admin-only, same reasoning as §3.16 — which source produced a field's
+value is not CAM-visible data. There is one write path, `record_field_source`
+(`p_organisation_id, p_field_name, p_value, p_source, p_raw_source_record_id`):
+flips any existing `is_current = true` row for that `organisation_id +
+field_name` to `false`, then inserts the new one as current. Granted to
+`service_role` only, not `authenticated` — mirrors `record_client_criteria_outcome`
+(§3.5) and `LOGIN_ATTEMPT`'s RPCs (§3.10): every caller either holds the
+service-role key server-side (`write-organisations.ts`, the ingestion pipeline) or
+is a nested call from inside `record_field_discrepancy` /
+`resolve_field_discrepancy` (§3.16), which already self-check `app.is_admin()`
+before reaching it.
+
+Only two writers exist as of this migration, both wired in: the ingestion
+pipeline on initial import, and F048's two RPCs when a conflict resolution
+overwrites a field. No CAM/admin hand-edit path exists yet (checked before
+writing this migration — no Server Action, route, or RPC updates `organisations`
+outside those two), so there is nothing else to wire up today; a future hand-edit
+feature is responsible for calling `record_field_source` itself.
+
+`get_field_sources(organisation_id)` — the read path, `authenticated`, self-checks
+`app.is_admin()` and `app.is_active_user()` inside (same shape as
+`get_organisation_sources`, §3.2). Returns every row for the organisation, current
+and superseded, newest-first per field — satisfies AC1 (current source per field)
+and AC2 (conflicting values and their sources both visible) from a single query.
+
+**MVP field scope**: the same six fields as `FIELD_DISCREPANCIES` (`legal_name`,
+`website`, `contact_email`, `address_line_1`, `city`, `postcode`) — kept identical
+on purpose so a field tracked for conflicts but not for provenance (or the
+reverse) can't silently diverge between the two tables. F044's own issue
+illustrates AC1 with `"mission" from CharityBase`, but `mission_statement` lives
+on `ENRICHMENT_RESULTS` (LLM-derived), not an `ORGANISATIONS` column any source
+mapper writes — out of scope here, flagged rather than silently unmet. See the
+migration header for the full reasoning.
+
+---
+
 ## 4. Denial behaviour and feedback
 
 Important and frequently got wrong: **a blocked read is not an error.**
@@ -918,13 +977,17 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    likely an `is_active`/`merged_into_organisation_id` column on `ORGANISATIONS`,
    following the same RPC-gated pattern as `SUPPRESSIONS` — raised rather than added
    unilaterally, since it changes the core entity every other table hangs off.
-10. **`FIELD_DISCREPANCIES.existing_source` is import-provenance, not per-field
-    tracking.** F048 (§3.16) approximates which source "owns" an organisation's
-    current field value as whichever `raw_source_records` row originally created it.
-    A later manual edit through the org edit UI is not distinguished from that
-    original import, so a discrepancy raised after such an edit will misattribute the
-    existing value's source. Properly closing this is F044 (Field-Level Source
-    Tracking, #45) — unbuilt and unassigned as of this writing — not F048's job.
+10. ~~`FIELD_DISCREPANCIES.existing_source` is import-provenance, not per-field
+    tracking.`~~ **Closed by F044 (§3.18, `20260820100000_create_field_sources.sql`).**
+    `FIELD_SOURCES` now records the real source behind every write to a tracked
+    field, updated whenever `record_field_discrepancy` / `resolve_field_discrepancy`
+    (F048) overwrite one. `FIELD_DISCREPANCIES.existing_source` itself is
+    unchanged — it still stores its original import-provenance approximation at
+    the moment a conflict was flagged — but a client's *current* per-field
+    provenance no longer depends on it; `get_field_sources` is the accurate
+    source of truth. Residual gap: no CAM/admin hand-edit UI exists yet (F036 or
+    similar), so a manual correction still can't be attributed until that
+    feature calls `record_field_source` itself.
 
 ---
 

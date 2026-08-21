@@ -3,7 +3,15 @@
  * so it can be tested without a database (same split as @/lib/suppressions).
  */
 
-import { formatLocation, formatOutreachStatus } from "../../lib/organisation-format.ts";
+import { z } from "zod";
+
+import {
+  PIPELINE_STATUSES,
+  formatLocation,
+  formatOutreachStatus,
+  type PipelineStatus,
+} from "../../lib/organisation-format.ts";
+import { safeValidate } from "../../lib/validation.ts";
 
 export { formatLocation, formatOutreachStatus };
 
@@ -151,4 +159,112 @@ export function filterBySource(
   }
   
   return clients;
+}
+
+/* ─── List sorting (F060 #62, F061 #63) ────────────────────────────────── */
+
+/**
+ * The fields the *list* can be sorted on. Deliberately not the same set as the
+ * insight band's breakdown (`parseField` in client-insights.ts): that panel
+ * groups and counts, this one orders rows. They read from different URL params
+ * (`listSort`/`listDir` here, `sort`/`dir` there) so one can be changed without
+ * disturbing the other — the two controls are visible on screen at once.
+ */
+export type ListSortField = "name" | "location" | "status";
+/** Spelled out rather than asc/desc because the control is a sentence, and the
+ * breakdown card next to it already uses these words (client-insights.ts). */
+export type ListSortDirection = "ascending" | "descending";
+
+export const LIST_SORT_FIELDS: { key: ListSortField; label: string }[] = [
+  { key: "name", label: "name" },
+  { key: "location", label: "location" },
+  { key: "status", label: "outreach status" },
+];
+
+export const LIST_SORT_DIRECTIONS: ListSortDirection[] = ["ascending", "descending"];
+
+/** `?listSort=` is user input, so anything unrecognised falls back to the
+ * default the list has always used — alphabetical by name, ascending. Parsed
+ * through `safeValidate` (`src/lib/validation.ts`) like every other input,
+ * rather than hand-rolled comparison. */
+const LIST_SORT_FIELD_SCHEMA = z.enum(
+  LIST_SORT_FIELDS.map((field) => field.key) as [ListSortField, ...ListSortField[]],
+);
+
+const LIST_SORT_DIRECTION_SCHEMA = z.enum(["ascending", "descending"]);
+
+export function parseListSort(value: string | null | undefined): ListSortField {
+  const parsed = safeValidate(LIST_SORT_FIELD_SCHEMA, value);
+  return parsed.success ? parsed.data : "name";
+}
+
+export function parseListDirection(value: string | null | undefined): ListSortDirection {
+  const parsed = safeValidate(LIST_SORT_DIRECTION_SCHEMA, value);
+  return parsed.success ? parsed.data : "ascending";
+}
+
+/**
+ * Rank of a status in the pipeline (F061 AC1): its index in PIPELINE_STATUSES,
+ * which is the order F145/F146-F155 define, *not* alphabetical order of the
+ * label — "Converted" would otherwise sort before "Initial outreach sent".
+ * A status not in that list sorts to the end rather than to the front, so a
+ * value added to the database before it is added here is visibly last instead
+ * of silently leading the list. "Last" holds in *both* directions: the
+ * comparator pins unknown ranks below known ones before the direction sign is
+ * applied, so a descending sort cannot float an unrecognised status to the top.
+ *
+ * The order itself, and the reasoning for it, is written down in
+ * docs/client-list-sorting.md — F061 AC3 asks for exactly that.
+ */
+const UNKNOWN_STATUS_RANK = PIPELINE_STATUSES.length;
+
+function pipelineRank(status: string): number {
+  const index = PIPELINE_STATUSES.indexOf(status as PipelineStatus);
+  return index === -1 ? UNKNOWN_STATUS_RANK : index;
+}
+
+/**
+ * F060 AC1/AC2 and F061 AC1 — order the list.
+ *
+ * Applied *after* filtering and *before* pagination, so the sort covers the
+ * whole filtered set rather than re-ordering whichever 25 rows page 1 happened
+ * to hold (F060 AC3 / F061 AC2: sorting combines with the active filters).
+ *
+ * Every field tie-breaks on legal_name, ascending, and that tie-break is not
+ * reversed by `desc`. Two consequences, both wanted: clients sharing a location
+ * stay adjacent *and* in a stable, readable order within the group (F060 AC2),
+ * and the same query always produces the same page 2.
+ *
+ * Returns a new array — the caller's list is left alone, since the unsorted
+ * order still feeds the funnel and breakdown counts above the list.
+ */
+export function sortClients(
+  clients: VisibleClient[],
+  field: ListSortField,
+  direction: ListSortDirection,
+): VisibleClient[] {
+  const sign = direction === "descending" ? -1 : 1;
+  const byName = (a: VisibleClient, b: VisibleClient) =>
+    a.legal_name.localeCompare(b.legal_name, "en", { sensitivity: "base" });
+
+  return [...clients].sort((a, b) => {
+    let primary = 0;
+    if (field === "location") {
+      primary = a.location.localeCompare(b.location, "en", { sensitivity: "base" });
+    } else if (field === "status") {
+      const rankA = pipelineRank(a.outreach_status);
+      const rankB = pipelineRank(b.outreach_status);
+      // Unknown ranks are pinned last *before* the direction sign is applied —
+      // otherwise a descending sort would reverse them to the top, which is the
+      // failure mode "visibly last" exists to prevent.
+      if ((rankA === UNKNOWN_STATUS_RANK) !== (rankB === UNKNOWN_STATUS_RANK)) {
+        return rankA === UNKNOWN_STATUS_RANK ? 1 : -1;
+      }
+      primary = rankA - rankB;
+    } else {
+      primary = byName(a, b);
+    }
+    if (primary !== 0) return primary * sign;
+    return field === "name" ? 0 : byName(a, b);
+  });
 }

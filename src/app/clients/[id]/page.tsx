@@ -35,6 +35,9 @@ import {
   type OwnershipRequestStatus,
 } from "@/lib/ownership-requests";
 import { RequestOwnershipForm } from "./request-ownership-form";
+import { buildNoteList, type NoteRow } from "@/lib/note-history";
+import { NotesSection } from "./notes-section";
+import { AddNoteForm } from "./add-note-form";
 import {
   buildTimeline,
   type AuditRow,
@@ -69,6 +72,19 @@ type OwnerRow = {
  * `<section aria-labelledby>`, same shape as "Record sources" and this one, to
  * keep F067 AC2's "each reachable without excessive scrolling" true as they land.
  *
+ * F071 (#73) View Notes / F072 (#74) Add Note / F073 (#75) Edit Own Note / F074
+ * (#76) Delete Own Note are one such section: every `notes` row for this
+ * client, from any CAM (F071 AC1), newest first (F071 AC3). AddNoteForm posts
+ * to /api/clients/[id]/notes; NotesSection's inline edit/delete both post to
+ * /api/clients/[id]/notes/[noteId] — see @/lib/note-history for the
+ * ordering/permission logic shared by all three write paths. F074's own
+ * "blocked by" question (soft-delete vs hard-delete) is confirmed: hard
+ * delete, no retention anywhere, including in an audit trail — see that
+ * route's header comment for the reasoning. None of the three write paths
+ * touch `audit_log` — a plain author-owned write doesn't follow
+ * docs/audit-log-pattern.md, which scopes that requirement to
+ * ownership/status/role/approval changes.
+ *
  * F070 (#72) View Previous Emails is one such section: the Outreach card below
  * now shows every outreach_messages row for this client, split into "Sent" and
  * "Not sent" (AC3) — see @/lib/outreach-history for the split/order logic and
@@ -91,11 +107,7 @@ type OwnerRow = {
  * `supabase_realtime` publication (AC3 could not have worked). F076's own
  * "final event type list" open question is resolved by construction: every
  * type in @/lib/timeline.ts's TimelineEventType maps to a real, already-wired
- * data source — there is nowhere to invent a type with nothing behind it. The
- * Notes feature's own add/edit/delete UI (F071-F074) is not built on this
- * branch and is out of scope here — neither F075 nor F076 lists it as a
- * dependency, and the timeline reads `notes` directly regardless of whether a
- * UI exists to write to it.
+ * data source — there is nowhere to invent a type with nothing behind it.
  *
  * Started as F251 AC1/AC2's minimal client screen (name + suppression state only)
  * — see src/app/clients/page.tsx for that history. Extended here, not replaced.
@@ -244,6 +256,19 @@ export default async function ClientDetailPage({
 
   if (ownerError) {
     await reportError(ownerError, { operation: "clients.detail_owner", organisationId: id });
+  }
+
+  // F071/F072/F073/F074: every note against this client, whoever wrote it
+  // (F071 AC1). RLS (notes_select_active) shares read across every active
+  // role, so this needs no author filter — same reasoning as the sources
+  // query above.
+  const { data: noteRows, error: notesError } = await supabase
+    .from("notes")
+    .select("id, content, created_at, updated_at, author_id, author:users!notes_author_id_fkey(full_name)")
+    .eq("organisation_id", id);
+
+  if (notesError) {
+    await reportError(notesError, { operation: "clients.detail_notes", organisationId: id });
   }
 
   // F070: every outreach message for this client, sent or not. RLS
@@ -415,6 +440,11 @@ export default async function ClientDetailPage({
     }
     ownRequest = requestRow ?? null;
   }
+
+  const noteList = buildNoteList((noteRows ?? []) as unknown as NoteRow[], {
+    id: authorization.actor.id,
+    role: authorization.actor.role,
+  });
 
   const requestAvailability = ownershipRequestAvailability({
     ownerId,
@@ -678,6 +708,21 @@ export default async function ClientDetailPage({
                     </p>
                   )
                 )}
+              </SectionCard>
+            </Rise>
+
+            <Rise>
+              <SectionCard
+                headingId="notes-heading"
+                title="Notes"
+                hint="Left by any team member — relationship history everyone can see."
+              >
+                <NotesSection
+                  notes={noteList}
+                  error={Boolean(notesError)}
+                  organisationId={client.id}
+                />
+                {canEdit && <AddNoteForm organisationId={client.id} />}
               </SectionCard>
             </Rise>
 

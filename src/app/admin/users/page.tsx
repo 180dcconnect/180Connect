@@ -22,10 +22,18 @@ export default async function AdminUsersPage() {
   // Excludes rows with an invite still pending (invited_at set, not yet
   // accepted) — those are listed separately below, not mixed into the team
   // table, so the two lists stay mutually exclusive (F008 AC5).
+  // F188: excludes the fixed placeholder account (see
+  // create_deleted_user_placeholder_for_tags.sql) — a fake, never-active
+  // row that exists purely as a foreign-key target so a tag survives its
+  // real creator's account being deleted. It must never appear as if it
+  // were a real team member.
+  const DELETED_USER_PLACEHOLDER_ID = "00000000-0000-0000-0000-000000000001";
+
   const { data: users, error } = await supabase
     .from("users")
     .select("id, email, full_name, role, is_active, deactivated_at, last_seen_at")
     .or("invited_at.is.null,invite_accepted_at.not.is.null")
+    .neq("id", DELETED_USER_PLACEHOLDER_ID)
     .order("full_name");
 
   if (error) {

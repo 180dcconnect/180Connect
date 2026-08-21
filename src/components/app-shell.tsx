@@ -67,6 +67,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
 
   if (hasPermission(actor.role, "client:edit")) {
     sections[0].items.push({ href: "/clients/new", label: "Add client", icon: "add" });
+    sections[0].items.push({ href: "/admin/tags", label: "Tags", icon: "users" });
   }
 
   if (hasPermission(actor.role, "user:manage")) {

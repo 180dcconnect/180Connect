@@ -42,22 +42,38 @@ export function buildSupabaseTagInsertClient(
 ): TagInsertClient {
   return {
     async insertTag(name, createdByUserId) {
-      const { data, error } = await supabase
-        .from("tags")
-        .insert({ name, created_by_user_id: createdByUserId })
-        .select("id, name")
-        .single();
+      try {
+        const { data, error } = await supabase
+          .from("tags")
+          .insert({ name, created_by_user_id: createdByUserId })
+          .select("id, name")
+          .single();
 
-      if (error) {
+        if (error) {
+          await reportError(error, {
+            operation: "tags.create",
+            actorUserId: createdByUserId,
+          });
+          return { ok: false, code: error.code ?? null, message: error.message };
+        }
+        // data is guaranteed non-null here: .single() either returns a row
+        // or populates `error`, never both null.
+        return { ok: true, tag: data! };
+      } catch (thrown) {
+        // Review fix: a network failure or similar throws rather than
+        // resolving with { error }, and without this the caller would get
+        // an unhandled exception instead of the normal safe failure
+        // message. Caught here, logged the same way as a resolved error,
+        // and reported with the same safe code: null so createTagCore
+        // never sees a raw thrown value.
+        const error =
+          thrown instanceof Error ? thrown : new Error(String(thrown));
         await reportError(error, {
           operation: "tags.create",
           actorUserId: createdByUserId,
         });
-        return { ok: false, code: error.code ?? null, message: error.message };
+        return { ok: false, code: null, message: error.message };
       }
-      // data is guaranteed non-null here: .single() either returns a row
-      // or populates `error`, never both null.
-      return { ok: true, tag: data! };
     },
   };
 }

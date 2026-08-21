@@ -11,7 +11,9 @@ export type OrganisationSource = OrganisationSourceRow & {
   label: string;
 };
 
-const SOURCE_LABELS: Readonly<Record<string, string>> = {
+// Exported so field-sources.ts (F044) can label the same source values without
+// a second, potentially-drifting copy of this map.
+export const SOURCE_LABELS: Readonly<Record<string, string>> = {
   charitybase: "CharityBase",
   companies_house: "Companies House",
   charity_commission: "Charity Commission",

@@ -3,6 +3,7 @@
 import { useActionState, useState, type KeyboardEvent } from "react";
 import { OriginButton } from "@/components/ui/origin-button";
 import { saveOutreachPreferencesAction, type OutreachPreferencesState } from "./actions";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import {
   GEOGRAPHIC_REACH_OPTIONS,
   GEOGRAPHIC_REACH_LABELS,
@@ -152,13 +153,12 @@ export function OutreachPreferencesForm({
         >
           {pending ? "Saving..." : "Save preferences"}
         </OriginButton>
-        <p aria-live="polite" className="text-sm font-bold">
-          {state.message ? (
-            <span className={state.status === "error" ? "text-red-700" : "text-brand"}>
-              {state.message}
-            </span>
-          ) : null}
-        </p>
+        {state.message ? (
+          <InlineAlert
+            tone={state.status === "error" ? "error" : "success"}
+            message={state.message}
+          />
+        ) : null}
       </div>
     </form>
   );

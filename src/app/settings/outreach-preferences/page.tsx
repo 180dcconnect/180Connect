@@ -2,6 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
+import { reportError } from "@/lib/error-logging";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import { OutreachPreferencesForm } from "./preferences-form";
 import type { GeographicReach, IncomeBand } from "./constants";
 
@@ -22,10 +24,14 @@ export default async function OutreachPreferencesPage() {
   const supabase = await createClient();
   // RLS scopes this to the caller's own row (docs/rls-permission-matrix.md §3.13) —
   // no user_id filter needed here, there is nothing else this query could return.
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("outreach_preferences")
     .select("preferred_geographic_reach, preferred_sectors, preferred_income_bands")
     .maybeSingle<OutreachPreferencesRow>();
+
+  if (error) {
+    await reportError(error, { operation: "settings.outreach_preferences.page_load" });
+  }
 
   return (
     <main className="min-h-screen bg-[#f1f2f4] p-6">
@@ -45,11 +51,20 @@ export default async function OutreachPreferencesPage() {
           </Link>
         </div>
 
-        <OutreachPreferencesForm
-          initialGeographicReach={data?.preferred_geographic_reach ?? []}
-          initialSectors={data?.preferred_sectors ?? []}
-          initialIncomeBands={data?.preferred_income_bands ?? []}
-        />
+        {error ? (
+          <div className="mt-6">
+            <InlineAlert
+              variant="page"
+              message="Your preferences could not be loaded. Please refresh and try again."
+            />
+          </div>
+        ) : (
+          <OutreachPreferencesForm
+            initialGeographicReach={data?.preferred_geographic_reach ?? []}
+            initialSectors={data?.preferred_sectors ?? []}
+            initialIncomeBands={data?.preferred_income_bands ?? []}
+          />
+        )}
       </section>
     </main>
   );

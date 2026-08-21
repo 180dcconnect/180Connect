@@ -3,10 +3,13 @@
 import Link from "next/link";
 import { useActionState, useState } from "react";
 import { OriginButton } from "@/components/ui/origin-button";
+import { Input } from "@/components/ui/input";
 
 import { importFromUrl, type UrlImportState } from "./import-actions";
 
 const initialState: UrlImportState = { kind: "idle", message: "" };
+
+const EYEBROW = "text-[11px] font-bold uppercase tracking-[0.12em]";
 
 /**
  * F037 / F256 URL Import Component.
@@ -33,23 +36,19 @@ export function UrlImportForm() {
   const isDuplicateActive = state.kind === "duplicate" && state.duplicate && !discardedDuplicate;
 
   return (
-    <section className="mt-6 rounded-xl border border-black/10 bg-gray-50 p-5 shadow-xs">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-base font-bold text-foreground">Start from their website</h2>
-          <p className="mt-1 text-sm text-foreground/70">
-            Paste an organisation&apos;s website URL to retrieve publicly available information,
-            identify registration numbers, and pre-fill client details. Nothing is saved until you
-            review and submit.
-          </p>
-        </div>
-      </div>
+    <section className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm sm:p-6">
+      <h2 className={EYEBROW + " text-foreground/40"}>Start from their website</h2>
+      <p className="mt-1.5 max-w-prose text-[13px] leading-[1.6] text-foreground/50">
+        Paste an organisation&apos;s website URL to retrieve publicly available information,
+        identify registration numbers, and pre-fill client details. Nothing is saved until you
+        review and submit.
+      </p>
 
       <form action={action} className="mt-4 flex flex-wrap items-end gap-3">
-        <label className="min-w-64 flex-1 text-sm font-bold text-foreground">
+        <label className={`${EYEBROW} min-w-64 flex-1 text-foreground/70`}>
           Website address
-          <input
-            className="mt-1.5 w-full rounded-lg border border-black/20 bg-white px-3.5 py-2.5 text-sm transition-colors focus:border-brand focus:outline-hidden focus:ring-2 focus:ring-brand/20"
+          <Input
+            className="mt-1.5"
             defaultValue={state.sourceUrl ?? ""}
             inputMode="url"
             maxLength={2000}
@@ -72,11 +71,11 @@ export function UrlImportForm() {
       {/* State 1: URL Unreachable / No Usable Data / System Error (Red) */}
       {(state.kind === "unreachable" || state.kind === "error") && (
         <div
-          className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-950 shadow-xs"
+          className="mt-4 rounded-2xl border border-destructive/20 bg-destructive/[0.06] p-5"
           role="alert"
         >
           <div className="flex items-start gap-3">
-            <div className="mt-0.5 rounded-full bg-red-100 p-1 text-red-700">
+            <div className="mt-0.5 rounded-full bg-destructive/10 p-1 text-destructive">
               <svg
                 aria-hidden="true"
                 className="h-4 w-4"
@@ -91,9 +90,9 @@ export function UrlImportForm() {
               </svg>
             </div>
             <div className="flex-1 space-y-1">
-              <p className="font-bold text-red-900">{state.message}</p>
-              {state.detail && <p className="text-red-900/80">{state.detail}</p>}
-              <p className="pt-1 text-xs text-red-800/80">
+              <p className="text-sm font-bold text-destructive">{state.message}</p>
+              {state.detail && <p className="text-sm text-destructive/80">{state.detail}</p>}
+              <p className="pt-1 text-xs text-destructive/60">
                 Tip: Check the URL for typos, or proceed by entering the client details in the form
                 below.
               </p>
@@ -105,7 +104,7 @@ export function UrlImportForm() {
       {/* State 2: Data Returned But Below Minimum Threshold / Incomplete Profile (Amber) */}
       {state.kind === "insufficient" && (
         <div
-          className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 shadow-xs"
+          className="mt-4 rounded-2xl border border-amber-300/60 bg-amber-50/70 p-5"
           role="alert"
         >
           <div className="flex items-start gap-3">
@@ -125,14 +124,14 @@ export function UrlImportForm() {
             </div>
             <div className="flex-1 space-y-2">
               <div>
-                <p className="font-bold text-amber-900">{state.message}</p>
-                {state.detail && <p className="mt-0.5 text-amber-900/85">{state.detail}</p>}
+                <p className="text-sm font-bold text-amber-900">{state.message}</p>
+                {state.detail && <p className="mt-0.5 text-sm text-amber-900/85">{state.detail}</p>}
               </div>
 
               {state.notes && state.notes.length > 0 && (
-                <div className="rounded-lg bg-amber-100/60 p-3">
-                  <p className="text-xs font-bold text-amber-900 uppercase tracking-wider">
-                    Extracted Summary & Missing Details
+                <div className="rounded-xl bg-amber-100/60 p-3">
+                  <p className={EYEBROW + " text-amber-900"}>
+                    Extracted Summary &amp; Missing Details
                   </p>
                   <ul className="mt-1.5 list-disc space-y-1 pl-4 text-xs text-amber-900/90">
                     {state.notes.map((note) => (
@@ -144,7 +143,7 @@ export function UrlImportForm() {
 
               <div className="pt-1">
                 <button
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3.5 py-1.5 text-xs font-bold text-amber-900 shadow-2xs hover:bg-amber-100/50"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-white px-4 py-2 text-xs font-bold text-amber-900 transition-colors hover:bg-amber-100/50"
                   onClick={scrollToManualForm}
                   type="button"
                 >
@@ -160,7 +159,7 @@ export function UrlImportForm() {
       {/* State 3: Duplicate Record Detected / Existing Charity (Indigo / Blue) */}
       {isDuplicateActive && state.duplicate && (
         <div
-          className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-950 shadow-xs"
+          className="mt-4 rounded-2xl border border-indigo-200 bg-indigo-50/70 p-5"
           role="alert"
         >
           <div className="flex items-start gap-3">
@@ -180,18 +179,16 @@ export function UrlImportForm() {
             <div className="flex-1 space-y-3">
               <div>
                 <div className="flex items-center gap-2">
-                  <p className="font-bold text-indigo-900">{state.message}</p>
-                  <span className="rounded-full bg-indigo-200/70 px-2 py-0.5 text-2xs font-bold text-indigo-900 uppercase">
+                  <p className="text-sm font-bold text-indigo-900">{state.message}</p>
+                  <span className="rounded-full bg-indigo-200/70 px-2.5 py-0.5 text-[10px] font-bold text-indigo-900 uppercase tracking-[0.1em]">
                     Duplicate Prevention
                   </span>
                 </div>
-                {state.detail && <p className="mt-0.5 text-indigo-900/80">{state.detail}</p>}
+                {state.detail && <p className="mt-0.5 text-sm text-indigo-900/80">{state.detail}</p>}
               </div>
 
-              <div className="rounded-lg border border-indigo-200 bg-white p-3 shadow-2xs">
-                <p className="text-xs font-bold text-foreground/60 uppercase tracking-wider">
-                  Existing Client Match
-                </p>
+              <div className="rounded-xl border border-indigo-200 bg-white p-3">
+                <p className={EYEBROW + " text-foreground/60"}>Existing Client Match</p>
                 <p className="mt-1 text-sm font-bold text-indigo-950">
                   {state.duplicate.legalName}
                 </p>
@@ -213,14 +210,14 @@ export function UrlImportForm() {
 
               <div className="flex flex-wrap items-center gap-2.5 pt-1">
                 <Link
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-700 px-3.5 py-2 text-xs font-bold text-white shadow-2xs transition-colors hover:bg-indigo-800"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-indigo-700 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-indigo-800"
                   href={`/clients/${state.duplicate.organisationId}`}
                 >
                   <span>View existing client profile</span>
                   <span aria-hidden="true">→</span>
                 </Link>
                 <button
-                  className="rounded-lg border border-indigo-300 bg-white px-3.5 py-2 text-xs font-bold text-indigo-900 shadow-2xs hover:bg-indigo-100/50"
+                  className="rounded-full border border-indigo-300 bg-white px-4 py-2 text-xs font-bold text-indigo-900 transition-colors hover:bg-indigo-100/50"
                   onClick={() => setDiscardedDuplicate(true)}
                   type="button"
                 >

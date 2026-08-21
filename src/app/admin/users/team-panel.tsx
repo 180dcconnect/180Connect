@@ -8,9 +8,9 @@ import {
   type TeamPanelState,
   type TeamUser,
 } from "@/lib/admin/team-realtime";
-import { InviteForm } from "./invite-form";
 import { PendingInvitesList } from "./pending-invites-list";
 import { UserManagementTable } from "./user-management-table";
+import { Group, Rise } from "@/components/dashboard-stage";
 
 export function TeamPanel({
   currentUserId,
@@ -97,19 +97,28 @@ export function TeamPanel({
 
   return (
     <>
-      <UserManagementTable
-        currentUserId={currentUserId}
-        setUsers={setTeamUsers}
-        users={state.teamUsers}
-      />
+      <Group className="space-y-4">
+        <Rise>
+          <div className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm overflow-hidden">
+            <UserManagementTable
+              currentUserId={currentUserId}
+              setUsers={setTeamUsers}
+              users={state.teamUsers}
+            />
+          </div>
+        </Rise>
+      </Group>
 
-      <hr className="my-8 border-black/10" />
-
-      <h2 className="text-xl font-bold">Invite a team member</h2>
-      <InviteForm />
-
-      <h2 className="mt-8 text-xl font-bold">Pending invites</h2>
-      <PendingInvitesList error={pendingInvitesError} invites={state.pendingInvites} />
+      <Group className="mt-10 space-y-4">
+        <Rise className="flex items-baseline justify-between gap-4">
+          <h2 className="text-xl font-semibold font-body tracking-[-0.02em]">Pending invites</h2>
+        </Rise>
+        <Rise>
+          <div className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm">
+            <PendingInvitesList error={pendingInvitesError} invites={state.pendingInvites} />
+          </div>
+        </Rise>
+      </Group>
     </>
   );
 }

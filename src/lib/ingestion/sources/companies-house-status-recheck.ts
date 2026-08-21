@@ -111,6 +111,7 @@ export async function runCompaniesHouseStatusRecheck(
       p_company_number: after.source_record_id,
       p_previous_status: oldStatus,
       p_new_status: newStatus,
+      p_source: "companies_house",
     });
     if (rpcError) {
       await reportError(rpcError, {
@@ -120,6 +121,22 @@ export async function runCompaniesHouseStatusRecheck(
       continue;
     }
     flagged++;
+  }
+
+  // F049 AC3: the flagged count must be part of the run's persistent history
+  // (ingestion_runs), not only the digest email below — an admin looking at a past
+  // run should be able to see how many records it flagged the same way they can
+  // already see how many it failed.
+  if (summary.runId) {
+    const { error: flagCountError } = await supabase
+      .from("ingestion_runs")
+      .update({ records_flagged: flagged })
+      .eq("id", summary.runId);
+    if (flagCountError) {
+      await reportError(flagCountError, {
+        operation: "ingestion.companies_house.status_recheck.record_flagged_count",
+      });
+    }
   }
 
   await sendCompaniesHouseStatusDigest({ flagged });

@@ -1,6 +1,14 @@
 "use client";
 
 import { useState, type Dispatch, type SetStateAction } from "react";
+import Link from "next/link";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export type TeamUser = {
   id: string;
@@ -14,7 +22,16 @@ export type TeamUser = {
    * this only says which kind of inactive they are.
    */
   deactivated_at: string | null;
+  /** Last time this user was seen on any signed-in page — not last login. Null if never. */
+  last_seen_at: string | null;
   owned_client_count: number;
+  /**
+   * F167. The subset of `owned_client_count` that /clients actually lists —
+   * actively-suppressed clients are hidden there (F051 AC4). This is what the
+   * Clients column links through to; `owned_client_count` stays the number the
+   * reassignment gate reasons about, which has to include the suppressed ones.
+   */
+  listed_client_count: number;
 };
 
 type AccessState = "active" | "suspended" | "deactivated";
@@ -22,6 +39,20 @@ type AccessState = "active" | "suspended" | "deactivated";
 function accessState(user: TeamUser): AccessState {
   if (user.is_active) return "active";
   return user.deactivated_at ? "deactivated" : "suspended";
+}
+
+/**
+ * What the Clients cell promises before it is clicked. Suppressed clients are
+ * owned but not listed, so they are named rather than silently missing from the
+ * list the admin lands on.
+ */
+function clientsLinkTitle(user: TeamUser): string {
+  const listed = user.listed_client_count;
+  const hidden = user.owned_client_count - listed;
+  const base = `View ${listed} client${listed === 1 ? "" : "s"} owned by ${displayName(user)}`;
+  return hidden > 0
+    ? `${base} (${hidden} more suppressed, not listed)`
+    : base;
 }
 
 const ACCESS_LABEL: Record<AccessState, string> = {
@@ -32,6 +63,23 @@ const ACCESS_LABEL: Record<AccessState, string> = {
 
 function displayName(user: TeamUser) {
   return user.full_name ?? user.email;
+}
+
+/**
+ * "Last active" — not last login. `last_seen_at` is touched on every signed-in page
+ * and admin API request (getCurrentActor), throttled to once per 5 minutes per user.
+ */
+function lastActiveLabel(lastSeenAt: string | null): string {
+  if (!lastSeenAt) return "Never";
+  const elapsedMs = Date.now() - new Date(lastSeenAt).getTime();
+  if (elapsedMs < 60_000) return "Just now";
+  const minutes = Math.floor(elapsedMs / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(lastSeenAt).toLocaleDateString();
 }
 
 export function UserManagementTable({
@@ -107,7 +155,7 @@ export function UserManagementTable({
       setUsers((current) =>
         current.map((user) =>
           user.id === userId
-            ? { ...user, ...result.user, owned_client_count: 0 }
+            ? { ...user, ...result.user, owned_client_count: 0, listed_client_count: 0 }
             : user,
         ),
       );
@@ -143,7 +191,7 @@ export function UserManagementTable({
 
   return (
     <>
-      <p aria-live="polite" className="mt-5 min-h-6 text-sm font-bold">
+      <p aria-live="polite" className="mb-2 min-h-5 text-sm font-bold">
         {message}
       </p>
 
@@ -168,11 +216,12 @@ export function UserManagementTable({
         <table className="w-full border-collapse text-left text-sm">
           <thead>
             <tr className="border-b border-black/10">
-              <th className="p-3">Member</th>
-              <th className="p-3">Role</th>
-              <th className="p-3">Clients</th>
-              <th className="p-3">Status</th>
-              <th className="p-3">Access</th>
+              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Member</th>
+              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Role</th>
+              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Clients</th>
+              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Last active</th>
+              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Status</th>
+              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Access</th>
             </tr>
           </thead>
           <tbody>
@@ -181,29 +230,62 @@ export function UserManagementTable({
               return (
                 <tr className="border-b border-black/5" key={user.id}>
                   <td className="p-3">
-                    <span className="block font-bold">{user.full_name ?? "Unnamed user"}</span>
+                    <Link
+                      href={`/team/${user.id}`}
+                      className="block font-bold hover:text-brand hover:underline"
+                    >
+                      {user.full_name ?? "Unnamed user"}
+                    </Link>
                     <span className="text-foreground/60">{user.email}</span>
+                    {user.role === "cam" && (
+                      <span className="block mt-1">
+                        <Link
+                          href={`/admin/cam-settings?user=${user.id}`}
+                          className="text-xs font-medium text-brand hover:underline"
+                        >
+                          Queue settings →
+                        </Link>
+                      </span>
+                    )}
                   </td>
                   <td className="p-3">
-                    <select
-                      aria-label={`Role for ${user.email}`}
-                      className="rounded-lg border border-black/15 bg-white px-3 py-2"
+                    <Select
                       disabled={savingId === user.id || user.id === currentUserId}
-                      onChange={(event) =>
+                      onValueChange={(value) =>
                         updateUser(
                           user.id,
-                          { role: event.target.value as TeamUser["role"] },
+                          { role: value as TeamUser["role"] },
                           "Role updated successfully.",
                         )
                       }
                       value={user.role}
                     >
-                      <option value="cam">CAM</option>
-                      <option value="admin">Admin</option>
-                      <option value="viewer">Viewer</option>
-                    </select>
+                      <SelectTrigger aria-label={`Role for ${user.email}`} className="w-fit bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cam">CAM</SelectItem>
+                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="viewer">Viewer</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </td>
-                  <td className="p-3">{user.owned_client_count}</td>
+                  <td className="p-3">
+                    {user.listed_client_count > 0 ? (
+                      <Link
+                        href={`/clients?owner=${user.id}`}
+                        className="font-bold text-brand hover:underline"
+                        title={clientsLinkTitle(user)}
+                      >
+                        {user.listed_client_count}
+                      </Link>
+                    ) : (
+                      <span className="text-foreground/40" title={clientsLinkTitle(user)}>
+                        {user.listed_client_count}
+                      </span>
+                    )}
+                  </td>
+                  <td className="p-3 text-foreground/60">{lastActiveLabel(user.last_seen_at)}</td>
                   <td className="p-3">
                     <span
                       className={
@@ -376,22 +458,22 @@ function OffboardingForm({
                   value="reassign"
                 />
                 Reassign to
-                <select
-                  aria-label="New owner"
-                  className="rounded-lg border border-black/15 bg-white px-3 py-2"
+                <Select
                   disabled={effectiveDestination !== "reassign"}
-                  onChange={(event) => setReassignTo(event.target.value)}
+                  onValueChange={setReassignTo}
                   value={reassignTo}
                 >
-                  <option disabled value="">
-                    Choose a team member…
-                  </option>
-                  {eligibleOwners.map((owner) => (
-                    <option key={owner.id} value={owner.id}>
-                      {displayName(owner)}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger aria-label="New owner" className="w-fit bg-white">
+                    <SelectValue placeholder="Choose a team member…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {eligibleOwners.map((owner) => (
+                      <SelectItem key={owner.id} value={owner.id}>
+                        {displayName(owner)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </label>
               <label className="mt-2 flex items-center gap-2 text-sm">
                 <input

@@ -18,7 +18,9 @@ function teamUser(overrides: Partial<TeamUser> = {}): TeamUser {
     role: "cam",
     is_active: true,
     deactivated_at: null,
+    last_seen_at: null,
     owned_client_count: 2,
+    listed_client_count: 2,
     ...overrides,
   };
 }
@@ -82,11 +84,12 @@ describe("applyRealtimeUserChange", () => {
         email: "b@180dc.org",
         full_name: "Bea",
         owned_client_count: 0,
+        listed_client_count: 0,
       }),
     ]);
   });
 
-  it("applies a role/suspension change to an existing team member, preserving owned_client_count", () => {
+  it("applies a role/suspension change to an existing team member, preserving the client counts", () => {
     const state: TeamPanelState = {
       teamUsers: [teamUser()],
       pendingInvites: [],
@@ -106,7 +109,7 @@ describe("applyRealtimeUserChange", () => {
     });
 
     assert.deepEqual(next.teamUsers, [
-      teamUser({ role: "admin", is_active: false, owned_client_count: 2 }),
+      teamUser({ role: "admin", is_active: false, owned_client_count: 2, listed_client_count: 2 }),
     ]);
   });
 

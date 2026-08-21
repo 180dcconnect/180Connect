@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 
 export type DataQualityEventRow = {
   id: string;
@@ -19,6 +20,7 @@ export type DataQualityEventRow = {
 export type StatusFlagRow = {
   id: string;
   organisation_id: string;
+  source: string;
   company_number: string;
   previous_status: string;
   new_status: string;
@@ -33,10 +35,21 @@ const RULE_LABEL: Record<string, string> = {
   client_criteria_does_not_meet: "Does not meet criteria",
 };
 
+const SOURCE_LABEL: Record<string, string> = {
+  companies_house: "Companies House",
+  charity_commission: "Charity Commission",
+};
+
+function sourceLabel(source: string): string {
+  return SOURCE_LABEL[source] ?? source;
+}
+
 function recordName(payload: unknown): string {
   if (payload && typeof payload === "object") {
     const record = payload as Record<string, unknown>;
-    const name = record.company_name ?? record.name;
+    // company_name (Companies House), charity_name (Charity Commission), name
+    // (a fallback for any other source's raw_payload shape).
+    const name = record.company_name ?? record.charity_name ?? record.name;
     if (typeof name === "string" && name.trim()) return name;
   }
   return "Unknown record";
@@ -96,11 +109,12 @@ export function ReviewPanel({
       <p aria-live="polite" className="min-h-6 text-sm font-bold">{message}</p>
 
       <div>
-        <h2 className="text-sm font-bold">Companies House status changes</h2>
+        <h2 className="text-sm font-bold">Status changes</h2>
         <p className="mt-1 text-sm text-foreground/65">
-          An organisation&apos;s Companies House status changed away from active.
-          Outreach status is never changed automatically — decide what, if
-          anything, this means for any in-progress outreach.
+          An organisation&apos;s Companies House or Charity Commission status
+          changed away from active/registered. Outreach status is never changed
+          automatically — decide what, if anything, this means for any
+          in-progress outreach.
         </p>
         {openFlags.length === 0 ? (
           <p className="mt-3 text-sm text-foreground/65">Nothing to review.</p>
@@ -110,7 +124,7 @@ export function ReviewPanel({
               <li key={flag.id} className="rounded-xl border border-black/10 p-4">
                 <p className="font-bold">{flag.organisations?.legal_name ?? "Unknown organisation"}</p>
                 <p className="mt-1 text-sm text-foreground/75">
-                  {flag.company_number}: {flag.previous_status} → {flag.new_status}
+                  {sourceLabel(flag.source)} {flag.company_number}: {flag.previous_status} → {flag.new_status}
                 </p>
                 <p className="mt-1 text-xs text-foreground/50">
                   Detected {new Date(flag.detected_at).toLocaleString("en-GB")}
@@ -128,14 +142,15 @@ export function ReviewPanel({
                   rows={2}
                   value={notes[flag.id] ?? ""}
                 />
-                <button
-                  className="mt-3 rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                <OriginButton
+                  className="mt-3"
                   disabled={busy}
+                  size="sm"
                   onClick={() => decide("status_flag", flag.id, "Acknowledged.")}
                   type="button"
                 >
                   Acknowledge
-                </button>
+                </OriginButton>
               </li>
             ))}
           </ul>
@@ -175,14 +190,15 @@ export function ReviewPanel({
                   rows={2}
                   value={notes[event.id] ?? ""}
                 />
-                <button
-                  className="mt-3 rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                <OriginButton
+                  className="mt-3"
                   disabled={busy}
+                  size="sm"
                   onClick={() => decide("data_quality_event", event.id, "Marked reviewed.")}
                   type="button"
                 >
                   Mark reviewed
-                </button>
+                </OriginButton>
               </li>
             ))}
           </ul>
@@ -212,7 +228,7 @@ export function ReviewPanel({
                       {flag.organisations?.legal_name ?? "Unknown organisation"}
                     </td>
                     <td className="py-3 pr-4 text-foreground/75">
-                      {flag.previous_status} → {flag.new_status}
+                      {sourceLabel(flag.source)}: {flag.previous_status} → {flag.new_status}
                     </td>
                     <td className="py-3 whitespace-nowrap text-foreground/65">
                       {flag.resolved_at ? new Date(flag.resolved_at).toLocaleString("en-GB") : "—"}

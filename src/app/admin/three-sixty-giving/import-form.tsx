@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 import { importThreeSixtyGiving, type ThreeSixtyGivingImportState } from "./actions";
 
 const initialImportState: ThreeSixtyGivingImportState = {
@@ -27,13 +28,14 @@ export function ThreeSixtyGivingImportForm() {
         For a single known charity or company, use the lookup below instead.
       </p>
       <form action={action} className="mt-5">
-        <button
-          className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
+        <OriginButton
           disabled={pending}
+          loading={pending}
+          size="md"
           type="submit"
         >
           {pending ? "Importing…" : "Import 360Giving data"}
-        </button>
+        </OriginButton>
       </form>
       {state.kind !== "idle" && (
         <div className={`mt-5 rounded-lg p-4 text-sm ${stateStyles[state.kind]}`} role={state.kind === "error" ? "alert" : "status"}>

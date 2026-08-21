@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useActionState, useCallback, useState } from "react";
 import type { LoginState } from "@/lib/auth/login";
 import { login } from "./actions";
@@ -8,20 +7,32 @@ import {
   CAPTCHA_HINT_ID,
   TurnstileChallenge,
 } from "@/components/turnstile-challenge";
+import { BrandCtaButton } from "@/components/brand/brand-cta";
+import {
+  bannerClass,
+  fieldClass,
+  fieldErrorClass,
+  fieldWithAffordanceClass,
+  iconButtonClass,
+  quietLinkClass,
+  type FieldTone,
+} from "@/components/brand/fields";
+import {
+  FloatingInput,
+  FloatingLabel,
+  FloatingLabelInput,
+} from "@/components/spectrumui/floating-label-input";
 
 const initialLoginState: LoginState = { status: "idle" };
 
-const inputBase =
-  "h-10 rounded-lg border border-black/10 bg-[#fafafa] text-sm outline-none transition-colors placeholder:text-foreground/35 focus-visible:border-brand focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-brand/20 aria-invalid:border-red-500 aria-invalid:ring-2 aria-invalid:ring-red-500/20";
-
-const inputClass = `${inputBase} px-3`;
-
-// The password field carries a reveal button inside its right edge, so its
-// padding is written per-side. Appending `pr-10` to `inputClass` would leave two
-// competing utilities and depend on Tailwind's output order to resolve them.
-const passwordInputClass = `${inputBase} w-full pl-3 pr-10`;
-
-export function LoginForm() {
+export function LoginForm({
+  tone = "light",
+  onForgotPassword,
+}: {
+  tone?: FieldTone;
+  /** Swaps the dialog to its reset panel rather than navigating away. */
+  onForgotPassword: () => void;
+}) {
   const [state, formAction, pending] = useActionState(login, initialLoginState);
   const emailError = state.fieldErrors?.email?.[0];
   const passwordError = state.fieldErrors?.password?.[0];
@@ -56,27 +67,23 @@ export function LoginForm() {
     <form
       action={formAction}
       onSubmit={onSubmit}
-      className="mt-8 flex flex-col gap-4"
+      className="mt-8 flex flex-col gap-5"
       noValidate
     >
       {state.message && (
         <div
           role={state.status === "error" ? "alert" : "status"}
-          className={`rounded-lg border px-3 py-2.5 text-xs leading-relaxed ${
-            state.status === "pending"
-              ? "border-amber-300 bg-amber-50 text-amber-900"
-              : "border-red-200 bg-red-50 text-red-700"
-          }`}
+          className={bannerClass(
+            tone,
+            state.status === "pending" ? "pending" : "error",
+          )}
         >
           {state.message}
         </div>
       )}
 
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="email" className="text-xs font-bold">
-          Email address
-        </label>
-        <input
+      <div className="flex flex-col gap-1">
+        <FloatingLabelInput
           id="email"
           name="email"
           type="email"
@@ -85,41 +92,31 @@ export function LoginForm() {
           defaultValue={state.email}
           aria-invalid={Boolean(emailError)}
           aria-describedby={emailError ? "email-error" : undefined}
-          placeholder="name@180dc.org"
-          className={inputClass}
+          className={fieldClass(tone)}
+          label="Email address"
           required
         />
         {emailError && (
-          <p id="email-error" className="text-xs text-red-700">
+          <p id="email-error" className={fieldErrorClass(tone)}>
             {emailError}
           </p>
         )}
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-baseline justify-between">
-          <label htmlFor="password" className="text-xs font-bold">
-            Password
-          </label>
-          <Link
-            href="/forgot-password"
-            className="text-xs text-foreground/50 underline-offset-4 hover:text-brand hover:underline"
-          >
-            Forgot password?
-          </Link>
-        </div>
-        <div className="relative flex">
-          <input
+      <div className="flex flex-col gap-1">
+        <div className="relative">
+          <FloatingInput
             id="password"
             name="password"
             type={passwordVisible ? "text" : "password"}
             autoComplete="current-password"
             aria-invalid={Boolean(passwordError)}
             aria-describedby={passwordError ? "password-error" : undefined}
-            placeholder="Enter your password"
-            className={passwordInputClass}
+            className={fieldWithAffordanceClass(tone)}
             required
           />
+          <FloatingLabel htmlFor="password">Password</FloatingLabel>
+
           {/*
             type="button" is load-bearing: a bare <button> inside a form defaults
             to submit, so revealing the password would post the form instead.
@@ -134,7 +131,7 @@ export function LoginForm() {
             onClick={() => setPasswordVisible((visible) => !visible)}
             aria-label={passwordVisible ? "Hide password" : "Show password"}
             aria-controls="password"
-            className="absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-r-lg text-foreground/45 transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            className={iconButtonClass(tone)}
           >
             {passwordVisible ? (
               // Eye with a slash — pressing it hides the password again.
@@ -170,8 +167,17 @@ export function LoginForm() {
             )}
           </button>
         </div>
+        <div className="flex justify-end pt-1">
+          <button
+            type="button"
+            onClick={onForgotPassword}
+            className={quietLinkClass(tone)}
+          >
+            Forgot password?
+          </button>
+        </div>
         {passwordError && (
-          <p id="password-error" className="text-xs text-red-700">
+          <p id="password-error" className={fieldErrorClass(tone)}>
             {passwordError}
           </p>
         )}
@@ -183,16 +189,18 @@ export function LoginForm() {
         action="log in"
         gerund="logging in"
         resetKey={state}
+        tone={tone}
       />
 
-      <button
-        type="submit"
+      {/* The page's one lime element. Same two-capsule CTA the landing page
+          leads with, so signing in is visibly the same action as "Get Started". */}
+      <BrandCtaButton
+        label={pending ? "Logging in…" : "Log in"}
         disabled={pending || !solved}
-        aria-describedby={solved ? undefined : CAPTCHA_HINT_ID}
-        className="mt-2 h-10 rounded-full bg-brand text-sm font-bold text-white transition-colors hover:bg-brand-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {pending ? "Logging in..." : "Log in"}
-      </button>
+        describedBy={solved ? undefined : CAPTCHA_HINT_ID}
+        tone={tone === "dark" ? "sheet" : "glass"}
+        className="mt-1 self-start"
+      />
     </form>
   );
 }

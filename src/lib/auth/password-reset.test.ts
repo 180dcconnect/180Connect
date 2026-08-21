@@ -85,6 +85,7 @@ describe("validation", () => {
 
   it("blames the confirmation field when the two do not match", () => {
     const result = newPasswordSchema.safeParse({
+      fullName: "Jane CAM",
       password: "A-secure-password-123",
       confirmPassword: "A-secure-password-124",
     });

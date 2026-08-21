@@ -57,18 +57,18 @@ export function PendingInvitesList({
 
   if (error) {
     return (
-      <p className="mt-3 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-800" role="alert">
+      <p className="rounded-xl bg-red-50 p-4 text-sm font-bold text-red-800" role="alert">
         Pending invites could not be loaded. Please refresh and try again.
       </p>
     );
   }
 
   if (invites.length === 0) {
-    return <p className="mt-3 text-sm text-foreground/60">No pending invites.</p>;
+    return <p className="text-sm text-foreground/60">No pending invites.</p>;
   }
 
   return (
-    <ul className="mt-3 divide-y divide-black/5 text-sm">
+    <ul className="divide-y divide-black/5 text-sm">
       {invites.map((invite) => {
         const result = results[invite.id];
         const expired = isInviteExpired(invite.invited_at);
@@ -84,7 +84,7 @@ export function PendingInvitesList({
               </span>
               <div className="flex items-center gap-3">
                 <span className="text-foreground/60">
-                  Invited {new Date(invite.invited_at).toLocaleDateString()}
+                  Invited {new Date(invite.invited_at).toLocaleDateString("en-GB")}
                   {expired && <span className="ml-2 font-bold text-red-700">Expired</span>}
                 </span>
                 <button

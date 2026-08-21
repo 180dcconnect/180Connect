@@ -461,3 +461,14 @@
 | 03 Raw Data | DATA_HANDLING_RULES | id | uuid |  | Primary key |
 | 03 Raw Data | DATA_HANDLING_RULES | rule_version | integer |  | The global rule version at the time this rule was created or last toggled |
 | 03 Raw Data | DATA_HANDLING_RULES | source | enum |  | Which source the rule applies to; null applies to every source |
+| 04 Entities | NOTIFICATIONS | id | uuid |  | Primary key |
+| 04 Entities | NOTIFICATIONS | recipient_user_id | uuid | USERS | User the notification is for |
+| 04 Entities | NOTIFICATIONS | actor_user_id | uuid | USERS | User whose action triggered the notification |
+| 04 Entities | NOTIFICATIONS | notification_type | enum |  | What kind of notification |
+| 04 Entities | NOTIFICATIONS | title | text |  | Short headline shown in the bell panel |
+| 04 Entities | NOTIFICATIONS | body | text |  | Optional longer description |
+| 04 Entities | NOTIFICATIONS | link_path | text |  | In-app route to navigate to on click |
+| 04 Entities | NOTIFICATIONS | target_table | text |  | Table of the linked record |
+| 04 Entities | NOTIFICATIONS | target_id | uuid |  | ID of the linked record |
+| 04 Entities | NOTIFICATIONS | read_at | timestamp |  | When the recipient marked it read |
+| 04 Entities | NOTIFICATIONS | created_at | timestamp |  | Row creation timestamp |

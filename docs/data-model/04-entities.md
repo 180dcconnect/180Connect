@@ -241,3 +241,19 @@
 | decided_at | timestamp |  | Yes | When decided |  |  | Null while pending |
 | decision_note | text |  | Yes | Optional admin note |  |  | Only reason is mandatory |
 | created_at | timestamp |  | No | Row creation timestamp |  |  | Auto-generated |
+
+## NOTIFICATIONS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| recipient_user_id | uuid | USERS | No | User the notification is for | System | Set when the triggering event creates the row | Wrong-recipient prevention relies on this + RLS |
+| actor_user_id | uuid | USERS | Yes | User whose action triggered the notification | System | Set by the creating code path when human-triggered | Null for system/scheduled reminders |
+| notification_type | enum |  | No | What kind of notification | System | Set when created | reply_received / reminder / team_activity / ownership_change / data_quality — extensible via migration |
+| title | text |  | No | Short headline shown in the bell panel | System | Set when created |  |
+| body | text |  | Yes | Optional longer description | System | Set when created |  |
+| link_path | text |  | Yes | In-app route to navigate to on click | System | Set when created | e.g. /clients/{id} — drives linked-record navigation AC |
+| target_table | text |  | Yes | Table of the linked record | System | Set when created | For future deep-linking/filtering |
+| target_id | uuid |  | Yes | ID of the linked record | System | Set when created |  |
+| read_at | timestamp |  | Yes | When the recipient marked it read | Human/System | Set by mark-as-read RPC; auto-set on click-open | Null = unread. Included now so F177 needs no second migration |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |

@@ -23,6 +23,7 @@ function org(overrides: Partial<ClientListRow> = {}): ClientListRow {
     outreach_status: "not_contacted",
     owner_id: null,
     owner: null,
+    org_tags: [],
     ...overrides,
   };
 }

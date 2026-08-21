@@ -9,6 +9,7 @@ import { InlineAlert } from "@/components/ui/inline-alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
   filterByOwner,
+  filterByTags,
   filterByCity,
   filterByStatus,
   filterBySource,
@@ -48,6 +49,7 @@ type SearchParams = Promise<{
   owner?: string;
   q?: string;
   page?: string;
+  tags?: string | string[];
   city?: string;
   status?: string;
   source?: string;
@@ -110,6 +112,7 @@ export default async function ClientsPage({
     owner: ownerFilter,
     q: search,
     page: pageParam,
+    tags: tagsParam,
     city,
     status,
     source,
@@ -118,15 +121,24 @@ export default async function ClientsPage({
     dir: dirParam,
   } = await searchParams;
 
+  // Same-name checkboxes submit as a repeated query param; Next.js gives us
+  // either a single string (one checked) or string[] (several), normalise
+  // to an array either way.
+  const tagFilter = tagsParam
+    ? Array.isArray(tagsParam)
+      ? tagsParam
+      : [tagsParam]
+    : [];
+
   const supabase = await createClient();
   const canClaim = hasPermission(authorization.actor.role, "client:edit");
   const isAdmin = authorization.actor.role === "admin";
 
-  const [organisations, openSuppressions, team] = await Promise.all([
+  const [organisations, openSuppressions, team, allTags] = await Promise.all([
     supabase
       .from("organisations")
       .select(
-        "id, legal_name, organisation_type, city, country_code, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
+        "id, legal_name, organisation_type, city, country_code, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id)",
       )
       .order("legal_name")
       .overrideTypes<ClientListRow[], { merge: false }>(),
@@ -141,6 +153,11 @@ export default async function ClientsPage({
       .eq("role", "cam")
       .order("full_name")
       .overrideTypes<TeamMember[], { merge: false }>(),
+    supabase
+      .from("tags")
+      .select("id, name")
+      .order("name")
+      .overrideTypes<{ id: string; name: string }[], { merge: false }>(),
   ]);
 
   if (organisations.error) {
@@ -151,6 +168,9 @@ export default async function ClientsPage({
   }
   if (team.error) {
     await reportError(team.error, { operation: "clients.page_team" });
+  }
+  if (allTags.error) {
+    await reportError(allTags.error, { operation: "clients.page_tags" });
   }
 
   const allVisibleClients = visibleClients(organisations.data ?? [], openSuppressions.data ?? []);
@@ -163,6 +183,7 @@ export default async function ClientsPage({
 
   let matchingClients = allVisibleClients;
   matchingClients = filterByOwner(matchingClients, ownerFilter);
+  matchingClients = filterByTags(matchingClients, tagFilter);
   matchingClients = filterByCity(matchingClients, city);
   matchingClients = filterByStatus(matchingClients, status);
   matchingClients = filterBySource(matchingClients, source);
@@ -179,7 +200,8 @@ export default async function ClientsPage({
         allVisibleClients.find((client) => client.owner_id === ownerFilter)?.ownerName ??
         "Unnamed team member")
       : null;
-  const filterActive = Boolean(ownerFilter || search || city || status || source);
+  const availableTags = allTags.data ?? [];
+  const filterActive = Boolean(ownerFilter || search || city || status || source || tagFilter.length > 0);
   // F166 AC1/AC3: this is the CAM viewing their own filter, not just any owner
   // filter — the heading, count label and empty state read "your clients" so the
   // view reads as its own thing rather than a generic filtered list.
@@ -201,10 +223,11 @@ export default async function ClientsPage({
    * all go through here rather than each rebuilding the query string and quietly
    * dropping the parameters it doesn't know about. `undefined` clears a key.
    */
-  const hrefWith = (changes: Record<string, string | number | undefined>) => {
-    const base: Record<string, string | number | undefined> = {
+  const hrefWith = (changes: Record<string, string | string[] | number | undefined>) => {
+    const base: Record<string, string | string[] | number | undefined> = {
       owner: ownerFilter,
       q: search,
+      tags: tagFilter,
       city,
       status,
       source,
@@ -221,7 +244,11 @@ export default async function ClientsPage({
     for (const [key, value] of Object.entries(base)) {
       if (value === undefined || value === "") continue;
       if (key === "page" && Number(value) <= 1) continue;
-      params.set(key, String(value));
+      if (Array.isArray(value)) {
+        for (const v of value) params.append(key, v);
+      } else {
+        params.set(key, String(value));
+      }
     }
     const qs = params.toString();
     return qs ? `/clients?${qs}` : "/clients";
@@ -279,13 +306,18 @@ export default async function ClientsPage({
                 ...(status ? [{ category: "Filter by outreach status", label: status, value: status }] : []),
                 ...(source ? [{ category: "Filter by source", label: source, value: source }] : []),
                 ...(ownerFilter === "unassigned" ? [{ category: "Filter by owner", label: "Unassigned", value: "unassigned" }] : []),
-                ...(ownerFilterLabel ? [{ category: "Filter by owner", label: ownerFilterLabel, value: ownerFilter as string }] : [])
+                ...(ownerFilterLabel ? [{ category: "Filter by owner", label: ownerFilterLabel, value: ownerFilter as string }] : []),
+                ...tagFilter.map(t => {
+                   const tag = availableTags.find(x => x.id === t);
+                   return { category: "Filter by tag", label: tag ? tag.name : t, value: t };
+                })
               ]}
               params={{
                 "Filter by city": "city",
                 "Filter by outreach status": "status",
                 "Filter by source": "source",
                 "Filter by owner": "owner",
+                "Filter by tag": "tags",
               }}
               categories={{
                 "Filter by city": uniqueCities.map(c => ({ label: c, value: c })),
@@ -294,7 +326,8 @@ export default async function ClientsPage({
                 "Filter by owner": [
                   { label: "Unassigned", value: "unassigned" },
                   ...teamMembers.map(m => ({ label: m.full_name || "Unnamed CAM", value: m.id }))
-                ]
+                ],
+                "Filter by tag": availableTags.map(t => ({ label: t.name, value: t.id }))
               }}
             />
           }

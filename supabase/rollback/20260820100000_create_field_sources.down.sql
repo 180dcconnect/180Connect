@@ -242,5 +242,6 @@ grant execute on function public.resolve_field_discrepancy(uuid, text, text) to 
 
 drop function if exists public.get_field_sources(uuid);
 drop function if exists public.record_field_source(uuid, text, text, text, uuid);
+drop function if exists public.record_field_sources(uuid, text, jsonb, uuid);
 
 drop table if exists public.field_sources;

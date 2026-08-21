@@ -704,7 +704,7 @@ Tracking, #45)'s job, not this table's.
 ### 3.17 Field sources — service-role write, admin read
 
 Backs F044 Field-Level Source Tracking (#45),
-`supabase/migrations/20260816100000_create_field_sources.sql`. New table — like
+`supabase/migrations/20260820100000_create_field_sources.sql`. New table — like
 `FIELD_DISCREPANCIES` (§3.16), not previously reserved in the Data Model. Real
 per-field provenance for `ORGANISATIONS`, closing the gap §3.16 and open-gap note
 10 both flagged: `FIELD_DISCREPANCIES.existing_source` only ever approximated
@@ -917,7 +917,7 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    following the same RPC-gated pattern as `SUPPRESSIONS` — raised rather than added
    unilaterally, since it changes the core entity every other table hangs off.
 10. ~~`FIELD_DISCREPANCIES.existing_source` is import-provenance, not per-field
-    tracking.`~~ **Closed by F044 (§3.17, `20260816100000_create_field_sources.sql`).**
+    tracking.`~~ **Closed by F044 (§3.17, `20260820100000_create_field_sources.sql`).**
     `FIELD_SOURCES` now records the real source behind every write to a tracked
     field, updated whenever `record_field_discrepancy` / `resolve_field_discrepancy`
     (F048) overwrite one. `FIELD_DISCREPANCIES.existing_source` itself is

@@ -69,7 +69,7 @@ import type { StandardOrganisation } from "./types.ts";
 
 // F044: the six ORGANISATIONS fields FIELD_SOURCES tracks provenance for — must
 // stay identical to field_sources' check constraint and FIELD_DISCREPANCIES' MVP
-// scope (20260815090000, 20260816100000), or the two tables silently diverge on
+// scope (20260815090000, 20260820100000), or the two tables silently diverge on
 // which fields are covered. The rest of StandardOrganisation (organisation_type,
 // entry_method, country_code, etc.) is pipeline/system-derived, not source data —
 // same exclusion reasoning as FIELD_DISCREPANCIES' migration header.
@@ -249,9 +249,11 @@ export interface OrganisationWriteStore {
   ): Promise<void>;
   /**
    * F044: records provenance for every populated TRACKED_FIELD_SOURCES field on a
-   * newly inserted organisation, one record_field_source call per field. Empty
-   * fields (a source that didn't provide that value) are skipped — there is
-   * nothing to attribute a source to.
+   * newly inserted organisation via one batched record_field_sources RPC — a
+   * single transaction, so provenance commits all-or-nothing instead of leaving
+   * half the fields attributed if one call fails. Empty fields (a source that
+   * didn't provide that value) are skipped — there is nothing to attribute a
+   * source to.
    */
   recordFieldSources(
     organisationId: string,
@@ -352,19 +354,20 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
     },
 
     async recordFieldSources(organisationId, org, source, rawSourceRecordId) {
+      const values: Partial<Record<(typeof TRACKED_FIELD_SOURCES)[number], string>> = {};
       for (const field of TRACKED_FIELD_SOURCES) {
         const value = org[field];
-        if (typeof value !== "string" || !value.trim()) continue;
-
-        const { error } = await supabase.rpc("record_field_source", {
-          p_organisation_id: organisationId,
-          p_field_name: field,
-          p_value: value,
-          p_source: source,
-          p_raw_source_record_id: rawSourceRecordId,
-        });
-        if (error) throw error;
+        if (typeof value === "string" && value.trim()) values[field] = value;
       }
+      if (Object.keys(values).length === 0) return;
+
+      const { error } = await supabase.rpc("record_field_sources", {
+        p_organisation_id: organisationId,
+        p_source: source,
+        p_values: values,
+        p_raw_source_record_id: rawSourceRecordId,
+      });
+      if (error) throw error;
     },
   };
 }

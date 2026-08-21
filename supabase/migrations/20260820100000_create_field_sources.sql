@@ -15,9 +15,8 @@
 -- ONLY TWO WRITERS EXIST TODAY — both are covered here, nothing else needs it:
 --   1. src/lib/standardize/write-organisations.ts's insertOrganisation (F041) —
 --      the ingestion pipeline creating a new organisation row. Application code
---      calls record_field_source once per populated tracked field, same pattern as
---      its existing recordCriteriaOutcome() -> record_client_criteria_outcome RPC
---      call.
+--      calls the batched record_field_sources once per organisation with every
+--      populated tracked field, so provenance commits all-or-nothing.
 --   2. record_field_discrepancy's auto-resolve branch and resolve_field_discrepancy
 --      (F048, this migration's create-or-replace below) — the only place an
 --      existing organisation field is ever overwritten. Both now call
@@ -68,8 +67,9 @@
 -- Schema change approval record (SOP §7):
 --   Change        | New table FIELD_SOURCES (not previously reserved in the Data
 --                 | Model — added here, same as FIELD_DISCREPANCIES in F048) +
---                 | record_field_source (service_role) + get_field_sources
---                 | (authenticated, self-checks admin) RPCs. create-or-replaces
+--                 | record_field_source and record_field_sources (batched, both
+--                 | service_role) + get_field_sources (authenticated, self-checks
+--                 | admin) RPCs. create-or-replaces
 --                 | record_field_discrepancy and resolve_field_discrepancy
 --                 | (F048, 20260815090000) to additionally call
 --                 | record_field_source — fix-forward per MIGRATIONS.md, the
@@ -94,7 +94,7 @@
 --                 | alongside this PR.
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260816100000_create_field_sources.down.sql — restores
+-- ../rollback/20260820100000_create_field_sources.down.sql — restores
 -- record_field_discrepancy / resolve_field_discrepancy to their pre-F044 bodies
 -- from 20260815090000, so a rollback doesn't leave F048 calling a dropped function.
 
@@ -106,7 +106,15 @@ create table public.field_sources (
                               ('legal_name', 'website', 'contact_email',
                                'address_line_1', 'city', 'postcode')),
   value                   text not null,
-  source                  text not null,
+  -- Same value set as the public.data_source_name domain (20260728153131) plus
+  -- 'manual' — duplicated here rather than typed as the domain because a domain
+  -- cannot be extended with a single extra value. Keep in sync with the domain:
+  -- adding a source means altering that domain AND this check.
+  source                  text not null
+                            check (source in
+                              ('charitybase', 'companies_house', '360giving',
+                               'find_that_charity', 'globalgiving', 'candid',
+                               'charity_commission', 'manual')),
   raw_source_record_id    uuid references public.raw_source_records (id),
   is_current              boolean not null default true,
   recorded_at             timestamptz not null default now()
@@ -172,6 +180,25 @@ begin
       using errcode = '22023';
   end if;
 
+  -- Same value set as the column's check constraint above (data_source_name
+  -- domain + 'manual'). Validating here too means a typo'd source fails loudly
+  -- at the call site instead of silently landing as an unlabeled row in the UI.
+  if p_source not in
+    ('charitybase', 'companies_house', '360giving', 'find_that_charity',
+     'globalgiving', 'candid', 'charity_commission', 'manual')
+  then
+    raise exception 'unknown field source: %', p_source using errcode = '22023';
+  end if;
+
+  -- Serialize the flip-and-insert pair per (organisation, field): two concurrent
+  -- calls would otherwise both pass the UPDATE and collide on
+  -- field_sources_current_idx, aborting the caller's whole transaction. Same
+  -- shared-advisory-lock technique as the last-admin guard (20260804153000);
+  -- xact-scoped, so it releases with the caller's transaction either way.
+  perform pg_advisory_xact_lock(
+    hashtext(p_organisation_id::text || ':' || p_field_name)
+  );
+
   update public.field_sources
      set is_current = false
    where organisation_id = p_organisation_id
@@ -196,6 +223,59 @@ comment on function public.record_field_source(uuid, text, text, text, uuid) is
 revoke execute on function public.record_field_source(uuid, text, text, text, uuid)
   from public, anon, authenticated;
 grant execute on function public.record_field_source(uuid, text, text, text, uuid)
+  to service_role;
+
+-- ---------------------------------------------------------------------------
+-- record_field_sources — batched write path for the ingestion pipeline.
+-- ---------------------------------------------------------------------------
+
+-- One call per newly inserted organisation instead of one PostgREST round trip
+-- per field: a single RPC is a single transaction, so provenance for an
+-- organisation commits all-or-nothing — a mid-batch failure can no longer leave
+-- half the fields attributed and half silently missing. Each field still goes
+-- through record_field_source above, inheriting its field/source validation and
+-- advisory lock. The F048 functions keep calling the singular form directly:
+-- they already run inside their caller's transaction and resolve exactly one
+-- field.
+create or replace function public.record_field_sources(
+  p_organisation_id       uuid,
+  p_source                text,
+  p_values                jsonb,
+  p_raw_source_record_id  uuid default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_field text;
+  v_value text;
+begin
+  if jsonb_typeof(p_values) <> 'object' then
+    raise exception 'p_values must be a JSON object of {field_name: value}'
+      using errcode = '22023';
+  end if;
+
+  for v_field, v_value in
+    select key, value from jsonb_each_text(p_values)
+  loop
+    perform public.record_field_source(
+      p_organisation_id, v_field, v_value, p_source, p_raw_source_record_id
+    );
+  end loop;
+end;
+$$;
+
+comment on function public.record_field_sources(uuid, text, jsonb, uuid) is
+  'F044: records provenance for every populated tracked field on a newly
+  inserted organisation in one transaction. p_values maps field_name to value;
+  empty values should be omitted by the caller (nothing to attribute). Delegates
+  each field to record_field_source, so validation and locking are identical.';
+
+revoke execute on function public.record_field_sources(uuid, text, jsonb, uuid)
+  from public, anon, authenticated;
+grant execute on function public.record_field_sources(uuid, text, jsonb, uuid)
   to service_role;
 
 -- ---------------------------------------------------------------------------

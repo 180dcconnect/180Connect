@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import { ThreeSixtyGivingImportForm } from "./import-form";
 import { ThreeSixtyGivingLookupForm } from "./lookup-form";
 
@@ -54,8 +55,7 @@ export default async function ThreeSixtyGivingPage() {
       <section className="mx-auto max-w-5xl rounded-2xl bg-white p-8 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-bold text-brand">Data ingestion</p>
-            <h1 className="mt-2 text-3xl font-bold">360Giving import</h1>
+            <h1 className="text-3xl font-bold">360Giving import</h1>
             <p className="mt-3 max-w-2xl text-sm text-foreground/65">
               Bring grant and funding history into charity records already in
               the pipeline, as an input to partnership prioritisation.
@@ -73,9 +73,12 @@ export default async function ThreeSixtyGivingPage() {
         <div className="mt-8">
           <h2 className="text-lg font-bold">Recent imports</h2>
           {error ? (
-            <p className="mt-3 rounded-lg bg-red-50 p-4 text-sm font-bold text-red-900" role="alert">
-              Import history could not be loaded. Please refresh and try again.
-            </p>
+            <div className="mt-3">
+              <InlineAlert
+                variant="page"
+                message="Import history could not be loaded. Please refresh and try again."
+              />
+            </div>
           ) : runs.length === 0 ? (
             <p className="mt-3 text-sm text-foreground/65">No 360Giving imports have run yet.</p>
           ) : (

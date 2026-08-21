@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import { ReviewPanel, type DataQualityEventRow, type StatusFlagRow } from "./review-panel";
 
 export default async function ReviewQueuePage() {
@@ -28,7 +29,7 @@ export default async function ReviewQueuePage() {
     supabase
       .from("organisation_status_flags")
       .select(
-        "id, organisation_id, company_number, previous_status, new_status, " +
+        "id, organisation_id, source, company_number, previous_status, new_status, " +
           "detected_at, resolved, resolved_at, organisations ( legal_name )",
       )
       .order("detected_at", { ascending: false })
@@ -45,11 +46,11 @@ export default async function ReviewQueuePage() {
       <section className="mx-auto max-w-5xl rounded-2xl bg-white p-8 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-bold text-brand">Data quality</p>
-            <h1 className="mt-2 text-3xl font-bold">Review queue</h1>
+            <h1 className="text-3xl font-bold">Review queue</h1>
             <p className="mt-3 max-w-2xl text-sm text-foreground/65">
               Records held for human review before joining the working list, and
-              organisations whose Companies House status changed and need a look.
+              organisations whose Companies House or Charity Commission status
+              changed and need a look.
             </p>
           </div>
           <Link className="text-sm font-bold text-brand hover:underline" href="/admin">
@@ -58,9 +59,12 @@ export default async function ReviewQueuePage() {
         </div>
 
         {(events.error || flags.error) ? (
-          <p className="mt-8 rounded-lg bg-red-50 p-4 text-sm font-bold text-red-900" role="alert">
-            The review queue could not be loaded. Please refresh and try again.
-          </p>
+          <div className="mt-8">
+            <InlineAlert
+              variant="page"
+              message="The review queue could not be loaded. Please refresh and try again."
+            />
+          </div>
         ) : (
           <ReviewPanel initialEvents={events.data ?? []} initialFlags={flags.data ?? []} />
         )}

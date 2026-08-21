@@ -2,6 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
+import { reportError } from "@/lib/error-logging";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import { OutreachPreferencesForm } from "./preferences-form";
 import type { GeographicReach, IncomeBand } from "./constants";
 
@@ -22,18 +24,21 @@ export default async function OutreachPreferencesPage() {
   const supabase = await createClient();
   // RLS scopes this to the caller's own row (docs/rls-permission-matrix.md §3.13) —
   // no user_id filter needed here, there is nothing else this query could return.
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("outreach_preferences")
     .select("preferred_geographic_reach, preferred_sectors, preferred_income_bands")
     .maybeSingle<OutreachPreferencesRow>();
+
+  if (error) {
+    await reportError(error, { operation: "settings.outreach_preferences.page_load" });
+  }
 
   return (
     <main className="min-h-screen bg-[#f1f2f4] p-6">
       <section className="mx-auto max-w-xl rounded-2xl bg-white p-8 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-bold text-brand">Settings</p>
-            <h1 className="mt-2 text-2xl font-bold">Outreach preferences</h1>
+            <h1 className="text-2xl font-bold">Outreach preferences</h1>
             <p className="mt-1 text-sm text-foreground/65">
               Set the geography, sector and size focus for your outreach queue.
             </p>
@@ -46,11 +51,20 @@ export default async function OutreachPreferencesPage() {
           </Link>
         </div>
 
-        <OutreachPreferencesForm
-          initialGeographicReach={data?.preferred_geographic_reach ?? []}
-          initialSectors={data?.preferred_sectors ?? []}
-          initialIncomeBands={data?.preferred_income_bands ?? []}
-        />
+        {error ? (
+          <div className="mt-6">
+            <InlineAlert
+              variant="page"
+              message="Your preferences could not be loaded. Please refresh and try again."
+            />
+          </div>
+        ) : (
+          <OutreachPreferencesForm
+            initialGeographicReach={data?.preferred_geographic_reach ?? []}
+            initialSectors={data?.preferred_sectors ?? []}
+            initialIncomeBands={data?.preferred_income_bands ?? []}
+          />
+        )}
       </section>
     </main>
   );

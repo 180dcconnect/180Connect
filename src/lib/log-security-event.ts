@@ -20,6 +20,8 @@ export type SecurityEvent =
   | "authentication.password_update_failed"
   | "session.expired"
   | "session.recovery_confined"
+  | "outreach.suppression_blocked"
+  | "outreach.ownership_conflict_blocked"
   | "user.invited"
   | "user.invite_resent"
   | "user.invite_cancelled"

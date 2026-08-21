@@ -4,6 +4,8 @@
 // scripts in `scripts/` run through node's type stripping, which does not resolve
 // extensionless specifiers. See the note in tsconfig.json.
 
+import type { DataHandlingPolicy } from "./apply-data-handling.ts";
+
 /**
  * Every source the pipeline knows about, defined once.
  *
@@ -23,6 +25,10 @@ export const DATA_SOURCES = [
   "globalgiving",
   "candid",
   "charity_commission",
+  // Not an API: an organisation's own website, fetched one page at a time by a CAM
+  // through F037's manual URL import. It has no DataSourceAdapter because there is
+  // nothing to enumerate — see src/lib/import/fetch-page.ts.
+  "website",
 ] as const;
 
 export type DataSourceName = (typeof DATA_SOURCES)[number];
@@ -82,6 +88,13 @@ export type RawRecordRow = {
   source_country: string | null;
   source_registry_name: string | null;
   ingestion_attempt: number;
+  /**
+   * Field paths stripped by the data handling rules (F246). An empty array means
+   * the rules ran and matched nothing; null means they never ran against this row.
+   */
+  excluded_fields: string[] | null;
+  /** Which rule version was in force. Null means the rules never ran. */
+  rule_version_applied: number | null;
 };
 
 /**
@@ -105,6 +118,16 @@ export interface IngestionStore {
     counts: RunCounts,
     errorMessage?: string,
   ): Promise<void>;
+  /**
+   * Loads everything needed to clear a payload for storage (F246 + F247): the
+   * active field rules, the active redaction rules, the role email allow-list and
+   * the current rule version.
+   *
+   * Called once per ingestion run, not per record — so a rule change mid-run
+   * cannot produce a batch where some rows were filtered under one policy and
+   * some under another.
+   */
+  loadDataHandlingPolicy(): Promise<DataHandlingPolicy>;
 }
 
 /** What `runIngestion` reports back for each source it was given. */
@@ -114,5 +137,12 @@ export type RunSummary = {
   counts: RunCounts;
   /** New rows vs rows rewritten because their payload changed. Logged, not stored. */
   written: { new: number; changed: number };
+  /**
+   * The ingestion_runs row this summary corresponds to. Null only when startRun
+   * itself failed — no row exists to reference. Callers that discover something
+   * worth recording against the run after runIngestion returns (e.g. a status-
+   * recheck job's flagged count, F049 AC3) update that row directly by this id.
+   */
+  runId: string | null;
   error?: string;
 };

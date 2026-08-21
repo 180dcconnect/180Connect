@@ -3,6 +3,17 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { PIPELINE_STATUSES, formatOutreachStatus, type PipelineStatus } from "@/lib/organisation-format";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { OriginButton } from "@/components/ui/origin-button";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
+import { reportError } from "@/lib/error-logging";
 
 /**
  * F145 — lets the client's owner (CAM) or an admin move it through the pipeline.
@@ -43,43 +54,48 @@ export function StatusSelect({
       }
       const body = await response.json();
       setError(body.error ?? "This status could not be saved.");
-    } catch {
-      setError("Could not reach the server. Check your connection and try again.");
+    } catch (err) {
+      void reportError(err, { operation: "clients.status_select_client", organisationId });
+      setError(NETWORK_ERROR_MESSAGE);
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-3">
+    <div className="mt-4 flex flex-wrap items-center gap-2.5">
       <label className="sr-only" htmlFor={`status-${organisationId}`}>
         Pipeline status
       </label>
-      <select
-        id={`status-${organisationId}`}
-        className="rounded-lg border border-black/10 px-3 py-2 text-sm"
+      <Select
         value={selected}
         disabled={busy}
-        onChange={(event) => setSelected(event.target.value as PipelineStatus)}
+        onValueChange={(value) => setSelected(value as PipelineStatus)}
       >
-        {PIPELINE_STATUSES.map((status) => (
-          <option key={status} value={status}>
-            {formatOutreachStatus(status)}
-          </option>
-        ))}
-      </select>
-      <button
+        <SelectTrigger id={`status-${organisationId}`} className="w-fit rounded-full bg-white text-sm">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {PIPELINE_STATUSES.map((status) => (
+            <SelectItem key={status} value={status}>
+              {formatOutreachStatus(status)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <OriginButton
         type="button"
-        className="rounded-full border border-brand/30 px-4 py-2 text-xs font-bold text-brand hover:bg-brand/5 disabled:opacity-50"
+        size="sm"
+        loading={busy}
         disabled={busy || !dirty}
         onClick={save}
       >
         {busy ? "Saving…" : "Save status"}
-      </button>
+      </OriginButton>
       {error && (
-        <p aria-live="polite" role="alert" className="w-full text-sm font-bold text-red-800">
-          {error}
-        </p>
+        <div className="w-full">
+          <InlineAlert message={error} />
+        </div>
       )}
     </div>
   );

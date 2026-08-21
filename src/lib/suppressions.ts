@@ -34,13 +34,14 @@ export type RpcFailure = { status: number; error: string };
 const GENERIC_FAILURE = "The suppression request could not be saved. Refresh and try again.";
 
 /**
- * Maps a Postgres error from request_suppression / decide_suppression_request onto
- * something safe to show an admin.
+ * Maps a Postgres error from request_suppression / decide_suppression_request /
+ * lift_suppression onto something safe to show an admin.
  *
- * Every errcode below is one the two RPCs raise deliberately, with a message written
- * to be read by an admin (see 20260806100000_create_suppressions.sql) — no table or
- * constraint names, nothing internal. Passing those through is safe; everything else
- * gets the generic string, same reasoning as rpcFailureResponse in @/lib/offboard
+ * Every errcode below is one the RPCs raise deliberately, with a message written
+ * to be read by an admin (see 20260806100000_create_suppressions.sql and
+ * 20260818130000_create_lift_suppression_rpc.sql) — no table or constraint names,
+ * nothing internal. Passing those through is safe; everything else gets the
+ * generic string, same reasoning as rpcFailureResponse in @/lib/offboard
  * (DoD: no stack traces or internals in a user-facing error).
  */
 export function suppressionRpcFailure(error: {

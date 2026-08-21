@@ -15,7 +15,10 @@ import {
   prioritiseQueue,
   resolveClientIncomeBand,
   getGrantPriorityScore,
+  parseListDirection,
+  parseListSort,
   searchClients,
+  sortClients,
   visibleClients,
   type ClientListRow,
 } from "./visible-clients.ts";
@@ -566,5 +569,200 @@ describe("prioritiseQueue (Combined F196 + F197 + F198 + F199)", () => {
     // Delta matches Grants: 10 = 10
     // Alpha matches Sector: 8 = 8
     assert.deepEqual(result.map((c) => c.id), ["3", "2", "4", "1"]);
+
+/* ─── List sorting (F060 #62, F061 #63) ────────────────────────────────── */
+
+/** sortClients works on VisibleClient, so fixtures go through visibleClients()
+ * once — the same path the page uses, so `location` and `outreachStatusLabel`
+ * are derived rather than hand-written and can't drift from the real ones. */
+function listOf(rows: Partial<ClientListRow>[]) {
+  return visibleClients(
+    rows.map((row, index) => org({ id: `org-${index}`, ...row })),
+    [],
+  );
+}
+
+const names = (clients: { legal_name: string }[]) => clients.map((c) => c.legal_name);
+
+describe("parseListSort", () => {
+  it("accepts the three sortable fields", () => {
+    assert.equal(parseListSort("name"), "name");
+    assert.equal(parseListSort("location"), "location");
+    assert.equal(parseListSort("status"), "status");
+  });
+
+  it("falls back to name for anything else", () => {
+    assert.equal(parseListSort("owner"), "name");
+    assert.equal(parseListSort(undefined), "name");
+    assert.equal(parseListSort(""), "name");
+    assert.equal(parseListSort("'; drop table organisations; --"), "name");
+  });
+});
+
+describe("parseListDirection", () => {
+  it("only descending is descending", () => {
+    assert.equal(parseListDirection("descending"), "descending");
+    assert.equal(parseListDirection("ascending"), "ascending");
+    assert.equal(parseListDirection("desc"), "ascending");
+    assert.equal(parseListDirection(undefined), "ascending");
+  });
+});
+
+describe("sortClients by name", () => {
+  it("sorts alphabetically, ignoring case", () => {
+    const clients = listOf([
+      { legal_name: "zebra trust" },
+      { legal_name: "Apple Fund" },
+      { legal_name: "Mango Aid" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "name", "ascending")), [
+      "Apple Fund",
+      "Mango Aid",
+      "zebra trust",
+    ]);
+  });
+
+  it("reverses on descending", () => {
+    const clients = listOf([{ legal_name: "Apple Fund" }, { legal_name: "Mango Aid" }]);
+    assert.deepEqual(names(sortClients(clients, "name", "descending")), [
+      "Mango Aid",
+      "Apple Fund",
+    ]);
+  });
+
+  it("leaves the caller's array alone", () => {
+    const clients = listOf([{ legal_name: "Zebra" }, { legal_name: "Apple" }]);
+    sortClients(clients, "name", "ascending");
+    assert.deepEqual(names(clients), ["Zebra", "Apple"]);
+  });
+
+  it("returns an empty list unchanged", () => {
+    assert.deepEqual(sortClients([], "location", "descending"), []);
+  });
+});
+
+describe("sortClients by location (F060)", () => {
+  it("sorts alphabetically on the displayed location", () => {
+    const clients = listOf([
+      { legal_name: "C", city: "York" },
+      { legal_name: "A", city: "Bristol" },
+      { legal_name: "B", city: "Leeds" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "location", "ascending")), ["A", "B", "C"]);
+  });
+
+  it("groups clients sharing a location adjacently, in name order (AC2)", () => {
+    const clients = listOf([
+      { legal_name: "Sheffield Two", city: "Sheffield" },
+      { legal_name: "Bristol One", city: "Bristol" },
+      { legal_name: "Sheffield One", city: "Sheffield" },
+      { legal_name: "Bristol Two", city: "Bristol" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "location", "ascending")), [
+      "Bristol One",
+      "Bristol Two",
+      "Sheffield One",
+      "Sheffield Two",
+    ]);
+  });
+
+  it("keeps the group together on descending, and the names inside it ascending", () => {
+    const clients = listOf([
+      { legal_name: "Sheffield Two", city: "Sheffield" },
+      { legal_name: "Bristol One", city: "Bristol" },
+      { legal_name: "Sheffield One", city: "Sheffield" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "location", "descending")), [
+      "Sheffield One",
+      "Sheffield Two",
+      "Bristol One",
+    ]);
+  });
+
+  it("sorts a missing city on its country code, the value the list shows", () => {
+    const clients = listOf([
+      { legal_name: "Has city", city: "Zanzibar" },
+      { legal_name: "No city", city: null, country_code: "AL" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "location", "ascending")), [
+      "No city",
+      "Has city",
+    ]);
+  });
+});
+
+describe("sortClients by outreach status (F061)", () => {
+  it("follows pipeline order, not alphabetical order of the label (AC1)", () => {
+    const clients = listOf([
+      { legal_name: "Converted", outreach_status: "converted" },
+      { legal_name: "Initial", outreach_status: "initial_outreach_sent" },
+      { legal_name: "Not contacted", outreach_status: "not_contacted" },
+    ]);
+    // Alphabetically the labels would be Converted, Initial…, Not contacted.
+    assert.deepEqual(names(sortClients(clients, "status", "ascending")), [
+      "Not contacted",
+      "Initial",
+      "Converted",
+    ]);
+  });
+
+  it("reverses the pipeline order on descending", () => {
+    const clients = listOf([
+      { legal_name: "Not contacted", outreach_status: "not_contacted" },
+      { legal_name: "Converted", outreach_status: "converted" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "status", "descending")), [
+      "Converted",
+      "Not contacted",
+    ]);
+  });
+
+  it("orders clients in the same status by name", () => {
+    const clients = listOf([
+      { legal_name: "Beta", outreach_status: "responded" },
+      { legal_name: "Alpha", outreach_status: "responded" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "status", "ascending")), ["Alpha", "Beta"]);
+  });
+
+  it("sorts an unrecognised status last rather than first", () => {
+    const clients = listOf([
+      { legal_name: "Unknown", outreach_status: "invented_status" },
+      { legal_name: "Converted", outreach_status: "converted" },
+      { legal_name: "Not contacted", outreach_status: "not_contacted" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "status", "ascending")), [
+      "Not contacted",
+      "Converted",
+      "Unknown",
+    ]);
+  });
+});
+
+describe("sortClients combined with filters (F060 AC3 / F061 AC2)", () => {
+  it("sorts only what the filter left behind", () => {
+    const clients = listOf([
+      { legal_name: "Owned York", city: "York", owner_id: "cam-1" },
+      { legal_name: "Other Bristol", city: "Bristol", owner_id: "cam-2" },
+      { legal_name: "Owned Bristol", city: "Bristol", owner_id: "cam-1" },
+    ]);
+    const mine = filterByOwner(clients, "cam-1");
+    assert.deepEqual(names(sortClients(mine, "location", "ascending")), [
+      "Owned Bristol",
+      "Owned York",
+    ]);
+  });
+
+  it("sorts what the search left behind", () => {
+    const clients = listOf([
+      { legal_name: "Trust Zed", outreach_status: "converted" },
+      { legal_name: "Unrelated", outreach_status: "not_contacted" },
+      { legal_name: "Trust Alpha", outreach_status: "not_contacted" },
+    ]);
+    const found = searchClients(clients, "trust");
+    assert.deepEqual(names(sortClients(found, "status", "ascending")), [
+      "Trust Alpha",
+      "Trust Zed",
+    ]);
   });
 });

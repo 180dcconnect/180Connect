@@ -12,7 +12,12 @@ import {
   filterBySource,
   filterByTags,
   prioritiseQueue,
+  LIST_SORT_DIRECTIONS,
+  LIST_SORT_FIELDS,
+  parseListDirection,
+  parseListSort,
   searchClients,
+  sortClients,
   visibleClients,
   type ClientListRow,
   type OpenSuppression,
@@ -35,6 +40,10 @@ import {
   type FunnelStageKey,
 } from "./client-insights";
 import { PipelineReport } from "./pipeline-report";
+import { SortMenu as ListSortMenu } from "./sort-menu";
+import { BulkSelectProvider } from "./bulk-select-provider";
+import { ClientRowCheckbox, SelectAllCheckbox } from "./bulk-select-checkbox";
+import { BulkActionBar } from "./bulk-action-bar";
 
 type TeamMember = { id: string; full_name: string | null };
 
@@ -56,6 +65,11 @@ type SearchParams = Promise<{
   /** Field the breakdown groups by, and which end of it to show. */
   sort?: string;
   dir?: string;
+  /** F060/F061 — field the *list* is ordered on, and which way. Separate from
+   * `sort`/`dir` above on purpose: that pair drives the breakdown card, and
+   * both controls are on screen together. */
+  listSort?: string;
+  listDir?: string;
 }>;
 
 const PAGE_SIZE = 25;
@@ -120,6 +134,8 @@ export default async function ClientsPage({
     stage: stageParam,
     sort: sortParam,
     dir: dirParam,
+    listSort: listSortParam,
+    listDir: listDirParam,
   } = await searchParams;
 
   const supabase = await createClient();
@@ -218,12 +234,21 @@ export default async function ClientsPage({
   const isOwnedView =
     authorization.actor.role === "cam" && ownerFilter === authorization.actor.id;
 
+  // F060/F061 — order the filtered set, then page it. Sorting after filtering
+  // is what makes "sort combines with the active filters" true; sorting before
+  // pagination is what makes it a sort of the list rather than of this page.
+  // The funnel and breakdown above keep reading `matchingClients`: they count,
+  // and a count doesn't care what order it was counted in.
+  const listSortField = parseListSort(listSortParam);
+  const listSortDirection = parseListDirection(listDirParam);
+  const sortedClients = sortClients(matchingClients, listSortField, listSortDirection);
+
   const totalPages = Math.max(1, Math.ceil(matchingClients.length / PAGE_SIZE));
   const requestedPage = Number.parseInt(pageParam ?? "1", 10);
   const currentPage = Number.isInteger(requestedPage)
     ? Math.min(Math.max(requestedPage, 1), totalPages)
     : 1;
-  const clients = matchingClients.slice(
+  const clients = sortedClients.slice(
     (currentPage - 1) * PAGE_SIZE,
     currentPage * PAGE_SIZE,
   );
@@ -246,6 +271,8 @@ export default async function ClientsPage({
       stage: stageParam,
       sort: sortParam,
       dir: dirParam,
+      listSort: listSortParam,
+      listDir: listDirParam,
       // Not carried over: a link that changes what the list holds has to start at
       // page one. Pagination opts back in explicitly.
       page: undefined,
@@ -411,6 +438,32 @@ export default async function ClientsPage({
               <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
                 {matchingClients.length} client{matchingClients.length === 1 ? "" : "s"}
                 {isOwnedView ? " you own" : ""}
+              </p>
+              {/* F060/F061 — the list's own sort. Same sentence control the
+                  breakdown card uses, on its own pair of params, sitting on
+                  the line that already introduces the list. Shown at every
+                  width: the column headers below it are lg-only. */}
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
+                Sorted by{" "}
+                <ListSortMenu
+                  param="listSort"
+                  value={listSortField}
+                  ariaLabel="Sort the client list by"
+                  options={LIST_SORT_FIELDS.map((entry) => ({
+                    value: entry.key,
+                    label: entry.label,
+                  }))}
+                />
+                ,{" "}
+                <ListSortMenu
+                  param="listDir"
+                  value={listSortDirection}
+                  ariaLabel="Sort direction for the client list"
+                  options={LIST_SORT_DIRECTIONS.map((entry) => ({
+                    value: entry,
+                    label: entry,
+                  }))}
+                />
               </p>
               {totalPages > 1 && (
                 <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">

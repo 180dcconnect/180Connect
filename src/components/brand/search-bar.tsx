@@ -132,8 +132,13 @@ export function BrandSearchBar({
 
     if (q) params.set("q", q);
 
-    filters.forEach(f => {
-      params.set(FILTER_PARAMS[f.category] ?? "filter", f.value);
+    // `append`, not `set`: the panel already lets several options be chosen in
+    // one category, but `set` overwrote each with the next, so only the last
+    // survived the trip through the URL and multi-select silently behaved like
+    // single-select. Repeating the parameter is what the host page reads back
+    // as an array.
+    filters.forEach((f) => {
+      params.append(FILTER_PARAMS[f.category] ?? "filter", f.value);
     });
 
     // Plays the rolling square animation before navigating (dev's designed

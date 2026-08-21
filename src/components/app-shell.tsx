@@ -2,11 +2,11 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentActor } from "@/lib/auth/actor";
-import { hasPermission } from "@/lib/auth/permissions";
+import { sidebarSectionsFor } from "@/lib/nav";
 import { logout } from "@/lib/auth/logout";
 import { ONBOARDING_STEPS, shouldShowGuide, type OnboardingUser } from "@/lib/onboarding";
 import { AppShellFrame } from "./app-shell-frame";
-import type { SidebarSection, SidebarOnboarding } from "./sidebar";
+import type { SidebarOnboarding } from "./sidebar";
 
 /**
  * What the sidebar's frosted glass actually blurs: brand green, pooled at the
@@ -54,32 +54,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   const actorResult = await getCurrentActor();
   if (!actorResult.ok) redirect("/login");
   const actor = actorResult.actor;
-
-  const sections: SidebarSection[] = [
-    {
-      items: [{ href: "/dashboard", label: "Dashboard", icon: "dashboard" }],
-    },
-  ];
-
-  if (hasPermission(actor.role, "client:view")) {
-    sections[0].items.push({ href: "/clients", label: "Clients", icon: "clients" });
-  }
-
-  if (hasPermission(actor.role, "client:edit")) {
-    sections[0].items.push({ href: "/clients/new", label: "Add client", icon: "add" });
-  }
-
-  if (hasPermission(actor.role, "user:manage")) {
-    sections.push({
-      items: [
-        { href: "/admin", label: "Overview", icon: "admin" },
-        { href: "/admin/users", label: "Team management", icon: "users" },
-        { href: "/admin/audit-log", label: "Audit log", icon: "audit" },
-        { href: "/admin/import-status", label: "Import status", icon: "import" },
-        { href: "/admin/feedback", label: "Feedback", icon: "feedback" },
-      ],
-    });
-  }
+  const sections = sidebarSectionsFor(actor.role);
 
   let onboarding: SidebarOnboarding | undefined = undefined;
 

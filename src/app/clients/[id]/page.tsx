@@ -851,7 +851,11 @@ export default async function ClientDetailPage({
 
             {/* F070: the history itself is readable by every active role
                 (outreach_messages_select_active), so the card is not gated on
-                client:contact — only ComposeButton inside it is. */}
+                client:contact — only ComposeButton inside it is.
+                F019 (#22): a non-owning CAM sees that button dead, with the
+                owner-naming warning rendered up front, rather than discovering
+                the block on click — the preflight behind it remains the
+                enforcement either way. */}
             <Rise>
               <SectionCard headingId="outreach-heading" title="Outreach">
                 <OutreachHistorySection history={outreachHistory} error={Boolean(outreachError)} />
@@ -860,6 +864,7 @@ export default async function ClientDetailPage({
                   <div className="mt-4">
                     <ComposeButton
                       blocked={suppressed}
+                      ownershipBlocked={!suppressed && ownershipConflict.hasConflict}
                       organisationId={client.id}
                       suppressionReason={suppressed ? latest.reason : undefined}
                       ownershipWarning={

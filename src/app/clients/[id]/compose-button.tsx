@@ -8,14 +8,23 @@ type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
 type Draft = { id: string; subject: string; body: string };
 
-/** F100 creates a review draft only, after the current outreach preflight passes. */
+/**
+ * F019 (#22): a client owned by another CAM is visible in full, but its
+ * outreach actions are not available — the button is dead on arrival rather
+ * than clickable-then-refused. `blocked` stays the harder state (suppression);
+ * `ownershipBlocked` renders the same disabled shape in the softer conflict
+ * tone. The server-side preflight behind `generate()` still re-checks both,
+ * so this is presentation over an enforcement that does not depend on it.
+ */
 export function ComposeButton({
   blocked,
+  ownershipBlocked = false,
   organisationId,
   suppressionReason,
   ownershipWarning,
 }: {
   blocked: boolean;
+  ownershipBlocked?: boolean;
   organisationId: string;
   suppressionReason?: string;
   ownershipWarning?: string;
@@ -29,8 +38,8 @@ export function ComposeButton({
           text: `This client is suppressed. Outreach is blocked. Reason: ${suppressionReason ?? "No reason was recorded."}`,
           tone: "block",
         }
-      : ownershipWarning
-        ? { text: ownershipWarning, tone: "conflict" }
+      : ownershipBlocked || ownershipWarning
+        ? { text: ownershipWarning ?? "Outreach is unavailable on this client.", tone: "conflict" }
         : null,
   );
 
@@ -67,13 +76,16 @@ export function ComposeButton({
     }
   }
 
-  if (blocked) {
+  if (blocked || ownershipBlocked) {
     return (
       <div>
         <OriginButton variant="outline" size="sm" disabled type="button">
           Generate Stage 1 email
         </OriginButton>
-        <p className="mt-2.5 text-[13px] font-bold leading-[1.6] text-red-800" role="alert">
+        <p
+          className={`mt-2.5 text-[13px] font-bold leading-[1.6] ${warning?.tone === "conflict" ? "text-amber-800" : "text-red-800"}`}
+          role="alert"
+        >
           {warning?.text}
         </p>
       </div>

@@ -2,7 +2,7 @@
  * F075/F076 — merges four different row shapes (notes, outreach_messages,
  * reply_events, audit_log) into one chronological feed for the client detail
  * page, kept out of the route so it can be tested without a database (same
- * split as @/lib/client-basic-info, @/lib/note-history, @/lib/outreach-history).
+ * split as @/lib/client-basic-info).
  *
  * This is the first place in this codebase that merges genuinely different
  * tables into one sorted feed — @/lib/team-activity.ts and
@@ -84,8 +84,9 @@ export type TimelineEntry = {
  * Shown for an actor who can't be identified — an account later deleted, or
  * (for `detail.from`/`detail.to`, which are bare uuids inside jsonb, not a
  * foreign key) a reference that was never one to begin with. Same phrasing
- * @/lib/note-history.ts already uses for the identical situation, for
- * consistency across the page (F257 AC5's "former CAM" requirement).
+ * the owner fallback on this page already uses (page.tsx's `ownerName`,
+ * visible-clients.ts), for consistency across the app (F257 AC5's "former
+ * CAM" requirement).
  */
 export const UNKNOWN_ACTOR = "A former team member";
 
@@ -136,11 +137,13 @@ function detailString(detail: Record<string, unknown>, key: string): string | nu
  * has ever been edited (F073) — AC1 lists "notes added" and "edits made" as
  * separate things a CAM should see, and an edit made today belongs near
  * "today" in the timeline, not buried only under the note's original date.
- * There is no per-edit history to show a diff from (F074's own note-history.ts
- * doc explains why), so both entries show the note's current content.
+ * There is no per-edit history to show a diff from (notes store no previous
+ * content — F074's edit overwrites in place), so both entries show the note's
+ * current content.
  */
 export function buildNoteEntries(row: NoteRow): TimelineEntry[] {
-  const actorName = row.author?.full_name ?? UNKNOWN_ACTOR;
+  const authorName = row.author?.full_name?.trim();
+  const actorName = authorName ? authorName : UNKNOWN_ACTOR;
   const entries: TimelineEntry[] = [
     {
       id: `note-added-${row.id}`,
@@ -166,16 +169,16 @@ export function buildNoteEntries(row: NoteRow): TimelineEntry[] {
 
 /**
  * Only an actually-delivered message is a timeline event — a draft or
- * scheduled-but-unsent one is not something that "happened" yet. Matches
- * @/lib/outreach-history.ts's identical "sent" vs "not sent" split.
+ * scheduled-but-unsent one is not something that "happened" yet.
  */
 export function buildEmailSentEntry(row: OutreachMessageRow): TimelineEntry | null {
   if (row.send_status !== "sent" || !row.sent_at) return null;
+  const senderName = row.sender?.full_name?.trim();
   return {
     id: `email-${row.id}`,
     type: "email_sent",
     timestamp: row.sent_at,
-    actorName: row.sender?.full_name ?? UNKNOWN_ACTOR,
+    actorName: senderName ? senderName : UNKNOWN_ACTOR,
     summary: row.subject,
   };
 }
@@ -248,9 +251,9 @@ export type TimelineSources = {
 };
 
 /**
- * Merges every source into one feed, newest first (matches
- * @/lib/note-history.ts and @/lib/outreach-history.ts's identical choice, for
- * one consistent "chronological order" across every list on this page).
+ * Merges every source into one feed, newest first — the same order every
+ * other list on this client page uses, for one consistent "chronological
+ * order" across the page.
  *
  * F076 AC3 — an `auditRows` entry not matching a recognised `action` is
  * silently dropped, never turned into a generic "unlabelled" entry. Every

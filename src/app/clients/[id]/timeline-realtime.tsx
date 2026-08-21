@@ -30,6 +30,19 @@ export function TimelineRealtimeRefresher({ organisationId }: { organisationId: 
     const supabase = createClient();
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let cancelled = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Coalesced, not per-event: one realtime burst (a batch reassignment
+    // writes one audit row per client; a webhook retry can double-fire) would
+    // otherwise trigger one full-page refetch per payload. Events arriving
+    // within the window collapse into a single refresh.
+    function scheduleRefresh() {
+      if (refreshTimer) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        router.refresh();
+      }, 500);
+    }
 
     async function subscribe() {
       // See BasicInfoPanel for why this is required: the realtime socket does
@@ -47,7 +60,7 @@ export function TimelineRealtimeRefresher({ organisationId }: { organisationId: 
         .on(
           "postgres_changes",
           { event: "*", schema: "public", table: "notes", filter: `organisation_id=eq.${organisationId}` },
-          () => router.refresh(),
+          () => scheduleRefresh(),
         )
         .on(
           "postgres_changes",
@@ -57,7 +70,7 @@ export function TimelineRealtimeRefresher({ organisationId }: { organisationId: 
             table: "outreach_messages",
             filter: `organisation_id=eq.${organisationId}`,
           },
-          () => router.refresh(),
+          () => scheduleRefresh(),
         )
         .on(
           "postgres_changes",
@@ -67,7 +80,7 @@ export function TimelineRealtimeRefresher({ organisationId }: { organisationId: 
             table: "reply_events",
             filter: `organisation_id=eq.${organisationId}`,
           },
-          () => router.refresh(),
+          () => scheduleRefresh(),
         )
         .on(
           "postgres_changes",
@@ -76,7 +89,7 @@ export function TimelineRealtimeRefresher({ organisationId }: { organisationId: 
           // RLS (audit_log_select_client_timeline) already confines what this
           // subscription can see to just those two action types.
           { event: "INSERT", schema: "public", table: "audit_log", filter: `target_id=eq.${organisationId}` },
-          () => router.refresh(),
+          () => scheduleRefresh(),
         )
         .subscribe();
     }
@@ -85,6 +98,7 @@ export function TimelineRealtimeRefresher({ organisationId }: { organisationId: 
 
     return () => {
       cancelled = true;
+      if (refreshTimer) clearTimeout(refreshTimer);
       if (channel) supabase.removeChannel(channel);
     };
   }, [organisationId, router]);

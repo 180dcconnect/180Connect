@@ -80,8 +80,7 @@ type OwnerRow = {
  * Notes feature's own add/edit/delete UI (F071-F074) is not built on this
  * branch and is out of scope here — neither F075 nor F076 lists it as a
  * dependency, and the timeline reads `notes` directly regardless of whether a
- * UI exists to write to it, the same way F070 read `outreach_messages` before
- * F123's send UI existed.
+ * UI exists to write to it.
  *
  * Started as F251 AC1/AC2's minimal client screen (name + suppression state only)
  * — see src/app/clients/page.tsx for that history. Extended here, not replaced.
@@ -240,7 +239,13 @@ export default async function ClientDetailPage({
     await reportError(auditError, { operation: "clients.timeline_audit", organisationId: id });
   }
 
-  const timelineError = Boolean(
+  // Degraded, not fatal: the four sources fail independently (each error is
+  // reported above), so whatever loaded still renders. `timelineDegraded`
+  // only downgrades the section to a warning above the surviving entries —
+  // a notes-query failure should not hide the emails and replies that did
+  // load. A total failure leaves entries empty and TimelineSection shows its
+  // full error state instead.
+  const timelineDegraded = Boolean(
     timelineNotesError || timelineMessagesError || replyError || auditError,
   );
 
@@ -681,7 +686,7 @@ export default async function ClientDetailPage({
             title="Timeline"
             hint="Every email, reply, note and change for this client, in one place."
           >
-            <TimelineSection entries={timeline} error={timelineError} />
+            <TimelineSection entries={timeline} degraded={timelineDegraded} />
           </SectionCard>
         </Rise>
         <TimelineRealtimeRefresher organisationId={client.id} />

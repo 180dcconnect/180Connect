@@ -56,16 +56,27 @@ function EventDot({ type }: { type: TimelineEntry["type"] }) {
  * triggers a server refetch on a relevant change rather than folding realtime
  * payloads into client state here — see that file's header comment for why.
  */
-export function TimelineSection({ entries, error }: { entries: TimelineEntry[]; error: boolean }) {
-  if (error) {
-    return (
-      <p className="mt-4 text-sm font-bold text-destructive" role="alert">
-        The timeline could not be loaded. Refresh and try again.
-      </p>
-    );
-  }
-
+/**
+ * `degraded` means at least one of the four timeline sources failed to load
+ * (each failure is reported server-side). The entries that did load still
+ * render, with a warning above them; only when nothing could be loaded does
+ * the section fall back to its full error state.
+ */
+export function TimelineSection({
+  entries,
+  degraded,
+}: {
+  entries: TimelineEntry[];
+  degraded: boolean;
+}) {
   if (entries.length === 0) {
+    if (degraded) {
+      return (
+        <p className="mt-4 text-sm font-bold text-destructive" role="alert">
+          The timeline could not be loaded. Refresh and try again.
+        </p>
+      );
+    }
     return (
       <p className="mt-4 text-sm leading-[1.7] text-foreground/45">
         Nothing has happened with this client yet.
@@ -74,7 +85,14 @@ export function TimelineSection({ entries, error }: { entries: TimelineEntry[]; 
   }
 
   return (
-    <ul className="mt-4 space-y-3">
+    <>
+      {degraded && (
+        <p className="mt-4 text-sm font-bold text-destructive" role="alert">
+          Some timeline events could not be loaded. Refresh to see the full
+          history.
+        </p>
+      )}
+      <ul className="mt-4 space-y-3">
       {entries.map((entry) => (
         <li key={entry.id} className="rounded-xl border border-black/[0.06] p-3.5">
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
@@ -106,6 +124,7 @@ export function TimelineSection({ entries, error }: { entries: TimelineEntry[]; 
           )}
         </li>
       ))}
-    </ul>
+      </ul>
+    </>
   );
 }

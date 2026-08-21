@@ -229,7 +229,7 @@
 | 04 Entities | SAVED_VIEWS | id | uuid |  | Primary key |
 | 04 Entities | SAVED_VIEWS | user_id | uuid | USERS | CAM the saved view belongs to |
 | 04 Entities | SAVED_VIEWS | name | text |  | Name the CAM gave the view; unique per user |
-| 04 Entities | SAVED_VIEWS | filters | jsonb |  | Filter combination the view re-applies (q, city, status, source, owner) |
+| 04 Entities | SAVED_VIEWS | filters | jsonb |  | Filter combination the view re-applies (q, city, country, status, type, owner — arrays for the multi-selects) |
 | 04 Entities | SAVED_VIEWS | created_at | timestamp |  | Row creation timestamp |
 | 04 Entities | SAVED_VIEWS | updated_at | timestamp |  | Last edit timestamp |
 | 04 Entities | OWNERSHIP_REQUESTS | id | uuid |  | Primary key |

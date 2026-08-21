@@ -136,16 +136,18 @@ export function BrandSearchBar({
       params.set(FILTER_PARAMS[f.category] ?? "filter", f.value);
     });
 
-    // Navigate immediately (F052: applying or clearing must not reload the
-    // document, and a stalled list reads as broken); the spinner stays up for
-    // a beat so the submit still gets its feedback and double-submits stay
-    // guarded by `isSearching`.
-    startTransition(() => {
-      router.replace(`?${params.toString()}`, { scroll: false });
-    });
+    // Plays the rolling square animation before navigating (dev's designed
+    // submit moment). Still a soft navigation — router.replace, no document
+    // reload — so F052's AC4 holds; the spinner doubles as the double-submit
+    // guard via `isSearching`.
     setTimeout(() => {
-      setIsSearching(false);
-    }, 400);
+      startTransition(() => {
+        router.replace(`?${params.toString()}`, { scroll: false });
+      });
+      setTimeout(() => {
+        setIsSearching(false);
+      }, 400);
+    }, 1500);
 
     if (closePanel) {
       setOpen(false);

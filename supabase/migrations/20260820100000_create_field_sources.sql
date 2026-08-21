@@ -1,6 +1,6 @@
 -- Migration: create_field_sources
 -- Story: F044 Field-Level Source Tracking (#45)
--- Spec: docs/rls-permission-matrix.md §3.17
+-- Spec: docs/rls-permission-matrix.md §3.18
 --
 -- WHAT THIS CLOSES:
 --   F043 (get_organisation_sources, 20260806120000) only ever answered "which
@@ -90,7 +90,7 @@
 --                 | not CAM-visible data). No INSERT/UPDATE/DELETE grant to
 --                 | authenticated; record_field_source is service_role-only.
 --   Documentation | Data Model (03 Raw Data, 02 Data Dictionary) and
---                 | docs/rls-permission-matrix.md §3.17 + open-gap note 10 updated
+--                 | docs/rls-permission-matrix.md §3.18 + open-gap note 10 updated
 --                 | alongside this PR.
 --
 -- Reversibility: paired rollback in

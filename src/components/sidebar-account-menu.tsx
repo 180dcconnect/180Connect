@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ChevronsUpDown, CircleUserRound, LogOut } from "lucide-react";
+import { ChevronsUpDown, CircleUserRound, LogOut, Sliders } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -66,7 +66,9 @@ export function SidebarAccountMenu({
         <button
           type="button"
           title={collapsed ? displayName : undefined}
-          className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-all hover:bg-black/10 data-[state=open]:bg-black/12"
+          className={`flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-all hover:bg-black/10 data-[state=open]:bg-black/12 md:pl-1.5 ${
+            collapsed ? "md:pr-1.5" : ""
+          }`}
         >
           <Avatar initials={initials} />
           {/* Hidden by class rather than unmounted: `collapsed` is a desktop-only
@@ -116,6 +118,11 @@ export function SidebarAccountMenu({
         <DropdownMenuItem onSelect={() => router.push("/profile")}>
           <CircleUserRound aria-hidden="true" />
           Account
+        </DropdownMenuItem>
+
+        <DropdownMenuItem onSelect={() => router.push("/settings/accessibility")}>
+          <Sliders aria-hidden="true" />
+          Accessibility
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />

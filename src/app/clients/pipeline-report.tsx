@@ -16,8 +16,9 @@ import {
 
 /**
  * The pipeline report — one white card above the client list, in three parts:
- * the four stage totals, the stream that connects them, and the top-three
- * breakdown under it.
+ * the four stage totals, the stream that connects them, and the grouped
+ * breakdown under it — a top three, or the complete list when the caller says so
+ * (`rowsLabel`), which is what grouping by owner does.
  *
  * White on the bone ground, in the app's own tokens, because the logged-in app
  * is a light tool and one dark slab at the top of a light page reads as a widget
@@ -63,6 +64,7 @@ export function PipelineReport({
   field,
   direction,
   rows,
+  rowsLabel,
   rowHref,
 }: {
   stages: FunnelStage[];
@@ -73,6 +75,8 @@ export function PipelineReport({
   field: BreakdownField;
   direction: SortDirection;
   rows: BreakdownRow[];
+  /** Overrides the "Top N" corner label when the rows are not a top N. */
+  rowsLabel?: string;
   rowHref: (filter: NonNullable<BreakdownRow["filter"]>) => string;
 }) {
   const chartData = stages.map((stage) => ({
@@ -84,7 +88,7 @@ export function PipelineReport({
     <section className="overflow-hidden rounded-3xl bg-white text-foreground ring-1 ring-black/[0.06] shadow-[0_20px_60px_-45px_rgba(12,16,20,0.55)]">
       <div className="px-6 pt-6 sm:px-8 sm:pt-8">
         <div className="flex items-baseline justify-between gap-4">
-          <h2 className="text-[19px] font-black tracking-[-0.02em]">Pipeline report</h2>
+          <h2 className="text-[19px] font-semibold font-body tracking-[-0.02em]">Pipeline report</h2>
           <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
             {caption}
           </p>
@@ -192,7 +196,7 @@ export function PipelineReport({
             />
           </p>
           <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/30">
-            Top {rows.length || 3}
+            {rowsLabel ?? `Top ${rows.length || 3}`}
           </p>
         </div>
 

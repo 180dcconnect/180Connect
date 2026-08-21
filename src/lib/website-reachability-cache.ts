@@ -7,7 +7,10 @@ import { checkWebsiteReachability } from "./website-reachability";
 // cache instead of blocking every profile render on DNS/HTTP checks.
 const cachedCheck = unstable_cache(
   checkWebsiteReachability,
-  ["f046-website-reachability"],
+  // Bumped to -v2 when scheme-less hosts started validating: the key is the only
+  // thing that invalidates this cache, so without a bump every record already
+  // checked would serve its stale "invalid format" verdict for up to an hour.
+  ["f046-website-reachability-v2"],
   { revalidate: 60 * 60 },
 );
 

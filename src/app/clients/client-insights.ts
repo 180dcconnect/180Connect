@@ -128,6 +128,22 @@ export function parseDirection(value: string | null | undefined): SortDirection 
   return value === "ascending" ? "ascending" : "descending";
 }
 
+/** The breakdown shows a top-N for most fields; 3 is the shape the panel was built for. */
+export const DEFAULT_BREAKDOWN_LIMIT = 3;
+
+/**
+ * How many groups the breakdown shows for a given field.
+ *
+ * F167 AC1: grouped by owner, the panel is the team ownership view — an admin has
+ * to see *every* owner, so a top-N would be the bug. It is deliberately not derived
+ * from the size of the CAM list: clients can also be owned by an admin, or by a
+ * deactivated former member whose row no longer appears in the team query, and any
+ * of those falling off the bottom is exactly the omission AC1 rules out.
+ */
+export function breakdownLimit(field: BreakdownField): number {
+  return field === "owner" ? Number.POSITIVE_INFINITY : DEFAULT_BREAKDOWN_LIMIT;
+}
+
 export function fieldLabel(field: BreakdownField): string {
   return BREAKDOWN_FIELDS.find((entry) => entry.key === field)?.label ?? field;
 }
@@ -189,7 +205,7 @@ export function breakdown(
   field: BreakdownField,
   direction: SortDirection = "descending",
   rankBy: FunnelStageKey = "all",
-  limit = 3,
+  limit = DEFAULT_BREAKDOWN_LIMIT,
 ): BreakdownRow[] {
   const groups = new Map<string, Grouped & { counts: Record<FunnelStageKey, number> }>();
 

@@ -2,6 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { OriginButton } from "@/components/ui/origin-button";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
+import { reportError } from "@/lib/error-logging";
 
 export function SuppressButton({
   organisationId,
@@ -35,8 +39,9 @@ export function SuppressButton({
       // The server component re-reads suppression state and swaps this button for
       // the pending/active banner.
       router.refresh();
-    } catch {
-      setMessage("Could not reach the server. Check your connection and try again.");
+    } catch (err) {
+      void reportError(err, { operation: "clients.suppress_button_client", organisationId });
+      setMessage(NETWORK_ERROR_MESSAGE);
     } finally {
       setBusy(false);
     }
@@ -44,47 +49,55 @@ export function SuppressButton({
 
   if (!expanded) {
     return (
-      <button
-        className="rounded-lg border border-red-200 px-5 py-2.5 font-bold text-red-700 hover:bg-red-50"
+      <OriginButton
+        variant="destructive"
+        size="sm"
         onClick={() => setExpanded(true)}
         type="button"
       >
         Flag as Do Not Contact
-      </button>
+      </OriginButton>
     );
   }
 
   return (
     <form onSubmit={submit}>
-      <label className="block text-sm font-bold" htmlFor="suppress-reason">
+      <label
+        className="block text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40"
+        htmlFor="suppress-reason"
+      >
         Reason
       </label>
-      <p className="mt-1 text-sm text-foreground/65">
+      <p className="mt-1.5 text-[13px] leading-[1.6] text-foreground/50">
         e.g. hard no, legal request, unsubscribe.{" "}
         {selfApproves
           ? "Required, and kept on file. Takes effect immediately."
           : "Required, and kept on file. An admin reviews this before it takes effect."}
       </p>
       <textarea
-        className="mt-2 w-full rounded-lg border border-black/15 bg-white px-3 py-2"
+        className="mt-2.5 w-full rounded-xl border border-input bg-white px-3 py-2 text-sm leading-[1.6] outline-none transition-[box-shadow,border-color] placeholder:text-foreground/35 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:opacity-50"
+        placeholder="Why this client must not be contacted"
         disabled={busy}
         id="suppress-reason"
         onChange={(event) => setReason(event.target.value)}
         rows={3}
         value={reason}
       />
-      <div className="mt-4 flex gap-3">
-        <button
-          className="rounded-lg bg-red-700 px-5 py-2.5 font-bold text-white disabled:opacity-50"
+      <div className="mt-4 flex flex-wrap gap-2.5">
+        <OriginButton
+          variant="destructive"
+          size="sm"
+          loading={busy}
           disabled={busy || reason.trim() === ""}
           type="submit"
         >
           {busy
             ? (selfApproves ? "Flagging…" : "Requesting…")
             : (selfApproves ? "Flag as Do Not Contact" : "Request Do Not Contact")}
-        </button>
-        <button
-          className="rounded-lg border border-black/15 px-5 py-2.5 font-bold disabled:opacity-50"
+        </OriginButton>
+        <OriginButton
+          variant="ghost"
+          size="sm"
           disabled={busy}
           onClick={() => {
             setExpanded(false);
@@ -94,11 +107,11 @@ export function SuppressButton({
           type="button"
         >
           Cancel
-        </button>
+        </OriginButton>
       </div>
-      <p aria-live="polite" className="mt-4 min-h-6 text-sm font-bold text-red-700">
-        {message}
-      </p>
+      <div className="mt-4 min-h-6">
+        {message && <InlineAlert message={message} />}
+      </div>
     </form>
   );
 }

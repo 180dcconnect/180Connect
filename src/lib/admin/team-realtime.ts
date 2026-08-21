@@ -7,7 +7,11 @@ export type TeamUser = {
   role: "cam" | "admin" | "viewer";
   is_active: boolean;
   deactivated_at: string | null;
+  /** Last time this user was seen on any signed-in page — not last login. Null if never. */
+  last_seen_at: string | null;
   owned_client_count: number;
+  /** F167: the subset of `owned_client_count` that /clients lists (suppressed clients excluded). */
+  listed_client_count: number;
 };
 
 export type PendingInvite = {
@@ -24,7 +28,7 @@ export type TeamPanelState = {
 
 /**
  * The shape of a `public.users` row as `postgres_changes` broadcasts it: every
- * column, but none of the joined/derived fields (`owned_client_count`) the page's
+ * column, but none of the joined/derived fields (the client counts) the page's
  * own queries add, and none of the guarantees a plain `select` gives — a
  * mid-migration or redacted payload can still be missing fields.
  */
@@ -35,6 +39,7 @@ type RealtimeUserRow = {
   role?: TeamUser["role"];
   is_active?: boolean;
   deactivated_at?: string | null;
+  last_seen_at?: string | null;
   invited_at?: string | null;
   invite_accepted_at?: string | null;
 };
@@ -116,9 +121,9 @@ export function applyRealtimeUserChange(
     };
   }
 
-  // owned_client_count is joined from `organisations`, not a `users` column, so
-  // no realtime payload ever carries it — the existing value (or 0, for a row
-  // just promoted out of "pending", which cannot own clients yet) is kept.
+  // The client counts are joined from `organisations`, not `users` columns, so
+  // no realtime payload ever carries them — the existing values (or 0, for a row
+  // just promoted out of "pending", which cannot own clients yet) are kept.
   const existing = state.teamUsers.find((user) => user.id === row.id);
   const teamUser: TeamUser = {
     id: row.id,
@@ -127,7 +132,9 @@ export function applyRealtimeUserChange(
     role: row.role ?? existing?.role ?? "cam",
     is_active: row.is_active ?? existing?.is_active ?? true,
     deactivated_at: row.deactivated_at ?? existing?.deactivated_at ?? null,
+    last_seen_at: row.last_seen_at ?? existing?.last_seen_at ?? null,
     owned_client_count: existing?.owned_client_count ?? 0,
+    listed_client_count: existing?.listed_client_count ?? 0,
   };
 
   return {

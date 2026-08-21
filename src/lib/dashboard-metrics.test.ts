@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   computeDashboardMetrics,
+  filterActiveSuppressed,
   needsAttention,
   organisationGrowthSeries,
   type DashboardOrgRow,
+  type OpenSuppression,
 } from "./dashboard-metrics.ts";
 
 function org(overrides: Partial<DashboardOrgRow> = {}): DashboardOrgRow {
@@ -62,6 +64,20 @@ describe("computeDashboardMetrics", () => {
       org({ id: "c", outreach_status: "converted" }),
     ];
     assert.equal(computeDashboardMetrics(rows).converted, 2);
+  });
+
+  it("decreases converted count when a client is reverted away from converted (F025 AC3)", () => {
+    const beforeRows = [
+      org({ id: "a", outreach_status: "converted" }),
+      org({ id: "b", outreach_status: "converted" }),
+    ];
+    assert.equal(computeDashboardMetrics(beforeRows).converted, 2);
+
+    const afterRows = [
+      org({ id: "a", outreach_status: "converted" }),
+      org({ id: "b", outreach_status: "soft_no" }),
+    ];
+    assert.equal(computeDashboardMetrics(afterRows).converted, 1);
   });
 });
 
@@ -161,5 +177,54 @@ describe("organisationGrowthSeries", () => {
 
   it("returns nothing for a zero-day window", () => {
     assert.deepEqual(organisationGrowthSeries([], 0, now), []);
+  });
+});
+
+describe("filterActiveSuppressed (F022 AC3)", () => {
+  it("returns all rows when there are no suppressions", () => {
+    const rows = [org({ id: "a" }), org({ id: "b" })];
+    assert.deepEqual(filterActiveSuppressed(rows, []), rows);
+  });
+
+  it("excludes actively suppressed charities so they do not inflate the outreach pool", () => {
+    const rows = [
+      org({ id: "a", legal_name: "Active Org" }),
+      org({ id: "b", legal_name: "Suppressed Org", outreach_status: "initial_outreach_sent" }),
+    ];
+    const suppressions: OpenSuppression[] = [{ organisation_id: "b", status: "active" }];
+
+    const activeRows = filterActiveSuppressed(rows, suppressions);
+    assert.deepEqual(activeRows.map((r) => r.id), ["a"]);
+
+    const metrics = computeDashboardMetrics(activeRows);
+    assert.equal(metrics.totalCharities, 1);
+    assert.equal(metrics.contacted, 0);
+  });
+
+  it("keeps charities with pending suppression requests counted until approved", () => {
+    const rows = [
+      org({ id: "a", legal_name: "Active Org" }),
+      org({ id: "b", legal_name: "Pending Suppression Org", outreach_status: "responded" }),
+    ];
+    const suppressions: OpenSuppression[] = [{ organisation_id: "b", status: "pending" }];
+
+    const activeRows = filterActiveSuppressed(rows, suppressions);
+    assert.deepEqual(activeRows.map((r) => r.id), ["a", "b"]);
+
+    const metrics = computeDashboardMetrics(activeRows);
+    assert.equal(metrics.totalCharities, 2);
+    assert.equal(metrics.responsesReceived, 1);
+  });
+
+  it("excludes actively suppressed charities from needs attention", () => {
+    const rows = [
+      org({ id: "a", owner_id: "cam-1", outreach_status: "initial_outreach_sent" }),
+      org({ id: "b", owner_id: "cam-1", outreach_status: "initial_outreach_sent" }),
+    ];
+    const suppressions: OpenSuppression[] = [{ organisation_id: "b", status: "active" }];
+
+    const activeRows = filterActiveSuppressed(rows, suppressions);
+    const attention = needsAttention(activeRows, "cam-1");
+    assert.deepEqual(attention.map((item) => item.id), ["a"]);
   });
 });

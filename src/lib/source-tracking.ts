@@ -3,6 +3,8 @@ export type OrganisationSourceRow = {
   source_record_id: string | null;
   source_registry_name: string | null;
   first_seen_at: string;
+  source_actor_user_id?: string | null;
+  source_actor_name?: string | null;
 };
 
 export type OrganisationSource = OrganisationSourceRow & {

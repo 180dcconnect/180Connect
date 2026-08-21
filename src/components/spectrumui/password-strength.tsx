@@ -129,14 +129,16 @@ export function PasswordStrengthInput({
   const fillColor = SCORE_COLORS[score]
 
   // The previous committed score decides which segments actually changed,
-  // and the direction drives the label slide and the segment stagger order
-  const [committedScore, setCommittedScore] = useState(score)
+  // and the direction drives the label slide and the segment stagger order.
+  // Derived via the "adjust state during render" pattern rather than a ref
+  // read at render time (react-hooks/refs) — React explicitly supports a
+  // conditional setState here and bails out the extra render itself.
   const [prevScore, setPrevScore] = useState(score)
-  if (score !== committedScore) {
-    setPrevScore(committedScore)
-    setCommittedScore(score)
+  const [direction, setDirection] = useState(1)
+  if (score !== prevScore) {
+    setDirection(score >= prevScore ? 1 : -1)
+    setPrevScore(score)
   }
-  const direction = score >= prevScore ? 1 : -1
 
   const handleChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -374,13 +376,13 @@ export function PasswordStrengthMeter({
   const strengthLabel = STRENGTH_LABELS[score]
   const fillColor = SCORE_COLORS[score]
 
-  const [committedScore, setCommittedScore] = useState(score)
+  // See PasswordStrengthInput above for why this is state, not a ref.
   const [prevScore, setPrevScore] = useState(score)
-  if (score !== committedScore) {
-    setPrevScore(committedScore)
-    setCommittedScore(score)
+  const [direction, setDirection] = useState(1)
+  if (score !== prevScore) {
+    setDirection(score >= prevScore ? 1 : -1)
+    setPrevScore(score)
   }
-  const direction = score >= prevScore ? 1 : -1
 
   return (
     <div className={cn("flex flex-col gap-1 mt-2.5", className)} role="status">

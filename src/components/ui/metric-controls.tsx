@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Activity, BarChart3, Check, ChevronDown } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import type { ChartView } from "./metric-chart";
 
 /**
@@ -23,24 +24,36 @@ export function ViewToggle({
   value: ChartView;
   onChange: (view: ChartView) => void;
 }) {
-  const item = (view: ChartView, Icon: typeof Activity, label: string) => (
-    <button
-      type="button"
-      aria-label={label}
-      aria-pressed={value === view}
-      onClick={() => onChange(view)}
-      className={`pointer-events-auto rounded-full p-1.5 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand ${
-        value === view
-          ? "bg-white text-foreground shadow-sm"
-          : "text-foreground/40 hover:text-foreground/70"
-      }`}
-    >
-      <Icon size={14} strokeWidth={2.5} />
-    </button>
-  );
+  const item = (view: ChartView, Icon: typeof Activity, label: string) => {
+    const isSelected = value === view;
+    return (
+      <button
+        type="button"
+        aria-label={label}
+        aria-pressed={isSelected}
+        onClick={() => onChange(view)}
+        className={`relative pointer-events-auto z-10 rounded-full p-1.5 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand ${
+          isSelected
+            ? "text-foreground font-semibold"
+            : "text-foreground/40 hover:text-foreground/75"
+        }`}
+      >
+        {isSelected && (
+          <motion.div
+            layoutId="view-toggle-pill"
+            className="absolute inset-0 rounded-full bg-white dark:bg-card shadow-sm"
+            transition={{ type: "spring", stiffness: 450, damping: 30 }}
+          />
+        )}
+        <span className="relative z-10 block">
+          <Icon size={14} strokeWidth={2.5} />
+        </span>
+      </button>
+    );
+  };
 
   return (
-    <div className="flex items-center gap-0.5 rounded-full bg-black/[0.05] p-0.5">
+    <div className="flex items-center gap-0.5 rounded-full bg-black/[0.05] dark:bg-white/[0.08] p-0.5 backdrop-blur-sm">
       {item("curve", Activity, "Line view")}
       {item("bars", BarChart3, "Bar view")}
     </div>
@@ -75,37 +88,63 @@ export function PeriodSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((previous) => !previous)}
-        className="pointer-events-auto flex items-center gap-1 rounded-full px-2 py-1 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+        className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-black/[0.03] dark:bg-white/[0.05] px-2.5 py-1 text-[13px] font-medium text-muted-foreground transition-all hover:bg-black/[0.06] dark:hover:bg-white/[0.09] hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
       >
-        {value}
-        <ChevronDown size={14} strokeWidth={2.5} className={open ? "rotate-180" : undefined} />
+        <span>{value}</span>
+        <motion.div
+          animate={{ rotate: open ? 180 : 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          <ChevronDown size={14} strokeWidth={2.5} />
+        </motion.div>
       </button>
 
-      {open && (
-        <ul
-          role="listbox"
-          className="pointer-events-auto absolute right-0 top-full z-30 mt-1 min-w-[10rem] overflow-hidden rounded-xl border border-border bg-popover py-1 shadow-[0_8px_24px_rgba(0,0,0,0.10)]"
-        >
-          {options.map((option) => (
-            <li key={option.label}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={option.label === value}
-                onClick={() => {
-                  onChange(option);
-                  setOpen(false);
-                }}
-                className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[13px] hover:bg-accent"
-                style={option.label === value ? { color: accentText } : undefined}
-              >
-                {option.label}
-                {option.label === value && <Check size={14} strokeWidth={3} />}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <AnimatePresence>
+        {open && (
+          <motion.ul
+            role="listbox"
+            initial={{ opacity: 0, scale: 0.95, y: -4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: -4 }}
+            transition={{ duration: 0.15, ease: "easeOut" }}
+            className="pointer-events-auto absolute right-0 top-full z-40 mt-1.5 min-w-[10.5rem] overflow-hidden rounded-2xl border border-black/[0.08] dark:border-white/[0.12] bg-popover/95 p-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur-md"
+          >
+            {options.map((option) => {
+              const isSelected = option.label === value;
+              return (
+                <li key={option.label}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    onClick={() => {
+                      onChange(option);
+                      setOpen(false);
+                    }}
+                    className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-[13px] font-medium transition-colors ${
+                      isSelected
+                        ? "bg-black/[0.05] dark:bg-white/[0.08]"
+                        : "hover:bg-black/[0.03] dark:hover:bg-white/[0.05]"
+                    }`}
+                    style={isSelected ? { color: accentText } : undefined}
+                  >
+                    <span>{option.label}</span>
+                    {isSelected && (
+                      <motion.span
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        transition={{ type: "spring", stiffness: 500, damping: 25 }}
+                      >
+                        <Check size={14} strokeWidth={3} />
+                      </motion.span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </motion.ul>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

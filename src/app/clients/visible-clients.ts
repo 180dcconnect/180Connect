@@ -116,46 +116,100 @@ export function emptyStateMessage({
   return filterActive ? "No clients match this filter." : "No clients to show.";
 }
 
+/**
+ * A filter parameter's selected values. Multi-select writes the parameter more
+ * than once (`?city=Leeds&city=York`), which Next hands over as a string[];
+ * a single choice is still a plain string. Everything downstream wants the same
+ * shape, so normalise once here rather than at each call site.
+ *
+ * An empty array means "no filter", which is why blank values are dropped: a
+ * stray `?city=` should show everything, not nothing.
+ */
+export function filterValues(
+  value: string | string[] | null | undefined,
+): string[] {
+  if (value == null) return [];
+  const list = Array.isArray(value) ? value : [value];
+  return list.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+}
+
+/**
+ * F054 AC1 — city. Multi-select is a union (any of the chosen cities), which is
+ * the only reading that makes sense: a client has one city, so treating several
+ * as "all of them" would always return nothing.
+ */
 export function filterByCity(
   clients: VisibleClient[],
-  cityFilter: string | null | undefined,
+  cityFilter: string | string[] | null | undefined,
 ): VisibleClient[] {
-  if (!cityFilter) return clients;
-  const term = cityFilter.toLowerCase();
-  return clients.filter((client) => client.city?.toLowerCase() === term);
+  const wanted = filterValues(cityFilter).map((value) => value.toLowerCase());
+  if (wanted.length === 0) return clients;
+  return clients.filter((client) => {
+    const city = client.city?.toLowerCase();
+    return city !== undefined && wanted.includes(city);
+  });
 }
 
+/**
+ * F054 AC1 — country, the level above city. Matches `country_code`, which is
+ * never null, so unlike city there is no "missing value" case to think about.
+ *
+ * Note there is deliberately no *region* filter, the third option AC1 offers:
+ * ORGANISATIONS has no region column (only country_code, city and postcode), so
+ * a region filter would need a schema change and that is not this ticket's to
+ * make. Country plus city satisfies AC2's "at least one level beyond country".
+ */
+export function filterByCountry(
+  clients: VisibleClient[],
+  countryFilter: string | string[] | null | undefined,
+): VisibleClient[] {
+  const wanted = filterValues(countryFilter).map((value) => value.toLowerCase());
+  if (wanted.length === 0) return clients;
+  return clients.filter((client) => wanted.includes(client.country_code.toLowerCase()));
+}
+
+/**
+ * F056 — outreach status. AC3: selecting several statuses shows clients in *any*
+ * of them.
+ *
+ * Matches the stored enum value (`not_contacted`), not the formatted label
+ * ("Not contacted"). It used to match the label, which meant any link built from
+ * a database value — an API response, a seeded fixture, a hand-written URL —
+ * silently returned nothing. The label is a display concern and can be
+ * retranslated at any time; the enum is the stable identifier, so it is the one
+ * the URL carries.
+ */
 export function filterByStatus(
   clients: VisibleClient[],
-  statusFilter: string | null | undefined,
+  statusFilter: string | string[] | null | undefined,
 ): VisibleClient[] {
-  if (!statusFilter) return clients;
-  const term = statusFilter.toLowerCase();
-  // We match against the formatted label (e.g. "Meeting set")
-  return clients.filter((client) => client.outreachStatusLabel.toLowerCase() === term);
+  const wanted = filterValues(statusFilter).map((value) => value.toLowerCase());
+  if (wanted.length === 0) return clients;
+  return clients.filter((client) => wanted.includes(client.outreach_status.toLowerCase()));
 }
 
-export function filterBySource(
+/**
+ * F053 — organisation type. AC1 asks for the standardised type field and AC2 for
+ * a union across several types, so this matches `organisation_type` values
+ * (`charity`, `company`, `both`, `other`) directly.
+ *
+ * It replaces the earlier `filterBySource`, which took display labels
+ * ("Charity Commission") and mapped them onto types, treating the field as
+ * *which register a record came from* rather than *what kind of organisation it
+ * is*. Two consequences of that made it fail its own ACs: "Charity Commission"
+ * quietly meant charity-or-dual, so no combination of labels could express the
+ * plain union AC2 asks for; and an unrecognised label fell through to
+ * `return clients`, so a stale or mistyped filter showed **every** client
+ * instead of none — a filter that appears to be off rather than one that
+ * matched nothing. An unknown value here simply matches no client.
+ */
+export function filterByType(
   clients: VisibleClient[],
-  sourceFilter: string | null | undefined,
+  typeFilter: string | string[] | null | undefined,
 ): VisibleClient[] {
-  if (!sourceFilter) return clients;
-  const term = sourceFilter.toLowerCase();
-  
-  if (term === "companies house") {
-    return clients.filter((c) => c.organisation_type === "company" || c.organisation_type === "both");
-  }
-  if (term === "charity commission") {
-    return clients.filter((c) => c.organisation_type === "charity" || c.organisation_type === "both");
-  }
-  if (term === "dual-registered") {
-    return clients.filter((c) => c.organisation_type === "both");
-  }
-  if (term === "other") {
-    return clients.filter((c) => c.organisation_type === "other");
-  }
-  
-  return clients;
+  const wanted = filterValues(typeFilter).map((value) => value.toLowerCase());
+  if (wanted.length === 0) return clients;
+  return clients.filter((client) => wanted.includes(client.organisation_type.toLowerCase()));
 }
 
 /* ─── List sorting (F060 #62, F061 #63) ────────────────────────────────── */

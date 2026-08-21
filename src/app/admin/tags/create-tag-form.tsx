@@ -25,7 +25,7 @@ export function CreateTagForm() {
       <button
         type="submit"
         disabled={pending}
-        className="rounded-full bg-[--brand] px-5 py-2 text-sm font-bold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+        className="rounded-full bg-brand px-5 py-2 text-sm font-bold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {pending ? "Creating…" : "Create tag"}
       </button>
@@ -35,7 +35,7 @@ export function CreateTagForm() {
         </p>
       )}
       {state && state.ok && (
-        <p className="w-full text-sm font-medium text-[--brand]" role="status">
+        <p className="w-full text-sm font-medium text-brand" role="status">
           &quot;{state.tag.name}&quot; created.
         </p>
       )}

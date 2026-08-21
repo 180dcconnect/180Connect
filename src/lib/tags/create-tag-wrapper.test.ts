@@ -80,4 +80,37 @@ describe("buildSupabaseTagInsertClient — error reporting", () => {
       assert.equal(result.message, "connection lost");
     }
   });
+
+  // Review fix (round 2): a network failure or similar throws rather than
+  // resolving with { error } — without the try/catch this would reject
+  // instead of returning a safe result, and the caller (createTagCore)
+  // would see an unhandled exception rather than its usual failure path.
+  it("catches a thrown error (e.g. a network failure) instead of rejecting", async () => {
+    const client: TagsTableClient = {
+      from(_table) {
+        return {
+          insert(_row) {
+            return {
+              select(_columns) {
+                return {
+                  async single() {
+                    throw new Error("fetch failed");
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    };
+
+    const insertClient = buildSupabaseTagInsertClient(client);
+    const result = await insertClient.insertTag("Urgent", "user-1");
+
+    assert.deepEqual(result, {
+      ok: false,
+      code: null,
+      message: "fetch failed",
+    });
+  });
 });

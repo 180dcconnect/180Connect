@@ -28,7 +28,7 @@ export default async function TagsPage() {
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <section className="mx-auto max-w-2xl rounded-2xl border border-black/[0.06] bg-white p-8 shadow-sm">
-        <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[--brand]">
+        <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-brand">
           Tags
         </p>
         <h1 className="mt-2 text-[clamp(2rem,4vw,2.75rem)] font-black leading-[1.05] tracking-[-0.03em]">
@@ -61,7 +61,7 @@ export default async function TagsPage() {
               {existingTags.map((tag) => (
                 <span
                   key={tag.id}
-                  className="rounded-full bg-[--brand]/10 px-2.5 py-1 text-xs font-medium text-[--brand]"
+                  className="rounded-full bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand"
                 >
                   {tag.name}
                 </span>

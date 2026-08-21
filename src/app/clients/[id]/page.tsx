@@ -19,6 +19,7 @@ import { safeWebsiteHref, websiteHref } from "@/lib/website-validation";
 import { formatLocation, formatOutreachStatus } from "@/lib/organisation-format";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
+import { splitOutreachHistory, type OutreachMessageRow } from "@/lib/outreach-history";
 import { SuppressButton } from "./suppress-button";
 import { LiftSuppressionButton } from "./lift-suppression-button";
 import { ComposeButton } from "./compose-button";
@@ -43,6 +44,7 @@ import {
 } from "@/lib/timeline";
 import { TimelineSection } from "./timeline-section";
 import { TimelineRealtimeRefresher } from "./timeline-realtime";
+import { OutreachHistorySection } from "./outreach-history";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -66,6 +68,14 @@ type OwnerRow = {
  * F069-081) are still separate open tickets; each will slot in here as its own
  * `<section aria-labelledby>`, same shape as "Record sources" and this one, to
  * keep F067 AC2's "each reachable without excessive scrolling" true as they land.
+ *
+ * F070 (#72) View Previous Emails is one such section: the Outreach card below
+ * now shows every outreach_messages row for this client, split into "Sent" and
+ * "Not sent" (AC3) — see @/lib/outreach-history for the split/order logic and
+ * outreach-history.tsx for the render. Gated on `client:view` like the rest of
+ * this page (matches outreach_messages_select_active — read is shared across
+ * all active roles, not ownership-scoped), not on `client:contact`, which still
+ * gates only ComposeButton within the same card.
  *
  * F075 (#77) View Communication Timeline / F076 (#78) Timeline Event Types:
  * merges notes, sent emails, replies, status changes and ownership handovers
@@ -235,6 +245,26 @@ export default async function ClientDetailPage({
   if (ownerError) {
     await reportError(ownerError, { operation: "clients.detail_owner", organisationId: id });
   }
+
+  // F070: every outreach message for this client, sent or not. RLS
+  // (outreach_messages_select_active) shares read across every active role, so
+  // this needs no ownership filter — same reasoning as the `client:view` gate
+  // above.
+  const { data: outreachRows, error: outreachError } = await supabase
+    .from("outreach_messages")
+    .select("id, subject, body, send_status, sent_at, scheduled_at, created_at")
+    .eq("organisation_id", id)
+    .order("created_at", { ascending: false });
+
+  if (outreachError) {
+    await reportError(outreachError, {
+      operation: "clients.detail_outreach",
+      organisationId: id,
+    });
+  }
+  const outreachHistory = splitOutreachHistory(
+    (outreachRows ?? []) as OutreachMessageRow[],
+  );
 
   // F075/F076: the four sources @/lib/timeline.ts's buildTimeline merges into
   // one feed. Independent queries, not one join — the four tables share no
@@ -774,11 +804,14 @@ export default async function ClientDetailPage({
               </Rise>
             )}
 
-            {hasPermission(authorization.actor.role, "client:contact") && (
-              <Rise>
-                <SectionCard headingId="outreach-heading" title="Outreach">
-                  {/* The conflict is shown by ComposeButton itself, so the one
-                      message survives a click and the re-check behind it. */}
+            {/* F070: the history itself is readable by every active role
+                (outreach_messages_select_active), so the card is not gated on
+                client:contact — only ComposeButton inside it is. */}
+            <Rise>
+              <SectionCard headingId="outreach-heading" title="Outreach">
+                <OutreachHistorySection history={outreachHistory} error={Boolean(outreachError)} />
+
+                {hasPermission(authorization.actor.role, "client:contact") && (
                   <div className="mt-4">
                     <ComposeButton
                       blocked={suppressed}
@@ -789,9 +822,9 @@ export default async function ClientDetailPage({
                       }
                     />
                   </div>
-                </SectionCard>
-              </Rise>
-            )}
+                )}
+              </SectionCard>
+            </Rise>
 
             {/* Only the action lives down here — the resulting state is the
                 banner at the top of the page, so there is nothing to show once

@@ -47,7 +47,7 @@ export function TagChips({
       {visibleTags.map((tag) => (
         <span
           key={tag.id}
-          className="inline-flex items-center gap-1 rounded-full bg-[--brand]/10 px-2.5 py-1 text-xs font-medium text-[--brand]"
+          className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand"
         >
           {tag.name}
           {canEdit && (
@@ -56,7 +56,7 @@ export function TagChips({
               onClick={() => handleRemove(tag.id)}
               disabled={pending}
               aria-label={`Remove ${tag.name}`}
-              className="ml-0.5 rounded-full text-[--brand]/60 hover:text-[--brand] disabled:cursor-not-allowed disabled:opacity-50"
+              className="ml-0.5 rounded-full text-brand/60 hover:text-brand disabled:cursor-not-allowed disabled:opacity-50"
             >
               ×
             </button>

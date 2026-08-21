@@ -12,8 +12,10 @@ import {
   emptyStateMessage,
   filterByOwner,
   filterByCity,
+  filterByCountry,
   filterByStatus,
-  filterBySource,
+  filterByType,
+  filterValues,
   LIST_SORT_DIRECTIONS,
   LIST_SORT_FIELDS,
   parseListDirection,
@@ -42,6 +44,12 @@ import {
   type BreakdownRow,
   type FunnelStageKey,
 } from "./client-insights";
+import {
+  ORGANISATION_TYPES,
+  PIPELINE_STATUSES,
+  formatOrganisationType,
+  formatOutreachStatus,
+} from "@/lib/organisation-format";
 import { PipelineReport } from "./pipeline-report";
 import { SortMenu as ListSortMenu } from "./sort-menu";
 import { BulkSelectProvider } from "./bulk-select-provider";
@@ -56,9 +64,13 @@ type SearchParams = Promise<{
   owner?: string;
   q?: string;
   page?: string;
-  city?: string;
-  status?: string;
-  source?: string;
+  // F053/F054/F056: multi-select writes a parameter more than once, so each of
+  // these arrives as a string[] when several values are chosen and a string when
+  // one is. filterValues() flattens both.
+  city?: string | string[];
+  country?: string | string[];
+  status?: string | string[];
+  type?: string | string[];
   /** Funnel stage the breakdown counts. */
   stage?: string;
   /** Field the breakdown groups by, and which end of it to show. */
@@ -133,8 +145,9 @@ export default async function ClientsPage({
     q: search,
     page: pageParam,
     city,
+    country,
     status,
-    source,
+    type: typeFilter,
     stage: stageParam,
     sort: sortParam,
     dir: dirParam,
@@ -145,7 +158,20 @@ export default async function ClientsPage({
   const supabase = await createClient();
   const canClaim = hasPermission(authorization.actor.role, "client:edit");
   const canGenerateBooklet = hasPermission(authorization.actor.role, "client:contact");
-  const isAdmin = authorization.actor.role === "admin";
+  /**
+   * F062 AC1 names the CAM: "CAM can select multiple individual clients from the
+   * list via checkboxes". Selection was gated on `isAdmin`, so the role the whole
+   * Client Database batch is built for saw no checkboxes at all.
+   *
+   * Selection itself grants nothing — it is a way of pointing at rows — so it is
+   * offered to anyone who can act on a client (`client:edit`, i.e. CAMs and
+   * admins) rather than to admins alone. A viewer, who can only read, still gets
+   * none. What you may then *do* with a selection stays permission-checked
+   * separately: the bulk assign action below is still admin-only, because
+   * reassigning ownership needs `ownership:reassign`.
+   */
+  const canSelect = hasPermission(authorization.actor.role, "client:edit");
+  const canBulkAssign = hasPermission(authorization.actor.role, "ownership:reassign");
 
   const [organisations, openSuppressions, team] = await Promise.all([
     supabase
@@ -180,17 +206,41 @@ export default async function ClientsPage({
 
   const allVisibleClients = visibleClients(organisations.data ?? [], openSuppressions.data ?? []);
   
-  const uniqueCities = Array.from(new Set(allVisibleClients.map(c => c.city).filter(Boolean))).sort() as string[];
-  const uniqueStatuses = Array.from(new Set(allVisibleClients.map(c => c.outreachStatusLabel).filter(Boolean))).sort() as string[];
-  
-  const uniqueSourceTypes = Array.from(new Set(allVisibleClients.map(c => c.organisation_type).filter(Boolean)));
-  const uniqueSources = uniqueSourceTypes.map(t => SOURCE_LABELS[t] || t).sort();
+  // Place options come from the data — there is no list of every city a charity
+  // could be in, and one that nothing is in would be a dead end (F053 AC3's
+  // reasoning, applied to places).
+  const uniqueCities = Array.from(
+    new Set(allVisibleClients.map((c) => c.city).filter(Boolean)),
+  ).sort() as string[];
+  const uniqueCountries = Array.from(
+    new Set(allVisibleClients.map((c) => c.country_code).filter(Boolean)),
+  ).sort();
+
+  // Type and status options come from the *defined* sets, not from the rows on
+  // screen. F053 AC3 and F056 AC2 both ask for the options to match what the
+  // column allows; deriving them from current data silently drops any value
+  // nobody happens to be in, so a status would disappear from the filter exactly
+  // when the list emptied of it — the moment you would want to check.
+  const typeOptions = ORGANISATION_TYPES.map((value) => ({
+    label: formatOrganisationType(value),
+    value,
+  }));
+  const statusOptions = PIPELINE_STATUSES.map((value) => ({
+    label: formatOutreachStatus(value),
+    value,
+  }));
+
+  const cityValues = filterValues(city);
+  const countryValues = filterValues(country);
+  const statusValues = filterValues(status);
+  const typeValues = filterValues(typeFilter);
 
   let matchingClients = allVisibleClients;
   matchingClients = filterByOwner(matchingClients, ownerFilter);
-  matchingClients = filterByCity(matchingClients, city);
-  matchingClients = filterByStatus(matchingClients, status);
-  matchingClients = filterBySource(matchingClients, source);
+  matchingClients = filterByCity(matchingClients, cityValues);
+  matchingClients = filterByCountry(matchingClients, countryValues);
+  matchingClients = filterByStatus(matchingClients, statusValues);
+  matchingClients = filterByType(matchingClients, typeValues);
   matchingClients = searchClients(matchingClients, search);
   const teamMembers = team.data ?? [];
   // The owner dropdown lists CAMs only (F163), but `?owner=` can name anyone who
@@ -204,7 +254,14 @@ export default async function ClientsPage({
         allVisibleClients.find((client) => client.owner_id === ownerFilter)?.ownerName ??
         "Unnamed team member")
       : null;
-  const filterActive = Boolean(ownerFilter || search || city || status || source);
+  const filterActive = Boolean(
+    ownerFilter ||
+      search ||
+      cityValues.length ||
+      countryValues.length ||
+      statusValues.length ||
+      typeValues.length,
+  );
   // F166 AC1/AC3: this is the CAM viewing their own filter, not just any owner
   // filter — the heading, count label and empty state read "your clients" so the
   // view reads as its own thing rather than a generic filtered list.
@@ -235,13 +292,17 @@ export default async function ClientsPage({
    * all go through here rather than each rebuilding the query string and quietly
    * dropping the parameters it doesn't know about. `undefined` clears a key.
    */
-  const hrefWith = (changes: Record<string, string | number | undefined>) => {
-    const base: Record<string, string | number | undefined> = {
+  type HrefValue = string | number | string[] | undefined;
+  const hrefWith = (changes: Record<string, HrefValue>) => {
+    const base: Record<string, HrefValue> = {
       owner: ownerFilter,
       q: search,
-      city,
-      status,
-      source,
+      // The multi-select filters carry every selected value, so a link that
+      // changes the sort keeps all three chosen cities rather than the first.
+      city: cityValues,
+      country: countryValues,
+      status: statusValues,
+      type: typeValues,
       stage: stageParam,
       sort: sortParam,
       dir: dirParam,
@@ -261,6 +322,12 @@ export default async function ClientsPage({
     for (const [key, value] of Object.entries(base)) {
       if (value === undefined || value === "") continue;
       if (key === "page" && Number(value) <= 1) continue;
+      // A multi-value filter is repeated, not comma-joined: `append` keeps values
+      // that contain a comma intact, and Next hands the repeats back as an array.
+      if (Array.isArray(value)) {
+        value.forEach((entry) => params.append(key, entry));
+        continue;
+      }
       params.set(key, String(value));
     }
     const qs = params.toString();
@@ -293,8 +360,11 @@ export default async function ClientsPage({
   // A group's row lands on the list filtered to that group, from page one. The
   // funnel stage rides along: it only ever counts the panels, never the list, so
   // "converted, by city" stays selected while the list narrows to that city.
+  // A group's row narrows the list to that group alone, replacing whatever was
+  // selected for that filter rather than adding to it — the row means "show me
+  // this one", and a click that quietly widened the list would be a surprise.
   const rowHref = (filter: NonNullable<BreakdownRow["filter"]>) =>
-    hrefWith({ [filter.param]: filter.value });
+    hrefWith({ [filter.param]: [filter.value] });
   const stageHref = (key: FunnelStageKey) =>
     hrefWith({ stage: key === "all" ? undefined : key });
 
@@ -315,22 +385,35 @@ export default async function ClientsPage({
             <BrandSearchBar
               defaultQuery={search ?? ""}
               defaultFilters={[
-                ...(city ? [{ category: "Filter by city", label: city, value: city }] : []),
-                ...(status ? [{ category: "Filter by outreach status", label: status, value: status }] : []),
-                ...(source ? [{ category: "Filter by source", label: source, value: source }] : []),
+                // One chip per selected value, so a three-city filter reads as
+                // three removable chips rather than one that hides the others.
+                ...cityValues.map((value) => ({ category: "Filter by city", label: value, value })),
+                ...countryValues.map((value) => ({ category: "Filter by country", label: value, value })),
+                ...statusValues.map((value) => ({
+                  category: "Filter by outreach status",
+                  label: formatOutreachStatus(value),
+                  value,
+                })),
+                ...typeValues.map((value) => ({
+                  category: "Filter by organisation type",
+                  label: formatOrganisationType(value),
+                  value,
+                })),
                 ...(ownerFilter === "unassigned" ? [{ category: "Filter by owner", label: "Unassigned", value: "unassigned" }] : []),
                 ...(ownerFilterLabel ? [{ category: "Filter by owner", label: ownerFilterLabel, value: ownerFilter as string }] : [])
               ]}
               params={{
                 "Filter by city": "city",
+                "Filter by country": "country",
                 "Filter by outreach status": "status",
-                "Filter by source": "source",
+                "Filter by organisation type": "type",
                 "Filter by owner": "owner",
               }}
               categories={{
                 "Filter by city": uniqueCities.map(c => ({ label: c, value: c })),
-                "Filter by outreach status": uniqueStatuses.map(c => ({ label: c, value: c })),
-                "Filter by source": uniqueSources.map(c => ({ label: c, value: c })),
+                "Filter by country": uniqueCountries.map(c => ({ label: c, value: c })),
+                "Filter by outreach status": statusOptions,
+                "Filter by organisation type": typeOptions,
                 "Filter by owner": [
                   { label: "Unassigned", value: "unassigned" },
                   ...teamMembers.map(m => ({ label: m.full_name || "Unnamed CAM", value: m.id }))
@@ -454,9 +537,14 @@ export default async function ClientsPage({
                   <div
                     className="group/header hidden items-center gap-4 border-b border-black/[0.06] bg-black/[0.015] px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em] text-foreground/30 lg:flex"
                   >
-                    {isAdmin && (
+                    {canSelect && (
                       <span className="flex w-6 shrink-0 items-center justify-center">
-                        <SelectAllCheckbox clientIds={clients.map((c) => c.id)} />
+                        {/* F062 AC1 asks for "all currently visible (filtered)
+                            clients", which is the whole filtered set, not the 25
+                            of it this page happens to show. Passing the paginated
+                            slice made "select all" mean "select this page", so a
+                            bulk action on a 60-client filter silently touched 25. */}
+                        <SelectAllCheckbox clientIds={matchingClients.map((c) => c.id)} />
                       </span>
                     )}
                     <span className={`${ROW_GRID} min-w-0 flex-1`}>
@@ -481,7 +569,7 @@ export default async function ClientsPage({
                         key={client.id}
                         className="group/row flex items-center gap-4 border-b border-black/[0.06] px-5 py-3.5 last:border-b-0"
                       >
-                        {isAdmin && (
+                        {canSelect && (
                           <span className="flex w-6 shrink-0 items-center justify-center">
                             <ClientRowCheckbox
                               organisationId={client.id}
@@ -615,7 +703,7 @@ export default async function ClientsPage({
             )}
           </Group>
         </SearchRail>
-        {isAdmin && <BulkActionBar team={teamMembers} />}
+        {canSelect && <BulkActionBar team={teamMembers} canAssign={canBulkAssign} />}
       </div>
     </BulkSelectProvider>
   );

@@ -4,18 +4,68 @@ import { useState } from "react";
 import { OriginButton } from "@/components/ui/origin-button";
 
 /**
- * F050 (#52) placeholder send action — see the comment on ../page.tsx for why this
- * exists ahead of the real F094/F100 outreach UI. Two states, no network call:
+ * F249/F165 visible preflight while F123's provider send path is pending. Every click
+ * re-reads suppression and ownership state; a page-open snapshot is not trusted. The
+ * future send action must repeat the server check immediately before delivery.
  *
- * - blocked: a real, non-dismissable disabled state. The "why" is the Do Not
- *   Contact banner already rendered above this component on the page — this button
- *   doesn't repeat it, just refuses to be clicked.
- * - not blocked: clickable, but clicking only reveals a message saying so. Nothing
- *   is sent, because nothing can be — there is no outreach_messages insert here at
- *   all, real or otherwise.
+ * Tone is carried alongside the message rather than fixed on the element: a
+ * suppression block or a failed check stays red, and only an ownership conflict —
+ * which an admin can resolve by reassigning — reads amber. A hard block must never
+ * be styled as soft advice.
  */
-export function ComposeButton({ blocked }: { blocked: boolean }) {
+type Tone = "block" | "conflict";
+type Warning = { text: string; tone: Tone };
+
+export function ComposeButton({
+  blocked,
+  organisationId,
+  suppressionReason,
+  ownershipWarning,
+}: {
+  blocked: boolean;
+  organisationId: string;
+  suppressionReason?: string;
+  ownershipWarning?: string;
+}) {
   const [clicked, setClicked] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [warning, setWarning] = useState<Warning | null>(
+    blocked
+      ? {
+          text: `This client is suppressed. Outreach is blocked. Reason: ${suppressionReason ?? "No reason was recorded."}`,
+          tone: "block",
+        }
+      : ownershipWarning
+        ? { text: ownershipWarning, tone: "conflict" }
+        : null,
+  );
+
+  async function checkBeforeCompose() {
+    setChecking(true);
+    setClicked(false);
+    setWarning(null);
+    try {
+      const response = await fetch(`/api/clients/${organisationId}/outreach-preflight`, {
+        method: "POST",
+      });
+      const body = await response.json();
+      if (!response.ok || !body.allowed) {
+        setWarning({
+          text: body.error ?? "Outreach permissions could not be verified. Nothing was sent.",
+          tone: body.kind === "ownership_conflict" ? "conflict" : "block",
+        });
+        return;
+      }
+      setClicked(true);
+    } catch {
+      setWarning({
+        text: "Outreach permissions could not be checked. Nothing was sent. Please try again.",
+        tone: "block",
+      });
+    } finally {
+      setChecking(false);
+    }
+  }
 
   if (blocked) {
     return (
@@ -29,8 +79,8 @@ export function ComposeButton({ blocked }: { blocked: boolean }) {
         >
           Compose email
         </OriginButton>
-        <p className="mt-2.5 text-[13px] leading-[1.6] text-foreground/45">
-          Blocked — see the Do Not Contact notice above.
+        <p className="mt-2.5 text-[13px] font-bold leading-[1.6] text-red-800" role="alert">
+          {warning?.text}
         </p>
       </div>
     );
@@ -41,16 +91,28 @@ export function ComposeButton({ blocked }: { blocked: boolean }) {
       <OriginButton
         variant="outline"
         size="sm"
-        onClick={() => setClicked(true)}
+        disabled={checking}
+        onClick={checkBeforeCompose}
         type="button"
       >
-        Compose email
+        {checking ? "Checking permissions…" : "Compose email"}
       </OriginButton>
+      {warning ? (
+        <p
+          aria-live="assertive"
+          className={
+            "mt-2.5 text-[13px] font-bold leading-[1.6] " +
+            (warning.tone === "conflict" ? "text-amber-800" : "text-red-800")
+          }
+          role="alert"
+        >
+          {warning.text}
+        </p>
+      ) : null}
       {clicked ? (
         <p aria-live="polite" className="mt-2.5 text-[13px] leading-[1.6] text-foreground/45">
-          Email generation isn&apos;t built yet (F094, F100) — this button is a
-          placeholder so Do Not Contact protection (F050) can be demonstrated ahead
-          of the real send flow.
+          Outreach checks passed. Email generation isn&apos;t built yet (F094, F100),
+          so nothing was sent.
         </p>
       ) : null}
     </div>

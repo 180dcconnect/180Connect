@@ -17,16 +17,24 @@ import { formatLocation, formatOutreachStatus } from "@/lib/organisation-format"
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
 import { SuppressButton } from "./suppress-button";
+import { LiftSuppressionButton } from "./lift-suppression-button";
 import { ComposeButton } from "./compose-button";
 import { BasicInfoPanel } from "./basic-info-panel";
 import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
 import { Pill, SectionCard } from "./section-card";
+import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
+import {
+  ownershipRequestAvailability,
+  type OwnershipRequestStatus,
+} from "@/lib/ownership-requests";
+import { RequestOwnershipForm } from "./request-ownership-form";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
 type LatestSuppression = {
+  id: string;
   status: "pending" | "active" | "rejected" | "lifted";
   reason: string;
   created_at: string;
@@ -138,7 +146,7 @@ export default async function ClientDetailPage({
   // through to the suppress button.
   const { data: latest } = await supabase
     .from("suppressions")
-    .select("status, reason, created_at")
+    .select("id, status, reason, created_at")
     .eq("organisation_id", id)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -182,6 +190,44 @@ export default async function ClientDetailPage({
   const suppressed = latest?.status === "active";
   const suppressionPending = latest?.status === "pending";
 
+  // Deliberately not `ownerName`: that falls back to "A former team member" for a
+  // deleted owner, which the warning would read back as a person to go and talk to.
+  const ownershipConflict = checkOwnershipConflict({
+    ownerId,
+    ownerName: ownerRow?.owner?.full_name ?? null,
+    actorId: authorization.actor.id,
+    actorRole: authorization.actor.role,
+  });
+
+  // #408: this CAM's own most recent request for this client, so the conflict warning
+  // can offer the escalation — or, if they have already asked, say so instead of
+  // inviting a second ask the RPC would refuse. Only fetched when a conflict exists;
+  // there is nothing to request otherwise.
+  let ownRequest: { status: OwnershipRequestStatus; decision_note: string | null } | null = null;
+  if (ownershipConflict.hasConflict) {
+    const { data: requestRow, error: requestError } = await supabase
+      .from("ownership_requests")
+      .select("status, decision_note")
+      .eq("organisation_id", id)
+      .eq("requested_by", authorization.actor.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<{ status: OwnershipRequestStatus; decision_note: string | null }>();
+    if (requestError) {
+      await reportError(requestError, {
+        operation: "clients.detail_ownership_request",
+        organisationId: id,
+      });
+    }
+    ownRequest = requestRow ?? null;
+  }
+
+  const requestAvailability = ownershipRequestAvailability({
+    ownerId,
+    actorId: authorization.actor.id,
+    actorRole: authorization.actor.role,
+    hasPendingRequest: ownRequest?.status === "pending",
+  });
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="mx-auto w-full max-w-5xl space-y-6">
@@ -216,7 +262,12 @@ export default async function ClientDetailPage({
             {ownerId && (
               <p className="text-sm leading-[1.7] text-foreground/50">
                 Owned by{" "}
-                <span className="font-bold text-foreground/75">{ownerName}</span>
+                <Link
+                  href={`/team/${ownerId}`}
+                  className="font-bold text-foreground/75 hover:text-brand hover:underline"
+                >
+                  {ownerName}
+                </Link>
                 {ownerId === authorization.actor.id ? " (you)" : ""}
               </p>
             )}
@@ -241,6 +292,12 @@ export default async function ClientDetailPage({
                 Hidden from the active working list. Outreach is blocked. Only an admin
                 can lift this.
               </p>
+              {isAdmin && (
+                <LiftSuppressionButton
+                  organisationId={client.id}
+                  suppressionId={latest.id}
+                />
+              )}
             </div>
           </Rise>
         )}
@@ -390,10 +447,31 @@ export default async function ClientDetailPage({
             <Rise>
               <SectionCard headingId="ownership-heading" title="Ownership">
                 {ownerId ? (
-                  <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
-                    Owned by <span className="font-bold text-foreground/85">{ownerName}</span>
-                    {ownerId === authorization.actor.id ? " (you)" : ""}.
-                  </p>
+                  <>
+                    <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
+                      Owned by{" "}
+                      <Link
+                        href={`/team/${ownerId}`}
+                        className="font-bold text-foreground/85 hover:text-brand hover:underline"
+                      >
+                        {ownerName}
+                      </Link>
+                      {ownerId === authorization.actor.id ? " (you)" : ""}.
+                    </p>
+                    {/* #408: the only sanctioned route past a conflict. A CAM asks; an
+                        admin decides. There is no take-anyway action, here or in the
+                        RPC behind it. */}
+                    {(requestAvailability.available ||
+                      requestAvailability.reason === "already_pending" ||
+                      (ownershipConflict.hasConflict && ownRequest)) && (
+                      <RequestOwnershipForm
+                        organisationId={client.id}
+                        ownerName={ownerRow?.owner?.full_name ?? null}
+                        existingStatus={ownRequest?.status ?? null}
+                        decisionNote={ownRequest?.decision_note ?? null}
+                      />
+                    )}
+                  </>
                 ) : canEdit ? (
                   <div className="mt-3 space-y-3">
                     <p className="text-sm leading-[1.7] text-foreground/55">
@@ -435,8 +513,17 @@ export default async function ClientDetailPage({
             {hasPermission(authorization.actor.role, "client:contact") && (
               <Rise>
                 <SectionCard headingId="outreach-heading" title="Outreach">
+                  {/* The conflict is shown by ComposeButton itself, so the one
+                      message survives a click and the re-check behind it. */}
                   <div className="mt-4">
-                    <ComposeButton blocked={suppressed} />
+                    <ComposeButton
+                      blocked={suppressed}
+                      organisationId={client.id}
+                      suppressionReason={suppressed ? latest.reason : undefined}
+                      ownershipWarning={
+                        ownershipConflict.hasConflict ? ownershipConflict.warning : undefined
+                      }
+                    />
                   </div>
                 </SectionCard>
               </Rise>

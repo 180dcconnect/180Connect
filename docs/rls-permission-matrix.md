@@ -530,16 +530,17 @@ which is the wrong test for a row a user writes about themselves.
 
 ---
 
-### 3.13 Outreach preferences — own row only
+### 3.13 Outreach preferences — own row or admin read
 
-Backs F195 (`supabase/migrations/20260805110000_create_outreach_preferences.sql`). Same
+Backs F195 (`supabase/migrations/20260805110000_create_outreach_preferences.sql`) and
+F187 (`supabase/migrations/20260819100000_allow_admin_read_outreach_preferences.sql`). Same
 shape as §3.12: a user's own settings, not ownership/status/role/approval state, so it
 is governed by RLS alone — no SECURITY DEFINER RPC, no `audit_log` row
 (`docs/audit-log-pattern.md` §1).
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `OUTREACH_PREFERENCES` | own row (`user_id = auth.uid()`) | own row | own row | — (no grant) |
+| `OUTREACH_PREFERENCES` | own row (`user_id = auth.uid()`) OR admin (`app.is_admin()`) | own row | own row | — (no grant) |
 
 One row per user (`unique (user_id)`), upserted by the settings form's server action.
 No DELETE grant to any role: clearing preferences is an UPDATE back to empty arrays,
@@ -547,9 +548,8 @@ not a row removal — this keeps "no preferences set" a single always-present st
 (empty arrays) instead of a row that may or may not exist, which is one fewer case for
 F094 (#93, not yet built) to handle when it reads this table.
 
-No admin read: nothing in #191 needs one, and F187 (admin views a CAM's settings, P3)
-can add it with a stated reason when it is actually built — same call already made for
-`USER_ONBOARDING_STEPS` (§3.12).
+Admin read added for F187 (admin views a CAM's settings, P3) via `outreach_preferences_select_admin`
+so an admin can understand how a CAM's queue is configured without notifying or restricting the CAM.
 
 Both policies AND in `app.is_active_user()`. No `app.can_write()` — that helper gates
 *client data* and excludes viewers (F258); this table is a user's own settings and is
@@ -571,7 +571,7 @@ which self-approves (no admin ever waits on their own request).
 No INSERT/UPDATE policy, by the same reasoning as `AUDIT_LOG` (§3.8) and
 `set_user_role` (§6): "reason required" plus a role-gated state transition is the RLS
 recipe's RPC case (MIGRATIONS.md step 4), not something a policy can express. All
-writes go through two `SECURITY DEFINER` RPCs, each self-checking the caller and each
+writes go through three `SECURITY DEFINER` RPCs, each self-checking the caller and each
 writing an `audit_log` row in the same transaction:
 
 - `request_suppression(organisation_id, reason)` — caller must satisfy
@@ -584,6 +584,11 @@ writing an `audit_log` row in the same transaction:
   `pending` row to `active` or `rejected`, records `decided_by`/`decided_at`, and
   writes `suppression_approved` or `suppression_rejected` to `audit_log`. Rejects a
   target that is not currently `pending`.
+- `lift_suppression(suppression_id, reason)` — admin only (F185, #181). Moves an
+  `active` row to `lifted`, records `decided_by`/`decided_at` and `decision_note = reason`
+  (mandatory written reason), and writes `suppression_lifted` to `audit_log`. Rejects a
+  target that is not currently `active` or a blank reason. Lifting unblocks outreach
+  and restores visibility on standard client lists.
 
 SELECT is open to every active user (not gated to admin/owner) because the working
 list needs to hide a suppressed organisation for everyone, not just the CAM who owns
@@ -604,11 +609,8 @@ contact-level story can extend this table rather than starting over. Built ahead
 F248 (#243, "a suppression list exists") with the Project Leader's agreement, since
 this table already satisfies that — see the migration header for the full note.
 
-`status` is `pending | active | rejected | lifted`. `lifted` is reserved now, not
-used by any RPC in this migration — F251's own AC commits to an admin being able to
-remove a suppression, and F185 (#181) is that RPC. Adding an enum value later is a
-one-way door in Postgres (`create_organisations.sql` precedent), so it is reserved
-up front rather than negotiated later.
+`status` is `pending | active | rejected | lifted`. `lifted` is implemented by F185
+(#181) via `lift_suppression` RPC (`20260818130000_create_lift_suppression_rpc.sql`).
 
 ### 3.15 Entity match candidates — service-role write, admin decides
 
@@ -708,6 +710,47 @@ per-field tracking — a later manual edit through the org edit UI is misattribu
 the original import source. Closing that properly is F044 (Field-Level Source
 Tracking, #45)'s job, not this table's.
 
+### 3.17 Ownership requests — RPC-only, admin decides, narrow read
+
+Backs #408 Request Client Ownership (admin-approved handover),
+`supabase/migrations/20260818120000_create_ownership_requests.sql`. The escalation
+half of F165's conflict warning (§3.11's `claim_organisation` 55000): the warning
+says a CAM cannot take a client another CAM owns, and this is the only sanctioned
+next step. Decided by the Project Leader 18 Aug 2026 (on #406): **a CAM never
+overrides another CAM's ownership.** Worst case they ask, and an admin hands it over.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `OWNERSHIP_REQUESTS` | admin, the requester, or the client's current owner | — (RPC only) | — (RPC only) | — (no grant) |
+
+SELECT is deliberately narrower than `SUPPRESSIONS` (§3.14, all active users). A
+suppression is a fact about a charity the whole team needs in order to hide it; a
+request is a conversation between one CAM, one owner, and the admins. The current
+owner is included on purpose — someone asking for their client is something they
+should learn when it is asked, not when it moves.
+
+Both writes are `SECURITY DEFINER` RPCs that self-check the caller and write
+`audit_log` in the same transaction (docs/audit-log-pattern.md):
+
+- `request_client_ownership(organisation_id, reason)` — CAM only (`app.is_cam()` +
+  `app.is_active_user()`; an admin is refused, since they hold `reassign_ownership`
+  and would be requesting from themselves). Requires a reason, refuses an unowned
+  client ("claim it instead"), a client the caller already owns, and a second pending
+  request from the same CAM for the same client. Inserts `pending` and audits
+  `ownership_requested`. **It moves no ownership and grants no access** — the
+  requester's reach over the client is exactly what it was before they asked.
+- `decide_ownership_request(request_id, approve, note)` — admin only. Refuses an
+  already-decided request. On approval it delegates the move to `reassign_ownership`
+  (§3.11) rather than touching `organisations.owner_id`, so the handover is audited as
+  a normal `ownership_assigned` transition and the outgoing owner's open actions travel
+  with the client; `owner_id` still has exactly the two write paths §3.2 lists. Audits
+  `ownership_request_approved` / `ownership_request_rejected`.
+
+**What this does not do:** nothing here relaxes `claim_organisation` (a CAM claiming an
+owned client still raises 55000) or re-opens the direct `owner_id` write closed by
+`20260810110000`. A pending request is inert; the admin's decision is the only thing
+with an effect.
+
 ---
 
 ## 4. Denial behaviour and feedback
@@ -788,10 +831,9 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
 2. **No suggestion table.** §4.3 grants CAMs "suggest organisation field correction"
    and F077 is a P1 story, but no table holds a suggestion. Without one the CAM path
    to changing canonical data does not exist, and 3.2 has no row for it.
-3. ~~**No suppression table.**~~ **RESOLVED — F251 (#82)**, 5 Aug 2026. §3.14 has
-   the table and RPCs. "Lift suppression: Admin, reason required" is now split into
-   *request* (CAM or admin, reason required) and *decide* (admin only) — see §3.14
-   for why. Lifting an active suppression is F185 (#181), not built yet.
+3. ~~**No suppression table.**~~ **RESOLVED — F251 (#82) & F185 (#181)**. §3.14 has
+   the table and RPCs (`request_suppression`, `decide_suppression_request`, `lift_suppression`).
+   "Lift suppression: Admin, mandatory reason required" is implemented by F185 (`lift_suppression`).
 4. ~~**Viewer role has no story.**~~ **RESOLVED — F258 (#268) owns it**, raised
    24 Jul 2026. The story also closed a live escalation this question had been
    hiding: `organisations_update_owner_or_admin` tested ownership and admin but

@@ -14,12 +14,13 @@ import { OriginButton } from "@/components/ui/origin-button";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
 import { reportError } from "@/lib/error-logging";
+import { validateReassignOwnership } from "@/lib/ownership";
 
 type TeamMember = { id: string; full_name: string | null };
 
 /**
- * F163 — admin assigns or reassigns this client's owner. Posts to
- * /api/clients/[id]/assign-owner, which calls reassign_ownership.
+ * F163/F164 — admin assigns (F163) or changes/reassigns (F164) this client's owner.
+ * Posts to /api/clients/[id]/assign-owner, which calls reassign_ownership.
  *
  * AC2's conflict warning is shown up front, not just after an error: when the
  * client already has an owner, the amber notice below the picker stays visible for
@@ -44,16 +45,24 @@ export function AssignOwnerForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const isReassignment = Boolean(currentOwnerId);
+  const isSameOwnerSelected = isReassignment && ownerId === currentOwnerId;
+
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!ownerId) {
-      setError("Choose a CAM to assign.");
+
+    const validation = validateReassignOwnership({
+      organisationId,
+      newOwnerId: ownerId,
+      reason,
+      currentOwnerId,
+    });
+
+    if (!validation.ok) {
+      setError(validation.error);
       return;
     }
-    if (!reason.trim()) {
-      setError("A reason is required so the handover can be understood later.");
-      return;
-    }
+
     setBusy(true);
     setError(null);
     try {
@@ -84,16 +93,22 @@ export function AssignOwnerForm({
           role="alert"
           className="rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-3.5 py-3 text-[13px] font-bold leading-[1.6] text-amber-800"
         >
-          Currently owned by {currentOwnerName ?? "a former team member"}. Assigning a
-          new owner moves this client away from them — this is not silent.
+          Currently owned by {currentOwnerName ?? "a former team member"}. Changing
+          ownership moves this client and all associated open tasks away from them.
         </p>
       )}
 
       <label className="flex flex-col gap-1.5 text-sm">
         <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-          Assign to
+          {isReassignment ? "Reassign to" : "Assign to"}
         </span>
-        <Select value={ownerId} onValueChange={setOwnerId}>
+        <Select
+          value={ownerId}
+          onValueChange={(val) => {
+            setOwnerId(val);
+            setError(null);
+          }}
+        >
           <SelectTrigger className="w-full rounded-xl bg-white text-sm">
             <SelectValue placeholder="Choose a CAM" />
           </SelectTrigger>
@@ -115,15 +130,38 @@ export function AssignOwnerForm({
         <Input
           type="text"
           value={reason}
-          onChange={(event) => setReason(event.target.value)}
-          placeholder="Why this handover is happening"
+          onChange={(event) => {
+            setReason(event.target.value);
+            setError(null);
+          }}
+          placeholder={
+            isReassignment
+              ? "Why this owner change is happening"
+              : "Why this assignment is being made"
+          }
           className="rounded-xl bg-white"
         />
       </label>
 
-      <OriginButton type="submit" size="sm" loading={busy} disabled={busy}>
-        {busy ? "Assigning…" : currentOwnerId ? "Reassign owner" : "Assign owner"}
-      </OriginButton>
+      <div className="flex flex-col gap-1.5">
+        <OriginButton
+          type="submit"
+          size="sm"
+          loading={busy}
+          disabled={busy || isSameOwnerSelected}
+        >
+          {busy ? "Updating…" : isReassignment ? "Reassign owner" : "Assign owner"}
+        </OriginButton>
+
+        {/* The picker opens on the current owner, so the button starts disabled on
+            an owned client — say why, rather than leaving a dead control. */}
+        {isSameOwnerSelected && (
+          <p className="text-[13px] leading-[1.6] text-foreground/50">
+            {currentOwnerName ?? "This team member"} already owns this client. Choose a
+            different CAM to change ownership.
+          </p>
+        )}
+      </div>
 
       {error && <InlineAlert message={error} />}
     </form>

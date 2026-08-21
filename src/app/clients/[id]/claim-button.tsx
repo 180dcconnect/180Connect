@@ -69,6 +69,7 @@ export function ClaimButton({
         disabled={busy}
         onClick={claim}
         type="button"
+        className="whitespace-nowrap"
       >
         {busy ? "Claiming…" : "Claim this client"}
       </OriginButton>

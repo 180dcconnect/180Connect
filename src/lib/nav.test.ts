@@ -35,4 +35,11 @@ describe("navigation", () => {
       assert.ok(hrefs.includes("/profile"));
     }
   });
+
+  it("gives every role accessibility settings (F205)", () => {
+    for (const role of ROLES) {
+      const hrefs = navItemsFor(role).map((item) => item.href);
+      assert.ok(hrefs.includes("/settings/accessibility"));
+    }
+  });
 });

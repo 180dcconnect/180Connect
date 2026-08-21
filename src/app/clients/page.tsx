@@ -5,6 +5,8 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   filterByOwner,
   filterByCity,
@@ -333,12 +335,11 @@ export default async function ClientsPage({
 
           {(organisations.error || openSuppressions.error) && (
             <Rise>
-              <p
-                role="alert"
-                className="rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4 text-sm font-bold text-destructive mb-8"
-              >
-                Some data could not be loaded. Refresh and try again.
-              </p>
+              <InlineAlert
+                variant="page"
+                className="mb-8"
+                message="Some data could not be loaded. Refresh and try again."
+              />
             </Rise>
           )}
 
@@ -377,15 +378,15 @@ export default async function ClientsPage({
 
             <Rise>
               {clients.length === 0 ? (
-                <div className="rounded-2xl border border-black/[0.06] bg-white px-5 py-8 shadow-sm">
-                  <p className="text-center text-sm leading-[1.7] text-foreground/65">
-                    {isOwnedView
+                <EmptyState
+                  message={
+                    isOwnedView
                       ? "You don't own any clients yet. Claim one from the list, or ask an admin to assign you one."
                       : filterActive
                         ? "No clients match this filter."
-                        : "No clients to show."}
-                  </p>
-                </div>
+                        : "No clients to show."
+                  }
+                />
               ) : (
                 <div className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm">
                   {/* The column key, on the widths the rows use. Hidden below lg,

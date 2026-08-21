@@ -11,6 +11,8 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { OriginButton } from "@/components/ui/origin-button";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
 import { reportError } from "@/lib/error-logging";
 import { validateReassignOwnership } from "@/lib/ownership";
 
@@ -78,7 +80,7 @@ export function AssignOwnerForm({
       setError(body.error ?? "This client could not be assigned.");
     } catch (err) {
       void reportError(err, { operation: "clients.assign_owner_client", organisationId });
-      setError("Could not reach the server. Check your connection and try again.");
+      setError(NETWORK_ERROR_MESSAGE);
     } finally {
       setBusy(false);
     }
@@ -161,11 +163,7 @@ export function AssignOwnerForm({
         )}
       </div>
 
-      {error && (
-        <p aria-live="polite" role="alert" className="text-[13px] font-bold text-destructive">
-          {error}
-        </p>
-      )}
+      {error && <InlineAlert message={error} />}
     </form>
   );
 }

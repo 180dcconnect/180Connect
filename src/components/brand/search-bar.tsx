@@ -96,7 +96,6 @@ export function BrandSearchBar({
   params: paramNames,
    defaultQuery = "",
    defaultFilters = [],
-   live = false,
 }: {
   className?: string;
   placeholder?: string;
@@ -112,13 +111,6 @@ export function BrandSearchBar({
    params?: Record<string, string>;
    defaultQuery?: string;
    defaultFilters?: { category: string; label: string; value: string }[];
-   /**
-    * Apply the query as you type (debounced soft navigation), rather than only
-    * on submit. Opt-in: host pages that don't pass it keep the bar inert until
-    * the form is submitted, so adding live search to one page never changes
-    * another page's behaviour.
-    */
-   live?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -156,36 +148,10 @@ export function BrandSearchBar({
     return () => document.removeEventListener("pointerdown", onDown);
   }, [open]);
 
-  // Memoised so these can sit in effect deps without re-arming timers (and
-  // re-running memos downstream) on every render — a fresh object literal here
-  // would defeat both.
+  // Memoised so the options memo below doesn't re-run on every render — a
+  // fresh object literal here would defeat it.
   const FILTER_CATEGORIES: Record<string, FilterOption[]> = useMemo(() => categories || DEFAULT_CATEGORIES, [categories]);
   const FILTER_PARAMS: Record<string, string> = useMemo(() => paramNames || DEFAULT_PARAMS, [paramNames]);
-
-  useEffect(() => {
-    if (!live) return;
-
-    const trimmed = query.trim();
-    if (trimmed === defaultQuery.trim()) return;
-
-    const timer = setTimeout(() => {
-      const params = new URLSearchParams(window.location.search);
-      params.delete("q");
-      params.delete("page");
-      Object.values(FILTER_PARAMS).forEach((name) => params.delete(name));
-      
-      if (trimmed) params.set("q", trimmed);
-      selectedFilters.forEach(f => {
-        params.set(FILTER_PARAMS[f.category] ?? "filter", f.value);
-      });
-      
-      startTransition(() => {
-        router.replace(`?${params.toString()}`, { scroll: false });
-      });
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [live, query, defaultQuery, selectedFilters, router, FILTER_PARAMS]);
 
   const submitSearch = (filters = selectedFilters, q = query, closePanel = true) => {
     // Start from the address bar, not from empty: the host page may carry state

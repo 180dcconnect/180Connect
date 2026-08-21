@@ -86,12 +86,11 @@ const CLAIM_SLOT = "w-[6.5rem] shrink-0";
  * normal navigation here, same as any other filter change.
  *
  * F052 (#54) search by organisation name: `q` was already read here, but as part
- * of the GET form below, so applying or clearing it meant a full document
- * reload — AC4 asks for neither. The input is now <ClientSearch>, which
- * debounces and soft-navigates; this page keeps reading `q` from the URL
- * exactly as before, so pagination, deep links and searchClients() are unchanged.
- * The owner <select> stays a plain GET form — one control needs to be live, not
- * both, and the form carries a hidden `q` so submitting it preserves the search.
+ * of a GET form, so applying or clearing it meant a full document reload — AC4
+ * asks for neither. The bar now soft-navigates on submit (Enter or click) via
+ * router.replace; this page keeps reading `q` from the URL exactly as before,
+ * so pagination, deep links and searchClients() are unchanged. Search fires on
+ * submit rather than per keystroke by design: deliberate over twitchy.
  * 
  * Restyled onto the same bone-ground/floating-card language as /dashboard
  * (docs/design-system.md's *character*, not its public palette — see that
@@ -259,7 +258,6 @@ export default async function ClientsPage({
         headingClassName="mb-8"
         bar={
           <BrandSearchBar
-            live
             defaultQuery={search ?? ""}
             defaultFilters={[
               ...(city ? [{ category: "Filter by city", label: city, value: city }] : []),

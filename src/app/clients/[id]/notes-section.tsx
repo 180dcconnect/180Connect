@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { NoteListItem } from "@/lib/note-history";
 
@@ -25,6 +25,13 @@ function formatDate(value: string): string {
  * A client component, not a server one, because the edit toggle and the
  * delete confirmation both need local state per note — same reasoning
  * UserManagementTable and StatusSelect already have on this page.
+ *
+ * After a successful edit or delete the `router.refresh()` runs inside
+ * `useTransition`, and every note's controls stay disabled until it settles:
+ * refresh is low-priority work React can defer, so re-enabling on the fetch
+ * alone left the list stale until the next click flushed the queue. The
+ * "Saving…"/"Deleting…" labels stay per-note (only the acted-on note shows
+ * them) while `refreshing` holds the whole section non-interactive.
  */
 export function NotesSection({
   notes,
@@ -39,6 +46,7 @@ export function NotesSection({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [isRefreshing, startRefresh] = useTransition();
   // Scoped to a specific note, not a single shared string — busyId briefly
   // returns to null for every note once a request settles, so a shared error
   // would flash under every manageable note instead of just the one that
@@ -81,7 +89,7 @@ export function NotesSection({
         // "edited" marker both come from a real refetch (F073 AC3: in place,
         // not a second note) rather than an optimistic guess at the new
         // updated_at.
-        router.refresh();
+        startRefresh(() => router.refresh());
         return;
       }
       const body = await response.json();
@@ -109,7 +117,7 @@ export function NotesSection({
         method: "DELETE",
       });
       if (response.ok) {
-        router.refresh();
+        startRefresh(() => router.refresh());
         return;
       }
       const body = await response.json();
@@ -139,6 +147,10 @@ export function NotesSection({
     <ul className="mt-4 space-y-3">
       {notes.map((note) => {
         const busy = busyId === note.id;
+        // Labels stay per-note (only the acted-on note says Saving…/Deleting…),
+        // but everything is non-interactive while the post-refresh repaint is
+        // pending too.
+        const locked = busy || isRefreshing;
         return (
           <li key={note.id} className="rounded-xl border border-black/[0.06] p-3.5">
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[13px] text-foreground/45">
@@ -157,7 +169,7 @@ export function NotesSection({
                 <textarea
                   id={`edit-note-${note.id}`}
                   className="w-full rounded-lg border border-black/15 p-2.5 text-sm outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/20"
-                  disabled={busy}
+                  disabled={locked}
                   onChange={(event) => setDraft(event.target.value)}
                   rows={3}
                   value={draft}
@@ -166,7 +178,7 @@ export function NotesSection({
                   <button
                     type="button"
                     className="rounded-full border border-brand/30 px-3.5 py-1.5 text-xs font-bold text-brand hover:bg-brand/5 disabled:opacity-50"
-                    disabled={busy}
+                    disabled={locked}
                     onClick={() => saveEdit(note.id)}
                   >
                     {busy ? "Saving…" : "Save"}
@@ -174,7 +186,7 @@ export function NotesSection({
                   <button
                     type="button"
                     className="text-xs font-bold text-foreground/45 hover:text-foreground/70 disabled:opacity-50"
-                    disabled={busy}
+                    disabled={locked}
                     onClick={cancelEdit}
                   >
                     Cancel
@@ -196,7 +208,7 @@ export function NotesSection({
                     <button
                       type="button"
                       className="text-xs font-bold text-foreground/45 hover:text-foreground/70 disabled:opacity-50"
-                      disabled={busy}
+                      disabled={locked}
                       onClick={() => startEdit(note)}
                     >
                       Edit
@@ -204,7 +216,7 @@ export function NotesSection({
                     <button
                       type="button"
                       className="text-xs font-bold text-destructive/70 hover:text-destructive disabled:opacity-50"
-                      disabled={busy}
+                      disabled={locked}
                       onClick={() => deleteNote(note)}
                     >
                       {busy ? "Deleting…" : "Delete"}

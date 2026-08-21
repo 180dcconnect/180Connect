@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 /**
@@ -8,12 +8,22 @@ import { useRouter } from "next/navigation";
  * StatusSelect: on success, `router.refresh()` re-runs the Server Component
  * fetch that feeds NotesSection, so the new note appears in the list
  * immediately without hand-rolling an optimistic insert.
+ *
+ * The refresh runs inside `useTransition`, and `saving` stays true until the
+ * transition settles: `router.refresh()` is low-priority work that React can
+ * defer, so a plain `setBusy(false)` after it would flip the UI back before
+ * the new note is actually on screen (it reappeared only on the next click,
+ * which flushed the queue). `saving` combines both flags so the button reads
+ * "Saving…" for the whole round trip plus repaint.
  */
 export function AddNoteForm({ organisationId }: { organisationId: string }) {
   const router = useRouter();
   const [content, setContent] = useState("");
   const [busy, setBusy] = useState(false);
+  const [isRefreshing, startRefresh] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  const saving = busy || isRefreshing;
 
   // Mirrors the server's own check so the button is disabled before a round
   // trip is even attempted — the request is still validated server-side
@@ -36,7 +46,7 @@ export function AddNoteForm({ organisationId }: { organisationId: string }) {
       });
       if (response.ok) {
         setContent("");
-        router.refresh();
+        startRefresh(() => router.refresh());
         return;
       }
       const body = await response.json();
@@ -56,7 +66,7 @@ export function AddNoteForm({ organisationId }: { organisationId: string }) {
       <textarea
         id={`add-note-${organisationId}`}
         className="w-full rounded-lg border border-black/15 p-2.5 text-sm outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/20"
-        disabled={busy}
+        disabled={saving}
         onChange={(event) => setContent(event.target.value)}
         placeholder="Add a note for the rest of the team…"
         rows={3}
@@ -66,10 +76,10 @@ export function AddNoteForm({ organisationId }: { organisationId: string }) {
         <button
           type="button"
           className="rounded-full border border-brand/30 px-3.5 py-1.5 text-xs font-bold text-brand hover:bg-brand/5 disabled:opacity-50"
-          disabled={busy || isBlank}
+          disabled={saving || isBlank}
           onClick={save}
         >
-          {busy ? "Saving…" : "Save note"}
+          {saving ? "Saving…" : "Save note"}
         </button>
         {error && (
           <p aria-live="polite" role="alert" className="text-xs font-bold text-destructive">

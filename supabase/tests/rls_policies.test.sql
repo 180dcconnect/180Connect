@@ -3949,6 +3949,12 @@ declare
   v_cam_a     uuid := '00000000-0000-4000-a000-000000000002';
   v_cam_b     uuid := '00000000-0000-4000-a000-000000000003';
   v_org_cam_b uuid := '00000000-0000-4000-b000-000000000003';
+  -- Every assertion targets these rows by id, never by counting the org's
+  -- rows: suites share one transaction, so suite_core has already left CAM
+  -- A's own "test note" on this same organisation (and a future suite could
+  -- leave anything). A per-org count would measure the other suites, not RLS.
+  v_note_id   uuid;
+  v_message_id uuid;
   v_count     bigint;
 begin
   if not tests.tables_exist('notes', 'outreach_messages', 'organisations') then
@@ -3960,15 +3966,17 @@ begin
 
   -- CAM B's history on their own client: one note, one sent email.
   insert into public.notes (organisation_id, author_id, content)
-  values (v_org_cam_b, v_cam_b, 'CAM B private context');
+  values (v_org_cam_b, v_cam_b, 'CAM B private context')
+  returning id into v_note_id;
 
   insert into public.outreach_messages (organisation_id, sent_by_user_id, subject, body, send_status, sent_at)
-  values (v_org_cam_b, v_cam_b, 'Intro', 'Hello', 'sent', now());
+  values (v_org_cam_b, v_cam_b, 'Intro', 'Hello', 'sent', now())
+  returning id into v_message_id;
 
   -- AC1: the full communication timeline is visible regardless of who owns
   -- the client — notes first.
   perform tests.login_as(v_cam_a);
-  select count(*) into v_count from public.notes where organisation_id = v_org_cam_b;
+  select count(*) into v_count from public.notes where id = v_note_id;
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
   return next is(v_count, 1::bigint,
@@ -3977,8 +3985,7 @@ begin
   -- ...then sent outreach (F070's outreach_messages_select_active is what a
   -- non-owner's timeline render depends on).
   perform tests.login_as(v_cam_a);
-  select count(*) into v_count
-    from public.outreach_messages where organisation_id = v_org_cam_b;
+  select count(*) into v_count from public.outreach_messages where id = v_message_id;
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
   return next is(v_count, 1::bigint,
@@ -3987,9 +3994,9 @@ begin
   -- AC2: visible context is not editable context. notes_update_own is
   -- USING-based, so the update silently matches zero rows — assert content.
   perform tests.login_as(v_cam_a);
-  update public.notes set content = 'hijacked' where organisation_id = v_org_cam_b;
+  update public.notes set content = 'hijacked' where id = v_note_id;
   select count(*) into v_count from public.notes
-    where organisation_id = v_org_cam_b and content = 'CAM B private context';
+    where id = v_note_id and content = 'CAM B private context';
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
   return next is(v_count, 1::bigint,
@@ -3997,8 +4004,8 @@ begin
 
   -- Same for delete: notes_delete_own filters the row out, so it survives.
   perform tests.login_as(v_cam_a);
-  delete from public.notes where organisation_id = v_org_cam_b;
-  select count(*) into v_count from public.notes where organisation_id = v_org_cam_b;
+  delete from public.notes where id = v_note_id;
+  select count(*) into v_count from public.notes where id = v_note_id;
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
   return next is(v_count, 1::bigint,

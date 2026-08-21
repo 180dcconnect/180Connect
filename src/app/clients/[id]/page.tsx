@@ -5,6 +5,7 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import { validateClientEmail } from "@/lib/client-email-validation";
 import {
   formatImportOrigin,
@@ -12,6 +13,7 @@ import {
   type ImportOriginRow,
   type OrganisationSourceRow,
 } from "@/lib/source-tracking";
+import { groupFieldSources, type FieldSourceRow } from "@/lib/field-sources";
 import { checkWebsiteReachabilityCached } from "@/lib/website-reachability-cache";
 import { safeWebsiteHref, websiteHref } from "@/lib/website-validation";
 import { formatLocation, formatOutreachStatus } from "@/lib/organisation-format";
@@ -21,6 +23,7 @@ import { SuppressButton } from "./suppress-button";
 import { LiftSuppressionButton } from "./lift-suppression-button";
 import { ComposeButton } from "./compose-button";
 import { BasicInfoPanel } from "./basic-info-panel";
+import { BookletPanel } from "./booklet-panel";
 import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
@@ -87,6 +90,7 @@ export default async function ClientDetailPage({
 }) {
   const authorization = await getCurrentActor("client:view", { route: "/clients/[id]" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
+  const isAdmin = authorization.actor.role === "admin";
 
   const { id } = await params;
   const supabase = await createClient();
@@ -162,6 +166,23 @@ export default async function ClientDetailPage({
   // free text captured from a CAM-followed link, same trust level as `website`.
   const importSourceHref = importOrigin ? safeWebsiteHref(importOrigin.sourceUrl) : null;
 
+  // F044: get_field_sources is admin-only (self-checks app.is_admin(), same as
+  // FIELD_DISCREPANCIES §3.16) — only fetched for an admin so a CAM view of this
+  // page doesn't spend a request on a call that's going to be refused anyway.
+  const { data: rawFieldSourceRows, error: fieldSourcesError } = isAdmin
+    ? await supabase.rpc("get_field_sources", { p_organisation_id: id })
+    : { data: null, error: null };
+
+  if (fieldSourcesError) {
+    await reportError(fieldSourcesError, {
+      operation: "clients.detail_field_sources",
+      organisationId: id,
+    });
+  }
+  const fieldSources = groupFieldSources(
+    (rawFieldSourceRows ?? []) as FieldSourceRow[],
+  );
+
   // Most recent suppression row for this org, whatever its status — pending shows a
   // waiting state, active shows the suppressed state, rejected/lifted/none all fall
   // through to the suppress button.
@@ -190,7 +211,6 @@ export default async function ClientDetailPage({
   const canSuppress = canEdit;
   const ownerId = ownerRow?.owner_id ?? null;
   const ownerName = ownerRow?.owner?.full_name ?? (ownerId ? "A former team member" : null);
-  const isAdmin = authorization.actor.role === "admin";
 
   // F163: admin's CAM picker. Only fetched for an admin — a CAM can't reach the
   // assign form, so the query would be wasted on every other page view.
@@ -353,6 +373,12 @@ export default async function ClientDetailPage({
               />
             </Rise>
 
+            {hasPermission(authorization.actor.role, "client:contact") && (
+              <Rise>
+                <BookletPanel organisationId={client.id} />
+              </Rise>
+            )}
+
             {/* Email and website were two near-identical cards — same
                 heading-plus-validity-pill shape, same failure copy — so they
                 read as one "can we actually reach them?" card instead. */}
@@ -441,9 +467,7 @@ export default async function ClientDetailPage({
                 hint="Where the information in this client record came from."
               >
                 {sourcesError ? (
-                  <p className="mt-4 text-sm font-bold text-destructive" role="alert">
-                    Source information could not be loaded. Refresh and try again.
-                  </p>
+                  <InlineAlert message="Source information could not be loaded. Refresh and try again." />
                 ) : sources.length === 0 ? (
                   <p className="mt-4 text-sm leading-[1.7] text-foreground/45">
                     No source information recorded.
@@ -503,6 +527,61 @@ export default async function ClientDetailPage({
                 )}
               </SectionCard>
             </Rise>
+
+            {isAdmin && (
+              <Rise>
+                <SectionCard
+                  headingId="field-sources-heading"
+                  title="Field sources"
+                  hint="Which source provided each field. Superseded values stay visible so a conflict can be reviewed, not just the one that was kept."
+                >
+                  {fieldSourcesError ? (
+                    <InlineAlert message="Field source information could not be loaded. Refresh and try again." />
+                  ) : fieldSources.length === 0 ? (
+                    <p className="mt-4 text-sm leading-[1.7] text-foreground/45">
+                      No field-level source information recorded.
+                    </p>
+                  ) : (
+                    <dl className="mt-4 divide-y divide-black/[0.05]">
+                      {fieldSources.map((field) => (
+                        <div key={field.fieldName} className="py-3.5 first:pt-0 last:pb-0">
+                          <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
+                            {field.fieldLabel}
+                          </dt>
+                          <dd className="mt-1.5 flex flex-wrap items-baseline gap-2">
+                            <span className="break-all text-sm leading-[1.6] text-foreground/80">
+                              {field.current?.value ?? "Not recorded"}
+                            </span>
+                            {field.current && <Pill tone="brand">{field.current.sourceLabel}</Pill>}
+                          </dd>
+                          {field.history.length > 0 && (
+                            <div className="mt-2 rounded-lg bg-black/[0.03] p-2.5">
+                              {/* "Previous", not "other sources": a newer import
+                                  from the same source supersedes the old value
+                                  too, and that is an update, not a conflict. */}
+                              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+                                Previous values
+                              </p>
+                              <ul className="mt-1 space-y-1">
+                                {field.history.map((entry, index) => (
+                                  <li
+                                    key={`${entry.source}-${index}`}
+                                    className="flex flex-wrap items-baseline gap-2 text-xs leading-[1.6] text-foreground/55"
+                                  >
+                                    <span className="break-all">{entry.value}</span>
+                                    <span className="font-bold">{entry.sourceLabel}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </dl>
+                  )}
+                </SectionCard>
+              </Rise>
+            )}
           </Group>
 
           <Group className="space-y-4">

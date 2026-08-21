@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/select";
 import { sendInviteAction } from "./invite-actions";
 import type { InviteState } from "@/lib/auth/invite";
+import { InlineAlert } from "@/components/ui/inline-alert";
 
 const initialInviteState: InviteState = { status: "idle" };
 
@@ -62,26 +63,18 @@ export function InviteForm() {
       >
         {pending ? "Sending..." : "Send invite"}
       </OriginButton>
-      <p aria-live="polite" className="w-full min-h-5 text-sm font-bold">
+      <div className="w-full min-h-5">
         {emailError ? (
-          <span className="text-red-700">{emailError}</span>
+          <InlineAlert message={emailError} />
+        ) : state.status === "error" && state.message ? (
+          <InlineAlert message={state.message} />
         ) : state.message ? (
-          <span
-            className={
-              state.status === "error"
-                ? "text-red-700"
-                : // The account exists but no email went out. Amber rather than the
-                  // success green, because the admin has to do something about it —
-                  // the invited person is waiting for a link that never arrived.
-                  state.status === "warning"
-                  ? "text-amber-700"
-                  : "text-brand"
-            }
-          >
-            {state.message}
-          </span>
+          <InlineAlert
+            tone={state.status === "warning" ? "warning" : "success"}
+            message={state.message}
+          />
         ) : null}
-      </p>
+      </div>
     </form>
   );
 }

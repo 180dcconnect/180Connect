@@ -222,6 +222,20 @@ export const SCHEMA: readonly EnvVarSpec[] = [
       "Charity Commission API key for charity data ingestion (F038/F033). Sent as `Ocp-Apim-Subscription-Key`. Not yet required — becomes required once F033 (Charity Commission data import) ships.",
   },
   {
+    name: "GEMINI_API_KEY",
+    required: false,
+    secret: true,
+    description:
+      "Google Gemini API key for LLM calls (F082 Client Booklet generation, and later F100 email drafts). Free tier via Google AI Studio for now — see docs/environment-variables.md. Passed explicitly to the AI SDK's createGoogleGenerativeAI rather than relying on its default GOOGLE_GENERATIVE_AI_API_KEY name, so every env var this app reads stays declared here. Not yet required — becomes required once F082 ships.",
+  },
+  {
+    name: "GEMINI_MODEL",
+    required: false,
+    secret: false,
+    description:
+      "Gemini model id for booklet generation (F082), e.g. a Flash-tier model — copy the exact id from the Google AI Studio model picker rather than guessing, since Google retires model ids frequently. No hardcoded default in code for that reason; unset means booklet generation cannot run.",
+  },
+  {
     name: "CHARITY_COMMISSION_BACKFILL_START",
     required: false,
     secret: false,

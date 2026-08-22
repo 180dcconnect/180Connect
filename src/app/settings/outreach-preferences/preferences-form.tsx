@@ -33,9 +33,14 @@ const LEGEND_CLASS =
 const CARD =
   "rounded-2xl border border-black/[0.06] bg-white px-6 py-6 shadow-sm";
 
-/** A saved value, shown as a chip. Empty dimensions say so in words instead. */
-function Chips({ values }: { values: string[] }) {
-  if (values.length === 0) {
+/**
+ * A saved value, shown as a chip. Empty dimensions say so in words instead.
+ * Chips carry an explicit `key` rather than keying on the label: the geography
+ * summary mixes enum labels with free-text cities, and a city literally named
+ * "Local" would otherwise collide with the reach label of the same name.
+ */
+function Chips({ items }: { items: { key: string; label: string }[] }) {
+  if (items.length === 0) {
     return (
       <p className="mt-2 text-sm text-foreground/45">
         No preference — nothing is weighted on this.
@@ -45,12 +50,12 @@ function Chips({ values }: { values: string[] }) {
 
   return (
     <div className="mt-2.5 flex flex-wrap gap-2">
-      {values.map((value) => (
+      {items.map(({ key, label }) => (
         <span
-          key={value}
+          key={key}
           className="rounded-full bg-brand/10 px-3 py-1 text-sm font-medium text-brand"
         >
-          {value}
+          {label}
         </span>
       ))}
     </div>
@@ -192,8 +197,11 @@ export function OutreachPreferencesForm({
   }
 
   const allSavedGeography = [
-    ...savedGeo.map((value) => GEOGRAPHIC_REACH_LABELS[value]),
-    ...savedCities,
+    ...savedGeo.map((value) => ({
+      key: `reach:${value}`,
+      label: GEOGRAPHIC_REACH_LABELS[value],
+    })),
+    ...savedCities.map((city) => ({ key: `city:${city}`, label: city })),
   ];
 
   if (!editing) {
@@ -216,17 +224,27 @@ export function OutreachPreferencesForm({
 
           <div>
             <p className={LEGEND_CLASS}>Geography & Locations</p>
-            <Chips values={allSavedGeography} />
+            <Chips items={allSavedGeography} />
           </div>
 
           <div>
             <p className={LEGEND_CLASS}>Size (annual income)</p>
-            <Chips values={savedBands.map((value) => INCOME_BAND_LABELS[value])} />
+            <Chips
+              items={savedBands.map((value) => ({
+                key: `band:${value}`,
+                label: INCOME_BAND_LABELS[value],
+              }))}
+            />
           </div>
 
           <div>
             <p className={LEGEND_CLASS}>Sector</p>
-            <Chips values={savedSectors} />
+            <Chips
+              items={savedSectors.map((sector) => ({
+                key: `sector:${sector}`,
+                label: sector,
+              }))}
+            />
           </div>
         </div>
 

@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
+import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { createClient } from "@/lib/supabase/server";
+import { reportError } from "@/lib/error-logging";
 import { Rise, Stage } from "@/components/dashboard-stage";
 import { OutreachPreferencesForm } from "./preferences-form";
 import type { GeographicReach, IncomeBand } from "./constants";
@@ -13,20 +15,31 @@ type OutreachPreferencesRow = {
 };
 
 export default async function OutreachPreferencesPage() {
-  const authorization = await getCurrentActor(undefined, {
+  // F200 review — permission boundary: the settings rail hides this row behind
+  // `client:edit` (a viewer has no outreach to target), so the page enforces the
+  // same permission rather than letting a direct URL reach a form the rail says
+  // they should not have. Same gate as the save action below us.
+  const authorization = await getCurrentActor("client:edit", {
     route: "/settings/outreach-preferences",
   });
   if (!authorization.ok) {
-    redirect("/login");
+    redirect(adminRouteDestination(authorization.reason));
   }
 
   const supabase = await createClient();
   // RLS scopes this to the caller's own row (docs/rls-permission-matrix.md §3.13) —
   // no user_id filter needed here, there is nothing else this query could return.
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("outreach_preferences")
     .select("preferred_geographic_reach, preferred_cities, preferred_sectors, preferred_income_bands")
     .maybeSingle<OutreachPreferencesRow>();
+
+  // F200 review — DoD (every failure visible and recorded): an ignored error here
+  // rendered "No preference" over preferences that may well exist. Logged and
+  // surfaced through the same safe-loading warning the other pages use.
+  if (error) {
+    await reportError(error, { operation: "outreach_preferences.page_load" });
+  }
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
@@ -39,6 +52,17 @@ export default async function OutreachPreferencesPage() {
             Set the geography, sector and size focus for your outreach queue.
           </p>
         </Rise>
+
+        {error && (
+          <Rise>
+            <p
+              role="alert"
+              className="rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4 text-sm font-bold text-destructive"
+            >
+              Some data could not be loaded. Refresh and try again.
+            </p>
+          </Rise>
+        )}
 
         <Rise>
           <OutreachPreferencesForm

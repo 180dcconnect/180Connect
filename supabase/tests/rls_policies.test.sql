@@ -4059,6 +4059,176 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- edit_suggestions (#79, F077)
+-- ---------------------------------------------------------------------------
+-- The point of this suite is the same negative as ownership_requests: a CAM has no
+-- path to a sensitive field except proposing, and proposing changes nothing. Plus
+-- the two duplicate rules (supersede own, block others) and the RLS visibility split.
+
+create or replace function tests.suite_edit_suggestions()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_org         uuid := '00000000-0000-4000-b000-000000000001';  -- unowned, legal_name set
+  v_suggestion  uuid;
+  v_status      public.edit_suggestion_status;
+  v_current     text;
+  v_live        text;
+  v_count       bigint;
+begin
+  if not tests.tables_exist('organisations', 'users', 'edit_suggestions')
+     or to_regprocedure('public.suggest_organisation_edit(uuid, text, text)') is null then
+    return next skip(20, 'edit_suggestions table or RPC not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Every write is RPC-only (recipe step 4), same shape as suppressions.
+  return next ok(
+    not has_table_privilege('authenticated', 'public.edit_suggestions', 'INSERT'),
+    'authenticated holds no direct INSERT privilege on edit_suggestions'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.edit_suggestions', 'UPDATE'),
+    'authenticated holds no direct UPDATE privilege on edit_suggestions'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.edit_suggestions (organisation_id, field_name, proposed_value, requested_by) values (%L, ''city'', ''X'', %L)',
+      v_org, v_cam_a)),
+    '42501',
+    'a direct table insert is refused even for a CAM'
+  );
+
+  -- Who may call the RPC at all.
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.suggest_organisation_edit(%L, ''city'', ''Leeds'')', v_org)),
+    '42501',
+    'a viewer cannot suggest an edit'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.suggest_organisation_edit(%L, ''city'', ''Leeds'')', v_org)),
+    '42501',
+    'an admin cannot suggest an edit — they hold UPDATE on these columns directly'
+  );
+
+  -- What the RPC refuses on content.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''owner_id'', ''someone'')', v_org)),
+    '23514',
+    'a field outside the six-field allowlist is rejected'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''city'', ''   '')', v_org)),
+    '23514',
+    'a blank proposed value is rejected — suggestions cannot clear a field'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''city'', ''Leeds'')',
+      '00000000-0000-4000-b000-000000000099')),
+    'P0002',
+    'an unknown client is rejected'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''legal_name'', ''Unowned Org Ltd'')', v_org)),
+    '55000',
+    'proposing the value already on record is refused as a no-op'
+  );
+
+  -- The sanctioned path: CAM A proposes a website for a client with none.
+  perform tests.login_as(v_cam_a);
+  select public.suggest_organisation_edit(v_org, 'website', 'https://example.org')
+    into v_suggestion;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status into v_status from public.edit_suggestions where id = v_suggestion;
+  return next is(v_status, 'pending'::public.edit_suggestion_status,
+    'a CAM''s suggestion lands pending');
+
+  select current_value into v_current from public.edit_suggestions where id = v_suggestion;
+  return next is(v_current, null,
+    'current_value snapshots what the field actually said (null here)');
+
+  select website into v_live from public.organisations where id = v_org;
+  return next is(v_live, null,
+    'the live record is untouched: a suggestion is not an edit');
+
+  select count(*) into v_count from public.audit_log
+   where target_table = 'edit_suggestions' or action like 'edit_suggestion%';
+  return next is(v_count, 0::bigint,
+    'submission writes no audit row — flagging is not a decision');
+
+  -- Duplicate rules.
+  return next is(
+    tests.sqlstate_of(v_cam_b, format(
+      'select public.suggest_organisation_edit(%L, ''website'', ''https://other.org'')', v_org)),
+    '23505',
+    'another CAM''s pending suggestion blocks the field'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''website'', ''https://corrected.org'')', v_org)),
+    null,
+    'the author may re-suggest their own pending field (supersede)'
+  );
+
+  select status into v_status
+    from public.edit_suggestions where id = v_suggestion;
+  return next is(v_status, 'superseded'::public.edit_suggestion_status,
+    're-suggesting marks the old proposal superseded, not deleted');
+
+  select count(*) into v_count
+    from public.edit_suggestions
+   where organisation_id = v_org and field_name = 'website' and status = 'pending';
+  return next is(v_count, 1::bigint,
+    'exactly one pending suggestion per field survives the supersede');
+
+  -- RLS visibility: pending rows are team-visible to CAMs; settled history is not.
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.edit_suggestions
+   where organisation_id = v_org and status = 'pending';
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'any active CAM can see another CAM''s pending suggestion');
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.edit_suggestions
+   where organisation_id = v_org and status = 'superseded';
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'settled history stays between the author and admins');
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.edit_suggestions
+   where organisation_id = v_org;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a viewer sees no suggestions at all');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.edit_suggestions
+   where organisation_id = v_org;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 2::bigint, 'an admin sees every row, decided or not');
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------------
 -- notifications (F173 / #169)
 -- ---------------------------------------------------------------------------
 
@@ -4228,6 +4398,7 @@ begin
 end;
 $$;
 
+
 select * from tests.suite_core();
 select * from tests.suite_viewer();
 select * from tests.suite_users();
@@ -4249,6 +4420,8 @@ select * from tests.suite_outreach_status();
 select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
 select * from tests.suite_ownership_requests();
+select * from tests.suite_edit_suggestions();
+select * from tests.suite_notifications();
 select * from tests.suite_source_tracking();
 select * from tests.suite_manual_entries();
 select * from tests.suite_url_import();
@@ -4258,7 +4431,6 @@ select * from tests.suite_saved_views();
 select * from tests.suite_client_criteria();
 select * from tests.suite_data_handling_rules();
 select * from tests.suite_personal_data_exclusion();
-select * from tests.suite_notifications();
 
 select * from finish();
 

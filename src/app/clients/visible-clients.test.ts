@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   filterByOwner,
+  filterByTags,
   formatLocation,
   formatOutreachStatus,
   prioritiseByGeography,
@@ -20,11 +21,10 @@ function org(overrides: Partial<ClientListRow> = {}): ClientListRow {
     outreach_status: "not_contacted",
     owner_id: null,
     owner: null,
-    org_tags: [],
     ...overrides,
+    org_tags: overrides.org_tags ?? [],
   };
 }
-
 describe("formatLocation", () => {
   it("uses the city when present", () => {
     assert.equal(formatLocation({ city: "Bristol", country_code: "GB" }), "Bristol");
@@ -139,6 +139,49 @@ describe("filterByOwner", () => {
 
   it("returns an empty list when filtering an empty client list", () => {
     assert.deepEqual(filterByOwner([], "cam-1"), []);
+  });
+});
+
+describe("filterByTags", () => {
+  const clients = visibleClients(
+    [
+      org({ id: "a", org_tags: [{ tag_id: "urgent" }] }),
+      org({ id: "b", org_tags: [{ tag_id: "urgent" }, { tag_id: "priority" }] }),
+      org({ id: "c", org_tags: [{ tag_id: "priority" }] }),
+      org({ id: "d", org_tags: [] }),
+    ],
+    [],
+  );
+  it("returns every client when no tags are selected", () => {
+    assert.deepEqual(filterByTags(clients, undefined).map((c) => c.id), [
+      "a", "b", "c", "d",
+    ]);
+    assert.deepEqual(filterByTags(clients, null).map((c) => c.id), [
+      "a", "b", "c", "d",
+    ]);
+    assert.deepEqual(filterByTags(clients, []).map((c) => c.id), [
+      "a", "b", "c", "d",
+    ]);
+  });
+  it("matches clients with any of the selected tags (OR logic, per AC2)", () => {
+    assert.deepEqual(filterByTags(clients, ["urgent"]).map((c) => c.id), [
+      "a", "b",
+    ]);
+    assert.deepEqual(filterByTags(clients, ["priority"]).map((c) => c.id), [
+      "b", "c",
+    ]);
+  });
+  it("selecting multiple tags is a union, not an intersection", () => {
+    assert.deepEqual(
+      filterByTags(clients, ["urgent", "priority"]).map((c) => c.id),
+      ["a", "b", "c"],
+    );
+  });
+  it("excludes clients with none of the selected tags", () => {
+    assert.deepEqual(filterByTags(clients, ["nonexistent-tag"]), []);
+  });
+  it("returns an empty list when filtering an empty client list", () => {
+    assert.deepEqual(filterByTags([], ["urgent"]), []);
   });
 });
 

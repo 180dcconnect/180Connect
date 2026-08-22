@@ -7,11 +7,13 @@
 --   plug in without further schema change. Read state (read_at) ships now so
 --   F177 Notification Read Status (#173) needs no second migration.
 --
--- WHY NO AUDIT LOG ENTRY HERE:
---   The table itself carries no client-facing INSERT grant — rows are only
---   written through public.create_notification (see
---   20260822090100_create_notification_rpcs.sql), which writes the audit_log
---   entry in the same transaction, per docs/audit-log-pattern.md.
+-- WHY NO AUDIT LOG ENTRIES HERE:
+--   The table carries no client-facing INSERT grant — rows are only written
+--   through public.create_notification (20260822090100). None of the
+--   notification write paths change ownership, status, role or approval state,
+--   so none of them write AUDIT_LOG rows (docs/audit-log-pattern.md §1, same
+--   reasoning as create_feedback). Full rationale in the RPCs migration's
+--   header; the durable trail of the underlying events stays in AUDIT_LOG.
 --
 -- RETENTION:
 --   Notifications are ephemeral UI signals, not records — the durable trail of

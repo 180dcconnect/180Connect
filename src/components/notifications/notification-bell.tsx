@@ -111,7 +111,9 @@ export function NotificationBell({ collapsed }: { collapsed: boolean }) {
 
   const handleClick = async (item: NotificationItem) => {
     if (!item.readAt) {
-      // Optimistic: the badge should drop before the RPC round-trips.
+      // Optimistic: the badge should drop before the RPC round-trips. If the
+      // RPC reports no transition (failure or already-read elsewhere), refetch
+      // so client state can't drift from what Postgres actually holds.
       setItems((prev) =>
         prev.map((n) =>
           n.id === item.id
@@ -120,7 +122,9 @@ export function NotificationBell({ collapsed }: { collapsed: boolean }) {
         ),
       );
       setUnreadCount((c) => Math.max(0, c - 1));
-      void markNotificationRead(item.id).then(() => undefined);
+      void markNotificationRead(item.id).then((changed) => {
+        if (!changed) void reload();
+      });
     }
     setOpen(false);
     if (item.linkPath) router.push(item.linkPath);
@@ -131,7 +135,10 @@ export function NotificationBell({ collapsed }: { collapsed: boolean }) {
       prev.map((n) => ({ ...n, readAt: n.readAt ?? new Date().toISOString() })),
     );
     setUnreadCount(0);
-    await markAllNotificationsRead();
+    const count = await markAllNotificationsRead();
+    // The button only shows when unreadCount > 0, so 0 back means the batch
+    // write failed — resync instead of trusting the optimistic state.
+    if (count === 0) void reload();
   };
 
   const button = (

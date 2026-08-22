@@ -835,7 +835,8 @@ SECURITY DEFINER RPCs that self-check inside their bodies:
 
 - `create_notification(...)` — `authenticated` + `service_role`; caller must be
   an active user (or hold the service-role key server-side). Silently skips
-  unknown/deactivated recipients and sub-minute duplicate retries.
+  unknown/deactivated recipients, self-notifications, and sub-minute duplicate
+  retries.
 - `mark_notification_read(id)` / `mark_all_notifications_read()` —
   `authenticated`, self-check `app.is_active_user()` + own-row scoping inside.
   A non-recipient's call returns `false`/`0`, deliberately indistinguishable

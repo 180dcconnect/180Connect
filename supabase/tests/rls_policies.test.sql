@@ -4114,6 +4114,15 @@ begin
   perform set_config('request.jwt.claims', null, true);
   return next ok(v_result is null, 'a deactivated recipient is skipped');
 
+  -- Self-notifications are skipped too (actor = recipient), not a 23514.
+  perform tests.login_as(v_cam_a);
+  select public.create_notification(
+    v_cam_a, 'reminder', 'Note to self', null, null, null, null, v_cam_a
+  ) into v_result;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_result is null, 'a self-notification is skipped, returning null');
+
   -- Wrong-recipient prevention: CAM B sees none of CAM A's rows.
   perform tests.login_as(v_cam_b);
   select count(*) into v_count from public.notifications where id = v_notif;

@@ -105,6 +105,13 @@ begin
     return v_existing;
   end if;
 
+  -- Self-notifications are noise; skip them like unknown recipients. Done
+  -- here rather than relying on the table's actor <> recipient CHECK, which
+  -- would raise 23514 instead of skipping quietly.
+  if p_actor_user_id is not null and p_actor_user_id = p_recipient_user_id then
+    return null;
+  end if;
+
   insert into public.notifications (
     recipient_user_id, actor_user_id, notification_type,
     title, body, link_path, target_table, target_id
@@ -112,25 +119,16 @@ begin
     p_recipient_user_id, p_actor_user_id, p_notification_type,
     p_title, p_body, p_link_path, p_target_table, p_target_id
   )
-  -- actor must differ from recipient; the table check rejects self-notifications
-  on conflict do nothing;
+  returning id into v_existing;
 
-  return (
-    select n.id from public.notifications n
-    where n.recipient_user_id = p_recipient_user_id
-      and n.notification_type = p_notification_type
-      and coalesce(n.title, '') = coalesce(p_title, '')
-      and coalesce(n.link_path, '') = coalesce(p_link_path, '')
-      and n.read_at is null
-    order by n.created_at desc
-    limit 1
-  );
+  return v_existing;
 end;
 $$;
 
 comment on function public.create_notification(uuid, text, text, text, text, text, uuid, uuid) is
   'F173: sole producer path for NOTIFICATIONS rows. Skips unknown/inactive '
-  'recipients and sub-minute duplicates; never exposes table INSERT.';
+  'recipients, self-notifications and sub-minute duplicates; never exposes '
+  'table INSERT.';
 
 revoke execute on function public.create_notification(uuid, text, text, text, text, text, uuid, uuid) from public, anon;
 grant execute on function public.create_notification(uuid, text, text, text, text, text, uuid, uuid) to authenticated, service_role;

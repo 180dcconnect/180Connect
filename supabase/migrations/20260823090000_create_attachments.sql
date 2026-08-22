@@ -4,7 +4,7 @@
 --   is defined anywhere in the PRD's own feature table (only ever referenced as
 --   a dependency of F080/F081/F118) or in this codebase; this migration is the
 --   minimal read-side schema those two names would otherwise cover.
--- Spec: docs/rls-permission-matrix.md §3.20
+-- Spec: docs/rls-permission-matrix.md §3.21
 --
 -- SCOPE (decided with the Project Lead — ticket's own "Blocked By: storage
 --   location"): this migration is read-only. It creates the ATTACHMENTS
@@ -33,7 +33,7 @@
 --   uploads of "invoice.pdf" to the same client from colliding.
 --
 -- WHY SHARED READ, NOT OWNER/ADMIN-SCOPED: same reasoning as NOTES (§3.3) and
---   CLIENT_EDIT_SUGGESTIONS (§3.19) — F019 read-only shared client visibility
+--   CLIENT_EDIT_SUGGESTIONS (§3.2) — F019 read-only shared client visibility
 --   and this ticket's own "timeline/context visibility" testing note both
 --   point at every active role seeing the same attachment list any CAM would.
 --
@@ -99,7 +99,7 @@ grant select on public.attachments to authenticated;
 
 alter table public.attachments enable row level security;
 
--- Shared read, same shape as NOTES (§3.3) and CLIENT_EDIT_SUGGESTIONS (§3.19).
+-- Shared read, same shape as NOTES (§3.3) and CLIENT_EDIT_SUGGESTIONS (§3.2).
 create policy attachments_select_active on public.attachments
   for select to authenticated
   using (app.is_active_user());

@@ -11,9 +11,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { OriginButton } from "@/components/ui/origin-button";
-import { InlineAlert } from "@/components/ui/inline-alert";
-import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
-import { reportError } from "@/lib/error-logging";
 
 /**
  * F145 — lets the client's owner (CAM) or an admin move it through the pipeline.
@@ -54,9 +51,8 @@ export function StatusSelect({
       }
       const body = await response.json();
       setError(body.error ?? "This status could not be saved.");
-    } catch (err) {
-      void reportError(err, { operation: "clients.status_select_client", organisationId });
-      setError(NETWORK_ERROR_MESSAGE);
+    } catch {
+      setError("Could not reach the server. Check your connection and try again.");
     } finally {
       setBusy(false);
     }
@@ -93,9 +89,9 @@ export function StatusSelect({
         {busy ? "Saving…" : "Save status"}
       </OriginButton>
       {error && (
-        <div className="w-full">
-          <InlineAlert message={error} />
-        </div>
+        <p aria-live="polite" role="alert" className="w-full text-[13px] font-bold text-destructive">
+          {error}
+        </p>
       )}
     </div>
   );

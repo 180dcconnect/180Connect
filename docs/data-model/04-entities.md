@@ -257,3 +257,19 @@
 | target_id | uuid |  | Yes | ID of the linked record | System | Set when created |  |
 | read_at | timestamp |  | Yes | When the recipient marked it read | Human/System | Set by mark-as-read RPC; auto-set on click-open | Null = unread. Included now so F177 needs no second migration |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+<<<<<<< HEAD
+
+## BOOKLET_GENERATIONS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| organisation_id | uuid | ORGANISATIONS | No | Organisation this booklet belongs to | System | Set when generated | On delete cascade. Index (organisation_id, created_at desc) |
+| generated_by | uuid | USERS | No | User who generated the booklet | System | Set to logged-in user |  |
+| prompt_system | text |  | No | System prompt used | System | Set when generated |  |
+| prompt_user | text |  | No | User prompt used | System | Set when generated |  |
+| output | text |  | No | Generated output | System | Set when generated |  |
+| model | text |  | No | Model used for generation | System | Set when generated |  |
+| created_at | timestamptz |  | No | Row creation timestamp | System | Auto-generated | Default now(). Append-only. |
+=======
+>>>>>>> origin/dev

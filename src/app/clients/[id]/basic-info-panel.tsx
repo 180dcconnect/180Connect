@@ -11,7 +11,6 @@ import {
   type OrganisationDetailRow,
 } from "@/lib/client-basic-info";
 import { SectionCard } from "./section-card";
-import { InlineAlert } from "@/components/ui/inline-alert";
 
 /**
  * Field order is reading order, not schema order. `wide` fields span both
@@ -58,7 +57,6 @@ export function BasicInfoPanel({
     missionStatement,
     missionEnrichedAt,
   });
-  const [connectionLost, setConnectionLost] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -116,13 +114,7 @@ export function BasicInfoPanel({
             );
           },
         )
-        .subscribe((status) => {
-          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
-            setConnectionLost(true);
-          } else if (status === "SUBSCRIBED") {
-            setConnectionLost(false);
-          }
-        });
+        .subscribe();
     }
 
     subscribe();
@@ -137,11 +129,6 @@ export function BasicInfoPanel({
 
   return (
     <SectionCard headingId="basic-info-heading" title="Basic info">
-      {connectionLost && (
-        <div className="mb-4">
-          <InlineAlert message="Live updates paused — refresh the page to see the latest changes." />
-        </div>
-      )}
       <dl className="mt-4 grid grid-cols-1 gap-x-8 sm:grid-cols-2">
         {FIELDS.map(({ key, label, wide }) => {
           // AC2: a field with no value still gets its row — greyed rather than

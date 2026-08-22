@@ -6,7 +6,6 @@ import { reportError } from "@/lib/error-logging";
 import {
   createDefaultGenerateBookletDeps,
   generateBooklet,
-  type GenerateBookletDeps,
 } from "@/lib/booklet/generate-booklet";
 import type {
   BookletEnrichmentInput,
@@ -14,19 +13,22 @@ import type {
 } from "@/lib/booklet/build-prompt";
 
 /**
- * F082 — Generate Client Booklet. Generate-and-display only this pass: F085 (save to
- * the client record) and F112 (store prompt/output for audit) are both deferred, so
- * every call here re-generates from Gemini fresh rather than reading/writing a saved
- * booklet. See generate-booklet.ts for the Gemini call itself.
+ * F082 — Generate Client Booklet. Every call generates fresh from Gemini (F085's
+ * saved-booklet read/write is separate, #382). After a successful generation the
+ * exact prompt and output are written to booklet_generations — F082 AC5 / F112's
+ * audit requirement. See generate-booklet.ts for the Gemini call itself.
  *
  * client:contact, not client:view — this calls a paid external API on every click,
  * same reasoning as gating the Outreach section on the client detail page.
  *
- * Vercel's default function timeout can be shorter than generate-booklet.ts's own
- * 30s upstream timeout on some hosting tiers — raise this if a real generation gets
- * cut off before the upstream timeout has a chance to return its own clear error.
+ * generate-booklet.ts's own upstream timeout is 90s (PRD hard timeout for Client
+ * Booklet generation). maxDuration must stay comfortably above that or the hosting
+ * platform kills the request before the upstream timeout gets the chance to return
+ * its own clear error — 120s here; confirm against the actual Vercel plan this
+ * deploys to, since some tiers cap function duration below that regardless of what
+ * this value asks for.
  */
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
   const status = reason === "unauthenticated" ? 401 : 403;
@@ -84,31 +86,34 @@ export async function POST(
     });
   }
 
-  // createDefaultGenerateBookletDeps throws synchronously when the Gemini env
-  // vars are missing — catch it here so the route answers with a clear 503
-  // instead of the error escaping unhandled (same pattern as the stage-one
-  // outreach route).
-  let deps: GenerateBookletDeps;
-  try {
-    deps = createDefaultGenerateBookletDeps();
-  } catch (error) {
-    await reportError(error, {
-      operation: "clients.generate_booklet.configure",
-      organisationId,
-    });
-    return NextResponse.json(
-      { error: "Booklet generation is not configured. Contact an administrator." },
-      { status: 503 },
-    );
-  }
-
   const result = await generateBooklet(
     { organisationId, organisation, enrichment: enrichment ?? null },
-    deps,
+    createDefaultGenerateBookletDeps(),
   );
 
   if ("error" in result) {
     return NextResponse.json({ error: result.error }, { status: 502 });
   }
+
+  // F082 AC5 / F112 — the exact prompt and output are stored per generation
+  // (booklet_generations). A failed audit insert does not fail the request:
+  // the CAM just waited up to 90s and losing the booklet over an audit write
+  // would trade a compliance nicety for a user-visible failure. It is reported
+  // to ERROR_LOG so the gap is visible, not silent.
+  const { error: auditError } = await supabase.from("booklet_generations").insert({
+    organisation_id: organisationId,
+    generated_by: authorization.actor.id,
+    prompt_system: result.systemPrompt,
+    prompt_user: result.userPrompt,
+    output: result.booklet,
+    model: result.model,
+  });
+  if (auditError) {
+    await reportError(auditError, {
+      operation: "clients.generate_booklet.audit_insert",
+      organisationId,
+    });
+  }
+
   return NextResponse.json({ booklet: result.booklet });
 }

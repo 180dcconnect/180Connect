@@ -4197,15 +4197,16 @@ begin
     'a deactivated account cannot produce notifications'
   );
 
+  -- A deactivated account's read is denied silently — §4: a blocked SELECT
+  -- returns 0 rows, never an error.
   perform tests.login_as(v_gone);
   select count(*) into v_count from public.notifications where recipient_user_id = v_gone;
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
   return next is(
-    tests.sqlstate_of(v_gone, format(
-      'select count(*) from public.notifications where recipient_user_id = %L', v_gone)),
-    '42501',
-    'a deactivated account cannot read notifications'
+    v_count,
+    0::bigint,
+    'a deactivated account reads no notifications (silent empty result, matrix §4)'
   );
 
   -- No direct INSERT door exists for any client role.

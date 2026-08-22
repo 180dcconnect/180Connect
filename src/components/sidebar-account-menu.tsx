@@ -2,6 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { ChevronsUpDown, CircleUserRound, LogOut, Sliders } from "lucide-react";
+import { AnimateIcon } from "@/components/animate-ui/icons/icon";
+import { Settings } from "@/components/animate-ui/icons/settings";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -115,10 +117,17 @@ export function SidebarAccountMenu({
          * prop, so an item cannot *be* an anchor. `logout` redirects, so
          * calling the action directly ends the same way the form post did.
          */}
-        <DropdownMenuItem onSelect={() => router.push("/profile")}>
+        <DropdownMenuItem onSelect={() => router.push("/settings/profile")}>
           <CircleUserRound aria-hidden="true" />
-          Account
+          Profile
         </DropdownMenuItem>
+
+        <AnimateIcon animateOnHover asChild>
+          <DropdownMenuItem onSelect={() => router.push("/settings")}>
+            <Settings aria-hidden="true" />
+            Settings
+          </DropdownMenuItem>
+        </AnimateIcon>
 
         <DropdownMenuItem onSelect={() => router.push("/settings/accessibility")}>
           <Sliders aria-hidden="true" />

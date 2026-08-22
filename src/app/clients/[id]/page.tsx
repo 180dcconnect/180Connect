@@ -5,55 +5,29 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
-import { InlineAlert } from "@/components/ui/inline-alert";
 import { validateClientEmail } from "@/lib/client-email-validation";
 import {
-  formatImportOrigin,
   formatOrganisationSources,
-  type ImportOriginRow,
   type OrganisationSourceRow,
 } from "@/lib/source-tracking";
-import { groupFieldSources, type FieldSourceRow } from "@/lib/field-sources";
 import { checkWebsiteReachabilityCached } from "@/lib/website-reachability-cache";
-import { safeWebsiteHref, websiteHref } from "@/lib/website-validation";
+import { websiteHref } from "@/lib/website-validation";
 import { formatLocation, formatOutreachStatus } from "@/lib/organisation-format";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
-import { splitOutreachHistory, type OutreachMessageRow } from "@/lib/outreach-history";
 import { SuppressButton } from "./suppress-button";
-import { LiftSuppressionButton } from "./lift-suppression-button";
 import { ComposeButton } from "./compose-button";
 import { BasicInfoPanel } from "./basic-info-panel";
-import { BookletPanel } from "./booklet-panel";
 import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
 import { Pill, SectionCard } from "./section-card";
 import { TagsSection } from "./tags-section";
-import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
-import {
-  ownershipRequestAvailability,
-  type OwnershipRequestStatus,
-} from "@/lib/ownership-requests";
-import { RequestOwnershipForm } from "./request-ownership-form";
-import { buildNoteList, type NoteRow } from "@/lib/note-history";
-import { NotesSection } from "./notes-section";
-import { AddNoteForm } from "./add-note-form";
-import {
-  buildTimeline,
-  type AuditRow,
-  type NoteRow as TimelineNoteRow,
-  type OutreachMessageRow as TimelineOutreachRow,
-  type ReplyEventRow,
-} from "@/lib/timeline";
-import { TimelineSection } from "./timeline-section";
-import { TimelineRealtimeRefresher } from "./timeline-realtime";
-import { OutreachHistorySection } from "./outreach-history";
+import { BookletPanel } from "./booklet-panel";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
 type LatestSuppression = {
-  id: string;
   status: "pending" | "active" | "rejected" | "lifted";
   reason: string;
   created_at: string;
@@ -72,43 +46,6 @@ type OwnerRow = {
  * F069-081) are still separate open tickets; each will slot in here as its own
  * `<section aria-labelledby>`, same shape as "Record sources" and this one, to
  * keep F067 AC2's "each reachable without excessive scrolling" true as they land.
- *
- * F071 (#73) View Notes / F072 (#74) Add Note / F073 (#75) Edit Own Note / F074
- * (#76) Delete Own Note are one such section: every `notes` row for this
- * client, from any CAM (F071 AC1), newest first (F071 AC3). AddNoteForm posts
- * to /api/clients/[id]/notes; NotesSection's inline edit/delete both post to
- * /api/clients/[id]/notes/[noteId] — see @/lib/note-history for the
- * ordering/permission logic shared by all three write paths. F074's own
- * "blocked by" question (soft-delete vs hard-delete) is confirmed: hard
- * delete, no retention anywhere, including in an audit trail — see that
- * route's header comment for the reasoning. None of the three write paths
- * touch `audit_log` — a plain author-owned write doesn't follow
- * docs/audit-log-pattern.md, which scopes that requirement to
- * ownership/status/role/approval changes.
- *
- * F070 (#72) View Previous Emails is one such section: the Outreach card below
- * now shows every outreach_messages row for this client, split into "Sent" and
- * "Not sent" (AC3) — see @/lib/outreach-history for the split/order logic and
- * outreach-history.tsx for the render. Gated on `client:view` like the rest of
- * this page (matches outreach_messages_select_active — read is shared across
- * all active roles, not ownership-scoped), not on `client:contact`, which still
- * gates only ComposeButton within the same card.
- *
- * F075 (#77) View Communication Timeline / F076 (#78) Timeline Event Types:
- * merges notes, sent emails, replies, status changes and ownership handovers
- * into one feed, each entry labelled and visually distinguishable — see
- * @/lib/timeline.ts for the per-source normalisation, the merge/sort, and the
- * event-type label/style maps; timeline-section.tsx for the render;
- * timeline-realtime.tsx for AC3's live-update subscriber. Two things this
- * needed that weren't already in place, both closed by
- * 20260820110000_widen_audit_log_for_client_timeline.sql: `audit_log` was
- * admin-only to SELECT (a CAM/viewer could not have read the
- * status_changed/ownership_reassigned rows at all), and none of
- * notes/outreach_messages/reply_events/audit_log were in the
- * `supabase_realtime` publication (AC3 could not have worked). F076's own
- * "final event type list" open question is resolved by construction: every
- * type in @/lib/timeline.ts's TimelineEventType maps to a real, already-wired
- * data source — there is nowhere to invent a type with nothing behind it.
  *
  * Started as F251 AC1/AC2's minimal client screen (name + suppression state only)
  * — see src/app/clients/page.tsx for that history. Extended here, not replaced.
@@ -142,7 +79,6 @@ export default async function ClientDetailPage({
 }) {
   const authorization = await getCurrentActor("client:view", { route: "/clients/[id]" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
-  const isAdmin = authorization.actor.role === "admin";
 
   const { id } = await params;
   const supabase = await createClient();
@@ -226,49 +162,12 @@ export default async function ClientDetailPage({
     (rawSourceRows ?? []) as OrganisationSourceRow[],
   );
 
-  // F044/F069 AC3: field-level provenance, on top of F043's record-level sources
-  // above. Only organisations built through the F037 URL import have this — most
-  // rows simply have nothing here, which formatImportOrigin treats as "no import".
-  const { data: rawImportOriginRows, error: importOriginError } = await supabase
-    .rpc("get_organisation_import_origin", { p_organisation_id: id });
-
-  if (importOriginError) {
-    await reportError(importOriginError, {
-      operation: "clients.detail_import_origin",
-      organisationId: id,
-    });
-  }
-  const importOrigin = formatImportOrigin(
-    ((rawImportOriginRows ?? []) as ImportOriginRow[])[0] ?? null,
-  );
-  // Reuses the website link's own safety check (scheme-less strings resolving as
-  // a relative path, unsafe hostnames) rather than re-deriving it: source_url is
-  // free text captured from a CAM-followed link, same trust level as `website`.
-  const importSourceHref = importOrigin ? safeWebsiteHref(importOrigin.sourceUrl) : null;
-
-  // F044: get_field_sources is admin-only (self-checks app.is_admin(), same as
-  // FIELD_DISCREPANCIES §3.16) — only fetched for an admin so a CAM view of this
-  // page doesn't spend a request on a call that's going to be refused anyway.
-  const { data: rawFieldSourceRows, error: fieldSourcesError } = isAdmin
-    ? await supabase.rpc("get_field_sources", { p_organisation_id: id })
-    : { data: null, error: null };
-
-  if (fieldSourcesError) {
-    await reportError(fieldSourcesError, {
-      operation: "clients.detail_field_sources",
-      organisationId: id,
-    });
-  }
-  const fieldSources = groupFieldSources(
-    (rawFieldSourceRows ?? []) as FieldSourceRow[],
-  );
-
   // Most recent suppression row for this org, whatever its status — pending shows a
   // waiting state, active shows the suppressed state, rejected/lifted/none all fall
   // through to the suppress button.
   const { data: latest } = await supabase
     .from("suppressions")
-    .select("id, status, reason, created_at")
+    .select("status, reason, created_at")
     .eq("organisation_id", id)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -287,137 +186,11 @@ export default async function ClientDetailPage({
     await reportError(ownerError, { operation: "clients.detail_owner", organisationId: id });
   }
 
-  // F071/F072/F073/F074: every note against this client, whoever wrote it
-  // (F071 AC1). RLS (notes_select_active) shares read across every active
-  // role, so this needs no author filter — same reasoning as the sources
-  // query above.
-  const { data: noteRows, error: notesError } = await supabase
-    .from("notes")
-    .select("id, content, created_at, updated_at, author_id, author:users!notes_author_id_fkey(full_name)")
-    .eq("organisation_id", id);
-
-  if (notesError) {
-    await reportError(notesError, { operation: "clients.detail_notes", organisationId: id });
-  }
-
-  // F070: every outreach message for this client, sent or not. RLS
-  // (outreach_messages_select_active) shares read across every active role, so
-  // this needs no ownership filter — same reasoning as the `client:view` gate
-  // above.
-  const { data: outreachRows, error: outreachError } = await supabase
-    .from("outreach_messages")
-    .select("id, subject, body, send_status, sent_at, scheduled_at, created_at")
-    .eq("organisation_id", id)
-    .order("created_at", { ascending: false });
-
-  if (outreachError) {
-    await reportError(outreachError, {
-      operation: "clients.detail_outreach",
-      organisationId: id,
-    });
-  }
-  const outreachHistory = splitOutreachHistory(
-    (outreachRows ?? []) as OutreachMessageRow[],
-  );
-
-  // F075/F076: the four sources @/lib/timeline.ts's buildTimeline merges into
-  // one feed. Independent queries, not one join — the four tables share no
-  // join key that would make sense together (notes/outreach_messages/
-  // reply_events key off organisation_id; audit_log keys off
-  // target_table+target_id), and each fails independently the same way every
-  // other section on this page does (reported, not fatal).
-  const { data: timelineNoteRows, error: timelineNotesError } = await supabase
-    .from("notes")
-    .select("id, content, created_at, updated_at, author:users!notes_author_id_fkey(full_name)")
-    .eq("organisation_id", id);
-  if (timelineNotesError) {
-    await reportError(timelineNotesError, { operation: "clients.timeline_notes", organisationId: id });
-  }
-
-  const { data: timelineMessageRows, error: timelineMessagesError } = await supabase
-    .from("outreach_messages")
-    .select("id, subject, send_status, sent_at, sender:users!outreach_messages_sent_by_user_id_fkey(full_name)")
-    .eq("organisation_id", id);
-  if (timelineMessagesError) {
-    await reportError(timelineMessagesError, {
-      operation: "clients.timeline_messages",
-      organisationId: id,
-    });
-  }
-
-  const { data: replyRows, error: replyError } = await supabase
-    .from("reply_events")
-    .select("id, reply_body, received_at")
-    .eq("organisation_id", id);
-  if (replyError) {
-    await reportError(replyError, { operation: "clients.timeline_replies", organisationId: id });
-  }
-
-  // RLS (audit_log_select_client_timeline, 20260820110000) is what makes this
-  // readable by a CAM/viewer at all — without it every row here is invisible,
-  // not merely filtered, to anyone but an admin.
-  const { data: auditRows, error: auditError } = await supabase
-    .from("audit_log")
-    .select("id, actor_user_id, action, detail, created_at")
-    .eq("target_table", "organisations")
-    .eq("target_id", id)
-    .in("action", ["status_changed", "ownership_reassigned"]);
-  if (auditError) {
-    await reportError(auditError, { operation: "clients.timeline_audit", organisationId: id });
-  }
-
-  // Degraded, not fatal: the four sources fail independently (each error is
-  // reported above), so whatever loaded still renders. `timelineDegraded`
-  // only downgrades the section to a warning above the surviving entries —
-  // a notes-query failure should not hide the emails and replies that did
-  // load. A total failure leaves entries empty and TimelineSection shows its
-  // full error state instead.
-  const timelineDegraded = Boolean(
-    timelineNotesError || timelineMessagesError || replyError || auditError,
-  );
-
-  // actor_user_id and detail.from/detail.to are bare uuids (detail is jsonb,
-  // not a foreign key PostgREST can embed), so they're resolved by hand in one
-  // batch rather than per-row. A name missing from this map — a deleted
-  // account, or a uuid audit_log carries no FK constraint to validate — reads
-  // as "A former team member" in @/lib/timeline.ts, never as a raw id or blank.
-  const referencedUserIds = new Set<string>();
-  for (const row of auditRows ?? []) {
-    if (row.actor_user_id) referencedUserIds.add(row.actor_user_id);
-    const from = row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).from : null;
-    const to = row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).to : null;
-    if (typeof from === "string") referencedUserIds.add(from);
-    if (typeof to === "string") referencedUserIds.add(to);
-  }
-
-  const timelineNames = new Map<string, string | null>();
-  if (referencedUserIds.size > 0) {
-    const { data: referencedUsers, error: namesError } = await supabase
-      .from("users")
-      .select("id, full_name")
-      .in("id", Array.from(referencedUserIds));
-    if (namesError) {
-      await reportError(namesError, { operation: "clients.timeline_names", organisationId: id });
-    }
-    for (const row of referencedUsers ?? []) {
-      timelineNames.set(row.id, row.full_name);
-    }
-  }
-
-  const timeline = buildTimeline(
-    {
-      notes: (timelineNoteRows ?? []) as unknown as TimelineNoteRow[],
-      outreachMessages: (timelineMessageRows ?? []) as unknown as TimelineOutreachRow[],
-      replyEvents: (replyRows ?? []) as ReplyEventRow[],
-      auditRows: (auditRows ?? []) as AuditRow[],
-    },
-    timelineNames,
-  );
-
   const canEdit = hasPermission(authorization.actor.role, "client:edit");
   const canSuppress = canEdit;
   const ownerId = ownerRow?.owner_id ?? null;
   const ownerName = ownerRow?.owner?.full_name ?? (ownerId ? "A former team member" : null);
+  const isAdmin = authorization.actor.role === "admin";
 
   // F163: admin's CAM picker. Only fetched for an admin — a CAM can't reach the
   // assign form, so the query would be wasted on every other page view.
@@ -438,49 +211,6 @@ export default async function ClientDetailPage({
   const suppressed = latest?.status === "active";
   const suppressionPending = latest?.status === "pending";
 
-  // Deliberately not `ownerName`: that falls back to "A former team member" for a
-  // deleted owner, which the warning would read back as a person to go and talk to.
-  const ownershipConflict = checkOwnershipConflict({
-    ownerId,
-    ownerName: ownerRow?.owner?.full_name ?? null,
-    actorId: authorization.actor.id,
-    actorRole: authorization.actor.role,
-  });
-
-  // #408: this CAM's own most recent request for this client, so the conflict warning
-  // can offer the escalation — or, if they have already asked, say so instead of
-  // inviting a second ask the RPC would refuse. Only fetched when a conflict exists;
-  // there is nothing to request otherwise.
-  let ownRequest: { status: OwnershipRequestStatus; decision_note: string | null } | null = null;
-  if (ownershipConflict.hasConflict) {
-    const { data: requestRow, error: requestError } = await supabase
-      .from("ownership_requests")
-      .select("status, decision_note")
-      .eq("organisation_id", id)
-      .eq("requested_by", authorization.actor.id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle<{ status: OwnershipRequestStatus; decision_note: string | null }>();
-    if (requestError) {
-      await reportError(requestError, {
-        operation: "clients.detail_ownership_request",
-        organisationId: id,
-      });
-    }
-    ownRequest = requestRow ?? null;
-  }
-
-  const noteList = buildNoteList((noteRows ?? []) as unknown as NoteRow[], {
-    id: authorization.actor.id,
-    role: authorization.actor.role,
-  });
-
-  const requestAvailability = ownershipRequestAvailability({
-    ownerId,
-    actorId: authorization.actor.id,
-    actorRole: authorization.actor.role,
-    hasPendingRequest: ownRequest?.status === "pending",
-  });
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="mx-auto w-full max-w-5xl space-y-6">
@@ -515,12 +245,7 @@ export default async function ClientDetailPage({
             {ownerId && (
               <p className="text-sm leading-[1.7] text-foreground/50">
                 Owned by{" "}
-                <Link
-                  href={`/team/${ownerId}`}
-                  className="font-bold text-foreground/75 hover:text-brand hover:underline"
-                >
-                  {ownerName}
-                </Link>
+                <span className="font-bold text-foreground/75">{ownerName}</span>
                 {ownerId === authorization.actor.id ? " (you)" : ""}
               </p>
             )}
@@ -545,12 +270,6 @@ export default async function ClientDetailPage({
                 Hidden from the active working list. Outreach is blocked. Only an admin
                 can lift this.
               </p>
-              {isAdmin && (
-                <LiftSuppressionButton
-                  organisationId={client.id}
-                  suppressionId={latest.id}
-                />
-              )}
             </div>
           </Rise>
         )}
@@ -585,6 +304,11 @@ export default async function ClientDetailPage({
               />
             </Rise>
 
+            {/* F082 — Generate Client Booklet: kept as its own distinct
+                brand-tinted card rather than wrapped in SectionCard — it's the
+                flagship AI feature, not another plain record field, and right
+                after BasicInfoPanel since a CAM reads this before anything
+                else on the page. */}
             {hasPermission(authorization.actor.role, "client:contact") && (
               <Rise>
                 <BookletPanel organisationId={client.id} />
@@ -679,7 +403,9 @@ export default async function ClientDetailPage({
                 hint="Where the information in this client record came from."
               >
                 {sourcesError ? (
-                  <InlineAlert message="Source information could not be loaded. Refresh and try again." />
+                  <p className="mt-4 text-sm font-bold text-destructive" role="alert">
+                    Source information could not be loaded. Refresh and try again.
+                  </p>
                 ) : sources.length === 0 ? (
                   <p className="mt-4 text-sm leading-[1.7] text-foreground/45">
                     No source information recorded.
@@ -687,159 +413,29 @@ export default async function ClientDetailPage({
                 ) : (
                   <ul className="mt-4 flex flex-wrap gap-2">
                     {sources.map((source) => (
-                      // AC2: manual entry reads as a distinct grey pill instead of the
-                      // brand-green used for every API-matched source, so a CAM can
-                      // tell them apart without reading the label text.
                       <li
                         key={source.source}
+                        className="rounded-full bg-brand/10 px-3 py-1.5 text-[13px] font-bold text-brand-hover"
                         title={`First recorded ${new Date(source.first_seen_at).toLocaleDateString("en-GB")}`}
                       >
-                        <Pill tone={source.source === "manual" ? "neutral" : "brand"}>
-                          {source.label}
-                          {source.source_actor_name ? ` · ${source.source_actor_name}` : ""}
-                        </Pill>
+                        {source.label}
+                        {source.source_actor_name ? ` · ${source.source_actor_name}` : ""}
                       </li>
                     ))}
                   </ul>
                 )}
-                {importOriginError ? (
-                  // Same visible-failure contract as `sourcesError` above: a broken
-                  // provenance lookup must not read as "this client was never imported".
-                  <p className="mt-3 text-sm font-bold text-destructive" role="alert">
-                    Import provenance could not be loaded. Refresh and try again.
-                  </p>
-                ) : (
-                  importOrigin &&
-                  importOrigin.fieldLabels.length > 0 && (
-                    // AC3: which fields specifically came from the import, not only
-                    // that an import contributed to the record somewhere.
-                    <p className="mt-3 text-[13px] leading-[1.6] text-foreground/50">
-                      <span className="font-bold text-foreground/65">
-                        {importOrigin.fieldLabels.length}{" "}
-                        field{importOrigin.fieldLabels.length === 1 ? "" : "s"}
-                      </span>{" "}
-                      imported from{" "}
-                      {importSourceHref ? (
-                        <a
-                          className="break-all font-bold text-brand-hover underline underline-offset-2 hover:text-brand"
-                          href={importSourceHref}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          {importOrigin.sourceUrl}
-                        </a>
-                      ) : (
-                        <span className="break-all font-bold text-foreground/65">
-                          {importOrigin.sourceUrl}
-                        </span>
-                      )}
-                      : {importOrigin.fieldLabels.join(", ")}.
-                    </p>
-                  )
-                )}
               </SectionCard>
             </Rise>
-
-            <Rise>
-              <SectionCard
-                headingId="notes-heading"
-                title="Notes"
-                hint="Left by any team member — relationship history everyone can see."
-              >
-                <NotesSection
-                  notes={noteList}
-                  error={Boolean(notesError)}
-                  organisationId={client.id}
-                />
-                {canEdit && <AddNoteForm organisationId={client.id} />}
-              </SectionCard>
-            </Rise>
-
-            {isAdmin && (
-              <Rise>
-                <SectionCard
-                  headingId="field-sources-heading"
-                  title="Field sources"
-                  hint="Which source provided each field. Superseded values stay visible so a conflict can be reviewed, not just the one that was kept."
-                >
-                  {fieldSourcesError ? (
-                    <InlineAlert message="Field source information could not be loaded. Refresh and try again." />
-                  ) : fieldSources.length === 0 ? (
-                    <p className="mt-4 text-sm leading-[1.7] text-foreground/45">
-                      No field-level source information recorded.
-                    </p>
-                  ) : (
-                    <dl className="mt-4 divide-y divide-black/[0.05]">
-                      {fieldSources.map((field) => (
-                        <div key={field.fieldName} className="py-3.5 first:pt-0 last:pb-0">
-                          <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                            {field.fieldLabel}
-                          </dt>
-                          <dd className="mt-1.5 flex flex-wrap items-baseline gap-2">
-                            <span className="break-all text-sm leading-[1.6] text-foreground/80">
-                              {field.current?.value ?? "Not recorded"}
-                            </span>
-                            {field.current && <Pill tone="brand">{field.current.sourceLabel}</Pill>}
-                          </dd>
-                          {field.history.length > 0 && (
-                            <div className="mt-2 rounded-lg bg-black/[0.03] p-2.5">
-                              {/* "Previous", not "other sources": a newer import
-                                  from the same source supersedes the old value
-                                  too, and that is an update, not a conflict. */}
-                              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-                                Previous values
-                              </p>
-                              <ul className="mt-1 space-y-1">
-                                {field.history.map((entry, index) => (
-                                  <li
-                                    key={`${entry.source}-${index}`}
-                                    className="flex flex-wrap items-baseline gap-2 text-xs leading-[1.6] text-foreground/55"
-                                  >
-                                    <span className="break-all">{entry.value}</span>
-                                    <span className="font-bold">{entry.sourceLabel}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </dl>
-                  )}
-                </SectionCard>
-              </Rise>
-            )}
           </Group>
 
           <Group className="space-y-4">
             <Rise>
               <SectionCard headingId="ownership-heading" title="Ownership">
                 {ownerId ? (
-                  <>
-                    <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
-                      Owned by{" "}
-                      <Link
-                        href={`/team/${ownerId}`}
-                        className="font-bold text-foreground/85 hover:text-brand hover:underline"
-                      >
-                        {ownerName}
-                      </Link>
-                      {ownerId === authorization.actor.id ? " (you)" : ""}.
-                    </p>
-                    {/* #408: the only sanctioned route past a conflict. A CAM asks; an
-                        admin decides. There is no take-anyway action, here or in the
-                        RPC behind it. */}
-                    {(requestAvailability.available ||
-                      requestAvailability.reason === "already_pending" ||
-                      (ownershipConflict.hasConflict && ownRequest)) && (
-                      <RequestOwnershipForm
-                        organisationId={client.id}
-                        ownerName={ownerRow?.owner?.full_name ?? null}
-                        existingStatus={ownRequest?.status ?? null}
-                        decisionNote={ownRequest?.decision_note ?? null}
-                      />
-                    )}
-                  </>
+                  <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
+                    Owned by <span className="font-bold text-foreground/85">{ownerName}</span>
+                    {ownerId === authorization.actor.id ? " (you)" : ""}.
+                  </p>
                 ) : canEdit ? (
                   <div className="mt-3 space-y-3">
                     <p className="text-sm leading-[1.7] text-foreground/55">
@@ -887,27 +483,15 @@ export default async function ClientDetailPage({
               </Rise>
             )}
 
-            {/* F070: the history itself is readable by every active role
-                (outreach_messages_select_active), so the card is not gated on
-                client:contact — only ComposeButton inside it is. */}
-            <Rise>
-              <SectionCard headingId="outreach-heading" title="Outreach">
-                <OutreachHistorySection history={outreachHistory} error={Boolean(outreachError)} />
-
-                {hasPermission(authorization.actor.role, "client:contact") && (
+            {hasPermission(authorization.actor.role, "client:contact") && (
+              <Rise>
+                <SectionCard headingId="outreach-heading" title="Outreach">
                   <div className="mt-4">
-                    <ComposeButton
-                      blocked={suppressed}
-                      organisationId={client.id}
-                      suppressionReason={suppressed ? latest.reason : undefined}
-                      ownershipWarning={
-                        ownershipConflict.hasConflict ? ownershipConflict.warning : undefined
-                      }
-                    />
+                    <ComposeButton blocked={suppressed} />
                   </div>
-                )}
-              </SectionCard>
-            </Rise>
+                </SectionCard>
+              </Rise>
+            )}
 
             {/* Only the action lives down here — the resulting state is the
                 banner at the top of the page, so there is nothing to show once
@@ -931,21 +515,6 @@ export default async function ClientDetailPage({
             )}
           </Group>
         </div>
-
-        {/* Full-width, not squeezed into either column: this is the one
-            section that reads across every other one on this page — emails,
-            replies, notes, status, ownership — so it earns its own row rather
-            than fighting a narrow column for space. */}
-        <Rise>
-          <SectionCard
-            headingId="timeline-heading"
-            title="Timeline"
-            hint="Every email, reply, note and change for this client, in one place."
-          >
-            <TimelineSection entries={timeline} degraded={timelineDegraded} />
-          </SectionCard>
-        </Rise>
-        <TimelineRealtimeRefresher organisationId={client.id} />
       </Stage>
     </div>
   );

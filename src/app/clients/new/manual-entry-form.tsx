@@ -3,8 +3,6 @@
 import Link from "next/link";
 import { useActionState, useState, type FormEvent } from "react";
 import { OriginButton } from "@/components/ui/origin-button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -38,18 +36,7 @@ export type ManualEntryDraft = {
 
 const initialState: ManualEntryState = { kind: "idle", message: "" };
 const initialImportState: UrlImportState = { kind: "idle", message: "" };
-
-const EYEBROW = "text-[11px] font-bold uppercase tracking-[0.12em]";
-const LABEL = `${EYEBROW} block text-foreground/70`;
-const CONTROL = "mt-1.5";
-
-const CARD = "rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm sm:p-6";
-
-const MESSAGE_TONES = {
-  success: "border-brand/20 bg-brand/10 text-brand-hover",
-  warning: "border-amber-300/60 bg-amber-50/80 text-amber-900",
-  error: "border-destructive/20 bg-destructive/[0.06] text-destructive",
-} as const;
+const inputClass = "mt-1 w-full rounded-lg border border-black/20 px-3 py-2";
 
 /**
  * Form field name to MANUAL_ENTRY_RECORDS column.
@@ -76,7 +63,7 @@ const FIELD_COLUMNS: Readonly<Record<string, string>> = {
 /** F037 AC8: says, on the field itself, that this value is not the CAM's own. */
 function ImportedBadge() {
   return (
-    <span className="ml-2 inline-flex items-center rounded-full bg-blue-100/80 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-blue-900">
+    <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-900">
       Imported
     </span>
   );
@@ -141,11 +128,11 @@ export function ManualEntryForm({
   }
 
   return (
-    <div className="space-y-6">
+    <>
       {drafts.length > 0 && (
-        <aside className={CARD}>
-          <h2 className={EYEBROW + " text-foreground/40"}>Your saved drafts</h2>
-          <ul className="mt-3 space-y-1 text-sm">
+        <aside className="mt-6 rounded-xl border border-black/10 bg-gray-50 p-4">
+          <h2 className="text-sm font-bold">Your saved drafts</h2>
+          <ul className="mt-2 space-y-1 text-sm">
             {drafts.map((draft) => (
               <li key={draft.id}>
                 <Link className="font-medium text-brand hover:underline" href={`/clients/new?draft=${draft.id}`}>
@@ -162,13 +149,13 @@ export function ManualEntryForm({
       )}
 
       {initialEntry?.source_url && (
-        <section className="rounded-2xl border border-blue-200 bg-blue-50/70 p-5">
-          <h2 className={EYEBROW + " text-blue-900"}>Imported client information</h2>
-          <p className="mt-2 max-w-prose text-[13px] leading-[1.6] text-blue-950/80">
-            The fields marked <span className="font-bold">Imported</span> were filled
+        <section className="mt-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
+          <h2 className="font-bold">Imported client information</h2>
+          <p className="mt-1">
+            The fields marked <span className="font-medium">Imported</span> were filled
             from{" "}
             <a
-              className="font-bold underline"
+              className="font-medium underline"
               href={initialEntry.source_url}
               rel="noreferrer nofollow noopener"
               target="_blank"
@@ -179,14 +166,14 @@ export function ManualEntryForm({
             client until you do.
           </p>
           {initialEntry.import_notes.length > 0 && (
-            <ul className="mt-3 list-disc space-y-1 pl-5 text-[13px] text-blue-950/80">
+            <ul className="mt-3 list-disc space-y-1 pl-5">
               {initialEntry.import_notes.map((note) => <li key={note}>{note}</li>)}
             </ul>
           )}
-          <form action={discardAction} className="mt-4">
+          <form action={discardAction} className="mt-3">
             <input name="entryId" type="hidden" value={initialEntry.id} />
             <button
-              className="rounded-full border border-blue-300 bg-white px-4 py-2 text-xs font-bold text-blue-900 transition-colors hover:bg-blue-100/50 disabled:opacity-50"
+              className="rounded-lg border border-blue-300 px-3 py-1.5 font-bold text-blue-900 disabled:opacity-50"
               disabled={discarding}
               type="submit"
             >
@@ -194,12 +181,12 @@ export function ManualEntryForm({
             </button>
           </form>
           {discardState.message && (
-            <p className="mt-2 text-sm font-medium text-destructive" role="alert">{discardState.message}</p>
+            <p className="mt-2 text-red-900" role="alert">{discardState.message}</p>
           )}
         </section>
       )}
 
-      <form action={action} className={`${CARD} space-y-6`} onChange={handleFieldChange}>
+      <form action={action} className="mt-6 space-y-5" onChange={handleFieldChange}>
         <input name="entryId" type="hidden" value={entryId} />
         {initialEntry?.source_url && (
           <input
@@ -209,22 +196,22 @@ export function ManualEntryForm({
           />
         )}
 
-        <label className={LABEL}>Organisation name
+        <label className="block text-sm font-bold">Organisation name
           {isImported("legal_name") && <ImportedBadge />}
-          <Input className={CONTROL} defaultValue={initialEntry?.legal_name ?? ""} maxLength={200} name="legalName" required />
+          <input className={inputClass} defaultValue={initialEntry?.legal_name ?? ""} maxLength={200} name="legalName" required />
         </label>
 
-        <label className={LABEL}>Mission
+        <label className="block text-sm font-bold">Mission
           {isImported("mission_statement") && <ImportedBadge />}
-          <Textarea className={CONTROL} defaultValue={initialEntry?.mission_statement ?? ""} maxLength={5000} name="missionStatement" required rows={4} />
+          <textarea className={inputClass} defaultValue={initialEntry?.mission_statement ?? ""} maxLength={5000} name="missionStatement" required rows={4} />
         </label>
 
-        <div className="grid gap-6 sm:grid-cols-2">
-          <label className={LABEL}>Organisation type
+        <div className="grid gap-5 sm:grid-cols-2">
+          <label className="block text-sm font-bold">Organisation type
             {isImported("organisation_type") && <ImportedBadge />}
             <input name="organisationType" type="hidden" value={organisationType} />
             <Select value={organisationType} onValueChange={handleOrganisationTypeChange}>
-              <SelectTrigger className={`${CONTROL} w-full`}>
+              <SelectTrigger className={`${inputClass} w-full`}>
                 <SelectValue placeholder="Choose a type" />
               </SelectTrigger>
               <SelectContent>
@@ -235,52 +222,52 @@ export function ManualEntryForm({
               </SelectContent>
             </Select>
           </label>
-          <label className={LABEL}>Country code
+          <label className="block text-sm font-bold">Country code
             {isImported("country_code") && <ImportedBadge />}
-            <Input className={CONTROL} defaultValue={initialEntry?.country_code ?? "GB"} maxLength={2} name="countryCode" pattern="[A-Za-z]{2}" required />
+            <input className={inputClass} defaultValue={initialEntry?.country_code ?? "GB"} maxLength={2} name="countryCode" pattern="[A-Za-z]{2}" required />
           </label>
         </div>
 
-        <fieldset className="rounded-xl border border-black/[0.06] bg-black/[0.015] p-4 sm:p-5">
-          <legend className={`${EYEBROW} px-1 text-foreground/70`}>Full address</legend>
-          <div className="grid gap-5 sm:grid-cols-2">
-            <label className={LABEL + " sm:col-span-2"}>Address line 1
+        <fieldset className="rounded-xl border border-black/10 p-4">
+          <legend className="px-1 text-sm font-bold">Full address</legend>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block text-sm font-bold sm:col-span-2">Address line 1
               {isImported("address_line_1") && <ImportedBadge />}
-              <Input className={CONTROL} defaultValue={initialEntry?.address_line_1 ?? ""} maxLength={300} name="addressLine1" required />
+              <input className={inputClass} defaultValue={initialEntry?.address_line_1 ?? ""} maxLength={300} name="addressLine1" required />
             </label>
-            <label className={LABEL}>Town or city
+            <label className="block text-sm font-bold">Town or city
               {isImported("city") && <ImportedBadge />}
-              <Input className={CONTROL} defaultValue={initialEntry?.city ?? ""} maxLength={200} name="city" required />
+              <input className={inputClass} defaultValue={initialEntry?.city ?? ""} maxLength={200} name="city" required />
             </label>
-            <label className={LABEL}>Postcode or postal code
+            <label className="block text-sm font-bold">Postcode or postal code
               {isImported("postcode") && <ImportedBadge />}
-              <Input className={CONTROL} defaultValue={initialEntry?.postcode ?? ""} maxLength={32} name="postcode" required />
+              <input className={inputClass} defaultValue={initialEntry?.postcode ?? ""} maxLength={32} name="postcode" required />
             </label>
           </div>
         </fieldset>
 
-        <div className="grid gap-6 sm:grid-cols-2">
-          <label className={LABEL}>Website
+        <div className="grid gap-5 sm:grid-cols-2">
+          <label className="block text-sm font-bold">Website
             {isImported("website") && <ImportedBadge />}
-            <Input className={CONTROL} defaultValue={initialEntry?.website ?? ""} maxLength={500} name="website" placeholder="https://example.org" required />
+            <input className={inputClass} defaultValue={initialEntry?.website ?? ""} maxLength={500} name="website" placeholder="https://example.org" required />
           </label>
-          <label className={LABEL}>Contact email
+          <label className="block text-sm font-bold">Contact email
             {isImported("contact_email") && <ImportedBadge />}
-            <Input className={CONTROL} defaultValue={initialEntry?.contact_email ?? ""} maxLength={320} name="contactEmail" type="text" required />
+            <input className={inputClass} defaultValue={initialEntry?.contact_email ?? ""} maxLength={320} name="contactEmail" type="text" required />
           </label>
-          <label className={LABEL}>Registry name
+          <label className="block text-sm font-bold">Registry name
             {isImported("registry_name") && <ImportedBadge />}
-            <Input className={CONTROL} defaultValue={initialEntry?.registry_name ?? ""} maxLength={200} name="registryName" required />
+            <input className={inputClass} defaultValue={initialEntry?.registry_name ?? ""} maxLength={200} name="registryName" required />
           </label>
-          <label className={LABEL}>Registry number
+          <label className="block text-sm font-bold">Registry number
             {isImported("registry_number") && <ImportedBadge />}
-            <Input className={CONTROL} defaultValue={initialEntry?.registry_number ?? ""} maxLength={200} name="registryNumber" required />
+            <input className={inputClass} defaultValue={initialEntry?.registry_number ?? ""} maxLength={200} name="registryNumber" required />
           </label>
         </div>
 
-        <label className={LABEL}>Why is manual entry needed?
-          <Textarea
-            className={CONTROL}
+        <label className="block text-sm font-bold">Why is manual entry needed?
+          <textarea
+            className={inputClass}
             defaultValue={
               initialEntry?.reason_for_manual_entry
               ?? (initialEntry?.source_url
@@ -296,9 +283,9 @@ export function ManualEntryForm({
         </label>
 
         {isAdmin && (
-          <label className="flex items-start gap-3 rounded-xl border border-black/[0.06] bg-black/[0.015] p-4">
-            <input className="mt-0.5 size-4 accent-brand" name="adminConfirmedEligible" type="checkbox" />
-            <span className="text-[13px] leading-[1.6] text-foreground/70">
+          <label className="flex items-start gap-2 rounded-lg bg-blue-50 p-3 text-sm text-blue-950">
+            <input className="mt-1" name="adminConfirmedEligible" type="checkbox" />
+            <span>
               For a company or other organisation, I confirm it is an eligible non-profit,
               social enterprise, NGO or socially focused startup.
             </span>
@@ -307,20 +294,16 @@ export function ManualEntryForm({
 
         {state.message && (
           <p
-            className={`rounded-2xl border px-5 py-4 text-sm font-medium ${
-              MESSAGE_TONES[
-                state.kind === "success" ? "success" : state.kind === "warning" ? "warning" : "error"
-              ]
-            }`}
+            className={`rounded-lg p-3 text-sm ${state.kind === "success" ? "bg-green-50 text-green-800" : state.kind === "warning" ? "bg-amber-50 text-amber-900" : "bg-red-50 text-red-800"}`}
             role={state.kind === "error" ? "alert" : "status"}
           >
             {state.message}
           </p>
         )}
         {state.warnings && state.warnings.length > 0 && (
-          <div className="rounded-2xl border border-amber-300/60 bg-amber-50/80 px-5 py-4" role="alert">
-            <p className={EYEBROW + " text-amber-900"}>Saved with field warnings</p>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-900/90">
+          <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900" role="alert">
+            <p className="font-bold">Saved with field warnings</p>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
               {state.warnings.map((warning) => <li key={warning}>{warning}</li>)}
             </ul>
           </div>
@@ -355,6 +338,6 @@ export function ManualEntryForm({
           </OriginButton>
         </div>
       </form>
-    </div>
+    </>
   );
 }

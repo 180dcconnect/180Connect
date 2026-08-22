@@ -5,11 +5,14 @@ import {
   describePendingSuggestion,
   isSensitiveOrgField,
   pendingSuggestionNotice,
+  restrictedFieldLabel,
+  restrictedFieldRpcFailure,
   SENSITIVE_FIELD_LABELS,
   SENSITIVE_ORG_FIELDS,
   suggestEditAvailability,
   suggestEditRpcFailure,
   suggestionDecisionNotice,
+  validateRestrictedFieldInput,
   validateSuggestEdit,
 } from "./edit-suggestions.ts";
 
@@ -252,5 +255,124 @@ describe("describePendingSuggestion (#80 AC1)", () => {
       describePendingSuggestion("Town or city", "Manchester", "Leeds"),
       'Town or city: "Manchester" → "Leeds"',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F020 (#23): config-driven restricted editing
+// ---------------------------------------------------------------------------
+
+describe("restrictedFieldLabel (F020)", () => {
+  it("uses the curated label for the seeded six", () => {
+    assert.equal(restrictedFieldLabel("legal_name"), "Name");
+    assert.equal(restrictedFieldLabel("city"), "Town or city");
+  });
+
+  it("derives a readable label for an admin-added field", () => {
+    assert.equal(restrictedFieldLabel("trading_name"), "trading name");
+  });
+});
+
+describe("validateSuggestEdit with a live allowlist (F020)", () => {
+  const base = {
+    organisationId: "0b8f6c1e-1111-4222-8333-444455556666",
+    fieldName: "trading_name",
+    fieldValue: "Acme Trading",
+  };
+
+  it("accepts a field that is only in the live config list", () => {
+    const result = validateSuggestEdit({ ...base, allowedFields: ["trading_name"] });
+    assert.equal(result.success, true);
+    if (result.success) assert.equal(result.data.fieldName, "trading_name");
+  });
+
+  it("rejects a seeded field once the live list no longer carries it", () => {
+    const result = validateSuggestEdit({
+      ...base,
+      fieldName: "city",
+      allowedFields: ["trading_name"],
+    });
+    assert.equal(result.success, false);
+    if (!result.success) assert.match(result.message, /Choose a field/);
+  });
+
+  it("defaults to the seeded six so pure-form callers stay correct", () => {
+    const result = validateSuggestEdit({
+      ...base,
+      fieldName: "postcode",
+      fieldValue: "M1 1AE",
+    });
+    assert.equal(result.success, true);
+  });
+
+  it("bounds an admin-added field with the default max length", () => {
+    const result = validateSuggestEdit({
+      ...base,
+      fieldValue: "x".repeat(501),
+      allowedFields: ["trading_name"],
+    });
+    assert.equal(result.success, false);
+  });
+});
+
+describe("validateRestrictedFieldInput (F020)", () => {
+  it("accepts a column-shaped name with a reason and trims both", () => {
+    const result = validateRestrictedFieldInput({
+      fieldName: " trading_name ",
+      reason: "  Feeds dedup.  ",
+    });
+    assert.equal(result.success, true);
+    if (result.success) {
+      assert.equal(result.data.fieldName, "trading_name");
+      assert.equal(result.data.reason, "Feeds dedup.");
+    }
+  });
+
+  it("refuses anything that is not a plausible Postgres column name", () => {
+    for (const bad of ["", "1abc", "has space", "drop table", "CamelCase!", null, 42]) {
+      const result = validateRestrictedFieldInput({ fieldName: bad, reason: "why" });
+      assert.equal(result.success, false, `expected refusal for ${String(bad)}`);
+    }
+  });
+
+  it("requires a reason — the panel shows why a field is locked", () => {
+    const result = validateRestrictedFieldInput({ fieldName: "trading_name", reason: "   " });
+    assert.equal(result.success, false);
+    if (!result.success) assert.match(result.message, /why/);
+  });
+
+  it("caps the reason length", () => {
+    const result = validateRestrictedFieldInput({
+      fieldName: "trading_name",
+      reason: "x".repeat(501),
+    });
+    assert.equal(result.success, false);
+  });
+});
+
+describe("restrictedFieldRpcFailure (F020)", () => {
+  it("maps deliberate refusal codes to their messages", () => {
+    assert.deepEqual(
+      restrictedFieldRpcFailure({ code: "42501", message: "only an admin may change restricted editing" }),
+      { status: 403, error: "only an admin may change restricted editing" },
+    );
+    assert.deepEqual(
+      restrictedFieldRpcFailure({ code: "23514", message: "not a restrictable client field" }),
+      { status: 400, error: "not a restrictable client field" },
+    );
+    assert.deepEqual(
+      restrictedFieldRpcFailure({ code: "P0002", message: "no active restriction found" }),
+      { status: 404, error: "no active restriction found" },
+    );
+  });
+
+  it("gives unexpected failures the generic message only", () => {
+    const failure = restrictedFieldRpcFailure({ code: "XX000", message: "relation missing" });
+    assert.equal(failure.status, 500);
+    assert.doesNotMatch(failure.error, /relation|missing/);
+  });
+
+  it("handles an empty error safely", () => {
+    assert.equal(restrictedFieldRpcFailure({}).status, 500);
   });
 });

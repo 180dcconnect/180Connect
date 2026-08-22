@@ -5,9 +5,8 @@ import Link from "next/link";
 import { OriginButton } from "@/components/ui/origin-button";
 import {
   describePendingSuggestion,
-  SENSITIVE_FIELD_LABELS,
+  restrictedFieldLabel,
   type EditSuggestionRow,
-  isSensitiveOrgField,
 } from "@/lib/edit-suggestions";
 
 const STATUS_STYLE: Record<EditSuggestionRow["status"], string> = {
@@ -20,10 +19,6 @@ const STATUS_STYLE: Record<EditSuggestionRow["status"], string> = {
 function personLabel(person: { full_name: string | null; email: string } | null) {
   if (!person) return "—";
   return person.full_name ?? person.email;
-}
-
-function fieldLabel(fieldName: string): string {
-  return isSensitiveOrgField(fieldName) ? SENSITIVE_FIELD_LABELS[fieldName] : fieldName;
 }
 
 /**
@@ -45,7 +40,7 @@ export function EditSuggestionsPanel({
   const [busyId, setBusyId] = useState<string | null>(null);
 
   function fieldLabelFor(row: EditSuggestionRow) {
-    return fieldLabel(row.field_name);
+    return restrictedFieldLabel(row.field_name);
   }
 
   async function refresh() {

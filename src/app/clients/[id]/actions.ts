@@ -11,12 +11,16 @@ import { reportError } from "@/lib/error-logging";
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * #79 (F077) — submit a suggested edit for one of a client's six sensitive fields.
+ * #79 + #23 (F077/F020) — submit a suggested edit for one of a client's restricted
+ * fields.
  *
  * The action is deliberately thin: permission gate, validation, RPC. Every rule that
  * matters (allowlist, current-value snapshot, supersede-own/block-others) is enforced
  * inside suggest_organisation_edit, because the Server Action is not the only door —
- * the RPC is reachable through PostgREST directly and must hold on its own.
+ * the RPC is reachable through PostgREST directly and must hold on its own. The one
+ * thing the action adds is the live allowlist: since F020 the restricted set is data,
+ * so validation runs against what RESTRICTED_EDIT_FIELDS says right now rather than a
+ * compile-time constant.
  *
  * No audit_log write here either, matching the RPC (submission is not a decision —
  * see the migration header). Unexpected failures go to ERROR_LOG via reportError.
@@ -30,16 +34,23 @@ export async function suggestEditAction(
     return { kind: "error", message: actorFailureMessage(authorization.reason) };
   }
 
+  const supabase = await createClient();
+  const { data: fieldRows } = await supabase
+    .from("restricted_edit_fields")
+    .select("field_name")
+    .eq("active", true);
+  const allowedFields = (fieldRows ?? []).map((row) => row.field_name);
+
   const parsed = validateSuggestEdit({
     organisationId: formData.get("organisationId"),
     fieldName: formData.get("fieldName"),
     fieldValue: formData.get("fieldValue"),
+    allowedFields,
   });
   if (!parsed.success) {
     return { kind: "error", message: parsed.message };
   }
 
-  const supabase = await createClient();
   const { error } = await supabase.rpc("suggest_organisation_edit", {
     p_organisation_id: parsed.data.organisationId,
     p_field_name: parsed.data.fieldName,

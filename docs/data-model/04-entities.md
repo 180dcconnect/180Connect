@@ -290,3 +290,14 @@
 | rejection_reason | text |  | Yes | Optional admin note for the CAM | Human | Typed by admin |  |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last edit timestamp | System | Updated on edit |  |
+
+## RESTRICTED_EDIT_FIELDS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| field_name | text |  | No | An ORGANISATIONS column CAMs may not write directly | System | Seeded (six) or set by add_restricted_edit_field | Unique — FK target for EDIT_SUGGESTIONS.field_name and the trigger's loop key |
+| active | boolean |  | No | False = retired: not enforced, not suggestible, row kept | Human | Set by deactivate_restricted_edit_field | Never delete; history and FK survive |
+| reason | text |  | No | Why the field is restricted | Human | Typed by the admin adding it | Shown in the admin panel |
+| added_by | uuid | USERS | Yes | Admin who added/re-added the restriction | System | auth.uid() at add time | Null for the system-seeded six |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |

@@ -4516,6 +4516,209 @@ end;
 $$;
 
 
+-- ---------------------------------------------------------------------------
+-- Restricted editing (F020, #23): the config table, the column-guard trigger and
+-- the config-driven suggestion path
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_restricted_editing()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_org_a       uuid := '00000000-0000-4000-b000-000000000002';  -- owned by cam_a
+  v_suggestion  uuid;
+  v_live        text;
+  v_count       bigint;
+begin
+  if not tests.tables_exist('organisations', 'users', 'edit_suggestions', 'restricted_edit_fields')
+     or to_regproc('public.enforce_restricted_org_columns') is null
+     or to_regprocedure('public.add_restricted_edit_field(text, text)') is null then
+    return next skip(30, 'restricted editing tables/RPCs not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- AC1: an owning CAM cannot save a sensitive-field change directly. This is the
+  -- direct-write hole §3.2 documented — same wall meets a hand-crafted API call,
+  -- because the trigger sits below the app.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set legal_name = ''Sneaky Rename'' where id = %L', v_org_a)),
+    '42501',
+    'an owning CAM cannot update legal_name directly (AC1)'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set website = ''https://sneaky.example'' where id = %L', v_org_a)),
+    '42501',
+    'an owning CAM cannot update website directly'
+  );
+
+  -- AC2: non-sensitive fields stay directly editable.
+  return next ok(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set trading_name = ''My Trading Name'' where id = %L', v_org_a)) is null,
+    'an owning CAM can still edit a non-restricted column (AC2)'
+  );
+
+  -- Admin keeps the §3.2 write path in full.
+  return next ok(
+    tests.sqlstate_of(v_admin, format(
+      'update public.organisations set legal_name = ''Admin Renamed Ltd'' where id = %L', v_org_a)) is null,
+    'an admin updates restricted columns directly, as before'
+  );
+
+  -- Everyone else is stopped upstream by the §3.2 UPDATE policy: their statement
+  -- touches zero rows rather than raising. The point of these two is that neither
+  -- role gains anything from the trigger's existence.
+  perform tests.login_as(v_viewer);
+  update public.organisations set trading_name = 'Viewer Was Here' where id = v_org_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select trading_name into v_live from public.organisations where id = v_org_a;
+  return next is(v_live, 'My Trading Name',
+    'a viewer''s direct write touches zero rows (RLS stops it before the trigger)');
+
+  perform tests.login_as(v_deactivated);
+  update public.organisations set trading_name = 'Ghost Was Here' where id = v_org_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select trading_name into v_live from public.organisations where id = v_org_a;
+  return next is(v_live, 'My Trading Name',
+    'a deactivated user''s direct write touches zero rows too');
+
+  -- Config table RLS: admins manage it, CAMs read active rows (the suggest-edit UI
+  -- needs the live list), viewers get nothing.
+  return next ok(
+    not has_table_privilege('authenticated', 'public.restricted_edit_fields', 'INSERT')
+    and not has_table_privilege('authenticated', 'public.restricted_edit_fields', 'UPDATE')
+    and not has_table_privilege('authenticated', 'public.restricted_edit_fields', 'DELETE'),
+    'authenticated holds no direct write privilege on restricted_edit_fields'
+  );
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.restricted_edit_fields;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 6::bigint,
+    'a CAM sees exactly the six seeded active restricted fields');
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.restricted_edit_fields;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'a viewer sees no restricted-field configuration');
+
+  -- Who may change the configuration: admins only, with a reason, on real text
+  -- columns only.
+  return next is(
+    tests.sqlstate_of(v_cam_b, format(
+      'select public.add_restricted_edit_field(''trading_name'', ''test'')')),
+    '42501',
+    'only an admin may add a restriction'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, 'select public.add_restricted_edit_field(''trading_name'', ''   '')'),
+    '23514',
+    'a blank reason is refused — the panel shows why a field is locked'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, 'select public.add_restricted_edit_field(''no_such_column'', ''test'')'),
+    '23514',
+    'restricting a column organisations does not have is refused'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, 'select public.add_restricted_edit_field(''owner_id'', ''test'')'),
+    '23514',
+    'the protected system columns cannot be restricted'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, 'select public.add_restricted_edit_field(''organisation_type'', ''test'')'),
+    '23514',
+    'enum-typed columns cannot be restricted — only text columns'
+  );
+
+  -- The payoff: restricting trading_name at runtime moves BOTH enforcement points.
+  return next ok(
+    tests.sqlstate_of(v_admin, 'select public.add_restricted_edit_field(''trading_name'', ''Trading names feed dedup too — restricted from the #23 follow-up call.'')') is null,
+    'admin adds trading_name to the restricted set'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set trading_name = ''Now Sneaky'' where id = %L', v_org_a)),
+    '42501',
+    'the column-guard trigger enforces a newly added restriction immediately'
+  );
+  return next ok(
+    tests.sqlstate_of(v_cam_b, format(
+      'select public.suggest_organisation_edit(%L, ''trading_name'', ''B Co Trading'')', v_org_a)) is null,
+    'and the suggestion path accepts the runtime-added field'
+  );
+
+  -- Approval must APPLY through the guarded dynamic apply-back — this is the case
+  -- the F078/F079 hardcoded UPDATE silently dropped on the floor.
+  select id into v_suggestion
+    from public.edit_suggestions
+   where organisation_id = v_org_a and field_name = 'trading_name' and status = 'pending';
+
+  perform tests.login_as(v_admin);
+  perform public.decide_edit_suggestion(v_suggestion, true, null);
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select trading_name into v_live from public.organisations where id = v_org_a;
+  return next is(v_live, 'B Co Trading',
+    'approving a suggestion against a runtime-added field applies the value (dynamic apply-back)');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'restricted_field_added';
+  return next ok(v_count >= 1,
+    'adding a restriction is audited');
+
+  -- Retire the restriction: history survives, new suggestions stop, direct writes
+  -- resume.
+  return next ok(
+    tests.sqlstate_of(v_admin, 'select public.deactivate_restricted_edit_field(''trading_name'')') is null,
+    'admin retires the trading_name restriction'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''trading_name'', ''Whatever'')', v_org_a)),
+    '23514',
+    'a retired field stops accepting suggestions immediately'
+  );
+  return next ok(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set trading_name = ''Free Again'' where id = %L', v_org_a)) is null,
+    'and its direct write opens again for the owning CAM'
+  );
+
+  select count(*) into v_count from public.audit_log
+   where action = 'restricted_field_removed';
+  return next ok(v_count >= 1,
+    'retiring a restriction is audited too');
+
+  -- The FK swap: a suggestion row cannot reference a field outside the config.
+  -- Runs unimpersonated (the table owner bypasses RLS) so the FK itself is what is
+  -- under test, not the missing INSERT grant.
+  begin
+    insert into public.edit_suggestions
+      (organisation_id, field_name, proposed_value, requested_by)
+    values
+      (v_org_a, 'not_in_config', 'X', v_cam_a);
+    return next ok(false, 'an unknown field_name violates the config FK');
+  exception when foreign_key_violation then
+    return next ok(true, 'an unknown field_name violates the config FK');
+  end;
+end;
+$$;
+
 select * from tests.suite_core();
 select * from tests.suite_viewer();
 select * from tests.suite_users();

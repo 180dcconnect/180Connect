@@ -92,7 +92,11 @@ export async function saveOutreachPreferencesAction(
   _previousState: OutreachPreferencesState,
   formData: FormData,
 ): Promise<OutreachPreferencesState> {
-  const authorization = await getCurrentActor(undefined, {
+  // F200 review — permission boundary: the write is confined to the caller's own
+  // row by RLS, but a viewer has no outreach to target and the rail hides the
+  // screen from them, so the action refuses them too rather than letting a direct
+  // POST save preferences nothing consumes. Same permission the page gates on.
+  const authorization = await getCurrentActor("client:edit", {
     route: "/settings/outreach-preferences",
   });
   if (!authorization.ok) {

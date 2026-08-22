@@ -140,7 +140,7 @@ const GENERIC_FAILURE =
 /**
  * Maps a Postgres error from suggest_organisation_edit onto something safe to show a
  * user. Every errcode below is one the RPC raises deliberately with a CAM-readable
- * message (see 20260822090000_create_edit_suggestions.sql); everything else gets the
+ * message (see 20260822140000_create_edit_suggestions.sql); everything else gets the
  * generic string (DoD: no internals in a user-facing error).
  */
 export function suggestEditRpcFailure(error: {

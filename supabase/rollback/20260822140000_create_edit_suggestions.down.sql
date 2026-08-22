@@ -1,4 +1,4 @@
--- Rollback for 20260822090000_create_edit_suggestions.sql (#79, F077).
+-- Rollback for 20260822140000_create_edit_suggestions.sql (#79, F077).
 --
 -- Drops the RPC, then the table, then the enum — reverse creation order, so the enum
 -- has no dependants left when it goes. Nothing else referenced either: F078/F079

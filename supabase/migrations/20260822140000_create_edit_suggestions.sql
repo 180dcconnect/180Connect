@@ -69,7 +69,7 @@
 --   Documentation | Data Model tabs 02/04/11 rows for EDIT_SUGGESTIONS to follow via
 --                 | npm run export:data-model once the spreadsheet is updated (#79).
 --
--- Reversibility: paired rollback in ../rollback/20260822090000_create_edit_suggestions.down.sql
+-- Reversibility: paired rollback in ../rollback/20260822140000_create_edit_suggestions.down.sql
 
 create type public.edit_suggestion_status as enum
   ('pending', 'approved', 'rejected', 'superseded');

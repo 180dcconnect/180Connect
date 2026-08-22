@@ -22,6 +22,8 @@ import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
 import { Pill, SectionCard } from "./section-card";
+import { TagsSection } from "./tags-section";
+import { BookletPanel } from "./booklet-panel";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -116,6 +118,34 @@ export default async function ClientDetailPage({
       organisationId: id,
     });
   }
+
+  // F191/F192/F193: this client's currently assigned tags, and the full
+  // list of tags for the assign dropdown.
+  const { data: clientTagRows, error: clientTagsError } = await supabase
+    .from("org_tags")
+    .select("tag_id, tags(name)")
+    .eq("organisation_id", id);
+  if (clientTagsError) {
+    await reportError(clientTagsError, {
+      operation: "clients.detail_tags",
+      organisationId: id,
+    });
+  }
+  const clientTags = (clientTagRows ?? [])
+    .filter((row) => row.tags)
+    .map((row) => ({
+      id: row.tag_id,
+      name: (row.tags as unknown as { name: string }).name,
+    }));
+
+  const { data: allTagsData, error: allTagsError } = await supabase
+    .from("tags")
+    .select("id, name")
+    .order("name");
+  if (allTagsError) {
+    await reportError(allTagsError, { operation: "clients.detail_all_tags" });
+  }
+  const allTags = allTagsData ?? [];
 
   // The generated Supabase types do not know about this branch's new RPC until the
   // remote schema is regenerated, so narrow its table-shaped result at this boundary.
@@ -274,6 +304,17 @@ export default async function ClientDetailPage({
               />
             </Rise>
 
+            {/* F082 — Generate Client Booklet: kept as its own distinct
+                brand-tinted card rather than wrapped in SectionCard — it's the
+                flagship AI feature, not another plain record field, and right
+                after BasicInfoPanel since a CAM reads this before anything
+                else on the page. */}
+            {hasPermission(authorization.actor.role, "client:contact") && (
+              <Rise>
+                <BookletPanel organisationId={client.id} />
+              </Rise>
+            )}
+
             {/* Email and website were two near-identical cards — same
                 heading-plus-validity-pill shape, same failure copy — so they
                 read as one "can we actually reach them?" card instead. */}
@@ -417,7 +458,16 @@ export default async function ClientDetailPage({
                 )}
               </SectionCard>
             </Rise>
-
+            <Rise>
+              <SectionCard headingId="tags-heading" title="Tags">
+                <TagsSection
+                  organisationId={client.id}
+                  initialClientTags={clientTags}
+                  availableTags={allTags}
+                  canEdit={canEdit}
+                />
+              </SectionCard>
+            </Rise>
             {(isAdmin || ownerId === authorization.actor.id) && (
               <Rise>
                 <SectionCard

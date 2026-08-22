@@ -58,6 +58,16 @@ export function websiteHref(status: WebsiteStatus): string | null {
   return status.status === "invalid" || status.status === "missing" ? null : status.url;
 }
 
+/**
+ * One-call gate for rendering any stored free-text URL as a link: the safe
+ * `href`, or null when the value must degrade to plain text. Composing the two
+ * steps callers always need together — validate, then ask for the href — keeps
+ * the "never read `.url` and hope" rule above impossible to skip.
+ */
+export function safeWebsiteHref(value: string | null | undefined): string | null {
+  return websiteHref(validateWebsiteFormat(value));
+}
+
 export function validateWebsiteFormat(value: string | null | undefined): WebsiteFormatStatus {
   const original = value?.trim() ?? "";
   if (!original) {

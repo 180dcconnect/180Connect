@@ -11,11 +11,11 @@ function row(overrides: Partial<RawTeamActivityRow> = {}): RawTeamActivityRow {
     id: "act-1",
     actor_user_id: "user-1",
     actor_name: "Mohammed Saeed",
-    action: "ownership_assigned",
+    action: "ownership_reassigned",
     target_table: "organisations",
     target_id: "org-1",
     target_name: "Oxford Homeless Project",
-    detail: { self_claim: true },
+    detail: { from: null, to: "user-1", trigger: "self_claim" },
     created_at: "2026-08-17T12:00:00Z",
     ...overrides,
   };
@@ -30,19 +30,83 @@ describe("formatTeamActivity (F029)", () => {
     assert.match(activity.sentence, /^Sarah Jenkins/);
   });
 
+  // The detail shapes below mirror what the RPCs actually insert: claim_organisation
+  // (20260806140000) writes trigger 'self_claim', reassign_ownership (20260804170000)
+  // writes 'bulk_assign' or 'offboarding'. Both use the ownership_reassigned token.
   it("formats self ownership claims", () => {
     const activity = formatTeamActivity(
       row({
         actor_name: "Mohammed Saeed",
-        action: "ownership_assigned",
+        action: "ownership_reassigned",
         target_name: "Cancer Research UK",
-        detail: { self_claim: true },
+        detail: { from: null, to: "cam-1", trigger: "self_claim" },
       }),
       now,
     );
     assert.equal(
       activity.sentence,
       "Mohammed Saeed claimed ownership of Cancer Research UK",
+    );
+    assert.equal(activity.actionLabel, "Ownership");
+  });
+
+  it("formats a first assignment onto an unowned client as a reassignment (F164)", () => {
+    const activity = formatTeamActivity(
+      row({
+        actor_name: "Bashir Admin",
+        action: "ownership_reassigned",
+        target_name: "Cancer Research UK",
+        detail: {
+          from: null,
+          to: "cam-1",
+          reason: "First owner",
+          trigger: "bulk_assign",
+        },
+      }),
+      now,
+    );
+    assert.equal(
+      activity.sentence,
+      "Bashir Admin reassigned ownership of Cancer Research UK",
+    );
+    assert.equal(activity.actionLabel, "Ownership");
+  });
+
+  it("still formats legacy ownership_assigned rows", () => {
+    const activity = formatTeamActivity(
+      row({
+        actor_name: "Bashir Admin",
+        action: "ownership_assigned",
+        target_name: "Cancer Research UK",
+        detail: { to: "cam-1" },
+      }),
+      now,
+    );
+    assert.equal(
+      activity.sentence,
+      "Bashir Admin assigned ownership of Cancer Research UK",
+    );
+    assert.equal(activity.actionLabel, "Ownership");
+  });
+
+  it("formats admin ownership reassignments (F164)", () => {
+    const activity = formatTeamActivity(
+      row({
+        actor_name: "Bashir Admin",
+        action: "ownership_reassigned",
+        target_name: "Cancer Research UK",
+        detail: {
+          from: "cam-1",
+          to: "cam-2",
+          reason: "Workload rebalance",
+          trigger: "bulk_assign",
+        },
+      }),
+      now,
+    );
+    assert.equal(
+      activity.sentence,
+      "Bashir Admin reassigned ownership of Cancer Research UK",
     );
     assert.equal(activity.actionLabel, "Ownership");
   });
@@ -104,6 +168,20 @@ describe("formatTeamActivity (F029)", () => {
       approved.sentence,
       "Admin User approved suppression of Amnesty International",
     );
+
+    const lifted = formatTeamActivity(
+      row({
+        actor_name: "Admin User",
+        action: "suppression_lifted",
+        target_name: "Amnesty International",
+      }),
+      now,
+    );
+    assert.equal(
+      lifted.sentence,
+      "Admin User lifted suppression of Amnesty International",
+    );
+    assert.equal(lifted.actionLabel, "Suppression");
   });
 
   it("formats team join events with Assign clients button when user has 0 clients", () => {

@@ -16,6 +16,7 @@ import {
   type ClientListRow,
   type OpenSuppression,
 } from "./visible-clients.ts";
+import { Sparkles } from "lucide-react";
 import { BrandSearchBar } from "@/components/brand/search-bar";
 import { ClaimButton } from "./[id]/claim-button";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
@@ -64,6 +65,9 @@ const ROW_GRID =
 
 /** Reserved width for the claim button, held whether or not the row has one. */
 const CLAIM_SLOT = "w-[6.5rem] shrink-0";
+
+/** Reserved width for the booklet quick-action (F082), same reasoning as CLAIM_SLOT. */
+const BOOKLET_SLOT = "w-[7rem] shrink-0";
 
 /**
  * F051 — the charity list view. Every organisation regardless of import method
@@ -114,12 +118,13 @@ export default async function ClientsPage({
 
   const supabase = await createClient();
   const canClaim = hasPermission(authorization.actor.role, "client:edit");
+  const canGenerateBooklet = hasPermission(authorization.actor.role, "client:contact");
 
-  const [organisations, openSuppressions, team, outreachPrefs] = await Promise.all([
+  const [organisations, openSuppressions, team, allTags, outreachPrefs] = await Promise.all([
     supabase
       .from("organisations")
       .select(
-        "id, legal_name, organisation_type, city, country_code, geographic_reach, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
+        "id, legal_name, organisation_type, city, country_code, geographic_reach, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id)",
       )
       .order("legal_name")
       .overrideTypes<ClientListRow[], { merge: false }>(),
@@ -135,7 +140,13 @@ export default async function ClientsPage({
       .order("full_name")
       .overrideTypes<TeamMember[], { merge: false }>(),
     supabase
+      .from("tags")
+      .select("id, name")
+      .overrideTypes<{ id: string; name: string }[], { merge: false }>(),
+    supabase
       .from("outreach_preferences")
+      // Income bands are saved by the preferences form but not weighted into the
+      // queue yet — only select what prioritiseByGeography actually consumes.
       .select("preferred_geographic_reach, preferred_cities")
       .maybeSingle<{ preferred_geographic_reach: string[] | null; preferred_cities: string[] | null }>(),
   ]);
@@ -149,6 +160,14 @@ export default async function ClientsPage({
   if (team.error) {
     await reportError(team.error, { operation: "clients.page_team" });
   }
+  if (allTags.error) {
+    await reportError(allTags.error, { operation: "clients.page_tags" });
+  }
+
+  // Read-only lookup for row pills — F193's filter-by-tag control is a separate,
+  // not-yet-merged piece of work; this is just id → name for display.
+  const tagNameById = new Map((allTags.data ?? []).map((tag) => [tag.id, tag.name]));
+
   // F196 review: a failed preferences load used to be ignored, silently falling
   // back to the default queue order. Logged here and surfaced through the same
   // safe-loading warning as the other queries — ordering silently changing is a
@@ -395,7 +414,12 @@ export default async function ClientsPage({
                     <span>Owner</span>
                     <span />
                   </span>
-                  {canClaim && <span className={CLAIM_SLOT} />}
+                  {(canGenerateBooklet || canClaim) && (
+                    <span className="flex shrink-0 gap-2">
+                      {canGenerateBooklet && <span className={BOOKLET_SLOT} />}
+                      {canClaim && <span className={CLAIM_SLOT} />}
+                    </span>
+                  )}
                 </div>
 
                 <ul>
@@ -430,6 +454,21 @@ export default async function ClientsPage({
                           <span className="hidden truncate text-[12px] text-foreground/40 lg:block">
                             {SOURCE_LABELS[client.organisation_type] ?? client.organisation_type}
                           </span>
+                          {client.org_tags.length > 0 && (
+                            <span className="mt-1 flex flex-wrap gap-1">
+                              {client.org_tags.map(({ tag_id }) => {
+                                const name = tagNameById.get(tag_id);
+                                return name ? (
+                                  <span
+                                    key={tag_id}
+                                    className="inline-flex max-w-full items-center truncate rounded-full bg-brand/12 px-2 py-0.5 text-[11px] font-medium text-brand-hover"
+                                  >
+                                    {name}
+                                  </span>
+                                ) : null;
+                              })}
+                            </span>
+                          )}
                         </span>
 
                         <span className="hidden min-w-0 truncate text-[13px] text-foreground/60 lg:block">
@@ -485,10 +524,30 @@ export default async function ClientsPage({
                       {/* A fixed slot rather than a conditional child: an owned
                           row still reserves the width, so no column shifts as
                           the list changes hands. */}
-                      {canClaim && (
-                        <span className={`${CLAIM_SLOT} flex justify-end`}>
-                          {!client.ownerName && (
-                            <ClaimButton compact organisationId={client.id} />
+                      {(canGenerateBooklet || canClaim) && (
+                        <span className="flex shrink-0 items-center gap-2">
+                          {/* F082 quick action: straight to the detail page's
+                              booklet section, already generating — see
+                              booklet-panel.tsx's ?booklet=generate handling.
+                              Always shown (not owner-gated like Claim), so no
+                              placeholder-vs-content split is needed here. */}
+                          {canGenerateBooklet && (
+                            <span className={`${BOOKLET_SLOT} flex justify-end`}>
+                              <Link
+                                className="flex items-center gap-1 rounded-full border border-brand/30 px-3 py-1 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
+                                href={`/clients/${client.id}?booklet=generate`}
+                              >
+                                <Sparkles aria-hidden="true" className="h-3 w-3" />
+                                Booklet
+                              </Link>
+                            </span>
+                          )}
+                          {canClaim && (
+                            <span className={`${CLAIM_SLOT} flex justify-end`}>
+                              {!client.ownerName && (
+                                <ClaimButton compact organisationId={client.id} />
+                              )}
+                            </span>
                           )}
                         </span>
                       )}

@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import { ENTITY_MATCH_CANDIDATE_SELECT, type EntityMatchCandidateRow } from "@/lib/duplicates";
 import { DuplicatesPanel } from "./duplicates-panel";
 
@@ -36,9 +37,9 @@ export default async function DuplicatesPage() {
         </p>
 
         {error && (
-          <p className="mt-5 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-800" role="alert">
-            Some data could not be loaded. Refresh and try again.
-          </p>
+          <div className="mt-5">
+            <InlineAlert variant="page" message="Some data could not be loaded. Refresh and try again." />
+          </div>
         )}
 
         <DuplicatesPanel initialDuplicates={data ?? []} />

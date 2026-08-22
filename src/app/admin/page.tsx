@@ -38,6 +38,24 @@ export default async function AdminPage() {
               Assign roles, and suspend, deactivate or reactivate access.
             </p>
           </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/offboard">
+            <h2 className="font-bold">Work handover & offboarding</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Reassign an outgoing CAM&apos;s clients and open actions to another team member.
+            </p>
+          </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/review">
+            <h2 className="font-bold">Review queue</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Review records held for validation and status changes flagged during sync.
+            </p>
+          </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/cam-settings">
+            <h2 className="font-bold">CAM queue settings</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              View outreach preferences and queue configuration for team members.
+            </p>
+          </Link>
           <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/audit-log">
             <h2 className="font-bold">Audit log</h2>
             <p className="mt-1 text-sm text-foreground/65">Every recorded action, most recent first.</p>
@@ -58,6 +76,12 @@ export default async function AdminPage() {
             <h2 className="font-bold">Suppressions</h2>
             <p className="mt-1 text-sm text-foreground/65">
               Suppress a charity, or approve/reject a CAM&apos;s request.
+            </p>
+          </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/ownership-requests">
+            <h2 className="font-bold">Ownership requests</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Decide who gets a client when a CAM asks for one another CAM owns.
             </p>
           </Link>
           <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/manual-entries">

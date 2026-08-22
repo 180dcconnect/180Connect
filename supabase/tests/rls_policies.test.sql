@@ -2375,13 +2375,15 @@ declare
   v_status      public.suppression_status;
   v_decided_by  uuid;
   v_requested_by uuid;
+  v_reason      text;
   v_count       bigint;
   v_can_contact boolean;
 begin
   if not tests.tables_exist('organisations', 'users', 'audit_log', 'suppressions')
      or to_regprocedure('public.request_suppression(uuid, text)') is null
-     or to_regprocedure('public.decide_suppression_request(uuid, boolean, text)') is null then
-    return next skip(23, 'suppressions table or RPCs not yet migrated');
+     or to_regprocedure('public.decide_suppression_request(uuid, boolean, text)') is null
+     or to_regprocedure('public.lift_suppression(uuid, text)') is null then
+    return next skip(32, 'suppressions table or RPCs not yet migrated');
     return;
   end if;
 
@@ -2544,6 +2546,58 @@ begin
     'an admin''s own request lands active immediately, skipping pending');
   return next is(v_requested_by, v_admin, 'requested_by is the admin');
   return next is(v_decided_by, v_admin, 'decided_by is the same admin — self-approved');
+
+  -- F185 Remove Suppression (#181)
+  -- Non-admin cannot call lift_suppression
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.lift_suppression(%L, ''cam trying to unsuppress'')', v_req_id)),
+    '42501',
+    'CAM cannot call lift_suppression'
+  );
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.lift_suppression(%L, ''viewer trying to unsuppress'')', v_req_id)),
+    '42501',
+    'viewer cannot call lift_suppression'
+  );
+
+  -- Blank reason is rejected
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.lift_suppression(%L, ''   '')', v_req_id)),
+    '23514',
+    'blank reason for lifting suppression is rejected'
+  );
+
+  -- Admin lifts the active suppression with a valid reason
+  perform tests.login_as(v_admin);
+  perform public.lift_suppression(v_req_id, 'Mistakenly flagged by CAM, re-contact approved');
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status, decided_by, decision_note into v_status, v_decided_by, v_reason
+    from public.suppressions where id = v_req_id;
+  return next is(v_status, 'lifted'::public.suppression_status,
+    'lifting suppression moves status to lifted');
+  return next is(v_decided_by, v_admin, 'decided_by is updated to the lifting admin');
+  return next is(v_reason, 'Mistakenly flagged by CAM, re-contact approved',
+    'decision_note records the mandatory lift reason');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'suppression_lifted' and target_id = v_org_unowned;
+  return next is(v_count, 1::bigint, 'lifting writes one suppression_lifted audit row');
+
+  select app.organisation_is_suppressed(v_org_unowned) into v_can_contact;
+  return next is(v_can_contact, false,
+    'organisation is no longer considered suppressed after lifting');
+
+  perform tests.login_as(v_admin);
+  select app.can_contact_organisation(v_org_unowned) into v_can_contact;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_can_contact, true,
+    'lifting suppression re-enables outreach via app.can_contact_organisation()');
 end;
 $$;
 
@@ -2715,6 +2769,134 @@ begin
   -- A blocked UPDATE removes zero rows and raises nothing (§4), so this asserts the
   -- absence of the write rather than an error code.
   return next ok(v_marker is null, 'a CAM cannot dismiss another CAM''s guide');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- saved filter views (F066) — own rows only, matrix §3.17
+-- ---------------------------------------------------------------------------
+-- The property this table hangs on: a saved view is private to its author. It holds
+-- no client data, so the interesting failures are not "who can read a charity" but
+-- "can one CAM see, plant, or delete another CAM's shortcuts" — and, because the
+-- filter set lives in jsonb, "can a row hold something that is not a filter set".
+
+create or replace function tests.suite_saved_views()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
+  v_count       bigint;
+begin
+  if not tests.tables_exist('saved_views') then
+    return next skip(11, 'F066 saved views not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.saved_views (user_id, name, filters) values (%L, %L, %L::jsonb)',
+      v_cam_a, 'Leeds prospects', '{"city":["Leeds"]}')),
+    null,
+    'a CAM saves their own filter view'
+  );
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'a CAM sees their own saved views');
+
+  -- Unforgeable ownership: the insert policy's with-check is what stops a view being
+  -- planted in someone else's list.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.saved_views (user_id, name, filters) values (%L, %L, %L::jsonb)',
+      v_cam_b, 'Not mine', '{}')),
+    '42501',
+    'a CAM cannot save a view onto another CAM'
+  );
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a CAM cannot read another CAM''s saved views');
+
+  -- Admins are deliberately not granted a read. F187 (admin views a CAM's settings)
+  -- can add one with a stated reason; until then this asserts the absence is
+  -- intentional rather than forgotten — same call as §3.12 and §3.13.
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'an admin has no read on saved views until F187 asks for one');
+
+  -- A blocked DELETE removes zero rows and raises nothing (§4), so the assertion is
+  -- that the row survives someone else trying.
+  perform tests.login_as(v_cam_b);
+  delete from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.saved_views where user_id = v_cam_a;
+  return next is(v_count, 1::bigint, 'a CAM cannot delete another CAM''s saved view');
+
+  -- An admin has no delete either: a purely destructive power over another user's
+  -- workspace, with no story asking for it.
+  perform tests.login_as(v_admin);
+  delete from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.saved_views where user_id = v_cam_a;
+  return next is(v_count, 1::bigint, 'an admin cannot delete a CAM''s saved view');
+
+  -- Deactivation bites immediately: every policy ANDs in app.is_active_user(), so a
+  -- suspended account's own views stop being readable without any row being touched.
+  perform tests.login_as(v_deactivated);
+  select count(*) into v_count from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a deactivated user reads no saved views');
+
+  -- Column constraints, which are what stop a nameless or unusable row existing at
+  -- all. The server action turns each of these into a form message rather than a
+  -- 500, but the table refuses them whatever calls it.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.saved_views (user_id, name) values (%L, %L)',
+      v_cam_a, 'Leeds prospects')),
+    '23505',
+    'two views by one name cannot exist for the same CAM'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.saved_views (user_id, name) values (%L, %L)',
+      v_cam_a, '   ')),
+    '23514',
+    'a blank name is refused by the table, not just by the form'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.saved_views (user_id, name, filters) values (%L, %L, %L::jsonb)',
+      v_cam_a, 'Array filters', '["city"]')),
+    '23514',
+    'filters must be an object, not any old json'
+  );
+
+  -- AC3: the author can remove one they no longer need. Last, so the rows above are
+  -- still standing for the assertions that need them.
+  perform tests.login_as(v_cam_a);
+  delete from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.saved_views where user_id = v_cam_a;
+  return next is(v_count, 0::bigint, 'a CAM deletes their own saved view');
 end;
 $$;
 
@@ -2971,7 +3153,7 @@ begin
   select public.save_manual_entry(
     null, 'Unique F036 Charity Limited', 'Provides related community services.', 'charity',
     '20 Example Road', 'Sheffield', 'S2 3CD', 'GB', 'https://duplicate.example.org',
-    'contact@example.org', 'Charity Commission', 'F036-002',
+    'info@duplicate.example.org', 'Charity Commission', 'F036-002',
     'Submitted independently for duplicate review', true
   ) into v_duplicate_entry;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
@@ -2995,7 +3177,7 @@ begin
   select public.save_manual_entry(
     null, 'Unconfirmed Social Company', 'Develops socially focused services.', 'company',
     '30 Example Lane', 'Sheffield', 'S3 4EF', 'GB', 'https://social.example.org',
-    'team@example.org', 'Companies House', 'F036-COMPANY',
+    'info@social.example.org', 'Companies House', 'F036-COMPANY',
     'May be a socially focused organisation', true
   ) into v_company_entry;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
@@ -3635,7 +3817,9 @@ begin
     not app.is_personal_email('not-an-address'),
     'a string with no @ is not something this function has an opinion about'
   );
-  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
 
   -- -- manual_entry_records trigger: personal email rejected (AC3) -------------
   if tests.tables_exist('manual_entry_records') then
@@ -3653,8 +3837,394 @@ begin
       'saving a manual entry with a role email is accepted'
     );
   end if;
+end;
+$$;
 
-  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+-- ---------------------------------------------------------------------------
+-- ownership_requests (#408, F165 follow-up)
+-- ---------------------------------------------------------------------------
+-- Matrix §3.17. The point of this suite is the negative: a CAM has no path to a
+-- client another CAM owns except asking, and asking moves nothing on its own.
+
+create or replace function tests.suite_ownership_requests()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_org_unowned uuid := '00000000-0000-4000-b000-000000000001';
+  v_org_cam_b   uuid := '00000000-0000-4000-b000-000000000003';
+  v_req_id      uuid;
+  v_status      public.ownership_request_status;
+  v_owner       uuid;
+  v_count       bigint;
+begin
+  if not tests.tables_exist('organisations', 'users', 'audit_log', 'ownership_requests')
+     or to_regprocedure('public.request_client_ownership(uuid, text)') is null
+     or to_regprocedure('public.decide_ownership_request(uuid, boolean, text)') is null then
+    return next skip(18, 'ownership_requests table or RPCs not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Every write is RPC-only (recipe step 4), same shape as suppressions.
+  return next ok(
+    not has_table_privilege('authenticated', 'public.ownership_requests', 'INSERT'),
+    'authenticated holds no direct INSERT privilege on ownership_requests'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.ownership_requests', 'UPDATE'),
+    'authenticated holds no direct UPDATE privilege on ownership_requests'
+  );
+
+  -- A viewer has no ownership to request.
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.request_client_ownership(%L, ''viewer wants a client'')', v_org_cam_b)),
+    '42501',
+    'viewer cannot call request_client_ownership'
+  );
+
+  -- An admin reassigns directly rather than requesting from themselves.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.request_client_ownership(%L, ''admin asking'')', v_org_cam_b)),
+    '42501',
+    'an admin is refused: they hold reassign_ownership already'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.request_client_ownership(%L, ''   '')', v_org_cam_b)),
+    '23514',
+    'blank reason is rejected'
+  );
+
+  -- An unowned client is claimed, not requested.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.request_client_ownership(%L, ''nobody owns it'')', v_org_unowned)),
+    '55000',
+    'requesting an unowned client is refused — claim it instead'
+  );
+
+  -- CAM A asks for CAM B's client. This is the whole sanctioned path.
+  perform tests.login_as(v_cam_a);
+  select public.request_client_ownership(v_org_cam_b, 'I already run their sister charity')
+    into v_req_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status into v_status from public.ownership_requests where id = v_req_id;
+  return next is(v_status, 'pending'::public.ownership_request_status,
+    'a CAM''s request lands pending');
+
+  -- The request moved nothing. This is the acceptance criterion that matters.
+  select owner_id into v_owner from public.organisations where id = v_org_cam_b;
+  return next is(v_owner, v_cam_b, 'the client has not moved: a request is not a handover');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'ownership_requested' and target_id = v_org_cam_b;
+  return next is(v_count, 1::bigint, 'the request writes one ownership_requested audit row');
+
+  -- Still no direct route, request or no request.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.claim_organisation(%L)', v_org_cam_b)),
+    '55000',
+    'a pending request does not unlock claim_organisation on an owned client'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set owner_id = %L where id = %L', v_cam_a, v_org_cam_b)),
+    '42501',
+    'a CAM cannot write owner_id directly, request or no request'
+  );
+
+  -- The requester cannot approve their own ask.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.decide_ownership_request(%L, true, null)', v_req_id)),
+    '42501',
+    'the requesting CAM cannot decide their own request'
+  );
+
+  -- Nor can a second identical ask be queued.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.request_client_ownership(%L, ''asking again'')', v_org_cam_b)),
+    '23505',
+    'a second pending request from the same CAM for the same client is rejected'
+  );
+
+  -- Admin approves: this is what moves the client, through reassign_ownership.
+  perform tests.login_as(v_admin);
+  perform public.decide_ownership_request(v_req_id, true, 'agreed on the Wednesday call');
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status into v_status from public.ownership_requests where id = v_req_id;
+  return next is(v_status, 'approved'::public.ownership_request_status,
+    'admin approval marks the request approved');
+
+  select owner_id into v_owner from public.organisations where id = v_org_cam_b;
+  return next is(v_owner, v_cam_a, 'approval moves the client to the requesting CAM');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'ownership_reassigned' and target_id = v_org_cam_b;
+  return next is(v_count, 1::bigint,
+    'the handover is audited as a normal ownership_assigned transition');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'ownership_request_approved' and target_id = v_org_cam_b;
+  return next is(v_count, 1::bigint, 'the decision itself is audited too');
+
+  -- Deciding twice is refused, not silently re-applied.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.decide_ownership_request(%L, false, null)', v_req_id)),
+    '55000',
+    'deciding a request that is no longer pending is rejected'
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- outreach preferences (F195 / F187)
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_outreach_preferences()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b  uuid := '00000000-0000-4000-a000-000000000003';
+  v_admin  uuid := '00000000-0000-4000-a000-000000000001';
+  v_viewer uuid := '00000000-0000-4000-a000-000000000004';
+  v_count  bigint;
+begin
+  if not tests.tables_exist('outreach_preferences') then
+    return next skip(6, 'F195 outreach preferences table not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- CAM A writes their own preferences
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.outreach_preferences (user_id, preferred_geographic_reach, preferred_sectors, preferred_income_bands) values (%L, %L, %L, %L) on conflict (user_id) do nothing',
+      v_cam_a, '{local,regional}'::public.geographic_reach[], '{"Education","Health"}'::text[], '{under_10k,10k_100k}'::public.income_band[])),
+    null,
+    'a CAM can save their own outreach preferences (F195)'
+  );
+
+  -- CAM A reads their own preferences
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.outreach_preferences where user_id = v_cam_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'a CAM can view their own outreach preferences (F195)');
+
+  -- CAM B cannot read CAM A's preferences
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.outreach_preferences where user_id = v_cam_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a CAM cannot read another CAM''s outreach preferences');
+
+  -- CAM A cannot write CAM B's preferences
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.outreach_preferences (user_id) values (%L)', v_cam_b)),
+    '42501',
+    'a CAM cannot insert preferences on another CAM''s behalf'
+  );
+
+  -- F187: Admin CAN read any CAM's preferences to inspect their queue configuration
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.outreach_preferences where user_id = v_cam_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'an admin can view a CAM''s outreach preferences (F187)');
+
+  -- Viewer cannot read another CAM's preferences
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.outreach_preferences where user_id = v_cam_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a viewer cannot read a CAM''s outreach preferences');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- notifications (F173 / #169)
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_notifications()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b  uuid := '00000000-0000-4000-a000-000000000003';
+  v_admin  uuid := '00000000-0000-4000-a000-000000000001';
+  v_gone   uuid := '00000000-0000-4000-a000-000000000004';
+  v_notif  uuid;
+  v_result uuid;
+  v_again  boolean;
+  v_flag   text;
+  v_count  bigint;
+begin
+  if not tests.tables_exist('notifications') then
+    return next skip(14, 'F173 notifications table not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Producer path: an active user creates a notification for another user.
+  perform tests.login_as(v_admin);
+  select public.create_notification(
+    v_cam_a, 'team_activity', 'Client assigned to you',
+    'Oxford Homeless Project was assigned to you.',
+    '/clients', 'organisations', null, null
+  ) into v_notif;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_notif is not null,
+    'an active user can produce a notification for another user');
+
+  select count(*) into v_count from public.notifications
+   where recipient_user_id = v_cam_a;
+  return next is(v_count, 1::bigint, 'the produced row exists exactly once');
+
+  -- Unknown recipients are skipped silently, not fatal to the producer flow.
+  perform tests.login_as(v_admin);
+  select public.create_notification(
+    gen_random_uuid(), 'reminder', 'Nobody home'
+  ) into v_result;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_result is null, 'an unknown recipient is skipped, returning null');
+
+  -- Deactivated recipients are skipped too.
+  perform tests.login_as(v_admin);
+  select public.create_notification(v_gone, 'reminder', 'Offboarded') into v_result;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_result is null, 'a deactivated recipient is skipped');
+
+  -- Self-notifications are skipped too (actor = recipient), not a 23514.
+  perform tests.login_as(v_cam_a);
+  select public.create_notification(
+    v_cam_a, 'reminder', 'Note to self', null, null, null, null, v_cam_a
+  ) into v_result;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_result is null, 'a self-notification is skipped, returning null');
+
+  -- Wrong-recipient prevention: CAM B sees none of CAM A's rows.
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.notifications where id = v_notif;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a non-recipient cannot SELECT someone else''s notification');
+
+  -- ...and gets a plain false, not an error, from their read RPC.
+  perform tests.login_as(v_cam_b);
+  select case when public.mark_notification_read(v_notif) then 'transitioned' else 'false' end
+    into v_flag;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_flag, 'false',
+    'mark_notification_read for a non-recipient returns false, no existence oracle');
+
+  -- Recipient reads it and marks it read.
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.notifications where id = v_notif and read_at is null;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'the recipient sees their own unread notification');
+
+  perform tests.login_as(v_cam_a);
+  select case when public.mark_notification_read(v_notif) then 'transitioned' else 'no-op' end
+    into v_flag;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_flag, 'transitioned', 'mark_notification_read transitions an unread own row');
+
+  perform tests.login_as(v_cam_a);
+  select public.mark_notification_read(v_notif) into v_again;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_again, false, 'marking an already-read notification is a no-op returning false');
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.notifications where id = v_notif and read_at is not null;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'read_at is set after the transition');
+
+  -- Read state is one-way.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.notifications set read_at = null where id = %L', v_notif)),
+    '42501',
+    'a read notification cannot be un-read'
+  );
+
+  -- The column grant pins every other field even for the owner.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.notifications set title = ''hijacked'' where id = %L', v_notif)),
+    '42501',
+    'even the owner cannot edit notification content'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.notifications set recipient_user_id = %L where id = %L', v_cam_b, v_notif)),
+    '42501',
+    'the recipient cannot readdress a notification to someone else'
+  );
+
+  -- Mark-all is strictly scoped and counted.
+  insert into public.notifications (recipient_user_id, notification_type, title)
+  values (v_cam_a, 'reminder', 'batch one'), (v_cam_a, 'reminder', 'batch two'),
+         (v_cam_b, 'reminder', 'not mine');
+  perform tests.login_as(v_cam_a);
+  select public.mark_all_notifications_read() into v_count;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 2::bigint, 'mark_all touches only the caller''s unread rows');
+
+  -- Inactive callers are locked out of both directions.
+  return next is(
+    tests.sqlstate_of(v_gone, format(
+      'select public.create_notification(%L, ''reminder'', ''hi'')', v_cam_b)),
+    '42501',
+    'a deactivated account cannot produce notifications'
+  );
+
+  -- A deactivated account's read is denied silently — §4: a blocked SELECT
+  -- returns 0 rows, never an error.
+  perform tests.login_as(v_gone);
+  select count(*) into v_count from public.notifications where recipient_user_id = v_gone;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(
+    v_count,
+    0::bigint,
+    'a deactivated account reads no notifications (silent empty result, matrix §4)'
+  );
+
+  -- No direct INSERT door exists for any client role.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.notifications (recipient_user_id, notification_type, title) values (%L, ''x'', ''y'')', v_cam_a)),
+    '42501',
+    'clients cannot INSERT notification rows directly'
+  );
 end;
 $$;
 
@@ -3678,13 +4248,17 @@ select * from tests.suite_claim_ownership();
 select * from tests.suite_outreach_status();
 select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
+select * from tests.suite_ownership_requests();
 select * from tests.suite_source_tracking();
 select * from tests.suite_manual_entries();
 select * from tests.suite_url_import();
 select * from tests.suite_onboarding();
+select * from tests.suite_outreach_preferences();
+select * from tests.suite_saved_views();
 select * from tests.suite_client_criteria();
 select * from tests.suite_data_handling_rules();
 select * from tests.suite_personal_data_exclusion();
+select * from tests.suite_notifications();
 
 select * from finish();
 

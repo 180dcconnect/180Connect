@@ -34,6 +34,8 @@ import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { EmptyState } from "@/components/ui/empty-state";
 import { BrandSearchBar } from "@/components/brand/search-bar";
 import { Group, Rise } from "@/components/dashboard-stage";
 import { SearchRail } from "@/components/search-rail";
@@ -175,13 +177,10 @@ export default async function AdminImportStatusPage({
       >
         {error ? (
           <Rise>
-            <p
-              role="alert"
-              className="rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4 text-sm font-bold text-destructive"
-            >
-              Import history could not be loaded. This has been recorded — refresh
-              and try again.
-            </p>
+            <InlineAlert
+              variant="page"
+              message="Import history could not be loaded. This has been recorded — refresh and try again."
+            />
           </Rise>
         ) : (
           <Group className="space-y-4">
@@ -217,13 +216,13 @@ export default async function AdminImportStatusPage({
               <ImportFeed groups={groups} />
             ) : (
               <Rise>
-                <div className="rounded-2xl border border-black/[0.06] bg-white px-5 py-10 shadow-sm">
-                  <p className="text-center text-sm leading-[1.7] text-foreground/65">
-                    {filtersActive
+                <EmptyState
+                  message={
+                    filtersActive
                       ? "No import runs match this filter."
-                      : "No import runs recorded yet. They appear here the first time an ingestion job runs."}
-                  </p>
-                </div>
+                      : "No import runs recorded yet. They appear here the first time an ingestion job runs."
+                  }
+                />
               </Rise>
             )}
           </Group>

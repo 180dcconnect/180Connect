@@ -10,6 +10,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { SuppressionRow } from "@/lib/suppressions";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
+import { reportError } from "@/lib/error-logging";
 
 type OrganisationOption = { id: string; legal_name: string };
 
@@ -36,7 +39,9 @@ export function SuppressionsPanel({
   const [organisationId, setOrganisationId] = useState("");
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState<Record<string, string>>({});
-  const [message, setMessage] = useState("");
+  const [liftReasons, setLiftReasons] = useState<Record<string, string>>({});
+  const [activeLiftId, setActiveLiftId] = useState<string | null>(null);
+  const [status, setStatus] = useState<{ text: string; tone: "success" | "error" } | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function refresh() {
@@ -49,7 +54,7 @@ export function SuppressionsPanel({
   async function submitCreate(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
-    setMessage("");
+    setStatus(null);
     try {
       const response = await fetch("/api/admin/suppressions", {
         method: "POST",
@@ -58,15 +63,16 @@ export function SuppressionsPanel({
       });
       const body = await response.json();
       if (!response.ok) {
-        setMessage(body.error ?? "The charity could not be suppressed.");
+        setStatus({ text: body.error ?? "The charity could not be suppressed.", tone: "error" });
         return;
       }
-      setMessage("Suppressed. Outreach to this charity is now blocked.");
+      setStatus({ text: "Suppressed. Outreach to this charity is now blocked.", tone: "success" });
       setOrganisationId("");
       setReason("");
       await refresh();
-    } catch {
-      setMessage("Could not reach the server. Check your connection and try again.");
+    } catch (err) {
+      void reportError(err, { operation: "admin.suppressions.create_client" });
+      setStatus({ text: NETWORK_ERROR_MESSAGE, tone: "error" });
     } finally {
       setBusy(false);
     }
@@ -74,7 +80,7 @@ export function SuppressionsPanel({
 
   async function decide(suppressionId: string, approve: boolean) {
     setBusy(true);
-    setMessage("");
+    setStatus(null);
     try {
       const response = await fetch("/api/admin/suppressions", {
         method: "PATCH",
@@ -87,19 +93,67 @@ export function SuppressionsPanel({
       });
       const body = await response.json();
       if (!response.ok) {
-        setMessage(body.error ?? "The decision could not be saved.");
+        setStatus({ text: body.error ?? "The decision could not be saved.", tone: "error" });
         return;
       }
-      setMessage(approve ? "Request approved. Outreach is now blocked." : "Request rejected.");
+      setStatus({
+        text: approve ? "Request approved. Outreach is now blocked." : "Request rejected.",
+        tone: "success",
+      });
       await refresh();
-    } catch {
-      setMessage("Could not reach the server. Check your connection and try again.");
+    } catch (err) {
+      void reportError(err, { operation: "admin.suppressions.decide_client" });
+      setStatus({ text: NETWORK_ERROR_MESSAGE, tone: "error" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function lift(suppressionId: string) {
+    const liftReason = (liftReasons[suppressionId] ?? "").trim();
+    if (!liftReason) {
+      setStatus({ text: "A reason is required to lift suppression.", tone: "error" });
+      return;
+    }
+
+    setBusy(true);
+    setStatus(null);
+    try {
+      const response = await fetch("/api/admin/suppressions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "lift",
+          suppressionId,
+          reason: liftReason,
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        setStatus({ text: body.error ?? "The suppression could not be lifted.", tone: "error" });
+        return;
+      }
+      setStatus({
+        text: "Suppression lifted. Outreach to this charity is now unblocked.",
+        tone: "success",
+      });
+      setActiveLiftId(null);
+      setLiftReasons((current) => {
+        const next = { ...current };
+        delete next[suppressionId];
+        return next;
+      });
+      await refresh();
+    } catch (err) {
+      void reportError(err, { operation: "admin.suppressions.lift_client" });
+      setStatus({ text: NETWORK_ERROR_MESSAGE, tone: "error" });
     } finally {
       setBusy(false);
     }
   }
 
   const pending = rows.filter((row) => row.status === "pending");
+  const active = rows.filter((row) => row.status === "active");
   const decided = rows.filter((row) => row.status !== "pending");
 
   return (
@@ -145,9 +199,9 @@ export function SuppressionsPanel({
           {busy ? "Suppressing…" : "Suppress"}
         </OriginButton>
 
-        <p aria-live="polite" className="mt-4 min-h-6 text-sm font-bold">
-          {message}
-        </p>
+        <div className="mt-4 min-h-6">
+          {status && <InlineAlert tone={status.tone} message={status.text} />}
+        </div>
       </form>
 
       {pending.length > 0 && (
@@ -203,6 +257,98 @@ export function SuppressionsPanel({
         </div>
       )}
 
+      {active.length > 0 && (
+        <div>
+          <h2 className="text-sm font-bold">Active suppressions ({active.length})</h2>
+          <p className="mt-1 text-sm text-foreground/65">
+            Currently suppressed charities. Outreach is blocked and records are hidden from standard lists.
+            Lifting suppression restores visibility and allows outreach.
+          </p>
+          <ul className="mt-4 space-y-4">
+            {active.map((row) => (
+              <li key={row.id} className="rounded-xl border border-destructive/20 bg-destructive/[0.02] p-4">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-bold">{row.organisations?.legal_name ?? "Unknown charity"}</p>
+                    <p className="mt-1 text-sm text-foreground/75">{row.reason}</p>
+                    <p className="mt-1 text-xs text-foreground/50">
+                      Suppressed by {personLabel(row.decided_by_user ?? row.requested_by_user)} on{" "}
+                      {row.decided_at
+                        ? new Date(row.decided_at).toLocaleString("en-GB")
+                        : new Date(row.created_at).toLocaleString("en-GB")}
+                    </p>
+                  </div>
+                  {activeLiftId !== row.id && (
+                    <OriginButton
+                      variant="outline"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => {
+                        setActiveLiftId(row.id);
+                        setStatus(null);
+                      }}
+                      type="button"
+                      className="shrink-0"
+                    >
+                      Lift suppression
+                    </OriginButton>
+                  )}
+                </div>
+
+                {activeLiftId === row.id && (
+                  <div className="mt-4 border-t border-black/10 pt-4">
+                    <label className="block text-sm font-bold" htmlFor={`lift-reason-${row.id}`}>
+                      Reason for lifting suppression
+                    </label>
+                    <p className="mt-1 text-xs text-foreground/65">
+                      Required, and kept on file for audit tracking.
+                    </p>
+                    <textarea
+                      className="mt-2 w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm"
+                      disabled={busy}
+                      id={`lift-reason-${row.id}`}
+                      placeholder="Why this suppression is being lifted (e.g. mistakenly suppressed, client re-engaged)"
+                      onChange={(event) =>
+                        setLiftReasons((current) => ({ ...current, [row.id]: event.target.value }))
+                      }
+                      rows={2}
+                      value={liftReasons[row.id] ?? ""}
+                    />
+                    <div className="mt-3 flex gap-3">
+                      <OriginButton
+                        size="sm"
+                        disabled={busy || !(liftReasons[row.id] ?? "").trim()}
+                        loading={busy}
+                        onClick={() => lift(row.id)}
+                        type="button"
+                      >
+                        Confirm lift suppression
+                      </OriginButton>
+                      <OriginButton
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => {
+                          setActiveLiftId(null);
+                          setLiftReasons((current) => {
+                            const next = { ...current };
+                            delete next[row.id];
+                            return next;
+                          });
+                        }}
+                        type="button"
+                      >
+                        Cancel
+                      </OriginButton>
+                    </div>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div>
         <h2 className="text-sm font-bold">History</h2>
         {decided.length === 0 ? (
@@ -216,8 +362,9 @@ export function SuppressionsPanel({
                   <th className="py-2 pr-4">Status</th>
                   <th className="py-2 pr-4">Reason</th>
                   <th className="py-2 pr-4">Requested by</th>
-                  <th className="py-2 pr-4">Decided by</th>
-                  <th className="py-2">When</th>
+                  <th className="py-2 pr-4">Decided by / Note</th>
+                  <th className="py-2 pr-4">When</th>
+                  <th className="py-2 text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -241,10 +388,26 @@ export function SuppressionsPanel({
                         <span className="block text-xs text-foreground/50">{row.decision_note}</span>
                       )}
                     </td>
-                    <td className="py-3 whitespace-nowrap text-foreground/65">
+                    <td className="py-3 pr-4 whitespace-nowrap text-foreground/65">
                       {row.decided_at
                         ? new Date(row.decided_at).toLocaleString("en-GB")
                         : new Date(row.created_at).toLocaleString("en-GB")}
+                    </td>
+                    <td className="py-3 text-right">
+                      {row.status === "active" && (
+                        <OriginButton
+                          variant="ghost"
+                          size="xs"
+                          disabled={busy}
+                          onClick={() => {
+                            setActiveLiftId(row.id);
+                            setStatus(null);
+                          }}
+                          type="button"
+                        >
+                          Lift
+                        </OriginButton>
+                      )}
                     </td>
                   </tr>
                 ))}

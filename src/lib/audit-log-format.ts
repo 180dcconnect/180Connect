@@ -122,6 +122,19 @@ export const AUDIT_ACTIONS: Record<string, ActionSpec> = {
 
   status_changed: { label: "Pipeline status changed", verb: "moved", tone: "neutral", icon: "pipeline" },
 
+  edit_suggestion_approved: {
+    label: "Suggested edit approved",
+    verb: "approved a suggested edit on",
+    tone: "positive",
+    icon: "quality",
+  },
+  edit_suggestion_rejected: {
+    label: "Suggested edit rejected",
+    verb: "rejected a suggested edit on",
+    tone: "neutral",
+    icon: "quality",
+  },
+
   suppression_requested: {
     label: "Suppression requested",
     verb: "requested suppression of",
@@ -137,6 +150,12 @@ export const AUDIT_ACTIONS: Record<string, ActionSpec> = {
   suppression_rejected: {
     label: "Suppression rejected",
     verb: "rejected the suppression of",
+    tone: "positive",
+    icon: "suppression",
+  },
+  suppression_lifted: {
+    label: "Suppression lifted",
+    verb: "lifted the suppression of",
     tone: "positive",
     icon: "suppression",
   },

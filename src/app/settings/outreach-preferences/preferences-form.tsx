@@ -11,12 +11,16 @@ import { Checkbox } from "@/components/animate-ui/components/radix/checkbox";
 import { Input } from "@/components/ui/input";
 import { OriginButton } from "@/components/ui/origin-button";
 import { saveOutreachPreferencesAction, type OutreachPreferencesState } from "./actions";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import {
   CITY_PRESETS,
   GEOGRAPHIC_REACH_OPTIONS,
   GEOGRAPHIC_REACH_LABELS,
+  GRANT_PREFERENCE_LABELS,
+  GRANT_PREFERENCE_DESCRIPTIONS,
   INCOME_BAND_OPTIONS,
   INCOME_BAND_LABELS,
+  INCOME_BAND_DESCRIPTIONS,
   MAX_CITY_LENGTH,
   MAX_CITIES,
   MAX_SECTOR_LENGTH,
@@ -68,11 +72,13 @@ export function OutreachPreferencesForm({
   initialCities = [],
   initialSectors,
   initialIncomeBands,
+  initialPrioritiseGrants = false,
 }: {
   initialGeographicReach: GeographicReach[];
   initialCities?: string[];
   initialSectors: string[];
   initialIncomeBands: IncomeBand[];
+  initialPrioritiseGrants?: boolean;
 }) {
   // Submitted through `useTransition` rather than `useActionState`, because this
   // form has to *do* something when the action returns — close the editor and
@@ -91,6 +97,7 @@ export function OutreachPreferencesForm({
   const [savedCities, setSavedCities] = useState<string[]>(initialCities);
   const [savedBands, setSavedBands] = useState<IncomeBand[]>(initialIncomeBands);
   const [savedSectors, setSavedSectors] = useState<string[]>(initialSectors);
+  const [savedPrioritiseGrants, setSavedPrioritiseGrants] = useState<boolean>(initialPrioritiseGrants);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -103,6 +110,7 @@ export function OutreachPreferencesForm({
       setSavedCities(result.saved?.cities ?? cities);
       setSavedBands(result.saved?.incomeBands ?? bands);
       setSavedSectors(result.saved?.sectors ?? sectors);
+      setSavedPrioritiseGrants(result.saved?.prioritiseGrantRecipients ?? prioritiseGrants);
       setEditing(false);
     });
   }
@@ -114,6 +122,7 @@ export function OutreachPreferencesForm({
   const [bands, setBands] = useState<IncomeBand[]>(initialIncomeBands);
   const [sectors, setSectors] = useState<string[]>(initialSectors);
   const [sectorInput, setSectorInput] = useState("");
+  const [prioritiseGrants, setPrioritiseGrants] = useState<boolean>(initialPrioritiseGrants);
 
   function startEditing() {
     setGeo(savedGeo);
@@ -122,6 +131,7 @@ export function OutreachPreferencesForm({
     setBands(savedBands);
     setSectors(savedSectors);
     setSectorInput("");
+    setPrioritiseGrants(savedPrioritiseGrants);
     // Clears a stale "Preferences saved." from the previous round, so the
     // banner cannot sit above a form that has unsaved changes in it.
     setState(initialState);
@@ -135,6 +145,7 @@ export function OutreachPreferencesForm({
     setBands(savedBands);
     setSectors(savedSectors);
     setSectorInput("");
+    setPrioritiseGrants(savedPrioritiseGrants);
     setEditing(false);
   }
 
@@ -248,6 +259,17 @@ export function OutreachPreferencesForm({
           </div>
 
           <div>
+            <p className={LEGEND_CLASS}>Funding & Grant History (360Giving)</p>
+            <Chips
+              items={
+                savedPrioritiseGrants
+                  ? [{ key: "grants:prioritise", label: "Prioritise grant recipients" }]
+                  : []
+              }
+            />
+          </div>
+
+          <div>
             <p className={LEGEND_CLASS}>Sector</p>
             <Chips
               items={savedSectors.map((sector) => ({
@@ -259,9 +281,11 @@ export function OutreachPreferencesForm({
         </div>
 
         {state.status === "success" && state.message ? (
-          <p aria-live="polite" className="mt-3 px-1 text-sm font-bold text-brand">
-            {state.message}
-          </p>
+          <InlineAlert
+            tone="success"
+            className="mt-3"
+            message={state.message}
+          />
         ) : null}
       </div>
     );
@@ -371,12 +395,15 @@ export function OutreachPreferencesForm({
 
         <fieldset>
           <legend className={LEGEND_CLASS}>Size (annual income)</legend>
-          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
+          <p className="mt-2 text-sm leading-[1.7] text-foreground/65">
+            Select organisation size tiers based on annual filed accounts from Charity Commission and Companies House.
+          </p>
+          <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
             {INCOME_BAND_OPTIONS.map((option) => (
               <label
                 key={option}
                 htmlFor={`band-${option}`}
-                className="flex cursor-pointer select-none items-center gap-3 text-sm"
+                className="flex cursor-pointer select-none items-start gap-3 rounded-xl border border-black/[0.08] bg-white p-3 transition-colors hover:border-brand/30"
               >
                 <Checkbox
                   id={`band-${option}`}
@@ -391,10 +418,45 @@ export function OutreachPreferencesForm({
                         : bands.filter((value) => value !== option),
                     )
                   }
+                  className="mt-0.5"
                 />
-                {INCOME_BAND_LABELS[option]}
+                <div className="space-y-0.5">
+                  <p className="text-sm font-medium text-foreground">{INCOME_BAND_LABELS[option]}</p>
+                  <p className="text-xs text-foreground/55">{INCOME_BAND_DESCRIPTIONS[option]}</p>
+                </div>
               </label>
             ))}
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend className={LEGEND_CLASS}>Funding & Grant History (360Giving)</legend>
+          <p className="mt-2 text-sm leading-[1.7] text-foreground/65">
+            Prioritise experienced organisations with documented grant funding awards from UK charitable trusts and foundations.
+          </p>
+          <div className="mt-3">
+            <label
+              htmlFor="grant-pref-toggle"
+              className="flex cursor-pointer select-none items-start gap-3 rounded-xl border border-black/[0.08] bg-white p-3.5 transition-colors hover:border-brand/30"
+            >
+              <Checkbox
+                id="grant-pref-toggle"
+                name="prioritise_grant_recipients"
+                value="true"
+                size="sm"
+                checked={prioritiseGrants}
+                onCheckedChange={(checked) => setPrioritiseGrants(Boolean(checked))}
+                className="mt-0.5"
+              />
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium text-foreground">
+                  {GRANT_PREFERENCE_LABELS.prioritise_grant_recipients}
+                </p>
+                <p className="text-xs text-foreground/55">
+                  {GRANT_PREFERENCE_DESCRIPTIONS.prioritise_grant_recipients}
+                </p>
+              </div>
+            </label>
           </div>
         </fieldset>
 
@@ -493,10 +555,11 @@ export function OutreachPreferencesForm({
         >
           Cancel
         </OriginButton>
-        {state.status === "error" && state.message ? (
-          <p aria-live="polite" className="text-sm font-bold text-destructive">
-            {state.message}
-          </p>
+        {state.status !== "idle" && state.message ? (
+          <InlineAlert
+            tone={state.status === "error" ? "error" : "success"}
+            message={state.message}
+          />
         ) : null}
       </div>
     </form>

@@ -100,7 +100,7 @@
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
 | organisation_id | uuid | ORGANISATIONS | No | Organisation this enrichment belongs to | System | Set when enrichment runs |  |
-| mission_statement | text |  | Yes | Organisation's mission or purpose | LLM + Human | Extracted from published materials or supplied through an approved manual entry | Manual values preserve Manual Entry source attribution |
+| mission_statement | text |  | Yes | Organisation's mission or purpose | LLM | Extracted from website and published materials |  |
 | mission_keywords | text[] |  | Yes | Key themes extracted from the mission | LLM | Classified by LLM from mission text |  |
 | news_hooks | text[] |  | Yes | Recent news items relevant to outreach | LLM | Extracted from news sources |  |
 | sector | text |  | Yes | Primary sector classification | LLM | Classified from mission and activity data |  |
@@ -197,9 +197,10 @@
 | id | uuid |  | No | Primary key | System | Auto-generated |  |
 | user_id | uuid | USERS | No | CAM these preferences belong to | System | Set on save | One row per user (unique) |
 | preferred_geographic_reach | enum[] |  | No | Subset of geographic_reach values the CAM wants prioritised | Human | Chosen by CAM in settings | Same enum as ORGANISATIONS.geographic_reach; empty array = no preference set |
-| preferred_cities | text[] |  | No | City/location values to prioritise | Human | Chosen by CAM in settings | Free text, matched against ORGANISATIONS.city; empty array = no preference set |
+| preferred_cities | text[] |  |  |  |  |  |  |
 | preferred_sectors | text[] |  | No | Sector values to prioritise | Human | Chosen by CAM in settings | Free text, matched against ORGANISATIONS.sector; empty array = no preference set |
 | preferred_income_bands | enum[] |  | No | Subset of income_band values to prioritise | Human | Chosen by CAM in settings | Same enum as FINANCIAL_PERIODS.income_band; empty array = no preference set |
+| prioritise_grant_recipients | boolean |  |  |  |  |  |  |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last edit timestamp | System | Updated on save |  |
 
@@ -224,6 +225,68 @@
 | id | uuid |  | No | Primary key | System | Auto-generated |  |
 | user_id | uuid | USERS | No | CAM the saved view belongs to | System | auth.uid() at save time | On delete cascade; a view is private to its owner |
 | name | text |  | No | Name the CAM gave the view | Human | Typed by CAM when saving | Required, cannot be blank; unique per user |
-| filters | jsonb |  | No | The client-list filter combination the view re-applies | System | Captured from the active list filters at save time | Keys mirror /clients search params: q, city, status, source, owner. jsonb rather than columns because the filter set grows (F055 sector, F058 priority, F193 tag) |
+| filters | jsonb |  | No | The client-list filter combination the view re-applies | System | Captured from the active list filters at save time | Keys mirror /clients search params: q, city, country, status, type, owner — arrays for the multi-selects. jsonb rather than columns because the filter set grows |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last edit timestamp | System | Updated when the view is renamed or re-saved | Rename/overwrite is not built by F066; column exists so adding it later needs no schema change |
+
+## OWNERSHIP_REQUESTS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key |  |  | Auto-generated |
+| organisation_id | uuid | ORGANISATIONS | No | Client being asked for |  |  | On delete cascade |
+| requested_by | uuid | USERS | No | CAM making the ask |  |  | auth.uid() at request time |
+| current_owner_id | uuid | USERS | Yes | Owner at request time, snapshotted |  |  | Live owner can change while pending; admin needs to see what the CAM saw |
+| status | enum |  | No | pending, approved, rejected |  |  | pending at creation; only an admin moves it |
+| reason | text |  | No | Why this CAM should take it on |  |  | Required, cannot be blank |
+| decided_by | uuid | USERS | Yes | Admin who approved/rejected |  |  | Null while pending |
+| decided_at | timestamp |  | Yes | When decided |  |  | Null while pending |
+| decision_note | text |  | Yes | Optional admin note |  |  | Only reason is mandatory |
+| created_at | timestamp |  | No | Row creation timestamp |  |  | Auto-generated |
+
+## NOTIFICATIONS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| recipient_user_id | uuid | USERS | No | User the notification is for | System | Set when the triggering event creates the row | Wrong-recipient prevention relies on this + RLS |
+| actor_user_id | uuid | USERS | Yes | User whose action triggered the notification | System | Set by the creating code path when human-triggered | Null for system/scheduled reminders |
+| notification_type | enum |  | No | What kind of notification | System | Set when created | reply_received / reminder / team_activity / ownership_change / data_quality — extensible via migration |
+| title | text |  | No | Short headline shown in the bell panel | System | Set when created |  |
+| body | text |  | Yes | Optional longer description | System | Set when created |  |
+| link_path | text |  | Yes | In-app route to navigate to on click | System | Set when created | e.g. /clients/{id} — drives linked-record navigation AC |
+| target_table | text |  | Yes | Table of the linked record | System | Set when created | For future deep-linking/filtering |
+| target_id | uuid |  | Yes | ID of the linked record | System | Set when created |  |
+| read_at | timestamp |  | Yes | When the recipient marked it read | Human/System | Set by mark-as-read RPC; auto-set on click-open | Null = unread. Included now so F177 needs no second migration |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+
+## BOOKLET_GENERATIONS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| organisation_id | uuid | ORGANISATIONS | No | Organisation this booklet belongs to | System | Set when generated | On delete cascade. Index (organisation_id, created_at desc) |
+| generated_by | uuid | USERS | No | User who generated the booklet | System | Set to logged-in user |  |
+| prompt_system | text |  | No | System prompt used | System | Set when generated |  |
+| prompt_user | text |  | No | User prompt used | System | Set when generated |  |
+| output | text |  | No | Generated output | System | Set when generated |  |
+| model | text |  | No | Model used for generation | System | Set when generated |  |
+| created_at | timestamptz |  | No | Row creation timestamp | System | Auto-generated | Default now(). Append-only. |
+
+## EDIT_SUGGESTIONS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| organisation_id | uuid | ORGANISATIONS | No | Client the correction is about | System | Set when correction is proposed |  |
+| field_name | text |  | No | One of the six sensitive fields | System | Set when correction is proposed |  |
+| current_value | text |  | Yes | Value at proposal time, captured server-side | System | Captured server-side at proposal time |  |
+| proposed_value | text |  | No | The CAM's corrected value | Human | Proposed by CAM |  |
+| status | enum |  | No | pending, approved, rejected, superseded | System | pending at creation; updated by admin decision or superseded |  |
+| requested_by | uuid | USERS | No | CAM making the proposal | System | auth.uid() at request time |  |
+| superseded_by | uuid | EDIT_SUGGESTIONS | Yes | Newer suggestion that replaced this one | System | Set when a new suggestion for the same field is made |  |
+| decided_by | uuid | USERS | Yes | Admin who approved/rejected | System | Set by decide_edit_suggestion | Null while pending |
+| decided_at | timestamp |  | Yes | When decided | System | Set by decide_edit_suggestion | Null while pending |
+| rejection_reason | text |  | Yes | Optional admin note for the CAM | Human | Typed by admin |  |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+| updated_at | timestamp |  | No | Last edit timestamp | System | Updated on edit |  |

@@ -10,12 +10,14 @@ import {
   filterByCity,
   filterByStatus,
   filterBySource,
+  filterByTags,
   prioritiseQueue,
   searchClients,
   visibleClients,
   type ClientListRow,
   type OpenSuppression,
 } from "./visible-clients.ts";
+import { Sparkles } from "lucide-react";
 import { BrandSearchBar } from "@/components/brand/search-bar";
 import { ClaimButton } from "./[id]/claim-button";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
@@ -45,6 +47,10 @@ type SearchParams = Promise<{
   city?: string;
   status?: string;
   source?: string;
+  // F193 — tags is inherently multi-select (OR logic across selected tags),
+  // so unlike the single-value filters above it can arrive as a string[]
+  // when BrandSearchBar's panel has more than one tag checked.
+  tags?: string | string[];
   /** Funnel stage the breakdown counts. */
   stage?: string;
   /** Field the breakdown groups by, and which end of it to show. */
@@ -64,6 +70,9 @@ const ROW_GRID =
 
 /** Reserved width for the claim button, held whether or not the row has one. */
 const CLAIM_SLOT = "w-[6.5rem] shrink-0";
+
+/** Reserved width for the booklet quick-action (F082), same reasoning as CLAIM_SLOT. */
+const BOOKLET_SLOT = "w-[7rem] shrink-0";
 
 /**
  * F051 — the charity list view. Every organisation regardless of import method
@@ -107,6 +116,7 @@ export default async function ClientsPage({
     city,
     status,
     source,
+    tags: tagsParam,
     stage: stageParam,
     sort: sortParam,
     dir: dirParam,
@@ -114,12 +124,13 @@ export default async function ClientsPage({
 
   const supabase = await createClient();
   const canClaim = hasPermission(authorization.actor.role, "client:edit");
+  const canGenerateBooklet = hasPermission(authorization.actor.role, "client:contact");
 
-  const [organisations, openSuppressions, team, outreachPrefs] = await Promise.all([
+  const [organisations, openSuppressions, team, allTags, outreachPrefs] = await Promise.all([
     supabase
       .from("organisations")
       .select(
-        "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
+        "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id), financial_periods(income_band, total_income, period_end), grants(id, amount_awarded, funder_name, award_date)",
       )
       .order("legal_name")
       .overrideTypes<ClientListRow[], { merge: false }>(),
@@ -135,14 +146,23 @@ export default async function ClientsPage({
       .order("full_name")
       .overrideTypes<TeamMember[], { merge: false }>(),
     supabase
+      .from("tags")
+      .select("id, name")
+      .order("name")
+      .overrideTypes<{ id: string; name: string }[], { merge: false }>(),
+    supabase
       .from("outreach_preferences")
-      // Income bands are saved by the preferences form but not weighted into the
-      // queue yet — only select what prioritiseQueue actually consumes.
-      .select("preferred_geographic_reach, preferred_cities, preferred_sectors")
+      .select("preferred_geographic_reach, preferred_cities, preferred_sectors, preferred_income_bands, prioritise_grant_recipients")
+      // F187 lets admins read every CAM's preferences row, so scope to the
+      // caller explicitly: an unfiltered maybeSingle would match all of them
+      // and error out for admins instead of weighting their own queue.
+      .eq("user_id", authorization.actor.id)
       .maybeSingle<{
         preferred_geographic_reach: string[] | null;
         preferred_cities: string[] | null;
         preferred_sectors: string[] | null;
+        preferred_income_bands: string[] | null;
+        prioritise_grant_recipients: boolean | null;
       }>(),
   ]);
 
@@ -155,33 +175,43 @@ export default async function ClientsPage({
   if (team.error) {
     await reportError(team.error, { operation: "clients.page_team" });
   }
-  // F197 review: a failed preferences load used to be ignored, silently falling
-  // back to the default queue order. Logged here and surfaced through the same
-  // safe-loading warning as the other queries — ordering silently changing is a
-  // failure the CAM needs to know about (Definition of Done).
+  if (allTags.error) {
+    await reportError(allTags.error, { operation: "clients.page_tags" });
+  }
   if (outreachPrefs.error) {
     await reportError(outreachPrefs.error, { operation: "clients.page_outreach_preferences" });
   }
 
+  const availableTags = allTags.data ?? [];
+  // id → name for both the row pills and the filter's chip labels.
+  const tagNameById = new Map(availableTags.map((tag) => [tag.id, tag.name]));
+
   const allVisibleClients = visibleClients(organisations.data ?? [], openSuppressions.data ?? []);
-  
+
   const uniqueCities = Array.from(new Set(allVisibleClients.map(c => c.city).filter(Boolean))).sort() as string[];
   const uniqueStatuses = Array.from(new Set(allVisibleClients.map(c => c.outreachStatusLabel).filter(Boolean))).sort() as string[];
-  
+
   const uniqueSourceTypes = Array.from(new Set(allVisibleClients.map(c => c.organisation_type).filter(Boolean)));
   const uniqueSources = uniqueSourceTypes.map(t => SOURCE_LABELS[t] || t).sort();
+
+  // BrandSearchBar always writes a multi-selected category as repeated params
+  // (see its submitSearch), so this can legitimately arrive as one string or
+  // several — normalise to an array once, here, rather than at every call site.
+  const tagFilter = tagsParam ? (Array.isArray(tagsParam) ? tagsParam : [tagsParam]) : [];
 
   let matchingClients = allVisibleClients;
   matchingClients = filterByOwner(matchingClients, ownerFilter);
   matchingClients = filterByCity(matchingClients, city);
   matchingClients = filterByStatus(matchingClients, status);
   matchingClients = filterBySource(matchingClients, source);
+  matchingClients = filterByTags(matchingClients, tagFilter);
   matchingClients = searchClients(matchingClients, search);
 
-  // F196 / F197 / F094: Prioritise matching clients based on the CAM's geographic & sector preferences
+  // F196 / F197 / F199 / F094: Prioritise matching clients based on the CAM's
+  // geographic, sector, size and grant-history preferences
   matchingClients = prioritiseQueue(matchingClients, outreachPrefs.data);
   const teamMembers = team.data ?? [];
-  const filterActive = Boolean(ownerFilter || search || city || status || source);
+  const filterActive = Boolean(ownerFilter || search || city || status || source || tagFilter.length);
   // F166 AC1/AC3: this is the CAM viewing their own filter, not just any owner
   // filter — the heading, count label and empty state read "your clients" so the
   // view reads as its own thing rather than a generic filtered list.
@@ -202,14 +232,17 @@ export default async function ClientsPage({
    * Every link on this page is the current URL with one thing changed, so they
    * all go through here rather than each rebuilding the query string and quietly
    * dropping the parameters it doesn't know about. `undefined` clears a key.
+   * `tags` is the one multi-value key, so a value here may be a string[] —
+   * written back as a repeated param, matching how BrandSearchBar writes it.
    */
-  const hrefWith = (changes: Record<string, string | number | undefined>) => {
-    const base: Record<string, string | number | undefined> = {
+  const hrefWith = (changes: Record<string, string | string[] | number | undefined>) => {
+    const base: Record<string, string | string[] | number | undefined> = {
       owner: ownerFilter,
       q: search,
       city,
       status,
       source,
+      tags: tagFilter,
       stage: stageParam,
       sort: sortParam,
       dir: dirParam,
@@ -223,6 +256,10 @@ export default async function ClientsPage({
     for (const [key, value] of Object.entries(base)) {
       if (value === undefined || value === "") continue;
       if (key === "page" && Number(value) <= 1) continue;
+      if (Array.isArray(value)) {
+        value.forEach((entry) => params.append(key, entry));
+        continue;
+      }
       params.set(key, String(value));
     }
     const qs = params.toString();
@@ -278,13 +315,21 @@ export default async function ClientsPage({
               ...(status ? [{ category: "Filter by outreach status", label: status, value: status }] : []),
               ...(source ? [{ category: "Filter by source", label: source, value: source }] : []),
               ...(ownerFilter === "unassigned" ? [{ category: "Filter by owner", label: "Unassigned", value: "unassigned" }] : []),
-              ...(ownerFilter && ownerFilter !== "unassigned" && teamMembers.find(m => m.id === ownerFilter) ? [{ category: "Filter by owner", label: teamMembers.find(m => m.id === ownerFilter)?.full_name || "Unnamed CAM", value: ownerFilter }] : [])
+              ...(ownerFilter && ownerFilter !== "unassigned" && teamMembers.find(m => m.id === ownerFilter) ? [{ category: "Filter by owner", label: teamMembers.find(m => m.id === ownerFilter)?.full_name || "Unnamed CAM", value: ownerFilter }] : []),
+              // F193 — one chip per selected tag, so a three-tag filter reads as
+              // three removable chips rather than one that hides the others.
+              ...tagFilter.map((tagId) => ({
+                category: "Filter by tag",
+                label: tagNameById.get(tagId) ?? tagId,
+                value: tagId,
+              })),
             ]}
             params={{
               "Filter by city": "city",
               "Filter by outreach status": "status",
               "Filter by source": "source",
               "Filter by owner": "owner",
+              "Filter by tag": "tags",
             }}
             categories={{
               "Filter by city": uniqueCities.map(c => ({ label: c, value: c })),
@@ -293,7 +338,8 @@ export default async function ClientsPage({
               "Filter by owner": [
                 { label: "Unassigned", value: "unassigned" },
                 ...teamMembers.map(m => ({ label: m.full_name || "Unnamed CAM", value: m.id }))
-              ]
+              ],
+              "Filter by tag": availableTags.map((t) => ({ label: t.name, value: t.id })),
             }}
           />
         }
@@ -401,7 +447,12 @@ export default async function ClientsPage({
                     <span>Owner</span>
                     <span />
                   </span>
-                  {canClaim && <span className={CLAIM_SLOT} />}
+                  {(canGenerateBooklet || canClaim) && (
+                    <span className="flex shrink-0 gap-2">
+                      {canGenerateBooklet && <span className={BOOKLET_SLOT} />}
+                      {canClaim && <span className={CLAIM_SLOT} />}
+                    </span>
+                  )}
                 </div>
 
                 <ul>
@@ -436,6 +487,21 @@ export default async function ClientsPage({
                           <span className="hidden truncate text-[12px] text-foreground/40 lg:block">
                             {SOURCE_LABELS[client.organisation_type] ?? client.organisation_type}
                           </span>
+                          {client.org_tags.length > 0 && (
+                            <span className="mt-1 flex flex-wrap gap-1">
+                              {client.org_tags.map(({ tag_id }) => {
+                                const name = tagNameById.get(tag_id);
+                                return name ? (
+                                  <span
+                                    key={tag_id}
+                                    className="inline-flex max-w-full items-center truncate rounded-full bg-brand/12 px-2 py-0.5 text-[11px] font-medium text-brand-hover"
+                                  >
+                                    {name}
+                                  </span>
+                                ) : null;
+                              })}
+                            </span>
+                          )}
                         </span>
 
                         <span className="hidden min-w-0 truncate text-[13px] text-foreground/60 lg:block">
@@ -491,10 +557,30 @@ export default async function ClientsPage({
                       {/* A fixed slot rather than a conditional child: an owned
                           row still reserves the width, so no column shifts as
                           the list changes hands. */}
-                      {canClaim && (
-                        <span className={`${CLAIM_SLOT} flex justify-end`}>
-                          {!client.ownerName && (
-                            <ClaimButton compact organisationId={client.id} />
+                      {(canGenerateBooklet || canClaim) && (
+                        <span className="flex shrink-0 items-center gap-2">
+                          {/* F082 quick action: straight to the detail page's
+                              booklet section, already generating — see
+                              booklet-panel.tsx's ?booklet=generate handling.
+                              Always shown (not owner-gated like Claim), so no
+                              placeholder-vs-content split is needed here. */}
+                          {canGenerateBooklet && (
+                            <span className={`${BOOKLET_SLOT} flex justify-end`}>
+                              <Link
+                                className="flex items-center gap-1 rounded-full border border-brand/30 px-3 py-1 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
+                                href={`/clients/${client.id}?booklet=generate`}
+                              >
+                                <Sparkles aria-hidden="true" className="h-3 w-3" />
+                                Booklet
+                              </Link>
+                            </span>
+                          )}
+                          {canClaim && (
+                            <span className={`${CLAIM_SLOT} flex justify-end`}>
+                              {!client.ownerName && (
+                                <ClaimButton compact organisationId={client.id} />
+                              )}
+                            </span>
                           )}
                         </span>
                       )}

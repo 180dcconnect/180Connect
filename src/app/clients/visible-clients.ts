@@ -4,8 +4,25 @@
  */
 
 import { formatLocation, formatOutreachStatus } from "../../lib/organisation-format.ts";
+import { deriveIncomeBand } from "../settings/outreach-preferences/constants.ts";
 
 export { formatLocation, formatOutreachStatus };
+
+export type ClientTagRow = { tag_id: string };
+
+export type FinancialPeriodRow = {
+  income_band?: string | null;
+  total_income?: number | null;
+  period_end?: string | null;
+};
+
+export type GrantRow = {
+  id: string;
+  amount_awarded?: number | null;
+  funder_name?: string | null;
+  award_date?: string | null;
+  grant_programme?: string | null;
+};
 
 export type ClientListRow = {
   id: string;
@@ -16,9 +33,15 @@ export type ClientListRow = {
   geographic_reach?: string | null;
   sector?: string | null;
   sub_sector?: string | null;
+  income_band?: string | null;
+  total_income?: number | null;
+  financial_periods?: FinancialPeriodRow[] | null;
+  grants?: GrantRow[] | null;
+  has_grants?: boolean | null;
   outreach_status: string;
   owner_id: string | null;
   owner: { full_name: string | null } | null;
+  org_tags: ClientTagRow[];
 };
 
 export type OpenSuppression = { organisation_id: string; status: "pending" | "active" };
@@ -32,7 +55,39 @@ export type VisibleClient = ClientListRow & {
    * (matrix §1, users_select_active hides their row) — falls back to a label rather
    * than reading as unassigned. */
   ownerName: string | null;
+  /** F191/F193: ids of every tag assigned to this client, from the embedded
+   * org_tags join. Used by filterByTags below. */
+  tagIds: string[];
+  income_band: string | null;
+  has_grants: boolean;
 };
+
+/**
+ * Resolves the effective income band for an organisation from direct property,
+ * latest filed financial period, or numeric total income calculation.
+ */
+export function resolveClientIncomeBand(org: ClientListRow): string | null {
+  if (org.income_band) return org.income_band;
+
+  if (org.financial_periods && org.financial_periods.length > 0) {
+    const sorted = [...org.financial_periods].sort((a, b) => {
+      const dateA = a.period_end ? new Date(a.period_end).getTime() : 0;
+      const dateB = b.period_end ? new Date(b.period_end).getTime() : 0;
+      return dateB - dateA;
+    });
+    const latest = sorted[0];
+    if (latest.income_band) return latest.income_band;
+    if (latest.total_income !== null && latest.total_income !== undefined) {
+      return deriveIncomeBand(latest.total_income);
+    }
+  }
+
+  if (org.total_income !== null && org.total_income !== undefined) {
+    return deriveIncomeBand(org.total_income);
+  }
+
+  return null;
+}
 
 /**
  * The default list view (F051 AC4): actively suppressed charities (F251) never
@@ -46,13 +101,20 @@ export function visibleClients(
   const statusByOrg = new Map(suppressions.map((row) => [row.organisation_id, row.status]));
 
   return organisations
-    .filter((org) => statusByOrg.get(org.id) !== "active")
-    .map((org) => ({
-      ...org,
-      location: formatLocation(org),
-      outreachStatusLabel: formatOutreachStatus(org.outreach_status),
-      suppressionPending: statusByOrg.get(org.id) === "pending",
-      ownerName: org.owner_id ? (org.owner?.full_name ?? "A former team member") : null,
+    .filter((organisation) => statusByOrg.get(organisation.id) !== "active")
+    .map((organisation) => ({
+      ...organisation,
+      location: formatLocation(organisation),
+      outreachStatusLabel: formatOutreachStatus(organisation.outreach_status),
+      suppressionPending: statusByOrg.get(organisation.id) === "pending",
+      ownerName: organisation.owner_id
+        ? (organisation.owner?.full_name ?? "A former team member")
+        : null,
+      tagIds: (organisation.org_tags ?? []).map((row) => row.tag_id),
+      income_band: resolveClientIncomeBand(organisation),
+      has_grants: Boolean(
+        organisation.has_grants || (organisation.grants && organisation.grants.length > 0),
+      ),
     }));
 }
 
@@ -68,7 +130,29 @@ export function filterByOwner(
   return clients.filter((c) => c.owner_id === ownerFilter);
 }
 
-/** F053: search by client legal name (case-insensitive substring match). */
+/**
+ * F193 — tag filter. OR logic (a client matching ANY selected tag is
+ * included), matching the ticket's stated convention for the platform's
+ * other multi-select filters. Note: F053/F055/F056, cited by the ticket as
+ * the existing pattern to match, do not appear to be built in this codebase
+ * yet — this establishes the OR-logic multi-select shape rather than
+ * copying an existing implementation.
+ */
+export function filterByTags(
+  clients: VisibleClient[],
+  tagFilter: string[] | null | undefined,
+): VisibleClient[] {
+  if (!tagFilter || tagFilter.length === 0) return clients;
+  return clients.filter((client) =>
+    client.tagIds.some((tagId) => tagFilter.includes(tagId)),
+  );
+}
+
+/**
+ * Free-text search on the client list. Case-insensitive substring match on
+ * legal_name only — the field the list actually displays and the one a CAM
+ * would type from memory.
+ */
 export function searchClients(
   clients: VisibleClient[],
   term: string | null | undefined,
@@ -105,16 +189,12 @@ export function filterBySource(
 ): VisibleClient[] {
   if (!sourceFilter) return clients;
   const term = sourceFilter.toLowerCase();
-
+  
   if (term === "companies house") {
-    return clients.filter(
-      (c) => c.organisation_type === "company" || c.organisation_type === "both",
-    );
+    return clients.filter((c) => c.organisation_type === "company" || c.organisation_type === "both");
   }
   if (term === "charity commission") {
-    return clients.filter(
-      (c) => c.organisation_type === "charity" || c.organisation_type === "both",
-    );
+    return clients.filter((c) => c.organisation_type === "charity" || c.organisation_type === "both");
   }
   if (term === "dual-registered") {
     return clients.filter((c) => c.organisation_type === "both");
@@ -122,7 +202,7 @@ export function filterBySource(
   if (term === "other") {
     return clients.filter((c) => c.organisation_type === "other");
   }
-
+  
   return clients;
 }
 
@@ -130,40 +210,31 @@ export type OutreachQueuePreferences = {
   preferred_geographic_reach?: string[] | null;
   preferred_cities?: string[] | null;
   preferred_sectors?: string[] | null;
+  preferred_income_bands?: string[] | null;
+  prioritise_grant_recipients?: boolean | null;
 };
 
 /**
- * The one keyword table for cross-source sector matching (F197) — the settings
- * presets in src/app/settings/outreach-preferences/constants.ts describe sectors
- * to the CAM; this table is how those words match heterogeneous organisation
- * data (Charity Commission cause strings, Companies House SIC descriptions,
- * LLM-classified sector tags). Aliases are deliberately specific and are matched
- * on whole words by `textContains` — broad stems like "social" or "energy" used
- * to drag unrelated groups into each other's matches.
+ * The South Yorkshire city set and the expansions below — "regional" reach means
+ * South Yorkshire, "local" reach means Sheffield, and both stack with exact city
+ * matches (a Sheffield org under a Sheffield-preferring local CAM can reach +30
+ * where an exact Leeds match gets +10) — are deliberate pilot scoping:
+ * 180Connect currently serves the Sheffield branch only. When another branch
+ * onboards this must become region-driven data, not more hardcoded cities.
  */
-export const CANONICAL_SECTOR_GROUPS: Record<string, string[]> = {
-  health: ["health", "healthcare", "medical", "hospital", "clinic", "mental health", "disability", "wellbeing", "social care"],
-  education: ["education", "training", "school", "college", "university", "learning", "literacy", "teaching", "skills"],
-  environment: ["environment", "conservation", "climate", "sustainability", "wildlife", "animal welfare", "renewable energy"],
-  poverty: ["poverty", "food bank", "homeless", "housing", "hardship", "deprivation", "social inclusion"],
-  community: ["community development", "youth", "children", "family support", "youth services"],
-  arts: ["arts", "culture", "heritage", "museum", "theatre", "sport", "recreation"],
-  justice: ["human rights", "justice", "equality", "legal", "international aid", "social enterprise", "enterprise"],
-};
-
-/**
- * Whole-word containment, case-insensitive. Raw `.includes()` matched inside
- * words ("arts" in "parts") and let single-word aliases over-trigger; anchoring
- * on non-alphanumeric boundaries keeps phrase aliases like "mental health"
- * working across "&"-separated strings.
- */
-function textContains(haystack: string, needle: string): boolean {
-  if (!haystack || !needle) return false;
-  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`).test(haystack);
-}
+export type GeographicPreference = OutreachQueuePreferences;
 
 const SOUTH_YORKSHIRE_CITIES = new Set(["sheffield", "rotherham", "barnsley", "doncaster"]);
+
+const CANONICAL_SECTOR_GROUPS: Record<string, string[]> = {
+  health: ["health", "healthcare", "medical", "hospital", "mental health", "disability support", "clinical"],
+  education: ["education", "training", "school", "college", "university", "literacy", "teaching", "skills"],
+  environment: ["environment", "conservation", "climate", "sustainability", "wildlife", "animal welfare", "renewable energy"],
+  poverty: ["poverty", "food bank", "homeless", "housing & homelessness", "hardship", "deprivation", "poverty relief"],
+  community: ["community development", "youth & children", "family support", "social inclusion", "youth services"],
+  arts: ["arts & culture", "heritage & museums", "theatre", "sports & recreation", "museum"],
+  justice: ["international aid", "human rights", "justice", "social enterprise"],
+};
 
 /** Computes sector weighting score for a client given CAM sector preferences (F197 / F089). */
 function getSectorPriorityScore(client: VisibleClient, preferredSectors: string[]): number {
@@ -181,27 +252,21 @@ function getSectorPriorityScore(client: VisibleClient, preferredSectors: string[
     const p = pref.toLowerCase().trim();
     if (!p) continue;
 
-    // Direct exact or whole-word match on sector
-    if (
-      clientSector &&
-      (clientSector === p || textContains(p, clientSector) || textContains(clientSector, p))
-    ) {
+    // Direct exact or substring match
+    if (clientSector === p || (clientSector && p.includes(clientSector)) || (clientSector && clientSector.includes(p))) {
       score = Math.max(score, 10);
       continue;
     }
 
-    if (clientSubSector && (clientSubSector === p || textContains(clientSubSector, p))) {
+    if (clientSubSector === p || (clientSubSector && clientSubSector.includes(p))) {
       score = Math.max(score, 8);
       continue;
     }
 
     // Canonical category match (e.g. "Health & Social Care" matches "Healthcare")
     for (const [groupKey, groupAliases] of Object.entries(CANONICAL_SECTOR_GROUPS)) {
-      const prefMatchesGroup =
-        groupAliases.some((alias) => textContains(p, alias)) || textContains(p, groupKey);
-      const clientMatchesGroup =
-        groupAliases.some((alias) => textContains(clientText, alias)) ||
-        textContains(clientText, groupKey);
+      const prefMatchesGroup = groupAliases.some((alias) => p.includes(alias)) || p.includes(groupKey);
+      const clientMatchesGroup = groupAliases.some((alias) => clientText.includes(alias)) || clientText.includes(groupKey);
 
       if (prefMatchesGroup && clientMatchesGroup) {
         score = Math.max(score, 8);
@@ -212,15 +277,7 @@ function getSectorPriorityScore(client: VisibleClient, preferredSectors: string[
   return score;
 }
 
-/**
- * Computes geographic weighting score for a client given CAM geographic preferences (F196 / F090).
- *
- * The South Yorkshire city set, "regional → South Yorkshire" and "local →
- * Sheffield" expansions are deliberate pilot scoping: 180Connect currently serves
- * the Sheffield branch only, where regional means South Yorkshire and local means
- * Sheffield. When another branch onboards this must become region-driven data,
- * not more hardcoded cities.
- */
+/** Computes geographic weighting score for a client given CAM geographic preferences (F196 / F090). */
 function getGeographicPriorityScore(
   client: VisibleClient,
   preferredReach: string[],
@@ -286,9 +343,85 @@ export function prioritiseBySector(
 }
 
 /**
- * F196 / F197 / F090 / F089 / F094 — Unified Personalised CAM Queue Prioritisation.
+ * Calculates size (income band) priority score for a client against CAM preferences.
+ */
+export function getSizePriorityScore(
+  client: VisibleClient,
+  preferredBands: string[],
+): number {
+  if (preferredBands.length === 0) return 0;
+  if (!client.income_band) return 0;
+
+  const clientBand = client.income_band.toLowerCase().trim();
+  if (preferredBands.includes(clientBand)) {
+    return 10;
+  }
+
+  return 0;
+}
+
+/**
+ * F198 / F091 / F094 — Personalised CAM queue size (income band) weighting.
  *
- * Combines geographic and sector preference weighting to rank matching clients
+ * Re-orders clients so that organisations matching the CAM's preferred size tiers
+ * are prioritised higher in the CAM's personal queue.
+ */
+export function prioritiseBySize(
+  clients: VisibleClient[],
+  preferences?: OutreachQueuePreferences | null,
+): VisibleClient[] {
+  if (!preferences) return clients;
+
+  const preferredBands = (preferences.preferred_income_bands ?? []).map((b) => b.toLowerCase().trim());
+  if (preferredBands.length === 0) return clients;
+
+  return [...clients].sort((a, b) => {
+    const scoreA = getSizePriorityScore(a, preferredBands);
+    const scoreB = getSizePriorityScore(b, preferredBands);
+    if (scoreB !== scoreA) {
+      return scoreB - scoreA;
+    }
+    return a.legal_name.localeCompare(b.legal_name);
+  });
+}
+
+/**
+ * Calculates grant / funding history priority score for a client (F199 / F092).
+ */
+export function getGrantPriorityScore(
+  client: VisibleClient,
+  prioritiseGrantRecipients?: boolean | null,
+): number {
+  if (!prioritiseGrantRecipients) return 0;
+  return client.has_grants ? 10 : 0;
+}
+
+/**
+ * F199 / F092 / F094 — Personalised CAM queue grant funding history weighting.
+ *
+ * Re-orders clients so that organisations with documented grant awards (360Giving)
+ * are prioritised higher in the CAM's personal queue.
+ */
+export function prioritiseByGrants(
+  clients: VisibleClient[],
+  preferences?: OutreachQueuePreferences | null,
+): VisibleClient[] {
+  if (!preferences?.prioritise_grant_recipients) return clients;
+
+  return [...clients].sort((a, b) => {
+    const scoreA = getGrantPriorityScore(a, preferences.prioritise_grant_recipients);
+    const scoreB = getGrantPriorityScore(b, preferences.prioritise_grant_recipients);
+    if (scoreB !== scoreA) {
+      return scoreB - scoreA;
+    }
+    return a.legal_name.localeCompare(b.legal_name);
+  });
+}
+
+/**
+ * F196 / F197 / F198 / F199 / F090 / F089 / F091 / F092 / F094 — Unified Personalised CAM Queue Prioritisation.
+ *
+ * Combines geographic, sector, size, and grant preference weighting to rank matching clients
  * at the top of the CAM's queue without altering underlying base scores (F088).
  *
  * If no preferences are active (or when cleared), returns the unmodified list in
@@ -303,8 +436,16 @@ export function prioritiseQueue(
   const preferredReach = (preferences.preferred_geographic_reach ?? []).map((r) => r.toLowerCase().trim());
   const preferredCities = (preferences.preferred_cities ?? []).map((c) => c.toLowerCase().trim());
   const preferredSectors = (preferences.preferred_sectors ?? []).map((s) => s.toLowerCase().trim());
+  const preferredBands = (preferences.preferred_income_bands ?? []).map((b) => b.toLowerCase().trim());
+  const prioritiseGrants = Boolean(preferences.prioritise_grant_recipients);
 
-  if (preferredReach.length === 0 && preferredCities.length === 0 && preferredSectors.length === 0) {
+  if (
+    preferredReach.length === 0 &&
+    preferredCities.length === 0 &&
+    preferredSectors.length === 0 &&
+    preferredBands.length === 0 &&
+    !prioritiseGrants
+  ) {
     return clients;
   }
 
@@ -313,13 +454,27 @@ export function prioritiseQueue(
     const geoScoreB = getGeographicPriorityScore(b, preferredReach, preferredCities);
     const secScoreA = getSectorPriorityScore(a, preferredSectors);
     const secScoreB = getSectorPriorityScore(b, preferredSectors);
+    const sizeScoreA = getSizePriorityScore(a, preferredBands);
+    const sizeScoreB = getSizePriorityScore(b, preferredBands);
+    const grantScoreA = getGrantPriorityScore(a, prioritiseGrants);
+    const grantScoreB = getGrantPriorityScore(b, prioritiseGrants);
 
-    const totalA = geoScoreA + secScoreA;
-    const totalB = geoScoreB + secScoreB;
+    const totalA = geoScoreA + secScoreA + sizeScoreA + grantScoreA;
+    const totalB = geoScoreB + secScoreB + sizeScoreB + grantScoreB;
 
     if (totalB !== totalA) {
       return totalB - totalA;
     }
     return a.legal_name.localeCompare(b.legal_name);
   });
+}
+
+/**
+ * F196 / F090 / F094 — Backward compatible alias for geographic prioritisation.
+ */
+export function prioritiseByGeography(
+  clients: VisibleClient[],
+  preferences?: GeographicPreference | null,
+): VisibleClient[] {
+  return prioritiseQueue(clients, preferences);
 }

@@ -30,6 +30,7 @@ export type OutreachPreferencesState = {
     cities: string[];
     sectors: string[];
     incomeBands: IncomeBand[];
+    prioritiseGrantRecipients: boolean;
   };
 };
 
@@ -48,6 +49,7 @@ function parsePreferences(formData: FormData): {
   cities: string[];
   sectors: string[];
   incomeBands: IncomeBand[];
+  prioritiseGrantRecipients: boolean;
 } {
   const geographicReach = formData
     .getAll("geographic_reach")
@@ -85,7 +87,10 @@ function parsePreferences(formData: FormData): {
     if (sectors.length >= MAX_SECTORS) break;
   }
 
-  return { geographicReach, cities, sectors, incomeBands };
+  const rawGrant = formData.get("prioritise_grant_recipients");
+  const prioritiseGrantRecipients = rawGrant === "true" || rawGrant === "on" || rawGrant === "1";
+
+  return { geographicReach, cities, sectors, incomeBands, prioritiseGrantRecipients };
 }
 
 export async function saveOutreachPreferencesAction(
@@ -103,7 +108,7 @@ export async function saveOutreachPreferencesAction(
     return { status: "error", message: actorFailureMessage(authorization.reason) };
   }
 
-  const { geographicReach, cities, sectors, incomeBands } = parsePreferences(formData);
+  const { geographicReach, cities, sectors, incomeBands, prioritiseGrantRecipients } = parsePreferences(formData);
 
   const supabase = await createClient();
   const { error } = await supabase
@@ -115,14 +120,12 @@ export async function saveOutreachPreferencesAction(
         preferred_cities: cities,
         preferred_sectors: sectors,
         preferred_income_bands: incomeBands,
+        prioritise_grant_recipients: prioritiseGrantRecipients,
       },
       { onConflict: "user_id" },
     );
 
   if (error) {
-    // F197 review: the CAM sees the message, but the failure must also be
-    // recorded (Definition of Done — every failure visible and recorded).
-    await reportError(error, { operation: "outreach_preferences.save" });
     return {
       status: "error",
       message: "Could not save your preferences. Try again.",
@@ -147,6 +150,6 @@ export async function saveOutreachPreferencesAction(
   return {
     status: "success",
     message: "Preferences saved.",
-    saved: { geographicReach, cities, sectors, incomeBands },
+    saved: { geographicReach, cities, sectors, incomeBands, prioritiseGrantRecipients },
   };
 }

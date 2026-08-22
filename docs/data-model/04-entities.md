@@ -144,6 +144,19 @@
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | Yes | When the note was last edited | System | Updated on edit | Null if never edited |
 
+## ATTACHMENTS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| organisation_id | uuid | ORGANISATIONS | No | Client the file is attached to | System | Set when attachment is created | Deleting the organisation deletes its attachments |
+| filename | text |  | No | Original file name shown in the list | Human | From the uploaded file | Cannot be blank |
+| storage_path | text |  | No | Path inside the private client-attachments Storage bucket | System | Generated at upload time | Not a URL — never store signed URLs |
+| content_type | text |  | Yes | MIME type of the file | System | Detected at upload time |  |
+| size_bytes | bigint |  | Yes | File size in bytes | System | From the upload metadata | Must be ≥ 0 if present |
+| uploaded_by | uuid | USERS | Yes | Team member who attached the file | System | Set to logged-in user at creation | Nullable — a future automated import may have no human uploader (F081 decides) |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+
 ## TAGS
 
 | Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
@@ -197,8 +210,10 @@
 | id | uuid |  | No | Primary key | System | Auto-generated |  |
 | user_id | uuid | USERS | No | CAM these preferences belong to | System | Set on save | One row per user (unique) |
 | preferred_geographic_reach | enum[] |  | No | Subset of geographic_reach values the CAM wants prioritised | Human | Chosen by CAM in settings | Same enum as ORGANISATIONS.geographic_reach; empty array = no preference set |
+| preferred_cities | text[] |  |  |  |  |  |  |
 | preferred_sectors | text[] |  | No | Sector values to prioritise | Human | Chosen by CAM in settings | Free text, matched against ORGANISATIONS.sector; empty array = no preference set |
 | preferred_income_bands | enum[] |  | No | Subset of income_band values to prioritise | Human | Chosen by CAM in settings | Same enum as FINANCIAL_PERIODS.income_band; empty array = no preference set |
+| prioritise_grant_recipients | boolean |  |  |  |  |  |  |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last edit timestamp | System | Updated on save |  |
 
@@ -257,7 +272,6 @@
 | target_id | uuid |  | Yes | ID of the linked record | System | Set when created |  |
 | read_at | timestamp |  | Yes | When the recipient marked it read | Human/System | Set by mark-as-read RPC; auto-set on click-open | Null = unread. Included now so F177 needs no second migration |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
-<<<<<<< HEAD
 
 ## BOOKLET_GENERATIONS
 
@@ -271,5 +285,32 @@
 | output | text |  | No | Generated output | System | Set when generated |  |
 | model | text |  | No | Model used for generation | System | Set when generated |  |
 | created_at | timestamptz |  | No | Row creation timestamp | System | Auto-generated | Default now(). Append-only. |
-=======
->>>>>>> origin/dev
+
+## EDIT_SUGGESTIONS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| organisation_id | uuid | ORGANISATIONS | No | Client the correction is about | System | Set when correction is proposed |  |
+| field_name | text |  | No | One of the six sensitive fields | System | Set when correction is proposed |  |
+| current_value | text |  | Yes | Value at proposal time, captured server-side | System | Captured server-side at proposal time |  |
+| proposed_value | text |  | No | The CAM's corrected value | Human | Proposed by CAM |  |
+| status | enum |  | No | pending, approved, rejected, superseded | System | pending at creation; updated by admin decision or superseded |  |
+| requested_by | uuid | USERS | No | CAM making the proposal | System | auth.uid() at request time |  |
+| superseded_by | uuid | EDIT_SUGGESTIONS | Yes | Newer suggestion that replaced this one | System | Set when a new suggestion for the same field is made |  |
+| decided_by | uuid | USERS | Yes | Admin who approved/rejected | System | Set by decide_edit_suggestion | Null while pending |
+| decided_at | timestamp |  | Yes | When decided | System | Set by decide_edit_suggestion | Null while pending |
+| rejection_reason | text |  | Yes | Optional admin note for the CAM | Human | Typed by admin |  |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+| updated_at | timestamp |  | No | Last edit timestamp | System | Updated on edit |  |
+
+## RESTRICTED_EDIT_FIELDS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| field_name | text |  | No | An ORGANISATIONS column CAMs may not write directly | System | Seeded (six) or set by add_restricted_edit_field | Unique — FK target for EDIT_SUGGESTIONS.field_name and the trigger's loop key |
+| active | boolean |  | No | False = retired: not enforced, not suggestible, row kept | Human | Set by deactivate_restricted_edit_field | Never delete; history and FK survive |
+| reason | text |  | No | Why the field is restricted | Human | Typed by the admin adding it | Shown in the admin panel |
+| added_by | uuid | USERS | Yes | Admin who added/re-added the restriction | System | auth.uid() at add time | Null for the system-seeded six |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |

@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { attachmentRpcFailure } from "@/lib/attachments";
+import { isUuid } from "@/lib/validation";
 
 /**
  * F081 — the second half of the two-step upload (see
@@ -40,7 +41,7 @@ export async function POST(
   if (!authorization.ok) return denied(authorization.reason);
 
   const { id: organisationId } = await params;
-  if (!z.uuid().safeParse(organisationId).success) {
+  if (!isUuid(organisationId)) {
     return NextResponse.json({ error: "That client could not be found." }, { status: 400 });
   }
 

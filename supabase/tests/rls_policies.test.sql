@@ -4059,6 +4059,298 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- edit_suggestions (#79, F077)
+-- ---------------------------------------------------------------------------
+-- The point of this suite is the same negative as ownership_requests: a CAM has no
+-- path to a sensitive field except proposing, and proposing changes nothing. Plus
+-- the two duplicate rules (supersede own, block others) and the RLS visibility split.
+
+create or replace function tests.suite_edit_suggestions()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_org         uuid := '00000000-0000-4000-b000-000000000001';  -- unowned, legal_name set
+  v_suggestion  uuid;
+  v_reject_id   uuid;
+  v_approve_id  uuid;
+  v_status      public.edit_suggestion_status;
+  v_current     text;
+  v_live        text;
+  v_count       bigint;
+  v_decided_by  uuid;
+  v_decided_at  timestamptz;
+  v_reason      text;
+begin
+  if not tests.tables_exist('organisations', 'users', 'edit_suggestions')
+     or to_regprocedure('public.suggest_organisation_edit(uuid, text, text)') is null
+     or to_regprocedure('public.decide_edit_suggestion(uuid, boolean, text)') is null then
+    return next skip(38, 'edit_suggestions table or RPCs not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Every write is RPC-only (recipe step 4), same shape as suppressions.
+  return next ok(
+    not has_table_privilege('authenticated', 'public.edit_suggestions', 'INSERT'),
+    'authenticated holds no direct INSERT privilege on edit_suggestions'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.edit_suggestions', 'UPDATE'),
+    'authenticated holds no direct UPDATE privilege on edit_suggestions'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.edit_suggestions (organisation_id, field_name, proposed_value, requested_by) values (%L, ''city'', ''X'', %L)',
+      v_org, v_cam_a)),
+    '42501',
+    'a direct table insert is refused even for a CAM'
+  );
+
+  -- Who may call the RPC at all.
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.suggest_organisation_edit(%L, ''city'', ''Leeds'')', v_org)),
+    '42501',
+    'a viewer cannot suggest an edit'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.suggest_organisation_edit(%L, ''city'', ''Leeds'')', v_org)),
+    '42501',
+    'an admin cannot suggest an edit — they hold UPDATE on these columns directly'
+  );
+
+  -- What the RPC refuses on content.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''owner_id'', ''someone'')', v_org)),
+    '23514',
+    'a field outside the six-field allowlist is rejected'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''city'', ''   '')', v_org)),
+    '23514',
+    'a blank proposed value is rejected — suggestions cannot clear a field'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''city'', ''Leeds'')',
+      '00000000-0000-4000-b000-000000000099')),
+    'P0002',
+    'an unknown client is rejected'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''legal_name'', ''Unowned Org Ltd'')', v_org)),
+    '55000',
+    'proposing the value already on record is refused as a no-op'
+  );
+
+  -- The sanctioned path: CAM A proposes a website for a client with none.
+  perform tests.login_as(v_cam_a);
+  select public.suggest_organisation_edit(v_org, 'website', 'https://example.org')
+    into v_suggestion;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status into v_status from public.edit_suggestions where id = v_suggestion;
+  return next is(v_status, 'pending'::public.edit_suggestion_status,
+    'a CAM''s suggestion lands pending');
+
+  select current_value into v_current from public.edit_suggestions where id = v_suggestion;
+  return next is(v_current, null,
+    'current_value snapshots what the field actually said (null here)');
+
+  select website into v_live from public.organisations where id = v_org;
+  return next is(v_live, null,
+    'the live record is untouched: a suggestion is not an edit');
+
+  select count(*) into v_count from public.audit_log
+   where target_table = 'edit_suggestions' or action like 'edit_suggestion%';
+  return next is(v_count, 0::bigint,
+    'submission writes no audit row — flagging is not a decision');
+
+  -- Duplicate rules.
+  return next is(
+    tests.sqlstate_of(v_cam_b, format(
+      'select public.suggest_organisation_edit(%L, ''website'', ''https://other.org'')', v_org)),
+    '23505',
+    'another CAM''s pending suggestion blocks the field'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''website'', ''https://corrected.org'')', v_org)),
+    null,
+    'the author may re-suggest their own pending field (supersede)'
+  );
+
+  select status into v_status
+    from public.edit_suggestions where id = v_suggestion;
+  return next is(v_status, 'superseded'::public.edit_suggestion_status,
+    're-suggesting marks the old proposal superseded, not deleted');
+
+  select count(*) into v_count
+    from public.edit_suggestions
+   where organisation_id = v_org and field_name = 'website' and status = 'pending';
+  return next is(v_count, 1::bigint,
+    'exactly one pending suggestion per field survives the supersede');
+
+  -- RLS visibility: pending rows are team-visible to CAMs; settled history is not.
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.edit_suggestions
+   where organisation_id = v_org and status = 'pending';
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'any active CAM can see another CAM''s pending suggestion');
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.edit_suggestions
+   where organisation_id = v_org and status = 'superseded';
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'settled history stays between the author and admins');
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.edit_suggestions
+   where organisation_id = v_org;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a viewer sees no suggestions at all');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.edit_suggestions
+   where organisation_id = v_org;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 2::bigint, 'an admin sees every row, decided or not');
+
+  -- ---------------------------------------------------------------------------
+  -- Decisions (#80/#81): decide_edit_suggestion
+  -- ---------------------------------------------------------------------------
+
+  -- Who may decide.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.decide_edit_suggestion(%L, true, null)', v_suggestion)),
+    '42501',
+    'a CAM cannot decide a suggested edit — not even their own'
+  );
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.decide_edit_suggestion(%L, true, null)', v_suggestion)),
+    '42501',
+    'a viewer cannot call decide_edit_suggestion'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin,
+      'select public.decide_edit_suggestion(''00000000-0000-4000-e000-000000000009'', true, null)'),
+    'P0002',
+    'deciding an unknown suggestion is a clean miss, not a crash'
+  );
+
+  -- Reject first (CAM B's fresh proposal on another field), then approve.
+  perform tests.login_as(v_cam_b);
+  select public.suggest_organisation_edit(v_org, 'city', 'Leeds') into v_reject_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  -- Stale-snapshot guard: an admin's direct edit moves the live value after
+  -- submission; approval must refuse rather than clobber it.
+  perform tests.login_as(v_admin);
+  update public.organisations set city = 'Sheffield' where id = v_org;
+  -- Drop the impersonation before touching schema tests again: while the session
+  -- IS `authenticated`, it has no USAGE on `tests` and the next sqlstate_of call
+  -- would die with "permission denied for schema tests" (see harness note above).
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.decide_edit_suggestion(%L, true, null)', v_reject_id)),
+    '55000',
+    'approval refuses when the live value drifted from the submission snapshot'
+  );
+  select status into v_status from public.edit_suggestions where id = v_reject_id;
+  return next is(v_status, 'pending'::public.edit_suggestion_status,
+    'a refused approval leaves the suggestion pending');
+  select count(*) into v_count from public.audit_log
+   where action like 'edit_suggestion%';
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'a refused approval writes no audit row and applies nothing');
+
+  -- The admin puts the field back; now rejection works and touches nothing.
+  perform tests.login_as(v_admin);
+  update public.organisations set city = null where id = v_org;
+  perform public.decide_edit_suggestion(v_reject_id, false, 'Registry disagrees with that postcode-level change');
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status, decided_by, decided_at, rejection_reason
+    into v_status, v_decided_by, v_decided_at, v_reason
+    from public.edit_suggestions where id = v_reject_id;
+  return next is(v_status, 'rejected'::public.edit_suggestion_status,
+    'admin rejection marks the suggestion rejected');
+  return next is(v_decided_by, v_admin, 'the decision records who decided it');
+  return next ok(v_decided_at is not null, 'the decision records when');
+  return next is(v_reason, 'Registry disagrees with that postcode-level change',
+    'the rejection reason is stored for the CAM');
+  select city into v_live from public.organisations where id = v_org;
+  return next is(v_live, null,
+    'rejection changed nothing on the live record (F079 AC1)');
+
+  -- Double-decide is refused.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.decide_edit_suggestion(%L, true, null)', v_reject_id)),
+    '55000',
+    'deciding an already-settled suggestion is rejected'
+  );
+
+  -- Approval path: CAM A proposes a legal_name fix over the known value; admin approves.
+  perform tests.login_as(v_cam_a);
+  select public.suggest_organisation_edit(v_org, 'legal_name', 'Renamed Org Ltd')
+    into v_approve_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  perform tests.login_as(v_admin);
+  perform public.decide_edit_suggestion(v_approve_id, true, null);
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select legal_name into v_live from public.organisations where id = v_org;
+  return next is(v_live, 'Renamed Org Ltd',
+    'approval applies the proposed value to the live record (F078 AC2)');
+
+  select status into v_status from public.edit_suggestions where id = v_approve_id;
+  return next is(v_status, 'approved'::public.edit_suggestion_status,
+    'approval marks the suggestion approved');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'edit_suggestion_approved' and target_id = v_org;
+  return next is(v_count, 1::bigint, 'the approval is audited');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'edit_suggestion_rejected' and target_id = v_org;
+  return next is(v_count, 1::bigint, 'the rejection is audited too');
+
+  -- Since F020 (#23) both decide branches notify the submitting CAM. These tests
+  -- are about the decision, not the notification — clear the side effect so
+  -- suite_notifications' counts see a clean slate (all suites share one transaction).
+  delete from public.notifications where notification_type = 'edit_suggestion_decided';
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------------
 -- notifications (F173 / #169)
 -- ---------------------------------------------------------------------------
 
@@ -4228,6 +4520,391 @@ begin
 end;
 $$;
 
+
+-- ---------------------------------------------------------------------------
+-- Attachments (F080 / #83): shared read for active roles, no write path yet
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_attachments()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_org_a       uuid := '00000000-0000-4000-b000-000000000002';  -- owned by cam_a
+  v_att         uuid;
+  v_count       bigint;
+  v_rls         boolean;
+begin
+  if not tests.tables_exist('attachments') then
+    return next skip(18, 'F080 attachments table not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Fixture row, inserted as the suite's superuser role: ATTACHMENTS grants
+  -- no INSERT to any client role — every write goes through record_attachment.
+  insert into public.attachments
+    (organisation_id, filename, storage_path, content_type, size_bytes, uploaded_by)
+  values
+    (v_org_a, 'grant-agreement.pdf',
+     v_org_a::text || '/11111111-1111-4111-8111-111111111111-grant-agreement.pdf',
+     'application/pdf', 48213, v_cam_a)
+  returning id into v_att;
+
+  -- RLS really is on — a missing ENABLE would make every later check vacuous.
+  select relrowsecurity into v_rls
+    from pg_class where oid = 'public.attachments'::regclass;
+  return next ok(v_rls, 'RLS is enabled on public.attachments');
+
+  -- Shared read (matrix §3.21): a CAM who does not own the client still sees
+  -- its attachment list — same shape as NOTES (§3.3).
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.attachments where id = v_att;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'a CAM who does not own the client can read its attachments (shared read)');
+
+  -- Viewers read too — every active role, per F019 shared visibility.
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.attachments where id = v_att;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'a viewer reads attachments like any other active role');
+
+  -- A deactivated account is silently locked out — §4: a blocked SELECT
+  -- returns 0 rows, never an error.
+  perform tests.login_as(v_deactivated);
+  select count(*) into v_count from public.attachments where id = v_att;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'a deactivated account reads no attachments (silent empty result)');
+
+  -- No direct table write path exists for any client role, before or after
+  -- F081: uploads create rows only through record_attachment.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.attachments (organisation_id, filename, storage_path) values (%L, ''x.pdf'', ''p/x.pdf'')', v_org_a)),
+    '42501',
+    'no role can INSERT an attachment row directly'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.attachments set filename = ''hijacked.pdf'' where id = %L', v_att)),
+    '42501',
+    'attachments cannot be renamed'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'delete from public.attachments where id = %L', v_att)),
+    '42501',
+    'attachments cannot be deleted from the client side'
+  );
+
+  -- Storage doors: exactly SELECT + INSERT on the bucket, never UPDATE/DELETE.
+  select count(*) into v_count from pg_policies
+   where schemaname = 'storage' and tablename = 'objects'
+     and policyname = 'attachments_bucket_select_active'
+     and cmd = 'SELECT';
+  return next is(v_count, 1::bigint,
+    'the client-attachments bucket SELECT policy exists');
+
+  select count(*) into v_count from pg_policies
+   where schemaname = 'storage' and tablename = 'objects'
+     and policyname = 'attachments_bucket_insert_active'
+     and cmd = 'INSERT';
+  return next is(v_count, 1::bigint,
+    'the client-attachments bucket INSERT policy exists (F081 upload door)');
+
+  select count(*) into v_count from pg_policies
+   where schemaname = 'storage' and tablename = 'objects'
+     and policyname like 'attachments%'
+     and cmd not in ('SELECT', 'INSERT');
+  return next is(v_count, 0::bigint,
+    'no UPDATE/DELETE policy on the bucket for client roles');
+
+  -- -----------------------------------------------------------------------
+  -- F081: record_attachment — the sanctioned write path
+  -- -----------------------------------------------------------------------
+
+  if to_regprocedure('public.record_attachment(uuid,text,text,text,bigint)') is null then
+    return next skip(9, 'record_attachment not yet migrated (F081)');
+    return;
+  end if;
+
+  -- Permission: read-only roles cannot attach files.
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.record_attachment(%L, ''x.pdf'', %L || ''/a-x.pdf'')', v_org_a, v_org_a)),
+    '42501',
+    'a viewer cannot record an attachment'
+  );
+
+  -- The RPC refuses content problems with distinct, deliberate errcodes.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.record_attachment(%L, '''', %L || ''/a-x.pdf'')', v_org_a, v_org_a)),
+    '23514',
+    'a blank filename is refused'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.record_attachment(%L, ''x.pdf'', ''other-org/99999999-9999-4999-8999-999999999999-x.pdf'')', v_org_a)),
+    '22023',
+    'a storage path under another organisation''s prefix is refused'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.record_attachment(%L, ''ghost.pdf'', %L || ''/22222222-2222-4222-8222-222222222222-ghost.pdf'')', v_org_a, v_org_a)),
+    'P0002',
+    'a storage path with no actual object behind it is refused'
+  );
+
+  -- The happy path requires the object to really be in the bucket first:
+  -- fixture it as the superuser, exactly as the browser's upload would have.
+  insert into storage.objects (bucket_id, name)
+  values ('client-attachments',
+          v_org_a::text || '/33333333-3333-4333-8333-333333333333-signed.pdf');
+
+  perform tests.login_as(v_cam_a);
+  select public.record_attachment(
+    v_org_a, 'signed agreement.pdf',
+    v_org_a::text || '/33333333-3333-4333-8333-333333333333-signed.pdf',
+    'application/pdf', 12345)
+    into v_att;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  return next ok(v_att is not null, 'a CAM records an attachment whose object exists');
+  select count(*) into v_count from public.attachments
+   where id = v_att and uploaded_by = v_cam_a
+     and filename = 'signed agreement.pdf' and size_bytes = 12345;
+  return next is(v_count, 1::bigint,
+    'the recorded row carries the caller as uploaded_by plus the metadata given');
+
+  -- Duplicate recording of the same path hits the unique storage_path.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.record_attachment(%L, ''again.pdf'', %L || ''/33333333-3333-4333-8333-333333333333-signed.pdf'')', v_org_a, v_org_a)),
+    '23505',
+    'recording the same storage path twice is refused'
+  );
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- Restricted editing (F020, #23): the config table, the column-guard trigger and
+-- the config-driven suggestion path
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_restricted_editing()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_org_a       uuid := '00000000-0000-4000-b000-000000000002';  -- owned by cam_a
+  v_suggestion  uuid;
+  v_live        text;
+  v_count       bigint;
+begin
+  if not tests.tables_exist('organisations', 'users', 'edit_suggestions', 'restricted_edit_fields')
+     or to_regproc('public.enforce_restricted_org_columns') is null
+     or to_regprocedure('public.add_restricted_edit_field(text, text)') is null then
+    return next skip(24, 'restricted editing tables/RPCs not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- AC1: an owning CAM cannot save a sensitive-field change directly. This is the
+  -- direct-write hole §3.2 documented — same wall meets a hand-crafted API call,
+  -- because the trigger sits below the app.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set legal_name = ''Sneaky Rename'' where id = %L', v_org_a)),
+    '42501',
+    'an owning CAM cannot update legal_name directly (AC1)'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set website = ''https://sneaky.example'' where id = %L', v_org_a)),
+    '42501',
+    'an owning CAM cannot update website directly'
+  );
+
+  -- AC2: non-sensitive fields stay directly editable.
+  return next ok(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set trading_name = ''My Trading Name'' where id = %L', v_org_a)) is null,
+    'an owning CAM can still edit a non-restricted column (AC2)'
+  );
+
+  -- Admin keeps the §3.2 write path in full.
+  return next ok(
+    tests.sqlstate_of(v_admin, format(
+      'update public.organisations set legal_name = ''Admin Renamed Ltd'' where id = %L', v_org_a)) is null,
+    'an admin updates restricted columns directly, as before'
+  );
+
+  -- Everyone else is stopped upstream by the §3.2 UPDATE policy: their statement
+  -- touches zero rows rather than raising. The point of these two is that neither
+  -- role gains anything from the trigger's existence.
+  perform tests.login_as(v_viewer);
+  update public.organisations set trading_name = 'Viewer Was Here' where id = v_org_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select trading_name into v_live from public.organisations where id = v_org_a;
+  return next is(v_live, 'My Trading Name',
+    'a viewer''s direct write touches zero rows (RLS stops it before the trigger)');
+
+  perform tests.login_as(v_deactivated);
+  update public.organisations set trading_name = 'Ghost Was Here' where id = v_org_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select trading_name into v_live from public.organisations where id = v_org_a;
+  return next is(v_live, 'My Trading Name',
+    'a deactivated user''s direct write touches zero rows too');
+
+  -- Config table RLS: admins manage it, CAMs read active rows (the suggest-edit UI
+  -- needs the live list), viewers get nothing.
+  return next ok(
+    not has_table_privilege('authenticated', 'public.restricted_edit_fields', 'INSERT')
+    and not has_table_privilege('authenticated', 'public.restricted_edit_fields', 'UPDATE')
+    and not has_table_privilege('authenticated', 'public.restricted_edit_fields', 'DELETE'),
+    'authenticated holds no direct write privilege on restricted_edit_fields'
+  );
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.restricted_edit_fields;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 6::bigint,
+    'a CAM sees exactly the six seeded active restricted fields');
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.restricted_edit_fields;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'a viewer sees no restricted-field configuration');
+
+  -- Who may change the configuration: admins only, with a reason, on real text
+  -- columns only.
+  return next is(
+    tests.sqlstate_of(v_cam_b, format(
+      'select public.add_restricted_edit_field(''trading_name'', ''test'')')),
+    '42501',
+    'only an admin may add a restriction'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, 'select public.add_restricted_edit_field(''trading_name'', ''   '')'),
+    '23514',
+    'a blank reason is refused — the panel shows why a field is locked'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, 'select public.add_restricted_edit_field(''no_such_column'', ''test'')'),
+    '23514',
+    'restricting a column organisations does not have is refused'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, 'select public.add_restricted_edit_field(''owner_id'', ''test'')'),
+    '23514',
+    'the protected system columns cannot be restricted'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, 'select public.add_restricted_edit_field(''organisation_type'', ''test'')'),
+    '23514',
+    'enum-typed columns cannot be restricted — only text columns'
+  );
+
+  -- The payoff: restricting trading_name at runtime moves BOTH enforcement points.
+  return next ok(
+    tests.sqlstate_of(v_admin, 'select public.add_restricted_edit_field(''trading_name'', ''Trading names feed dedup too — restricted from the #23 follow-up call.'')') is null,
+    'admin adds trading_name to the restricted set'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set trading_name = ''Now Sneaky'' where id = %L', v_org_a)),
+    '42501',
+    'the column-guard trigger enforces a newly added restriction immediately'
+  );
+  return next ok(
+    tests.sqlstate_of(v_cam_b, format(
+      'select public.suggest_organisation_edit(%L, ''trading_name'', ''B Co Trading'')', v_org_a)) is null,
+    'and the suggestion path accepts the runtime-added field'
+  );
+
+  -- Approval must APPLY through the guarded dynamic apply-back — this is the case
+  -- the F078/F079 hardcoded UPDATE silently dropped on the floor.
+  select id into v_suggestion
+    from public.edit_suggestions
+   where organisation_id = v_org_a and field_name = 'trading_name' and status = 'pending';
+
+  perform tests.login_as(v_admin);
+  perform public.decide_edit_suggestion(v_suggestion, true, null);
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select trading_name into v_live from public.organisations where id = v_org_a;
+  return next is(v_live, 'B Co Trading',
+    'approving a suggestion against a runtime-added field applies the value (dynamic apply-back)');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'restricted_field_added';
+  return next ok(v_count >= 1,
+    'adding a restriction is audited');
+
+  -- Retire the restriction: history survives, new suggestions stop, direct writes
+  -- resume.
+  return next ok(
+    tests.sqlstate_of(v_admin, 'select public.deactivate_restricted_edit_field(''trading_name'')') is null,
+    'admin retires the trading_name restriction'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''trading_name'', ''Whatever'')', v_org_a)),
+    '23514',
+    'a retired field stops accepting suggestions immediately'
+  );
+  return next ok(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set trading_name = ''Free Again'' where id = %L', v_org_a)) is null,
+    'and its direct write opens again for the owning CAM'
+  );
+
+  select count(*) into v_count from public.audit_log
+   where action = 'restricted_field_removed';
+  return next ok(v_count >= 1,
+    'retiring a restriction is audited too');
+
+  -- Same side-effect hygiene as suite_edit_suggestions: the AC3 notification was
+  -- asserted above; clear it before suite_notifications counts fixtures.
+  delete from public.notifications where notification_type = 'edit_suggestion_decided';
+
+  -- The FK swap: a suggestion row cannot reference a field outside the config.
+  -- Runs unimpersonated (the table owner bypasses RLS) so the FK itself is what is
+  -- under test, not the missing INSERT grant.
+  begin
+    insert into public.edit_suggestions
+      (organisation_id, field_name, proposed_value, requested_by)
+    values
+      (v_org_a, 'not_in_config', 'X', v_cam_a);
+    return next ok(false, 'an unknown field_name violates the config FK');
+  exception when foreign_key_violation then
+    return next ok(true, 'an unknown field_name violates the config FK');
+  end;
+end;
+$$;
+
 select * from tests.suite_core();
 select * from tests.suite_viewer();
 select * from tests.suite_users();
@@ -4249,6 +4926,10 @@ select * from tests.suite_outreach_status();
 select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
 select * from tests.suite_ownership_requests();
+select * from tests.suite_edit_suggestions();
+select * from tests.suite_notifications();
+select * from tests.suite_attachments();
+select * from tests.suite_restricted_editing();
 select * from tests.suite_source_tracking();
 select * from tests.suite_manual_entries();
 select * from tests.suite_url_import();
@@ -4258,7 +4939,6 @@ select * from tests.suite_saved_views();
 select * from tests.suite_client_criteria();
 select * from tests.suite_data_handling_rules();
 select * from tests.suite_personal_data_exclusion();
-select * from tests.suite_notifications();
 
 select * from finish();
 

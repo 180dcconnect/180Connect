@@ -1,71 +1,81 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
+import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
+import { Rise, Stage } from "@/components/dashboard-stage";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { OutreachPreferencesForm } from "./preferences-form";
 import type { GeographicReach, IncomeBand } from "./constants";
 
 type OutreachPreferencesRow = {
   preferred_geographic_reach: GeographicReach[] | null;
+  preferred_cities: string[] | null;
   preferred_sectors: string[] | null;
   preferred_income_bands: IncomeBand[] | null;
+  prioritise_grant_recipients: boolean | null;
 };
 
 export default async function OutreachPreferencesPage() {
-  const authorization = await getCurrentActor(undefined, {
+  // F200 review — permission boundary: the settings rail hides this row behind
+  // `client:edit` (a viewer has no outreach to target), so the page enforces the
+  // same permission rather than letting a direct URL reach a form the rail says
+  // they should not have. Same gate as the save action below us.
+  const authorization = await getCurrentActor("client:edit", {
     route: "/settings/outreach-preferences",
   });
   if (!authorization.ok) {
-    redirect("/login");
+    redirect(adminRouteDestination(authorization.reason));
   }
 
   const supabase = await createClient();
-  // RLS scopes this to the caller's own row (docs/rls-permission-matrix.md §3.13) —
-  // no user_id filter needed here, there is nothing else this query could return.
+  // F187 gave admins read access to every CAM's preferences row (matrix §3.13,
+  // outreach_preferences_select_admin) so they can review how a CAM's queue is
+  // configured. RLS therefore no longer scopes this query to the caller — filter
+  // explicitly, or an admin's maybeSingle matches every CAM and errors out.
   const { data, error } = await supabase
     .from("outreach_preferences")
-    .select("preferred_geographic_reach, preferred_sectors, preferred_income_bands")
+    .select("preferred_geographic_reach, preferred_cities, preferred_sectors, preferred_income_bands, prioritise_grant_recipients")
+    .eq("user_id", authorization.actor.id)
     .maybeSingle<OutreachPreferencesRow>();
 
+  // F200 review — DoD (every failure visible and recorded): an ignored error here
+  // rendered "No preference" over preferences that may well exist. Logged and
+  // surfaced through the shared F236 InlineAlert, same as the rest of the app.
   if (error) {
     await reportError(error, { operation: "settings.outreach_preferences.page_load" });
   }
 
   return (
-    <main className="min-h-screen bg-[#f1f2f4] p-6">
-      <section className="mx-auto max-w-xl rounded-2xl bg-white p-8 shadow-sm">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold">Outreach preferences</h1>
-            <p className="mt-1 text-sm text-foreground/65">
-              Set the geography, sector and size focus for your outreach queue.
-            </p>
-          </div>
-          <Link
-            className="text-sm font-bold text-brand hover:underline"
-            href="/dashboard"
-          >
-            Back to dashboard
-          </Link>
-        </div>
+    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+      <Stage className="mx-auto w-full max-w-2xl space-y-10">
+        <Rise>
+          <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
+            Outreach preferences
+          </h1>
+          <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
+            Set the geography, sector and size focus for your outreach queue.
+          </p>
+        </Rise>
 
         {error ? (
-          <div className="mt-6">
+          <Rise>
             <InlineAlert
               variant="page"
               message="Your preferences could not be loaded. Please refresh and try again."
             />
-          </div>
+          </Rise>
         ) : (
-          <OutreachPreferencesForm
-            initialGeographicReach={data?.preferred_geographic_reach ?? []}
-            initialSectors={data?.preferred_sectors ?? []}
-            initialIncomeBands={data?.preferred_income_bands ?? []}
-          />
+          <Rise>
+            <OutreachPreferencesForm
+              initialGeographicReach={data?.preferred_geographic_reach ?? []}
+              initialCities={data?.preferred_cities ?? []}
+              initialSectors={data?.preferred_sectors ?? []}
+              initialIncomeBands={data?.preferred_income_bands ?? []}
+            />
+          </Rise>
         )}
-      </section>
-    </main>
+      </Stage>
+    </div>
   );
 }

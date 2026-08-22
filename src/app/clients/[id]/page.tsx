@@ -22,10 +22,17 @@ import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
 import { Pill, SectionCard } from "./section-card";
+import { TagsSection } from "./tags-section";
 import { BookletPanel } from "./booklet-panel";
 import { formatAttachments, type AttachmentRow } from "@/lib/attachments";
 import { AttachmentsSection } from "./attachments-section";
 import { UploadAttachmentForm } from "./upload-attachment-form";
+import {
+  EDIT_SUGGESTION_SELECT,
+  type EditSuggestionRow,
+  restrictedFieldLabel,
+} from "@/lib/edit-suggestions";
+import { SuggestEditSection } from "./suggest-edit-section";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -121,6 +128,34 @@ export default async function ClientDetailPage({
     });
   }
 
+  // F191/F192/F193: this client's currently assigned tags, and the full
+  // list of tags for the assign dropdown.
+  const { data: clientTagRows, error: clientTagsError } = await supabase
+    .from("org_tags")
+    .select("tag_id, tags(name)")
+    .eq("organisation_id", id);
+  if (clientTagsError) {
+    await reportError(clientTagsError, {
+      operation: "clients.detail_tags",
+      organisationId: id,
+    });
+  }
+  const clientTags = (clientTagRows ?? [])
+    .filter((row) => row.tags)
+    .map((row) => ({
+      id: row.tag_id,
+      name: (row.tags as unknown as { name: string }).name,
+    }));
+
+  const { data: allTagsData, error: allTagsError } = await supabase
+    .from("tags")
+    .select("id, name")
+    .order("name");
+  if (allTagsError) {
+    await reportError(allTagsError, { operation: "clients.detail_all_tags" });
+  }
+  const allTags = allTagsData ?? [];
+
   // The generated Supabase types do not know about this branch's new RPC until the
   // remote schema is regenerated, so narrow its table-shaped result at this boundary.
   const { data: rawSourceRows, error: sourcesError } = await supabase
@@ -136,8 +171,10 @@ export default async function ClientDetailPage({
     (rawSourceRows ?? []) as OrganisationSourceRow[],
   );
 
-  // F080/F081: RLS (attachments_select_active) shares read across every
-  // active role, same reasoning as the sources query above.
+  // F080: RLS (attachments_select_active) shares read across every active
+  // role, same reasoning as the sources query above. No write path exists yet
+  // (F081) — see 20260823090000_create_attachments.sql's header — so this is
+  // empty for every client today; that is AC3's correct state, not a bug.
   const { data: attachmentRows, error: attachmentsError } = await supabase
     .from("attachments")
     .select(
@@ -205,6 +242,57 @@ export default async function ClientDetailPage({
   const suppressed = latest?.status === "active";
   const suppressionPending = latest?.status === "pending";
 
+  // #79/#80/#81 (F077/F078/F079): this client's edit suggestions, fetched without a
+  // status filter and filtered in the component — RLS already scopes what each role
+  // may see (pending rows to every active CAM; authors also their own settled rows;
+  // admins everything), so the query can just ask for the org's rows. CAMs get their
+  // proposal form plus outcome notices; admins get inline decision cards. Viewers
+  // have no write access at all, so the section is not rendered for them.
+  let suggestions: EditSuggestionRow[] = [];
+  if (authorization.actor.role !== "viewer") {
+    const { data: suggestionRows, error: suggestionError } = await supabase
+      .from("edit_suggestions")
+      .select(EDIT_SUGGESTION_SELECT)
+      .eq("organisation_id", id)
+      .order("created_at", { ascending: false });
+    if (suggestionError) {
+      await reportError(suggestionError, {
+        operation: "clients.detail_edit_suggestions",
+        organisationId: id,
+      });
+    }
+    suggestions = (suggestionRows ?? []) as unknown as EditSuggestionRow[];
+  }
+
+  // #23 (F020): the restricted fields are configuration now, not a compile-time
+  // list — the proposal form offers exactly what RESTRICTED_EDIT_FIELDS says is
+  // active (RLS scopes the read to CAMs and admins). The current values come off the
+  // client row already fetched above, so "current vs proposed" reads in one glance.
+  let restrictedFields: { field_name: string; label: string }[] = [];
+  if (authorization.actor.role === "cam") {
+    const { data: fieldRows, error: fieldError } = await supabase
+      .from("restricted_edit_fields")
+      .select("field_name")
+      .eq("active", true)
+      .order("field_name");
+    if (fieldError) {
+      await reportError(fieldError, {
+        operation: "clients.detail_restricted_fields",
+        organisationId: id,
+      });
+    }
+    restrictedFields = (fieldRows ?? []).map((row) => ({
+      field_name: row.field_name,
+      label: restrictedFieldLabel(row.field_name),
+    }));
+  }
+
+  const sensitiveCurrentValues = Object.fromEntries(
+    restrictedFields.map((field) => [
+      field.field_name,
+      client[field.field_name as keyof typeof client] as string | null,
+    ]),
+  ) as Record<string, string | null>;
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="mx-auto w-full max-w-5xl space-y-6">
@@ -297,6 +385,23 @@ export default async function ClientDetailPage({
                 missionEnrichedAt={enrichment?.enriched_at ?? null}
               />
             </Rise>
+
+            {/* #79/#80/#81 (F077/F078/F079): sits directly under the values it
+                governs, so "current vs proposed" reads in one glance. CAMs propose;
+                admins decide inline. Viewers are absent because they have no write
+                access at all. */}
+            {authorization.actor.role !== "viewer" && (
+              <Rise>
+                <SuggestEditSection
+                  organisationId={client.id}
+                  actorId={authorization.actor.id}
+                  actorRole={authorization.actor.role}
+                  restrictedFields={restrictedFields}
+                  currentValues={sensitiveCurrentValues}
+                  suggestions={suggestions}
+                />
+              </Rise>
+            )}
 
             {/* F082 — Generate Client Booklet: kept as its own distinct
                 brand-tinted card rather than wrapped in SectionCard — it's the
@@ -432,6 +537,8 @@ export default async function ClientDetailPage({
                   attachments={attachments}
                   error={Boolean(attachmentsError)}
                 />
+                {/* F081: upload sits inside the same card so the new file
+                    appears in the list directly above it on refresh (AC4). */}
                 {canEdit && <UploadAttachmentForm organisationId={client.id} />}
               </SectionCard>
             </Rise>
@@ -467,7 +574,16 @@ export default async function ClientDetailPage({
                 )}
               </SectionCard>
             </Rise>
-
+            <Rise>
+              <SectionCard headingId="tags-heading" title="Tags">
+                <TagsSection
+                  organisationId={client.id}
+                  initialClientTags={clientTags}
+                  availableTags={allTags}
+                  canEdit={canEdit}
+                />
+              </SectionCard>
+            </Rise>
             {(isAdmin || ownerId === authorization.actor.id) && (
               <Rise>
                 <SectionCard

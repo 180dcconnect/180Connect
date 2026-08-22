@@ -4,10 +4,7 @@ import type { Attachment } from "@/lib/attachments";
  * F080 — list / empty / error states for a client's attachments (AC1, AC3).
  * No interactivity, so this stays a server component: the "Open" link is a
  * plain anchor to the download route, which does the signed-URL exchange and
- * redirects — nothing here needs client-side state. F081's upload form is a
- * sibling, not a child of this one, so a successful upload only needs to
- * refresh the page data (see upload-attachment-form.tsx) for this list to
- * pick it up.
+ * redirects — nothing here needs client-side state.
  */
 export function AttachmentsSection({
   organisationId,
@@ -42,7 +39,7 @@ export function AttachmentsSection({
           className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-3 first:pt-0 last:pb-0"
         >
           <div className="min-w-0">
-            {/* Opens (new tab) or downloads from this one link — the route
+            {/* AC2: opens (new tab) or downloads from this one link — the route
                 behind it exchanges the row for a short-lived signed URL, since
                 the bucket is private. */}
             <a

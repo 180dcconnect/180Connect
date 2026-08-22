@@ -1,0 +1,44 @@
+# OpenCode GitHub integration (on-demand).
+#
+# Comment `/opencode <task>` or `/oc <task>` on any PR or issue and OpenCode
+# runs inside this Actions runner: it reads the thread/diff context, replies
+# in the thread, and can push branches or commits when asked to fix something.
+# Commenting `/oc` on specific lines in a PR's "Files changed" tab gives it
+# that file's path, line numbers, and diff context automatically.
+#
+# Setup already done:
+#   - opencode-agent GitHub App installed on this repo
+#   - OPENCODE_API_KEY stored in Actions secrets (OpenCode Zen key)
+#
+# Model: `x-preview-f-free`, a free-tier Zen model with a zero-retention
+# provider policy. Free models are limited-time; if runs start failing with
+# an unknown-model error, swap the `model:` line below for another Zen model.
+name: opencode
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+jobs:
+  opencode:
+    if: |
+      contains(github.event.comment.body, '/oc') ||
+      contains(github.event.comment.body, '/opencode')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Run OpenCode
+        uses: anomalyco/opencode/github@latest
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        with:
+          model: opencode/x-preview-f-free

@@ -221,6 +221,7 @@ set search_path = ''
 as $$
 declare
   v_pruned int;
+  v_batch  int;
 begin
   delete from public.notifications
   where read_at is not null and read_at < now() - interval '90 days';
@@ -230,7 +231,10 @@ begin
   delete from public.notifications
   where read_at is null and created_at < now() - interval '1 year';
 
-  get diagnostics v_pruned = v_pruned + row_count;
+  -- GET DIAGNOSTICS takes a bare diagnostic item, not an expression, so the
+  -- second count lands in its own variable before being added.
+  get diagnostics v_batch = row_count;
+  v_pruned := v_pruned + v_batch;
   return v_pruned;
 end;
 $$;

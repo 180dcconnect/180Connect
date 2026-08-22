@@ -7,6 +7,7 @@ import {
   pendingSuggestionNotice,
   restrictedFieldLabel,
   restrictedFieldRpcFailure,
+  validateDeactivateRestrictedFieldInput,
   SENSITIVE_FIELD_LABELS,
   SENSITIVE_ORG_FIELDS,
   suggestEditAvailability,
@@ -347,6 +348,21 @@ describe("validateRestrictedFieldInput (F020)", () => {
       reason: "x".repeat(501),
     });
     assert.equal(result.success, false);
+  });
+});
+
+describe("validateDeactivateRestrictedFieldInput (F020)", () => {
+  it("accepts and trims a field name", () => {
+    const result = validateDeactivateRestrictedFieldInput({ fieldName: " trading_name " });
+    assert.equal(result.success, true);
+    if (result.success) assert.equal(result.data.fieldName, "trading_name");
+  });
+
+  it("refuses blank or non-string names", () => {
+    for (const bad of ["   ", "", null, 42]) {
+      const result = validateDeactivateRestrictedFieldInput({ fieldName: bad });
+      assert.equal(result.success, false, `expected refusal for ${String(bad)}`);
+    }
   });
 });
 

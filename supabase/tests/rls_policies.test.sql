@@ -4542,7 +4542,7 @@ begin
   if not tests.tables_exist('organisations', 'users', 'edit_suggestions', 'restricted_edit_fields')
      or to_regproc('public.enforce_restricted_org_columns') is null
      or to_regprocedure('public.add_restricted_edit_field(text, text)') is null then
-    return next skip(30, 'restricted editing tables/RPCs not yet migrated');
+    return next skip(24, 'restricted editing tables/RPCs not yet migrated');
     return;
   end if;
 
@@ -4751,6 +4751,7 @@ select * from tests.suite_suppressions();
 select * from tests.suite_ownership_requests();
 select * from tests.suite_edit_suggestions();
 select * from tests.suite_notifications();
+select * from tests.suite_restricted_editing();
 select * from tests.suite_source_tracking();
 select * from tests.suite_manual_entries();
 select * from tests.suite_url_import();

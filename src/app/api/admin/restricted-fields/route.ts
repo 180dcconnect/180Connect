@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import {
   restrictedFieldRpcFailure,
+  validateDeactivateRestrictedFieldInput,
   validateRestrictedFieldInput,
   type RestrictedFieldRow,
 } from "@/lib/edit-suggestions";
@@ -20,10 +20,6 @@ import { createClient } from "@/lib/supabase/server";
  * DELETE  retire a restriction (soft-disable, audited) — the row stays so historical
  *         suggestions keep their FK and the trail of what was restricted survives.
  */
-
-const deactivateSchema = z.object({
-  fieldName: z.string().trim().min(1),
-});
 
 function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
   const status = reason === "unauthenticated" ? 401 : 403;
@@ -116,16 +112,15 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "The request body must be valid JSON." }, { status: 400 });
   }
 
-  const parsed = deactivateSchema.safeParse(input);
+  const parsed = validateDeactivateRestrictedFieldInput({
+    fieldName: (input as { fieldName?: unknown })?.fieldName,
+  });
   if (!parsed.success) {
     logSecurityEvent("validation.rejected", {
       route: "/api/admin/restricted-fields",
-      fieldCount: parsed.error.issues.length,
+      fieldCount: 1,
     });
-    return NextResponse.json(
-      { error: parsed.error.issues[0]?.message ?? "Check the request." },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: parsed.message }, { status: 400 });
   }
 
   const supabase = await createClient();

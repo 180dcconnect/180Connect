@@ -73,6 +73,10 @@ begin
   for r in
     select field_name from public.restricted_edit_fields where active
   loop
+    -- NOTE: this SELECT runs through RLS as the calling user (invoker rights).
+    -- Enforcement is correct only while the CAM policy on restricted_edit_fields
+    -- exposes active rows (matrix §3.20) — if that policy ever narrows, the guard
+    -- weakens to whatever the caller can see. suite_restricted_editing pins it.
     if (to_jsonb(new) ->> r) is distinct from (to_jsonb(old) ->> r) then
       raise exception 'the % field is admin-managed — submit a suggested edit instead', r
         using errcode = '42501';

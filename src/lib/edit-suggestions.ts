@@ -401,6 +401,26 @@ export function validateRestrictedFieldInput(input: {
   };
 }
 
+/**
+ * Validates one retire-restriction submission (same wrapper discipline as the add
+ * path — no raw Zod at the route).
+ */
+export function validateDeactivateRestrictedFieldInput(input: {
+  fieldName: unknown;
+}): { success: true; data: { fieldName: string } } | { success: false; message: string } {
+  const parsed = safeValidate(
+    z.object({ fieldName: nonEmptyTrimmed(100, "Name the field to retire.") }),
+    { fieldName: input.fieldName },
+  );
+  if (!parsed.success) {
+    return {
+      success: false,
+      message: parsed.fieldErrors.fieldName?.[0] ?? "Name the field to retire.",
+    };
+  }
+  return { success: true, data: { fieldName: parsed.data.fieldName.trim() } };
+}
+
 const CONFIG_GENERIC_FAILURE =
   "The change could not be saved. Refresh and try again.";
 

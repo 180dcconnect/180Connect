@@ -940,6 +940,41 @@ is the §2 pattern ("what RLS cannot do"), not an oversight.
 
 ---
 
+### 3.20 Restricted edit fields — admin-configured enforcement, CAM read
+
+Backs F020 Restricted Editing (#23),
+`supabase/migrations/20260822160000_create_restricted_edit_fields.sql`. New
+table — not previously reserved in the Data Model. Holds the set of
+`ORGANISATIONS` columns a CAM may not write directly; both enforcement points
+read it live (the column-guard trigger of §3.2 and
+`suggest_organisation_edit`), so a change here re-scopes restricted editing
+with no migration and no deploy.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `RESTRICTED_EDIT_FIELDS` | admins: all rows · CAMs: active rows only · viewers: none (§4 zero rows) | — (RPC only) | — (RPC only) | — (never; soft-disable via `active = false`) |
+
+No direct INSERT/UPDATE/DELETE grant to anyone. Both writes are SECURITY
+DEFINER RPCs that self-check `app.is_admin()` and audit in-transaction
+(`restricted_field_added` / `restricted_field_removed`,
+docs/audit-log-pattern.md §1 — changing this table changes who can write
+client records, which is approval-state territory):
+
+- `add_restricted_edit_field(field_name, reason)` — validates the column is a
+  real `text` column of `organisations` outside the protected system set;
+  re-adding a retired row reactivates it instead of duplicating.
+- `deactivate_restricted_edit_field(field_name)` — soft-disable only. Rows are
+  never deleted: `EDIT_SUGGESTIONS.field_name` is a foreign key to this table,
+  and the record of what was restricted when is part of the trail.
+
+The trigger depends on this table's CAM SELECT policy exposing **active**
+rows — it reads the config through RLS as the calling user. If that policy
+ever narrows below active-rows-for-CAMs, direct-write enforcement silently
+weakens to whatever remains visible (pgTAP suite_restricted_editing guards
+the current contract).
+
+---
+
 ## 4. Denial behaviour and feedback
 
 Important and frequently got wrong: **a blocked read is not an error.**

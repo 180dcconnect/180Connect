@@ -283,23 +283,23 @@ export function SuggestEditSection({
                     replaces it.
                   </p>
                 )}
-                  <label className="flex flex-col gap-1.5 text-sm">
-                    <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-                      Corrected value
-                    </span>
-                    <Input
-                      type="text"
-                      name="fieldValue"
-                      required
-                      placeholder={`The correct ${restrictedFieldLabel(fieldName).toLowerCase()}`}
-                      className="rounded-xl bg-white"
-                    />
-                  </label>
-                  <OriginButton type="submit" size="sm" loading={pending} disabled={pending}>
-                    {pending ? "Submitting…" : "Submit suggestion"}
-                  </OriginButton>
-                </>
-              )}
+                <label className="flex flex-col gap-1.5 text-sm">
+                  <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+                    Corrected value
+                  </span>
+                  <Input
+                    type="text"
+                    name="fieldValue"
+                    required
+                    placeholder={`The correct ${restrictedFieldLabel(fieldName).toLowerCase()}`}
+                    className="rounded-xl bg-white"
+                  />
+                </label>
+                <OriginButton type="submit" size="sm" loading={pending} disabled={pending}>
+                  {pending ? "Submitting…" : "Submit suggestion"}
+                </OriginButton>
+              </>
+            )}
 
             {state.kind === "success" && (
               <p aria-live="polite" className="text-[13px] font-bold text-emerald-700">

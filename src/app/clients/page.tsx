@@ -10,6 +10,7 @@ import {
   filterByCity,
   filterByStatus,
   filterBySource,
+  filterByTags,
   searchClients,
   visibleClients,
   type ClientListRow,
@@ -45,6 +46,10 @@ type SearchParams = Promise<{
   city?: string;
   status?: string;
   source?: string;
+  // F193 — tags is inherently multi-select (OR logic across selected tags),
+  // so unlike the single-value filters above it can arrive as a string[]
+  // when BrandSearchBar's panel has more than one tag checked.
+  tags?: string | string[];
   /** Funnel stage the breakdown counts. */
   stage?: string;
   /** Field the breakdown groups by, and which end of it to show. */
@@ -110,6 +115,7 @@ export default async function ClientsPage({
     city,
     status,
     source,
+    tags: tagsParam,
     stage: stageParam,
     sort: sortParam,
     dir: dirParam,
@@ -141,6 +147,7 @@ export default async function ClientsPage({
     supabase
       .from("tags")
       .select("id, name")
+      .order("name")
       .overrideTypes<{ id: string; name: string }[], { merge: false }>(),
   ]);
 
@@ -157,26 +164,32 @@ export default async function ClientsPage({
     await reportError(allTags.error, { operation: "clients.page_tags" });
   }
 
-  // Read-only lookup for row pills — F193's filter-by-tag control is a separate,
-  // not-yet-merged piece of work; this is just id → name for display.
-  const tagNameById = new Map((allTags.data ?? []).map((tag) => [tag.id, tag.name]));
+  const availableTags = allTags.data ?? [];
+  // id → name for both the row pills and the filter's chip labels.
+  const tagNameById = new Map(availableTags.map((tag) => [tag.id, tag.name]));
 
   const allVisibleClients = visibleClients(organisations.data ?? [], openSuppressions.data ?? []);
-  
+
   const uniqueCities = Array.from(new Set(allVisibleClients.map(c => c.city).filter(Boolean))).sort() as string[];
   const uniqueStatuses = Array.from(new Set(allVisibleClients.map(c => c.outreachStatusLabel).filter(Boolean))).sort() as string[];
-  
+
   const uniqueSourceTypes = Array.from(new Set(allVisibleClients.map(c => c.organisation_type).filter(Boolean)));
   const uniqueSources = uniqueSourceTypes.map(t => SOURCE_LABELS[t] || t).sort();
+
+  // BrandSearchBar always writes a multi-selected category as repeated params
+  // (see its submitSearch), so this can legitimately arrive as one string or
+  // several — normalise to an array once, here, rather than at every call site.
+  const tagFilter = tagsParam ? (Array.isArray(tagsParam) ? tagsParam : [tagsParam]) : [];
 
   let matchingClients = allVisibleClients;
   matchingClients = filterByOwner(matchingClients, ownerFilter);
   matchingClients = filterByCity(matchingClients, city);
   matchingClients = filterByStatus(matchingClients, status);
   matchingClients = filterBySource(matchingClients, source);
+  matchingClients = filterByTags(matchingClients, tagFilter);
   matchingClients = searchClients(matchingClients, search);
   const teamMembers = team.data ?? [];
-  const filterActive = Boolean(ownerFilter || search || city || status || source);
+  const filterActive = Boolean(ownerFilter || search || city || status || source || tagFilter.length);
   // F166 AC1/AC3: this is the CAM viewing their own filter, not just any owner
   // filter — the heading, count label and empty state read "your clients" so the
   // view reads as its own thing rather than a generic filtered list.
@@ -197,14 +210,17 @@ export default async function ClientsPage({
    * Every link on this page is the current URL with one thing changed, so they
    * all go through here rather than each rebuilding the query string and quietly
    * dropping the parameters it doesn't know about. `undefined` clears a key.
+   * `tags` is the one multi-value key, so a value here may be a string[] —
+   * written back as a repeated param, matching how BrandSearchBar writes it.
    */
-  const hrefWith = (changes: Record<string, string | number | undefined>) => {
-    const base: Record<string, string | number | undefined> = {
+  const hrefWith = (changes: Record<string, string | string[] | number | undefined>) => {
+    const base: Record<string, string | string[] | number | undefined> = {
       owner: ownerFilter,
       q: search,
       city,
       status,
       source,
+      tags: tagFilter,
       stage: stageParam,
       sort: sortParam,
       dir: dirParam,
@@ -218,6 +234,10 @@ export default async function ClientsPage({
     for (const [key, value] of Object.entries(base)) {
       if (value === undefined || value === "") continue;
       if (key === "page" && Number(value) <= 1) continue;
+      if (Array.isArray(value)) {
+        value.forEach((entry) => params.append(key, entry));
+        continue;
+      }
       params.set(key, String(value));
     }
     const qs = params.toString();
@@ -273,13 +293,21 @@ export default async function ClientsPage({
               ...(status ? [{ category: "Filter by outreach status", label: status, value: status }] : []),
               ...(source ? [{ category: "Filter by source", label: source, value: source }] : []),
               ...(ownerFilter === "unassigned" ? [{ category: "Filter by owner", label: "Unassigned", value: "unassigned" }] : []),
-              ...(ownerFilter && ownerFilter !== "unassigned" && teamMembers.find(m => m.id === ownerFilter) ? [{ category: "Filter by owner", label: teamMembers.find(m => m.id === ownerFilter)?.full_name || "Unnamed CAM", value: ownerFilter }] : [])
+              ...(ownerFilter && ownerFilter !== "unassigned" && teamMembers.find(m => m.id === ownerFilter) ? [{ category: "Filter by owner", label: teamMembers.find(m => m.id === ownerFilter)?.full_name || "Unnamed CAM", value: ownerFilter }] : []),
+              // F193 — one chip per selected tag, so a three-tag filter reads as
+              // three removable chips rather than one that hides the others.
+              ...tagFilter.map((tagId) => ({
+                category: "Filter by tag",
+                label: tagNameById.get(tagId) ?? tagId,
+                value: tagId,
+              })),
             ]}
             params={{
               "Filter by city": "city",
               "Filter by outreach status": "status",
               "Filter by source": "source",
               "Filter by owner": "owner",
+              "Filter by tag": "tags",
             }}
             categories={{
               "Filter by city": uniqueCities.map(c => ({ label: c, value: c })),
@@ -288,7 +316,8 @@ export default async function ClientsPage({
               "Filter by owner": [
                 { label: "Unassigned", value: "unassigned" },
                 ...teamMembers.map(m => ({ label: m.full_name || "Unnamed CAM", value: m.id }))
-              ]
+              ],
+              "Filter by tag": availableTags.map((t) => ({ label: t.name, value: t.id })),
             }}
           />
         }

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
+import { isUuid } from "@/lib/validation";
 import {
   createDefaultGenerateBookletDeps,
   generateBooklet,
@@ -43,7 +43,7 @@ export async function POST(
   if (!authorization.ok) return denied(authorization.reason);
 
   const { id: organisationId } = await params;
-  if (!z.uuid().safeParse(organisationId).success) {
+  if (!isUuid(organisationId)) {
     return NextResponse.json({ error: "That client could not be found." }, { status: 400 });
   }
 

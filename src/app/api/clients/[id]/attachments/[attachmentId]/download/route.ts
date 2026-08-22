@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
+import { isUuid } from "@/lib/validation";
 
 /**
  * F080 AC2 — "opened or downloaded from the list". The attachments bucket is
@@ -31,10 +31,7 @@ export async function GET(
   if (!authorization.ok) return denied(authorization.reason);
 
   const { id: organisationId, attachmentId } = await params;
-  if (
-    !z.uuid().safeParse(organisationId).success ||
-    !z.uuid().safeParse(attachmentId).success
-  ) {
+  if (!isUuid(organisationId) || !isUuid(attachmentId)) {
     return NextResponse.json({ error: "That attachment could not be found." }, { status: 400 });
   }
 

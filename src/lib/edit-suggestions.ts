@@ -229,3 +229,90 @@ export function suggestEditAvailability({
 export function pendingSuggestionNotice(fieldName: SensitiveOrgField): string {
   return `A correction to ${SENSITIVE_FIELD_LABELS[fieldName]} is awaiting admin review — the value below is still the live one.`;
 }
+
+// ---------------------------------------------------------------------------
+// Admin queue + decisions (#80/#81, F078/F079)
+// ---------------------------------------------------------------------------
+
+/** Full row shape behind the admin queue and the client-profile decision cards.
+ *  Joins mirror OWNERSHIP_REQUEST_SELECT's alias style. */
+export type EditSuggestionRow = {
+  id: string;
+  organisation_id: string;
+  field_name: string;
+  current_value: string | null;
+  proposed_value: string;
+  status: EditSuggestionStatus;
+  requested_by: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  rejection_reason: string | null;
+  created_at: string;
+  organisations: { legal_name: string } | null;
+  requested_by_user: { full_name: string | null; email: string } | null;
+  decided_by_user: { full_name: string | null; email: string } | null;
+};
+
+/** Shared PostgREST select for the admin page's initial load and the GET route. */
+export const EDIT_SUGGESTION_SELECT = `
+  id, organisation_id, field_name, current_value, proposed_value, status,
+  requested_by, decided_by, decided_at, rejection_reason, created_at,
+  organisations ( legal_name ),
+  requested_by_user:users!edit_suggestions_requested_by_fkey ( full_name, email ),
+  decided_by_user:users!edit_suggestions_decided_by_fkey ( full_name, email )
+`;
+
+const DECIDE_GENERIC_FAILURE =
+  "The decision could not be saved. Refresh and try again.";
+
+/**
+ * Maps a Postgres error from decide_edit_suggestion onto something safe to show an
+ * admin. Every errcode below is one the RPC raises deliberately with an admin-readable
+ * message (see 20260822150000_create_decide_edit_suggestion_rpc.sql).
+ */
+export function decideEditRpcFailure(error: {
+  code?: string;
+  message?: string;
+}): RpcFailure {
+  if (!error.message?.trim()) {
+    return { status: 500, error: DECIDE_GENERIC_FAILURE };
+  }
+  switch (error.code) {
+    case "42501":
+      return { status: 403, error: error.message };
+    case "55000":
+      return { status: 409, error: error.message };
+    case "P0002":
+      return { status: 404, error: error.message };
+    default:
+      return { status: 500, error: DECIDE_GENERIC_FAILURE };
+  }
+}
+
+/**
+ * What the submitting CAM is told about a suggestion that has been decided — AC3 of
+ * F078 ("notification or a visible status"): the suggest-edit card renders this next
+ * to their own rows, so nobody waits on an answer that already happened.
+ */
+export function suggestionDecisionNotice(
+  status: Exclude<EditSuggestionStatus, "pending" | "superseded">,
+  fieldNameLabel: string,
+  rejectionReason?: string | null,
+): string {
+  const head =
+    status === "approved"
+      ? `An admin approved your correction to ${fieldNameLabel}. The live record now carries it.`
+      : `An admin declined your correction to ${fieldNameLabel}. The live record is unchanged.`;
+  const reason = rejectionReason?.trim();
+  return reason ? `${head} Reason: ${reason}` : head;
+}
+
+/** One line summarising a pending proposal, reused by both admin surfaces. */
+export function describePendingSuggestion(
+  fieldNameLabel: string,
+  currentValue: string | null,
+  proposedValue: string,
+): string {
+  const current = currentValue?.trim() || "Not provided";
+  return `${fieldNameLabel}: "${current}" → "${proposedValue}"`;
+}

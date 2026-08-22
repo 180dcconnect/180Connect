@@ -25,8 +25,9 @@ import { Pill, SectionCard } from "./section-card";
 import { TagsSection } from "./tags-section";
 import { BookletPanel } from "./booklet-panel";
 import {
+  EDIT_SUGGESTION_SELECT,
   SENSITIVE_ORG_FIELDS,
-  type PendingSuggestion,
+  type EditSuggestionRow,
   type SensitiveOrgField,
 } from "@/lib/edit-suggestions";
 import { SuggestEditSection } from "./suggest-edit-section";
@@ -217,26 +218,26 @@ export default async function ClientDetailPage({
   const suppressed = latest?.status === "active";
   const suppressionPending = latest?.status === "pending";
 
-  // #79 (F077): the open suggestions for this client, so a CAM sees what is already
-  // awaiting review before proposing a conflicting edit. RLS scopes the rows (pending
-  // ones are visible to every active CAM; authors also see their own settled rows),
-  // and the section below is only rendered for CAMs — admins edit these fields
-  // directly, viewers have no write access. Only pending rows are fetched: decided
-  // outcomes reach the CAM through F078/F079's notifications, not this list.
-  let pendingSuggestions: PendingSuggestion[] = [];
-  if (authorization.actor.role === "cam") {
+  // #79/#80/#81 (F077/F078/F079): this client's edit suggestions, fetched without a
+  // status filter and filtered in the component — RLS already scopes what each role
+  // may see (pending rows to every active CAM; authors also their own settled rows;
+  // admins everything), so the query can just ask for the org's rows. CAMs get their
+  // proposal form plus outcome notices; admins get inline decision cards. Viewers
+  // have no write access at all, so the section is not rendered for them.
+  let suggestions: EditSuggestionRow[] = [];
+  if (authorization.actor.role !== "viewer") {
     const { data: suggestionRows, error: suggestionError } = await supabase
       .from("edit_suggestions")
-      .select("id, field_name, current_value, proposed_value, requested_by")
+      .select(EDIT_SUGGESTION_SELECT)
       .eq("organisation_id", id)
-      .eq("status", "pending");
+      .order("created_at", { ascending: false });
     if (suggestionError) {
       await reportError(suggestionError, {
         operation: "clients.detail_edit_suggestions",
         organisationId: id,
       });
     }
-    pendingSuggestions = (suggestionRows ?? []) as unknown as PendingSuggestion[];
+    suggestions = (suggestionRows ?? []) as unknown as EditSuggestionRow[];
   }
 
   const sensitiveCurrentValues = Object.fromEntries(
@@ -339,17 +340,18 @@ export default async function ClientDetailPage({
               />
             </Rise>
 
-            {/* #79 (F077): CAM-only. Sits directly under the values it proposes to
-                correct, so "current vs proposed" reads in one glance; admins are
-                absent because they change these fields through the normal policy
-                (matrix §3.2), not by suggestion. */}
-            {authorization.actor.role === "cam" && (
+            {/* #79/#80/#81 (F077/F078/F079): sits directly under the values it
+                governs, so "current vs proposed" reads in one glance. CAMs propose;
+                admins decide inline. Viewers are absent because they have no write
+                access at all. */}
+            {authorization.actor.role !== "viewer" && (
               <Rise>
                 <SuggestEditSection
                   organisationId={client.id}
                   actorId={authorization.actor.id}
+                  actorRole={authorization.actor.role}
                   currentValues={sensitiveCurrentValues}
-                  pendingSuggestions={pendingSuggestions}
+                  suggestions={suggestions}
                 />
               </Rise>
             )}

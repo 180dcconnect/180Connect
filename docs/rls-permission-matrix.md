@@ -202,16 +202,22 @@ canonical-edit RPC or column-guard trigger (F224). The narrower unowned-org hole
 editing a row they do not own) *is* closed: the `WITH CHECK` uses
 `coalesce(owner_id = auth.uid(), false)`, so a null owner no longer slips through.
 
-**The sanctioned route around the gap (F077, #79).** Until the gap itself closes
-(F020's restricted-editing enforcement), a CAM who owns a row can still write these
-columns directly through the policy above. What F077 adds is the legitimate path for
-corrections: `suggest_organisation_edit(org_id, field_name, new_value)`
-(`20260822140000_create_edit_suggestions.sql`) lets an active CAM propose a change to
-one of the six sensitive fields (`legal_name`, `website`, `contact_email`,
+**The sanctioned route around the gap (F077, #79; decided by F078/F079, #80/#81).**
+Until the gap itself closes (F020's restricted-editing enforcement), a CAM who owns a
+row can still write these columns directly through the policy above. What F077 adds is
+the legitimate path for corrections: `suggest_organisation_edit(org_id, field_name,
+new_value)` (`20260822140000_create_edit_suggestions.sql`) lets an active CAM propose a
+change to one of the six sensitive fields (`legal_name`, `website`, `contact_email`,
 `address_line_1`, `city`, `postcode` — the same allowlist as §3.16's discrepancy
 tracking), snapshots the current value server-side into `EDIT_SUGGESTIONS`, and writes
-nothing to `organisations`. Submission audits nothing (flagging is not a decision);
-F078/F079's decide RPCs will. At most one pending suggestion exists per field per
+nothing to `organisations`. Submission audits nothing (flagging is not a decision).
+`decide_edit_suggestion(suggestion_id, approve, reason)`
+(`20260822150000_create_decide_edit_suggestion_rpc.sql`) is the decision half, admin
+only and audited both ways: approval re-checks that the live value still matches the
+submission snapshot (refusing on drift rather than silently overwriting whatever moved
+in the meantime) and then applies the proposed value through the same six-column case
+UPDATE shape `resolve_field_discrepancy` uses; rejection touches nothing and records
+the optional reason for the CAM. At most one pending suggestion exists per field per
 client: a CAM re-suggesting supersedes their own, another CAM's pending proposal blocks
 the field. SELECT on the table follows the same split: admins see everything, any
 active CAM sees pending rows, authors see their own history, viewers see nothing.

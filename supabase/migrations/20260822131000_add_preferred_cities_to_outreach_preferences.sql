@@ -14,10 +14,6 @@
 --   Security      | Existing RLS policies on outreach_preferences apply.
 --
 -- Reversibility: paired rollback in ../rollback/20260822131000_add_preferred_cities_to_outreach_preferences.down.sql
---
--- Re-dated from 20260818110000 before merging: dev had already applied later
--- migrations, and a migration's timestamp must be later than everything already
--- on dev (SOP §7). Kept below F199's 20260822140000 to preserve stack order.
 
 alter table public.outreach_preferences
   add column if not exists preferred_cities text[] not null default '{}';

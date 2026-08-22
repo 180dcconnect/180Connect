@@ -45,5 +45,11 @@ jobs:
         uses: anomalyco/opencode/github@latest
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          # Built-in token instead of the opencode-agent App's installation
+          # token — the run crashed with `p.rest` undefined when the App path
+          # returned no usable client (App not installed on this repo). With
+          # this, comments post as github-actions[bot].
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           model: opencode/x-preview-f-free
+          use_github_token: true

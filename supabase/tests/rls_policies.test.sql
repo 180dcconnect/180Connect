@@ -4538,14 +4538,14 @@ declare
   v_rls         boolean;
 begin
   if not tests.tables_exist('attachments') then
-    return next skip(9, 'F080 attachments table not yet migrated');
+    return next skip(18, 'F080 attachments table not yet migrated');
     return;
   end if;
 
   perform tests.seed();
 
-  -- Fixture row, inserted as the suite's superuser role: F080 has no INSERT
-  -- grant by design (upload is F081), so no client session could create one.
+  -- Fixture row, inserted as the suite's superuser role: ATTACHMENTS grants
+  -- no INSERT to any client role — every write goes through record_attachment.
   insert into public.attachments
     (organisation_id, filename, storage_path, content_type, size_bytes, uploaded_by)
   values
@@ -4585,12 +4585,13 @@ begin
   return next is(v_count, 0::bigint,
     'a deactivated account reads no attachments (silent empty result)');
 
-  -- No write path exists for any client role until F081 ships one.
+  -- No direct table write path exists for any client role, before or after
+  -- F081: uploads create rows only through record_attachment.
   return next is(
     tests.sqlstate_of(v_cam_a, format(
       'insert into public.attachments (organisation_id, filename, storage_path) values (%L, ''x.pdf'', ''p/x.pdf'')', v_org_a)),
     '42501',
-    'no role can INSERT an attachment row directly (upload is F081)'
+    'no role can INSERT an attachment row directly'
   );
   return next is(
     tests.sqlstate_of(v_cam_a, format(
@@ -4605,8 +4606,7 @@ begin
     'attachments cannot be deleted from the client side'
   );
 
-  -- The storage door mirrors the table: exactly the one SELECT policy on the
-  -- bucket, and no client-role write policy alongside it.
+  -- Storage doors: exactly SELECT + INSERT on the bucket, never UPDATE/DELETE.
   select count(*) into v_count from pg_policies
    where schemaname = 'storage' and tablename = 'objects'
      and policyname = 'attachments_bucket_select_active'
@@ -4616,10 +4616,84 @@ begin
 
   select count(*) into v_count from pg_policies
    where schemaname = 'storage' and tablename = 'objects'
+     and policyname = 'attachments_bucket_insert_active'
+     and cmd = 'INSERT';
+  return next is(v_count, 1::bigint,
+    'the client-attachments bucket INSERT policy exists (F081 upload door)');
+
+  select count(*) into v_count from pg_policies
+   where schemaname = 'storage' and tablename = 'objects'
      and policyname like 'attachments%'
-     and cmd <> 'SELECT';
+     and cmd not in ('SELECT', 'INSERT');
   return next is(v_count, 0::bigint,
-    'no INSERT/UPDATE/DELETE policy on the bucket for client roles');
+    'no UPDATE/DELETE policy on the bucket for client roles');
+
+  -- -----------------------------------------------------------------------
+  -- F081: record_attachment — the sanctioned write path
+  -- -----------------------------------------------------------------------
+
+  if to_regprocedure('public.record_attachment(uuid,text,text,text,bigint)') is null then
+    return next skip(9, 'record_attachment not yet migrated (F081)');
+    return;
+  end if;
+
+  -- Permission: read-only roles cannot attach files.
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.record_attachment(%L, ''x.pdf'', %L || ''/a-x.pdf'')', v_org_a, v_org_a)),
+    '42501',
+    'a viewer cannot record an attachment'
+  );
+
+  -- The RPC refuses content problems with distinct, deliberate errcodes.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.record_attachment(%L, '''', %L || ''/a-x.pdf'')', v_org_a, v_org_a)),
+    '23514',
+    'a blank filename is refused'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.record_attachment(%L, ''x.pdf'', ''other-org/99999999-9999-4999-8999-999999999999-x.pdf'')', v_org_a)),
+    '22023',
+    'a storage path under another organisation''s prefix is refused'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.record_attachment(%L, ''ghost.pdf'', %L || ''/22222222-2222-4222-8222-222222222222-ghost.pdf'')', v_org_a, v_org_a)),
+    'P0002',
+    'a storage path with no actual object behind it is refused'
+  );
+
+  -- The happy path requires the object to really be in the bucket first:
+  -- fixture it as the superuser, exactly as the browser's upload would have.
+  insert into storage.objects (bucket_id, name)
+  values ('client-attachments',
+          v_org_a::text || '/33333333-3333-4333-8333-333333333333-signed.pdf');
+
+  perform tests.login_as(v_cam_a);
+  select public.record_attachment(
+    v_org_a, 'signed agreement.pdf',
+    v_org_a::text || '/33333333-3333-4333-8333-333333333333-signed.pdf',
+    'application/pdf', 12345)
+    into v_att;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  return next ok(v_att is not null, 'a CAM records an attachment whose object exists');
+  select count(*) into v_count from public.attachments
+   where id = v_att and uploaded_by = v_cam_a
+     and filename = 'signed agreement.pdf' and size_bytes = 12345;
+  return next is(v_count, 1::bigint,
+    'the recorded row carries the caller as uploaded_by plus the metadata given');
+
+  -- Duplicate recording of the same path hits the unique storage_path.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.record_attachment(%L, ''again.pdf'', %L || ''/33333333-3333-4333-8333-333333333333-signed.pdf'')', v_org_a, v_org_a)),
+    '23505',
+    'recording the same storage path twice is refused'
+  );
 end;
 $$;
 

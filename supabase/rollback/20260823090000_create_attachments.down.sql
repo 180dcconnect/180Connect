@@ -1,8 +1,10 @@
 -- Rollback for 20260823090000_create_attachments.sql (F080, #83).
 --
--- Drops the storage policy, then the bucket row, then the table. Safe to
--- delete the bucket outright: F080 ships no write path, so nothing can have
--- put an object in it yet — there is nothing in Storage to orphan.
+-- Drops the storage policies, then the bucket row, then the table. NOTE (F081):
+-- once uploads exist this rollback orphans any stored objects — run
+-- 20260824000000_add_attachment_upload.down.sql first if you need the write
+-- path gone too, and only delete the bucket when its contents are confirmed
+-- disposable.
 
 drop policy if exists attachments_bucket_select_active on storage.objects;
 delete from storage.buckets where id = 'client-attachments';

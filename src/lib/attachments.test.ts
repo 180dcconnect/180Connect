@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { formatAttachments, formatFileSize, type AttachmentRow } from "./attachments.ts";
+import {
+  ALLOWED_ATTACHMENT_MIME_TYPES,
+  MAX_ATTACHMENT_SIZE_BYTES,
+  attachmentRpcFailure,
+  attachmentUploadFailureMessage,
+  buildAttachmentStoragePath,
+  formatAttachments,
+  formatFileSize,
+  sanitizeAttachmentFilename,
+  validateAttachmentFile,
+  type AttachmentRow,
+} from "./attachments.ts";
 
 function row(overrides: Partial<AttachmentRow> = {}): AttachmentRow {
   return {
@@ -36,14 +47,14 @@ describe("formatFileSize", () => {
 });
 
 describe("formatAttachments", () => {
-  it("carries filename, size and uploader through (AC1/AC2)", () => {
+  it("carries filename, size and uploader through (AC1/AC2 of F080)", () => {
     const [attachment] = formatAttachments([row()]);
     assert.equal(attachment?.filename, "signed-agreement.pdf");
     assert.equal(attachment?.sizeLabel, "240.0 KB");
     assert.equal(attachment?.uploadedByName, "Alex CAM");
   });
 
-  it("returns an empty list for a client with no attachments (AC3)", () => {
+  it("returns an empty list for a client with no attachments", () => {
     assert.deepEqual(formatAttachments([]), []);
   });
 
@@ -70,5 +81,174 @@ describe("formatAttachments", () => {
       row({ id: "newer", created_at: "2026-08-05T10:00:00Z" }),
     ]);
     assert.deepEqual(attachments.map((a) => a.id), ["newer", "older"]);
+  });
+});
+
+describe("validateAttachmentFile (F081 AC3)", () => {
+  it("accepts a file within the size limit and an allowed type", () => {
+    assert.equal(
+      validateAttachmentFile({ size: 1024, type: "application/pdf", name: "a.pdf" }),
+      null,
+    );
+  });
+
+  it("rejects a file with no name", () => {
+    assert.match(
+      validateAttachmentFile({ size: 1024, type: "application/pdf", name: "  " }) ?? "",
+      /choose a file/i,
+    );
+  });
+
+  it("rejects an empty file", () => {
+    assert.match(
+      validateAttachmentFile({ size: 0, type: "application/pdf", name: "a.pdf" }) ?? "",
+      /empty/i,
+    );
+  });
+
+  it("rejects a file over the size limit with a specific message naming the limit", () => {
+    const message = validateAttachmentFile({
+      size: MAX_ATTACHMENT_SIZE_BYTES + 1,
+      type: "application/pdf",
+      name: "a.pdf",
+    });
+    assert.match(message ?? "", /too large/i);
+    assert.match(message ?? "", /25\.0 MB/);
+  });
+
+  it("rejects a file at exactly the size limit boundary as allowed", () => {
+    assert.equal(
+      validateAttachmentFile({ size: MAX_ATTACHMENT_SIZE_BYTES, type: "application/pdf", name: "a.pdf" }),
+      null,
+    );
+  });
+
+  it("rejects an unsupported mime type with a specific message", () => {
+    const message = validateAttachmentFile({
+      size: 1024,
+      type: "application/x-msdownload",
+      name: "a.exe",
+    });
+    assert.match(message ?? "", /not supported/i);
+  });
+
+  it("does not reject a file the browser could not identify a type for", () => {
+    assert.equal(
+      validateAttachmentFile({ size: 1024, type: "", name: "a.unknown" }),
+      null,
+    );
+  });
+
+  it("accepts every type in the shared allowlist", () => {
+    for (const type of ALLOWED_ATTACHMENT_MIME_TYPES) {
+      assert.equal(validateAttachmentFile({ size: 1024, type, name: "f" }), null);
+    }
+  });
+});
+
+describe("sanitizeAttachmentFilename", () => {
+  it("keeps a simple safe filename as-is", () => {
+    assert.equal(sanitizeAttachmentFilename("invoice.pdf"), "invoice.pdf");
+  });
+
+  it("replaces unsafe characters", () => {
+    assert.equal(sanitizeAttachmentFilename("my report (final)!.pdf"), "my_report_final_.pdf");
+  });
+
+  it("falls back to a default when nothing usable remains", () => {
+    assert.equal(sanitizeAttachmentFilename("   "), "file");
+    assert.equal(sanitizeAttachmentFilename("???"), "file");
+  });
+
+  it("caps an unreasonably long filename", () => {
+    const long = "a".repeat(500) + ".pdf";
+    assert.ok(sanitizeAttachmentFilename(long).length <= 150);
+  });
+});
+
+describe("buildAttachmentStoragePath", () => {
+  it("leads with the organisation id and includes the sanitized filename", () => {
+    const path = buildAttachmentStoragePath(
+      "11111111-1111-4111-8111-111111111111",
+      "invoice.pdf",
+      "upload-1",
+    );
+    assert.equal(path, "11111111-1111-4111-8111-111111111111/upload-1-invoice.pdf");
+  });
+});
+
+describe("attachmentUploadFailureMessage (F081 AC3)", () => {
+  it("maps a 413 to a size-specific message", () => {
+    assert.match(
+      attachmentUploadFailureMessage({ statusCode: "413", message: "Payload too large" }),
+      /too large/i,
+    );
+  });
+
+  it("maps a size message without a statusCode the same way", () => {
+    assert.match(
+      attachmentUploadFailureMessage({ message: "The object exceeded the maximum allowed size" }),
+      /too large/i,
+    );
+  });
+
+  it("maps a 415 to a type-specific message", () => {
+    assert.match(
+      attachmentUploadFailureMessage({ statusCode: "415", message: "mime type not supported" }),
+      /not supported/i,
+    );
+  });
+
+  it("falls back to a generic message for anything unrecognised", () => {
+    assert.equal(
+      attachmentUploadFailureMessage({ statusCode: "500", message: "internal error" }),
+      "The file could not be uploaded. Refresh and try again.",
+    );
+  });
+
+  it("handles a null/undefined error without throwing", () => {
+    assert.equal(
+      attachmentUploadFailureMessage(null),
+      "The file could not be uploaded. Refresh and try again.",
+    );
+    assert.equal(
+      attachmentUploadFailureMessage(undefined),
+      "The file could not be uploaded. Refresh and try again.",
+    );
+  });
+});
+
+describe("attachmentRpcFailure", () => {
+  it("passes through a deliberate permission refusal", () => {
+    assert.deepEqual(
+      attachmentRpcFailure({ code: "42501", message: "only a CAM or admin can attach a file" }),
+      { status: 403, error: "only a CAM or admin can attach a file" },
+    );
+  });
+
+  it("maps a blank filename or path mismatch to 400", () => {
+    assert.equal(attachmentRpcFailure({ code: "23514", message: "required" }).status, 400);
+    assert.equal(attachmentRpcFailure({ code: "22023", message: "path mismatch" }).status, 400);
+  });
+
+  it("maps a duplicate storage path to 409", () => {
+    assert.equal(attachmentRpcFailure({ code: "23505", message: "duplicate" }).status, 409);
+  });
+
+  it("maps a missing organisation or storage object to 404", () => {
+    assert.equal(attachmentRpcFailure({ code: "P0002", message: "not found" }).status, 404);
+  });
+
+  it("hides an unexpected error behind a generic message", () => {
+    const failure = attachmentRpcFailure({
+      code: "42P01",
+      message: 'relation "public.attachments" does not exist',
+    });
+    assert.equal(failure.status, 500);
+    assert.ok(!failure.error.includes("relation"));
+  });
+
+  it("hides a message-less error too", () => {
+    assert.equal(attachmentRpcFailure({ code: "42501", message: "  " }).status, 500);
   });
 });

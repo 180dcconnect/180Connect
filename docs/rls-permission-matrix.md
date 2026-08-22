@@ -941,16 +941,57 @@ is the §2 pattern ("what RLS cannot do"), not an oversight.
 ---
 
 
-### 3.21 Attachments — shared read, no write path yet
+### 3.21 Attachments — shared read, RPC-recorded write, private bucket
 
-Backs F080 View Client Attachments (#83),
-`supabase/migrations/20260823090000_create_attachments.sql`. Also the schema-level
-resolution of F217/F218, neither of which is defined anywhere in the PRD's own
-feature table or this codebase — see the migration header for the full reasoning
-and the "storage location" answer (Supabase Storage, PRD §7's architecture table).
+Backs F080 View Client Attachments (#83) and F081 Upload Client Attachment
+(#84), `supabase/migrations/20260823090000_create_attachments.sql` (schema and
+read half) plus `20260824000000_add_attachment_upload.sql` (upload half — split
+out because the create migration had already run on staging/production by the
+time F081 landed, and an applied migration file must never be edited in
+place). Also the schema-level resolution of F217/F218, neither of which is
+defined anywhere in the PRD's own feature table or this codebase — see the
+migration header for the full reasoning, the "storage location" answer
+(Supabase Storage, PRD §7's architecture table), and the explicit caveat that
+the size/type limits below are a provisional default, not the sign-off PRD
+§14 names as still owed.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
+| `ATTACHMENTS` | all active roles | — (RPC only) | — (no grant) | — (no grant) |
+
+SELECT is shared, same shape as `NOTES` (§3.3) — a client's attachment list is
+relationship context every active role sees, not something narrowed to an
+owner or an admin.
+
+**Upload is two steps, not one RPC call**: a Postgres function cannot receive
+a multipart file body. The browser uploads the bytes directly to Storage
+(client-side, so the loading state reflects the real transfer rather than a
+proxy through this app's server), then `record_attachment(organisation_id,
+filename, storage_path, content_type, size_bytes)` writes the metadata row —
+`SECURITY DEFINER`, self-checks `app.can_write()`, confirms the organisation
+exists, confirms `storage_path` is actually under that organisation's prefix
+(so a caller cannot attribute someone else's upload to the wrong client), and
+confirms the Storage object exists before recording it. No `audit_log` entry:
+attaching a file changes no ownership/status/role/approval state
+(`docs/audit-log-pattern.md` §1), same reasoning as `NOTES`.
+
+**Storage**: a private bucket, `client-attachments` (never public — nothing
+about a client's files is meant to be reachable by an unauthenticated guess at
+a path), with a real, Storage-enforced `file_size_limit` (25 MB) and
+`allowed_mime_types` allowlist (office documents + common images) — this is
+what actually stops an over-limit or wrong-type upload, not application code.
+Two policies on `storage.objects`: SELECT mirrors `attachments_select_active`
+(any active user, needed for `createSignedUrl` to succeed on open/download);
+INSERT requires `app.can_write()`. No UPDATE/DELETE policy for either —
+replacing or removing an uploaded file is out of both tickets' AC and stays
+`service_role`-only.
+
+**Known limitation, not a gap**: a failure between the Storage upload
+succeeding and `record_attachment` running leaves an orphaned object with no
+metadata row — it simply never appears in anyone's list. Neither ticket's AC
+asks for a sweep to reclaim it, so none exists.
+
+---|
 | `ATTACHMENTS` | all active roles | — (no grant; F081) | — (no grant) | — (no grant) |
 
 SELECT is shared, same shape as `NOTES` (§3.3) and `CLIENT_EDIT_SUGGESTIONS`

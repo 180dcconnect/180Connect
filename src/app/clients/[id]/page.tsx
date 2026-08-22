@@ -26,6 +26,7 @@ import { TagsSection } from "./tags-section";
 import { BookletPanel } from "./booklet-panel";
 import { formatAttachments, type AttachmentRow } from "@/lib/attachments";
 import { AttachmentsSection } from "./attachments-section";
+import { UploadAttachmentForm } from "./upload-attachment-form";
 import {
   EDIT_SUGGESTION_SELECT,
   type EditSuggestionRow,
@@ -536,6 +537,9 @@ export default async function ClientDetailPage({
                   attachments={attachments}
                   error={Boolean(attachmentsError)}
                 />
+                {/* F081: upload sits inside the same card so the new file
+                    appears in the list directly above it on refresh (AC4). */}
+                {canEdit && <UploadAttachmentForm organisationId={client.id} />}
               </SectionCard>
             </Rise>
           </Group>

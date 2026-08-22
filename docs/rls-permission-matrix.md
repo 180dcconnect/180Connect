@@ -287,6 +287,16 @@ F019); **send** is restricted.
 | `SEND_EVENTS` | all roles | — (service role, Gmail webhook) | — | — |
 | `REPLY_EVENTS` | all roles | — (service role) | — | — |
 | `OUTCOMES` | all roles | admin, cam (`recorded_by_user_id = auth.uid()`) | admin, own | admin |
+| `BOOKLET_GENERATIONS` | admin, cam (`app.can_contact_organisation(organisation_id)`); viewer: none | admin, cam (`app.can_contact_organisation(organisation_id)` **and** `generated_by = auth.uid()`); append-only audit of booklet prompt/output (F082 AC5 / F112, `20260822130000`) | — | — |
+
+`BOOKLET_GENERATIONS` lives here rather than in a new section because it is the
+booklet-side sibling of `AI_GENERATIONS`: the same "what exactly did the model
+produce" audit question. It cannot be a row in that table — `AI_GENERATIONS`
+hangs off `outreach_messages`, and a booklet generation has no outreach message.
+Read scope follows the booklet feature's own gate (client:contact ≈
+`app.can_contact_organisation`), which excludes viewers; the table holds full
+prompt/output text, so it is deliberately tighter than shared read. Append-only
+by omission of UPDATE/DELETE grants, same mechanism as `AUDIT_LOG`.
 
 The CAM INSERT check on `OUTREACH_MESSAGES` is the database-layer expression of
 "Send to an organisation owned by another CAM: Admin yes, CAM no". This is the
@@ -388,10 +398,20 @@ viewers both read every row; only the CAM path is scoped.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `AUDIT_LOG` | admin | — (service role / `SECURITY DEFINER` RPC only) | **none** | **none** |
+| `AUDIT_LOG` | admin; **plus** any active user, but only `status_changed`/`ownership_reassigned` rows targeting `organisations` (F075, 20260820110000) | — (service role / `SECURITY DEFINER` RPC only) | **none** | **none** |
 
 No UPDATE or DELETE policy is written for any role, including admin. An audit trail
 an admin can edit is not an audit trail.
+
+**F075's carve-out** (`audit_log_select_client_timeline`) is additive, not a
+replacement for `audit_log_select_admin` above — every other `action` token
+(`role_changed`, `user_suspended`, `invite_*`, etc.) stays admin-only. It exists
+because the client communication timeline needs a CAM/viewer to read the
+handover and status-change entries for a client they can already see everywhere
+else on that client's page (`notes`/`outreach_messages`/`reply_events` are
+already shared-read, §3.3/§3.4) — and because RLS gates `postgres_changes`
+delivery exactly like a SELECT, so without this, F075's realtime subscription
+would silently never receive these two event types for a non-admin.
 
 ### 3.9 Views
 
@@ -530,16 +550,17 @@ which is the wrong test for a row a user writes about themselves.
 
 ---
 
-### 3.13 Outreach preferences — own row only
+### 3.13 Outreach preferences — own row or admin read
 
-Backs F195 (`supabase/migrations/20260805110000_create_outreach_preferences.sql`). Same
+Backs F195 (`supabase/migrations/20260805110000_create_outreach_preferences.sql`) and
+F187 (`supabase/migrations/20260819100000_allow_admin_read_outreach_preferences.sql`). Same
 shape as §3.12: a user's own settings, not ownership/status/role/approval state, so it
 is governed by RLS alone — no SECURITY DEFINER RPC, no `audit_log` row
 (`docs/audit-log-pattern.md` §1).
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `OUTREACH_PREFERENCES` | own row (`user_id = auth.uid()`) | own row | own row | — (no grant) |
+| `OUTREACH_PREFERENCES` | own row (`user_id = auth.uid()`) OR admin (`app.is_admin()`) | own row | own row | — (no grant) |
 
 One row per user (`unique (user_id)`), upserted by the settings form's server action.
 No DELETE grant to any role: clearing preferences is an UPDATE back to empty arrays,
@@ -547,9 +568,8 @@ not a row removal — this keeps "no preferences set" a single always-present st
 (empty arrays) instead of a row that may or may not exist, which is one fewer case for
 F094 (#93, not yet built) to handle when it reads this table.
 
-No admin read: nothing in #191 needs one, and F187 (admin views a CAM's settings, P3)
-can add it with a stated reason when it is actually built — same call already made for
-`USER_ONBOARDING_STEPS` (§3.12).
+Admin read added for F187 (admin views a CAM's settings, P3) via `outreach_preferences_select_admin`
+so an admin can understand how a CAM's queue is configured without notifying or restricting the CAM.
 
 Both policies AND in `app.is_active_user()`. No `app.can_write()` — that helper gates
 *client data* and excludes viewers (F258); this table is a user's own settings and is
@@ -571,7 +591,7 @@ which self-approves (no admin ever waits on their own request).
 No INSERT/UPDATE policy, by the same reasoning as `AUDIT_LOG` (§3.8) and
 `set_user_role` (§6): "reason required" plus a role-gated state transition is the RLS
 recipe's RPC case (MIGRATIONS.md step 4), not something a policy can express. All
-writes go through two `SECURITY DEFINER` RPCs, each self-checking the caller and each
+writes go through three `SECURITY DEFINER` RPCs, each self-checking the caller and each
 writing an `audit_log` row in the same transaction:
 
 - `request_suppression(organisation_id, reason)` — caller must satisfy
@@ -584,6 +604,11 @@ writing an `audit_log` row in the same transaction:
   `pending` row to `active` or `rejected`, records `decided_by`/`decided_at`, and
   writes `suppression_approved` or `suppression_rejected` to `audit_log`. Rejects a
   target that is not currently `pending`.
+- `lift_suppression(suppression_id, reason)` — admin only (F185, #181). Moves an
+  `active` row to `lifted`, records `decided_by`/`decided_at` and `decision_note = reason`
+  (mandatory written reason), and writes `suppression_lifted` to `audit_log`. Rejects a
+  target that is not currently `active` or a blank reason. Lifting unblocks outreach
+  and restores visibility on standard client lists.
 
 SELECT is open to every active user (not gated to admin/owner) because the working
 list needs to hide a suppressed organisation for everyone, not just the CAM who owns
@@ -604,11 +629,8 @@ contact-level story can extend this table rather than starting over. Built ahead
 F248 (#243, "a suppression list exists") with the Project Leader's agreement, since
 this table already satisfies that — see the migration header for the full note.
 
-`status` is `pending | active | rejected | lifted`. `lifted` is reserved now, not
-used by any RPC in this migration — F251's own AC commits to an admin being able to
-remove a suppression, and F185 (#181) is that RPC. Adding an enum value later is a
-one-way door in Postgres (`create_organisations.sql` precedent), so it is reserved
-up front rather than negotiated later.
+`status` is `pending | active | rejected | lifted`. `lifted` is implemented by F185
+(#181) via `lift_suppression` RPC (`20260818130000_create_lift_suppression_rpc.sql`).
 
 ### 3.15 Entity match candidates — service-role write, admin decides
 
@@ -708,6 +730,185 @@ per-field tracking — a later manual edit through the org edit UI is misattribu
 the original import source. Closing that properly is F044 (Field-Level Source
 Tracking, #45)'s job, not this table's.
 
+### 3.17 Ownership requests — RPC-only, admin decides, narrow read
+
+Backs #408 Request Client Ownership (admin-approved handover),
+`supabase/migrations/20260818120000_create_ownership_requests.sql`. The escalation
+half of F165's conflict warning (§3.11's `claim_organisation` 55000): the warning
+says a CAM cannot take a client another CAM owns, and this is the only sanctioned
+next step. Decided by the Project Leader 18 Aug 2026 (on #406): **a CAM never
+overrides another CAM's ownership.** Worst case they ask, and an admin hands it over.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `OWNERSHIP_REQUESTS` | admin, the requester, or the client's current owner | — (RPC only) | — (RPC only) | — (no grant) |
+
+SELECT is deliberately narrower than `SUPPRESSIONS` (§3.14, all active users). A
+suppression is a fact about a charity the whole team needs in order to hide it; a
+request is a conversation between one CAM, one owner, and the admins. The current
+owner is included on purpose — someone asking for their client is something they
+should learn when it is asked, not when it moves.
+
+Both writes are `SECURITY DEFINER` RPCs that self-check the caller and write
+`audit_log` in the same transaction (docs/audit-log-pattern.md):
+
+- `request_client_ownership(organisation_id, reason)` — CAM only (`app.is_cam()` +
+  `app.is_active_user()`; an admin is refused, since they hold `reassign_ownership`
+  and would be requesting from themselves). Requires a reason, refuses an unowned
+  client ("claim it instead"), a client the caller already owns, and a second pending
+  request from the same CAM for the same client. Inserts `pending` and audits
+  `ownership_requested`. **It moves no ownership and grants no access** — the
+  requester's reach over the client is exactly what it was before they asked.
+- `decide_ownership_request(request_id, approve, note)` — admin only. Refuses an
+  already-decided request. On approval it delegates the move to `reassign_ownership`
+  (§3.11) rather than touching `organisations.owner_id`, so the handover is audited as
+  a normal `ownership_assigned` transition and the outgoing owner's open actions travel
+  with the client; `owner_id` still has exactly the two write paths §3.2 lists. Audits
+  `ownership_request_approved` / `ownership_request_rejected`.
+
+**What this does not do:** nothing here relaxes `claim_organisation` (a CAM claiming an
+owned client still raises 55000) or re-opens the direct `owner_id` write closed by
+`20260810110000`. A pending request is inert; the admin's decision is the only thing
+with an effect.
+
+---
+
+### 3.18 Field sources — service-role write, admin read
+
+Backs F044 Field-Level Source Tracking (#45),
+`supabase/migrations/20260820100000_create_field_sources.sql`. New table — like
+`FIELD_DISCREPANCIES` (§3.16), not previously reserved in the Data Model. Real
+per-field provenance for `ORGANISATIONS`, closing the gap §3.16 and open-gap note
+10 both flagged: `FIELD_DISCREPANCIES.existing_source` only ever approximated
+which source "owns" a field's current value.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `FIELD_SOURCES` | admin only | — (`service_role` only) | — (`service_role` only, via same RPC) | — (no grant) |
+
+SELECT is admin-only, same reasoning as §3.16 — which source produced a field's
+value is not CAM-visible data. There is one write path, `record_field_source`
+(`p_organisation_id, p_field_name, p_value, p_source, p_raw_source_record_id`):
+flips any existing `is_current = true` row for that `organisation_id +
+field_name` to `false`, then inserts the new one as current. Granted to
+`service_role` only, not `authenticated` — mirrors `record_client_criteria_outcome`
+(§3.5) and `LOGIN_ATTEMPT`'s RPCs (§3.10): every caller either holds the
+service-role key server-side (`write-organisations.ts`, the ingestion pipeline) or
+is a nested call from inside `record_field_discrepancy` /
+`resolve_field_discrepancy` (§3.16), which already self-check `app.is_admin()`
+before reaching it.
+
+Only two writers exist as of this migration, both wired in: the ingestion
+pipeline on initial import, and F048's two RPCs when a conflict resolution
+overwrites a field. No CAM/admin hand-edit path exists yet (checked before
+writing this migration — no Server Action, route, or RPC updates `organisations`
+outside those two), so there is nothing else to wire up today; a future hand-edit
+feature is responsible for calling `record_field_source` itself.
+
+`get_field_sources(organisation_id)` — the read path, `authenticated`, self-checks
+`app.is_admin()` and `app.is_active_user()` inside (same shape as
+`get_organisation_sources`, §3.2). Returns every row for the organisation, current
+and superseded, newest-first per field — satisfies AC1 (current source per field)
+and AC2 (conflicting values and their sources both visible) from a single query.
+
+**MVP field scope**: the same six fields as `FIELD_DISCREPANCIES` (`legal_name`,
+`website`, `contact_email`, `address_line_1`, `city`, `postcode`) — kept identical
+on purpose so a field tracked for conflicts but not for provenance (or the
+reverse) can't silently diverge between the two tables. F044's own issue
+illustrates AC1 with `"mission" from CharityBase`, but `mission_statement` lives
+on `ENRICHMENT_RESULTS` (LLM-derived), not an `ORGANISATIONS` column any source
+mapper writes — out of scope here, flagged rather than silently unmet. See the
+migration header for the full reasoning.
+
+### 3.19 Notifications — own-row only, RPC-only writes
+
+Backs F173 In-App Notifications (#169),
+`supabase/migrations/20260822130000_create_notifications.sql` +
+`20260822090100_create_notification_rpcs.sql`. New table — not previously
+reserved in the Data Model. General per-user notification feed: any future
+producer (replies, reminders, team activity) inserts rows via RPC instead of
+gaining table-level INSERT.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `NOTIFICATIONS` | own rows (`recipient_user_id = auth.uid()`) | — (RPC only) | own rows, `read_at` column only (via grant + trigger guard) | — (no grant; cron prune only) |
+
+SELECT is strictly own-row — wrong-recipient prevention is the RLS policy
+itself, and a non-recipient's query returns 0 rows (§4), never an error. UPDATE
+is doubly constrained: the *grant* covers only the `read_at` column and the
+policy only matches own rows, so no client can ever edit title/body/recipient;
+a `BEFORE UPDATE` trigger additionally pins every other column and makes the
+transition one-way (`null → timestamp`, never back).
+
+There are no direct INSERT/DELETE grants for anyone. All four write paths are
+SECURITY DEFINER RPCs that self-check inside their bodies:
+
+- `create_notification(...)` — `authenticated` + `service_role`; caller must be
+  an active user (or hold the service-role key server-side). Silently skips
+  unknown/deactivated recipients, self-notifications, and sub-minute duplicate
+  retries.
+- `mark_notification_read(id)` / `mark_all_notifications_read()` —
+  `authenticated`, self-check `app.is_active_user()` + own-row scoping inside.
+  A non-recipient's call returns `false`/`0`, deliberately indistinguishable
+  from "already read" so no existence oracle leaks other users' notification ids.
+- `prune_notifications()` — granted to **no** interactive role; runs only as
+  its daily pg_cron job (`notifications_prune_daily`, postgres). Retention:
+  read > 90 days, unread > 1 year. Safe because the durable record of every
+  underlying event stays in AUDIT_LOG forever.
+
+No audit_log entries are written by any of these (§1 of audit-log-pattern:
+none change ownership/status/role/approval state of a business entity — same
+documented reasoning as `feedback`). The table is in the `supabase_realtime`
+publication for live bell-panel delivery; publication membership grants nothing
+on its own — delivery is still filtered by the SELECT policy per subscriber
+(same mechanism as §3.8 / F075).
+
+---
+
+### 3.17 Saved filter views — own rows only
+
+Backs F066 (`supabase/migrations/20260821090000_create_saved_views.sql`). Same shape as
+§3.12 and §3.13: the user's own view state, not ownership/status/role/approval state, so
+it is governed by RLS alone — no SECURITY DEFINER RPC, no `audit_log` row
+(`docs/audit-log-pattern.md` §1).
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `SAVED_VIEWS` | own rows (`user_id = auth.uid()`) | own rows | own rows | own rows |
+
+A saved view holds no client data: it is a set of `/clients` search params
+(`q`, `city`, `country`, `status`, `type`, `owner` — arrays for the multi-selects)
+stored as `jsonb` under a name, and selecting
+one rebuilds a query string. Nothing in it is readable to anyone but its author, and
+nothing in it grants access to a client the author's role does not already allow — the
+params are re-applied to a list the RLS on `ORGANISATIONS` (§3.2) has already filtered,
+so a stale `owner=<someone>` view shows exactly what that CAM could see by typing the
+filter by hand.
+
+DELETE **is** granted here, unlike §3.13. AC3 asks for deletion by name, and this is a
+many-row table where "no longer need this one" has no UPDATE-to-empty equivalent. UPDATE
+is granted with no F066 write path behind it yet (saving is an INSERT; the AC has no
+rename), so a later rename/overwrite story needs no migration; both policies confine the
+row to the caller in `using` **and** `with check`, so a row cannot be moved onto another
+`user_id`.
+
+No admin read, delete included: nothing in #68 needs one, and an admin who could delete
+someone's shortcuts would hold a purely destructive power over another user's workspace
+with no story asking for it. F187 (admin views a CAM's settings, P3) can add a read with
+a stated reason when it is actually built — same call already made for
+`USER_ONBOARDING_STEPS` (§3.12) and `OUTREACH_PREFERENCES` (§3.13).
+
+All four policies AND in `app.is_active_user()`. None uses `app.can_write()` — that
+helper gates *client data* and excludes viewers (F258); a bookmark over a list the viewer
+can already read is harmless for any active role to keep.
+
+**What RLS does not check here**: the *keys* inside `filters`. Postgres constrains the
+column to a JSON object under 4 KB (`saved_views_filters_is_object`) and nothing more.
+The key whitelist lives in `src/app/clients/saved-view-filters.ts` and is applied on both
+write and read, so an unexpected key is ignored rather than rendered — a row that somehow
+carries one produces a view missing that filter, never a filter the CAM cannot see. This
+is the §2 pattern ("what RLS cannot do"), not an oversight.
+
 ---
 
 ## 4. Denial behaviour and feedback
@@ -788,10 +989,9 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
 2. **No suggestion table.** §4.3 grants CAMs "suggest organisation field correction"
    and F077 is a P1 story, but no table holds a suggestion. Without one the CAM path
    to changing canonical data does not exist, and 3.2 has no row for it.
-3. ~~**No suppression table.**~~ **RESOLVED — F251 (#82)**, 5 Aug 2026. §3.14 has
-   the table and RPCs. "Lift suppression: Admin, reason required" is now split into
-   *request* (CAM or admin, reason required) and *decide* (admin only) — see §3.14
-   for why. Lifting an active suppression is F185 (#181), not built yet.
+3. ~~**No suppression table.**~~ **RESOLVED — F251 (#82) & F185 (#181)**. §3.14 has
+   the table and RPCs (`request_suppression`, `decide_suppression_request`, `lift_suppression`).
+   "Lift suppression: Admin, mandatory reason required" is implemented by F185 (`lift_suppression`).
 4. ~~**Viewer role has no story.**~~ **RESOLVED — F258 (#268) owns it**, raised
    24 Jul 2026. The story also closed a live escalation this question had been
    hiding: `organisations_update_owner_or_admin` tested ownership and admin but
@@ -876,13 +1076,17 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    likely an `is_active`/`merged_into_organisation_id` column on `ORGANISATIONS`,
    following the same RPC-gated pattern as `SUPPRESSIONS` — raised rather than added
    unilaterally, since it changes the core entity every other table hangs off.
-10. **`FIELD_DISCREPANCIES.existing_source` is import-provenance, not per-field
-    tracking.** F048 (§3.16) approximates which source "owns" an organisation's
-    current field value as whichever `raw_source_records` row originally created it.
-    A later manual edit through the org edit UI is not distinguished from that
-    original import, so a discrepancy raised after such an edit will misattribute the
-    existing value's source. Properly closing this is F044 (Field-Level Source
-    Tracking, #45) — unbuilt and unassigned as of this writing — not F048's job.
+10. ~~`FIELD_DISCREPANCIES.existing_source` is import-provenance, not per-field
+    tracking.`~~ **Closed by F044 (§3.18, `20260820100000_create_field_sources.sql`).**
+    `FIELD_SOURCES` now records the real source behind every write to a tracked
+    field, updated whenever `record_field_discrepancy` / `resolve_field_discrepancy`
+    (F048) overwrite one. `FIELD_DISCREPANCIES.existing_source` itself is
+    unchanged — it still stores its original import-provenance approximation at
+    the moment a conflict was flagged — but a client's *current* per-field
+    provenance no longer depends on it; `get_field_sources` is the accurate
+    source of truth. Residual gap: no CAM/admin hand-edit UI exists yet (F036 or
+    similar), so a manual correction still can't be attributed until that
+    feature calls `record_field_source` itself.
 
 ---
 

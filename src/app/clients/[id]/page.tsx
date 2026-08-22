@@ -22,6 +22,7 @@ import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
 import { Pill, SectionCard } from "./section-card";
+import { BookletPanel } from "./booklet-panel";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -273,6 +274,17 @@ export default async function ClientDetailPage({
                 missionEnrichedAt={enrichment?.enriched_at ?? null}
               />
             </Rise>
+
+            {/* F082 — Generate Client Booklet: kept as its own distinct
+                brand-tinted card rather than wrapped in SectionCard — it's the
+                flagship AI feature, not another plain record field, and right
+                after BasicInfoPanel since a CAM reads this before anything
+                else on the page. */}
+            {hasPermission(authorization.actor.role, "client:contact") && (
+              <Rise>
+                <BookletPanel organisationId={client.id} />
+              </Rise>
+            )}
 
             {/* Email and website were two near-identical cards — same
                 heading-plus-validity-pill shape, same failure copy — so they

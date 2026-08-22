@@ -4,6 +4,7 @@ import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { Rise, Stage } from "@/components/dashboard-stage";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import { OutreachPreferencesForm } from "./preferences-form";
 import type { GeographicReach, IncomeBand } from "./constants";
 
@@ -36,9 +37,9 @@ export default async function OutreachPreferencesPage() {
 
   // F200 review — DoD (every failure visible and recorded): an ignored error here
   // rendered "No preference" over preferences that may well exist. Logged and
-  // surfaced through the same safe-loading warning the other pages use.
+  // surfaced through the shared F236 InlineAlert, same as the rest of the app.
   if (error) {
-    await reportError(error, { operation: "outreach_preferences.page_load" });
+    await reportError(error, { operation: "settings.outreach_preferences.page_load" });
   }
 
   return (
@@ -53,25 +54,23 @@ export default async function OutreachPreferencesPage() {
           </p>
         </Rise>
 
-        {error && (
+        {error ? (
           <Rise>
-            <p
-              role="alert"
-              className="rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4 text-sm font-bold text-destructive"
-            >
-              Some data could not be loaded. Refresh and try again.
-            </p>
+            <InlineAlert
+              variant="page"
+              message="Your preferences could not be loaded. Please refresh and try again."
+            />
+          </Rise>
+        ) : (
+          <Rise>
+            <OutreachPreferencesForm
+              initialGeographicReach={data?.preferred_geographic_reach ?? []}
+              initialCities={data?.preferred_cities ?? []}
+              initialSectors={data?.preferred_sectors ?? []}
+              initialIncomeBands={data?.preferred_income_bands ?? []}
+            />
           </Rise>
         )}
-
-        <Rise>
-          <OutreachPreferencesForm
-            initialGeographicReach={data?.preferred_geographic_reach ?? []}
-            initialCities={data?.preferred_cities ?? []}
-            initialSectors={data?.preferred_sectors ?? []}
-            initialIncomeBands={data?.preferred_income_bands ?? []}
-          />
-        </Rise>
       </Stage>
     </div>
   );

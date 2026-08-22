@@ -59,8 +59,13 @@ export function formatTeamActivity(
       case "ownership_assigned":
       case "ownership_reassigned":
         actionLabel = "Ownership";
-        if (detail.self_claim === true) {
+        // claim_organisation (F162) and reassign_ownership (F257/F164) both write
+        // 'ownership_reassigned'; only `detail.trigger` tells them apart, and a
+        // self-claim reads as a claim, not as an admin moving someone's client.
+        if (detail.trigger === "self_claim" || detail.self_claim === true) {
           sentence = `${actorName} claimed ownership of ${target}`;
+        } else if (row.action === "ownership_reassigned") {
+          sentence = `${actorName} reassigned ownership of ${target}`;
         } else {
           sentence = `${actorName} assigned ownership of ${target}`;
         }
@@ -83,6 +88,11 @@ export function formatTeamActivity(
       case "suppression_approved":
         actionLabel = "Suppression";
         sentence = `${actorName} approved suppression of ${target}`;
+        break;
+
+      case "suppression_lifted":
+        actionLabel = "Suppression";
+        sentence = `${actorName} lifted suppression of ${target}`;
         break;
 
       case "invite_accepted":

@@ -104,7 +104,7 @@ export async function GET() {
   // only place immune to a client being reassigned between this read and that write.
   const { data: owned, error: ownedError } = await supabase
     .from("organisations")
-    .select("owner_id")
+    .select("id, owner_id")
     .not("owner_id", "is", null);
 
   if (ownedError) {
@@ -114,16 +114,35 @@ export async function GET() {
     await reportError(ownedError, { operation: "admin.users.owned_client_counts" });
   }
 
+  // F167: the table's Clients column links to /clients?owner=, which never lists an
+  // actively-suppressed client (F051 AC4), so that column counts the listed subset
+  // while the deactivation gate above keeps counting everything the member owns.
+  const { data: suppressed, error: suppressedError } = await supabase
+    .from("suppressions")
+    .select("organisation_id")
+    .eq("status", "active");
+
+  if (suppressedError) {
+    await reportError(suppressedError, { operation: "admin.users.suppressed_clients" });
+  }
+
+  const suppressedOrgs = new Set((suppressed ?? []).map((row) => row.organisation_id));
+
   const ownedCounts = new Map<string, number>();
+  const listedCounts = new Map<string, number>();
   for (const row of owned ?? []) {
     if (!row.owner_id) continue;
     ownedCounts.set(row.owner_id, (ownedCounts.get(row.owner_id) ?? 0) + 1);
+    if (!suppressedOrgs.has(row.id)) {
+      listedCounts.set(row.owner_id, (listedCounts.get(row.owner_id) ?? 0) + 1);
+    }
   }
 
   return NextResponse.json({
     users: (data ?? []).map((user) => ({
       ...user,
       owned_client_count: ownedCounts.get(user.id) ?? 0,
+      listed_client_count: listedCounts.get(user.id) ?? 0,
     })),
     ownedCountsAvailable: !ownedError,
   });

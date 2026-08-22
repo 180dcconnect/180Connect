@@ -11,6 +11,7 @@ import { Checkbox } from "@/components/animate-ui/components/radix/checkbox";
 import { Input } from "@/components/ui/input";
 import { OriginButton } from "@/components/ui/origin-button";
 import { saveOutreachPreferencesAction, type OutreachPreferencesState } from "./actions";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import {
   CITY_PRESETS,
   GEOGRAPHIC_REACH_OPTIONS,
@@ -249,9 +250,11 @@ export function OutreachPreferencesForm({
         </div>
 
         {state.status === "success" && state.message ? (
-          <p aria-live="polite" className="mt-3 px-1 text-sm font-bold text-brand">
-            {state.message}
-          </p>
+          <InlineAlert
+            tone="success"
+            className="mt-3"
+            message={state.message}
+          />
         ) : null}
       </div>
     );
@@ -442,10 +445,11 @@ export function OutreachPreferencesForm({
         >
           Cancel
         </OriginButton>
-        {state.status === "error" && state.message ? (
-          <p aria-live="polite" className="text-sm font-bold text-destructive">
-            {state.message}
-          </p>
+        {state.status !== "idle" && state.message ? (
+          <InlineAlert
+            tone={state.status === "error" ? "error" : "success"}
+            message={state.message}
+          />
         ) : null}
       </div>
     </form>

@@ -123,13 +123,31 @@ export function BookletPanel({ organisationId }: { organisationId: string }) {
   const [busy, setBusy] = useState(false);
   const sectionRef = useRef<HTMLElement>(null);
   const autoTriggered = useRef(false);
+  // Ref, not the busy state: two clicks inside one render window both read
+  // stale state, and each fires a paid Gemini call. The ref is checked before
+  // either can get past this guard. Aborted on unmount so a navigation away
+  // mid-generation doesn't leave setState calls running on a dead component.
+  const inFlight = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      inFlight.current = false;
+    };
+  }, []);
 
   async function generate() {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setError(null);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const response = await fetch(`/api/clients/${organisationId}/booklet`, {
         method: "POST",
+        signal: controller.signal,
       });
       const body = await response.json();
       if (!response.ok) {
@@ -138,9 +156,13 @@ export function BookletPanel({ organisationId }: { organisationId: string }) {
       }
       setBooklet(body.booklet as string);
     } catch {
+      if (controller.signal.aborted) return;
       setError("Could not reach the server. Check your connection and try again.");
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted) {
+        inFlight.current = false;
+        setBusy(false);
+      }
     }
   }
 

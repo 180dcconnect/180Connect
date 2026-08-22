@@ -138,6 +138,14 @@ export type GeographicPreference = {
   preferred_cities?: string[] | null;
 };
 
+/**
+ * The South Yorkshire city set and the expansions below — "regional" reach means
+ * South Yorkshire, "local" reach means Sheffield, and both stack with exact city
+ * matches (a Sheffield org under a Sheffield-preferring local CAM can reach +30
+ * where an exact Leeds match gets +10) — are deliberate pilot scoping:
+ * 180Connect currently serves the Sheffield branch only. When another branch
+ * onboards this must become region-driven data, not more hardcoded cities.
+ */
 const SOUTH_YORKSHIRE_CITIES = new Set(["sheffield", "rotherham", "barnsley", "doncaster"]);
 
 /**

@@ -149,6 +149,13 @@ export default async function ClientsPage({
   if (team.error) {
     await reportError(team.error, { operation: "clients.page_team" });
   }
+  // F196 review: a failed preferences load used to be ignored, silently falling
+  // back to the default queue order. Logged here and surfaced through the same
+  // safe-loading warning as the other queries — ordering silently changing is a
+  // failure the CAM needs to know about (Definition of Done).
+  if (outreachPrefs.error) {
+    await reportError(outreachPrefs.error, { operation: "clients.page_outreach_preferences" });
+  }
 
   const allVisibleClients = visibleClients(organisations.data ?? [], openSuppressions.data ?? []);
   
@@ -319,7 +326,7 @@ export default async function ClientsPage({
         }
       >
 
-        {(organisations.error || openSuppressions.error) && (
+        {(organisations.error || openSuppressions.error || outreachPrefs.error) && (
           <Rise>
             <p
               role="alert"

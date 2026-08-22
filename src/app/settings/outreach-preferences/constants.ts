@@ -43,3 +43,20 @@ export const INCOME_BAND_LABELS: Record<IncomeBand, string> = {
 // trying to anticipate a future canonical list.
 export const MAX_SECTOR_LENGTH = 60;
 export const MAX_SECTORS = 20;
+
+// F196: City and location presets for fast selection, plus caps to ensure
+// sensible bounds for custom-typed locations.
+export const CITY_PRESETS = [
+  "Sheffield",
+  "South Yorkshire",
+  "Rotherham",
+  "Barnsley",
+  "Doncaster",
+  "Leeds",
+  "Manchester",
+  "London",
+] as const;
+
+export const MAX_CITY_LENGTH = 60;
+export const MAX_CITIES = 20;
+

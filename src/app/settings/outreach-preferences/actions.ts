@@ -8,6 +8,8 @@ import { reportError } from "@/lib/error-logging";
 import {
   GEOGRAPHIC_REACH_OPTIONS,
   INCOME_BAND_OPTIONS,
+  MAX_CITY_LENGTH,
+  MAX_CITIES,
   MAX_SECTOR_LENGTH,
   MAX_SECTORS,
   type GeographicReach,
@@ -17,6 +19,18 @@ import {
 export type OutreachPreferencesState = {
   status: "idle" | "error" | "success";
   message?: string;
+  /**
+   * The preferences as actually stored, echoed back on success. The read-only
+   * view renders these rather than its own copy of the draft, so what is on
+   * screen after a save is what the parser kept — trimmed, deduplicated and
+   * capped — not what was typed.
+   */
+  saved?: {
+    geographicReach: GeographicReach[];
+    cities: string[];
+    sectors: string[];
+    incomeBands: IncomeBand[];
+  };
 };
 
 const GEOGRAPHIC_REACH_SET = new Set<string>(GEOGRAPHIC_REACH_OPTIONS);
@@ -25,12 +39,13 @@ const INCOME_BAND_SET = new Set<string>(INCOME_BAND_OPTIONS);
 /**
  * Trusts nothing from the client past its shape: a tampered POST could submit any
  * string for geo/income, so both are filtered against the actual enum rather than
- * cast. Sectors are free text (no enum to check against, see constants.ts) but are
- * still trimmed, deduplicated and length/count-capped so a form bug or a hostile
- * client can't grow the array without bound.
+ * cast. Sectors and cities are free text (no enum to check against, see constants.ts)
+ * but are still trimmed, deduplicated and length/count-capped so a form bug or a
+ * hostile client can't grow the array without bound.
  */
 function parsePreferences(formData: FormData): {
   geographicReach: GeographicReach[];
+  cities: string[];
   sectors: string[];
   incomeBands: IncomeBand[];
 } {
@@ -43,6 +58,19 @@ function parsePreferences(formData: FormData): {
     .getAll("income_band")
     .filter((value): value is string => typeof value === "string")
     .filter((value) => INCOME_BAND_SET.has(value)) as IncomeBand[];
+
+  const seenCities = new Set<string>();
+  const cities: string[] = [];
+  for (const raw of formData.getAll("city")) {
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.length > MAX_CITY_LENGTH) continue;
+    const key = trimmed.toLowerCase();
+    if (seenCities.has(key)) continue;
+    seenCities.add(key);
+    cities.push(trimmed);
+    if (cities.length >= MAX_CITIES) break;
+  }
 
   const seenSectors = new Set<string>();
   const sectors: string[] = [];
@@ -57,21 +85,25 @@ function parsePreferences(formData: FormData): {
     if (sectors.length >= MAX_SECTORS) break;
   }
 
-  return { geographicReach, sectors, incomeBands };
+  return { geographicReach, cities, sectors, incomeBands };
 }
 
 export async function saveOutreachPreferencesAction(
   _previousState: OutreachPreferencesState,
   formData: FormData,
 ): Promise<OutreachPreferencesState> {
-  const authorization = await getCurrentActor(undefined, {
+  // F200 review — permission boundary: the write is confined to the caller's own
+  // row by RLS, but a viewer has no outreach to target and the rail hides the
+  // screen from them, so the action refuses them too rather than letting a direct
+  // POST save preferences nothing consumes. Same permission the page gates on.
+  const authorization = await getCurrentActor("client:edit", {
     route: "/settings/outreach-preferences",
   });
   if (!authorization.ok) {
     return { status: "error", message: actorFailureMessage(authorization.reason) };
   }
 
-  const { geographicReach, sectors, incomeBands } = parsePreferences(formData);
+  const { geographicReach, cities, sectors, incomeBands } = parsePreferences(formData);
 
   const supabase = await createClient();
   const { error } = await supabase
@@ -80,6 +112,7 @@ export async function saveOutreachPreferencesAction(
       {
         user_id: authorization.actor.id,
         preferred_geographic_reach: geographicReach,
+        preferred_cities: cities,
         preferred_sectors: sectors,
         preferred_income_bands: incomeBands,
       },
@@ -107,5 +140,10 @@ export async function saveOutreachPreferencesAction(
 
   revalidatePath("/settings/outreach-preferences");
   revalidatePath("/dashboard");
-  return { status: "success", message: "Preferences saved." };
+  revalidatePath("/clients");
+  return {
+    status: "success",
+    message: "Preferences saved.",
+    saved: { geographicReach, cities, sectors, incomeBands },
+  };
 }

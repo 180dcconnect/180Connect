@@ -29,11 +29,14 @@ export default async function OutreachPreferencesPage() {
   }
 
   const supabase = await createClient();
-  // RLS scopes this to the caller's own row (docs/rls-permission-matrix.md §3.13) —
-  // no user_id filter needed here, there is nothing else this query could return.
+  // F187 gave admins read access to every CAM's preferences row (matrix §3.13,
+  // outreach_preferences_select_admin) so they can review how a CAM's queue is
+  // configured. RLS therefore no longer scopes this query to the caller — filter
+  // explicitly, or an admin's maybeSingle matches every CAM and errors out.
   const { data, error } = await supabase
     .from("outreach_preferences")
     .select("preferred_geographic_reach, preferred_cities, preferred_sectors, preferred_income_bands, prioritise_grant_recipients")
+    .eq("user_id", authorization.actor.id)
     .maybeSingle<OutreachPreferencesRow>();
 
   // F200 review — DoD (every failure visible and recorded): an ignored error here

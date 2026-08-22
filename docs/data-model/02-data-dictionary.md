@@ -503,3 +503,9 @@
 | 04 Entities | ATTACHMENTS | size_bytes | bigint |  | File size in bytes |
 | 04 Entities | ATTACHMENTS | uploaded_by | uuid | USERS | Team member who attached the file |
 | 04 Entities | ATTACHMENTS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | id | uuid |  | Primary key |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | field_name | text |  | An ORGANISATIONS column CAMs may not write directly |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | active | boolean |  | False = retired: not enforced, not suggestible, row kept |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | reason | text |  | Why the field is restricted |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | added_by | uuid | USERS | Admin who added/re-added the restriction |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | created_at | timestamp |  | Row creation timestamp |

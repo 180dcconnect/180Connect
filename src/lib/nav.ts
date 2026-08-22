@@ -50,7 +50,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     permission: "platform-settings:manage",
   },
   {
-    href: "/profile",
+    href: "/settings/profile",
     label: "My profile",
     description: "View your name, email, and role.",
   },

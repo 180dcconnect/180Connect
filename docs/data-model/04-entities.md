@@ -197,6 +197,7 @@
 | id | uuid |  | No | Primary key | System | Auto-generated |  |
 | user_id | uuid | USERS | No | CAM these preferences belong to | System | Set on save | One row per user (unique) |
 | preferred_geographic_reach | enum[] |  | No | Subset of geographic_reach values the CAM wants prioritised | Human | Chosen by CAM in settings | Same enum as ORGANISATIONS.geographic_reach; empty array = no preference set |
+| preferred_cities | text[] |  | No | City/location values to prioritise | Human | Chosen by CAM in settings | Free text, matched against ORGANISATIONS.city; empty array = no preference set |
 | preferred_sectors | text[] |  | No | Sector values to prioritise | Human | Chosen by CAM in settings | Free text, matched against ORGANISATIONS.sector; empty array = no preference set |
 | preferred_income_bands | enum[] |  | No | Subset of income_band values to prioritise | Human | Chosen by CAM in settings | Same enum as FINANCIAL_PERIODS.income_band; empty array = no preference set |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |

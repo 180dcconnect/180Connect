@@ -301,6 +301,16 @@ F019); **send** is restricted.
 | `SEND_EVENTS` | all roles | — (service role, Gmail webhook) | — | — |
 | `REPLY_EVENTS` | all roles | — (service role) | — | — |
 | `OUTCOMES` | all roles | admin, cam (`recorded_by_user_id = auth.uid()`) | admin, own | admin |
+| `BOOKLET_GENERATIONS` | admin, cam (`app.can_contact_organisation(organisation_id)`); viewer: none | admin, cam (`app.can_contact_organisation(organisation_id)` **and** `generated_by = auth.uid()`); append-only audit of booklet prompt/output (F082 AC5 / F112, `20260822130000`) | — | — |
+
+`BOOKLET_GENERATIONS` lives here rather than in a new section because it is the
+booklet-side sibling of `AI_GENERATIONS`: the same "what exactly did the model
+produce" audit question. It cannot be a row in that table — `AI_GENERATIONS`
+hangs off `outreach_messages`, and a booklet generation has no outreach message.
+Read scope follows the booklet feature's own gate (client:contact ≈
+`app.can_contact_organisation`), which excludes viewers; the table holds full
+prompt/output text, so it is deliberately tighter than shared read. Append-only
+by omission of UPDATE/DELETE grants, same mechanism as `AUDIT_LOG`.
 
 The CAM INSERT check on `OUTREACH_MESSAGES` is the database-layer expression of
 "Send to an organisation owned by another CAM: Admin yes, CAM no". This is the
@@ -823,6 +833,49 @@ illustrates AC1 with `"mission" from CharityBase`, but `mission_statement` lives
 on `ENRICHMENT_RESULTS` (LLM-derived), not an `ORGANISATIONS` column any source
 mapper writes — out of scope here, flagged rather than silently unmet. See the
 migration header for the full reasoning.
+
+### 3.19 Notifications — own-row only, RPC-only writes
+
+Backs F173 In-App Notifications (#169),
+`supabase/migrations/20260822130000_create_notifications.sql` +
+`20260822090100_create_notification_rpcs.sql`. New table — not previously
+reserved in the Data Model. General per-user notification feed: any future
+producer (replies, reminders, team activity) inserts rows via RPC instead of
+gaining table-level INSERT.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `NOTIFICATIONS` | own rows (`recipient_user_id = auth.uid()`) | — (RPC only) | own rows, `read_at` column only (via grant + trigger guard) | — (no grant; cron prune only) |
+
+SELECT is strictly own-row — wrong-recipient prevention is the RLS policy
+itself, and a non-recipient's query returns 0 rows (§4), never an error. UPDATE
+is doubly constrained: the *grant* covers only the `read_at` column and the
+policy only matches own rows, so no client can ever edit title/body/recipient;
+a `BEFORE UPDATE` trigger additionally pins every other column and makes the
+transition one-way (`null → timestamp`, never back).
+
+There are no direct INSERT/DELETE grants for anyone. All four write paths are
+SECURITY DEFINER RPCs that self-check inside their bodies:
+
+- `create_notification(...)` — `authenticated` + `service_role`; caller must be
+  an active user (or hold the service-role key server-side). Silently skips
+  unknown/deactivated recipients, self-notifications, and sub-minute duplicate
+  retries.
+- `mark_notification_read(id)` / `mark_all_notifications_read()` —
+  `authenticated`, self-check `app.is_active_user()` + own-row scoping inside.
+  A non-recipient's call returns `false`/`0`, deliberately indistinguishable
+  from "already read" so no existence oracle leaks other users' notification ids.
+- `prune_notifications()` — granted to **no** interactive role; runs only as
+  its daily pg_cron job (`notifications_prune_daily`, postgres). Retention:
+  read > 90 days, unread > 1 year. Safe because the durable record of every
+  underlying event stays in AUDIT_LOG forever.
+
+No audit_log entries are written by any of these (§1 of audit-log-pattern:
+none change ownership/status/role/approval state of a business entity — same
+documented reasoning as `feedback`). The table is in the `supabase_realtime`
+publication for live bell-panel delivery; publication membership grants nothing
+on its own — delivery is still filtered by the SELECT policy per subscriber
+(same mechanism as §3.8 / F075).
 
 ---
 

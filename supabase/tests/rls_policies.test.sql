@@ -4227,6 +4227,178 @@ begin
 end;
 $$;
 
+
+-- ---------------------------------------------------------------------------
+-- notifications (F173 / #169)
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_notifications()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b  uuid := '00000000-0000-4000-a000-000000000003';
+  v_admin  uuid := '00000000-0000-4000-a000-000000000001';
+  v_gone   uuid := '00000000-0000-4000-a000-000000000004';
+  v_notif  uuid;
+  v_result uuid;
+  v_again  boolean;
+  v_flag   text;
+  v_count  bigint;
+begin
+  if not tests.tables_exist('notifications') then
+    return next skip(14, 'F173 notifications table not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Producer path: an active user creates a notification for another user.
+  perform tests.login_as(v_admin);
+  select public.create_notification(
+    v_cam_a, 'team_activity', 'Client assigned to you',
+    'Oxford Homeless Project was assigned to you.',
+    '/clients', 'organisations', null, null
+  ) into v_notif;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_notif is not null,
+    'an active user can produce a notification for another user');
+
+  select count(*) into v_count from public.notifications
+   where recipient_user_id = v_cam_a;
+  return next is(v_count, 1::bigint, 'the produced row exists exactly once');
+
+  -- Unknown recipients are skipped silently, not fatal to the producer flow.
+  perform tests.login_as(v_admin);
+  select public.create_notification(
+    gen_random_uuid(), 'reminder', 'Nobody home'
+  ) into v_result;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_result is null, 'an unknown recipient is skipped, returning null');
+
+  -- Deactivated recipients are skipped too.
+  perform tests.login_as(v_admin);
+  select public.create_notification(v_gone, 'reminder', 'Offboarded') into v_result;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_result is null, 'a deactivated recipient is skipped');
+
+  -- Self-notifications are skipped too (actor = recipient), not a 23514.
+  perform tests.login_as(v_cam_a);
+  select public.create_notification(
+    v_cam_a, 'reminder', 'Note to self', null, null, null, null, v_cam_a
+  ) into v_result;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_result is null, 'a self-notification is skipped, returning null');
+
+  -- Wrong-recipient prevention: CAM B sees none of CAM A's rows.
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.notifications where id = v_notif;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a non-recipient cannot SELECT someone else''s notification');
+
+  -- ...and gets a plain false, not an error, from their read RPC.
+  perform tests.login_as(v_cam_b);
+  select case when public.mark_notification_read(v_notif) then 'transitioned' else 'false' end
+    into v_flag;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_flag, 'false',
+    'mark_notification_read for a non-recipient returns false, no existence oracle');
+
+  -- Recipient reads it and marks it read.
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.notifications where id = v_notif and read_at is null;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'the recipient sees their own unread notification');
+
+  perform tests.login_as(v_cam_a);
+  select case when public.mark_notification_read(v_notif) then 'transitioned' else 'no-op' end
+    into v_flag;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_flag, 'transitioned', 'mark_notification_read transitions an unread own row');
+
+  perform tests.login_as(v_cam_a);
+  select public.mark_notification_read(v_notif) into v_again;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_again, false, 'marking an already-read notification is a no-op returning false');
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.notifications where id = v_notif and read_at is not null;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'read_at is set after the transition');
+
+  -- Read state is one-way.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.notifications set read_at = null where id = %L', v_notif)),
+    '42501',
+    'a read notification cannot be un-read'
+  );
+
+  -- The column grant pins every other field even for the owner.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.notifications set title = ''hijacked'' where id = %L', v_notif)),
+    '42501',
+    'even the owner cannot edit notification content'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.notifications set recipient_user_id = %L where id = %L', v_cam_b, v_notif)),
+    '42501',
+    'the recipient cannot readdress a notification to someone else'
+  );
+
+  -- Mark-all is strictly scoped and counted.
+  insert into public.notifications (recipient_user_id, notification_type, title)
+  values (v_cam_a, 'reminder', 'batch one'), (v_cam_a, 'reminder', 'batch two'),
+         (v_cam_b, 'reminder', 'not mine');
+  perform tests.login_as(v_cam_a);
+  select public.mark_all_notifications_read() into v_count;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 2::bigint, 'mark_all touches only the caller''s unread rows');
+
+  -- Inactive callers are locked out of both directions.
+  return next is(
+    tests.sqlstate_of(v_gone, format(
+      'select public.create_notification(%L, ''reminder'', ''hi'')', v_cam_b)),
+    '42501',
+    'a deactivated account cannot produce notifications'
+  );
+
+  -- A deactivated account's read is denied silently — §4: a blocked SELECT
+  -- returns 0 rows, never an error.
+  perform tests.login_as(v_gone);
+  select count(*) into v_count from public.notifications where recipient_user_id = v_gone;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(
+    v_count,
+    0::bigint,
+    'a deactivated account reads no notifications (silent empty result, matrix §4)'
+  );
+
+  -- No direct INSERT door exists for any client role.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.notifications (recipient_user_id, notification_type, title) values (%L, ''x'', ''y'')', v_cam_a)),
+    '42501',
+    'clients cannot INSERT notification rows directly'
+  );
+end;
+$$;
+
+
 select * from tests.suite_core();
 select * from tests.suite_viewer();
 select * from tests.suite_users();
@@ -4249,6 +4421,7 @@ select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
 select * from tests.suite_ownership_requests();
 select * from tests.suite_edit_suggestions();
+select * from tests.suite_notifications();
 select * from tests.suite_source_tracking();
 select * from tests.suite_manual_entries();
 select * from tests.suite_url_import();

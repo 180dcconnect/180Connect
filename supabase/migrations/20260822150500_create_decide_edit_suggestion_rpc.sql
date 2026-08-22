@@ -55,7 +55,14 @@
 --                 | unchanged — their decide_edit_suggestion references were written
 --                 | when F077's dictionary rows landed.
 --
--- Reversibility: paired rollback in ../rollback/20260822150000_create_decide_edit_suggestion_rpc.down.sql
+-- NOTE — RE-DATED 22 Aug 2026 (#454): this file shipped as 20260822150000 in #451,
+--   colliding with add_grant_preference_to_outreach_preferences (#400) at the same
+--   timestamp. The second insert into supabase_migrations violated the version
+--   primary key, breaking `supabase db reset` / `start` for everyone once both were
+--   on dev. Moved to 20260822150500; anyone who applied the old name locally needs
+--   one `supabase db reset` after pulling.
+--
+-- Reversibility: paired rollback in ../rollback/20260822150500_create_decide_edit_suggestion_rpc.down.sql
 
 create or replace function public.decide_edit_suggestion(
   p_suggestion_id uuid,

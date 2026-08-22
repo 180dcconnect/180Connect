@@ -1,4 +1,4 @@
--- Rollback for 20260822150000_create_decide_edit_suggestion_rpc.sql (#80/#81).
+-- Rollback for 20260822150500_create_decide_edit_suggestion_rpc.sql (#80/#81).
 --
 -- Drops the RPC. Nothing else to remove: the migration created no tables, columns,
 -- grants or policies, and EDIT_SUGGESTIONS (F077) predates it and stays.

@@ -203,24 +203,33 @@ editing a row they do not own) *is* closed: the `WITH CHECK` uses
 `coalesce(owner_id = auth.uid(), false)`, so a null owner no longer slips through.
 
 **The sanctioned route around the gap (F077, #79; decided by F078/F079, #80/#81).**
-Until the gap itself closes (F020's restricted-editing enforcement), a CAM who owns a
-row can still write these columns directly through the policy above. What F077 adds is
-the legitimate path for corrections: `suggest_organisation_edit(org_id, field_name,
-new_value)` (`20260822140000_create_edit_suggestions.sql`) lets an active CAM propose a
-change to one of the six sensitive fields (`legal_name`, `website`, `contact_email`,
-`address_line_1`, `city`, `postcode` — the same allowlist as §3.16's discrepancy
-tracking), snapshots the current value server-side into `EDIT_SUGGESTIONS`, and writes
-nothing to `organisations`. Submission audits nothing (flagging is not a decision).
+~~Until the gap itself closes (F020's restricted-editing enforcement), a CAM who owns a
+row can still write these columns directly through the policy above.~~ **The gap is now
+closed — F020 (#23)**: a BEFORE UPDATE column-guard trigger
+(`20260822160100_restrict_organisation_sensitive_columns.sql`) refuses any non-admin
+write that changes a column listed active in `RESTRICTED_EDIT_FIELDS`
+(`20260822160000_create_restricted_edit_fields.sql`), raising 42501 with a pointer to
+the suggestion flow. The restricted set is configuration, not code: an admin adds or
+retires fields at runtime through `add_restricted_edit_field` /
+`deactivate_restricted_edit_field` (both audited, `/admin/restricted-fields`), and both
+enforcement points — the trigger and the suggestion RPC — follow the table. What F077
+added is the legitimate path for corrections: `suggest_organisation_edit(org_id,
+field_name, new_value)` (`20260822140000_create_edit_suggestions.sql`, rewritten by
+F020 to validate against the config table) lets an active CAM propose a change, snapshots
+the current value server-side into `EDIT_SUGGESTIONS`, and writes nothing to
+`organisations`. Submission audits nothing (flagging is not a decision).
 `decide_edit_suggestion(suggestion_id, approve, reason)`
-(`20260822150000_create_decide_edit_suggestion_rpc.sql`) is the decision half, admin
-only and audited both ways: approval re-checks that the live value still matches the
-submission snapshot (refusing on drift rather than silently overwriting whatever moved
-in the meantime) and then applies the proposed value through the same six-column case
-UPDATE shape `resolve_field_discrepancy` uses; rejection touches nothing and records
-the optional reason for the CAM. At most one pending suggestion exists per field per
-client: a CAM re-suggesting supersedes their own, another CAM's pending proposal blocks
-the field. SELECT on the table follows the same split: admins see everything, any
-active CAM sees pending rows, authors see their own history, viewers see nothing.
+(`20260822150500_create_decide_edit_suggestion_rpc.sql`, apply-back rewritten by F020 in
+`20260822160200` as guarded dynamic SQL so admin-added fields are applied too) is the
+decision half, admin only and audited both ways: approval re-checks that the live value
+still matches the submission snapshot (refusing on drift rather than silently
+overwriting whatever moved in the meantime) and then applies the proposed value;
+rejection touches nothing and records the optional reason for the CAM. At most one
+pending suggestion exists per field per client: a CAM re-suggesting supersedes their
+own, another CAM's pending proposal blocks the field. SELECT on the suggestions table
+follows the same split: admins see everything, any active CAM sees pending rows, authors
+see their own history, viewers see nothing. Background jobs (no JWT) bypass the trigger
+by design; admins keep the §3.2 write path in full.
 
 **Claiming an unowned client (F162).** Until `20260806140000`, a CAM claimed an unowned
 organisation the same way they edit one they own — directly through this UPDATE policy,
@@ -885,7 +894,7 @@ on its own — delivery is still filtered by the SELECT policy per subscriber
 
 ---
 
-### 3.17 Saved filter views — own rows only
+### 3.20 Saved filter views — own rows only
 
 Backs F066 (`supabase/migrations/20260821090000_create_saved_views.sql`). Same shape as
 §3.12 and §3.13: the user's own view state, not ownership/status/role/approval state, so
@@ -931,7 +940,8 @@ is the §2 pattern ("what RLS cannot do"), not an oversight.
 
 ---
 
-### 3.20 Attachments — shared read, no write path yet
+
+### 3.21 Attachments — shared read, no write path yet
 
 Backs F080 View Client Attachments (#83),
 `supabase/migrations/20260823090000_create_attachments.sql`. Also the schema-level
@@ -944,7 +954,7 @@ and the "storage location" answer (Supabase Storage, PRD §7's architecture tabl
 | `ATTACHMENTS` | all active roles | — (no grant; F081) | — (no grant) | — (no grant) |
 
 SELECT is shared, same shape as `NOTES` (§3.3) and `CLIENT_EDIT_SUGGESTIONS`
-(§3.19) — a client's attachment list is relationship context every active role
+(§3.2) — a client's attachment list is relationship context every active role
 sees, not something narrowed to an owner or an admin.
 
 **Deliberately no write path.** F080 is a view; F081 (Upload Client Attachment,
@@ -961,6 +971,39 @@ lets an active user's `createSignedUrl` call succeed (AC2's open/download), sinc
 Storage checks RLS on `storage.objects` the same way a table read does. No
 INSERT/UPDATE/DELETE policy there either: object writes stay `service_role`-only
 until F081 adds one.
+### 3.22 Restricted edit fields — admin-configured enforcement, CAM read
+
+Backs F020 Restricted Editing (#23),
+`supabase/migrations/20260822160000_create_restricted_edit_fields.sql`. New
+table — not previously reserved in the Data Model. Holds the set of
+`ORGANISATIONS` columns a CAM may not write directly; both enforcement points
+read it live (the column-guard trigger of §3.2 and
+`suggest_organisation_edit`), so a change here re-scopes restricted editing
+with no migration and no deploy.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `RESTRICTED_EDIT_FIELDS` | admins: all rows · CAMs: active rows only · viewers: none (§4 zero rows) | — (RPC only) | — (RPC only) | — (never; soft-disable via `active = false`) |
+
+No direct INSERT/UPDATE/DELETE grant to anyone. Both writes are SECURITY
+DEFINER RPCs that self-check `app.is_admin()` and audit in-transaction
+(`restricted_field_added` / `restricted_field_removed`,
+docs/audit-log-pattern.md §1 — changing this table changes who can write
+client records, which is approval-state territory):
+
+- `add_restricted_edit_field(field_name, reason)` — validates the column is a
+  real `text` column of `organisations` outside the protected system set;
+  re-adding a retired row reactivates it instead of duplicating.
+- `deactivate_restricted_edit_field(field_name)` — soft-disable only. Rows are
+  never deleted: `EDIT_SUGGESTIONS.field_name` is a foreign key to this table,
+  and the record of what was restricted when is part of the trail.
+
+The trigger depends on this table's CAM SELECT policy exposing **active**
+rows — it reads the config through RLS as the calling user. If that policy
+ever narrows below active-rows-for-CAMs, direct-write enforcement silently
+weakens to whatever remains visible (pgTAP suite_restricted_editing guards
+the current contract).
+
 
 ---
 
@@ -1041,8 +1084,10 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    requires role changes and deactivations to be audited, and F221 depends on it.
 2. ~~**No suggestion table.**~~ **RESOLVED — F077 (#79)**. `EDIT_SUGGESTIONS` and
    `suggest_organisation_edit` (20260822140000) hold the suggestion; §3.2's
-   "sanctioned route" paragraph documents the flow. The decide side is F078/F079,
-   and blocking the direct owned-row write on sensitive fields stays with F020.
+   "sanctioned route" paragraph documents the flow. The decide side is F078/F079.
+   The remaining piece — blocking the direct owned-row write on restricted fields —
+   is done: **RESOLVED — F020 (#23)**, the column-guard trigger of
+   20260822160100 plus the configurable `RESTRICTED_EDIT_FIELDS` allowlist.
 3. ~~**No suppression table.**~~ **RESOLVED — F251 (#82) & F185 (#181)**. §3.14 has
    the table and RPCs (`request_suppression`, `decide_suppression_request`, `lift_suppression`).
    "Lift suppression: Admin, mandatory reason required" is implemented by F185 (`lift_suppression`).

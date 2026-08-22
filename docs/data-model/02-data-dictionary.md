@@ -495,3 +495,9 @@
 | 04 Entities | EDIT_SUGGESTIONS | rejection_reason | text |  | Optional admin note for the CAM |
 | 04 Entities | EDIT_SUGGESTIONS | created_at | timestamp |  | Row creation timestamp |
 | 04 Entities | EDIT_SUGGESTIONS | updated_at | timestamp |  | Last edit timestamp |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | id | uuid |  | Primary key |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | field_name | text | ORGANISATIONS (column) | Client column CAMs may not write directly |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | active | boolean |  | False = retired, not enforced |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | reason | text |  | Why the field is restricted |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | added_by | uuid | USERS | Admin who restricted it; null for seeded rows |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | created_at | timestamp |  | Row creation timestamp |

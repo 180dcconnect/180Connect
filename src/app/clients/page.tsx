@@ -155,6 +155,10 @@ export default async function ClientsPage({
       // Income bands are saved by the preferences form but not weighted into the
       // queue yet — only select what prioritiseByGeography actually consumes.
       .select("preferred_geographic_reach, preferred_cities")
+      // F187 lets admins read every CAM's preferences row, so scope to the
+      // caller explicitly: an unfiltered maybeSingle would match all of them
+      // and error out for admins instead of weighting their own queue.
+      .eq("user_id", authorization.actor.id)
       .maybeSingle<{ preferred_geographic_reach: string[] | null; preferred_cities: string[] | null }>(),
   ]);
 

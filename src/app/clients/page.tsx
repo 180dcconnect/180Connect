@@ -136,12 +136,13 @@ export default async function ClientsPage({
       .overrideTypes<TeamMember[], { merge: false }>(),
     supabase
       .from("outreach_preferences")
-      .select("preferred_geographic_reach, preferred_cities, preferred_sectors, preferred_income_bands")
+      // Income bands are saved by the preferences form but not weighted into the
+      // queue yet — only select what prioritiseQueue actually consumes.
+      .select("preferred_geographic_reach, preferred_cities, preferred_sectors")
       .maybeSingle<{
         preferred_geographic_reach: string[] | null;
         preferred_cities: string[] | null;
         preferred_sectors: string[] | null;
-        preferred_income_bands: string[] | null;
       }>(),
   ]);
 
@@ -153,6 +154,13 @@ export default async function ClientsPage({
   }
   if (team.error) {
     await reportError(team.error, { operation: "clients.page_team" });
+  }
+  // F197 review: a failed preferences load used to be ignored, silently falling
+  // back to the default queue order. Logged here and surfaced through the same
+  // safe-loading warning as the other queries — ordering silently changing is a
+  // failure the CAM needs to know about (Definition of Done).
+  if (outreachPrefs.error) {
+    await reportError(outreachPrefs.error, { operation: "clients.page_outreach_preferences" });
   }
 
   const allVisibleClients = visibleClients(organisations.data ?? [], openSuppressions.data ?? []);
@@ -324,7 +332,7 @@ export default async function ClientsPage({
         }
       >
 
-        {(organisations.error || openSuppressions.error) && (
+        {(organisations.error || openSuppressions.error || outreachPrefs.error) && (
           <Rise>
             <p
               role="alert"

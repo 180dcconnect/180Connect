@@ -4,9 +4,8 @@ import {
   filterByOwner,
   formatLocation,
   formatOutreachStatus,
-  prioritiseByGeography,
-  prioritiseBySector,
   prioritiseQueue,
+  prioritiseBySector,
   searchClients,
   visibleClients,
   type ClientListRow,
@@ -170,7 +169,7 @@ describe("searchClients", () => {
   });
 });
 
-describe("prioritiseByGeography (F196 / F090 / F094)", () => {
+describe("prioritiseQueue — geography only (F196 / F090 / F094)", () => {
   const clients = visibleClients(
     [
       org({ id: "1", legal_name: "Action for Children", city: "London", country_code: "GB", geographic_reach: "national" }),
@@ -184,21 +183,21 @@ describe("prioritiseByGeography (F196 / F090 / F094)", () => {
 
   it("returns the unweighted default order when no preferences are passed", () => {
     assert.deepEqual(
-      prioritiseByGeography(clients, undefined).map((c) => c.id),
+      prioritiseQueue(clients, undefined).map((c) => c.id),
       ["1", "2", "3", "4", "5"],
     );
     assert.deepEqual(
-      prioritiseByGeography(clients, null).map((c) => c.id),
+      prioritiseQueue(clients, null).map((c) => c.id),
       ["1", "2", "3", "4", "5"],
     );
     assert.deepEqual(
-      prioritiseByGeography(clients, { preferred_geographic_reach: [], preferred_cities: [] }).map((c) => c.id),
+      prioritiseQueue(clients, { preferred_geographic_reach: [], preferred_cities: [] }).map((c) => c.id),
       ["1", "2", "3", "4", "5"],
     );
   });
 
   it("prioritises organisations matching preferred target cities", () => {
-    const result = prioritiseByGeography(clients, {
+    const result = prioritiseQueue(clients, {
       preferred_cities: ["Leeds", "Barnsley"],
       preferred_geographic_reach: [],
     });
@@ -207,7 +206,7 @@ describe("prioritiseByGeography (F196 / F090 / F094)", () => {
   });
 
   it("prioritises Sheffield when local reach or Sheffield city is preferred", () => {
-    const result = prioritiseByGeography(clients, {
+    const result = prioritiseQueue(clients, {
       preferred_cities: ["Sheffield"],
       preferred_geographic_reach: ["local"],
     });
@@ -215,7 +214,7 @@ describe("prioritiseByGeography (F196 / F090 / F094)", () => {
   });
 
   it("boosts South Yorkshire cities when South Yorkshire regional preference is set", () => {
-    const result = prioritiseByGeography(clients, {
+    const result = prioritiseQueue(clients, {
       preferred_cities: ["South Yorkshire"],
       preferred_geographic_reach: [],
     });
@@ -225,7 +224,7 @@ describe("prioritiseByGeography (F196 / F090 / F094)", () => {
   });
 
   it("prioritises matching geographic reach", () => {
-    const result = prioritiseByGeography(clients, {
+    const result = prioritiseQueue(clients, {
       preferred_geographic_reach: ["national"],
       preferred_cities: [],
     });
@@ -278,6 +277,24 @@ describe("prioritiseBySector (F197 / F089 / F094)", () => {
       preferred_sectors: ["Renewable Energy"],
     });
     assert.equal(result[0].id, "3");
+  });
+
+  it("matches aliases on whole words only — no accidental fragment boosts", () => {
+    const result = prioritiseBySector(clients, {
+      preferred_sectors: ["Arts & Culture"],
+    });
+    // None of these organisations is an arts organisation; raw substring
+    // matching could previously boost via fragments of unrelated words.
+    assert.deepEqual(result.map((c) => c.id), ["1", "2", "3", "4", "5"]);
+  });
+
+  it("does not let overlapping group vocabulary cross-match unrelated sectors", () => {
+    const result = prioritiseBySector(clients, {
+      preferred_sectors: ["Human Rights & Justice", "Social Enterprise"],
+    });
+    // Youth (#1) and poverty (#5) orgs share vocabulary with the justice and
+    // community groups but are neither — they keep the unweighted tail order.
+    assert.deepEqual(result.map((c) => c.id), ["1", "2", "3", "4", "5"]);
   });
 });
 

@@ -130,22 +130,40 @@ export type OutreachQueuePreferences = {
   preferred_geographic_reach?: string[] | null;
   preferred_cities?: string[] | null;
   preferred_sectors?: string[] | null;
-  preferred_income_bands?: string[] | null;
 };
 
-export type GeographicPreference = OutreachQueuePreferences;
+/**
+ * The one keyword table for cross-source sector matching (F197) — the settings
+ * presets in src/app/settings/outreach-preferences/constants.ts describe sectors
+ * to the CAM; this table is how those words match heterogeneous organisation
+ * data (Charity Commission cause strings, Companies House SIC descriptions,
+ * LLM-classified sector tags). Aliases are deliberately specific and are matched
+ * on whole words by `textContains` — broad stems like "social" or "energy" used
+ * to drag unrelated groups into each other's matches.
+ */
+export const CANONICAL_SECTOR_GROUPS: Record<string, string[]> = {
+  health: ["health", "healthcare", "medical", "hospital", "clinic", "mental health", "disability", "wellbeing", "social care"],
+  education: ["education", "training", "school", "college", "university", "learning", "literacy", "teaching", "skills"],
+  environment: ["environment", "conservation", "climate", "sustainability", "wildlife", "animal welfare", "renewable energy"],
+  poverty: ["poverty", "food bank", "homeless", "housing", "hardship", "deprivation", "social inclusion"],
+  community: ["community development", "youth", "children", "family support", "youth services"],
+  arts: ["arts", "culture", "heritage", "museum", "theatre", "sport", "recreation"],
+  justice: ["human rights", "justice", "equality", "legal", "international aid", "social enterprise", "enterprise"],
+};
+
+/**
+ * Whole-word containment, case-insensitive. Raw `.includes()` matched inside
+ * words ("arts" in "parts") and let single-word aliases over-trigger; anchoring
+ * on non-alphanumeric boundaries keeps phrase aliases like "mental health"
+ * working across "&"-separated strings.
+ */
+function textContains(haystack: string, needle: string): boolean {
+  if (!haystack || !needle) return false;
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`).test(haystack);
+}
 
 const SOUTH_YORKSHIRE_CITIES = new Set(["sheffield", "rotherham", "barnsley", "doncaster"]);
-
-const CANONICAL_SECTOR_GROUPS: Record<string, string[]> = {
-  health: ["health", "healthcare", "medical", "hospital", "mental health", "disability support", "clinical"],
-  education: ["education", "training", "school", "college", "university", "literacy", "teaching", "skills"],
-  environment: ["environment", "conservation", "climate", "sustainability", "wildlife", "animal welfare", "renewable energy"],
-  poverty: ["poverty", "food bank", "homeless", "housing & homelessness", "hardship", "deprivation", "poverty relief"],
-  community: ["community development", "youth & children", "family support", "social inclusion", "youth services"],
-  arts: ["arts & culture", "heritage & museums", "theatre", "sports & recreation", "museum"],
-  justice: ["international aid", "human rights", "justice", "social enterprise"],
-};
 
 /** Computes sector weighting score for a client given CAM sector preferences (F197 / F089). */
 function getSectorPriorityScore(client: VisibleClient, preferredSectors: string[]): number {
@@ -163,21 +181,27 @@ function getSectorPriorityScore(client: VisibleClient, preferredSectors: string[
     const p = pref.toLowerCase().trim();
     if (!p) continue;
 
-    // Direct exact or substring match
-    if (clientSector === p || (clientSector && p.includes(clientSector)) || (clientSector && clientSector.includes(p))) {
+    // Direct exact or whole-word match on sector
+    if (
+      clientSector &&
+      (clientSector === p || textContains(p, clientSector) || textContains(clientSector, p))
+    ) {
       score = Math.max(score, 10);
       continue;
     }
 
-    if (clientSubSector === p || (clientSubSector && clientSubSector.includes(p))) {
+    if (clientSubSector && (clientSubSector === p || textContains(clientSubSector, p))) {
       score = Math.max(score, 8);
       continue;
     }
 
     // Canonical category match (e.g. "Health & Social Care" matches "Healthcare")
     for (const [groupKey, groupAliases] of Object.entries(CANONICAL_SECTOR_GROUPS)) {
-      const prefMatchesGroup = groupAliases.some((alias) => p.includes(alias)) || p.includes(groupKey);
-      const clientMatchesGroup = groupAliases.some((alias) => clientText.includes(alias)) || clientText.includes(groupKey);
+      const prefMatchesGroup =
+        groupAliases.some((alias) => textContains(p, alias)) || textContains(p, groupKey);
+      const clientMatchesGroup =
+        groupAliases.some((alias) => textContains(clientText, alias)) ||
+        textContains(clientText, groupKey);
 
       if (prefMatchesGroup && clientMatchesGroup) {
         score = Math.max(score, 8);
@@ -188,7 +212,15 @@ function getSectorPriorityScore(client: VisibleClient, preferredSectors: string[
   return score;
 }
 
-/** Computes geographic weighting score for a client given CAM geographic preferences (F196 / F090). */
+/**
+ * Computes geographic weighting score for a client given CAM geographic preferences (F196 / F090).
+ *
+ * The South Yorkshire city set, "regional → South Yorkshire" and "local →
+ * Sheffield" expansions are deliberate pilot scoping: 180Connect currently serves
+ * the Sheffield branch only, where regional means South Yorkshire and local means
+ * Sheffield. When another branch onboards this must become region-driven data,
+ * not more hardcoded cities.
+ */
 function getGeographicPriorityScore(
   client: VisibleClient,
   preferredReach: string[],
@@ -290,14 +322,4 @@ export function prioritiseQueue(
     }
     return a.legal_name.localeCompare(b.legal_name);
   });
-}
-
-/**
- * F196 / F090 / F094 — Backward compatible alias for geographic prioritisation.
- */
-export function prioritiseByGeography(
-  clients: VisibleClient[],
-  preferences?: GeographicPreference | null,
-): VisibleClient[] {
-  return prioritiseQueue(clients, preferences);
 }

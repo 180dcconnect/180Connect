@@ -11,6 +11,7 @@ import {
   filterByStatus,
   filterBySource,
   filterByTags,
+  prioritiseQueue,
   searchClients,
   visibleClients,
   type ClientListRow,
@@ -125,11 +126,11 @@ export default async function ClientsPage({
   const canClaim = hasPermission(authorization.actor.role, "client:edit");
   const canGenerateBooklet = hasPermission(authorization.actor.role, "client:contact");
 
-  const [organisations, openSuppressions, team, allTags] = await Promise.all([
+  const [organisations, openSuppressions, team, allTags, outreachPrefs] = await Promise.all([
     supabase
       .from("organisations")
       .select(
-        "id, legal_name, organisation_type, city, country_code, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id)",
+        "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id), financial_periods(income_band, total_income, period_end), grants(id, amount_awarded, funder_name, award_date)",
       )
       .order("legal_name")
       .overrideTypes<ClientListRow[], { merge: false }>(),
@@ -149,6 +150,16 @@ export default async function ClientsPage({
       .select("id, name")
       .order("name")
       .overrideTypes<{ id: string; name: string }[], { merge: false }>(),
+    supabase
+      .from("outreach_preferences")
+      .select("preferred_geographic_reach, preferred_cities, preferred_sectors, preferred_income_bands, prioritise_grant_recipients")
+      .maybeSingle<{
+        preferred_geographic_reach: string[] | null;
+        preferred_cities: string[] | null;
+        preferred_sectors: string[] | null;
+        preferred_income_bands: string[] | null;
+        prioritise_grant_recipients: boolean | null;
+      }>(),
   ]);
 
   if (organisations.error) {
@@ -162,6 +173,9 @@ export default async function ClientsPage({
   }
   if (allTags.error) {
     await reportError(allTags.error, { operation: "clients.page_tags" });
+  }
+  if (outreachPrefs.error) {
+    await reportError(outreachPrefs.error, { operation: "clients.page_outreach_preferences" });
   }
 
   const availableTags = allTags.data ?? [];
@@ -188,6 +202,10 @@ export default async function ClientsPage({
   matchingClients = filterBySource(matchingClients, source);
   matchingClients = filterByTags(matchingClients, tagFilter);
   matchingClients = searchClients(matchingClients, search);
+
+  // F196 / F197 / F199 / F094: Prioritise matching clients based on the CAM's
+  // geographic, sector, size and grant-history preferences
+  matchingClients = prioritiseQueue(matchingClients, outreachPrefs.data);
   const teamMembers = team.data ?? [];
   const filterActive = Boolean(ownerFilter || search || city || status || source || tagFilter.length);
   // F166 AC1/AC3: this is the CAM viewing their own filter, not just any owner
@@ -356,7 +374,7 @@ export default async function ClientsPage({
         }
       >
 
-        {(organisations.error || openSuppressions.error) && (
+        {(organisations.error || openSuppressions.error || outreachPrefs.error) && (
           <Rise>
             <p
               role="alert"

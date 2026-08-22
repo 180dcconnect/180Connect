@@ -16,6 +16,7 @@ export type ClientListRow = {
   outreach_status: string;
   owner_id: string | null;
   owner: { full_name: string | null } | null;
+  org_tags: { tag_id: string }[];
 };
 
 export type OpenSuppression = { organisation_id: string; status: "pending" | "active" };

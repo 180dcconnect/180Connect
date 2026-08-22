@@ -119,11 +119,11 @@ export default async function ClientsPage({
   const canClaim = hasPermission(authorization.actor.role, "client:edit");
   const canGenerateBooklet = hasPermission(authorization.actor.role, "client:contact");
 
-  const [organisations, openSuppressions, team] = await Promise.all([
+  const [organisations, openSuppressions, team, allTags] = await Promise.all([
     supabase
       .from("organisations")
       .select(
-        "id, legal_name, organisation_type, city, country_code, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
+        "id, legal_name, organisation_type, city, country_code, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id)",
       )
       .order("legal_name")
       .overrideTypes<ClientListRow[], { merge: false }>(),
@@ -138,6 +138,10 @@ export default async function ClientsPage({
       .eq("role", "cam")
       .order("full_name")
       .overrideTypes<TeamMember[], { merge: false }>(),
+    supabase
+      .from("tags")
+      .select("id, name")
+      .overrideTypes<{ id: string; name: string }[], { merge: false }>(),
   ]);
 
   if (organisations.error) {
@@ -149,6 +153,13 @@ export default async function ClientsPage({
   if (team.error) {
     await reportError(team.error, { operation: "clients.page_team" });
   }
+  if (allTags.error) {
+    await reportError(allTags.error, { operation: "clients.page_tags" });
+  }
+
+  // Read-only lookup for row pills — F193's filter-by-tag control is a separate,
+  // not-yet-merged piece of work; this is just id → name for display.
+  const tagNameById = new Map((allTags.data ?? []).map((tag) => [tag.id, tag.name]));
 
   const allVisibleClients = visibleClients(organisations.data ?? [], openSuppressions.data ?? []);
   
@@ -425,6 +436,21 @@ export default async function ClientsPage({
                           <span className="hidden truncate text-[12px] text-foreground/40 lg:block">
                             {SOURCE_LABELS[client.organisation_type] ?? client.organisation_type}
                           </span>
+                          {client.org_tags.length > 0 && (
+                            <span className="mt-1 flex flex-wrap gap-1">
+                              {client.org_tags.map(({ tag_id }) => {
+                                const name = tagNameById.get(tag_id);
+                                return name ? (
+                                  <span
+                                    key={tag_id}
+                                    className="inline-flex max-w-full items-center truncate rounded-full bg-brand/12 px-2 py-0.5 text-[11px] font-medium text-brand-hover"
+                                  >
+                                    {name}
+                                  </span>
+                                ) : null;
+                              })}
+                            </span>
+                          )}
                         </span>
 
                         <span className="hidden min-w-0 truncate text-[13px] text-foreground/60 lg:block">

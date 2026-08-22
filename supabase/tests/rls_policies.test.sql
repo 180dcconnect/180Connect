@@ -4522,6 +4522,109 @@ $$;
 
 
 -- ---------------------------------------------------------------------------
+-- Attachments (F080 / #83): shared read for active roles, no write path yet
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_attachments()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_org_a       uuid := '00000000-0000-4000-b000-000000000002';  -- owned by cam_a
+  v_att         uuid;
+  v_count       bigint;
+  v_rls         boolean;
+begin
+  if not tests.tables_exist('attachments') then
+    return next skip(9, 'F080 attachments table not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Fixture row, inserted as the suite's superuser role: F080 has no INSERT
+  -- grant by design (upload is F081), so no client session could create one.
+  insert into public.attachments
+    (organisation_id, filename, storage_path, content_type, size_bytes, uploaded_by)
+  values
+    (v_org_a, 'grant-agreement.pdf',
+     v_org_a::text || '/11111111-1111-4111-8111-111111111111-grant-agreement.pdf',
+     'application/pdf', 48213, v_cam_a)
+  returning id into v_att;
+
+  -- RLS really is on — a missing ENABLE would make every later check vacuous.
+  select relrowsecurity into v_rls
+    from pg_class where oid = 'public.attachments'::regclass;
+  return next ok(v_rls, 'RLS is enabled on public.attachments');
+
+  -- Shared read (matrix §3.21): a CAM who does not own the client still sees
+  -- its attachment list — same shape as NOTES (§3.3).
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.attachments where id = v_att;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'a CAM who does not own the client can read its attachments (shared read)');
+
+  -- Viewers read too — every active role, per F019 shared visibility.
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.attachments where id = v_att;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'a viewer reads attachments like any other active role');
+
+  -- A deactivated account is silently locked out — §4: a blocked SELECT
+  -- returns 0 rows, never an error.
+  perform tests.login_as(v_deactivated);
+  select count(*) into v_count from public.attachments where id = v_att;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'a deactivated account reads no attachments (silent empty result)');
+
+  -- No write path exists for any client role until F081 ships one.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.attachments (organisation_id, filename, storage_path) values (%L, ''x.pdf'', ''p/x.pdf'')', v_org_a)),
+    '42501',
+    'no role can INSERT an attachment row directly (upload is F081)'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.attachments set filename = ''hijacked.pdf'' where id = %L', v_att)),
+    '42501',
+    'attachments cannot be renamed'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'delete from public.attachments where id = %L', v_att)),
+    '42501',
+    'attachments cannot be deleted from the client side'
+  );
+
+  -- The storage door mirrors the table: exactly the one SELECT policy on the
+  -- bucket, and no client-role write policy alongside it.
+  select count(*) into v_count from pg_policies
+   where schemaname = 'storage' and tablename = 'objects'
+     and policyname = 'attachments_bucket_select_active'
+     and cmd = 'SELECT';
+  return next is(v_count, 1::bigint,
+    'the client-attachments bucket SELECT policy exists');
+
+  select count(*) into v_count from pg_policies
+   where schemaname = 'storage' and tablename = 'objects'
+     and policyname like 'attachments%'
+     and cmd <> 'SELECT';
+  return next is(v_count, 0::bigint,
+    'no INSERT/UPDATE/DELETE policy on the bucket for client roles');
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------------
 -- Restricted editing (F020, #23): the config table, the column-guard trigger and
 -- the config-driven suggestion path
 -- ---------------------------------------------------------------------------
@@ -4751,6 +4854,7 @@ select * from tests.suite_suppressions();
 select * from tests.suite_ownership_requests();
 select * from tests.suite_edit_suggestions();
 select * from tests.suite_notifications();
+select * from tests.suite_attachments();
 select * from tests.suite_restricted_editing();
 select * from tests.suite_source_tracking();
 select * from tests.suite_manual_entries();

@@ -4,7 +4,7 @@ import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
-import { nonEmptyTrimmed, safeValidate } from "@/lib/validation";
+import { isUuid, nonEmptyTrimmed, safeValidate } from "@/lib/validation";
 
 /**
  * F072 — add a free-text note to a client, reached from /clients/[id]. No RPC:
@@ -38,7 +38,7 @@ export async function POST(
   if (!authorization.ok) return denied(authorization.reason);
 
   const { id: organisationId } = await params;
-  if (!z.uuid().safeParse(organisationId).success) {
+  if (!isUuid(organisationId)) {
     return NextResponse.json({ error: "That client could not be found." }, { status: 400 });
   }
 

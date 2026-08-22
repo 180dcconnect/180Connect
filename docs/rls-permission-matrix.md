@@ -894,7 +894,7 @@ on its own — delivery is still filtered by the SELECT policy per subscriber
 
 ---
 
-### 3.17 Saved filter views — own rows only
+### 3.20 Saved filter views — own rows only
 
 Backs F066 (`supabase/migrations/20260821090000_create_saved_views.sql`). Same shape as
 §3.12 and §3.13: the user's own view state, not ownership/status/role/approval state, so
@@ -940,7 +940,38 @@ is the §2 pattern ("what RLS cannot do"), not an oversight.
 
 ---
 
-### 3.20 Restricted edit fields — admin-configured enforcement, CAM read
+
+### 3.21 Attachments — shared read, no write path yet
+
+Backs F080 View Client Attachments (#83),
+`supabase/migrations/20260823090000_create_attachments.sql`. Also the schema-level
+resolution of F217/F218, neither of which is defined anywhere in the PRD's own
+feature table or this codebase — see the migration header for the full reasoning
+and the "storage location" answer (Supabase Storage, PRD §7's architecture table).
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `ATTACHMENTS` | all active roles | — (no grant; F081) | — (no grant) | — (no grant) |
+
+SELECT is shared, same shape as `NOTES` (§3.3) and `CLIENT_EDIT_SUGGESTIONS`
+(§3.2) — a client's attachment list is relationship context every active role
+sees, not something narrowed to an owner or an admin.
+
+**Deliberately no write path.** F080 is a view; F081 (Upload Client Attachment,
+P3, not yet built) owns deciding how a row and its bytes get created, including
+the size/type/security limits PRD §7.11/§11.3 asks for. Until F081 ships, this
+table has no INSERT grant and no RPC that could produce a row, so every client's
+attachment list is correctly empty rather than a placeholder.
+
+**Storage**: a private bucket, `client-attachments` (not public — nothing about a
+client's files is meant to be reachable by an unauthenticated guess at a path).
+`storage.objects` carries one SELECT policy, `bucket_id = 'client-attachments'
+and app.is_active_user()`, mirroring `attachments_select_active` — this is what
+lets an active user's `createSignedUrl` call succeed (AC2's open/download), since
+Storage checks RLS on `storage.objects` the same way a table read does. No
+INSERT/UPDATE/DELETE policy there either: object writes stay `service_role`-only
+until F081 adds one.
+### 3.22 Restricted edit fields — admin-configured enforcement, CAM read
 
 Backs F020 Restricted Editing (#23),
 `supabase/migrations/20260822160000_create_restricted_edit_fields.sql`. New
@@ -972,6 +1003,7 @@ rows — it reads the config through RLS as the calling user. If that policy
 ever narrows below active-rows-for-CAMs, direct-write enforcement silently
 weakens to whatever remains visible (pgTAP suite_restricted_editing guards
 the current contract).
+
 
 ---
 

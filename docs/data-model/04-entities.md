@@ -144,6 +144,19 @@
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | Yes | When the note was last edited | System | Updated on edit | Null if never edited |
 
+## ATTACHMENTS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| organisation_id | uuid | ORGANISATIONS | No | Client the file is attached to | System | Set when attachment is created | Deleting the organisation deletes its attachments |
+| filename | text |  | No | Original file name shown in the list | Human | From the uploaded file | Cannot be blank |
+| storage_path | text |  | No | Path inside the private client-attachments Storage bucket | System | Generated at upload time | Not a URL — never store signed URLs |
+| content_type | text |  | Yes | MIME type of the file | System | Detected at upload time |  |
+| size_bytes | bigint |  | Yes | File size in bytes | System | From the upload metadata | Must be ≥ 0 if present |
+| uploaded_by | uuid | USERS | Yes | Team member who attached the file | System | Set to logged-in user at creation | Nullable — a future automated import may have no human uploader (F081 decides) |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+
 ## TAGS
 
 | Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |

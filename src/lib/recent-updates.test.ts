@@ -88,6 +88,16 @@ describe("recentUpdatesCutoff", () => {
       new Date(NOW.getTime() - RECENT_UPDATES_WINDOW_DAYS * 24 * 60 * 60 * 1000),
     );
   });
+
+  it("serialises to an ISO string that is safe inside PostgREST filter grammar", () => {
+    // Callers pass this straight into .gte()/or= filters, where postgrest-js
+    // interpolates the value raw — a Date's toString ("Sat Aug 08 … (Coordinated
+    // Universal Time)") would break both. Commas/parens are the or=() grammar
+    // delimiters; there must be none.
+    const iso = recentUpdatesCutoff(NOW).toISOString();
+    assert.match(iso, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    assert.ok(!/[(),]/.test(iso));
+  });
 });
 
 describe("buildRecentUpdates — normal data (F028 testing notes)", () => {

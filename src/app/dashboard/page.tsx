@@ -104,7 +104,10 @@ export default async function DashboardPage({
     // F028: each recent-updates source is windowed and capped at the query
     // level; buildRecentUpdates re-filters by the same cutoff after merging,
     // so a note created before the window but edited inside it still shows.
-    const updateCutoff = recentUpdatesCutoff();
+    // ISO string, not a Date — postgrest-js interpolates filter values raw,
+    // so a Date would serialize as "Sat Aug 08 2026 … (Coordinated Universal
+    // Time)" and 400 every one of these queries.
+    const updateCutoff = recentUpdatesCutoff().toISOString();
     const [
       organisations,
       openSuppressions,

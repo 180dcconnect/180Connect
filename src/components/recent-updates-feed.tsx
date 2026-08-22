@@ -30,7 +30,7 @@ export function RecentUpdatesFeed({ items }: { items: FormattedRecentUpdate[] })
                   {String(index + 1).padStart(2, "0")}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[14px] leading-snug font-medium text-foreground">
+                  <p className="line-clamp-2 text-[14px] leading-snug font-medium text-foreground">
                     <span className="font-bold">{item.orgName}</span>{" "}
                     <span className="text-foreground/70">— {item.summary}</span>
                   </p>

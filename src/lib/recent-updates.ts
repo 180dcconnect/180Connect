@@ -79,12 +79,12 @@ export type FormattedRecentUpdate = {
   timestamp: string;
 };
 
-type ScopedEntry = TimelineEntry & { orgId: string };
+type ScopedEntry = TimelineEntry & { orgId: string; orgName: string };
 
 /**
- * Attaches the client to entries produced by @/lib/timeline.ts's builders and
- * drops any whose organisation the caller didn't supply a name for (deleted,
- * or filtered out of the dashboard's visible set).
+ * Attaches the client (id + name) to entries produced by @/lib/timeline.ts's
+ * builders and drops any whose organisation the caller didn't supply a name
+ * for (deleted, or filtered out of the dashboard's visible set).
  */
 function scopeToOrg(
   entries: readonly TimelineEntry[],
@@ -93,7 +93,7 @@ function scopeToOrg(
 ): ScopedEntry[] {
   const orgName = orgNames.get(orgId);
   if (!orgName) return [];
-  return entries.map((entry) => ({ ...entry, orgId }));
+  return entries.map((entry) => ({ ...entry, orgId, orgName }));
 }
 
 function withinWindow(timestamp: string, cutoff: Date): boolean {
@@ -150,7 +150,7 @@ export function buildRecentUpdates(
     .map((entry) => ({
       id: entry.id,
       orgId: entry.orgId,
-      orgName: orgNames.get(entry.orgId) ?? "",
+      orgName: entry.orgName,
       href: `/clients/${entry.orgId}`,
       eventLabel: TIMELINE_EVENT_LABEL[entry.type],
       actorName: entry.actorName,

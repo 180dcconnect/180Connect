@@ -1,16 +1,21 @@
 /**
- * #79 (F077) — Suggest Client Edit.
+ * #79/#80/#81 + #23 (F077/F078/F079/F020) — Restricted Editing.
  *
- * The decision logic behind the suggest-edit server action and the client-profile
- * section, kept out of the route so it can be tested without a database (same split
- * as @/lib/ownership-requests and @/lib/suppressions).
+ * The decision logic behind the suggest-edit server action, the client-profile
+ * section and the admin configuration panel, kept out of the routes so it can be
+ * tested without a database (same split as @/lib/ownership-requests).
  *
  * The rule this file encodes, signed off with the Project Leader on #23: a CAM never
- * edits one of a client's six sensitive identity fields directly — proposing is the
- * only route, and it ends in an admin's decision (F078/F079). Nothing here changes
- * the live record; it only decides whether the *proposal* is offered and what it must
- * contain. The database holds the same line: suggest_organisation_edit re-checks
- * every guard in this file inside its SECURITY DEFINER body.
+ * edits a restricted client field directly — proposing is the only route, and it ends
+ * in an admin's decision (F078/F079). Nothing here changes the live record; it only
+ * decides whether the *proposal* is offered and what it must contain. The database
+ * holds the same line twice over: suggest_organisation_edit re-checks every guard in
+ * this file inside its SECURITY DEFINER body, and the organisations column-guard
+ * trigger blocks any direct write the UI might miss.
+ *
+ * Since F020 the restricted set itself is data (RESTRICTED_EDIT_FIELDS, managed by
+ * admins at runtime), not this constant — SENSITIVE_ORG_FIELDS is the seeded default,
+ * its labels, and the type-level floor every other module can rely on.
  */
 
 import { z } from "zod";
@@ -18,11 +23,12 @@ import type { AppRole } from "./auth/permissions.ts";
 import { nonEmptyTrimmed, safeValidate } from "./validation.ts";
 
 /**
- * The sensitive fields — the only ones a suggestion can touch. Signed off on #23 and
- * deliberately identical to field_discrepancies/field_sources' allowlist
- * (20260815090000 / 20260820100000): externally verifiable identity/location fields
- * where a wrong value corrupts dedup and outreach targeting. The DB CHECK constraint
- * on edit_suggestions.field_name is this same list; change both together.
+ * The seeded restricted fields (#23, signed off 22 Aug 2026): the externally
+ * verifiable identity/location fields where a wrong value corrupts dedup and
+ * outreach targeting. F020 made this list runtime-configurable — the live set is
+ * RESTRICTED_EDIT_FIELDS in the database, read by the pages that need it. This
+ * constant remains as (a) the seed's mirror for tests and docs and (b) the label
+ * map below; new restricted fields get a derived label via restrictedFieldLabel.
  */
 export const SENSITIVE_ORG_FIELDS = [
   "legal_name",
@@ -50,11 +56,24 @@ export const SENSITIVE_FIELD_LABELS: Record<SensitiveOrgField, string> = {
 };
 
 /**
+ * Label for any restricted field, known or admin-added: the curated display name for
+ * the seeded six, otherwise the column name with underscores spaced out. A field an
+ * admin adds later has no hand-written label anywhere, so this is the one place the
+ * UI can go.
+ */
+export function restrictedFieldLabel(fieldName: string): string {
+  return isSensitiveOrgField(fieldName)
+    ? SENSITIVE_FIELD_LABELS[fieldName]
+    : fieldName.replaceAll("_", " ");
+}
+
+/**
  * Per-field validation, matching what manual entry already accepts for the same
  * columns (src/lib/manual-entry.ts): trimmed, bounded free text. website/contact_email
  * are NOT urlField/emailField here on purpose — canonical values arrive from messy
  * third-party sources and manual entry accepts the same shapes, so a CAM can propose
- * exactly what the record could hold.
+ * exactly what the record could hold. Fields added after seeding have no recorded
+ * length bound; they get a generous default.
  */
 const FIELD_MAX_LENGTHS: Record<SensitiveOrgField, number> = {
   legal_name: 200,
@@ -65,26 +84,40 @@ const FIELD_MAX_LENGTHS: Record<SensitiveOrgField, number> = {
   postcode: 32,
 };
 
-function fieldValueSchema(field: SensitiveOrgField) {
+const DEFAULT_FIELD_MAX_LENGTH = 500;
+
+function maxLengthFor(field: string): number {
+  return isSensitiveOrgField(field) ? FIELD_MAX_LENGTHS[field] : DEFAULT_FIELD_MAX_LENGTH;
+}
+
+function fieldValueSchema(field: string) {
   return z.object({
     fieldValue: nonEmptyTrimmed(
-      FIELD_MAX_LENGTHS[field],
-      `Enter the corrected ${SENSITIVE_FIELD_LABELS[field].toLowerCase()}.`,
+      maxLengthFor(field),
+      `Enter the corrected ${restrictedFieldLabel(field).toLowerCase()}.`,
     ),
   });
 }
 
 export type SuggestEditInput = {
   organisationId: string;
-  fieldName: SensitiveOrgField;
+  fieldName: string;
   fieldValue: string;
 };
 
-/** Validates one suggest-edit submission; returns per-field errors like every form. */
+/**
+ * Validates one suggest-edit submission; returns per-field errors like every form.
+ *
+ * allowedFields is the live RESTRICTED_EDIT_FIELDS list the caller fetched — the UI
+ * only offers those fields, and this check keeps the action honest against a forged
+ * formData. It defaults to the seeded six so pure-form callers stay correct without
+ * a database round-trip; the RPC re-checks the live table regardless.
+ */
 export function validateSuggestEdit(input: {
   organisationId: unknown;
   fieldName: unknown;
   fieldValue: unknown;
+  allowedFields?: readonly string[];
 }): { success: true; data: SuggestEditInput } | { success: false; message: string } {
   if (
     typeof input.organisationId !== "string" ||
@@ -93,7 +126,11 @@ export function validateSuggestEdit(input: {
     return { success: false, message: "This client could not be identified." };
   }
 
-  if (typeof input.fieldName !== "string" || !isSensitiveOrgField(input.fieldName)) {
+  const allowedFields = input.allowedFields ?? SENSITIVE_ORG_FIELDS;
+  if (
+    typeof input.fieldName !== "string" ||
+    !allowedFields.includes(input.fieldName)
+  ) {
     return { success: false, message: "Choose a field to correct." };
   }
 
@@ -123,7 +160,7 @@ export type SuggestEditState = {
   kind: "idle" | "success" | "error";
   message: string;
   /** The field the state refers to, so the UI can scope success/error copy. */
-  fieldName?: SensitiveOrgField;
+  fieldName?: string;
 };
 
 export const idleSuggestEditState: SuggestEditState = { kind: "idle", message: "" };
@@ -208,7 +245,7 @@ export function suggestEditAvailability({
 }: {
   actorRole: AppRole;
   actorId: string;
-  fieldName: SensitiveOrgField;
+  fieldName: string;
   pendingSuggestions: PendingSuggestion[];
 }): SuggestEditAvailability {
   // An admin edits these fields directly through the normal policy (matrix §3.2);
@@ -226,8 +263,8 @@ export function suggestEditAvailability({
 }
 
 /** What the team sees while a field has an open proposal. */
-export function pendingSuggestionNotice(fieldName: SensitiveOrgField): string {
-  return `A correction to ${SENSITIVE_FIELD_LABELS[fieldName]} is awaiting admin review — the value below is still the live one.`;
+export function pendingSuggestionNotice(fieldName: string): string {
+  return `A correction to ${restrictedFieldLabel(fieldName)} is awaiting admin review — the value below is still the live one.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +305,7 @@ const DECIDE_GENERIC_FAILURE =
 /**
  * Maps a Postgres error from decide_edit_suggestion onto something safe to show an
  * admin. Every errcode below is one the RPC raises deliberately with an admin-readable
- * message (see 20260822150000_create_decide_edit_suggestion_rpc.sql).
+ * message (see 20260822150500_create_decide_edit_suggestion_rpc.sql).
  */
 export function decideEditRpcFailure(error: {
   code?: string;
@@ -315,4 +352,100 @@ export function describePendingSuggestion(
 ): string {
   const current = currentValue?.trim() || "Not provided";
   return `${fieldNameLabel}: "${current}" → "${proposedValue}"`;
+}
+
+// ---------------------------------------------------------------------------
+// Restricted-field configuration (#23, F020)
+// ---------------------------------------------------------------------------
+
+/** Row shape behind the admin configuration panel. */
+export type RestrictedFieldRow = {
+  field_name: string;
+  reason: string;
+  active: boolean;
+};
+
+/**
+ * Validates one add-restriction submission. The field name must look like a Postgres
+ * column (the RPC re-checks it against organisations' actual text columns — this is
+ * the cheap first pass so obvious junk never leaves the form).
+ */
+export function validateRestrictedFieldInput(input: {
+  fieldName: unknown;
+  reason: unknown;
+}): { success: true; data: { fieldName: string; reason: string } } | { success: false; message: string } {
+  if (
+    typeof input.fieldName !== "string" ||
+    !/^[a-z][a-z0-9_]*$/.test(input.fieldName.trim())
+  ) {
+    return {
+      success: false,
+      message: "Enter the column name of a client field, e.g. trading_name.",
+    };
+  }
+
+  const parsed = safeValidate(
+    z.object({ reason: nonEmptyTrimmed(500, "Say why this field is being restricted.") }),
+    { reason: input.reason },
+  );
+  if (!parsed.success) {
+    return {
+      success: false,
+      message: parsed.fieldErrors.reason?.[0] ?? "Say why this field is being restricted.",
+    };
+  }
+
+  return {
+    success: true,
+    data: { fieldName: input.fieldName.trim(), reason: parsed.data.reason },
+  };
+}
+
+/**
+ * Validates one retire-restriction submission (same wrapper discipline as the add
+ * path — no raw Zod at the route).
+ */
+export function validateDeactivateRestrictedFieldInput(input: {
+  fieldName: unknown;
+}): { success: true; data: { fieldName: string } } | { success: false; message: string } {
+  const parsed = safeValidate(
+    z.object({ fieldName: nonEmptyTrimmed(100, "Name the field to retire.") }),
+    { fieldName: input.fieldName },
+  );
+  if (!parsed.success) {
+    return {
+      success: false,
+      message: parsed.fieldErrors.fieldName?.[0] ?? "Name the field to retire.",
+    };
+  }
+  return { success: true, data: { fieldName: parsed.data.fieldName.trim() } };
+}
+
+const CONFIG_GENERIC_FAILURE =
+  "The change could not be saved. Refresh and try again.";
+
+/**
+ * Maps a Postgres error from add_restricted_edit_field /
+ * deactivate_restricted_edit_field onto something safe to show an admin. Every
+ * errcode below is one the RPCs raise deliberately (see
+ * 20260822160000_create_restricted_edit_fields.sql); anything else gets the generic
+ * string.
+ */
+export function restrictedFieldRpcFailure(error: {
+  code?: string;
+  message?: string;
+}): RpcFailure {
+  if (!error.message?.trim()) {
+    return { status: 500, error: CONFIG_GENERIC_FAILURE };
+  }
+  switch (error.code) {
+    case "42501":
+      return { status: 403, error: error.message };
+    case "23514":
+      return { status: 400, error: error.message };
+    case "P0002":
+      return { status: 404, error: error.message };
+    default:
+      return { status: 500, error: CONFIG_GENERIC_FAILURE };
+  }
 }

@@ -258,7 +258,7 @@ export function buildOwnershipReassignedEntry(
 }
 
 /**
- * decide_edit_suggestion (20260822150000) writes `detail: {field, from, to,
+ * decide_edit_suggestion (20260822150500) writes `detail: {field, from, to,
  * requested_by, reason}` — the field is a raw ORGANISATIONS column name, so
  * SENSITIVE_FIELD_LABELS renders it the way the suggest-edit form named it. `to`
  * is only set on approval (nothing was written on rejection); `reason` only on

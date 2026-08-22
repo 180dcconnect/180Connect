@@ -15,30 +15,26 @@ import type { AppRole } from "@/lib/auth/permissions.ts";
 import {
   describePendingSuggestion,
   idleSuggestEditState,
-  isSensitiveOrgField,
   pendingSuggestionNotice,
-  SENSITIVE_FIELD_LABELS,
-  SENSITIVE_ORG_FIELDS,
+  restrictedFieldLabel,
   suggestEditAvailability,
   suggestionDecisionNotice,
   type EditSuggestionRow,
-  type SensitiveOrgField,
 } from "@/lib/edit-suggestions";
 import { suggestEditAction } from "./actions";
 
-function fieldLabel(fieldName: string): string {
-  return isSensitiveOrgField(fieldName) ? SENSITIVE_FIELD_LABELS[fieldName] : fieldName;
-}
-
 /**
- * #79/#80/#81 (F077/F078/F079) — one section serving both sides of the edit-suggestion
- * system, right under the values it governs so "live vs proposed" reads in one glance.
+ * #79/#80/#81 + #23 (F077/F078/F079/F020) — one section serving both sides of the
+ * edit-suggestion system, right under the values it governs so "live vs proposed"
+ * reads in one glance.
  *
- * CAM side: proposes a correction to one of the six sensitive fields. Submitting
- * creates a pending suggestion and changes nothing else; the copy says so at every
- * step. Their own settled proposals render the outcome (approved / rejected with the
- * admin's reason) — AC3 of #80's "notification or a visible status", satisfied by
- * visibility rather than the not-yet-built notifications table.
+ * CAM side: proposes a correction to one of the restricted fields (the live list
+ * comes from RESTRICTED_EDIT_FIELDS via the page, so an admin-added field appears
+ * here without a deploy). Submitting creates a pending suggestion and changes nothing
+ * else; the copy says so at every step. Their own settled proposals render the
+ * outcome (approved / rejected with the admin's reason) — AC3 of #80's "notification
+ * or a visible status", satisfied by visibility rather than the not-yet-built
+ * notifications table.
  *
  * Admin side: each pending proposal becomes a decision card — current → proposed,
  * who asked, optional reason, Approve/Reject — PATCHing /api/admin/edit-suggestions,
@@ -49,13 +45,16 @@ export function SuggestEditSection({
   organisationId,
   actorId,
   actorRole,
+  restrictedFields,
   currentValues,
   suggestions,
 }: {
   organisationId: string;
   actorId: string;
   actorRole: AppRole;
-  currentValues: Record<SensitiveOrgField, string | null>;
+  /** The live active restricted fields, label included — F020's config table. */
+  restrictedFields: { field_name: string; label: string }[];
+  currentValues: Record<string, string | null>;
   suggestions: EditSuggestionRow[];
 }) {
   const router = useRouter();
@@ -63,7 +62,9 @@ export function SuggestEditSection({
     suggestEditAction,
     idleSuggestEditState,
   );
-  const [fieldName, setFieldName] = useState<SensitiveOrgField>("legal_name");
+  const [fieldName, setFieldName] = useState(
+    restrictedFields[0]?.field_name ?? "legal_name",
+  );
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [decideMessage, setDecideMessage] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -144,7 +145,7 @@ export function SuggestEditSection({
               <div key={row.id} className="rounded-xl border border-amber-500/25 bg-amber-500/[0.06] p-4">
                 <p className="text-sm font-bold text-foreground/85">
                   {describePendingSuggestion(
-                    fieldLabel(row.field_name),
+                    restrictedFieldLabel(row.field_name),
                     row.current_value,
                     row.proposed_value,
                   )}
@@ -210,14 +211,11 @@ export function SuggestEditSection({
                       : "border border-black/[0.06] bg-black/[0.02] text-foreground/65"
                   }`}
                 >
-                  {isSensitiveOrgField(row.field_name)
-                    ? suggestionDecisionNotice(
-                        row.status as "approved" | "rejected",
-                        SENSITIVE_FIELD_LABELS[row.field_name],
-                        row.rejection_reason,
-                      )
-                    : null}
-                </li>
+                  {suggestionDecisionNotice(
+                    row.status as "approved" | "rejected",
+                    restrictedFieldLabel(row.field_name),
+                    row.rejection_reason,
+                  )}                </li>
               ))}
             </ul>
           )}
@@ -229,9 +227,7 @@ export function SuggestEditSection({
                   key={suggestion.id}
                   className="rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-3.5 py-2.5 text-[13px] leading-[1.6] text-amber-800"
                 >
-                  {isSensitiveOrgField(suggestion.field_name)
-                    ? pendingSuggestionNotice(suggestion.field_name)
-                    : null}{" "}
+                  {pendingSuggestionNotice(suggestion.field_name)}{" "}
                   Proposed: &ldquo;{suggestion.proposed_value}&rdquo;
                 </li>
               ))}
@@ -246,14 +242,14 @@ export function SuggestEditSection({
               <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
                 Field
               </span>
-              <Select value={fieldName} onValueChange={(value) => setFieldName(value as SensitiveOrgField)}>
+              <Select value={fieldName} onValueChange={setFieldName}>
                 <SelectTrigger size="sm" className="w-full rounded-xl bg-white" aria-label="Field to correct">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {SENSITIVE_ORG_FIELDS.map((field) => (
-                    <SelectItem key={field} value={field}>
-                      {SENSITIVE_FIELD_LABELS[field]}
+                  {restrictedFields.map((field) => (
+                    <SelectItem key={field.field_name} value={field.field_name}>
+                      {field.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -287,23 +283,23 @@ export function SuggestEditSection({
                     replaces it.
                   </p>
                 )}
-                  <label className="flex flex-col gap-1.5 text-sm">
-                    <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-                      Corrected value
-                    </span>
-                    <Input
-                      type="text"
-                      name="fieldValue"
-                      required
-                      placeholder={`The correct ${SENSITIVE_FIELD_LABELS[fieldName].toLowerCase()}`}
-                      className="rounded-xl bg-white"
-                    />
-                  </label>
-                  <OriginButton type="submit" size="sm" loading={pending} disabled={pending}>
-                    {pending ? "Submitting…" : "Submit suggestion"}
-                  </OriginButton>
-                </>
-              )}
+                <label className="flex flex-col gap-1.5 text-sm">
+                  <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+                    Corrected value
+                  </span>
+                  <Input
+                    type="text"
+                    name="fieldValue"
+                    required
+                    placeholder={`The correct ${restrictedFieldLabel(fieldName).toLowerCase()}`}
+                    className="rounded-xl bg-white"
+                  />
+                </label>
+                <OriginButton type="submit" size="sm" loading={pending} disabled={pending}>
+                  {pending ? "Submitting…" : "Submit suggestion"}
+                </OriginButton>
+              </>
+            )}
 
             {state.kind === "success" && (
               <p aria-live="polite" className="text-[13px] font-bold text-emerald-700">

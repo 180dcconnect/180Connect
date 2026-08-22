@@ -26,9 +26,8 @@ import { TagsSection } from "./tags-section";
 import { BookletPanel } from "./booklet-panel";
 import {
   EDIT_SUGGESTION_SELECT,
-  SENSITIVE_ORG_FIELDS,
   type EditSuggestionRow,
-  type SensitiveOrgField,
+  restrictedFieldLabel,
 } from "@/lib/edit-suggestions";
 import { SuggestEditSection } from "./suggest-edit-section";
 
@@ -240,13 +239,35 @@ export default async function ClientDetailPage({
     suggestions = (suggestionRows ?? []) as unknown as EditSuggestionRow[];
   }
 
-  const sensitiveCurrentValues = Object.fromEntries(
-    SENSITIVE_ORG_FIELDS.map((field) => [
-      field,
-      client[field as keyof typeof client] as string | null,
-    ]),
-  ) as Record<SensitiveOrgField, string | null>;
+  // #23 (F020): the restricted fields are configuration now, not a compile-time
+  // list — the proposal form offers exactly what RESTRICTED_EDIT_FIELDS says is
+  // active (RLS scopes the read to CAMs and admins). The current values come off the
+  // client row already fetched above, so "current vs proposed" reads in one glance.
+  let restrictedFields: { field_name: string; label: string }[] = [];
+  if (authorization.actor.role === "cam") {
+    const { data: fieldRows, error: fieldError } = await supabase
+      .from("restricted_edit_fields")
+      .select("field_name")
+      .eq("active", true)
+      .order("field_name");
+    if (fieldError) {
+      await reportError(fieldError, {
+        operation: "clients.detail_restricted_fields",
+        organisationId: id,
+      });
+    }
+    restrictedFields = (fieldRows ?? []).map((row) => ({
+      field_name: row.field_name,
+      label: restrictedFieldLabel(row.field_name),
+    }));
+  }
 
+  const sensitiveCurrentValues = Object.fromEntries(
+    restrictedFields.map((field) => [
+      field.field_name,
+      client[field.field_name as keyof typeof client] as string | null,
+    ]),
+  ) as Record<string, string | null>;
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="mx-auto w-full max-w-5xl space-y-6">
@@ -350,6 +371,7 @@ export default async function ClientDetailPage({
                   organisationId={client.id}
                   actorId={authorization.actor.id}
                   actorRole={authorization.actor.role}
+                  restrictedFields={restrictedFields}
                   currentValues={sensitiveCurrentValues}
                   suggestions={suggestions}
                 />

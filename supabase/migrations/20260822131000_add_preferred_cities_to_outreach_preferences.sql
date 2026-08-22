@@ -13,7 +13,7 @@
 --   Data migration| None.
 --   Security      | Existing RLS policies on outreach_preferences apply.
 --
--- Reversibility: paired rollback in ../rollback/20260818110000_add_preferred_cities_to_outreach_preferences.down.sql
+-- Reversibility: paired rollback in ../rollback/20260822131000_add_preferred_cities_to_outreach_preferences.down.sql
 
 alter table public.outreach_preferences
   add column if not exists preferred_cities text[] not null default '{}';

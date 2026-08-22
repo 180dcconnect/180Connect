@@ -1,6 +1,6 @@
 -- Rollback: decide_edit_suggestion_dynamic_apply_back
 -- Reverses 20260822160200_decide_edit_suggestion_dynamic_apply_back.sql by restoring
--- the F078/F079 body (20260822150000): case-per-column apply-back over the seeded six.
+-- the F078/F079 body (20260822150500): case-per-column apply-back over the seeded six.
 
 create or replace function public.decide_edit_suggestion(
   p_suggestion_id uuid,

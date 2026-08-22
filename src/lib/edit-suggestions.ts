@@ -305,7 +305,7 @@ const DECIDE_GENERIC_FAILURE =
 /**
  * Maps a Postgres error from decide_edit_suggestion onto something safe to show an
  * admin. Every errcode below is one the RPC raises deliberately with an admin-readable
- * message (see 20260822150000_create_decide_edit_suggestion_rpc.sql).
+ * message (see 20260822150500_create_decide_edit_suggestion_rpc.sql).
  */
 export function decideEditRpcFailure(error: {
   code?: string;

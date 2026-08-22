@@ -29,6 +29,6 @@ version the repository and its tooling read.
 | [07 Outreach & Outcomes](07-outreach-outcomes.md) | 52 |
 | [08 System Analytics](08-system-analytics.md) | 51 |
 | [09 CAM Analytics](09-cam-analytics.md) | 45 |
-| [11 Supasbase Migration Sequence](11-supasbase-migration-sequence.md) | 42 |
+| [11 Supasbase Migration Sequence](11-supasbase-migration-sequence.md) | 43 |
 
 Source spreadsheet: `~/Downloads/Data Model.xlsx`

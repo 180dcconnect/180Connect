@@ -219,7 +219,7 @@ F020 to validate against the config table) lets an active CAM propose a change, 
 the current value server-side into `EDIT_SUGGESTIONS`, and writes nothing to
 `organisations`. Submission audits nothing (flagging is not a decision).
 `decide_edit_suggestion(suggestion_id, approve, reason)`
-(`20260822150000_create_decide_edit_suggestion_rpc.sql`, apply-back rewritten by F020 in
+(`20260822150500_create_decide_edit_suggestion_rpc.sql`, apply-back rewritten by F020 in
 `20260822160200` as guarded dynamic SQL so admin-added fields are applied too) is the
 decision half, admin only and audited both ways: approval re-checks that the live value
 still matches the submission snapshot (refusing on drift rather than silently

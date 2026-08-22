@@ -2,7 +2,7 @@
 -- Story: F020 Restricted Editing (#23)
 -- Spec: docs/rls-permission-matrix.md §3.2
 --
--- WHY THIS REWRITE EXISTS: decide_edit_suggestion (20260822150000) applies an
+-- WHY THIS REWRITE EXISTS: decide_edit_suggestion (20260822150500) applies an
 --   approved suggestion through a case-per-column UPDATE over exactly the six
 --   signed-off fields — deliberately no dynamic SQL when that list was fixed code.
 --   F020 makes the restricted set data (restricted_edit_fields, 20260822160000): an
@@ -37,20 +37,25 @@
 --   plan cache before the reject path runs; a direct API call does not. The casts
 --   make typing deterministic everywhere.
 --
--- NOT YET IN THIS MIGRATION: notifying the submitting CAM of the outcome (#23 AC3).
---   That lands once this branch carries the NOTIFICATIONS schema; tracked on #23.
+-- NOTIFICATION (AC3): after the audit insert, both branches notify the submitting CAM
+--   through create_notification (F173) — approval ("your correction is live") and
+--   rejection (with the admin's reason, when given), linked back to the client
+--   profile. The producer skips deactivated recipients and self-notifications
+--   itself; a decision always has an actor distinct from the requester, so the row's
+--   actor <> recipient CHECK cannot bite.
 --
 -- Schema change approval record (SOP §7):
 --   Change        | Replace body of decide_edit_suggestion(uuid, boolean, text).
 --                 | Signature, return type, grants unchanged.
 --   Reason        | F020's configurable restricted set needs an apply-back that is
---                 | not hardcoded to the seeded six.
+--                 | not hardcoded to the seeded six; #23 AC3 needs the CAM told of
+--                 | the outcome.
 --   Compatibility | Identical behaviour for all six seeded fields. New behaviour
 --                 | only for suggestions against fields restricted after F020.
 --   Data migration| None.
 --   Security      | Same self-checks as before: app.is_admin(), row lock,
 --                 | non-pending refusal. EXECUTE grants untouched (revoked from
---                 | public/anon, granted to authenticated by 20260822150000).
+--                 | public/anon, granted to authenticated by 20260822150500).
 --   Documentation | Tab 11 step 24.5; matrix §3.2 paragraph notes the dynamic path.
 --
 -- Reversibility: paired rollback in ../rollback/20260822160200_decide_edit_suggestion_dynamic_apply_back.down.sql
@@ -157,6 +162,25 @@ begin
       'reason',        v_reason
     )
   );
+
+  -- AC3: tell the submitting CAM which way it went. create_notification is also
+  -- SECURITY DEFINER and self-checking; it silently skips a deactivated recipient.
+  perform public.create_notification(
+    v_suggestion.requested_by,
+    'edit_suggestion_decided',
+    case when p_approve
+         then 'Your suggested edit was approved'
+         else 'Your suggested edit was not applied' end,
+    case when p_approve
+         then 'The correction to ' || v_suggestion.field_name || ' is now live on the client record.'
+         else 'The proposed change to ' || v_suggestion.field_name || ' was reviewed and not applied.'
+              || coalesce(' Reason: ' || v_reason, '')
+    end,
+    '/clients/' || v_suggestion.organisation_id,
+    'organisations',
+    v_suggestion.organisation_id,
+    v_actor
+  );
 end;
 $$;
 
@@ -166,5 +190,6 @@ comment on function public.decide_edit_suggestion(uuid, boolean, text) is
   'submission snapshot, then applies proposed_value through a guarded dynamic '
   'identifier (%I, FK-validated against restricted_edit_fields, existence-checked) '
   'so admin-added restricted fields are applied too. Rejection touches nothing and '
-  'records the optional reason. Both branches settle the row and write one audit_log '
-  'row in-transaction. SECURITY DEFINER; self-checks app.is_admin().';
+  'records the optional reason. Both branches settle the row, write one audit_log '
+  'row in-transaction, and notify the submitting CAM via create_notification (#23 '
+  'AC3). SECURITY DEFINER; self-checks app.is_admin().';

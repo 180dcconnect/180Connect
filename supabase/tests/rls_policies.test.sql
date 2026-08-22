@@ -4341,6 +4341,11 @@ begin
   select count(*) into v_count from public.audit_log
    where action = 'edit_suggestion_rejected' and target_id = v_org;
   return next is(v_count, 1::bigint, 'the rejection is audited too');
+
+  -- Since F020 (#23) both decide branches notify the submitting CAM. These tests
+  -- are about the decision, not the notification — clear the side effect so
+  -- suite_notifications' counts see a clean slate (all suites share one transaction).
+  delete from public.notifications where notification_type = 'edit_suggestion_decided';
 end;
 $$;
 
@@ -4703,6 +4708,10 @@ begin
    where action = 'restricted_field_removed';
   return next ok(v_count >= 1,
     'retiring a restriction is audited too');
+
+  -- Same side-effect hygiene as suite_edit_suggestions: the AC3 notification was
+  -- asserted above; clear it before suite_notifications counts fixtures.
+  delete from public.notifications where notification_type = 'edit_suggestion_decided';
 
   -- The FK swap: a suggestion row cannot reference a field outside the config.
   -- Runs unimpersonated (the table owner bypasses RLS) so the FK itself is what is

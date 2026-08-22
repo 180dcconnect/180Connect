@@ -130,22 +130,6 @@ export const SECTOR_CATEGORY_GROUPS = [
 
 export const SECTOR_PRESETS = SECTOR_CATEGORY_GROUPS.flatMap((g) => g.presets);
 
-/**
- * Common keyword aliases to ensure matching against heterogeneous source
- * data (Charity Commission cause strings, Companies House SIC descriptions,
- * and LLM-classified sector tags).
- */
-export const SECTOR_KEYWORD_ALIASES: Record<string, string[]> = {
-  health: ["health", "healthcare", "medical", "hospital", "care", "wellbeing", "mental health", "disability"],
-  education: ["education", "training", "school", "college", "university", "learning", "academic", "skills", "teaching"],
-  environment: ["environment", "conservation", "climate", "sustainability", "wildlife", "animal", "green", "energy", "nature"],
-  poverty: ["poverty", "relief", "food bank", "homeless", "housing", "hardship", "deprivation", "inclusion"],
-  community: ["community", "youth", "children", "welfare", "civic", "social", "neighbourhood"],
-  arts: ["arts", "culture", "heritage", "museum", "theatre", "music", "sport", "recreation", "creative"],
-  justice: ["justice", "rights", "international", "aid", "human rights", "legal", "equality"],
-  enterprise: ["enterprise", "social enterprise", "cic", "business", "impact"],
-};
-
 // F196: City and location presets for fast selection, plus caps to ensure
 // sensible bounds for custom-typed locations.
 export const CITY_PRESETS = [

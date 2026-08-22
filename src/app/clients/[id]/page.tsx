@@ -22,9 +22,17 @@ import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
 import { Pill, SectionCard } from "./section-card";
+import { TagsSection } from "./tags-section";
 import { BookletPanel } from "./booklet-panel";
 import { formatAttachments, type AttachmentRow } from "@/lib/attachments";
 import { AttachmentsSection } from "./attachments-section";
+import {
+  EDIT_SUGGESTION_SELECT,
+  SENSITIVE_ORG_FIELDS,
+  type EditSuggestionRow,
+  type SensitiveOrgField,
+} from "@/lib/edit-suggestions";
+import { SuggestEditSection } from "./suggest-edit-section";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -120,6 +128,34 @@ export default async function ClientDetailPage({
     });
   }
 
+  // F191/F192/F193: this client's currently assigned tags, and the full
+  // list of tags for the assign dropdown.
+  const { data: clientTagRows, error: clientTagsError } = await supabase
+    .from("org_tags")
+    .select("tag_id, tags(name)")
+    .eq("organisation_id", id);
+  if (clientTagsError) {
+    await reportError(clientTagsError, {
+      operation: "clients.detail_tags",
+      organisationId: id,
+    });
+  }
+  const clientTags = (clientTagRows ?? [])
+    .filter((row) => row.tags)
+    .map((row) => ({
+      id: row.tag_id,
+      name: (row.tags as unknown as { name: string }).name,
+    }));
+
+  const { data: allTagsData, error: allTagsError } = await supabase
+    .from("tags")
+    .select("id, name")
+    .order("name");
+  if (allTagsError) {
+    await reportError(allTagsError, { operation: "clients.detail_all_tags" });
+  }
+  const allTags = allTagsData ?? [];
+
   // The generated Supabase types do not know about this branch's new RPC until the
   // remote schema is regenerated, so narrow its table-shaped result at this boundary.
   const { data: rawSourceRows, error: sourcesError } = await supabase
@@ -205,6 +241,35 @@ export default async function ClientDetailPage({
   const statusLabel = formatOutreachStatus(client.outreach_status);
   const suppressed = latest?.status === "active";
   const suppressionPending = latest?.status === "pending";
+
+  // #79/#80/#81 (F077/F078/F079): this client's edit suggestions, fetched without a
+  // status filter and filtered in the component — RLS already scopes what each role
+  // may see (pending rows to every active CAM; authors also their own settled rows;
+  // admins everything), so the query can just ask for the org's rows. CAMs get their
+  // proposal form plus outcome notices; admins get inline decision cards. Viewers
+  // have no write access at all, so the section is not rendered for them.
+  let suggestions: EditSuggestionRow[] = [];
+  if (authorization.actor.role !== "viewer") {
+    const { data: suggestionRows, error: suggestionError } = await supabase
+      .from("edit_suggestions")
+      .select(EDIT_SUGGESTION_SELECT)
+      .eq("organisation_id", id)
+      .order("created_at", { ascending: false });
+    if (suggestionError) {
+      await reportError(suggestionError, {
+        operation: "clients.detail_edit_suggestions",
+        organisationId: id,
+      });
+    }
+    suggestions = (suggestionRows ?? []) as unknown as EditSuggestionRow[];
+  }
+
+  const sensitiveCurrentValues = Object.fromEntries(
+    SENSITIVE_ORG_FIELDS.map((field) => [
+      field,
+      client[field as keyof typeof client] as string | null,
+    ]),
+  ) as Record<SensitiveOrgField, string | null>;
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
@@ -298,6 +363,22 @@ export default async function ClientDetailPage({
                 missionEnrichedAt={enrichment?.enriched_at ?? null}
               />
             </Rise>
+
+            {/* #79/#80/#81 (F077/F078/F079): sits directly under the values it
+                governs, so "current vs proposed" reads in one glance. CAMs propose;
+                admins decide inline. Viewers are absent because they have no write
+                access at all. */}
+            {authorization.actor.role !== "viewer" && (
+              <Rise>
+                <SuggestEditSection
+                  organisationId={client.id}
+                  actorId={authorization.actor.id}
+                  actorRole={authorization.actor.role}
+                  currentValues={sensitiveCurrentValues}
+                  suggestions={suggestions}
+                />
+              </Rise>
+            )}
 
             {/* F082 — Generate Client Booklet: kept as its own distinct
                 brand-tinted card rather than wrapped in SectionCard — it's the
@@ -467,7 +548,16 @@ export default async function ClientDetailPage({
                 )}
               </SectionCard>
             </Rise>
-
+            <Rise>
+              <SectionCard headingId="tags-heading" title="Tags">
+                <TagsSection
+                  organisationId={client.id}
+                  initialClientTags={clientTags}
+                  availableTags={allTags}
+                  canEdit={canEdit}
+                />
+              </SectionCard>
+            </Rise>
             {(isAdmin || ownerId === authorization.actor.id) && (
               <Rise>
                 <SectionCard

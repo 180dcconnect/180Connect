@@ -82,7 +82,10 @@ export type InviteState = {
    */
   status: "idle" | "error" | "success" | "warning";
   message?: string;
-  fieldErrors?: { email?: string[] };
+  fieldErrors?: {
+    email?: string[];
+    role?: string[];
+  };
 };
 
 /**
@@ -224,7 +227,10 @@ export async function sendInvite(
   rule: DomainRule = allowedEmailDomains(),
   deps: SendInviteDeps = {},
 ): Promise<SendInviteOutcome> {
-  const result = safeValidate(inviteSchema(rule), { email: input.email, role: input.role });
+  const result = safeValidate(inviteSchema(rule), {
+    email: input.email,
+    role: input.role,
+  });
 
   if (!result.success) {
     logSecurityEvent("validation.rejected", {
@@ -413,6 +419,9 @@ async function mintAndSendInvite(
 
   const delivery = await (deps.send ?? sendEmail)({ to: email, subject, text, html });
 
+  const warnings = [roleWarning].filter(Boolean);
+  const warningText = warnings.length > 0 ? ` Also, ${warnings.join(" Also, ")}` : "";
+
   if (delivery.status !== "sent") {
     logSecurityEvent("user.invite_failed", {
       cause: "delivery",
@@ -425,15 +434,15 @@ async function mintAndSendInvite(
         message:
           `${email} was invited, but the email was not sent — they will not have received a link. ` +
           (delivery.reason ?? "") +
-          (roleWarning ? ` Also, ${roleWarning}` : ""),
+          warningText,
       },
     };
   }
 
-  if (roleWarning) {
+  if (warnings.length > 0) {
     return {
       ok: true,
-      state: { status: "warning", message: `${outcome.successMessage} But ${roleWarning}` },
+      state: { status: "warning", message: `${outcome.successMessage} But ${warnings.join(" Also, ")}` },
     };
   }
 

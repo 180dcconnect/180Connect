@@ -5,6 +5,7 @@ import {
   TIMELINE_EVENT_LABEL,
   TIMELINE_EVENT_STYLE,
   UNKNOWN_ACTOR,
+  buildEditSuggestionEntry,
   buildEmailSentEntry,
   buildNoteEntries,
   buildOwnershipReassignedEntry,
@@ -32,6 +33,8 @@ const ALL_EVENT_TYPES: TimelineEventType[] = [
   "note_edited",
   "status_changed",
   "ownership_reassigned",
+  "edit_applied",
+  "edit_rejected",
 ];
 
 function noteRow(overrides: Partial<NoteRow> = {}): NoteRow {
@@ -84,11 +87,11 @@ describe("TIMELINE_EVENT_LABEL and TIMELINE_EVENT_STYLE (F076 AC1)", () => {
     }
   });
 
-  it("gives every event type a visually distinct tone+filled pairing (F076 AC2)", () => {
+  it("gives every event type a visually distinct tone+fill pairing (F076 AC2)", () => {
     const seen = new Set<string>();
     for (const type of ALL_EVENT_TYPES) {
       const style = TIMELINE_EVENT_STYLE[type];
-      const key = `${style.tone}:${style.filled}`;
+      const key = `${style.tone}:${style.fill}`;
       assert.ok(!seen.has(key), `${type} shares its style with an earlier type (${key})`);
       seen.add(key);
     }
@@ -171,6 +174,52 @@ describe("buildStatusChangedEntry", () => {
       `Status changed from ${formatOutreachStatus("not_contacted")} to ${formatOutreachStatus("contacted")}.`,
     );
     assert.equal(entry.actorName, "Ada Lovelace");
+  });
+});
+
+describe("buildEditSuggestionEntry (#80/#81)", () => {
+  it("renders an approval with the field label, new value and proposer", () => {
+    const entry = buildEditSuggestionEntry(
+      auditRow({
+        action: "edit_suggestion_approved",
+        actor_user_id: "admin-1",
+        detail: {
+          field: "city",
+          from: null,
+          to: "Leeds",
+          requested_by: CAM_B,
+        },
+      }),
+      NAMES,
+    );
+    assert.equal(entry.type, "edit_applied");
+    assert.equal(entry.actorName, UNKNOWN_ACTOR);
+    assert.match(entry.summary, /Applied a suggested edit to Town or city/);
+    assert.match(entry.summary, /now "Leeds"/);
+    assert.match(entry.summary, /proposed by Bashir Bobboi/);
+  });
+
+  it("renders a rejection as unchanged, carrying the admin's reason", () => {
+    const entry = buildEditSuggestionEntry(
+      auditRow({
+        action: "edit_suggestion_rejected",
+        detail: { field: "website", reason: "Registry shows a different URL" },
+      }),
+      NAMES,
+    );
+    assert.equal(entry.type, "edit_rejected");
+    assert.match(entry.summary, /Declined a suggested edit to Website/);
+    assert.match(entry.summary, /record is unchanged/);
+    assert.match(entry.summary, /Reason: Registry shows a different URL/);
+  });
+
+  it("falls back safely on an unrecognised field key or missing detail", () => {
+    const entry = buildEditSuggestionEntry(
+      auditRow({ action: "edit_suggestion_approved", detail: {} }),
+      NAMES,
+    );
+    assert.equal(entry.type, "edit_applied");
+    assert.match(entry.summary, /a field/);
   });
 });
 

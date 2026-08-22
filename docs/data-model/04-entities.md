@@ -197,8 +197,10 @@
 | id | uuid |  | No | Primary key | System | Auto-generated |  |
 | user_id | uuid | USERS | No | CAM these preferences belong to | System | Set on save | One row per user (unique) |
 | preferred_geographic_reach | enum[] |  | No | Subset of geographic_reach values the CAM wants prioritised | Human | Chosen by CAM in settings | Same enum as ORGANISATIONS.geographic_reach; empty array = no preference set |
+| preferred_cities | text[] |  |  |  |  |  |  |
 | preferred_sectors | text[] |  | No | Sector values to prioritise | Human | Chosen by CAM in settings | Free text, matched against ORGANISATIONS.sector; empty array = no preference set |
 | preferred_income_bands | enum[] |  | No | Subset of income_band values to prioritise | Human | Chosen by CAM in settings | Same enum as FINANCIAL_PERIODS.income_band; empty array = no preference set |
+| prioritise_grant_recipients | boolean |  |  |  |  |  |  |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last edit timestamp | System | Updated on save |  |
 
@@ -257,7 +259,6 @@
 | target_id | uuid |  | Yes | ID of the linked record | System | Set when created |  |
 | read_at | timestamp |  | Yes | When the recipient marked it read | Human/System | Set by mark-as-read RPC; auto-set on click-open | Null = unread. Included now so F177 needs no second migration |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
-<<<<<<< HEAD
 
 ## BOOKLET_GENERATIONS
 
@@ -271,5 +272,21 @@
 | output | text |  | No | Generated output | System | Set when generated |  |
 | model | text |  | No | Model used for generation | System | Set when generated |  |
 | created_at | timestamptz |  | No | Row creation timestamp | System | Auto-generated | Default now(). Append-only. |
-=======
->>>>>>> origin/dev
+
+## EDIT_SUGGESTIONS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| organisation_id | uuid | ORGANISATIONS | No | Client the correction is about | System | Set when correction is proposed |  |
+| field_name | text |  | No | One of the six sensitive fields | System | Set when correction is proposed |  |
+| current_value | text |  | Yes | Value at proposal time, captured server-side | System | Captured server-side at proposal time |  |
+| proposed_value | text |  | No | The CAM's corrected value | Human | Proposed by CAM |  |
+| status | enum |  | No | pending, approved, rejected, superseded | System | pending at creation; updated by admin decision or superseded |  |
+| requested_by | uuid | USERS | No | CAM making the proposal | System | auth.uid() at request time |  |
+| superseded_by | uuid | EDIT_SUGGESTIONS | Yes | Newer suggestion that replaced this one | System | Set when a new suggestion for the same field is made |  |
+| decided_by | uuid | USERS | Yes | Admin who approved/rejected | System | Set by decide_edit_suggestion | Null while pending |
+| decided_at | timestamp |  | Yes | When decided | System | Set by decide_edit_suggestion | Null while pending |
+| rejection_reason | text |  | Yes | Optional admin note for the CAM | Human | Typed by admin |  |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+| updated_at | timestamp |  | No | Last edit timestamp | System | Updated on edit |  |

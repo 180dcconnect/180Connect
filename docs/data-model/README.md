@@ -21,9 +21,15 @@ version the repository and its tooling read.
 | Tab | Rows |
 | :--- | ---: |
 | [01 Data Lifecycle](01-data-lifecycle.md) | 16 |
+<<<<<<< HEAD
+| [02 Data Dictionary](02-data-dictionary.md) | 472 |
+| [03 Raw Data](03-raw-data.md) | 145 |
+| [04 Entities](04-entities.md) | 211 |
+=======
 | [02 Data Dictionary](02-data-dictionary.md) | 464 |
 | [03 Raw Data](03-raw-data.md) | 145 |
 | [04 Entities](04-entities.md) | 201 |
+>>>>>>> origin/dev
 | [05 - Feature Store](05-feature-store.md) | 50 |
 | [06 - Predictions](06-predictions.md) | 44 |
 | [07 Outreach & Outcomes](07-outreach-outcomes.md) | 52 |

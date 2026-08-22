@@ -12,7 +12,6 @@
  */
 
 import { hasResponded, isContacted, isConverted } from "../../lib/dashboard-metrics.ts";
-import { formatOrganisationType } from "../../lib/organisation-format.ts";
 import type { VisibleClient } from "./visible-clients.ts";
 
 /** organisation_type → the label the source filter (F051 bar) matches on. */
@@ -129,22 +128,6 @@ export function parseDirection(value: string | null | undefined): SortDirection 
   return value === "ascending" ? "ascending" : "descending";
 }
 
-/** The breakdown shows a top-N for most fields; 3 is the shape the panel was built for. */
-export const DEFAULT_BREAKDOWN_LIMIT = 3;
-
-/**
- * How many groups the breakdown shows for a given field.
- *
- * F167 AC1: grouped by owner, the panel is the team ownership view — an admin has
- * to see *every* owner, so a top-N would be the bug. It is deliberately not derived
- * from the size of the CAM list: clients can also be owned by an admin, or by a
- * deactivated former member whose row no longer appears in the team query, and any
- * of those falling off the bottom is exactly the omission AC1 rules out.
- */
-export function breakdownLimit(field: BreakdownField): number {
-  return field === "owner" ? Number.POSITIVE_INFINITY : DEFAULT_BREAKDOWN_LIMIT;
-}
-
 export function fieldLabel(field: BreakdownField): string {
   return BREAKDOWN_FIELDS.find((entry) => entry.key === field)?.label ?? field;
 }
@@ -162,21 +145,14 @@ function groupOf(client: VisibleClient, field: BreakdownField): Grouped {
         : { key: "city:none", label: "No city recorded", filter: null };
     }
     case "type": {
-      // F053: the group's link now carries the stored type, not its label —
-      // the filter matches on the enum, so a label here would match nothing.
-      const label = formatOrganisationType(client.organisation_type);
-      return {
-        key: `type:${client.organisation_type}`,
-        label,
-        filter: { param: "type", value: client.organisation_type },
-      };
+      const label = SOURCE_LABELS[client.organisation_type] ?? client.organisation_type;
+      return { key: `type:${label}`, label, filter: { param: "source", value: label } };
     }
     case "status":
       return {
         key: `status:${client.outreachStatusLabel}`,
         label: client.outreachStatusLabel,
-        // F056: likewise the stored status, not the formatted label.
-        filter: { param: "status", value: client.outreach_status },
+        filter: { param: "status", value: client.outreachStatusLabel },
       };
     case "owner":
       return client.owner_id
@@ -213,7 +189,7 @@ export function breakdown(
   field: BreakdownField,
   direction: SortDirection = "descending",
   rankBy: FunnelStageKey = "all",
-  limit = DEFAULT_BREAKDOWN_LIMIT,
+  limit = 3,
 ): BreakdownRow[] {
   const groups = new Map<string, Grouped & { counts: Record<FunnelStageKey, number> }>();
 

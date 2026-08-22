@@ -472,3 +472,14 @@
 | 04 Entities | NOTIFICATIONS | target_id | uuid |  | ID of the linked record |
 | 04 Entities | NOTIFICATIONS | read_at | timestamp |  | When the recipient marked it read |
 | 04 Entities | NOTIFICATIONS | created_at | timestamp |  | Row creation timestamp |
+<<<<<<< HEAD
+| 04 Entities | BOOKLET_GENERATIONS | id | uuid |  | Primary key |
+| 04 Entities | BOOKLET_GENERATIONS | organisation_id | uuid | ORGANISATIONS | Organisation this booklet belongs to |
+| 04 Entities | BOOKLET_GENERATIONS | generated_by | uuid | USERS | User who generated the booklet |
+| 04 Entities | BOOKLET_GENERATIONS | prompt_system | text |  | System prompt used |
+| 04 Entities | BOOKLET_GENERATIONS | prompt_user | text |  | User prompt used |
+| 04 Entities | BOOKLET_GENERATIONS | output | text |  | Generated output |
+| 04 Entities | BOOKLET_GENERATIONS | model | text |  | Model used for generation |
+| 04 Entities | BOOKLET_GENERATIONS | created_at | timestamptz |  | Row creation timestamp |
+=======
+>>>>>>> origin/dev

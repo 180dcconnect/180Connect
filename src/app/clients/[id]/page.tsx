@@ -35,6 +35,12 @@ import {
   type OwnershipRequestStatus,
 } from "@/lib/ownership-requests";
 import { RequestOwnershipForm } from "./request-ownership-form";
+import {
+  SENSITIVE_ORG_FIELDS,
+  type PendingSuggestion,
+  type SensitiveOrgField,
+} from "@/lib/edit-suggestions";
+import { SuggestEditSection } from "./suggest-edit-section";
 import { buildNoteList, type NoteRow } from "@/lib/note-history";
 import { NotesSection } from "./notes-section";
 import { AddNoteForm } from "./add-note-form";
@@ -452,6 +458,35 @@ export default async function ClientDetailPage({
     actorRole: authorization.actor.role,
     hasPendingRequest: ownRequest?.status === "pending",
   });
+
+  // #79 (F077): the open suggestions for this client, so a CAM sees what is already
+  // awaiting review before proposing a conflicting edit. RLS scopes the rows (pending
+  // ones are visible to every active CAM; authors also see their own settled rows),
+  // and the section below is only rendered for CAMs — admins edit these fields
+  // directly, viewers have no write access. Only pending rows are fetched: decided
+  // outcomes reach the CAM through F078/F079's notifications, not this list.
+  let pendingSuggestions: PendingSuggestion[] = [];
+  if (authorization.actor.role === "cam") {
+    const { data: suggestionRows, error: suggestionError } = await supabase
+      .from("edit_suggestions")
+      .select("id, field_name, current_value, proposed_value, requested_by")
+      .eq("organisation_id", id)
+      .eq("status", "pending");
+    if (suggestionError) {
+      await reportError(suggestionError, {
+        operation: "clients.detail_edit_suggestions",
+        organisationId: id,
+      });
+    }
+    pendingSuggestions = (suggestionRows ?? []) as unknown as PendingSuggestion[];
+  }
+
+  const sensitiveCurrentValues = Object.fromEntries(
+    SENSITIVE_ORG_FIELDS.map((field) => [
+      field,
+      client[field as keyof typeof client] as string | null,
+    ]),
+  ) as Record<SensitiveOrgField, string | null>;
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="mx-auto w-full max-w-5xl space-y-6">
@@ -555,6 +590,21 @@ export default async function ClientDetailPage({
                 missionEnrichedAt={enrichment?.enriched_at ?? null}
               />
             </Rise>
+
+            {/* #79 (F077): CAM-only. Sits directly under the values it proposes to
+                correct, so "current vs proposed" reads in one glance; admins are
+                absent because they change these fields through the normal policy
+                (matrix §3.2), not by suggestion. */}
+            {authorization.actor.role === "cam" && (
+              <Rise>
+                <SuggestEditSection
+                  organisationId={client.id}
+                  actorId={authorization.actor.id}
+                  currentValues={sensitiveCurrentValues}
+                  pendingSuggestions={pendingSuggestions}
+                />
+              </Rise>
+            )}
 
             {hasPermission(authorization.actor.role, "client:contact") && (
               <Rise>

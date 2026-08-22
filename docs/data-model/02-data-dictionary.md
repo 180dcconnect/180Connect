@@ -472,3 +472,24 @@
 | 04 Entities | NOTIFICATIONS | target_id | uuid |  | ID of the linked record |
 | 04 Entities | NOTIFICATIONS | read_at | timestamp |  | When the recipient marked it read |
 | 04 Entities | NOTIFICATIONS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | BOOKLET_GENERATIONS | id | uuid |  | Primary key |
+| 04 Entities | BOOKLET_GENERATIONS | organisation_id | uuid | ORGANISATIONS | Organisation this booklet belongs to |
+| 04 Entities | BOOKLET_GENERATIONS | generated_by | uuid | USERS | User who generated the booklet |
+| 04 Entities | BOOKLET_GENERATIONS | prompt_system | text |  | System prompt used |
+| 04 Entities | BOOKLET_GENERATIONS | prompt_user | text |  | User prompt used |
+| 04 Entities | BOOKLET_GENERATIONS | output | text |  | Generated output |
+| 04 Entities | BOOKLET_GENERATIONS | model | text |  | Model used for generation |
+| 04 Entities | BOOKLET_GENERATIONS | created_at | timestamptz |  | Row creation timestamp |
+| 04 Entities | EDIT_SUGGESTIONS | id | uuid |  | Primary key |
+| 04 Entities | EDIT_SUGGESTIONS | organisation_id | uuid | ORGANISATIONS | Client the correction is about |
+| 04 Entities | EDIT_SUGGESTIONS | field_name | text |  | One of the six sensitive fields |
+| 04 Entities | EDIT_SUGGESTIONS | current_value | text |  | Value at proposal time, captured server-side |
+| 04 Entities | EDIT_SUGGESTIONS | proposed_value | text |  | The CAM's corrected value |
+| 04 Entities | EDIT_SUGGESTIONS | status | enum |  | pending, approved, rejected, superseded |
+| 04 Entities | EDIT_SUGGESTIONS | requested_by | uuid | USERS | CAM making the proposal |
+| 04 Entities | EDIT_SUGGESTIONS | superseded_by | uuid | EDIT_SUGGESTIONS | Newer suggestion that replaced this one |
+| 04 Entities | EDIT_SUGGESTIONS | decided_by | uuid | USERS | Admin who approved/rejected |
+| 04 Entities | EDIT_SUGGESTIONS | decided_at | timestamp |  | When decided |
+| 04 Entities | EDIT_SUGGESTIONS | rejection_reason | text |  | Optional admin note for the CAM |
+| 04 Entities | EDIT_SUGGESTIONS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | EDIT_SUGGESTIONS | updated_at | timestamp |  | Last edit timestamp |

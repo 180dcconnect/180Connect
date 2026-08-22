@@ -257,3 +257,34 @@
 | target_id | uuid |  | Yes | ID of the linked record | System | Set when created |  |
 | read_at | timestamp |  | Yes | When the recipient marked it read | Human/System | Set by mark-as-read RPC; auto-set on click-open | Null = unread. Included now so F177 needs no second migration |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+
+## BOOKLET_GENERATIONS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| organisation_id | uuid | ORGANISATIONS | No | Organisation this booklet belongs to | System | Set when generated | On delete cascade. Index (organisation_id, created_at desc) |
+| generated_by | uuid | USERS | No | User who generated the booklet | System | Set to logged-in user |  |
+| prompt_system | text |  | No | System prompt used | System | Set when generated |  |
+| prompt_user | text |  | No | User prompt used | System | Set when generated |  |
+| output | text |  | No | Generated output | System | Set when generated |  |
+| model | text |  | No | Model used for generation | System | Set when generated |  |
+| created_at | timestamptz |  | No | Row creation timestamp | System | Auto-generated | Default now(). Append-only. |
+
+## EDIT_SUGGESTIONS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| organisation_id | uuid | ORGANISATIONS | No | Client the correction is about | System | Set when correction is proposed |  |
+| field_name | text |  | No | One of the six sensitive fields | System | Set when correction is proposed |  |
+| current_value | text |  | Yes | Value at proposal time, captured server-side | System | Captured server-side at proposal time |  |
+| proposed_value | text |  | No | The CAM's corrected value | Human | Proposed by CAM |  |
+| status | enum |  | No | pending, approved, rejected, superseded | System | pending at creation; updated by admin decision or superseded |  |
+| requested_by | uuid | USERS | No | CAM making the proposal | System | auth.uid() at request time |  |
+| superseded_by | uuid | EDIT_SUGGESTIONS | Yes | Newer suggestion that replaced this one | System | Set when a new suggestion for the same field is made |  |
+| decided_by | uuid | USERS | Yes | Admin who approved/rejected | System | Set by decide_edit_suggestion | Null while pending |
+| decided_at | timestamp |  | Yes | When decided | System | Set by decide_edit_suggestion | Null while pending |
+| rejection_reason | text |  | Yes | Optional admin note for the CAM | Human | Typed by admin |  |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+| updated_at | timestamp |  | No | Last edit timestamp | System | Updated on edit |  |

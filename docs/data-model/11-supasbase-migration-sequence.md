@@ -44,3 +44,4 @@
 | 22.8 | seed_data_handling_rules | DATA_HANDLING_RULES (seed data) | 22.7 | Seed the 16 opening rules. |
 | 23.0 | create_notifications | NOTIFICATIONS | USERS |  |
 | 24.0 | create_notification_rpcs | RPCs for NOTIFICATIONS | 23.0 |  |
+| 24.1 | create_edit_suggestions | EDIT_SUGGESTIONS | ORGANISATIONS, USERS | F077 (#79). A CAM proposes a correction to one of six sensitive ORGANISATIONS fields; nothing reaches the client until an admin approves (F078/F079). RPC suggest_organisation_edit snapshots current_value server-side, supersedes the caller's own pending proposal, blocks while another CAM's is pending. No AUDIT_LOG write on submission — flagging is not a decision; the decide RPCs audit. RLS: admin sees all, CAMs see pending rows + own history, viewers see nothing. Same six-field allowlist as FIELD_DISCREPANCIES/FIELD_SOURCES. |

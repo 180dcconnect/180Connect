@@ -202,6 +202,20 @@ canonical-edit RPC or column-guard trigger (F224). The narrower unowned-org hole
 editing a row they do not own) *is* closed: the `WITH CHECK` uses
 `coalesce(owner_id = auth.uid(), false)`, so a null owner no longer slips through.
 
+**The sanctioned route around the gap (F077, #79).** Until the gap itself closes
+(F020's restricted-editing enforcement), a CAM who owns a row can still write these
+columns directly through the policy above. What F077 adds is the legitimate path for
+corrections: `suggest_organisation_edit(org_id, field_name, new_value)`
+(`20260822090000_create_edit_suggestions.sql`) lets an active CAM propose a change to
+one of the six sensitive fields (`legal_name`, `website`, `contact_email`,
+`address_line_1`, `city`, `postcode` — the same allowlist as §3.16's discrepancy
+tracking), snapshots the current value server-side into `EDIT_SUGGESTIONS`, and writes
+nothing to `organisations`. Submission audits nothing (flagging is not a decision);
+F078/F079's decide RPCs will. At most one pending suggestion exists per field per
+client: a CAM re-suggesting supersedes their own, another CAM's pending proposal blocks
+the field. SELECT on the table follows the same split: admins see everything, any
+active CAM sees pending rows, authors see their own history, viewers see nothing.
+
 **Claiming an unowned client (F162).** Until `20260806140000`, a CAM claimed an unowned
 organisation the same way they edit one they own — directly through this UPDATE policy,
 its `WITH CHECK` pinning the new `owner_id` to themselves. That path wrote no
@@ -933,9 +947,10 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
 1. **`AUDIT_LOG` is not in the Data Model.** Section 3.8 assumes it. The model has
    `ERROR_LOG` (application errors, F226), which is a different thing. PRD §4.2
    requires role changes and deactivations to be audited, and F221 depends on it.
-2. **No suggestion table.** §4.3 grants CAMs "suggest organisation field correction"
-   and F077 is a P1 story, but no table holds a suggestion. Without one the CAM path
-   to changing canonical data does not exist, and 3.2 has no row for it.
+2. ~~**No suggestion table.**~~ **RESOLVED — F077 (#79)**. `EDIT_SUGGESTIONS` and
+   `suggest_organisation_edit` (20260822090000) hold the suggestion; §3.2's
+   "sanctioned route" paragraph documents the flow. The decide side is F078/F079,
+   and blocking the direct owned-row write on sensitive fields stays with F020.
 3. ~~**No suppression table.**~~ **RESOLVED — F251 (#82) & F185 (#181)**. §3.14 has
    the table and RPCs (`request_suppression`, `decide_suppression_request`, `lift_suppression`).
    "Lift suppression: Admin, mandatory reason required" is implemented by F185 (`lift_suppression`).

@@ -287,6 +287,16 @@ F019); **send** is restricted.
 | `SEND_EVENTS` | all roles | — (service role, Gmail webhook) | — | — |
 | `REPLY_EVENTS` | all roles | — (service role) | — | — |
 | `OUTCOMES` | all roles | admin, cam (`recorded_by_user_id = auth.uid()`) | admin, own | admin |
+| `BOOKLET_GENERATIONS` | admin, cam (`app.can_contact_organisation(organisation_id)`); viewer: none | admin, cam (`app.can_contact_organisation(organisation_id)` **and** `generated_by = auth.uid()`); append-only audit of booklet prompt/output (F082 AC5 / F112, `20260822090000`) | — | — |
+
+`BOOKLET_GENERATIONS` lives here rather than in a new section because it is the
+booklet-side sibling of `AI_GENERATIONS`: the same "what exactly did the model
+produce" audit question. It cannot be a row in that table — `AI_GENERATIONS`
+hangs off `outreach_messages`, and a booklet generation has no outreach message.
+Read scope follows the booklet feature's own gate (client:contact ≈
+`app.can_contact_organisation`), which excludes viewers; the table holds full
+prompt/output text, so it is deliberately tighter than shared read. Append-only
+by omission of UPDATE/DELETE grants, same mechanism as `AUDIT_LOG`.
 
 The CAM INSERT check on `OUTREACH_MESSAGES` is the database-layer expression of
 "Send to an organisation owned by another CAM: Admin yes, CAM no". This is the

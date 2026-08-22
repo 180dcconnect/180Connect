@@ -229,7 +229,7 @@
 | 04 Entities | SAVED_VIEWS | id | uuid |  | Primary key |
 | 04 Entities | SAVED_VIEWS | user_id | uuid | USERS | CAM the saved view belongs to |
 | 04 Entities | SAVED_VIEWS | name | text |  | Name the CAM gave the view; unique per user |
-| 04 Entities | SAVED_VIEWS | filters | jsonb |  | Filter combination the view re-applies (q, city, status, source, owner) |
+| 04 Entities | SAVED_VIEWS | filters | jsonb |  | Filter combination the view re-applies (q, city, country, status, type, owner — arrays for the multi-selects) |
 | 04 Entities | SAVED_VIEWS | created_at | timestamp |  | Row creation timestamp |
 | 04 Entities | SAVED_VIEWS | updated_at | timestamp |  | Last edit timestamp |
 | 04 Entities | OWNERSHIP_REQUESTS | id | uuid |  | Primary key |
@@ -461,3 +461,14 @@
 | 03 Raw Data | DATA_HANDLING_RULES | id | uuid |  | Primary key |
 | 03 Raw Data | DATA_HANDLING_RULES | rule_version | integer |  | The global rule version at the time this rule was created or last toggled |
 | 03 Raw Data | DATA_HANDLING_RULES | source | enum |  | Which source the rule applies to; null applies to every source |
+| 04 Entities | NOTIFICATIONS | id | uuid |  | Primary key |
+| 04 Entities | NOTIFICATIONS | recipient_user_id | uuid | USERS | User the notification is for |
+| 04 Entities | NOTIFICATIONS | actor_user_id | uuid | USERS | User whose action triggered the notification |
+| 04 Entities | NOTIFICATIONS | notification_type | enum |  | What kind of notification |
+| 04 Entities | NOTIFICATIONS | title | text |  | Short headline shown in the bell panel |
+| 04 Entities | NOTIFICATIONS | body | text |  | Optional longer description |
+| 04 Entities | NOTIFICATIONS | link_path | text |  | In-app route to navigate to on click |
+| 04 Entities | NOTIFICATIONS | target_table | text |  | Table of the linked record |
+| 04 Entities | NOTIFICATIONS | target_id | uuid |  | ID of the linked record |
+| 04 Entities | NOTIFICATIONS | read_at | timestamp |  | When the recipient marked it read |
+| 04 Entities | NOTIFICATIONS | created_at | timestamp |  | Row creation timestamp |

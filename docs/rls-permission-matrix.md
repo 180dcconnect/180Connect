@@ -810,6 +810,95 @@ on `ENRICHMENT_RESULTS` (LLM-derived), not an `ORGANISATIONS` column any source
 mapper writes — out of scope here, flagged rather than silently unmet. See the
 migration header for the full reasoning.
 
+### 3.19 Notifications — own-row only, RPC-only writes
+
+Backs F173 In-App Notifications (#169),
+`supabase/migrations/20260822090000_create_notifications.sql` +
+`20260822090100_create_notification_rpcs.sql`. New table — not previously
+reserved in the Data Model. General per-user notification feed: any future
+producer (replies, reminders, team activity) inserts rows via RPC instead of
+gaining table-level INSERT.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `NOTIFICATIONS` | own rows (`recipient_user_id = auth.uid()`) | — (RPC only) | own rows, `read_at` column only (via grant + trigger guard) | — (no grant; cron prune only) |
+
+SELECT is strictly own-row — wrong-recipient prevention is the RLS policy
+itself, and a non-recipient's query returns 0 rows (§4), never an error. UPDATE
+is doubly constrained: the *grant* covers only the `read_at` column and the
+policy only matches own rows, so no client can ever edit title/body/recipient;
+a `BEFORE UPDATE` trigger additionally pins every other column and makes the
+transition one-way (`null → timestamp`, never back).
+
+There are no direct INSERT/DELETE grants for anyone. All four write paths are
+SECURITY DEFINER RPCs that self-check inside their bodies:
+
+- `create_notification(...)` — `authenticated` + `service_role`; caller must be
+  an active user (or hold the service-role key server-side). Silently skips
+  unknown/deactivated recipients, self-notifications, and sub-minute duplicate
+  retries.
+- `mark_notification_read(id)` / `mark_all_notifications_read()` —
+  `authenticated`, self-check `app.is_active_user()` + own-row scoping inside.
+  A non-recipient's call returns `false`/`0`, deliberately indistinguishable
+  from "already read" so no existence oracle leaks other users' notification ids.
+- `prune_notifications()` — granted to **no** interactive role; runs only as
+  its daily pg_cron job (`notifications_prune_daily`, postgres). Retention:
+  read > 90 days, unread > 1 year. Safe because the durable record of every
+  underlying event stays in AUDIT_LOG forever.
+
+No audit_log entries are written by any of these (§1 of audit-log-pattern:
+none change ownership/status/role/approval state of a business entity — same
+documented reasoning as `feedback`). The table is in the `supabase_realtime`
+publication for live bell-panel delivery; publication membership grants nothing
+on its own — delivery is still filtered by the SELECT policy per subscriber
+(same mechanism as §3.8 / F075).
+
+---
+
+### 3.17 Saved filter views — own rows only
+
+Backs F066 (`supabase/migrations/20260821090000_create_saved_views.sql`). Same shape as
+§3.12 and §3.13: the user's own view state, not ownership/status/role/approval state, so
+it is governed by RLS alone — no SECURITY DEFINER RPC, no `audit_log` row
+(`docs/audit-log-pattern.md` §1).
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `SAVED_VIEWS` | own rows (`user_id = auth.uid()`) | own rows | own rows | own rows |
+
+A saved view holds no client data: it is a set of `/clients` search params
+(`q`, `city`, `country`, `status`, `type`, `owner` — arrays for the multi-selects)
+stored as `jsonb` under a name, and selecting
+one rebuilds a query string. Nothing in it is readable to anyone but its author, and
+nothing in it grants access to a client the author's role does not already allow — the
+params are re-applied to a list the RLS on `ORGANISATIONS` (§3.2) has already filtered,
+so a stale `owner=<someone>` view shows exactly what that CAM could see by typing the
+filter by hand.
+
+DELETE **is** granted here, unlike §3.13. AC3 asks for deletion by name, and this is a
+many-row table where "no longer need this one" has no UPDATE-to-empty equivalent. UPDATE
+is granted with no F066 write path behind it yet (saving is an INSERT; the AC has no
+rename), so a later rename/overwrite story needs no migration; both policies confine the
+row to the caller in `using` **and** `with check`, so a row cannot be moved onto another
+`user_id`.
+
+No admin read, delete included: nothing in #68 needs one, and an admin who could delete
+someone's shortcuts would hold a purely destructive power over another user's workspace
+with no story asking for it. F187 (admin views a CAM's settings, P3) can add a read with
+a stated reason when it is actually built — same call already made for
+`USER_ONBOARDING_STEPS` (§3.12) and `OUTREACH_PREFERENCES` (§3.13).
+
+All four policies AND in `app.is_active_user()`. None uses `app.can_write()` — that
+helper gates *client data* and excludes viewers (F258); a bookmark over a list the viewer
+can already read is harmless for any active role to keep.
+
+**What RLS does not check here**: the *keys* inside `filters`. Postgres constrains the
+column to a JSON object under 4 KB (`saved_views_filters_is_object`) and nothing more.
+The key whitelist lives in `src/app/clients/saved-view-filters.ts` and is applied on both
+write and read, so an unexpected key is ignored rather than rendered — a row that somehow
+carries one produces a view missing that filter, never a filter the CAM cannot see. This
+is the §2 pattern ("what RLS cannot do"), not an oversight.
+
 ---
 
 ## 4. Denial behaviour and feedback

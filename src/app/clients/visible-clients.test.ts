@@ -5,6 +5,11 @@ import {
   filterByOwner,
   formatLocation,
   formatOutreachStatus,
+  filterByCity,
+  filterByCountry,
+  filterByStatus,
+  filterByType,
+  filterValues,
   parseListDirection,
   parseListSort,
   searchClients,
@@ -443,5 +448,140 @@ describe("sortClients combined with filters (F060 AC3 / F061 AC2)", () => {
       "Trust Alpha",
       "Trust Zed",
     ]);
+  });
+});
+
+/* ─── Multi-select filters (F053 #55, F054 #56, F056 #58) ──────────────── */
+
+describe("filterValues", () => {
+  it("accepts a single value, an array, or nothing", () => {
+    assert.deepEqual(filterValues("Leeds"), ["Leeds"]);
+    assert.deepEqual(filterValues(["Leeds", "York"]), ["Leeds", "York"]);
+    assert.deepEqual(filterValues(undefined), []);
+    assert.deepEqual(filterValues(null), []);
+  });
+
+  it("drops blanks, so a stray ?city= shows everything rather than nothing", () => {
+    assert.deepEqual(filterValues(""), []);
+    assert.deepEqual(filterValues(["Leeds", "", "  "]), ["Leeds"]);
+  });
+});
+
+describe("filterByType (F053)", () => {
+  const clients = listOf([
+    { legal_name: "A charity", organisation_type: "charity" },
+    { legal_name: "A company", organisation_type: "company" },
+    { legal_name: "Both", organisation_type: "both" },
+    { legal_name: "Other", organisation_type: "other" },
+  ]);
+
+  it("filters on the stored type value", () => {
+    assert.deepEqual(names(filterByType(clients, "charity")), ["A charity"]);
+  });
+
+  it("AC2 — several types show clients matching any of them", () => {
+    assert.deepEqual(names(filterByType(clients, ["charity", "company"])), [
+      "A charity",
+      "A company",
+    ]);
+  });
+
+  it("does not treat 'both' as a match for charity or company", () => {
+    // "both" is its own standardised value, not a wildcard. The old
+    // source-based filter folded it into each, which is why no combination of
+    // options could express a plain union.
+    assert.deepEqual(names(filterByType(clients, "charity")), ["A charity"]);
+  });
+
+  it("an unknown value matches nothing, rather than silently showing everything", () => {
+    assert.deepEqual(names(filterByType(clients, "Charity Commission")), []);
+    assert.deepEqual(names(filterByType(clients, ["charity", "nonsense"])), ["A charity"]);
+  });
+
+  it("no filter shows everything", () => {
+    assert.equal(filterByType(clients, undefined).length, 4);
+    assert.equal(filterByType(clients, []).length, 4);
+  });
+});
+
+describe("filterByCity (F054)", () => {
+  const clients = listOf([
+    { legal_name: "Leeds one", city: "Leeds" },
+    { legal_name: "York one", city: "York" },
+    { legal_name: "Hull one", city: "Hull" },
+    { legal_name: "No city", city: null, country_code: "FR" },
+  ]);
+
+  it("matches case-insensitively", () => {
+    assert.deepEqual(names(filterByCity(clients, "leeds")), ["Leeds one"]);
+  });
+
+  it("AC — several cities show clients in any of them", () => {
+    assert.deepEqual(names(filterByCity(clients, ["Leeds", "Hull"])), [
+      "Leeds one",
+      "Hull one",
+    ]);
+  });
+
+  it("never matches a client with no city", () => {
+    assert.deepEqual(names(filterByCity(clients, ["Leeds", "York", "Hull"])), [
+      "Leeds one",
+      "York one",
+      "Hull one",
+    ]);
+  });
+});
+
+describe("filterByCountry (F054 AC1)", () => {
+  const clients = listOf([
+    { legal_name: "British", country_code: "GB" },
+    { legal_name: "French", country_code: "FR" },
+    { legal_name: "Dutch", country_code: "NL" },
+  ]);
+
+  it("filters on country_code, case-insensitively", () => {
+    assert.deepEqual(names(filterByCountry(clients, "gb")), ["British"]);
+  });
+
+  it("supports several countries at once", () => {
+    assert.deepEqual(names(filterByCountry(clients, ["FR", "NL"])), ["French", "Dutch"]);
+  });
+
+  it("combines with a city filter rather than replacing it", () => {
+    const mixed = listOf([
+      { legal_name: "Leeds GB", city: "Leeds", country_code: "GB" },
+      { legal_name: "Leeds NL", city: "Leeds", country_code: "NL" },
+      { legal_name: "York GB", city: "York", country_code: "GB" },
+    ]);
+    assert.deepEqual(names(filterByCountry(filterByCity(mixed, "Leeds"), "GB")), ["Leeds GB"]);
+  });
+});
+
+describe("filterByStatus (F056)", () => {
+  const clients = listOf([
+    { legal_name: "Fresh", outreach_status: "not_contacted" },
+    { legal_name: "Replied", outreach_status: "responded" },
+    { legal_name: "Won", outreach_status: "converted" },
+  ]);
+
+  it("matches the stored enum value, which the label used to break", () => {
+    // The old filter matched "Not contacted" and returned nothing for the value
+    // the database actually holds.
+    assert.deepEqual(names(filterByStatus(clients, "not_contacted")), ["Fresh"]);
+  });
+
+  it("does not match the formatted label", () => {
+    assert.deepEqual(names(filterByStatus(clients, "Not contacted")), []);
+  });
+
+  it("AC3 — several statuses show clients in any of them", () => {
+    assert.deepEqual(names(filterByStatus(clients, ["responded", "converted"])), [
+      "Replied",
+      "Won",
+    ]);
+  });
+
+  it("no filter shows everything", () => {
+    assert.equal(filterByStatus(clients, []).length, 3);
   });
 });

@@ -257,6 +257,7 @@
 | target_id | uuid |  | Yes | ID of the linked record | System | Set when created |  |
 | read_at | timestamp |  | Yes | When the recipient marked it read | Human/System | Set by mark-as-read RPC; auto-set on click-open | Null = unread. Included now so F177 needs no second migration |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+<<<<<<< HEAD
 
 ## BOOKLET_GENERATIONS
 
@@ -270,3 +271,5 @@
 | output | text |  | No | Generated output | System | Set when generated |  |
 | model | text |  | No | Model used for generation | System | Set when generated |  |
 | created_at | timestamptz |  | No | Row creation timestamp | System | Auto-generated | Default now(). Append-only. |
+=======
+>>>>>>> origin/dev

@@ -4,6 +4,7 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import type { PendingInvite } from "@/lib/admin/team-realtime";
 import { TeamPanel } from "./team-panel";
 import type { TeamUser } from "./user-management-table";
@@ -21,10 +22,18 @@ export default async function AdminUsersPage() {
   // Excludes rows with an invite still pending (invited_at set, not yet
   // accepted) — those are listed separately below, not mixed into the team
   // table, so the two lists stay mutually exclusive (F008 AC5).
+  // F188: excludes the fixed placeholder account (see
+  // create_deleted_user_placeholder_for_tags.sql) — a fake, never-active
+  // row that exists purely as a foreign-key target so a tag survives its
+  // real creator's account being deleted. It must never appear as if it
+  // were a real team member.
+  const DELETED_USER_PLACEHOLDER_ID = "00000000-0000-0000-0000-000000000001";
+
   const { data: users, error } = await supabase
     .from("users")
     .select("id, email, full_name, role, is_active, deactivated_at, last_seen_at")
     .or("invited_at.is.null,invite_accepted_at.not.is.null")
+    .neq("id", DELETED_USER_PLACEHOLDER_ID)
     .order("full_name");
 
   if (error) {
@@ -48,22 +57,43 @@ export default async function AdminUsersPage() {
   // select. A failure here is not fatal: deactivate_user recounts authoritatively.
   const { data: owned, error: ownedError } = await supabase
     .from("organisations")
-    .select("owner_id")
+    .select("id, owner_id")
     .not("owner_id", "is", null);
 
   if (ownedError) {
     await reportError(ownedError, { operation: "admin.users.page_owned_counts" });
   }
 
+  // F167: the count in the table links through to /clients?owner=, and that list
+  // hides actively-suppressed clients (F051 AC4). Counting them here too would send
+  // the admin to a list shorter than the number they clicked. Kept as a second count
+  // rather than a narrower `owned` query: the reassignment gate above still has to
+  // see every client the leaver holds, suppressed or not.
+  const { data: suppressed, error: suppressedError } = await supabase
+    .from("suppressions")
+    .select("organisation_id")
+    .eq("status", "active");
+
+  if (suppressedError) {
+    await reportError(suppressedError, { operation: "admin.users.page_suppressions" });
+  }
+
+  const suppressedOrgs = new Set((suppressed ?? []).map((row) => row.organisation_id));
+
   const ownedCounts = new Map<string, number>();
+  const listedCounts = new Map<string, number>();
   for (const row of owned ?? []) {
     if (!row.owner_id) continue;
     ownedCounts.set(row.owner_id, (ownedCounts.get(row.owner_id) ?? 0) + 1);
+    if (!suppressedOrgs.has(row.id)) {
+      listedCounts.set(row.owner_id, (listedCounts.get(row.owner_id) ?? 0) + 1);
+    }
   }
 
   const teamUsers: TeamUser[] = (users ?? []).map((user) => ({
     ...user,
     owned_client_count: ownedCounts.get(user.id) ?? 0,
+    listed_client_count: listedCounts.get(user.id) ?? 0,
   })) as TeamUser[];
 
   return (
@@ -77,6 +107,10 @@ export default async function AdminUsersPage() {
               <Link className="font-bold text-brand underline" href="/admin/offboard">
                 Reassign a leaver&apos;s clients
               </Link>
+              {" "}or{" "}
+              <Link className="font-bold text-brand underline" href="/admin/cam-settings">
+                view CAM queue settings
+              </Link>
               .
             </p>
           </div>
@@ -85,18 +119,21 @@ export default async function AdminUsersPage() {
 
         {error && (
           <Rise>
-            <p className="rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4 text-sm font-bold text-destructive" role="alert">
-              Team members could not be loaded. Please refresh and try again.
-            </p>
+            <InlineAlert
+              variant="page"
+              message="Team members could not be loaded. Please refresh and try again."
+            />
           </Rise>
         )}
 
-        <TeamPanel
-          currentUserId={authorization.actor.id}
-          initialPendingInvites={(pendingInvites as PendingInvite[] | null) ?? []}
-          initialTeamUsers={teamUsers}
-          pendingInvitesError={Boolean(pendingError)}
-        />
+        {!error && (
+          <TeamPanel
+            currentUserId={authorization.actor.id}
+            initialPendingInvites={(pendingInvites as PendingInvite[] | null) ?? []}
+            initialTeamUsers={teamUsers}
+            pendingInvitesError={Boolean(pendingError)}
+          />
+        )}
       </Stage>
     </div>
   );

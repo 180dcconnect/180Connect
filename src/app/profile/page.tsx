@@ -46,6 +46,36 @@ export default async function ProfilePage() {
           Role changes are made by an administrator — you cannot edit your own
           role here.
         </p>
+
+        <div className="mt-8 border-t border-black/10 pt-6">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-foreground/60">
+            Preferences & Settings
+          </h2>
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+            <Link
+              href="/settings/accessibility"
+              className="flex-1 rounded-xl border border-black/10 p-4 transition-colors hover:border-brand hover:bg-brand/5"
+            >
+              <span className="block font-bold text-foreground">
+                Accessibility settings
+              </span>
+              <span className="mt-1 block text-xs text-foreground/60">
+                Adjust font size, contrast, line spacing, and motion.
+              </span>
+            </Link>
+            <Link
+              href="/settings/outreach-preferences"
+              className="flex-1 rounded-xl border border-black/10 p-4 transition-colors hover:border-brand hover:bg-brand/5"
+            >
+              <span className="block font-bold text-foreground">
+                Outreach preferences
+              </span>
+              <span className="mt-1 block text-xs text-foreground/60">
+                Set geography, sector, and size focus for your queue.
+              </span>
+            </Link>
+          </div>
+        </div>
       </section>
     </main>
   );

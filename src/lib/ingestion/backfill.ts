@@ -1,9 +1,17 @@
-// Retroactive data handling rule backfill (F246).
+// Retroactive data handling backfill (F246, extended by F247).
 //
-// The runner filters payloads on the way in, which protects everything ingested
+// The runner clears payloads on the way in, which protects everything ingested
 // after the rules existed. It does nothing for rows already sitting in
 // `raw_source_records` — and those were written by exactly the same source APIs,
 // so whatever the rules now deny is, in all likelihood, already stored.
+//
+// F247 makes this the answer to its AC2 ("if personal data was stored before this
+// rule existed, there is a defined path to identify and remove it from existing
+// records, not just prevention going forward") rather than a nice-to-have. The
+// rules F247 seeds — trustee names, personal email addresses — describe data the
+// platform has been storing since the first import, so a forward-only control
+// would leave AC2 unmet by construction. Running this is part of shipping F247,
+// not a follow-up.
 //
 // The policy's commitment ("a field the rules exclude is discarded before it is
 // written") is not met by a forward-only control while the old rows remain, so
@@ -22,8 +30,12 @@
 // transaction holding locks on the largest table in the schema.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  applyDataHandling,
+  type DataHandlingPolicy,
+} from "./apply-data-handling.ts";
 import { hashPayload } from "./checksum.ts";
-import { filterPayload, type FieldRule } from "./field-filter.ts";
+import type { RedactionKind, RedactionRule } from "./personal-data.ts";
 import type { DataSourceName } from "./type.ts";
 
 /** Rows per round trip. Matches the ingestion store's batch size. */
@@ -48,7 +60,12 @@ export type RowUpdate = {
 
 export type BackfillSummary = {
   scanned: number;
-  /** Rows where at least one field was stripped from the stored payload. */
+  /**
+   * Rows the rules changed — a field removed, a value redacted, or both.
+   *
+   * Counted per row, not per match, which is what makes it comparable with
+   * `scanned`. `fieldCounts` below has the per-rule breakdown.
+   */
   stripped: number;
   /** Rows already carrying this rule version, so nothing to do. */
   alreadyCurrent: number;
@@ -71,37 +88,36 @@ export type BackfillSummary = {
  */
 export function planRowUpdate(
   row: BackfillRow,
-  rules: FieldRule[],
-  ruleVersion: number,
+  policy: DataHandlingPolicy,
 ): RowUpdate | null {
-  if (row.rule_version_applied === ruleVersion) return null;
+  if (row.rule_version_applied === policy.version) return null;
 
-  const { filtered, excludedFields } = filterPayload(
+  const cleared = applyDataHandling(
     row.raw_payload,
-    rules,
     row.record_source,
+    policy,
   );
 
   // Nothing matched: the payload stands, and so does its checksum. Only the
   // stamp changes, recording that these rules were applied and found nothing.
-  if (excludedFields.length === 0) {
+  if (cleared.excludedFields.length === 0) {
     return {
       id: row.id,
       excluded_fields: [],
-      rule_version_applied: ruleVersion,
+      rule_version_applied: policy.version,
     };
   }
 
-  // Something was stripped, so the stored payload changes and the checksum has
-  // to change with it. Leaving the old checksum would make the next ingestion
-  // run compare against a payload that no longer exists and skip the record as
-  // unchanged, quietly reinstating nothing — but also never repairing it.
+  // Something was removed or redacted, so the stored payload changes and the
+  // checksum has to change with it. Leaving the old checksum would make the next
+  // ingestion run compare against a payload that no longer exists and skip the
+  // record as unchanged, quietly reinstating nothing — but also never repairing it.
   return {
     id: row.id,
-    raw_payload: filtered,
-    checksum: hashPayload(filtered),
-    excluded_fields: excludedFields,
-    rule_version_applied: ruleVersion,
+    raw_payload: cleared.payload,
+    checksum: hashPayload(cleared.payload),
+    excluded_fields: cleared.excludedFields,
+    rule_version_applied: policy.version,
   };
 }
 
@@ -126,9 +142,15 @@ export async function backfillDataHandlingRules(
   // make, and pretending otherwise would stamp rows as checked against nothing.
   const { data: rulesData, error: rulesError } = await supabase
     .from("data_handling_rules")
-    .select("source, field_path, action")
+    .select("source, field_path, action, rule_kind")
     .eq("is_active", true);
   if (rulesError) throw rulesError;
+
+  const { data: roleData, error: roleError } = await supabase
+    .from("personal_email_role_parts")
+    .select("local_part")
+    .eq("is_active", true);
+  if (roleError) throw roleError;
 
   const { data: versionData, error: versionError } = await supabase
     .from("data_handling_rule_versions")
@@ -137,12 +159,28 @@ export async function backfillDataHandlingRules(
     .single();
   if (versionError) throw versionError;
 
-  const rules: FieldRule[] = (rulesData ?? []).map((r) => ({
-    source: (r.source as string) ?? null,
-    field_path: r.field_path as string,
-    action: r.action as "allow" | "deny",
-  }));
-  const ruleVersion = (versionData?.current_version as number) ?? 0;
+  const ruleRows = rulesData ?? [];
+  const policy: DataHandlingPolicy = {
+    fieldRules: ruleRows
+      .filter((r) => (r.rule_kind as string) === "field_path")
+      .map((r) => ({
+        source: (r.source as string) ?? null,
+        field_path: r.field_path as string,
+        action: r.action as "allow" | "deny",
+      })),
+    redactionRules: ruleRows
+      .filter((r) => (r.rule_kind as string) !== "field_path")
+      .map(
+        (r): RedactionRule => ({
+          source: (r.source as string) ?? null,
+          field_path: r.field_path as string,
+          kind: r.rule_kind as RedactionKind,
+        }),
+      ),
+    roleLocalParts: new Set((roleData ?? []).map((r) => r.local_part as string)),
+    version: (versionData?.current_version as number) ?? 0,
+  };
+  const ruleVersion = policy.version;
 
   const { count, error: countError } = await supabase
     .from("raw_source_records")
@@ -179,7 +217,7 @@ export async function backfillDataHandlingRules(
     const updates: RowUpdate[] = [];
     for (const row of batch) {
       summary.scanned++;
-      const update = planRowUpdate(row, rules, ruleVersion);
+      const update = planRowUpdate(row, policy);
       if (!update) {
         summary.alreadyCurrent++;
         continue;

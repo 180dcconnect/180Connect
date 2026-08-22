@@ -67,6 +67,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
 
   if (hasPermission(actor.role, "client:edit")) {
     sections[0].items.push({ href: "/clients/new", label: "Add client", icon: "add" });
+    sections[0].items.push({ href: "/admin/tags", label: "Tags", icon: "users" });
   }
 
   if (hasPermission(actor.role, "user:manage")) {
@@ -76,6 +77,9 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         { href: "/admin/users", label: "Team management", icon: "users" },
         { href: "/admin/audit-log", label: "Audit log", icon: "audit" },
         { href: "/admin/import-status", label: "Import status", icon: "import" },
+        // Not duplicated here: every admin already has client:edit, so the
+        // main-nav entry above already covers them — a second entry in this
+        // section would just show "Tags" twice in the same sidebar.
         { href: "/admin/feedback", label: "Feedback", icon: "feedback" },
       ],
     });

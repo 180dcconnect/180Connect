@@ -11,8 +11,11 @@
 //
 // The runner holds the decisions; all PostgREST detail is behind IngestionStore.
 
+import {
+  applyDataHandling,
+  type DataHandlingPolicy,
+} from "./apply-data-handling.ts";
 import { hashPayload } from "./checksum.ts";
-import { filterPayload, type FieldRule } from "./field-filter.ts";
 import { createDefaultIngestionStore } from "./store.ts";
 import type {
   CommonRecord,
@@ -68,15 +71,16 @@ export type Partitioned = {
  *    is rejected rather than sent to the database — `source_record_id` is NOT NULL,
  *    so one malformed record would otherwise abort the whole batch and take the
  *    other 999 with it. Rejected records land in `records_failed`.
- * 2. **Field filtering (F246).** The payload is filtered against the active data
- *    handling rules before checksumming. Denied fields are stripped; the list of
- *    excluded paths and the rule version are recorded on each row. Filtering
- *    before the checksum is deliberate: the stored checksum describes what was
- *    actually stored, so tightening a rule changes it and the next run rewrites
- *    the record rather than skipping it as unchanged.
+ * 2. **Data handling (F246 + F247).** The payload goes through
+ *    `applyDataHandling` before checksumming: denied fields are removed, and
+ *    personal email addresses and phone numbers are redacted from what survives.
+ *    The list of what the rules did and the rule version are recorded on each row.
+ *    Clearing before the checksum is deliberate: the stored checksum describes
+ *    what was actually stored, so tightening a rule changes it and the next run
+ *    rewrites the record rather than skipping it as unchanged.
  *
- *    `ruleVersion` doubles as the "were rules applied at all?" flag. Pass a
- *    number (including 0, meaning no rules are seeded yet) and every row records
+ *    `policy` doubles as the "were rules applied at all?" flag. Pass one (even an
+ *    empty one, meaning no rules are seeded yet) and every row records
  *    `excluded_fields` as an array — empty if nothing matched. Pass null and the
  *    rows record null, meaning the rules never ran against them.
  * 3. **Intra-batch duplicates.** Paging a search can return the same company twice.
@@ -90,8 +94,7 @@ export function partitionRecords(
   existing: Map<string, { checksum: string; ingestion_attempt: number }>,
   runId: string,
   source: DataSourceName,
-  dataHandlingRules: FieldRule[] = [],
-  ruleVersion: number | null = null,
+  policy: DataHandlingPolicy | null = null,
 ): Partitioned {
   const rows: RawRecordRow[] = [];
   const invalid: InvalidRecord[] = [];
@@ -116,16 +119,14 @@ export function partitionRecords(
     }
     seen.add(id);
 
-    // F246: filter denied fields from the payload before checksumming.
-    // The checksum reflects the filtered payload, so a rule change correctly
+    // F246 + F247: clear the payload for storage before checksumming. The
+    // checksum reflects what is actually stored, so a rule change correctly
     // triggers re-ingestion of previously-unchanged records.
-    const { filtered, excludedFields } = filterPayload(
-      record.raw_payload,
-      dataHandlingRules,
-      source,
-    );
+    const cleared = policy
+      ? applyDataHandling(record.raw_payload, source, policy)
+      : { payload: record.raw_payload, excludedFields: [], redactionCounts: {} };
 
-    const checksum = hashPayload(filtered);
+    const checksum = hashPayload(cleared.payload);
     const previous = existing.get(id);
 
     if (previous?.checksum === checksum) {
@@ -138,16 +139,16 @@ export function partitionRecords(
       ingestion_run_id: runId,
       record_source: source,
       source_record_id: id,
-      raw_payload: filtered,
+      raw_payload: cleared.payload,
       checksum,
       source_country: record.source_country ?? null,
       source_registry_name: record.source_registry_name ?? null,
       ingestion_attempt: previous ? previous.ingestion_attempt + 1 : 1,
       // Null and [] mean different things and an audit depends on the difference:
       // null = the rules were never applied to this row, [] = they were applied and
-      // matched nothing. Only a caller that passes no rule version gets null.
-      excluded_fields: ruleVersion === null ? null : excludedFields,
-      rule_version_applied: ruleVersion,
+      // matched nothing. Only a caller that passes no policy at all gets null.
+      excluded_fields: policy ? cleared.excludedFields : null,
+      rule_version_applied: policy ? policy.version : null,
     });
   });
 
@@ -158,8 +159,7 @@ async function runOneSource(
   store: IngestionStore,
   source: DataSourceAdapter,
   trigger: RunTrigger,
-  dataHandlingRules: FieldRule[],
-  ruleVersion: number,
+  policy: DataHandlingPolicy,
 ): Promise<RunSummary> {
   const counts: RunCounts = { fetched: 0, inserted: 0, skipped: 0, failed: 0 };
   const written = { new: 0, changed: 0 };
@@ -197,8 +197,7 @@ async function runOneSource(
       existing,
       run.id,
       source.name,
-      dataHandlingRules,
-      ruleVersion,
+      policy,
     );
 
     await store.writeRecords(rows);
@@ -280,8 +279,9 @@ export async function runIngestion(
     );
   }
 
-  // F246: load data handling rules once for the entire run — every source
-  // uses the same snapshot, so a rule change mid-run cannot produce inconsistency.
+  // F246 + F247: load the data handling policy once for the entire run — every
+  // source uses the same snapshot, so a rule change mid-run cannot produce
+  // inconsistency.
   //
   // **Fail-closed.** If the rules cannot be read, no source runs. The data handling
   // policy §2 commits to a denied field never being written; carrying on unfiltered
@@ -292,12 +292,9 @@ export async function runIngestion(
   // to reconcile. Every caller already wraps `runIngestion` in a try/catch that
   // reports the error and shows the operator a failure, so the blocked import is
   // visible rather than quietly degraded.
-  let dataHandlingRules: FieldRule[];
-  let ruleVersion: number;
+  let policy: DataHandlingPolicy;
   try {
-    const loaded = await store.loadDataHandlingRules();
-    dataHandlingRules = loaded.rules;
-    ruleVersion = loaded.version;
+    policy = await store.loadDataHandlingPolicy();
   } catch (err) {
     throw new Error(
       `Data handling rules could not be loaded: ${errorMessage(err)}. ` +
@@ -308,9 +305,7 @@ export async function runIngestion(
   }
 
   const settled = await Promise.allSettled(
-    sources.map((source) =>
-      runOneSource(store, source, trigger, dataHandlingRules, ruleVersion),
-    ),
+    sources.map((source) => runOneSource(store, source, trigger, policy)),
   );
 
   // runOneSource catches its own failures, so a rejection here means a bug in the

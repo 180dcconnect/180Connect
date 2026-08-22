@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   checkWebsite,
   isPrivateAddress,
+  safeWebsiteHref,
   validateWebsiteFormat,
   websiteHref,
   type WebsiteCheckDependencies,
@@ -92,6 +93,33 @@ describe("websiteHref", () => {
       websiteHref({ status: "unreachable", url: "https://example.org/", message: "x" }),
       "https://example.org/",
     );
+  });
+});
+
+describe("safeWebsiteHref", () => {
+  it("links a bare host by assuming https", () => {
+    assert.equal(safeWebsiteHref("1-1coco.org"), "https://1-1coco.org/");
+  });
+
+  it("links an ordinary https URL unchanged in spirit", () => {
+    assert.equal(safeWebsiteHref("https://example.org/about"), "https://example.org/about");
+  });
+
+  it("degrades a script URL to plain text rather than linking it", () => {
+    assert.equal(safeWebsiteHref("javascript:alert(1)"), null);
+    assert.equal(safeWebsiteHref("data:text/html,<script>alert(1)</script>"), null);
+  });
+
+  it("never links a hostname that resolves inside the network", () => {
+    assert.equal(safeWebsiteHref("http://192.168.1.1/admin"), null);
+    assert.equal(safeWebsiteHref("http://localhost:3000"), null);
+    assert.equal(safeWebsiteHref("http://169.254.169.254/latest/meta-data"), null);
+  });
+
+  it("degrades a malformed fragment to plain text, never a relative path", () => {
+    assert.equal(safeWebsiteHref("example dot org"), null);
+    assert.equal(safeWebsiteHref(""), null);
+    assert.equal(safeWebsiteHref(null), null);
   });
 });
 

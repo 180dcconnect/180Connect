@@ -38,6 +38,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     permission: "user:manage",
   },
   {
+    href: "/admin/cam-settings",
+    label: "CAM queue settings",
+    description: "Inspect team members' outreach preferences and queue configuration.",
+    permission: "user:manage",
+  },
+  {
     href: "/admin/import-status",
     label: "Import status",
     description: "See whether data ingestion runs succeeded, partially succeeded, or failed.",
@@ -52,6 +58,11 @@ export const NAV_ITEMS: readonly NavItem[] = [
     href: "/settings/outreach-preferences",
     label: "Outreach preferences",
     description: "Set the geography, sector and size focus for your queue.",
+  },
+  {
+    href: "/settings/accessibility",
+    label: "Accessibility settings",
+    description: "Adjust text size, contrast, and visual comfort across the platform.",
   },
 ];
 

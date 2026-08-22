@@ -13,10 +13,10 @@ import type {
 } from "@/lib/booklet/build-prompt";
 
 /**
- * F082 — Generate Client Booklet. Generate-and-display only this pass: F085 (save to
- * the client record) and F112 (store prompt/output for audit) are both deferred, so
- * every call here re-generates from Gemini fresh rather than reading/writing a saved
- * booklet. See generate-booklet.ts for the Gemini call itself.
+ * F082 — Generate Client Booklet. Every call generates fresh from Gemini (F085's
+ * saved-booklet read/write is separate, #382). After a successful generation the
+ * exact prompt and output are written to booklet_generations — F082 AC5 / F112's
+ * audit requirement. See generate-booklet.ts for the Gemini call itself.
  *
  * client:contact, not client:view — this calls a paid external API on every click,
  * same reasoning as gating the Outreach section on the client detail page.
@@ -94,5 +94,26 @@ export async function POST(
   if ("error" in result) {
     return NextResponse.json({ error: result.error }, { status: 502 });
   }
+
+  // F082 AC5 / F112 — the exact prompt and output are stored per generation
+  // (booklet_generations). A failed audit insert does not fail the request:
+  // the CAM just waited up to 90s and losing the booklet over an audit write
+  // would trade a compliance nicety for a user-visible failure. It is reported
+  // to ERROR_LOG so the gap is visible, not silent.
+  const { error: auditError } = await supabase.from("booklet_generations").insert({
+    organisation_id: organisationId,
+    generated_by: authorization.actor.id,
+    prompt_system: result.systemPrompt,
+    prompt_user: result.userPrompt,
+    output: result.booklet,
+    model: result.model,
+  });
+  if (auditError) {
+    await reportError(auditError, {
+      operation: "clients.generate_booklet.audit_insert",
+      organisationId,
+    });
+  }
+
   return NextResponse.json({ booklet: result.booklet });
 }

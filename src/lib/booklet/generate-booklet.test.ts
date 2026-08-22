@@ -24,12 +24,16 @@ function fakeDeps(callGemini: CallGeminiFn) {
 }
 
 describe("generateBooklet", () => {
-  it("returns the trimmed booklet text on success", async () => {
+  it("returns the trimmed booklet text, model, and exact prompts on success", async () => {
     const result = await generateBooklet(
       INPUT,
-      fakeDeps(async () => "  A short booklet about Test Charity.  "),
+      fakeDeps(async () => ({ text: "  A short booklet about Test Charity.  ", model: "gemini-test" })),
     );
-    assert.deepEqual(result, { booklet: "A short booklet about Test Charity." });
+    assert.ok(!("error" in result));
+    assert.equal(result.booklet, "A short booklet about Test Charity.");
+    assert.equal(result.model, "gemini-test");
+    assert.match(result.systemPrompt, /never invent/i);
+    assert.match(result.userPrompt, /Test Charity/);
   });
 
   it("passes the built prompt through to callGemini", async () => {
@@ -41,7 +45,7 @@ describe("generateBooklet", () => {
         assert.match(input.prompt, /Test Charity/);
         assert.match(input.system, /never invent/i);
         assert.equal(typeof input.timeoutMs, "number");
-        return "booklet text";
+        return { text: "booklet text", model: "gemini-test" };
       }),
     );
     assert.equal(calls, 1);
@@ -60,7 +64,7 @@ describe("generateBooklet", () => {
   it("treats an empty response as a failure rather than an empty success", async () => {
     const result = await generateBooklet(
       INPUT,
-      fakeDeps(async () => "   "),
+      fakeDeps(async () => ({ text: "   ", model: "gemini-test" })),
     );
     assert.ok("error" in result);
   });

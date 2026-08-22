@@ -911,6 +911,39 @@ is the §2 pattern ("what RLS cannot do"), not an oversight.
 
 ---
 
+### 3.20 Attachments — shared read, no write path yet
+
+Backs F080 View Client Attachments (#83),
+`supabase/migrations/20260823090000_create_attachments.sql`. Also the schema-level
+resolution of F217/F218, neither of which is defined anywhere in the PRD's own
+feature table or this codebase — see the migration header for the full reasoning
+and the "storage location" answer (Supabase Storage, PRD §7's architecture table).
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `ATTACHMENTS` | all active roles | — (no grant; F081) | — (no grant) | — (no grant) |
+
+SELECT is shared, same shape as `NOTES` (§3.3) and `CLIENT_EDIT_SUGGESTIONS`
+(§3.19) — a client's attachment list is relationship context every active role
+sees, not something narrowed to an owner or an admin.
+
+**Deliberately no write path.** F080 is a view; F081 (Upload Client Attachment,
+P3, not yet built) owns deciding how a row and its bytes get created, including
+the size/type/security limits PRD §7.11/§11.3 asks for. Until F081 ships, this
+table has no INSERT grant and no RPC that could produce a row, so every client's
+attachment list is correctly empty rather than a placeholder.
+
+**Storage**: a private bucket, `client-attachments` (not public — nothing about a
+client's files is meant to be reachable by an unauthenticated guess at a path).
+`storage.objects` carries one SELECT policy, `bucket_id = 'client-attachments'
+and app.is_active_user()`, mirroring `attachments_select_active` — this is what
+lets an active user's `createSignedUrl` call succeed (AC2's open/download), since
+Storage checks RLS on `storage.objects` the same way a table read does. No
+INSERT/UPDATE/DELETE policy there either: object writes stay `service_role`-only
+until F081 adds one.
+
+---
+
 ## 4. Denial behaviour and feedback
 
 Important and frequently got wrong: **a blocked read is not an error.**

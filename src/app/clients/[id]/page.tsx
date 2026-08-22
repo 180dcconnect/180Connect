@@ -23,6 +23,8 @@ import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
 import { Pill, SectionCard } from "./section-card";
 import { BookletPanel } from "./booklet-panel";
+import { formatAttachments, type AttachmentRow } from "@/lib/attachments";
+import { AttachmentsSection } from "./attachments-section";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -131,6 +133,28 @@ export default async function ClientDetailPage({
   }
   const sources = formatOrganisationSources(
     (rawSourceRows ?? []) as OrganisationSourceRow[],
+  );
+
+  // F080: RLS (attachments_select_active) shares read across every active
+  // role, same reasoning as the sources query above. No write path exists yet
+  // (F081) — see 20260823090000_create_attachments.sql's header — so this is
+  // empty for every client today; that is AC3's correct state, not a bug.
+  const { data: attachmentRows, error: attachmentsError } = await supabase
+    .from("attachments")
+    .select(
+      "id, filename, content_type, size_bytes, created_at, uploaded_by_user:users!attachments_uploaded_by_fkey(full_name)",
+    )
+    .eq("organisation_id", id)
+    .order("created_at", { ascending: false });
+
+  if (attachmentsError) {
+    await reportError(attachmentsError, {
+      operation: "clients.detail_attachments",
+      organisationId: id,
+    });
+  }
+  const attachments = formatAttachments(
+    (attachmentRows ?? []) as unknown as AttachmentRow[],
   );
 
   // Most recent suppression row for this org, whatever its status — pending shows a
@@ -395,6 +419,20 @@ export default async function ClientDetailPage({
                     ))}
                   </ul>
                 )}
+              </SectionCard>
+            </Rise>
+
+            <Rise>
+              <SectionCard
+                headingId="attachments-heading"
+                title="Attachments"
+                hint="Files attached to this client."
+              >
+                <AttachmentsSection
+                  organisationId={client.id}
+                  attachments={attachments}
+                  error={Boolean(attachmentsError)}
+                />
               </SectionCard>
             </Rise>
           </Group>

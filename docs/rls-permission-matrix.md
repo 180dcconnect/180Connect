@@ -858,6 +858,44 @@ is the §2 pattern ("what RLS cannot do"), not an oversight.
 
 ---
 
+### 3.19 Client edit suggestions — shared read, RPC-only propose
+
+Backs F077 Suggest Client Edit (#79),
+`supabase/migrations/20260822090000_create_client_edit_suggestions.sql`. Closes open
+gap 2 below: §3.2 already said "CAMs go through the suggestion flow (F077)" for
+canonical-field writes, but no table existed for that flow until now.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `CLIENT_EDIT_SUGGESTIONS` | all active roles | — (RPC only) | — (no grant; F078/F079) | — (no grant) |
+
+SELECT is shared, same shape as `NOTES` (§3.3), not narrowed to admin the way
+`FIELD_DISCREPANCIES`/`FIELD_SOURCES` are (§3.16/§3.18): those are about which
+third-party source said what, which is not CAM-visible; a pending correction on a
+client's own record is exactly the reliability context every active role viewing
+that profile needs (AC3 — the profile keeps showing the current live value, but a
+CAM should be able to tell one is proposed).
+
+One write path, `suggest_client_edit(organisation_id, field_name, proposed_value,
+note)`: `SECURITY DEFINER`, self-checks `app.can_write()` (CAM or admin; a viewer
+is refused — `can_write()`'s own comment already names this feature: "no notes, no
+suggestions, no sends"). Snapshots the field's live value as `current_value` at
+proposal time (AC2), refuses a proposal identical to the current value, refuses a
+second pending suggestion on a field that already has one open, and writes
+`audit_log` (`client_edit_suggested`, `target_table: organisations`) in the same
+transaction — audited on creation despite moving nothing yet, same precedent as
+`ownership_requested` (§3.17): the ask itself is the observable event, not just its
+eventual decision.
+
+**Scope boundary, not a gap**: this migration only lands the propose half. `status`
+reserves `approved`/`rejected` (same reasoning `create_suppressions` gives for
+reserving `lifted` ahead of its own RPC), but nothing in this migration can produce
+them — approving or rejecting a suggestion, and applying it to `ORGANISATIONS` when
+approved, is F078/F079's RPC to add. Until then every row in this table is
+`pending` and the live client profile is unaffected by design (AC3).
+
+---
+
 ## 4. Denial behaviour and feedback
 
 Important and frequently got wrong: **a blocked read is not an error.**
@@ -933,9 +971,10 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
 1. **`AUDIT_LOG` is not in the Data Model.** Section 3.8 assumes it. The model has
    `ERROR_LOG` (application errors, F226), which is a different thing. PRD §4.2
    requires role changes and deactivations to be audited, and F221 depends on it.
-2. **No suggestion table.** §4.3 grants CAMs "suggest organisation field correction"
-   and F077 is a P1 story, but no table holds a suggestion. Without one the CAM path
-   to changing canonical data does not exist, and 3.2 has no row for it.
+2. ~~**No suggestion table.**~~ **RESOLVED — F077 (#79)**, 22 Aug 2026. §3.19 has the
+   table (`CLIENT_EDIT_SUGGESTIONS`) and the propose RPC (`suggest_client_edit`).
+   Deciding a suggestion (F078 Approve, F079 Reject) is not yet built — see §3.19's
+   own scope note.
 3. ~~**No suppression table.**~~ **RESOLVED — F251 (#82) & F185 (#181)**. §3.14 has
    the table and RPCs (`request_suppression`, `decide_suppression_request`, `lift_suppression`).
    "Lift suppression: Admin, mandatory reason required" is implemented by F185 (`lift_suppression`).

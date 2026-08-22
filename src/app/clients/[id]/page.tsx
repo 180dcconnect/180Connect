@@ -14,6 +14,10 @@ import {
   type OrganisationSourceRow,
 } from "@/lib/source-tracking";
 import { groupFieldSources, type FieldSourceRow } from "@/lib/field-sources";
+import {
+  formatClientEditSuggestions,
+  type ClientEditSuggestionRow,
+} from "@/lib/client-edit-suggestions";
 import { checkWebsiteReachabilityCached } from "@/lib/website-reachability-cache";
 import { safeWebsiteHref, websiteHref } from "@/lib/website-validation";
 import { formatLocation, formatOutreachStatus } from "@/lib/organisation-format";
@@ -48,6 +52,7 @@ import {
 import { TimelineSection } from "./timeline-section";
 import { TimelineRealtimeRefresher } from "./timeline-realtime";
 import { OutreachHistorySection } from "./outreach-history";
+import { SuggestEditPanel } from "./suggest-edit-panel";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -233,6 +238,38 @@ export default async function ClientDetailPage({
   const fieldSources = groupFieldSources(
     (rawFieldSourceRows ?? []) as FieldSourceRow[],
   );
+
+  // F077: RLS (client_edit_suggestions_select_active) shares read across every
+  // active role, same reasoning as the sources/notes queries above — AC3 needs
+  // a CAM to see that a suggestion is pending, not only the admin who'll decide it.
+  const { data: suggestionRows, error: suggestionsError } = await supabase
+    .from("client_edit_suggestions")
+    .select(
+      "id, field_name, current_value, proposed_value, status, note, created_at, suggested_by_user:users!client_edit_suggestions_suggested_by_fkey(full_name)",
+    )
+    .eq("organisation_id", id)
+    .order("created_at", { ascending: false });
+
+  if (suggestionsError) {
+    await reportError(suggestionsError, {
+      operation: "clients.detail_edit_suggestions",
+      organisationId: id,
+    });
+  }
+  const editSuggestions = formatClientEditSuggestions(
+    (suggestionRows ?? []) as unknown as ClientEditSuggestionRow[],
+  );
+  // The six fields suggest_client_edit can target, for the propose form's
+  // "current value" preview — already on `client` from the OrganisationDetailRow
+  // query above, so this is a relabelling, not a second fetch.
+  const suggestibleCurrentValues: Readonly<Record<string, string | null>> = {
+    legal_name: client.legal_name,
+    website: client.website,
+    contact_email: client.contact_email,
+    address_line_1: client.address_line_1,
+    city: client.city,
+    postcode: client.postcode,
+  };
 
   // Most recent suppression row for this org, whatever its status — pending shows a
   // waiting state, active shows the suppressed state, rejected/lifted/none all fall
@@ -723,6 +760,25 @@ export default async function ClientDetailPage({
                   organisationId={client.id}
                 />
                 {canEdit && <AddNoteForm organisationId={client.id} />}
+              </SectionCard>
+            </Rise>
+
+            <Rise>
+              <SectionCard
+                headingId="suggested-edits-heading"
+                title="Suggested edits"
+                hint="Proposed corrections to this record. The client profile keeps showing the current value until an admin reviews a suggestion."
+              >
+                {suggestionsError ? (
+                  <InlineAlert message="Suggested edits could not be loaded. Refresh and try again." />
+                ) : (
+                  <SuggestEditPanel
+                    organisationId={client.id}
+                    suggestions={editSuggestions}
+                    currentValues={suggestibleCurrentValues}
+                    canPropose={canEdit}
+                  />
+                )}
               </SectionCard>
             </Rise>
 

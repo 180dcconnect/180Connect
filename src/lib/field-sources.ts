@@ -30,11 +30,14 @@ export type FieldProvenance = {
 };
 
 // Same six fields as write-organisations.ts's TRACKED_FIELD_SOURCES and the
-// field_sources/field_discrepancies check constraints — kept in this fixed order
-// (rather than deriving it from whatever rows happen to come back) so the panel's
-// field order doesn't reshuffle between organisations depending on which fields
-// happen to have data.
-const FIELD_LABELS: Readonly<Record<string, string>> = {
+// field_sources/field_discrepancies/client_edit_suggestions check constraints —
+// kept in this fixed order (rather than deriving it from whatever rows happen to
+// come back) so the panel's field order doesn't reshuffle between organisations
+// depending on which fields happen to have data.
+//
+// Exported so client-edit-suggestions.ts (F077) labels the same six fields
+// without a second, potentially-drifting copy of this map.
+export const FIELD_LABELS: Readonly<Record<string, string>> = {
   legal_name: "Legal name",
   website: "Website",
   contact_email: "Contact email",
@@ -42,7 +45,7 @@ const FIELD_LABELS: Readonly<Record<string, string>> = {
   city: "City",
   postcode: "Postcode",
 };
-const FIELD_ORDER = Object.keys(FIELD_LABELS);
+export const FIELD_ORDER = Object.keys(FIELD_LABELS);
 
 function toEntry(row: FieldSourceRow): FieldSourceEntry {
   const source = row.source?.trim().toLowerCase() || row.source;

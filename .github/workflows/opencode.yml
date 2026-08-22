@@ -28,7 +28,12 @@ jobs:
       contains(github.event.comment.body, '/opencode')
     runs-on: ubuntu-latest
     permissions:
+      # Declaring any permission here revokes all unspecified ones, so the
+      # checkout step's git fetch fails with 128 if contents: read is missing.
       id-token: write
+      contents: read
+      issues: write
+      pull-requests: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6

@@ -1,4 +1,4 @@
--- Rollback for: 20260821100100_create_notification_rpcs.sql
+-- Rollback for: 20260822090100_create_notification_rpcs.sql
 -- Unschedule the prune job BEFORE dropping its function.
 
 select cron.unschedule('notifications_prune_daily');

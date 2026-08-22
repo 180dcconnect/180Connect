@@ -10,7 +10,7 @@
 -- WHY NO AUDIT LOG ENTRY HERE:
 --   The table itself carries no client-facing INSERT grant — rows are only
 --   written through public.create_notification (see
---   20260821100100_create_notification_rpcs.sql), which writes the audit_log
+--   20260822090100_create_notification_rpcs.sql), which writes the audit_log
 --   entry in the same transaction, per docs/audit-log-pattern.md.
 --
 -- RETENTION:
@@ -40,7 +40,7 @@
 --                  | tab 11 sequence step; docs/rls-permission-matrix.md §3.19.
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260821100000_create_notifications.down.sql
+-- ../rollback/20260822090000_create_notifications.down.sql
 
 create table public.notifications (
   id                uuid primary key default gen_random_uuid(),

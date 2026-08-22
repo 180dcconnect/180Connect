@@ -1,7 +1,7 @@
 -- Migration: create_notification_rpcs
 -- Story: F173 — In-App Notifications.
 -- Purpose: the only write paths into public.notifications
---   (20260821100000_create_notifications.sql):
+--   (20260822090000_create_notifications.sql):
 --
 --   create_notification          producers call this; never INSERT directly
 --   mark_notification_read       F177 hook — recipient marks one row read
@@ -33,7 +33,7 @@
 --   Documentation  | docs/rls-permission-matrix.md §3.19.
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260821100100_create_notification_rpcs.down.sql
+-- ../rollback/20260822090100_create_notification_rpcs.down.sql
 
 -- ---------------------------------------------------------------------------
 -- Producer path

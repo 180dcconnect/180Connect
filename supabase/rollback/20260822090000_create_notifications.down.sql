@@ -1,4 +1,4 @@
--- Rollback: 20260821100000_create_notifications
+-- Rollback: 20260822090000_create_notifications
 drop trigger if exists guard_notification_read_state on public.notifications;
 drop function if exists public.guard_notification_read_state();
 drop policy if exists notifications_update_own_read_state on public.notifications;

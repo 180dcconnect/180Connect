@@ -813,8 +813,8 @@ migration header for the full reasoning.
 ### 3.19 Notifications — own-row only, RPC-only writes
 
 Backs F173 In-App Notifications (#169),
-`supabase/migrations/20260821100000_create_notifications.sql` +
-`20260821100100_create_notification_rpcs.sql`. New table — not previously
+`supabase/migrations/20260822090000_create_notifications.sql` +
+`20260822090100_create_notification_rpcs.sql`. New table — not previously
 reserved in the Data Model. General per-user notification feed: any future
 producer (replies, reminders, team activity) inserts rows via RPC instead of
 gaining table-level INSERT.

@@ -39,7 +39,6 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
-          persist-credentials: false
 
       - name: Run OpenCode
         uses: anomalyco/opencode/github@latest

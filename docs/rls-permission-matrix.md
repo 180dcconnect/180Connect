@@ -287,7 +287,7 @@ F019); **send** is restricted.
 | `SEND_EVENTS` | all roles | — (service role, Gmail webhook) | — | — |
 | `REPLY_EVENTS` | all roles | — (service role) | — | — |
 | `OUTCOMES` | all roles | admin, cam (`recorded_by_user_id = auth.uid()`) | admin, own | admin |
-| `BOOKLET_GENERATIONS` | admin, cam (`app.can_contact_organisation(organisation_id)`); viewer: none | admin, cam (`app.can_contact_organisation(organisation_id)` **and** `generated_by = auth.uid()`); append-only audit of booklet prompt/output (F082 AC5 / F112, `20260822090000`) | — | — |
+| `BOOKLET_GENERATIONS` | admin, cam (`app.can_contact_organisation(organisation_id)`); viewer: none | admin, cam (`app.can_contact_organisation(organisation_id)` **and** `generated_by = auth.uid()`); append-only audit of booklet prompt/output (F082 AC5 / F112, `20260822130000`) | — | — |
 
 `BOOKLET_GENERATIONS` lives here rather than in a new section because it is the
 booklet-side sibling of `AI_GENERATIONS`: the same "what exactly did the model
@@ -823,7 +823,7 @@ migration header for the full reasoning.
 ### 3.19 Notifications — own-row only, RPC-only writes
 
 Backs F173 In-App Notifications (#169),
-`supabase/migrations/20260822090000_create_notifications.sql` +
+`supabase/migrations/20260822130000_create_notifications.sql` +
 `20260822090100_create_notification_rpcs.sql`. New table — not previously
 reserved in the Data Model. General per-user notification feed: any future
 producer (replies, reminders, team activity) inserts rows via RPC instead of

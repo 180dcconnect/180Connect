@@ -20,7 +20,7 @@
 --   immutable by omission, the same mechanism AUDIT_LOG uses (matrix §2 row
 --   "Audit entries are immutable").
 --
--- Reversibility: paired rollback in ../rollback/20260822090000_create_booklet_generations.down.sql
+-- Reversibility: paired rollback in ../rollback/20260822130000_create_booklet_generations.down.sql
 
 create table public.booklet_generations (
   id              uuid primary key default gen_random_uuid(),

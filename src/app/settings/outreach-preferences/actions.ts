@@ -126,6 +126,9 @@ export async function saveOutreachPreferencesAction(
     );
 
   if (error) {
+    // F197 review: the CAM sees the message, but the failure must also be
+    // recorded (Definition of Done — every failure visible and recorded).
+    await reportError(error, { operation: "outreach_preferences.save" });
     return {
       status: "error",
       message: "Could not save your preferences. Try again.",

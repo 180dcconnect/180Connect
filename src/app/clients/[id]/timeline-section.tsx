@@ -18,11 +18,13 @@ function formatTimestamp(value: string): string {
 
 /**
  * F076 AC2 — the dot before each Pill, not the Pill's colour alone: three
- * tones cannot give six event types six distinct looks on their own, so each
- * tone's "primary" member (something created) renders filled and its
- * "secondary" member (something received or changed) renders hollow. See
- * @/lib/timeline.ts's TIMELINE_EVENT_STYLE for which type gets which, and its
- * test for the guarantee that no two types ever share a combination.
+ * tones cannot give eight event types eight distinct looks on their own, so
+ * each tone carries three fills: "solid" (something created), "hollow"
+ * (something received or changed) and "ring" (a heavier border over a faint
+ * tint of the same hue — added for #80/#81's decision events when the original
+ * six pairings were used up). See @/lib/timeline.ts's TIMELINE_EVENT_STYLE for
+ * which type gets which, and its test for the guarantee that no two types ever
+ * share a combination.
  */
 const DOT_TONE_CLASS: Record<TimelineTone, string> = {
   brand: "border-brand bg-brand",
@@ -30,14 +32,28 @@ const DOT_TONE_CLASS: Record<TimelineTone, string> = {
   warn: "border-amber-600 bg-amber-600",
 };
 
+const RING_TONE_CLASS: Record<TimelineTone, string> = {
+  brand: "border-brand bg-brand/10",
+  neutral: "border-foreground/40 bg-foreground/[0.06]",
+  warn: "border-amber-600 bg-amber-600/10",
+};
+
 function EventDot({ type }: { type: TimelineEntry["type"] }) {
   const style = TIMELINE_EVENT_STYLE[type];
+  if (style.fill === "ring") {
+    return (
+      <span
+        aria-hidden="true"
+        className={`inline-block size-3 shrink-0 rounded-full border-[3px] ${RING_TONE_CLASS[style.tone]}`}
+      />
+    );
+  }
   const toneClass = DOT_TONE_CLASS[style.tone];
   return (
     <span
       aria-hidden="true"
       className={`inline-block size-2.5 shrink-0 rounded-full border-2 ${
-        style.filled ? toneClass : `${toneClass.split(" ")[0]} bg-transparent`
+        style.fill === "solid" ? toneClass : `${toneClass.split(" ")[0]} bg-transparent`
       }`}
     />
   );

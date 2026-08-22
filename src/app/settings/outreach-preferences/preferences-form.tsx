@@ -16,12 +16,16 @@ import {
   CITY_PRESETS,
   GEOGRAPHIC_REACH_OPTIONS,
   GEOGRAPHIC_REACH_LABELS,
+  GRANT_PREFERENCE_LABELS,
+  GRANT_PREFERENCE_DESCRIPTIONS,
   INCOME_BAND_OPTIONS,
   INCOME_BAND_LABELS,
+  INCOME_BAND_DESCRIPTIONS,
   MAX_CITY_LENGTH,
   MAX_CITIES,
   MAX_SECTOR_LENGTH,
   MAX_SECTORS,
+  SECTOR_CATEGORY_GROUPS,
   type GeographicReach,
   type IncomeBand,
 } from "./constants";
@@ -68,11 +72,13 @@ export function OutreachPreferencesForm({
   initialCities = [],
   initialSectors,
   initialIncomeBands,
+  initialPrioritiseGrants = false,
 }: {
   initialGeographicReach: GeographicReach[];
   initialCities?: string[];
   initialSectors: string[];
   initialIncomeBands: IncomeBand[];
+  initialPrioritiseGrants?: boolean;
 }) {
   // Submitted through `useTransition` rather than `useActionState`, because this
   // form has to *do* something when the action returns — close the editor and
@@ -91,6 +97,7 @@ export function OutreachPreferencesForm({
   const [savedCities, setSavedCities] = useState<string[]>(initialCities);
   const [savedBands, setSavedBands] = useState<IncomeBand[]>(initialIncomeBands);
   const [savedSectors, setSavedSectors] = useState<string[]>(initialSectors);
+  const [savedPrioritiseGrants, setSavedPrioritiseGrants] = useState<boolean>(initialPrioritiseGrants);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -103,6 +110,7 @@ export function OutreachPreferencesForm({
       setSavedCities(result.saved?.cities ?? cities);
       setSavedBands(result.saved?.incomeBands ?? bands);
       setSavedSectors(result.saved?.sectors ?? sectors);
+      setSavedPrioritiseGrants(result.saved?.prioritiseGrantRecipients ?? prioritiseGrants);
       setEditing(false);
     });
   }
@@ -114,6 +122,7 @@ export function OutreachPreferencesForm({
   const [bands, setBands] = useState<IncomeBand[]>(initialIncomeBands);
   const [sectors, setSectors] = useState<string[]>(initialSectors);
   const [sectorInput, setSectorInput] = useState("");
+  const [prioritiseGrants, setPrioritiseGrants] = useState<boolean>(initialPrioritiseGrants);
 
   function startEditing() {
     setGeo(savedGeo);
@@ -122,6 +131,7 @@ export function OutreachPreferencesForm({
     setBands(savedBands);
     setSectors(savedSectors);
     setSectorInput("");
+    setPrioritiseGrants(savedPrioritiseGrants);
     // Clears a stale "Preferences saved." from the previous round, so the
     // banner cannot sit above a form that has unsaved changes in it.
     setState(initialState);
@@ -135,6 +145,7 @@ export function OutreachPreferencesForm({
     setBands(savedBands);
     setSectors(savedSectors);
     setSectorInput("");
+    setPrioritiseGrants(savedPrioritiseGrants);
     setEditing(false);
   }
 
@@ -188,6 +199,15 @@ export function OutreachPreferencesForm({
     setSectors(sectors.filter((s) => s !== sector));
   }
 
+  function toggleSectorPreset(preset: string) {
+    if (sectors.some((s) => s.toLowerCase() === preset.toLowerCase())) {
+      setSectors(sectors.filter((s) => s.toLowerCase() !== preset.toLowerCase()));
+    } else {
+      if (sectors.length >= MAX_SECTORS) return;
+      setSectors([...sectors, preset]);
+    }
+  }
+
   function handleSectorKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter" || event.key === ",") {
       event.preventDefault();
@@ -235,6 +255,17 @@ export function OutreachPreferencesForm({
                 key: `band:${value}`,
                 label: INCOME_BAND_LABELS[value],
               }))}
+            />
+          </div>
+
+          <div>
+            <p className={LEGEND_CLASS}>Funding & Grant History (360Giving)</p>
+            <Chips
+              items={
+                savedPrioritiseGrants
+                  ? [{ key: "grants:prioritise", label: "Prioritise grant recipients" }]
+                  : []
+              }
             />
           </div>
 
@@ -364,12 +395,15 @@ export function OutreachPreferencesForm({
 
         <fieldset>
           <legend className={LEGEND_CLASS}>Size (annual income)</legend>
-          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
+          <p className="mt-2 text-sm leading-[1.7] text-foreground/65">
+            Select organisation size tiers based on annual filed accounts from Charity Commission and Companies House.
+          </p>
+          <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
             {INCOME_BAND_OPTIONS.map((option) => (
               <label
                 key={option}
                 htmlFor={`band-${option}`}
-                className="flex cursor-pointer select-none items-center gap-3 text-sm"
+                className="flex cursor-pointer select-none items-start gap-3 rounded-xl border border-black/[0.08] bg-white p-3 transition-colors hover:border-brand/30"
               >
                 <Checkbox
                   id={`band-${option}`}
@@ -384,51 +418,127 @@ export function OutreachPreferencesForm({
                         : bands.filter((value) => value !== option),
                     )
                   }
+                  className="mt-0.5"
                 />
-                {INCOME_BAND_LABELS[option]}
+                <div className="space-y-0.5">
+                  <p className="text-sm font-medium text-foreground">{INCOME_BAND_LABELS[option]}</p>
+                  <p className="text-xs text-foreground/55">{INCOME_BAND_DESCRIPTIONS[option]}</p>
+                </div>
               </label>
             ))}
           </div>
         </fieldset>
 
         <fieldset>
+          <legend className={LEGEND_CLASS}>Funding & Grant History (360Giving)</legend>
+          <p className="mt-2 text-sm leading-[1.7] text-foreground/65">
+            Prioritise experienced organisations with documented grant funding awards from UK charitable trusts and foundations.
+          </p>
+          <div className="mt-3">
+            <label
+              htmlFor="grant-pref-toggle"
+              className="flex cursor-pointer select-none items-start gap-3 rounded-xl border border-black/[0.08] bg-white p-3.5 transition-colors hover:border-brand/30"
+            >
+              <Checkbox
+                id="grant-pref-toggle"
+                name="prioritise_grant_recipients"
+                value="true"
+                size="sm"
+                checked={prioritiseGrants}
+                onCheckedChange={(checked) => setPrioritiseGrants(Boolean(checked))}
+                className="mt-0.5"
+              />
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium text-foreground">
+                  {GRANT_PREFERENCE_LABELS.prioritise_grant_recipients}
+                </p>
+                <p className="text-xs text-foreground/55">
+                  {GRANT_PREFERENCE_DESCRIPTIONS.prioritise_grant_recipients}
+                </p>
+              </div>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset>
           <legend className={LEGEND_CLASS}>Sector</legend>
           <p className="mt-2 text-sm leading-[1.7] text-foreground/65">
-            Type a sector and press Enter to add it.
+            Select standard sector categories from Charity Commission & Companies House classifications, or type custom tags to prioritise matching organisations.
           </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {sectors.map((sector) => (
-              <span
-                key={sector}
-                className="flex items-center gap-1.5 rounded-full bg-brand/10 px-3 py-1 text-sm font-medium text-brand"
-              >
-                {sector}
-                <button
-                  type="button"
-                  onClick={() => removeSector(sector)}
-                  aria-label={`Remove ${sector}`}
-                  className="text-brand/70 hover:text-brand"
-                >
-                  ×
-                </button>
-                <input type="hidden" name="sector" value={sector} />
-              </span>
+
+          {/* Categorized Sector Presets */}
+          <div className="mt-4 space-y-3">
+            {SECTOR_CATEGORY_GROUPS.map((group) => (
+              <div key={group.category} className="space-y-1.5">
+                <p className="text-[11px] font-semibold text-foreground/60">{group.category}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {group.presets.map((preset) => {
+                    const isSelected = sectors.some((s) => s.toLowerCase() === preset.toLowerCase());
+                    return (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => toggleSectorPreset(preset)}
+                        className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                          isSelected
+                            ? "border-brand bg-brand text-white"
+                            : "border-black/15 bg-white text-foreground/70 hover:border-brand/40 hover:text-brand"
+                        }`}
+                      >
+                        {isSelected ? `✓ ${preset}` : `+ ${preset}`}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             ))}
           </div>
-          <Input
-            type="text"
-            value={sectorInput}
-            onChange={(event) => setSectorInput(event.target.value)}
-            onKeyDown={handleSectorKeyDown}
-            onBlur={addSector}
-            maxLength={MAX_SECTOR_LENGTH}
-            disabled={sectors.length >= MAX_SECTORS}
-            aria-label="Add a sector"
-            placeholder={
-              sectors.length >= MAX_SECTORS ? `Up to ${MAX_SECTORS} sectors` : "e.g. Education"
-            }
-            className="mt-3 bg-white"
-          />
+
+          {/* Active Selected Sectors */}
+          {sectors.length > 0 && (
+            <div className="mt-5 border-t border-black/[0.06] pt-4">
+              <p className="text-xs font-semibold text-foreground/75">Active sector focus ({sectors.length}/{MAX_SECTORS})</p>
+              <div className="mt-2.5 flex flex-wrap gap-2">
+                {sectors.map((sector) => (
+                  <span
+                    key={sector}
+                    className="flex items-center gap-1.5 rounded-full bg-brand/10 px-3 py-1 text-sm font-medium text-brand"
+                  >
+                    {sector}
+                    <button
+                      type="button"
+                      onClick={() => removeSector(sector)}
+                      aria-label={`Remove ${sector}`}
+                      className="text-brand/70 hover:text-brand"
+                    >
+                      ×
+                    </button>
+                    <input type="hidden" name="sector" value={sector} />
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Custom Sector Input */}
+          <div className="mt-4">
+            <Input
+              type="text"
+              value={sectorInput}
+              onChange={(event) => setSectorInput(event.target.value)}
+              onKeyDown={handleSectorKeyDown}
+              onBlur={addSector}
+              maxLength={MAX_SECTOR_LENGTH}
+              disabled={sectors.length >= MAX_SECTORS}
+              aria-label="Add a custom sector"
+              placeholder={
+                sectors.length >= MAX_SECTORS
+                  ? `Up to ${MAX_SECTORS} sectors`
+                  : "Type a custom sector (e.g. Mental Health) and press Enter"
+              }
+              className="bg-white"
+            />
+          </div>
         </fieldset>
       </div>
 

@@ -10,8 +10,8 @@ import {
   filterByCity,
   filterByStatus,
   filterBySource,
-  prioritiseByGeography,
   filterByTags,
+  prioritiseQueue,
   searchClients,
   visibleClients,
   type ClientListRow,
@@ -130,7 +130,7 @@ export default async function ClientsPage({
     supabase
       .from("organisations")
       .select(
-        "id, legal_name, organisation_type, city, country_code, geographic_reach, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id)",
+        "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id), financial_periods(income_band, total_income, period_end), grants(id, amount_awarded, funder_name, award_date)",
       )
       .order("legal_name")
       .overrideTypes<ClientListRow[], { merge: false }>(),
@@ -152,14 +152,18 @@ export default async function ClientsPage({
       .overrideTypes<{ id: string; name: string }[], { merge: false }>(),
     supabase
       .from("outreach_preferences")
-      // Income bands are saved by the preferences form but not weighted into the
-      // queue yet — only select what prioritiseByGeography actually consumes.
-      .select("preferred_geographic_reach, preferred_cities")
+      .select("preferred_geographic_reach, preferred_cities, preferred_sectors, preferred_income_bands, prioritise_grant_recipients")
       // F187 lets admins read every CAM's preferences row, so scope to the
       // caller explicitly: an unfiltered maybeSingle would match all of them
       // and error out for admins instead of weighting their own queue.
       .eq("user_id", authorization.actor.id)
-      .maybeSingle<{ preferred_geographic_reach: string[] | null; preferred_cities: string[] | null }>(),
+      .maybeSingle<{
+        preferred_geographic_reach: string[] | null;
+        preferred_cities: string[] | null;
+        preferred_sectors: string[] | null;
+        preferred_income_bands: string[] | null;
+        prioritise_grant_recipients: boolean | null;
+      }>(),
   ]);
 
   if (organisations.error) {
@@ -174,18 +178,13 @@ export default async function ClientsPage({
   if (allTags.error) {
     await reportError(allTags.error, { operation: "clients.page_tags" });
   }
+  if (outreachPrefs.error) {
+    await reportError(outreachPrefs.error, { operation: "clients.page_outreach_preferences" });
+  }
 
   const availableTags = allTags.data ?? [];
   // id → name for both the row pills and the filter's chip labels.
   const tagNameById = new Map(availableTags.map((tag) => [tag.id, tag.name]));
-
-  // F196 review: a failed preferences load used to be ignored, silently falling
-  // back to the default queue order. Logged here and surfaced through the same
-  // safe-loading warning as the other queries — ordering silently changing is a
-  // failure the CAM needs to know about (Definition of Done).
-  if (outreachPrefs.error) {
-    await reportError(outreachPrefs.error, { operation: "clients.page_outreach_preferences" });
-  }
 
   const allVisibleClients = visibleClients(organisations.data ?? [], openSuppressions.data ?? []);
 
@@ -208,8 +207,9 @@ export default async function ClientsPage({
   matchingClients = filterByTags(matchingClients, tagFilter);
   matchingClients = searchClients(matchingClients, search);
 
-  // F196 / F094: Prioritise matching clients based on the CAM's geographic preferences
-  matchingClients = prioritiseByGeography(matchingClients, outreachPrefs.data);
+  // F196 / F197 / F199 / F094: Prioritise matching clients based on the CAM's
+  // geographic, sector, size and grant-history preferences
+  matchingClients = prioritiseQueue(matchingClients, outreachPrefs.data);
   const teamMembers = team.data ?? [];
   const filterActive = Boolean(ownerFilter || search || city || status || source || tagFilter.length);
   // F166 AC1/AC3: this is the CAM viewing their own filter, not just any owner

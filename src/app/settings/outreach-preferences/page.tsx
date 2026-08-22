@@ -13,6 +13,7 @@ type OutreachPreferencesRow = {
   preferred_cities: string[] | null;
   preferred_sectors: string[] | null;
   preferred_income_bands: IncomeBand[] | null;
+  prioritise_grant_recipients: boolean | null;
 };
 
 export default async function OutreachPreferencesPage() {
@@ -34,7 +35,7 @@ export default async function OutreachPreferencesPage() {
   // explicitly, or an admin's maybeSingle matches every CAM and errors out.
   const { data, error } = await supabase
     .from("outreach_preferences")
-    .select("preferred_geographic_reach, preferred_cities, preferred_sectors, preferred_income_bands")
+    .select("preferred_geographic_reach, preferred_cities, preferred_sectors, preferred_income_bands, prioritise_grant_recipients")
     .eq("user_id", authorization.actor.id)
     .maybeSingle<OutreachPreferencesRow>();
 
@@ -53,7 +54,7 @@ export default async function OutreachPreferencesPage() {
             Outreach preferences
           </h1>
           <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
-            Set the geography, sector and size focus for your outreach queue.
+            Set the geography, sector, size and grant funding focus for your outreach queue.
           </p>
         </Rise>
 
@@ -71,6 +72,7 @@ export default async function OutreachPreferencesPage() {
               initialCities={data?.preferred_cities ?? []}
               initialSectors={data?.preferred_sectors ?? []}
               initialIncomeBands={data?.preferred_income_bands ?? []}
+              initialPrioritiseGrants={data?.prioritise_grant_recipients ?? false}
             />
           </Rise>
         )}

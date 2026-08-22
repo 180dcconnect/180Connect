@@ -4074,14 +4074,20 @@ declare
   v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
   v_org         uuid := '00000000-0000-4000-b000-000000000001';  -- unowned, legal_name set
   v_suggestion  uuid;
+  v_reject_id   uuid;
+  v_approve_id  uuid;
   v_status      public.edit_suggestion_status;
   v_current     text;
   v_live        text;
   v_count       bigint;
+  v_decided_by  uuid;
+  v_decided_at  timestamptz;
+  v_reason      text;
 begin
   if not tests.tables_exist('organisations', 'users', 'edit_suggestions')
-     or to_regprocedure('public.suggest_organisation_edit(uuid, text, text)') is null then
-    return next skip(20, 'edit_suggestions table or RPC not yet migrated');
+     or to_regprocedure('public.suggest_organisation_edit(uuid, text, text)') is null
+     or to_regprocedure('public.decide_edit_suggestion(uuid, boolean, text)') is null then
+    return next skip(38, 'edit_suggestions table or RPCs not yet migrated');
     return;
   end if;
 
@@ -4224,6 +4230,117 @@ begin
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
   return next is(v_count, 2::bigint, 'an admin sees every row, decided or not');
+
+  -- ---------------------------------------------------------------------------
+  -- Decisions (#80/#81): decide_edit_suggestion
+  -- ---------------------------------------------------------------------------
+
+  -- Who may decide.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.decide_edit_suggestion(%L, true, null)', v_suggestion)),
+    '42501',
+    'a CAM cannot decide a suggested edit — not even their own'
+  );
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.decide_edit_suggestion(%L, true, null)', v_suggestion)),
+    '42501',
+    'a viewer cannot call decide_edit_suggestion'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin,
+      'select public.decide_edit_suggestion(''00000000-0000-4000-e000-000000000009'', true, null)'),
+    'P0002',
+    'deciding an unknown suggestion is a clean miss, not a crash'
+  );
+
+  -- Reject first (CAM B's fresh proposal on another field), then approve.
+  perform tests.login_as(v_cam_b);
+  select public.suggest_organisation_edit(v_org, 'city', 'Leeds') into v_reject_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  -- Stale-snapshot guard: an admin's direct edit moves the live value after
+  -- submission; approval must refuse rather than clobber it.
+  perform tests.login_as(v_admin);
+  update public.organisations set city = 'Sheffield' where id = v_org;
+  -- Drop the impersonation before touching schema tests again: while the session
+  -- IS `authenticated`, it has no USAGE on `tests` and the next sqlstate_of call
+  -- would die with "permission denied for schema tests" (see harness note above).
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.decide_edit_suggestion(%L, true, null)', v_reject_id)),
+    '55000',
+    'approval refuses when the live value drifted from the submission snapshot'
+  );
+  select status into v_status from public.edit_suggestions where id = v_reject_id;
+  return next is(v_status, 'pending'::public.edit_suggestion_status,
+    'a refused approval leaves the suggestion pending');
+  select count(*) into v_count from public.audit_log
+   where action like 'edit_suggestion%';
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'a refused approval writes no audit row and applies nothing');
+
+  -- The admin puts the field back; now rejection works and touches nothing.
+  perform tests.login_as(v_admin);
+  update public.organisations set city = null where id = v_org;
+  perform public.decide_edit_suggestion(v_reject_id, false, 'Registry disagrees with that postcode-level change');
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status, decided_by, decided_at, rejection_reason
+    into v_status, v_decided_by, v_decided_at, v_reason
+    from public.edit_suggestions where id = v_reject_id;
+  return next is(v_status, 'rejected'::public.edit_suggestion_status,
+    'admin rejection marks the suggestion rejected');
+  return next is(v_decided_by, v_admin, 'the decision records who decided it');
+  return next ok(v_decided_at is not null, 'the decision records when');
+  return next is(v_reason, 'Registry disagrees with that postcode-level change',
+    'the rejection reason is stored for the CAM');
+  select city into v_live from public.organisations where id = v_org;
+  return next is(v_live, null,
+    'rejection changed nothing on the live record (F079 AC1)');
+
+  -- Double-decide is refused.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.decide_edit_suggestion(%L, true, null)', v_reject_id)),
+    '55000',
+    'deciding an already-settled suggestion is rejected'
+  );
+
+  -- Approval path: CAM A proposes a legal_name fix over the known value; admin approves.
+  perform tests.login_as(v_cam_a);
+  select public.suggest_organisation_edit(v_org, 'legal_name', 'Renamed Org Ltd')
+    into v_approve_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  perform tests.login_as(v_admin);
+  perform public.decide_edit_suggestion(v_approve_id, true, null);
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select legal_name into v_live from public.organisations where id = v_org;
+  return next is(v_live, 'Renamed Org Ltd',
+    'approval applies the proposed value to the live record (F078 AC2)');
+
+  select status into v_status from public.edit_suggestions where id = v_approve_id;
+  return next is(v_status, 'approved'::public.edit_suggestion_status,
+    'approval marks the suggestion approved');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'edit_suggestion_approved' and target_id = v_org;
+  return next is(v_count, 1::bigint, 'the approval is audited');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'edit_suggestion_rejected' and target_id = v_org;
+  return next is(v_count, 1::bigint, 'the rejection is audited too');
 end;
 $$;
 

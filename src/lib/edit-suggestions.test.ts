@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  decideEditRpcFailure,
+  describePendingSuggestion,
   isSensitiveOrgField,
   pendingSuggestionNotice,
   SENSITIVE_FIELD_LABELS,
   SENSITIVE_ORG_FIELDS,
   suggestEditAvailability,
   suggestEditRpcFailure,
+  suggestionDecisionNotice,
   validateSuggestEdit,
 } from "./edit-suggestions.ts";
 
@@ -182,5 +185,72 @@ describe("pendingSuggestionNotice", () => {
     assert.match(notice, /Email/);
     assert.match(notice, /awaiting admin review/);
     assert.match(notice, /still the live one/);
+  });
+});
+
+describe("decideEditRpcFailure (#80/#81)", () => {
+  it("maps deliberate refusal codes to their messages", () => {
+    assert.deepEqual(decideEditRpcFailure({ code: "42501", message: "only an admin" }), {
+      status: 403,
+      error: "only an admin",
+    });
+    assert.deepEqual(
+      decideEditRpcFailure({ code: "55000", message: "already decided" }),
+      { status: 409, error: "already decided" },
+    );
+    assert.deepEqual(
+      decideEditRpcFailure({
+        code: "55000",
+        message: "the live value changed since this was suggested",
+      }),
+      { status: 409, error: "the live value changed since this was suggested" },
+    );
+    assert.deepEqual(decideEditRpcFailure({ code: "P0002", message: "not found" }), {
+      status: 404,
+      error: "not found",
+    });
+  });
+
+  it("gives unexpected failures the generic message only", () => {
+    const failure = decideEditRpcFailure({ code: "XX000", message: "column missing" });
+    assert.equal(failure.status, 500);
+    assert.doesNotMatch(failure.error, /column|missing/);
+  });
+});
+
+describe("suggestionDecisionNotice (#80 AC3)", () => {
+  it("tells the CAM an approval landed on the record", () => {
+    const notice = suggestionDecisionNotice("approved", "Town or city");
+    assert.match(notice, /approved your correction to Town or city/);
+    assert.match(notice, /live record now carries it/);
+  });
+
+  it("tells the CAM a rejection changed nothing, with the reason", () => {
+    const notice = suggestionDecisionNotice(
+      "rejected",
+      "Website",
+      "Registry shows a different URL",
+    );
+    assert.match(notice, /declined your correction to Website/);
+    assert.match(notice, /record is unchanged/);
+    assert.match(notice, /Reason: Registry shows a different URL/);
+  });
+
+  it("handles a missing rejection reason without a dangling label", () => {
+    const notice = suggestionDecisionNotice("rejected", "Website", null);
+    assert.doesNotMatch(notice, /Reason:/);
+  });
+});
+
+describe("describePendingSuggestion (#80 AC1)", () => {
+  it("shows current → proposed, naming an empty current explicitly", () => {
+    assert.equal(
+      describePendingSuggestion("Town or city", null, "Leeds"),
+      'Town or city: "Not provided" → "Leeds"',
+    );
+    assert.equal(
+      describePendingSuggestion("Town or city", "Manchester", "Leeds"),
+      'Town or city: "Manchester" → "Leeds"',
+    );
   });
 });

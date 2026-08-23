@@ -148,9 +148,11 @@ describe("breakdown", () => {
 
   it("names the list filter each group corresponds to", () => {
     assert.deepEqual(breakdown(clients, "city")[0].filter, { param: "city", value: "London" });
+    // F053: the link carries the stored organisation_type, not its label — the
+    // filter matches on the enum, so a label here would find nothing.
     assert.deepEqual(breakdown(clients, "type")[0].filter, {
-      param: "source",
-      value: "Charity Commission",
+      param: "type",
+      value: "charity",
     });
     assert.deepEqual(breakdown(clients, "owner")[0].filter, {
       param: "owner",

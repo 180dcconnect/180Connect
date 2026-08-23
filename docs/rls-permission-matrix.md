@@ -1048,6 +1048,51 @@ the current contract).
 
 ---
 
+### 3.17 Saved filter views — own rows only
+
+Backs F066 (`supabase/migrations/20260817090000_create_saved_views.sql`). Same shape as
+§3.12 and §3.13: the user's own view state, not ownership/status/role/approval state, so
+it is governed by RLS alone — no SECURITY DEFINER RPC, no `audit_log` row
+(`docs/audit-log-pattern.md` §1).
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `SAVED_VIEWS` | own rows (`user_id = auth.uid()`) | own rows | own rows | own rows |
+
+A saved view holds no client data: it is a set of `/clients` search params
+(`q`, `city`, `status`, `source`, `owner`) stored as `jsonb` under a name, and selecting
+one rebuilds a query string. Nothing in it is readable to anyone but its author, and
+nothing in it grants access to a client the author's role does not already allow — the
+params are re-applied to a list the RLS on `ORGANISATIONS` (§3.2) has already filtered,
+so a stale `owner=<someone>` view shows exactly what that CAM could see by typing the
+filter by hand.
+
+DELETE **is** granted here, unlike §3.13. AC3 asks for deletion by name, and this is a
+many-row table where "no longer need this one" has no UPDATE-to-empty equivalent. UPDATE
+is granted with no F066 write path behind it yet (saving is an INSERT; the AC has no
+rename), so a later rename/overwrite story needs no migration; both policies confine the
+row to the caller in `using` **and** `with check`, so a row cannot be moved onto another
+`user_id`.
+
+No admin read, delete included: nothing in #68 needs one, and an admin who could delete
+someone's shortcuts would hold a purely destructive power over another user's workspace
+with no story asking for it. F187 (admin views a CAM's settings, P3) can add a read with
+a stated reason when it is actually built — same call already made for
+`USER_ONBOARDING_STEPS` (§3.12) and `OUTREACH_PREFERENCES` (§3.13).
+
+All four policies AND in `app.is_active_user()`. None uses `app.can_write()` — that
+helper gates *client data* and excludes viewers (F258); a bookmark over a list the viewer
+can already read is harmless for any active role to keep.
+
+**What RLS does not check here**: the *keys* inside `filters`. Postgres constrains the
+column to a JSON object under 4 KB (`saved_views_filters_is_object`) and nothing more.
+The key whitelist lives in `src/app/clients/saved-view-filters.ts` and is applied on both
+write and read, so an unexpected key is ignored rather than rendered — a row that somehow
+carries one produces a view missing that filter, never a filter the CAM cannot see. This
+is the §2 pattern ("what RLS cannot do"), not an oversight.
+
+---
+
 ## 4. Denial behaviour and feedback
 
 Important and frequently got wrong: **a blocked read is not an error.**

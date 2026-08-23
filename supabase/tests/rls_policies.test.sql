@@ -1159,7 +1159,7 @@ begin
   return next ok(not v_is_viewer, 'app.is_viewer() is false for a CAM');
 
   if not tests.tables_exist('organisations') then
-    return next skip(6, 'step 3 create_organisations not yet migrated');
+    return next skip(7, 'step 3 create_organisations not yet migrated');
     return;
   end if;
 
@@ -1204,6 +1204,23 @@ begin
     'delete from public.organisations where id = %L', v_org));
   select count(*) into v_count from public.organisations where id = v_org;
   return next is(v_count, 1::bigint, 'viewer cannot delete an organisation');
+
+  -- F065 (bulk add comment) authorises nothing of its own: the route inserts as
+  -- the signed-in user, so `notes_insert_author`'s can_write() is what keeps a
+  -- viewer out. Asserted here rather than trusted to the UI hiding the control,
+  -- because the route is reachable without it. Guarded separately from the block
+  -- above since notes arrives a migration step after organisations.
+  if tests.tables_exist('notes') then
+    return next is(
+      tests.sqlstate_of(v_viewer, format(
+        'insert into public.notes (organisation_id, author_id, content)
+         values (%L, %L, ''viewer comment'')', v_org, v_viewer)),
+      '42501',
+      'viewer cannot add a note to a client (F065 bulk comment is closed to viewers)'
+    );
+  else
+    return next skip(1, 'step 4 create_org_children not yet migrated');
+  end if;
 
   -- Regression guard on the same policy: narrowing it to admin-or-CAM must not have
   -- taken the CAM's claim path with it. Since F162 (20260806140000) that path is

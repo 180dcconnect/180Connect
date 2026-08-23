@@ -58,9 +58,9 @@ import {
 } from "./saved-view-filters";
 import { SavedViewsPanel, type SavedViewSummary } from "./saved-views-panel";
 import { SortMenu as ListSortMenu } from "./sort-menu";
-import { BulkSelectProvider } from "./bulk-select-provider";
-import { ClientRowCheckbox, SelectAllCheckbox } from "./bulk-select-checkbox";
-import { BulkActionBar } from "./bulk-action-bar";
+import { bulkStatusBlockedReason, canBulkUpdateStatus } from "@/lib/bulk-status";
+import { ClientSelectCheckbox, SelectPageCheckbox } from "./bulk-selection";
+import { BulkActionsBar } from "./bulk-actions-bar";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ClientOwnerBadge } from "./client-owner-badge";
 
@@ -113,6 +113,13 @@ const CLAIM_SLOT = "w-[6.5rem] shrink-0";
 
 /** Reserved width for the booklet quick-action (F082), same reasoning as CLAIM_SLOT. */
 const BOOKLET_SLOT = "w-[7rem] shrink-0";
+
+/**
+ * F062's checkbox column. Outside the row's Link, on the same reasoning the claim
+ * button is (a control nested in an anchor fires both), and a fixed slot so a row
+ * whose box is disabled still lines up with one whose box is not.
+ */
+const SELECT_SLOT = "flex w-5 shrink-0 justify-center";
 
 /**
  * F051 — the charity list view. Every organisation regardless of import method
@@ -182,6 +189,11 @@ export default async function ClientsPage({
    */
   const canSelect = hasPermission(authorization.actor.role, "client:edit");
   const canBulkAssign = hasPermission(authorization.actor.role, "ownership:reassign");
+  /**
+   * F062/F064/F065 — which rows this actor may bulk-change status for.
+   * The header checkbox only selects those, but every row is selectable for
+   * commenting (F065) — the narrower status rule rides per-row.
+   */
 
   const [organisations, openSuppressions, team, allTags, outreachPrefs, savedViews] = await Promise.all([
     supabase
@@ -383,6 +395,16 @@ export default async function ClientsPage({
     currentPage * PAGE_SIZE,
   );
 
+  // F062/F064/F065 — selectable clients for the header checkbox.
+  // Every row is selectable for commenting; status needs owner-or-admin so the
+  // flag rides per row for the bar to count blocked rows.
+  const selectableClients = canSelect
+    ? clients.map((client) => ({
+        id: client.id,
+        canStatus: canBulkUpdateStatus(authorization.actor, client),
+      }))
+    : [];
+
   /**
    * Every link on this page is the current URL with one thing changed, so they
    * all go through here rather than each rebuilding the query string and quietly
@@ -472,8 +494,7 @@ export default async function ClientsPage({
   const reviewingOwnClients = ownerFilter === authorization.actor.id;
 
   return (
-    <BulkSelectProvider>
-      <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
         {reviewingOwnClients && <RecordOnboardingStep step="review_clients" />}
         <SearchRail
           className="max-w-6xl"
@@ -654,13 +675,8 @@ export default async function ClientsPage({
                     className="group/header hidden items-center gap-4 border-b border-black/[0.06] bg-black/[0.015] px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em] text-foreground/30 lg:flex"
                   >
                     {canSelect && (
-                      <span className="flex w-6 shrink-0 items-center justify-center">
-                        {/* F062 AC1 asks for "all currently visible (filtered)
-                            clients", which is the whole filtered set, not the 25
-                            of it this page happens to show. Passing the paginated
-                            slice made "select all" mean "select this page", so a
-                            bulk action on a 60-client filter silently touched 25. */}
-                        <SelectAllCheckbox clientIds={matchingClients.map((c) => c.id)} />
+                      <span className={SELECT_SLOT}>
+                        <SelectPageCheckbox clients={selectableClients} />
                       </span>
                     )}
                     <span className={`${ROW_GRID} min-w-0 flex-1`}>
@@ -686,10 +702,12 @@ export default async function ClientsPage({
                         className="group/row flex items-center gap-4 border-b border-black/[0.06] px-5 py-3.5 last:border-b-0"
                       >
                         {canSelect && (
-                          <span className="flex w-6 shrink-0 items-center justify-center">
-                            <ClientRowCheckbox
-                              organisationId={client.id}
-                              legalName={client.legal_name}
+                          <span className={SELECT_SLOT}>
+                            <ClientSelectCheckbox
+                              clientId={client.id}
+                              clientName={client.legal_name}
+                              canStatus={canBulkUpdateStatus(authorization.actor, client)}
+                              statusNote={bulkStatusBlockedReason(authorization.actor, client)}
                             />
                           </span>
                         )}
@@ -820,8 +838,7 @@ export default async function ClientsPage({
           )}
           </Group>
         </SearchRail>
-        {canSelect && <BulkActionBar team={teamMembers} canAssign={canBulkAssign} />}
+        {canSelect && <BulkActionsBar team={teamMembers} canAssign={canBulkAssign} />}
       </div>
-    </BulkSelectProvider>
   );
 }

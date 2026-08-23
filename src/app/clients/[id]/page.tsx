@@ -43,6 +43,13 @@ type OwnerRow = {
   owner_id: string | null;
   owner: { full_name: string | null } | null;
 };
+type SentEmailRow = {
+  id: string;
+  subject: string;
+  body: string;
+  sent_at: string;
+  sent_by_user: { full_name: string | null } | null;
+};
 
 /**
  * F067 (#69) Client Detail Page / F068 (#70) View Client Basic Info: opens from the
@@ -189,6 +196,19 @@ export default async function ClientDetailPage({
   const statusLabel = formatOutreachStatus(client.outreach_status);
   const suppressed = latest?.status === "active";
   const suppressionPending = latest?.status === "pending";
+
+  // F125: immutable sent records are the communication history. Drafts and failed
+  // attempts are deliberately excluded so this section says what actually left.
+  const { data: sentEmails, error: sentEmailsError } = await supabase
+    .from("outreach_messages")
+    .select("id, subject, body, sent_at, sent_by_user:users!outreach_messages_sent_by_user_id_fkey(full_name)")
+    .eq("organisation_id", id)
+    .eq("send_status", "sent")
+    .order("sent_at", { ascending: false })
+    .returns<SentEmailRow[]>();
+  if (sentEmailsError) {
+    await reportError(sentEmailsError, { operation: "clients.detail_sent_emails", organisationId: id });
+  }
 
   // Deliberately not `ownerName`: that falls back to "A former team member" for a
   // deleted owner, which the warning would read back as a person to go and talk to.
@@ -337,6 +357,34 @@ export default async function ClientDetailPage({
                 <BookletPanel organisationId={client.id} />
               </Rise>
             )}
+
+            <Rise>
+              <SectionCard
+                headingId="email-history-heading"
+                title="Sent email history"
+                hint="The exact final content delivered after human review. Sent records cannot be edited."
+              >
+                <div className="mt-4 space-y-3">
+                  {(sentEmails ?? []).length === 0 ? (
+                    <p className="text-sm text-foreground/55">No outreach emails have been sent yet.</p>
+                  ) : (
+                    (sentEmails ?? []).map((message) => (
+                      <details className="rounded-lg border border-black/10 bg-white p-3" key={message.id}>
+                        <summary className="cursor-pointer text-sm font-bold">
+                          {message.subject} — {new Date(message.sent_at).toLocaleString("en-GB")}
+                        </summary>
+                        <p className="mt-2 text-xs text-foreground/55">
+                          Sent by {message.sent_by_user?.full_name ?? "a former team member"}
+                        </p>
+                        <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground/75">
+                          {message.body}
+                        </p>
+                      </details>
+                    ))
+                  )}
+                </div>
+              </SectionCard>
+            </Rise>
 
             {/* Email and website were two near-identical cards — same
                 heading-plus-validity-pill shape, same failure copy — so they

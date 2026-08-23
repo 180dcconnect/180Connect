@@ -4,6 +4,7 @@
 // (AC2's "empty, not omitted" rule, the mapper/write-layer split) — this file
 // only documents what's different for this source.
 
+import { normalizeCity } from "../city.ts";
 import {
   computeCompletenessScore,
   type StandardOrganisation,
@@ -90,7 +91,7 @@ export function standardizeCompaniesHouseRecord(
     website: "",
     contact_email: "",
     address_line_1: address.address_line_1 ?? "",
-    city: address.locality ?? "",
+    city: normalizeCity(address.locality ?? ""),
     postcode: address.postal_code ?? "",
     // geographic_reach has no source signal at all yet — null, not a guess.
     geographic_reach: null,

@@ -7,6 +7,7 @@ import {
   validateClientEmail,
   type ClientEmailStatus,
 } from "./client-email-validation.ts";
+import { normalizeCity } from "./city.ts";
 import {
   computeCompletenessScore,
   type OrganisationType,
@@ -134,7 +135,7 @@ export function buildManualOrganisation(
     website: website.status === "valid" ? website.url : input.website?.trim() ?? "",
     contact_email: email.status === "valid" ? email.value : input.contactEmail?.trim() ?? "",
     address_line_1: input.addressLine1.trim(),
-    city: input.city.trim(),
+    city: normalizeCity(input.city.trim()),
     postcode: input.postcode.trim(),
     geographic_reach: null,
     outreach_status: "not_contacted",

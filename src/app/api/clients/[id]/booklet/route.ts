@@ -40,15 +40,18 @@ type WebsiteContextResult =
  * See generate-booklet.ts for the Gemini call and scrape-website.ts for the optional
  * website-context fetch this route does first.
  *
- * F085: a successful generation is upserted into CLIENT_BOOKLETS (one row per
- * organisation — see that migration's header) alongside the F082 audit write, using
- * the caller's own RLS-scoped session rather than a service-role bypass: the
- * client_booklets write policies require app.can_contact_organisation(), the exact
- * predicate this route's own client:contact gate already enforces, so there is
- * nothing a passing request here could do at the DB layer that authorization above
- * didn't already allow. A save failure is reported but does not fail the response —
- * the CAM still gets the booklet they asked for this once, just as "generated"
- * rather than "generated and saved" (see the `saved` field below).
+ * F085/F086: a successful generation is inserted into CLIENT_BOOKLETS
+ * (append-only, versioned — see 20260828000000_version_client_booklets.sql)
+ * alongside the F082 audit write, using the caller's own RLS-scoped session
+ * rather than a service-role bypass: the client_booklets INSERT policy requires
+ * app.can_contact_organisation(), the exact predicate this route's own
+ * client:contact gate already enforces, so there is nothing a passing request
+ * here could do at the DB layer that authorization above didn't already allow.
+ * A save failure is reported but does not fail the response — the CAM still gets
+ * the booklet they asked for this once, just as "generated" rather than
+ * "generated and saved" (see the `saved` field below). A regenerate (F086) is
+ * the exact same insert, not an update — the prior row is left alone, satisfying
+ * F086 AC2 (a bad regeneration never destroys the last good version).
  *
  * client:contact, not client:view — this calls a paid external API on every click,
  * same reasoning as gating the Outreach section on the client detail page.
@@ -177,28 +180,29 @@ export async function POST(
     });
   }
 
-  // F085: save on success only — a failed generation (returned above) leaves any
-  // previously saved booklet untouched, matching the testing notes' "generation
-  // failure (nothing saved)" case. The URL stored is the F046-normalised form,
-  // not the raw pasted string — it already passed through validateWebsiteFormat
-  // inside fetchImportPage, so this is a formatting pass over known-valid input.
+  // F085/F086: save on success only — a failed generation (returned above) leaves
+  // every previously saved version untouched, matching the testing notes'
+  // "generation failure (nothing saved)" case. A plain insert, not an upsert: this
+  // is a new version, not a replacement (F086 AC2). The URL stored is the
+  // F046-normalised form, not the raw pasted string — it already passed through
+  // validateWebsiteFormat inside fetchImportPage, so this is a formatting pass
+  // over known-valid input.
   const generatedAt = new Date().toISOString();
   const savedUrl =
     websiteContextResult.status === "used" && websiteUrl
       ? validateWebsiteFormat(websiteUrl).url
       : null;
-  const { error: saveError } = await supabase
+  const { data: savedRow, error: saveError } = await supabase
     .from("client_booklets")
-    .upsert(
-      {
-        organisation_id: organisationId,
-        booklet_text: result.booklet,
-        website_url: savedUrl,
-        website_context_used: websiteContextResult.status === "used",
-        generated_at: generatedAt,
-      },
-      { onConflict: "organisation_id" },
-    );
+    .insert({
+      organisation_id: organisationId,
+      booklet_text: result.booklet,
+      website_url: savedUrl,
+      website_context_used: websiteContextResult.status === "used",
+      generated_at: generatedAt,
+    })
+    .select("id")
+    .single();
 
   if (saveError) {
     await reportError(saveError, {
@@ -211,6 +215,7 @@ export async function POST(
     booklet: result.booklet,
     websiteContext: websiteContextResult,
     generatedAt,
+    versionId: savedRow?.id ?? null,
     saved: !saveError,
   });
 }

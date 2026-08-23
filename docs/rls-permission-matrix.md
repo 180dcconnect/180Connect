@@ -309,18 +309,24 @@ permission exception is a backstop against a crafted request rather than the nor
 | `ENRICHMENT_RESULTS` | all roles | — (service role) | — | admin |
 | `TAGS` | all roles | admin, cam | admin, own | admin |
 | `ORG_TAGS` | all roles | admin, cam | admin, own | admin, own |
-| `CLIENT_BOOKLETS` | all roles | admin, cam (`can_contact_organisation`) | admin, cam (`can_contact_organisation`) | admin |
+| `CLIENT_BOOKLETS` | all roles | admin, cam (`can_contact_organisation`) | — (immutable, see below) | admin |
 
-**`CLIENT_BOOKLETS` (F085, #349)** is the one row here whose write predicate isn't
-plain `can_write()`: it reuses `app.can_contact_organisation()`, the same
-ownership-scoped predicate §3.4's `OUTREACH_MESSAGES` uses, rather than the simple
-admin-or-CAM check the rest of this table's writable rows use. That matches the
+**`CLIENT_BOOKLETS` (F085 #349, versioned by F086 #350)** is the one row here whose
+write predicate isn't plain `can_write()`: it reuses `app.can_contact_organisation()`,
+the same ownership-scoped predicate §3.4's `OUTREACH_MESSAGES` uses, rather than the
+simple admin-or-CAM check the rest of this table's writable rows use. That matches the
 `/api/clients/[id]/booklet` route's own `client:contact` permission gate — a CAM
 saves a booklet only for a client they own or that's unowned, same as they may only
-contact one. One row per organisation (`organisation_id unique`); a regenerate
-upserts rather than appending, so there is no history to scope reads by author or
-time. **Not yet in the Data Model spreadsheet** — flagged in the migration's own
-header (`20260827000001_create_client_booklets.sql`) for Bashir to add to tab 04/02.
+contact one. **Append-only, not one row per organisation**: F085's original design
+upserted a single row per organisation; F086 AC2 ("the prior saved version remains
+retrievable") requires the opposite, so
+`20260828000000_version_client_booklets.sql` drops the `organisation_id` uniqueness
+and the UPDATE policy/grant entirely — every generation, including a regenerate, is a
+new INSERT, and no role can UPDATE an existing row. "The current booklet" is the most
+recent row per organisation (`order by generated_at desc`), same convention as
+`ENRICHMENT_RESULTS`. **Not yet in the Data Model spreadsheet** — flagged in both
+migrations' own headers for Bashir to add to tab 04/02, reflecting this append-only
+shape rather than F085's original single-row one.
 
 ### 3.3 Notes — shared read, author write
 

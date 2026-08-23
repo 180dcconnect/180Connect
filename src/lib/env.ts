@@ -236,6 +236,38 @@ export const SCHEMA: readonly EnvVarSpec[] = [
       "Gemini model id for booklet generation (F082), e.g. a Flash-tier model — copy the exact id from the Google AI Studio model picker rather than guessing, since Google retires model ids frequently. No hardcoded default in code for that reason; unset means booklet generation cannot run.",
   },
   {
+    name: "GMAIL_CLIENT_ID",
+    required: false,
+    secret: false,
+    description:
+      "OAuth client ID for the Google Cloud project used by the Gmail outreach integration (F241). Server-side only even though the identifier is not itself a secret.",
+  },
+  {
+    name: "GMAIL_CLIENT_SECRET",
+    required: false,
+    secret: true,
+    description:
+      "OAuth client secret for the Gmail outreach integration (F241). Store only in the deployment secret manager and .env.local.",
+  },
+  {
+    name: "GMAIL_REFRESH_TOKEN",
+    required: false,
+    secret: true,
+    description:
+      "Long-lived OAuth refresh token authorised by the clients.sheffield outreach mailbox. Never expose it to the browser or commit it.",
+  },
+  {
+    name: "GMAIL_SENDER_EMAIL",
+    required: false,
+    secret: false,
+    description:
+      "Exact Google Workspace mailbox used for client outreach (F124). No fallback is permitted when it is absent.",
+    validate: (value) =>
+      /^[^@<>\s]+@[^@<>\s]+\.[^@<>\s]+$/.test(value)
+        ? null
+        : "must be a valid email address",
+  },
+  {
     name: "CHARITY_COMMISSION_BACKFILL_START",
     required: false,
     secret: false,
@@ -303,8 +335,29 @@ export function collectEnvProblems(
 
   problems.push(...requireOneSupabaseKey(source));
   problems.push(...requireSenderWhenSendingEmail(source));
+  problems.push(...requireCompleteGmailConfiguration(source));
 
   return problems;
+}
+
+function requireCompleteGmailConfiguration(
+  source: Record<string, string | undefined>,
+): EnvProblem[] {
+  const names = [
+    "GMAIL_CLIENT_ID",
+    "GMAIL_CLIENT_SECRET",
+    "GMAIL_REFRESH_TOKEN",
+    "GMAIL_SENDER_EMAIL",
+  ] as const;
+  const configured = names.filter((name) => source[name]?.trim());
+  if (configured.length === 0 || configured.length === names.length) return [];
+
+  return names
+    .filter((name) => !source[name]?.trim())
+    .map((name) => ({
+      name,
+      problem: "is required when any Gmail outreach setting is configured",
+    }));
 }
 
 /**

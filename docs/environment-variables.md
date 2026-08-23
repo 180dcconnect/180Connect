@@ -82,6 +82,8 @@ NEXT_PUBLIC_ENV=local
 GMAIL_REDIRECT_URI=http://localhost:3000/api/auth/gmail/callback
 GMAIL_CLIENT_ID=123456789-randomstring.apps.googleusercontent.com
 GMAIL_CLIENT_SECRET=GOCSPX-secretkey
+GMAIL_REFRESH_TOKEN=<authorised-outreach-mailbox-refresh-token>
+GMAIL_SENDER_EMAIL=clients.sheffield@180dc.org
 
 # LLM (Development API key — ask team)
 OPENAI_API_KEY=sk-proj-test-key-local-only
@@ -132,6 +134,8 @@ NEXT_PUBLIC_ENV=staging
 GMAIL_REDIRECT_URI=https://<staging-url>/api/auth/gmail/callback
 GMAIL_CLIENT_ID=<redacted>
 GMAIL_CLIENT_SECRET=<redacted>
+GMAIL_REFRESH_TOKEN=<redacted>
+GMAIL_SENDER_EMAIL=clients.sheffield@180dc.org
 
 # LLM (Development API key)
 OPENAI_API_KEY=<redacted>
@@ -175,6 +179,8 @@ NEXT_PUBLIC_ENV=production
 GMAIL_REDIRECT_URI=https://180connect.vercel.app/api/auth/gmail/callback
 GMAIL_CLIENT_ID=<redacted>
 GMAIL_CLIENT_SECRET=<redacted>
+GMAIL_REFRESH_TOKEN=<redacted>
+GMAIL_SENDER_EMAIL=clients.sheffield@180dc.org
 
 # LLM (Production API key)
 OPENAI_API_KEY=<redacted>
@@ -214,6 +220,8 @@ NEXT_PUBLIC_SENTRY_DSN=<redacted>
 | `NEXT_PUBLIC_ENV` | `staging` | `production` | Always | Tells app which environment it's in |
 | `GMAIL_CLIENT_ID` | dev-id | prod-id | Always | Public OAuth client ID |
 | `GMAIL_CLIENT_SECRET` | dev-secret | prod-secret | Only server-side | **SENSITIVE:** Never expose |
+| `GMAIL_REFRESH_TOKEN` | dev token | prod token | Only server-side | **SENSITIVE:** Authorises mailbox access |
+| `GMAIL_SENDER_EMAIL` | outreach mailbox | outreach mailbox | Only server-side | Exact branch mailbox; no fallback sender |
 | `OPENAI_API_KEY` | test-key | prod-key | Only server-side | **SENSITIVE:** Never expose |
 | `CRON_SECRET` | shared-secret | shared-secret | Only server-side | **SENSITIVE:** Auth for `/api/cron/*` routes |
 | `SESSION_ACTIVITY_SECRET` | random 32+ chars | random 32+ chars | Only server-side | **SENSITIVE:** Signs the inactivity record behind session expiry (F007). Optional — unset means sessions still expire after 30 idle minutes but the record is unsigned and forgeable, so set it everywhere hosted. `openssl rand -base64 32`. Rotating it signs every open session out once |

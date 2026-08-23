@@ -18,7 +18,10 @@ export async function editTag(
   tagId: string,
   newName: string,
 ): Promise<EditTagResult> {
-  const authorization = await getCurrentActor("client:edit", {
+  // Outer gate is the shared "tags:manage" permission; renaming itself stays
+  // admin-only via editTagCore's isAdmin check, so a CAM gets the clear
+  // "Only an admin can edit a shared tag" message instead of a bare refusal.
+  const authorization = await getCurrentActor("tags:manage", {
     route: "tags.edit",
   });
   if (!authorization.ok) {

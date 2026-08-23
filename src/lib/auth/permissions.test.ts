@@ -17,7 +17,12 @@ function testUser(): User {
 
 describe("role permission matrix", () => {
   it("allows admins to perform every CAM action", () => {
-    for (const permission of ["client:view", "client:edit", "client:contact"] as const) {
+    for (const permission of [
+      "client:view",
+      "client:edit",
+      "client:contact",
+      "tags:manage",
+    ] as const) {
       assert.equal(hasPermission("cam", permission), true);
       assert.equal(hasPermission("admin", permission), true);
     }
@@ -40,6 +45,7 @@ describe("role permission matrix", () => {
     assert.equal(hasPermission("viewer", "client:view"), true);
     assert.equal(hasPermission("viewer", "client:edit"), false);
     assert.equal(hasPermission("viewer", "client:contact"), false);
+    assert.equal(hasPermission("viewer", "tags:manage"), false);
   });
 });
 

@@ -1137,6 +1137,43 @@ is the §2 pattern ("what RLS cannot do"), not an oversight.
 
 ---
 
+### 3.23 Tags and tag assignments — shared read, CAM/admin write (app: `tags:manage`)
+
+Backs the Tags cluster (F188 create, F189 edit/rename, F191 assign,
+F192 remove): `supabase/migrations/20260821120000_create_tags_table.sql`,
+`20260822130200_create_org_tags_table.sql`,
+`20260822130100_grant_tags_update_admin_only.sql`,
+`20260826110000_grant_org_tags_delete.sql`. Tags are shared platform-wide
+labels, not personal to their creator (F188 AC2) — creation is attributed via
+`created_by_user_id` / `added_by_user_id` but never restricts use.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `TAGS` | any active user | admins + CAMs (`app.can_write()`, attribution required) | admin only (`app.is_admin()`) | — (never; F190 owns deletion) |
+| `ORG_TAGS` | any active user | admins + CAMs (`app.can_write()`, attribution required) | — | admins + CAMs (`app.can_write()`), any assignment |
+
+At the application layer every tag mutation gates on the dedicated
+**`tags:manage`** permission (`src/lib/auth/permissions.ts`) — held by CAMs
+and admins, not viewers. It deliberately replaces an earlier borrow of
+`client:edit`: the shared taxonomy is a curation concern, not a client-data
+write, and granting client-edit rights should never by itself confer the
+right to reshape labels every CAM shares. The DB population (`can_write()` =
+admin or CAM) matches the app-level population exactly, so neither layer can
+drift ahead of the other without a migration or a permissions diff noticing.
+
+Renaming a tag is admin-only at both layers (F189's own "could be admin-only"
+note resolved conservatively): RLS allows only `app.is_admin()`, and the app
+checks `role === "admin"` explicitly so a CAM gets a clear message rather
+than a silent RLS refusal. Assign/remove stay CAM-level — organising a client
+with existing labels is ordinary client work; reshaping the label set is not.
+No SECURITY DEFINER RPC or audit row: tags are not ownership, status, role or
+approval state (`docs/audit-log-pattern.md` §1). The fixed placeholder user
+(`20260821120100_create_deleted_user_placeholder_for_tags.sql`) exists so
+`created_by_user_id` can stay NOT NULL-able after a creator is hard-deleted;
+it is excluded from `/admin/users`.
+
+---
+
 ## 4. Denial behaviour and feedback
 
 Important and frequently got wrong: **a blocked read is not an error.**

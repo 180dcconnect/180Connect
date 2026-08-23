@@ -12,3 +12,7 @@ export function resolveEmailSendLimit(source: Record<string, string | undefined>
 export function emailLimitMessage(windowSeconds: number): string {
   return `The outreach sending limit has been reached. Try again in up to ${Math.max(1, Math.ceil(windowSeconds / 60))} minutes.`;
 }
+
+export function emailSendWindowStart(windowSeconds: number, now = Date.now()): string {
+  return new Date(now - windowSeconds * 1000).toISOString();
+}

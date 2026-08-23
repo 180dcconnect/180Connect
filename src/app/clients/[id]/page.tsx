@@ -31,6 +31,7 @@ import {
 } from "@/lib/ownership-requests";
 import { RequestOwnershipForm } from "./request-ownership-form";
 import { ScheduledEmailList } from "./scheduled-email-list";
+import { emailSendWindowStart, resolveEmailSendLimit } from "@/lib/outreach/send-rate-limit";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -179,6 +180,18 @@ export default async function ClientDetailPage({
   const ownerId = ownerRow?.owner_id ?? null;
   const ownerName = ownerRow?.owner?.full_name ?? (ownerId ? "A former team member" : null);
   const isAdmin = authorization.actor.role === "admin";
+  let sendingVolume: { count: number; limit: number; warning: boolean } | null = null;
+  if (isAdmin) {
+    const limit = resolveEmailSendLimit();
+    const since = emailSendWindowStart(limit.windowSeconds);
+    const { count, error: volumeError } = await supabase
+      .from("outreach_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("send_status", "sent")
+      .gte("sent_at", since);
+    if (volumeError) await reportError(volumeError, { operation: "clients.detail_sending_volume" });
+    if (count !== null) sendingVolume = { count, limit: limit.maximum, warning: count >= Math.ceil(limit.maximum * 0.8) };
+  }
 
   // F163: admin's CAM picker. Only fetched for an admin — a CAM can't reach the
   // assign form, so the query would be wasted on every other page view.
@@ -579,6 +592,11 @@ export default async function ClientDetailPage({
             {hasPermission(authorization.actor.role, "client:contact") && (
               <Rise>
                 <SectionCard headingId="outreach-heading" title="Outreach">
+                  {sendingVolume && (
+                    <p className={`mt-3 rounded-lg p-3 text-sm font-bold ${sendingVolume.warning ? "bg-amber-50 text-amber-900" : "bg-black/[0.03] text-foreground/60"}`} role={sendingVolume.warning ? "alert" : "status"}>
+                      Branch sending volume: {sendingVolume.count} of {sendingVolume.limit} emails in the current limit window.{sendingVolume.warning ? " The configured threshold is close; review volume before sending more." : ""}
+                    </p>
+                  )}
                   {/* The conflict is shown by ComposeButton itself, so the one
                       message survives a click and the re-check behind it. */}
                   <div className="mt-4">

@@ -51,8 +51,32 @@ describe("scoreByGeography — personal preference impact / configurable regions
     assert.ok(asPriority.score > notPriority.score);
   });
 
-  it("an empty priority region list means nothing can match", () => {
+  it("an empty priority region list is neutral 'no preference set', not a penalty (AC2)", () => {
+    // Empty preferred_cities means "no preference set" per the data
+    // dictionary — every recorded location must keep its neutral score
+    // rather than being scored as confirmed non-priority.
     const result = scoreByGeography("London", []);
+    assert.equal(result.noPreferenceSet, true);
     assert.equal(result.matchedPriorityRegion, false);
+    assert.equal(result.score, 0.5);
+  });
+
+  it("no preference set does not score a location below a configured non-match", () => {
+    const noPreference = scoreByGeography("London", []);
+    const configuredNonMatch = scoreByGeography("London", ["Manchester"]);
+    assert.ok(noPreference.score > configuredNonMatch.score);
+  });
+
+  it("an empty priority region list still defaults a missing location neutrally", () => {
+    const result = scoreByGeography(null, []);
+    assert.equal(result.usedDefault, true);
+    assert.equal(result.noPreferenceSet, true);
+    assert.equal(result.score, 0.5);
+  });
+
+  it("whitespace-only regions never match", () => {
+    const result = scoreByGeography("London", ["   ", ""]);
+    assert.equal(result.matchedPriorityRegion, false);
+    assert.equal(result.noPreferenceSet, false);
   });
 });

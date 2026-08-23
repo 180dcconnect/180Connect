@@ -8,22 +8,45 @@
 // directly, ready to be fed real data as soon as it's read from those
 // existing columns, without needing F054 to add anything new first.
 //
-// AC2 is meaningfully different from F089's flat per-category ranking:
-// geography scoring must be RELATIVE to "the branch's stated geographic
+// WHICH FIELDS THIS SCORES — the city path only:
+//
+//   location       → ORGANISATIONS.city
+//   priorityRegions → OUTREACH_PREFERENCES.preferred_cities (the CAM/branch's
+//                    stated geographic focus; the settings table already
+//                    stores free-text city lists there)
+//
+// This is deliberately NOT the geographic_reach path. Reach-based scoring
+// (local/regional/national/international, with the South Yorkshire pilot
+// expansion) already lives in getGeographicPriorityScore in
+// src/app/clients/visible-clients.ts for personal queue ordering; that stays
+// separate. When this function is wired into calculatePriorityScore's
+// `geography` factor it should be fed city data, and reach handling either
+// composed alongside or kept queue-only — not duplicated here.
+//
+// AC2: geography scoring must be RELATIVE to "the branch's stated geographic
 // focus" — a client in the priority region should score higher than one
-// outside it, not every location treated identically. Rather than
-// hardcoding a specific priority region (which isn't confirmed anywhere,
-// and might belong in a settings table, an env var, or somewhere else
-// entirely — genuinely not our decision to place), this function takes the
-// priority regions as a parameter. Whatever eventually reads the real
-// "branch focus" setting can pass it straight in.
+// outside it, not every location treated identically. Rather than hardcoding
+// a specific priority region, this function takes them as a parameter;
+// whatever reads preferred_cities (or a future branch-level setting) passes
+// them straight in.
 //
 // AC3: a client with no location recorded gets an explicit default
-// treatment, not an error or a silent zero.
+// treatment, not an error or a silent zero. The neutral score deliberately
+// sits BETWEEN non-priority and priority: an unknown location neither gains
+// nor loses against a confirmed one until the team decides otherwise.
 
 export type GeographyScoreResult = {
   score: number;
+  /** True when the client had no usable location (missing/blank). */
   usedDefault: boolean;
+  /**
+   * True when the caller passed NO priority regions at all — i.e. "no
+   * preference set" per the data dictionary's definition of an empty
+   * OUTREACH_PREFERENCES.preferred_cities array. Distinct from a configured
+   * preference that simply didn't match: no preference must be NEUTRAL, not
+   * a penalty applied to every recorded location.
+   */
+  noPreferenceSet: boolean;
   matchedPriorityRegion: boolean;
 };
 
@@ -38,21 +61,36 @@ const PRIORITY_REGION_SCORE = 0.8;
 const NON_PRIORITY_REGION_SCORE = 0.3;
 
 /**
- * AC3: explicit default for a missing location, distinct from scoring as
- * if the client were confirmed outside every priority region.
+ * Neutral score shared by both "no signal" cases (AC3): a missing location,
+ * and a caller with no priority regions configured. Sits between the two
+ * confirmed outcomes so neither is advantaged by an unknown.
  */
-const DEFAULT_FOR_MISSING_LOCATION = 0.5;
+const NEUTRAL_NO_SIGNAL_SCORE = 0.5;
 
 export function scoreByGeography(
   location: string | null | undefined,
   priorityRegions: readonly string[],
 ): GeographyScoreResult {
+  if (priorityRegions.length === 0) {
+    // Empty preferred_cities means "no preference set", not "nothing is
+    // priority" — treating every recorded location as non-priority here
+    // would silently depress every client's geography score whenever a CAM
+    // hasn't configured preferences yet.
+    return {
+      score: NEUTRAL_NO_SIGNAL_SCORE,
+      usedDefault: true,
+      noPreferenceSet: true,
+      matchedPriorityRegion: false,
+    };
+  }
+
   const trimmed = location?.trim();
 
   if (!trimmed) {
     return {
-      score: DEFAULT_FOR_MISSING_LOCATION,
+      score: NEUTRAL_NO_SIGNAL_SCORE,
       usedDefault: true,
+      noPreferenceSet: false,
       matchedPriorityRegion: false,
     };
   }
@@ -65,6 +103,7 @@ export function scoreByGeography(
   return {
     score: matched ? PRIORITY_REGION_SCORE : NON_PRIORITY_REGION_SCORE,
     usedDefault: false,
+    noPreferenceSet: false,
     matchedPriorityRegion: matched,
   };
 }

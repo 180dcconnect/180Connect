@@ -33,7 +33,15 @@ export const OUTREACH_STATUSES = [
 ] as const;
 export type OutreachStatus = (typeof OUTREACH_STATUSES)[number];
 
-export type OrganisationType = "charity" | "company" | "both" | "other";
+export type OrganisationType =
+  | "charity"
+  | "cio"
+  | "cic"
+  | "social_enterprise"
+  | "ngo"
+  | "company"
+  | "both"
+  | "other";
 export type EntryMethod = "api" | "manual";
 export type GeographicReach = "local" | "regional" | "national" | "international";
 
@@ -245,7 +253,16 @@ export function generateOrganisations(
       // Manually entered records start unverified; API records usually verify.
       is_verified: random() < 0.7,
       organisation_type: pick<OrganisationType>(random, [
-        "charity", "charity", "charity", "company", "both", "other",
+        "charity",
+        "charity",
+        "charity",
+        "cio",
+        "cic",
+        "social_enterprise",
+        "ngo",
+        "company",
+        "both",
+        "other",
       ]),
       website: missing.has("website") ? null : `https://www.${slug}.${SEED_DOMAIN}`,
       contact_email: missing.has("contact_email")

@@ -18,7 +18,7 @@ import { organisationTypeFrom } from "./registry-lookup.ts";
 export type ImportDraftFields = {
   legal_name: string | null;
   mission_statement: string | null;
-  organisation_type: "charity" | "company" | "both" | null;
+  organisation_type: "charity" | "cio" | "cic" | "social_enterprise" | "ngo" | "company" | "both" | "other" | null;
   address_line_1: string | null;
   city: string | null;
   postcode: string | null;

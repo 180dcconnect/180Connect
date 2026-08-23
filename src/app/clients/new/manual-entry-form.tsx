@@ -17,7 +17,7 @@ export type ManualEntryDraft = {
   id: string;
   legal_name: string | null;
   mission_statement: string | null;
-  organisation_type: "charity" | "company" | "both" | "other" | null;
+  organisation_type: "charity" | "cio" | "cic" | "social_enterprise" | "ngo" | "company" | "both" | "other" | null;
   address_line_1: string | null;
   city: string | null;
   postcode: string | null;
@@ -216,8 +216,12 @@ export function ManualEntryForm({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="charity">Charity</SelectItem>
-                <SelectItem value="both">Charity and company</SelectItem>
+                <SelectItem value="cio">CIO</SelectItem>
+                <SelectItem value="cic">CIC</SelectItem>
+                <SelectItem value="social_enterprise">Social enterprise</SelectItem>
+                <SelectItem value="ngo">NGO</SelectItem>
                 <SelectItem value="company">Company</SelectItem>
+                <SelectItem value="both">Charity and company</SelectItem>
                 <SelectItem value="other">Other organisation</SelectItem>
               </SelectContent>
             </Select>

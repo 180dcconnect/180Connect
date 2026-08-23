@@ -33,6 +33,9 @@ import {
   restrictedFieldLabel,
 } from "@/lib/edit-suggestions";
 import { SuggestEditSection } from "./suggest-edit-section";
+import { buildNoteList, type NoteRow } from "@/lib/note-history";
+import { NotesSection } from "./notes-section";
+import { AddNoteForm } from "./add-note-form";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -217,6 +220,18 @@ export default async function ClientDetailPage({
     await reportError(ownerError, { operation: "clients.detail_owner", organisationId: id });
   }
 
+  // F071/F072/F073/F074: every note against this client, whoever wrote it
+  // (F071 AC1). RLS (notes_select_active) shares read across every active
+  // role, so this needs no author filter.
+  const { data: noteRows, error: notesError } = await supabase
+    .from("notes")
+    .select("id, content, created_at, updated_at, author_id, author:users!notes_author_id_fkey(full_name)")
+    .eq("organisation_id", id);
+
+  if (notesError) {
+    await reportError(notesError, { operation: "clients.detail_notes", organisationId: id });
+  }
+
   const canEdit = hasPermission(authorization.actor.role, "client:edit");
   const canSuppress = canEdit;
   const ownerId = ownerRow?.owner_id ?? null;
@@ -293,6 +308,12 @@ export default async function ClientDetailPage({
       client[field.field_name as keyof typeof client] as string | null,
     ]),
   ) as Record<string, string | null>;
+
+  const noteList = buildNoteList((noteRows ?? []) as unknown as NoteRow[], {
+    id: authorization.actor.id,
+    role: authorization.actor.role,
+  });
+
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="mx-auto w-full max-w-5xl space-y-6">
@@ -540,6 +561,21 @@ export default async function ClientDetailPage({
                 {/* F081: upload sits inside the same card so the new file
                     appears in the list directly above it on refresh (AC4). */}
                 {canEdit && <UploadAttachmentForm organisationId={client.id} />}
+              </SectionCard>
+            </Rise>
+
+            <Rise>
+              <SectionCard
+                headingId="notes-heading"
+                title="Notes"
+                hint="Left by any team member — relationship history everyone can see."
+              >
+                <NotesSection
+                  notes={noteList}
+                  error={Boolean(notesError)}
+                  organisationId={client.id}
+                />
+                {canEdit && <AddNoteForm organisationId={client.id} />}
               </SectionCard>
             </Rise>
           </Group>

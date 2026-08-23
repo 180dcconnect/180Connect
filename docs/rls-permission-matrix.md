@@ -320,7 +320,7 @@ saves a booklet only for a client they own or that's unowned, same as they may o
 contact one. One row per organisation (`organisation_id unique`); a regenerate
 upserts rather than appending, so there is no history to scope reads by author or
 time. **Not yet in the Data Model spreadsheet** — flagged in the migration's own
-header (`20260827000000_create_client_booklets.sql`) for Bashir to add to tab 04/02.
+header (`20260827000001_create_client_booklets.sql`) for Bashir to add to tab 04/02.
 
 ### 3.3 Notes — shared read, author write
 

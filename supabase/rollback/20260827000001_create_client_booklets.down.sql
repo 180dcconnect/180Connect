@@ -1,4 +1,4 @@
--- Rollback for: 20260827000000_create_client_booklets.sql
+-- Rollback for: 20260827000001_create_client_booklets.sql
 -- Apply manually against the target DB to reverse the paired migration.
 --
 -- Drops the saved-booklet table. Every saved booklet is regenerable from Gemini (it is

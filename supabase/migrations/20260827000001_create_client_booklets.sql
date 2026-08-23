@@ -34,7 +34,7 @@
 --                 | booklet route's own permission gate.
 --   Documentation | Not yet in the Data Model spreadsheet — flagged above.
 --
--- Reversibility: paired rollback in ../rollback/20260827000000_create_client_booklets.down.sql
+-- Reversibility: paired rollback in ../rollback/20260827000001_create_client_booklets.down.sql
 
 create table public.client_booklets (
   id                    uuid primary key default gen_random_uuid(),

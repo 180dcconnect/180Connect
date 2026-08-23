@@ -16,6 +16,7 @@ import { Users } from "@/components/animate-ui/icons/users";
 import { ThumbsUp} from "@/components/animate-ui/icons/thumbs-up";
 import UsersGroupIcon from "@/components/ui/users-group-icon";
 import { SidebarAccountMenu } from "@/components/sidebar-account-menu";
+import { NotificationBell } from "@/components/notifications/notification-bell";
 import { SidebarChecklist, type SidebarChecklistStep } from "@/components/sidebar-checklist";
 import {
   Tooltip,
@@ -283,7 +284,10 @@ export function Sidebar({
         </div>
       )}
 
-      <div className="border-t border-white/70 p-2">
+      <div className="space-y-1 border-t border-white/70 p-2">
+        {/* F173: notification bell lives above the account block, inside the
+            same footer group — one place every signed-in user already looks. */}
+        <NotificationBell collapsed={collapsed} />
         <SidebarAccountMenu
           name={userName ?? null}
           email={userEmail ?? null}

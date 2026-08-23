@@ -67,6 +67,21 @@ import {
 import { sourcePriority } from "./source-priority.ts";
 import type { StandardOrganisation } from "./types.ts";
 
+// F044: the six ORGANISATIONS fields FIELD_SOURCES tracks provenance for — must
+// stay identical to field_sources' check constraint and FIELD_DISCREPANCIES' MVP
+// scope (20260815090000, 20260820100000), or the two tables silently diverge on
+// which fields are covered. The rest of StandardOrganisation (organisation_type,
+// entry_method, country_code, etc.) is pipeline/system-derived, not source data —
+// same exclusion reasoning as FIELD_DISCREPANCIES' migration header.
+const TRACKED_FIELD_SOURCES = [
+  "legal_name",
+  "website",
+  "contact_email",
+  "address_line_1",
+  "city",
+  "postcode",
+] as const satisfies readonly (keyof StandardOrganisation)[];
+
 export type PendingRecord = {
   id: string; // raw_source_records.id
   // Left as unknown, not a specific Raw*Record type: this same loader serves
@@ -232,6 +247,20 @@ export interface OrganisationWriteStore {
     result: ClientCriteriaResult,
     organisationType: string,
   ): Promise<void>;
+  /**
+   * F044: records provenance for every populated TRACKED_FIELD_SOURCES field on a
+   * newly inserted organisation via one batched record_field_sources RPC — a
+   * single transaction, so provenance commits all-or-nothing instead of leaving
+   * half the fields attributed if one call fails. Empty fields (a source that
+   * didn't provide that value) are skipped — there is nothing to attribute a
+   * source to.
+   */
+  recordFieldSources(
+    organisationId: string,
+    org: StandardOrganisation,
+    source: string,
+    rawSourceRecordId: string,
+  ): Promise<void>;
 }
 
 export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | null {
@@ -323,7 +352,49 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
       });
       if (error) throw error;
     },
+
+    async recordFieldSources(organisationId, org, source, rawSourceRecordId) {
+      const values: Partial<Record<(typeof TRACKED_FIELD_SOURCES)[number], string>> = {};
+      for (const field of TRACKED_FIELD_SOURCES) {
+        const value = org[field];
+        if (typeof value === "string" && value.trim()) values[field] = value;
+      }
+      if (Object.keys(values).length === 0) return;
+
+      const { error } = await supabase.rpc("record_field_sources", {
+        p_organisation_id: organisationId,
+        p_source: source,
+        p_values: values,
+        p_raw_source_record_id: rawSourceRecordId,
+      });
+      if (error) throw error;
+    },
   };
+}
+
+/**
+ * Shared by every promotePending*Records function below: records F044 field
+ * provenance right after a successful insert. Failure here does not fail the
+ * batch or roll back the insert — the organisation was already created
+ * successfully, and losing provenance for one record is a lesser failure than
+ * losing the client record itself. Logged via reportError, same as the website
+ * validation step's non-fatal failures above.
+ */
+async function recordFieldSourcesOrReport(
+  store: OrganisationWriteStore,
+  organisationId: string,
+  org: StandardOrganisation,
+  source: string,
+  record: PendingRecord,
+): Promise<void> {
+  try {
+    await store.recordFieldSources(organisationId, org, source, record.id);
+  } catch (error) {
+    await reportError(error instanceof Error ? error : new Error(String(error)), {
+      operation: `standardize.${source}.record_field_sources`,
+      rawRecordId: record.id,
+    });
+  }
 }
 
 /** A record is usable if it at least has a non-empty legal_name. */
@@ -409,11 +480,10 @@ export async function promotePendingCharityCommissionRecords(
   const pending = await store.loadPendingRecords("charity_commission");
   const counts = newCounts(pending.length);
 
-  // Loaded once per run, not once per record — cheap for a batch of a few hundred, and
-  // good enough for F042's scope. A record newly inserted earlier in this same batch is
-  // not visible to later matches in the batch; two near-simultaneous duplicates within
-  // one run are a narrower case than the cross-source one this ticket targets, and not
-  // covered by its AC.
+  // Loaded once per run, then augmented after each successful insert so
+  // later records in the same batch see earlier inserts (intra-batch dedup).
+  // Without the push, two raws with the same name+postcode in one batch both
+  // inserted — 756 duplicate pairs in staging (2026-08-11).
   const existingOrganisations = await store.loadExistingOrganisationsForMatching();
 
   // Criteria checked once per record up front and carried through — it's a
@@ -479,7 +549,17 @@ export async function promotePendingCharityCommissionRecords(
     }
 
     await store.markRecordStatus(record.id, "validated", result.id);
+    await recordFieldSourcesOrReport(store, result.id, org, "charity_commission", record);
     counts.inserted++;
+    // Intra-batch dedup: make this newly inserted organisation visible to
+    // subsequent records in the same run. Without this, two raws with the
+    // same name+postcode in one batch both insert (756 duplicate groups in
+    // staging, 2026-08-11). findDuplicateMatch compares legal_name+postcode.
+    existingOrganisations.push({
+      id: result.id,
+      legal_name: org.legal_name,
+      postcode: org.postcode ?? "",
+    });
   }
 
   return counts;
@@ -551,7 +631,13 @@ export async function promotePendingCompaniesHouseRecords(
     }
 
     await store.markRecordStatus(record.id, "validated", result.id);
+    await recordFieldSourcesOrReport(store, result.id, org, "companies_house", record);
     counts.inserted++;
+    existingOrganisations.push({
+      id: result.id,
+      legal_name: org.legal_name,
+      postcode: org.postcode ?? "",
+    });
   }
 
   return counts;
@@ -623,7 +709,13 @@ export async function promotePendingFindThatCharityRecords(
     }
 
     await store.markRecordStatus(record.id, "validated", result.id);
+    await recordFieldSourcesOrReport(store, result.id, org, "find_that_charity", record);
     counts.inserted++;
+    existingOrganisations.push({
+      id: result.id,
+      legal_name: org.legal_name,
+      postcode: org.postcode ?? "",
+    });
   }
 
   return counts;

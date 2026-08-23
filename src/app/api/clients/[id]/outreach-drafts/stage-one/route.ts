@@ -9,6 +9,7 @@ import {
   createStageOneModelCall,
   generateStageOneDraft,
 } from "@/lib/outreach/stage-one-generation";
+import { EMAIL_LENGTHS } from "@/lib/outreach/stage-one-prompt";
 import {
   checkSuppressionBeforeSend,
   suppressionBlockedMessage,
@@ -19,7 +20,7 @@ import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 export const maxDuration = 60;
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
@@ -33,6 +34,16 @@ export async function POST(
   const { id: organisationId } = await params;
   if (!z.uuid().safeParse(organisationId).success) {
     return NextResponse.json({ error: "That client could not be found." }, { status: 400 });
+  }
+
+  const requestBody = await request.json().catch(() => ({}));
+  const preferences = z
+    .object({
+      length: z.enum(EMAIL_LENGTHS).default("standard"),
+    })
+    .safeParse(requestBody);
+  if (!preferences.success) {
+    return NextResponse.json({ error: "Choose a valid email length and try again." }, { status: 400 });
   }
 
   const admin = createAdminClient();
@@ -164,6 +175,7 @@ export async function POST(
       newsHooks: enrichment?.news_hooks,
     },
     callModel,
+    { length: preferences.data.length },
   );
   if ("error" in result) return NextResponse.json({ error: result.error }, { status: 502 });
 

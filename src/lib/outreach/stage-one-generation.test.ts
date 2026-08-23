@@ -23,3 +23,26 @@ test("generateStageOneDraft rejects an empty or malformed draft", async () => {
   const result = await generateStageOneDraft("org-1", context, async () => "{}");
   assert.deepEqual(result, { error: "The email draft could not be generated. Try again." });
 });
+
+test("generateStageOneDraft forwards email length to prompt builder", async () => {
+  const captured: { system: string; prompt: string }[] = [];
+  const makeCallModel = () => async (input: { system: string; prompt: string }) => {
+    captured.push(input);
+    return JSON.stringify({ subject: "S", body: "B" });
+  };
+
+  await generateStageOneDraft("org-1", context, makeCallModel(), { length: "short" });
+  assert.match(captured[0]!.system, /70 and 100 words/);
+
+  captured.length = 0;
+  await generateStageOneDraft("org-1", context, makeCallModel(), { length: "standard" });
+  assert.match(captured[0]!.system, /130 and 170 words/);
+
+  captured.length = 0;
+  await generateStageOneDraft("org-1", context, makeCallModel(), { length: "detailed" });
+  assert.match(captured[0]!.system, /200 and 260 words/);
+
+  captured.length = 0;
+  await generateStageOneDraft("org-1", context, makeCallModel());
+  assert.match(captured[0]!.system, /130 and 170 words/);
+});

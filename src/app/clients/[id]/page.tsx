@@ -5,6 +5,7 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
+import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import { validateClientEmail } from "@/lib/client-email-validation";
 import {
   formatOrganisationSources,
@@ -281,6 +282,15 @@ export default async function ClientDetailPage({
   const ownerId = ownerRow?.owner_id ?? null;
   const ownerName = ownerRow?.owner?.full_name ?? (ownerId ? "A former team member" : null);
   const isAdmin = authorization.actor.role === "admin";
+
+  // F165: warn the CAM up front when the client they are viewing is owned by
+  // someone else, so the compose flow explains a block the route would enforce.
+  const ownershipConflict = checkOwnershipConflict({
+    ownerId,
+    ownerName,
+    actorId: authorization.actor.id,
+    actorRole: authorization.actor.role,
+  });
 
   // F163: admin's CAM picker. Only fetched for an admin — a CAM can't reach the
   // assign form, so the query would be wasted on every other page view.
@@ -823,7 +833,12 @@ export default async function ClientDetailPage({
               <Rise>
                 <SectionCard headingId="outreach-heading" title="Outreach">
                   <div className="mt-4">
-                    <ComposeButton blocked={suppressed} />
+                    <ComposeButton
+                      blocked={suppressed}
+                      organisationId={client.id}
+                      suppressionReason={suppressed ? latest?.reason : undefined}
+                      ownershipWarning={ownershipConflict.hasConflict ? ownershipConflict.warning : undefined}
+                    />
                   </div>
                 </SectionCard>
               </Rise>

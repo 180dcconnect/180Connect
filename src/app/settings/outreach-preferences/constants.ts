@@ -21,39 +21,23 @@ export const GEOGRAPHIC_REACH_LABELS: Record<GeographicReach, string> = {
   international: "International",
 };
 
-export const INCOME_BAND_OPTIONS = [
-  "under_10k",
-  "10k_100k",
-  "100k_1m",
-  "over_1m",
-] as const;
-
-export type IncomeBand = (typeof INCOME_BAND_OPTIONS)[number];
-
-export const INCOME_BAND_LABELS: Record<IncomeBand, string> = {
-  under_10k: "Under £10k",
-  "10k_100k": "£10k – £100k",
-  "100k_1m": "£100k – £1m",
-  over_1m: "Over £1m",
-};
-
-export const INCOME_BAND_DESCRIPTIONS: Record<IncomeBand, string> = {
-  under_10k: "Micro / grassroots (< £10k)",
-  "10k_100k": "Small non-profit (£10k – £100k)",
-  "100k_1m": "Medium charity (£100k – £1m)",
-  over_1m: "Large institution (> £1m)",
-};
-
-/** Converts a numeric total income into the standard public.income_band enum value. */
-export function deriveIncomeBand(totalIncome: number | null | undefined): IncomeBand | null {
-  if (totalIncome === null || totalIncome === undefined || Number.isNaN(totalIncome)) {
-    return null;
-  }
-  if (totalIncome < 10_000) return "under_10k";
-  if (totalIncome <= 100_000) return "10k_100k";
-  if (totalIncome <= 1_000_000) return "100k_1m";
-  return "over_1m";
-}
+/**
+ * The income-band values and deriveIncomeBand moved to
+ * src/lib/income-band.ts so lib-side consumers (F091 size scoring,
+ * visible-clients queue ordering) can share them without importing out of
+ * src/app; re-exported here to keep this module's public surface stable.
+ * Mirrors public.income_band
+ * (supabase/migrations/20260804180000_create_org_children.sql), same
+ * approach as ROLES in src/lib/auth/permissions.ts — schema enums, not
+ * data, and changing one is a migration either way.
+ */
+export {
+  INCOME_BAND_OPTIONS,
+  INCOME_BAND_LABELS,
+  INCOME_BAND_DESCRIPTIONS,
+  deriveIncomeBand,
+  type IncomeBand,
+} from "../../../lib/income-band.ts";
 
 export const GRANT_PREFERENCE_LABELS = {
   prioritise_grant_recipients: "Prioritise organisations with previous grant history (360Giving)",

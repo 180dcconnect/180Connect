@@ -25,14 +25,13 @@ export interface TagInsertClient {
 }
 
 /**
- * TODO: no dedicated "tags:create" (or similar) permission exists in
- * src/lib/auth/permissions.ts yet. "client:edit" is used here since tags
- * exist to organise clients (organisations) and every CAM already has that
- * permission — matches the ticket's "As a CAM, I want to create tags"
- * framing. Worth checking whether a dedicated permission should be added
- * instead, same open question as F039's "platform-settings:manage" choice.
+ * Tags have their own permission rather than borrowing "client:edit": the
+ * shared tag taxonomy is a curation concern, not a client-data write, and
+ * F188-F192 (create/assign/remove) all gate on this single permission. The
+ * DB-level counterpart is app.can_write() on public.tags / public.org_tags,
+ * which covers the same admin+CAM population.
  */
-export const CREATE_TAG_PERMISSION = "client:edit" as const;
+export const CREATE_TAG_PERMISSION = "tags:manage" as const;
 
 /**
  * Pure decision logic: validate, attempt the insert, translate the result

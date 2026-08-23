@@ -28,10 +28,10 @@ export interface OrgTagDeleteClient {
 }
 
 /**
- * TODO: same open question as F188/F191 — "client:edit" is used here since
- * no dedicated "tags:remove" permission exists yet.
+ * Shared "tags:manage" permission — see create-tag-core.ts for why tags do
+ * not borrow "client:edit".
  */
-export const REMOVE_TAG_PERMISSION = "client:edit" as const;
+export const REMOVE_TAG_PERMISSION = "tags:manage" as const;
 
 export async function removeTagCore(
   organisationId: string,

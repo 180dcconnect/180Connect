@@ -34,11 +34,10 @@ export interface OrgTagInsertClient {
 }
 
 /**
- * TODO: same open question as F188 — "client:edit" is used here since
- * assigning a tag is editing a client's organisation of data. No dedicated
- * "tags:assign" permission exists yet.
+ * Shared "tags:manage" permission — see create-tag-core.ts for why tags do
+ * not borrow "client:edit".
  */
-export const ASSIGN_TAG_PERMISSION = "client:edit" as const;
+export const ASSIGN_TAG_PERMISSION = "tags:manage" as const;
 
 export async function assignTagsCore(
   organisationId: string,

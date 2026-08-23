@@ -6,7 +6,7 @@ import { CreateTagForm } from "./create-tag-form";
 import { EditableTagList } from "./editable-tag-list";
 
 export default async function TagsPage() {
-  const authorization = await getCurrentActor("client:edit", {
+  const authorization = await getCurrentActor("tags:manage", {
     route: "/admin/tags",
   });
   if (!authorization.ok) {

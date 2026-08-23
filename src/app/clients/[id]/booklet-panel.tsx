@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { ExternalLink, Globe, Sparkles } from "lucide-react";
+import { Clock, ExternalLink, Globe, Sparkles } from "lucide-react";
 import { parseBookletSections } from "@/lib/booklet/parse-sections";
 
 /**
@@ -176,6 +176,7 @@ type WebsiteContextResult =
   | { status: "skipped"; reason: string };
 
 export type SavedBooklet = {
+  id: string;
   text: string;
   websiteUrl: string | null;
   websiteContextUsed: boolean;
@@ -206,23 +207,41 @@ export function BookletPanel({
   organisationId,
   initialWebsiteUrl,
   savedBooklet,
+  priorVersions,
 }: {
   organisationId: string;
   initialWebsiteUrl: string | null;
   savedBooklet: SavedBooklet | null;
+  priorVersions: SavedBooklet[];
 }) {
-  // F085: seeded straight from the server-read CLIENT_BOOKLETS row, so a client
+  // F085: seeded straight from the server-read CLIENT_BOOKLETS rows, so a client
   // with a saved booklet renders it on first paint with zero fetch and zero
   // Gemini cost (AC2). The route saves after every successful generate(), so this
   // is only stale within the current tab's own session.
-  const [booklet, setBooklet] = useState<string | null>(savedBooklet?.text ?? null);
+  //
+  // F086: CLIENT_BOOKLETS is append-only now (see that migration's header), so a
+  // regenerate is a new row, never an overwrite — AC2 needs the prior version to
+  // stay retrievable, not just timestamped. `history` holds every earlier version
+  // this component knows about (seeded from `priorVersions`, then grown in place
+  // each time generate() succeeds by archiving whatever was `currentVersion`
+  // before the call). `viewingVersionId` picks a historical entry to display
+  // read-only in place of the current one; it is purely a local view toggle —
+  // nothing about the DB records or Regenerate's own behaviour changes while
+  // browsing history, and Regenerate plus the URL field are hidden while a
+  // historical entry is shown, so there is no path where clicking something here
+  // looks like it edits or replaces an old version.
+  const [currentVersion, setCurrentVersion] = useState<SavedBooklet | null>(savedBooklet);
+  const [history, setHistory] = useState<SavedBooklet[]>(priorVersions);
+  const [viewingVersionId, setViewingVersionId] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [websiteUrl, setWebsiteUrl] = useState(initialWebsiteUrl ?? "");
-  const [websiteContext, setWebsiteContext] = useState<WebsiteContextResult | null>(
-    savedBooklet ? initialWebsiteContext(savedBooklet) : null,
-  );
-  const [generatedAt, setGeneratedAt] = useState<string | null>(savedBooklet?.generatedAt ?? null);
+  // Only meaningful for a version generated this session — it carries the skip
+  // *reason* the API returns, which CLIENT_BOOKLETS never stores (only the
+  // used/not-used boolean does). A page-load-seeded currentVersion, or any
+  // historical one, falls back to the boolean-only derivation instead.
+  const [freshWebsiteContext, setFreshWebsiteContext] = useState<WebsiteContextResult | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
   const sectionRef = useRef<HTMLElement>(null);
   const autoTriggered = useRef(false);
@@ -239,6 +258,19 @@ export function BookletPanel({
       inFlight.current = false;
     };
   }, []);
+
+  // A viewing id that no longer resolves to a history entry (state corruption,
+  // a future change that prunes history) is treated as not viewing at all, so
+  // the read-only banner can never be orphaned and Regenerate never stays
+  // hidden behind a stale id.
+  const viewingVersion =
+    viewingVersionId != null
+      ? (history.find((version) => version.id === viewingVersionId) ?? null)
+      : null;
+  const displayed = viewingVersion ?? currentVersion;
+  const displayedWebsiteContext = viewingVersion
+    ? initialWebsiteContext(viewingVersion)
+    : (freshWebsiteContext ?? (currentVersion ? initialWebsiteContext(currentVersion) : null));
 
   async function generate() {
     if (inFlight.current) return;
@@ -260,9 +292,28 @@ export function BookletPanel({
         setError(body.error ?? "The booklet could not be generated. Try again.");
         return;
       }
-      setBooklet(body.booklet as string);
-      setWebsiteContext((body.websiteContext as WebsiteContextResult | undefined) ?? null);
-      setGeneratedAt((body.generatedAt as string | undefined) ?? null);
+      const websiteContextResult = (body.websiteContext as WebsiteContextResult | undefined) ?? null;
+      const versionId = (body.versionId as string | null) ?? null;
+      if (body.saved && !versionId) {
+        // A save the server reports as successful must come back with its row id;
+        // if it ever doesn't, that is a server contract break worth seeing, not
+        // silently absorbing — the local fallback below is display-only and this
+        // version would be unaddressable by any future server-side reference.
+        console.warn("Booklet save reported success without a versionId");
+      }
+      const newVersion: SavedBooklet = {
+        id: versionId ?? crypto.randomUUID(),
+        text: body.booklet as string,
+        websiteUrl: websiteContextResult?.status === "used" ? trimmedUrl || null : null,
+        websiteContextUsed: websiteContextResult?.status === "used",
+        generatedAt: (body.generatedAt as string | undefined) ?? new Date().toISOString(),
+      };
+      // F086 AC2: archive whatever was current, never discard it — a regenerate
+      // is additive to history, not a replacement of it.
+      setHistory((previous) => (currentVersion ? [currentVersion, ...previous] : previous));
+      setCurrentVersion(newVersion);
+      setFreshWebsiteContext(websiteContextResult);
+      setViewingVersionId(null);
       setSaveFailed(body.saved === false);
     } catch {
       if (controller.signal.aborted) return;
@@ -322,7 +373,7 @@ export function BookletPanel({
           </div>
         </div>
 
-        {(booklet || error) && !busy && (
+        {(currentVersion || error) && !busy && !viewingVersion && (
           <button
             className="shrink-0 rounded-full border border-brand/30 px-4 py-2 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
             onClick={generate}
@@ -333,7 +384,7 @@ export function BookletPanel({
         )}
       </div>
 
-      {!busy && (
+      {!busy && !viewingVersion && (
         <div className="mt-4">
           <label
             className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-foreground/55"
@@ -358,7 +409,7 @@ export function BookletPanel({
         </div>
       )}
 
-      {!booklet && !busy && !error && (
+      {!currentVersion && !busy && !error && (
         <div className="mt-6 flex flex-col items-center gap-3 rounded-xl border border-dashed border-brand/25 bg-white/60 px-6 py-8 text-center">
           <p className="max-w-sm text-sm text-foreground/65">
             Generate a quick summary of this charity&rsquo;s mission and profile
@@ -390,31 +441,88 @@ export function BookletPanel({
         </div>
       )}
 
-      {booklet && !busy && generatedAt && (
+      {/* F086: read-only banner while browsing a historical entry — the one exit
+          is "Back to current", never Regenerate (hidden above), so there is no
+          path where clicking something here looks like it edits an old version. */}
+      {viewingVersion && !busy && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2.5">
+          <p className="flex items-center gap-1.5 text-xs font-medium text-amber-800">
+            <Clock aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+            Viewing an older version — generated {formatGeneratedAt(viewingVersion.generatedAt)}
+          </p>
+          <button
+            className="shrink-0 text-xs font-bold text-amber-800 underline underline-offset-2 hover:text-amber-900"
+            onClick={() => setViewingVersionId(null)}
+            type="button"
+          >
+            Back to current
+          </button>
+        </div>
+      )}
+
+      {/* F085/F086: the saved/generated booklet stays visible even when a
+          regeneration fails — hiding it behind the error box would discard exactly
+          the artifact saving exists to preserve, and F086 makes the prior version
+          retrievable by design, so the error state must not undo that in the UI.
+          The error box above makes clear that what's shown below is the previous
+          version, not a fresh generation. */}
+      {displayed && !busy && (
         <p className="mt-1 text-xs text-foreground/45">
-          Generated {formatGeneratedAt(generatedAt)}
-          {saveFailed
+          Generated {formatGeneratedAt(displayed.generatedAt)}
+          {!viewingVersion && saveFailed
             ? " — could not be saved, will re-generate next time this client is opened."
             : "."}
         </p>
       )}
-      {/* F085: the saved/generated booklet stays visible even when a regeneration
-          fails — hiding it behind the error box would discard exactly the artifact
-          saving exists to preserve. The error box above makes clear that what's
-          shown below is the previous version, not a fresh generation. */}
-      {booklet && !busy && websiteContext && websiteContext.status !== "not_provided" && (
+      {displayed && !busy && displayedWebsiteContext && displayedWebsiteContext.status !== "not_provided" && (
         <p
           className={`mt-1 flex items-start gap-1.5 text-xs font-medium ${
-            websiteContext.status === "used" ? "text-green-700" : "text-amber-700"
+            displayedWebsiteContext.status === "used" ? "text-green-700" : "text-amber-700"
           }`}
         >
           <Globe aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          {websiteContext.status === "used"
-            ? `Used live content from ${websiteContext.hostname}.`
-            : `Website content not used — ${websiteContext.reason}`}
+          {displayedWebsiteContext.status === "used"
+            ? `Used live content from ${displayedWebsiteContext.hostname}.`
+            : `Website content not used — ${displayedWebsiteContext.reason}`}
         </p>
       )}
-      {booklet && !busy && <BookletContent booklet={booklet} />}
+      {displayed && !busy && <BookletContent booklet={displayed.text} />}
+
+      {/* F086 AC2: the timeline — every prior version stays retrievable, not just
+          timestamped. Collapsed by default so it doesn't compete with the
+          booklet itself; only rendered once there's something to browse. */}
+      {history.length > 0 && !busy && !viewingVersion && (
+        <div className="mt-6 border-t border-black/[0.06] pt-4">
+          <button
+            aria-expanded={historyOpen}
+            className="flex items-center gap-1.5 text-xs font-bold text-foreground/60 hover:text-foreground/80"
+            onClick={() => setHistoryOpen((open) => !open)}
+            type="button"
+          >
+            <Clock aria-hidden="true" className="h-3.5 w-3.5" />
+            {historyOpen ? "Hide" : "Show"} history ({history.length} prior version{history.length === 1 ? "" : "s"})
+          </button>
+          {historyOpen && (
+            <ul className="mt-3 space-y-1.5">
+              {history.map((version) => (
+                <li key={version.id}>
+                  <button
+                    className={`w-full rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                      viewingVersionId === version.id
+                        ? "bg-brand/10 font-bold text-brand-hover"
+                        : "text-foreground/65 hover:bg-black/[0.03]"
+                    }`}
+                    onClick={() => setViewingVersionId(version.id)}
+                    type="button"
+                  >
+                    Generated {formatGeneratedAt(version.generatedAt)}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </section>
   );
 }

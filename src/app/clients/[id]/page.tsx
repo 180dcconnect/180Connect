@@ -50,11 +50,18 @@ import { TimelineRealtimeRefresher } from "./timeline-realtime";
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
 type SavedBookletRow = {
+  id: string;
   booklet_text: string;
   website_url: string | null;
   website_context_used: boolean;
   generated_at: string;
 };
+
+// F086: how many past versions the page prefetches for the timeline. Capped
+// rather than unbounded — a client regenerated many times over months does not
+// need its entire history loaded on every page view; recent history is what a
+// CAM actually compares against.
+const BOOKLET_HISTORY_LIMIT = 20;
 type LatestSuppression = {
   status: "pending" | "active" | "rejected" | "lifted";
   reason: string;
@@ -130,21 +137,25 @@ export default async function ClientDetailPage({
   const websiteLink = websiteHref(website);
   const email = validateClientEmail(client.contact_email);
 
-  // F085: a saved booklet, if one exists, so BookletPanel can render it immediately
-  // instead of triggering a fresh (billed) Gemini generation on every page open.
-  // An errored read is not fatal — the panel just falls back to its empty state.
-  const { data: savedBooklet, error: savedBookletError } = await supabase
+  // F085/F086: every saved version, most recent first, so BookletPanel can render
+  // the current one immediately (no fresh, billed Gemini call on page open) and
+  // list the rest as a timeline a CAM can browse (F086 AC2: a regeneration must
+  // never make a prior version unrecoverable).
+  const { data: bookletVersions, error: bookletVersionsError } = await supabase
     .from("client_booklets")
-    .select("booklet_text, website_url, website_context_used, generated_at")
+    .select("id, booklet_text, website_url, website_context_used, generated_at")
     .eq("organisation_id", id)
-    .maybeSingle<SavedBookletRow>();
+    .order("generated_at", { ascending: false })
+    .limit(BOOKLET_HISTORY_LIMIT)
+    .returns<SavedBookletRow[]>();
 
-  if (savedBookletError) {
-    await reportError(savedBookletError, {
+  if (bookletVersionsError) {
+    await reportError(bookletVersionsError, {
       operation: "clients.detail_saved_booklet",
       organisationId: id,
     });
   }
+  const savedBooklet = bookletVersions?.[0] ?? null;
 
   // ENRICHMENT_RESULTS is append-only (20260804180000_create_org_children.sql), so
   // the most recently enriched row is "the" mission statement, not the only one.
@@ -567,12 +578,20 @@ export default async function ClientDetailPage({
                   }
                   savedBooklet={
                     savedBooklet && {
+                      id: savedBooklet.id,
                       text: savedBooklet.booklet_text,
                       websiteUrl: savedBooklet.website_url,
                       websiteContextUsed: savedBooklet.website_context_used,
                       generatedAt: savedBooklet.generated_at,
                     }
                   }
+                  priorVersions={(bookletVersions ?? []).slice(1).map((version) => ({
+                    id: version.id,
+                    text: version.booklet_text,
+                    websiteUrl: version.website_url,
+                    websiteContextUsed: version.website_context_used,
+                    generatedAt: version.generated_at,
+                  }))}
                 />
               </Rise>
             )}

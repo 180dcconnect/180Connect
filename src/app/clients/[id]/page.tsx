@@ -13,6 +13,7 @@ import {
 import { checkWebsiteReachabilityCached } from "@/lib/website-reachability-cache";
 import { websiteHref } from "@/lib/website-validation";
 import { formatLocation, formatOutreachStatus } from "@/lib/organisation-format";
+import { ExternalLink } from "lucide-react";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
 import { SuppressButton } from "./suppress-button";
@@ -486,7 +487,8 @@ export default async function ClientDetailPage({
                     <dd className="w-full text-sm leading-[1.6]">
                       {websiteLink ? (
                         <a
-                          className={`break-all underline underline-offset-2 transition-colors ${
+                          aria-label={`Tap to open website ${websiteLink} in new tab`}
+                          className={`group inline-flex items-center gap-1.5 break-all underline decoration-1 underline-offset-2 transition-colors ${
                             website.status === "reachable"
                               ? "text-brand-hover hover:text-brand"
                               : "font-bold text-destructive"
@@ -494,8 +496,13 @@ export default async function ClientDetailPage({
                           href={websiteLink}
                           rel="noreferrer"
                           target="_blank"
+                          title="Tap to open website in new tab"
                         >
-                          {websiteLink}
+                          <span className="break-all">{websiteLink}</span>
+                          <ExternalLink
+                            aria-hidden="true"
+                            className="h-3.5 w-3.5 shrink-0 opacity-60 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                          />
                         </a>
                       ) : website.url ? (
                         // Malformed: show what is stored, as text. There is
@@ -505,6 +512,11 @@ export default async function ClientDetailPage({
                         <span className="text-foreground/35">Not provided</span>
                       )}
                     </dd>
+                    {websiteLink && (
+                      <p className="w-full text-[11px] font-medium tracking-wide text-foreground/40">
+                        Tap to open in new tab
+                      </p>
+                    )}
                     {website.message && (
                       <p className="w-full text-[13px] leading-[1.6] text-destructive/80" role="alert">
                         {website.message} Booklet generation may use unreliable or missing

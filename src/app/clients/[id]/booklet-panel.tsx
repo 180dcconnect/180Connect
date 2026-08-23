@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Sparkles } from "lucide-react";
+import { ExternalLink, Sparkles } from "lucide-react";
 import { parseBookletSections } from "@/lib/booklet/parse-sections";
 
 /**
@@ -83,6 +83,47 @@ function BookletLoadingState() {
   );
 }
 
+// Matches bare URLs Gemini may emit (the prompt says "plain text only").
+// Trailing punctuation like "." or ")" is stripped so "https://example.org." links correctly.
+const BOOKLET_URL_RE = /(https?:\/\/[^\s]+)/g;
+
+function LinkifiedText({ text }: { text: string }) {
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  const re = new RegExp(BOOKLET_URL_RE.source, "g");
+  while ((match = re.exec(text)) !== null) {
+    const raw = match[0];
+    // Peel off trailing punctuation that is sentence punctuation, not part of the URL.
+    const trimmed = raw.replace(/[.,;:)!?]+$/, "");
+    const trailing = raw.slice(trimmed.length);
+    const start = match.index;
+    if (start > lastIndex) parts.push(text.slice(lastIndex, start));
+    parts.push(
+      <a
+        key={`${start}-${trimmed}`}
+        aria-label={`Tap to open ${trimmed} in new tab`}
+        className="group inline-flex items-center gap-1 break-all text-brand-hover underline decoration-1 underline-offset-2 hover:text-brand"
+        href={trimmed}
+        rel="noreferrer"
+        target="_blank"
+        title="Tap to open in new tab"
+      >
+        <span>{trimmed}</span>
+        <ExternalLink
+          aria-hidden="true"
+          className="h-3 w-3 shrink-0 opacity-60 transition-opacity group-hover:opacity-100"
+        />
+      </a>,
+    );
+    if (trailing) parts.push(trailing);
+    lastIndex = start + raw.length;
+  }
+  if (parts.length === 0) return <>{text}</>;
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return <>{parts}</>;
+}
+
 function BookletContent({ booklet }: { booklet: string }) {
   const blocks = parseBookletSections(booklet);
   return (
@@ -102,14 +143,16 @@ function BookletContent({ booklet }: { booklet: string }) {
           return (
             <ul className="list-disc space-y-1 pl-5 text-[15px] leading-relaxed text-foreground/85" key={index}>
               {block.items.map((item, itemIndex) => (
-                <li key={itemIndex}>{item}</li>
+                <li key={itemIndex}>
+                  <LinkifiedText text={item} />
+                </li>
               ))}
             </ul>
           );
         }
         return (
           <p className="text-[15px] leading-relaxed text-foreground/85" key={index}>
-            {block.text}
+            <LinkifiedText text={block.text} />
           </p>
         );
       })}

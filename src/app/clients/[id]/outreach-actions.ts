@@ -7,6 +7,7 @@ import { canSendClientOutreach } from "@/lib/client-email-validation";
 import { reportError } from "@/lib/error-logging";
 import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
 import { checkSuppressionBeforeSend, suppressionBlockedMessage } from "@/lib/outreach/suppression-check";
+import { emailLimitMessage, resolveEmailSendLimit } from "@/lib/outreach/send-rate-limit";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { nonEmptyTrimmed, safeValidate } from "@/lib/validation";
@@ -132,6 +133,20 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
     : draft.organisations;
   const decision = canSendClientOutreach(contact?.email ?? organisation?.contact_email, explicitlyApproved);
   if (!decision.allowed) return { ok: false, message: decision.warning };
+
+  const sendLimit = resolveEmailSendLimit();
+  const windowStart = new Date(Date.now() - sendLimit.windowSeconds * 1000).toISOString();
+  const { count: recentSendCount, error: limitError } = await supabase
+    .from("outreach_messages")
+    .select("id", { count: "exact", head: true })
+    .eq("sent_by_user_id", authorization.actor.id)
+    .eq("send_status", "sent")
+    .gte("sent_at", windowStart);
+  if (limitError || recentSendCount === null) {
+    if (limitError) await reportError(limitError, { operation: "outreach.send.rate_limit", messageId });
+    return { ok: false, message: "The sending limit could not be checked. Nothing was sent." };
+  }
+  if (recentSendCount >= sendLimit.maximum) return { ok: false, message: emailLimitMessage(sendLimit.windowSeconds) };
 
   // Save the exact reviewed content first. A failed provider call leaves an editable
   // draft containing precisely what the CAM attempted, never the earlier AI output.

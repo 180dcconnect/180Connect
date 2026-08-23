@@ -290,6 +290,20 @@ export const SCHEMA: readonly EnvVarSpec[] = [
         : "must be a positive whole number of seconds",
   },
   {
+    name: "EMAIL_SEND_RATE_LIMIT",
+    required: false,
+    secret: false,
+    description: "Maximum outreach emails each CAM may send per fixed window. Optional; defaults to 100.",
+    validate: (value) => /^\d+$/.test(value) && Number(value) > 0 ? null : "must be a positive whole number of emails",
+  },
+  {
+    name: "EMAIL_SEND_RATE_WINDOW_SECONDS",
+    required: false,
+    secret: false,
+    description: "Fixed-window duration for EMAIL_SEND_RATE_LIMIT. Optional; defaults to 3600 seconds.",
+    validate: (value) => /^\d+$/.test(value) && Number(value) > 0 ? null : "must be a positive whole number of seconds",
+  },
+  {
     name: "CHARITY_COMMISSION_BACKFILL_START",
     required: false,
     secret: false,

@@ -32,7 +32,7 @@ describe("navigation", () => {
   it("gives every role their own profile", () => {
     for (const role of ROLES) {
       const hrefs = navItemsFor(role).map((item) => item.href);
-      assert.ok(hrefs.includes("/profile"));
+      assert.ok(hrefs.includes("/settings/profile"));
     }
   });
 

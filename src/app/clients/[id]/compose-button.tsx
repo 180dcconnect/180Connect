@@ -3,12 +3,23 @@
 import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
+import { EMAIL_LENGTHS, EMAIL_VOICES, type EmailLength, type EmailVoice } from "@/lib/outreach/stage-one-prompt";
 
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
 type Draft = { id: string; subject: string; body: string };
-type EmailLength = "short" | "standard" | "detailed";
-type EmailVoice = "180dc" | "consultative" | "plain_language";
+
+const EMAIL_LENGTH_LABELS: Record<EmailLength, string> = {
+  short: "Short",
+  standard: "Standard",
+  detailed: "Detailed",
+};
+
+const EMAIL_VOICE_LABELS: Record<EmailVoice, string> = {
+  "180dc": "180DC Sheffield",
+  consultative: "Consultative",
+  plain_language: "Plain language",
+};
 
 /** F100 creates a review draft only, after the current outreach preflight passes. */
 export function ComposeButton({
@@ -96,9 +107,11 @@ export function ComposeButton({
           onChange={(event) => setLength(event.target.value as EmailLength)}
           value={length}
         >
-          <option value="short">Short</option>
-          <option value="standard">Standard</option>
-          <option value="detailed">Detailed</option>
+          {EMAIL_LENGTHS.map((value) => (
+            <option key={value} value={value}>
+              {EMAIL_LENGTH_LABELS[value]}
+            </option>
+          ))}
         </select>
       </label>
       <label className="block max-w-xs text-xs font-bold text-foreground/65">
@@ -109,9 +122,11 @@ export function ComposeButton({
           onChange={(event) => setVoice(event.target.value as EmailVoice)}
           value={voice}
         >
-          <option value="180dc">180DC Sheffield</option>
-          <option value="consultative">Consultative</option>
-          <option value="plain_language">Plain language</option>
+          {EMAIL_VOICES.map((value) => (
+            <option key={value} value={value}>
+              {EMAIL_VOICE_LABELS[value]}
+            </option>
+          ))}
         </select>
       </label>
       <OriginButton variant="outline" size="sm" onClick={generate} disabled={busy} type="button">

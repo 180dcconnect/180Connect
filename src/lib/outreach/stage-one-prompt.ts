@@ -19,9 +19,9 @@ export const EMAIL_VOICES = ["180dc", "consultative", "plain_language"] as const
 export type EmailVoice = (typeof EMAIL_VOICES)[number];
 
 const LENGTH_INSTRUCTIONS: Record<EmailLength, string> = {
-  short: "Keep the body between 70 and 110 words, with no more than three short paragraphs.",
-  standard: "Keep the body between 120 and 180 words, with clear, readable paragraphs.",
-  detailed: "Keep the body between 190 and 260 words, adding useful context without repetition.",
+  short: "Keep the body between 70 and 100 words, with no more than three short paragraphs.",
+  standard: "Keep the body between 130 and 170 words, with clear, readable paragraphs.",
+  detailed: "Keep the body between 200 and 260 words, adding useful context without repetition.",
 };
 
 const VOICE_INSTRUCTIONS: Record<EmailVoice, string> = {

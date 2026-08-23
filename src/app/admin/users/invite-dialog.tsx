@@ -22,7 +22,7 @@ export function InviteDialog() {
           Invite a team member
         </OriginButton>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Invite a team member</DialogTitle>
           <DialogDescription>

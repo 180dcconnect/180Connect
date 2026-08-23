@@ -8,7 +8,8 @@
 // Which register is not a fixed choice, and this is the part of F037 the ticket got
 // wrong by assuming charities. 180Connect's clients are charities, non-profits,
 // CICs and sustainability-focused companies, and organisation_type has said
-// 'charity' | 'company' | 'both' | 'other' since the schema was created. A charitable
+// 'charity' | 'cio' | 'cic' | 'social_enterprise' | 'ngo' | 'company' | 'both' |
+// 'other' since F041 expansion. A charitable
 // company appears on both registers and should be looked up on both. A CIC appears
 // only on Companies House. Neither register is the default; what the site prints
 // about itself decides.
@@ -174,12 +175,23 @@ export async function resolveRegistry(
  * Returns null when neither register confirmed anything — an unconfirmed guess at
  * organisation_type is worse than an empty dropdown, because F047 gates eligibility
  * on this value and 'charity' waves a record through checks 'company' does not.
+ * When only Companies House confirmed, preserve its finer type (cic/cio/social_enterprise)
+ * rather than collapsing back to "company".
  */
-export function organisationTypeFrom(matches: RegistryMatch[]): "charity" | "company" | "both" | null {
+export function organisationTypeFrom(
+  matches: RegistryMatch[],
+): "charity" | "cio" | "cic" | "social_enterprise" | "ngo" | "company" | "both" | "other" | null {
   const charity = matches.some((match) => match.source === "charity_commission");
-  const company = matches.some((match) => match.source === "companies_house");
+  const companyMatch = matches.find((match) => match.source === "companies_house");
+  const company = Boolean(companyMatch);
   if (charity && company) return "both";
   if (charity) return "charity";
+  if (companyMatch) {
+    const t = companyMatch.organisation.organisation_type;
+    // trust the mapper's finer type; fall back to "company" if it returned generic
+    if (t === "cic" || t === "cio" || t === "social_enterprise" || t === "ngo" || t === "company") return t;
+    return "company";
+  }
   if (company) return "company";
   return null;
 }

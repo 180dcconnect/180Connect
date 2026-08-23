@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { ExternalLink, Sparkles } from "lucide-react";
+import { ExternalLink, Globe, Sparkles } from "lucide-react";
 import { parseBookletSections } from "@/lib/booklet/parse-sections";
 
 /**
@@ -28,6 +28,16 @@ import { parseBookletSections } from "@/lib/booklet/parse-sections";
  * turns the "Label:" lines the system prompt asks Gemini for into real headings,
  * and dash-bulleted blocks into a real list — see that file for why this only
  * works because the prompt dictates that exact format.
+ *
+ * F084 — Use Website URL in Booklet: the URL field below is pre-filled from the
+ * client's already-known, already-reachable website (page.tsx passes
+ * `initialWebsiteUrl`) but stays editable — a CAM can clear it, paste a different
+ * page entirely, or fill one in when none is on record. Whatever's in the field at
+ * generate time is what gets sent; the route re-validates it with F046's
+ * validateWebsiteFormat and fetches it through F037's shared robots-aware,
+ * SSRF-safe transport (scrape-website.ts) fresh on every click — nothing is cached,
+ * same "no persistence yet" reasoning as the booklet itself. Whether the site's
+ * content actually made it in is reported back as a status line under the booklet.
  */
 
 const STATUS_MESSAGES = [
@@ -160,10 +170,23 @@ function BookletContent({ booklet }: { booklet: string }) {
   );
 }
 
-export function BookletPanel({ organisationId }: { organisationId: string }) {
+type WebsiteContextResult =
+  | { status: "not_provided" }
+  | { status: "used"; hostname: string }
+  | { status: "skipped"; reason: string };
+
+export function BookletPanel({
+  organisationId,
+  initialWebsiteUrl,
+}: {
+  organisationId: string;
+  initialWebsiteUrl: string | null;
+}) {
   const [booklet, setBooklet] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [websiteUrl, setWebsiteUrl] = useState(initialWebsiteUrl ?? "");
+  const [websiteContext, setWebsiteContext] = useState<WebsiteContextResult | null>(null);
   const sectionRef = useRef<HTMLElement>(null);
   const autoTriggered = useRef(false);
   // Ref, not the busy state: two clicks inside one render window both read
@@ -188,8 +211,11 @@ export function BookletPanel({ organisationId }: { organisationId: string }) {
     const controller = new AbortController();
     abortRef.current = controller;
     try {
+      const trimmedUrl = websiteUrl.trim();
       const response = await fetch(`/api/clients/${organisationId}/booklet`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(trimmedUrl ? { websiteUrl: trimmedUrl } : {}),
         signal: controller.signal,
       });
       const body = await response.json();
@@ -198,6 +224,7 @@ export function BookletPanel({ organisationId }: { organisationId: string }) {
         return;
       }
       setBooklet(body.booklet as string);
+      setWebsiteContext((body.websiteContext as WebsiteContextResult | undefined) ?? null);
     } catch {
       if (controller.signal.aborted) return;
       setError("Could not reach the server. Check your connection and try again.");
@@ -267,6 +294,31 @@ export function BookletPanel({ organisationId }: { organisationId: string }) {
         )}
       </div>
 
+      {!busy && (
+        <div className="mt-4">
+          <label
+            className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-foreground/55"
+            htmlFor="booklet-website-url"
+          >
+            <Globe aria-hidden="true" className="h-3.5 w-3.5" />
+            Website URL for extra context (optional)
+          </label>
+          <input
+            className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm text-foreground placeholder:text-foreground/40 focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            id="booklet-website-url"
+            onChange={(event) => setWebsiteUrl(event.target.value)}
+            onKeyDown={(event) => {
+              // generate() itself refuses concurrent runs (inFlight guard), so a
+              // second Enter mid-generation is a no-op, not a second paid call.
+              if (event.key === "Enter") generate();
+            }}
+            placeholder="https://example.org"
+            type="url"
+            value={websiteUrl}
+          />
+        </div>
+      )}
+
       {!booklet && !busy && !error && (
         <div className="mt-6 flex flex-col items-center gap-3 rounded-xl border border-dashed border-brand/25 bg-white/60 px-6 py-8 text-center">
           <p className="max-w-sm text-sm text-foreground/65">
@@ -299,6 +351,18 @@ export function BookletPanel({ organisationId }: { organisationId: string }) {
         </div>
       )}
 
+      {booklet && !busy && !error && websiteContext && websiteContext.status !== "not_provided" && (
+        <p
+          className={`mt-1 flex items-start gap-1.5 text-xs font-medium ${
+            websiteContext.status === "used" ? "text-green-700" : "text-amber-700"
+          }`}
+        >
+          <Globe aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {websiteContext.status === "used"
+            ? `Used live content from ${websiteContext.hostname}.`
+            : `Website content not used — ${websiteContext.reason}`}
+        </p>
+      )}
       {booklet && !busy && !error && (
         <p className="mt-1 text-xs text-foreground/45">
           Not saved yet — regenerating replaces it.

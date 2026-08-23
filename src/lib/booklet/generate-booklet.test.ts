@@ -61,6 +61,32 @@ describe("generateBooklet", () => {
     assert.deepEqual(result, { error: "The booklet could not be generated. Try again." });
   });
 
+  it("threads a scraped websiteContext through to the prompt (F084)", async () => {
+    let calls = 0;
+    await generateBooklet(
+      {
+        ...INPUT,
+        websiteContext: { text: "We run weekly youth clubs.", hostname: "test-charity.org" },
+      },
+      fakeDeps(async (input) => {
+        calls += 1;
+        assert.match(input.prompt, /We run weekly youth clubs\./);
+        return { text: "booklet text", model: "gemini-test" };
+      }),
+    );
+    assert.equal(calls, 1);
+  });
+
+  it("omits any website-context section when none was scraped", async () => {
+    await generateBooklet(
+      { ...INPUT, websiteContext: null },
+      fakeDeps(async (input) => {
+        assert.doesNotMatch(input.prompt, /Extracted text from/);
+        return { text: "booklet text", model: "gemini-test" };
+      }),
+    );
+  });
+
   it("treats an empty response as a failure rather than an empty success", async () => {
     const result = await generateBooklet(
       INPUT,

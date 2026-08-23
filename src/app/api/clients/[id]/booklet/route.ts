@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { isUuid } from "@/lib/validation";
+import { logApiHealth } from "@/lib/api-health-log";
 import {
   createDefaultGenerateBookletDeps,
   generateBooklet,
@@ -11,12 +13,32 @@ import type {
   BookletEnrichmentInput,
   BookletOrganisationInput,
 } from "@/lib/booklet/build-prompt";
+import {
+  createDefaultScrapeDependencies,
+  fetchWebsiteContext,
+} from "@/lib/booklet/scrape-website";
+
+// F084 — Use Website URL in Booklet: an optional URL the CAM pastes in, separate
+// from the stored organisation.website (which is always sent as a plain field
+// regardless — see build-prompt.ts). Malformed/unreachable/unscrapable is never a
+// 400 here — AC3 says generation still proceeds without it, so this is reported
+// back to the CAM as a status, not a request-rejecting validation error.
+const RequestBodySchema = z.object({
+  websiteUrl: z.string().trim().max(2048).optional(),
+});
+
+type WebsiteContextResult =
+  | { status: "not_provided" }
+  | { status: "used"; hostname: string }
+  | { status: "skipped"; reason: string };
 
 /**
- * F082 — Generate Client Booklet. Every call generates fresh from Gemini (F085's
- * saved-booklet read/write is separate, #382). After a successful generation the
- * exact prompt and output are written to booklet_generations — F082 AC5 / F112's
- * audit requirement. See generate-booklet.ts for the Gemini call itself.
+ * F082 — Generate Client Booklet, extended by F084 — Use Website URL in Booklet.
+ * Every call generates fresh from Gemini (F085's saved-booklet read/write is
+ * separate, #382). After a successful generation the exact prompt and output are
+ * written to booklet_generations — F082 AC5 / F112's audit requirement. See
+ * generate-booklet.ts for the Gemini call and scrape-website.ts for the optional
+ * website-context fetch this route does first.
  *
  * client:contact, not client:view — this calls a paid external API on every click,
  * same reasoning as gating the Outreach section on the client detail page.
@@ -36,7 +58,7 @@ function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
 }
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
@@ -46,6 +68,14 @@ export async function POST(
   if (!isUuid(organisationId)) {
     return NextResponse.json({ error: "That client could not be found." }, { status: 400 });
   }
+
+  // Body is optional (a plain click, no URL) — default to {} so an empty request
+  // still parses cleanly against the all-optional schema instead of failing on `null`.
+  const parsedBody = RequestBodySchema.safeParse(await request.json().catch(() => ({})));
+  if (!parsedBody.success) {
+    return NextResponse.json({ error: "The request body must be valid JSON." }, { status: 400 });
+  }
+  const { websiteUrl } = parsedBody.data;
 
   const supabase = await createClient();
 
@@ -86,8 +116,30 @@ export async function POST(
     });
   }
 
+  // F084: an optional CAM-pasted URL, scraped up front here (a route-level
+  // concern, same as the two DB reads above) so generateBooklet's own job stays
+  // limited to building the prompt and calling Gemini. fetchImportPage already
+  // reports its own failures to ERROR_LOG, so only the API_HEALTH_LOGS entry is
+  // recorded here.
+  let websiteContext: { text: string; hostname: string } | null = null;
+  let websiteContextResult: WebsiteContextResult = { status: "not_provided" };
+
+  if (websiteUrl) {
+    const scrapeStartedAt = Date.now();
+    const scraped = await fetchWebsiteContext(websiteUrl, createDefaultScrapeDependencies());
+    logApiHealth("website", "booklet.scrape_context", scraped.status === "used", scrapeStartedAt, {
+      organisationId,
+    });
+    if (scraped.status === "used") {
+      websiteContext = { text: scraped.text, hostname: scraped.hostname };
+      websiteContextResult = { status: "used", hostname: scraped.hostname };
+    } else {
+      websiteContextResult = { status: "skipped", reason: scraped.reason };
+    }
+  }
+
   const result = await generateBooklet(
-    { organisationId, organisation, enrichment: enrichment ?? null },
+    { organisationId, organisation, enrichment: enrichment ?? null, websiteContext },
     createDefaultGenerateBookletDeps(),
   );
 
@@ -115,5 +167,5 @@ export async function POST(
     });
   }
 
-  return NextResponse.json({ booklet: result.booklet });
+  return NextResponse.json({ booklet: result.booklet, websiteContext: websiteContextResult });
 }

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
 import { BOOKLET_GENERATED_EVENT, type BookletGeneratedDetail } from "@/lib/booklet/browser-event";
-import { sendReviewedEmail } from "./outreach-actions";
+import { scheduleReviewedEmail, sendReviewedEmail } from "./outreach-actions";
 
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
@@ -54,6 +54,7 @@ export function ComposeButton({
   const [approved, setApproved] = useState(false);
   const [sendMessage, setSendMessage] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState("");
 
   useEffect(() => {
     function receiveBooklet(event: Event) {
@@ -116,6 +117,15 @@ export function ComposeButton({
       body,
       explicitlyApproved: approved,
     });
+    setSendMessage(result.message);
+    if (result.ok) setDraft(null);
+    setSending(false);
+  }
+
+  async function schedule() {
+    if (!draft || !scheduledAt) return;
+    setSending(true);
+    const result = await scheduleReviewedEmail({ organisationId, messageId: draft.id, subject, body, explicitlyApproved: approved, scheduledAt: new Date(scheduledAt).toISOString() });
     setSendMessage(result.message);
     if (result.ok) setDraft(null);
     setSending(false);
@@ -246,6 +256,15 @@ export function ComposeButton({
           <OriginButton disabled={!approved || sending || !subject.trim() || !body.trim()} onClick={send} type="button">
             {sending ? "Sending…" : "Send reviewed email"}
           </OriginButton>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="text-xs font-bold text-foreground/65">
+              Or schedule for later
+              <input className="mt-1 block rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" min={new Date().toISOString().slice(0, 16)} onChange={(event) => setScheduledAt(event.target.value)} type="datetime-local" value={scheduledAt} />
+            </label>
+            <OriginButton disabled={!approved || sending || !scheduledAt || !subject.trim() || !body.trim()} onClick={schedule} type="button" variant="outline">
+              Schedule reviewed email
+            </OriginButton>
+          </div>
           <p className="text-xs font-bold text-amber-800" role="status">
             {sendMessage ?? "Not sent — explicit human review and Send action are required."}
           </p>

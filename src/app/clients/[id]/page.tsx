@@ -30,6 +30,7 @@ import {
   type OwnershipRequestStatus,
 } from "@/lib/ownership-requests";
 import { RequestOwnershipForm } from "./request-ownership-form";
+import { ScheduledEmailList } from "./scheduled-email-list";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -50,6 +51,7 @@ type SentEmailRow = {
   sent_at: string;
   sent_by_user: { full_name: string | null } | null;
 };
+type ScheduledEmailRow = { id: string; subject: string; scheduled_at: string };
 
 /**
  * F067 (#69) Client Detail Page / F068 (#70) View Client Basic Info: opens from the
@@ -209,6 +211,14 @@ export default async function ClientDetailPage({
   if (sentEmailsError) {
     await reportError(sentEmailsError, { operation: "clients.detail_sent_emails", organisationId: id });
   }
+  const { data: scheduledEmails, error: scheduledEmailsError } = await supabase
+    .from("outreach_messages")
+    .select("id, subject, scheduled_at")
+    .eq("organisation_id", id)
+    .eq("send_status", "scheduled")
+    .order("scheduled_at", { ascending: true })
+    .returns<ScheduledEmailRow[]>();
+  if (scheduledEmailsError) await reportError(scheduledEmailsError, { operation: "clients.detail_scheduled_emails", organisationId: id });
 
   // Deliberately not `ownerName`: that falls back to "A former team member" for a
   // deleted owner, which the warning would read back as a person to go and talk to.
@@ -581,6 +591,7 @@ export default async function ClientDetailPage({
                         ownershipConflict.hasConflict ? ownershipConflict.warning : undefined
                       }
                     />
+                    <ScheduledEmailList organisationId={client.id} messages={scheduledEmails ?? []} />
                   </div>
                 </SectionCard>
               </Rise>

@@ -25,6 +25,57 @@ export type ReviewedSendResult =
   | { ok: true; message: string }
   | { ok: false; message: string };
 
+const scheduleSchema = reviewedEmailSchema.extend({ scheduledAt: z.iso.datetime() });
+
+export async function scheduleReviewedEmail(input: unknown): Promise<ReviewedSendResult> {
+  const parsed = safeValidate(scheduleSchema, input);
+  if (!parsed.success) {
+    return { ok: false, message: Object.values(parsed.fieldErrors).flat().find(Boolean) ?? "Check the schedule and try again." };
+  }
+  if (new Date(parsed.data.scheduledAt).getTime() <= Date.now()) {
+    return { ok: false, message: "Choose a future date and time." };
+  }
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) return { ok: false, message: actorFailureMessage(authorization.reason) };
+
+  const supabase = await createClient();
+  const suppression = await checkSuppressionBeforeSend(parsed.data.organisationId, async (id) => {
+    const { data, error } = await supabase.from("suppressions").select("id, reason").eq("organisation_id", id).eq("status", "active").maybeSingle();
+    if (error) throw error;
+    return data;
+  });
+  if (!suppression.allowed) {
+    return { ok: false, message: suppression.kind === "suppressed" ? suppressionBlockedMessage(suppression.reason) : "Suppression status could not be verified. Nothing was scheduled." };
+  }
+  const { data: draft } = await supabase.from("outreach_messages").select("send_status").eq("id", parsed.data.messageId).eq("organisation_id", parsed.data.organisationId).maybeSingle();
+  if (draft?.send_status !== "draft") return { ok: false, message: "This email is no longer an unsent draft." };
+  const { error } = await supabase.from("outreach_messages").update({
+    subject: parsed.data.subject,
+    body: parsed.data.body,
+    sent_by_user_id: authorization.actor.id,
+    send_status: "scheduled",
+    scheduled_at: parsed.data.scheduledAt,
+  }).eq("id", parsed.data.messageId).eq("send_status", "draft");
+  if (error) {
+    await reportError(error, { operation: "outreach.schedule", messageId: parsed.data.messageId });
+    return { ok: false, message: "The email could not be scheduled. Try again." };
+  }
+  revalidatePath(`/clients/${parsed.data.organisationId}`);
+  return { ok: true, message: `Email scheduled for ${new Date(parsed.data.scheduledAt).toLocaleString("en-GB")}.` };
+}
+
+export async function cancelScheduledEmail(input: unknown): Promise<ReviewedSendResult> {
+  const parsed = safeValidate(z.object({ organisationId: z.uuid(), messageId: z.uuid() }), input);
+  if (!parsed.success) return { ok: false, message: "That scheduled email could not be identified." };
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) return { ok: false, message: actorFailureMessage(authorization.reason) };
+  const supabase = await createClient();
+  const { error } = await supabase.from("outreach_messages").update({ send_status: "draft", scheduled_at: null }).eq("id", parsed.data.messageId).eq("organisation_id", parsed.data.organisationId).eq("send_status", "scheduled");
+  if (error) return { ok: false, message: "The scheduled email could not be cancelled." };
+  revalidatePath(`/clients/${parsed.data.organisationId}`);
+  return { ok: true, message: "Scheduled send cancelled. The email is a draft again." };
+}
+
 /** F123/F250: the sole deliberate, human-approved outreach send action. */
 export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendResult> {
   const parsed = safeValidate(reviewedEmailSchema, input);

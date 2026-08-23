@@ -8,6 +8,7 @@ import { reportError } from "@/lib/error-logging";
 import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
 import { checkSuppressionBeforeSend, suppressionBlockedMessage } from "@/lib/outreach/suppression-check";
 import { emailLimitMessage, resolveEmailSendLimit } from "@/lib/outreach/send-rate-limit";
+import { humanReviewDecision } from "@/lib/outreach/human-review";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { nonEmptyTrimmed, safeValidate } from "@/lib/validation";
@@ -17,9 +18,7 @@ const reviewedEmailSchema = z.object({
   messageId: z.uuid(),
   subject: nonEmptyTrimmed(998, "Add a subject before sending."),
   body: nonEmptyTrimmed(100_000, "Add email content before sending."),
-  explicitlyApproved: z.literal(true, {
-    error: "Review the email and confirm approval before sending.",
-  }),
+  explicitlyApproved: z.boolean(),
 });
 
 export type ReviewedSendResult =
@@ -33,6 +32,8 @@ export async function scheduleReviewedEmail(input: unknown): Promise<ReviewedSen
   if (!parsed.success) {
     return { ok: false, message: Object.values(parsed.fieldErrors).flat().find(Boolean) ?? "Check the schedule and try again." };
   }
+  const review = humanReviewDecision("scheduled", parsed.data.explicitlyApproved);
+  if (!review.allowed) return { ok: false, message: review.message };
   if (new Date(parsed.data.scheduledAt).getTime() <= Date.now()) {
     return { ok: false, message: "Choose a future date and time." };
   }
@@ -93,6 +94,8 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   }
 
   const { organisationId, messageId, subject, body, explicitlyApproved } = parsed.data;
+  const review = humanReviewDecision("stage_one", explicitlyApproved);
+  if (!review.allowed) return { ok: false, message: review.message };
   const supabase = await createClient();
   const { data: draft, error: draftError } = await supabase
     .from("outreach_messages")

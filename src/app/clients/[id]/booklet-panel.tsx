@@ -175,18 +175,55 @@ type WebsiteContextResult =
   | { status: "used"; hostname: string }
   | { status: "skipped"; reason: string };
 
+export type SavedBooklet = {
+  text: string;
+  websiteUrl: string | null;
+  websiteContextUsed: boolean;
+  generatedAt: string;
+};
+
+function formatGeneratedAt(iso: string): string {
+  return new Date(iso).toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Best-effort label for a saved booklet's website context — no reason is stored for a skip. */
+function initialWebsiteContext(saved: SavedBooklet): WebsiteContextResult | null {
+  if (!saved.websiteContextUsed || !saved.websiteUrl) return null;
+  try {
+    return { status: "used", hostname: new URL(saved.websiteUrl).hostname };
+  } catch {
+    return null;
+  }
+}
+
 export function BookletPanel({
   organisationId,
   initialWebsiteUrl,
+  savedBooklet,
 }: {
   organisationId: string;
   initialWebsiteUrl: string | null;
+  savedBooklet: SavedBooklet | null;
 }) {
-  const [booklet, setBooklet] = useState<string | null>(null);
+  // F085: seeded straight from the server-read CLIENT_BOOKLETS row, so a client
+  // with a saved booklet renders it on first paint with zero fetch and zero
+  // Gemini cost (AC2). The route saves after every successful generate(), so this
+  // is only stale within the current tab's own session.
+  const [booklet, setBooklet] = useState<string | null>(savedBooklet?.text ?? null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [websiteUrl, setWebsiteUrl] = useState(initialWebsiteUrl ?? "");
-  const [websiteContext, setWebsiteContext] = useState<WebsiteContextResult | null>(null);
+  const [websiteContext, setWebsiteContext] = useState<WebsiteContextResult | null>(
+    savedBooklet ? initialWebsiteContext(savedBooklet) : null,
+  );
+  const [generatedAt, setGeneratedAt] = useState<string | null>(savedBooklet?.generatedAt ?? null);
+  const [saveFailed, setSaveFailed] = useState(false);
   const sectionRef = useRef<HTMLElement>(null);
   const autoTriggered = useRef(false);
   // Ref, not the busy state: two clicks inside one render window both read
@@ -225,6 +262,8 @@ export function BookletPanel({
       }
       setBooklet(body.booklet as string);
       setWebsiteContext((body.websiteContext as WebsiteContextResult | undefined) ?? null);
+      setGeneratedAt((body.generatedAt as string | undefined) ?? null);
+      setSaveFailed(body.saved === false);
     } catch {
       if (controller.signal.aborted) return;
       setError("Could not reach the server. Check your connection and try again.");
@@ -351,7 +390,19 @@ export function BookletPanel({
         </div>
       )}
 
-      {booklet && !busy && !error && websiteContext && websiteContext.status !== "not_provided" && (
+      {booklet && !busy && generatedAt && (
+        <p className="mt-1 text-xs text-foreground/45">
+          Generated {formatGeneratedAt(generatedAt)}
+          {saveFailed
+            ? " — could not be saved, will re-generate next time this client is opened."
+            : "."}
+        </p>
+      )}
+      {/* F085: the saved/generated booklet stays visible even when a regeneration
+          fails — hiding it behind the error box would discard exactly the artifact
+          saving exists to preserve. The error box above makes clear that what's
+          shown below is the previous version, not a fresh generation. */}
+      {booklet && !busy && websiteContext && websiteContext.status !== "not_provided" && (
         <p
           className={`mt-1 flex items-start gap-1.5 text-xs font-medium ${
             websiteContext.status === "used" ? "text-green-700" : "text-amber-700"
@@ -363,12 +414,7 @@ export function BookletPanel({
             : `Website content not used — ${websiteContext.reason}`}
         </p>
       )}
-      {booklet && !busy && !error && (
-        <p className="mt-1 text-xs text-foreground/45">
-          Not saved yet — regenerating replaces it.
-        </p>
-      )}
-      {booklet && !busy && !error && <BookletContent booklet={booklet} />}
+      {booklet && !busy && <BookletContent booklet={booklet} />}
     </section>
   );
 }

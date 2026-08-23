@@ -309,6 +309,18 @@ permission exception is a backstop against a crafted request rather than the nor
 | `ENRICHMENT_RESULTS` | all roles | — (service role) | — | admin |
 | `TAGS` | all roles | admin, cam | admin, own | admin |
 | `ORG_TAGS` | all roles | admin, cam | admin, own | admin, own |
+| `CLIENT_BOOKLETS` | all roles | admin, cam (`can_contact_organisation`) | admin, cam (`can_contact_organisation`) | admin |
+
+**`CLIENT_BOOKLETS` (F085, #349)** is the one row here whose write predicate isn't
+plain `can_write()`: it reuses `app.can_contact_organisation()`, the same
+ownership-scoped predicate §3.4's `OUTREACH_MESSAGES` uses, rather than the simple
+admin-or-CAM check the rest of this table's writable rows use. That matches the
+`/api/clients/[id]/booklet` route's own `client:contact` permission gate — a CAM
+saves a booklet only for a client they own or that's unowned, same as they may only
+contact one. One row per organisation (`organisation_id unique`); a regenerate
+upserts rather than appending, so there is no history to scope reads by author or
+time. **Not yet in the Data Model spreadsheet** — flagged in the migration's own
+header (`20260827000001_create_client_booklets.sql`) for Bashir to add to tab 04/02.
 
 ### 3.3 Notes — shared read, author write
 

@@ -17,7 +17,7 @@
 | is_international | boolean |  | No | Whether the organisation is based outside the United Kingdom | System | Derived from country_code; set to true when country_code is not GB | Default: false |
 | entry_method | enum |  | No | How the organisation record entered the system | System | Set when the record is created | api / manual |
 | is_verified | boolean |  | No | Whether all identifiers for this organisation have been verified | System | Set to true automatically when all related ORGANISATION_IDENTIFIERS records are verified | Default is false the is_verified boolean on ORGANISATIONS just reflects whether the identifiers underneath it have been confirmed. It never stores the actual numbers itself that's always in ORGANISATION_IDENTIFIERS. |
-| organisation_type | enum |  | No | Type of organisation | System | Derived from source and registration data | charity / company / both / other |
+| organisation_type | enum |  | No | Type of organisation | System | Derived from source and registration data | charity / cio / cic / social_enterprise / ngo / company / both / other |
 | website | text |  | Yes | Organisation website URL | API | Pulled from external sources |  |
 | contact_email | text |  | Yes | Primary contact email address | API | Pulled from external sources or enrichment |  |
 | address_line_1 | text |  | Yes | First line of registered address | API | Pulled from Companies House or CharityBase |  |

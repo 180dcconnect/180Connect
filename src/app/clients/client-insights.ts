@@ -15,10 +15,17 @@ import { hasResponded, isContacted, isConverted } from "../../lib/dashboard-metr
 import { formatOrganisationType } from "../../lib/organisation-format.ts";
 import type { VisibleClient } from "./visible-clients.ts";
 
-/** organisation_type → the label the source filter (F051 bar) matches on. */
+/** organisation_type → the label the source filter (F051 bar) matches on.
+ * Kept for backward compat — new types (cic/cio/ngo/social_enterprise) fall
+ * through to formatOrganisationType in the grouping code, but entries here
+ * preserve historic source-mapped labels where they still apply. */
 export const SOURCE_LABELS: Record<string, string> = {
   company: "Companies House",
   charity: "Charity Commission",
+  cio: "CIO",
+  cic: "CIC",
+  social_enterprise: "Social enterprise",
+  ngo: "NGO",
   both: "Dual-registered",
   other: "Other",
 };

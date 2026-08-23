@@ -68,6 +68,37 @@ const ASSUMED_COUNTRY_CODE = "GB";
  * built here. Flagged explicitly (same boundary write-organisations.ts draws
  * for F042/F048) rather than silently assumed away.
  */
+/**
+ * Derive a finer F041 organisation_type from Companies House legal form.
+ * CIC subtype is the strongest signal (community-interest-company); CIO forms
+ * map to cio; Tier C (SIC-gated) maps to social_enterprise as probable
+ * mission-fit where legal form alone isn't definitive.
+ */
+function deriveCompaniesHouseOrganisationType(
+  raw: RawCompaniesHouseRecord,
+): StandardOrganisation["organisation_type"] {
+  const subtype = typeof raw.company_subtype === "string" ? raw.company_subtype.toLowerCase() : "";
+  if (subtype === "community-interest-company") return "cic";
+
+  const companyType = typeof raw.company_type === "string" ? raw.company_type.toLowerCase() : "";
+  if (
+    companyType === "charitable-incorporated-organisation" ||
+    companyType === "scottish-charitable-incorporated-organisation"
+  ) {
+    return "cio";
+  }
+  if (companyType === "further-education-or-sixth-form-college-corporation") {
+    return "social_enterprise";
+  }
+
+  const tier = classifyCompaniesHouseTier(raw);
+  if (tier === "C") return "social_enterprise";
+  // Tier B without subtype already handled above, but keep fallback
+  if (tier === "B") return "cic";
+  if (tier === "A") return "cio";
+  return "company";
+}
+
 export function standardizeCompaniesHouseRecord(
   raw: RawCompaniesHouseRecord,
 ): StandardOrganisation {
@@ -83,7 +114,7 @@ export function standardizeCompaniesHouseRecord(
     // official government register counts as "verified" in this project's
     // sense is unresolved — left false pending clarification.
     is_verified: false,
-    organisation_type: "company",
+    organisation_type: deriveCompaniesHouseOrganisationType(raw),
     // The /company profile endpoint has no contact fields at all (no
     // website, no email) — unlike Charity Commission's enrichment calls,
     // there's no richer Companies House endpoint this adapter could call for

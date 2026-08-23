@@ -18,7 +18,16 @@ import {
   type WebsiteStatus,
 } from "./website-validation.ts";
 
-const organisationTypeSchema = z.enum(["charity", "company", "both", "other"]);
+const organisationTypeSchema = z.enum([
+  "charity",
+  "cio",
+  "cic",
+  "social_enterprise",
+  "ngo",
+  "company",
+  "both",
+  "other",
+]);
 
 export const manualEntryDraftSchema = z.object({
   legalName: z.string().trim().max(200),

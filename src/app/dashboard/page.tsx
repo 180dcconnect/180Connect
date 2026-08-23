@@ -108,57 +108,97 @@ export default async function DashboardPage({
     // so a Date would serialize as "Sat Aug 08 2026 … (Coordinated Universal
     // Time)" and 400 every one of these queries.
     const updateCutoff = recentUpdatesCutoff().toISOString();
-    const [
-      organisations,
-      openSuppressions,
-      rawActivity,
-      rawUpdateNotes,
-      rawUpdateMessages,
-      rawUpdateReplies,
-      rawUpdateAudit,
-    ] = await Promise.all([
-      supabase
-        .from("organisations")
-        .select("id, legal_name, outreach_status, owner_id, updated_at, created_at")
-        .overrideTypes<DashboardOrgRow[], { merge: false }>(),
-      supabase
-        .from("suppressions")
-        .select("organisation_id, status")
-        .in("status", ["pending", "active"])
-        .overrideTypes<OpenSuppression[], { merge: false }>(),
-      supabase.rpc("get_recent_team_activity", { p_limit: 10 }),
-      supabase
-        .from("notes")
-        .select(
-          "id, content, created_at, updated_at, organisation_id, author:users!notes_author_id_fkey(full_name)",
-        )
-        .or(`created_at.gte.${updateCutoff},updated_at.gte.${updateCutoff}`)
-        .order("created_at", { ascending: false })
-        .limit(RECENT_UPDATES_SOURCE_FETCH_CAP),
-      supabase
-        .from("outreach_messages")
-        .select(
-          "id, subject, send_status, sent_at, organisation_id, sender:users!outreach_messages_sent_by_user_id_fkey(full_name)",
-        )
-        .eq("send_status", "sent")
-        .gte("sent_at", updateCutoff)
-        .order("sent_at", { ascending: false })
-        .limit(RECENT_UPDATES_SOURCE_FETCH_CAP),
-      supabase
-        .from("reply_events")
-        .select("id, reply_body, received_at, organisation_id")
-        .gte("received_at", updateCutoff)
-        .order("received_at", { ascending: false })
-        .limit(RECENT_UPDATES_SOURCE_FETCH_CAP),
-      supabase
-        .from("audit_log")
-        .select("id, actor_user_id, action, detail, created_at, target_id")
-        .eq("target_table", "organisations")
-        .in("action", ["status_changed", "ownership_reassigned"])
-        .gte("created_at", updateCutoff)
-        .order("created_at", { ascending: false })
-        .limit(RECENT_UPDATES_SOURCE_FETCH_CAP),
-    ]);
+
+    // Organisations and suppressions are not windowed: the dashboard needs the
+    // full pipeline to compute metrics and to build the org-name map that
+    // recent-updates filters against. PostgREST caps a single response at
+    // 1000 rows, so a plain `.select()` silently truncates once the table grows
+    // past that — the 1794-row staging dataset already hit this, dropping the
+    // two recently-claimed orgs and making recent-updates and needs-attention
+    // appear empty. Paginate until the server returns fewer than a full page.
+    async function fetchAllOrganisations(): Promise<{
+      data: DashboardOrgRow[] | null;
+      error: { message: string } | null;
+    }> {
+      const all: DashboardOrgRow[] = [];
+      let from = 0;
+      const step = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("organisations")
+          .select("id, legal_name, outreach_status, owner_id, updated_at, created_at")
+          .order("created_at", { ascending: true })
+          .range(from, from + step - 1)
+          .overrideTypes<DashboardOrgRow[], { merge: false }>();
+        if (error) return { data: null, error };
+        if (!data || data.length === 0) break;
+        all.push(...data);
+        if (data.length < step) break;
+        from += step;
+      }
+      return { data: all, error: null };
+    }
+
+    async function fetchAllOpenSuppressions(): Promise<{
+      data: OpenSuppression[] | null;
+      error: { message: string } | null;
+    }> {
+      const all: OpenSuppression[] = [];
+      let from = 0;
+      const step = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("suppressions")
+          .select("organisation_id, status")
+          .in("status", ["pending", "active"])
+          .range(from, from + step - 1)
+          .overrideTypes<OpenSuppression[], { merge: false }>();
+        if (error) return { data: null, error };
+        if (!data || data.length === 0) break;
+        all.push(...data);
+        if (data.length < step) break;
+        from += step;
+      }
+      return { data: all, error: null };
+    }
+
+    const [organisations, openSuppressions, rawActivity, rawUpdateNotes, rawUpdateMessages, rawUpdateReplies, rawUpdateAudit] =
+      await Promise.all([
+        fetchAllOrganisations(),
+        fetchAllOpenSuppressions(),
+        supabase.rpc("get_recent_team_activity", { p_limit: 10 }),
+        supabase
+          .from("notes")
+          .select(
+            "id, content, created_at, updated_at, organisation_id, author:users!notes_author_id_fkey(full_name)",
+          )
+          .or(`created_at.gte.${updateCutoff},updated_at.gte.${updateCutoff}`)
+          .order("created_at", { ascending: false })
+          .limit(RECENT_UPDATES_SOURCE_FETCH_CAP),
+        supabase
+          .from("outreach_messages")
+          .select(
+            "id, subject, send_status, sent_at, organisation_id, sender:users!outreach_messages_sent_by_user_id_fkey(full_name)",
+          )
+          .eq("send_status", "sent")
+          .gte("sent_at", updateCutoff)
+          .order("sent_at", { ascending: false })
+          .limit(RECENT_UPDATES_SOURCE_FETCH_CAP),
+        supabase
+          .from("reply_events")
+          .select("id, reply_body, received_at, organisation_id")
+          .gte("received_at", updateCutoff)
+          .order("received_at", { ascending: false })
+          .limit(RECENT_UPDATES_SOURCE_FETCH_CAP),
+        supabase
+          .from("audit_log")
+          .select("id, actor_user_id, action, detail, created_at, target_id")
+          .eq("target_table", "organisations")
+          .in("action", ["status_changed", "ownership_reassigned"])
+          .gte("created_at", updateCutoff)
+          .order("created_at", { ascending: false })
+          .limit(RECENT_UPDATES_SOURCE_FETCH_CAP),
+      ]);
 
     if (organisations.error) {
       await reportError(organisations.error, { operation: "dashboard.page_metrics" });

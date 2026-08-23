@@ -60,7 +60,7 @@ describe("Past Clients URL Import Scenarios", () => {
     assert.equal(draft.fields.legal_name, "IRISE INTERNATIONAL");
     assert.equal(draft.fields.organisation_type, "charity");
     assert.equal(draft.fields.address_line_1, "18 Upperthorpe");
-    assert.equal(draft.fields.city, "SHEFFIELD");
+    assert.equal(draft.fields.city, "Sheffield");
     assert.equal(draft.fields.postcode, "S6 3NA");
     assert.equal(draft.fields.country_code, "GB");
     assert.equal(draft.fields.website, "https://www.irise.org.uk");
@@ -195,7 +195,7 @@ describe("Past Clients URL Import Scenarios", () => {
     assert.equal(draft.fields.legal_name, "THE LINK COMMUNITY HUB");
     assert.equal(draft.fields.organisation_type, "charity");
     assert.equal(draft.fields.address_line_1, "83 STRADBROKE DRIVE");
-    assert.equal(draft.fields.city, "SHEFFIELD");
+    assert.equal(draft.fields.city, "Sheffield");
     assert.equal(draft.fields.postcode, "S13 8SE");
     assert.equal(draft.importedFieldPaths.length, 11);
   });
@@ -234,7 +234,7 @@ describe("Past Clients URL Import Scenarios", () => {
     assert.equal(draft.fields.legal_name, "MULTIPLE SCLEROSIS TRUST");
     assert.equal(draft.fields.organisation_type, "charity");
     assert.equal(draft.fields.address_line_1, "SPIRELLA BUILDING");
-    assert.equal(draft.fields.city, "LETCHWORTH GARDEN CITY");
+    assert.equal(draft.fields.city, "Letchworth Garden City");
     assert.equal(draft.fields.postcode, "SG6 4ET");
     assert.equal(draft.importedFieldPaths.length, 11);
   });

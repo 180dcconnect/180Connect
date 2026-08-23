@@ -64,7 +64,7 @@ async function main() {
       .range(from, from + step - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
-    all.push(...data as any);
+    all.push(...(data as typeof all));
     if (data.length < step) break;
     from += step;
   }

@@ -8,7 +8,9 @@ import type { NotificationFrequency } from "@/lib/account-settings";
 /**
  * Profile (F015) and account settings (F200 / F201) are one screen, not two:
  * the display name, read-only auth details, and notification delivery frequency
- * are configured together here.
+ * are configured together here. The same three fields were on both, and a
+ * second copy of a field is how two controls for it drift apart. This is the
+ * view; the display name opens in place.
  */
 export default async function ProfileSettingsPage() {
   const authorization = await getCurrentActor(undefined, {
@@ -18,6 +20,9 @@ export default async function ProfileSettingsPage() {
     redirect("/login");
   }
 
+  // No permission argument: every signed-in role has a profile to maintain, and
+  // the write is confined to the caller's own row by RLS rather than by a role
+  // check here.
   const actor = authorization.actor;
   const supabase = await createClient();
   const { data: userRow } = await supabase

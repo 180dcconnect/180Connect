@@ -18,7 +18,7 @@
 --   Security      | Grants update (notification_frequency) to authenticated on users. Existing RLS policies apply.
 --   Documentation | Data Model tab 04 + tab 02.
 --
--- Reversibility: paired rollback in ../rollback/20260818130000_add_notification_frequency_and_followup_timing.down.sql
+-- Reversibility: paired rollback in ../rollback/20260828130000_add_notification_frequency_and_followup_timing.down.sql
 
 -- 1. F201: Notification Frequency
 do $$

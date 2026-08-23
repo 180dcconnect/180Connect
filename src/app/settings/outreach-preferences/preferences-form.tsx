@@ -11,6 +11,7 @@ import { Checkbox } from "@/components/animate-ui/components/radix/checkbox";
 import { Input } from "@/components/ui/input";
 import { OriginButton } from "@/components/ui/origin-button";
 import { saveOutreachPreferencesAction, type OutreachPreferencesState } from "./actions";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import {
   CITY_PRESETS,
   DEFAULT_FIRST_FOLLOW_UP_DAYS,
@@ -42,9 +43,14 @@ const LEGEND_CLASS =
 const CARD =
   "rounded-2xl border border-black/[0.06] bg-white px-6 py-6 shadow-sm";
 
-/** A saved value, shown as a chip. Empty dimensions say so in words instead. */
-function Chips({ values }: { values: string[] }) {
-  if (values.length === 0) {
+/**
+ * A saved value, shown as a chip. Empty dimensions say so in words instead.
+ * Chips carry an explicit `key` rather than keying on the label: the geography
+ * summary mixes enum labels with free-text cities, and a city literally named
+ * "Local" would otherwise collide with the reach label of the same name.
+ */
+function Chips({ items }: { items: { key: string; label: string }[] }) {
+  if (items.length === 0) {
     return (
       <p className="mt-2 text-sm text-foreground/45">
         No preference — nothing is weighted on this.
@@ -54,12 +60,12 @@ function Chips({ values }: { values: string[] }) {
 
   return (
     <div className="mt-2.5 flex flex-wrap gap-2">
-      {values.map((value) => (
+      {items.map(({ key, label }) => (
         <span
-          key={value}
+          key={key}
           className="rounded-full bg-brand/10 px-3 py-1 text-sm font-medium text-brand"
         >
-          {value}
+          {label}
         </span>
       ))}
     </div>
@@ -231,8 +237,11 @@ export function OutreachPreferencesForm({
   }
 
   const allSavedGeography = [
-    ...savedGeo.map((value) => GEOGRAPHIC_REACH_LABELS[value]),
-    ...savedCities,
+    ...savedGeo.map((value) => ({
+      key: `reach:${value}`,
+      label: GEOGRAPHIC_REACH_LABELS[value],
+    })),
+    ...savedCities.map((city) => ({ key: `city:${city}`, label: city })),
   ];
 
   if (!editing) {
@@ -255,20 +264,25 @@ export function OutreachPreferencesForm({
 
           <div>
             <p className={LEGEND_CLASS}>Geography & Locations</p>
-            <Chips values={allSavedGeography} />
+            <Chips items={allSavedGeography} />
           </div>
 
           <div>
             <p className={LEGEND_CLASS}>Size (annual income)</p>
-            <Chips values={savedBands.map((value) => INCOME_BAND_LABELS[value])} />
+            <Chips
+              items={savedBands.map((value) => ({
+                key: `band:${value}`,
+                label: INCOME_BAND_LABELS[value],
+              }))}
+            />
           </div>
 
           <div>
             <p className={LEGEND_CLASS}>Funding & Grant History (360Giving)</p>
             <Chips
-              values={
+              items={
                 savedPrioritiseGrants
-                  ? ["Prioritise grant recipients"]
+                  ? [{ key: "grants:prioritise", label: "Prioritise grant recipients" }]
                   : []
               }
             />
@@ -277,23 +291,30 @@ export function OutreachPreferencesForm({
           <div>
             <p className={LEGEND_CLASS}>Follow-Up Reminder Cadence (F202 / F161)</p>
             <Chips
-              values={[
-                `1st reminder: ${savedFirstDays} days`,
-                `2nd reminder: ${savedSecondDays} days`,
+              items={[
+                { key: "followup:1", label: `1st reminder: ${savedFirstDays} days` },
+                { key: "followup:2", label: `2nd reminder: ${savedSecondDays} days` },
               ]}
             />
           </div>
 
           <div>
             <p className={LEGEND_CLASS}>Sector</p>
-            <Chips values={savedSectors} />
+            <Chips
+              items={savedSectors.map((sector) => ({
+                key: `sector:${sector}`,
+                label: sector,
+              }))}
+            />
           </div>
         </div>
 
         {state.status === "success" && state.message ? (
-          <p aria-live="polite" className="mt-3 px-1 text-sm font-bold text-brand">
-            {state.message}
-          </p>
+          <InlineAlert
+            tone="success"
+            className="mt-3"
+            message={state.message}
+          />
         ) : null}
       </div>
     );
@@ -615,10 +636,11 @@ export function OutreachPreferencesForm({
         >
           Cancel
         </OriginButton>
-        {state.status === "error" && state.message ? (
-          <p aria-live="polite" className="text-sm font-bold text-destructive">
-            {state.message}
-          </p>
+        {state.status !== "idle" && state.message ? (
+          <InlineAlert
+            tone={state.status === "error" ? "error" : "success"}
+            message={state.message}
+          />
         ) : null}
       </div>
     </form>

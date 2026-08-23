@@ -1,4 +1,4 @@
--- Rollback for 20260818130000_add_notification_frequency_and_followup_timing.sql
+-- Rollback for 20260828130000_add_notification_frequency_and_followup_timing.sql
 -- Reverses F201 and F202 schema additions.
 
 alter table public.outreach_preferences

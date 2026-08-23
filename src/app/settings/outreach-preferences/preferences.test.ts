@@ -22,8 +22,8 @@ import {
   MAX_SECTORS,
   SECTOR_CATEGORY_GROUPS,
   SECTOR_PRESETS,
-  SECTOR_KEYWORD_ALIASES,
 } from "./constants.ts";
+import { CANONICAL_SECTOR_GROUPS } from "../../clients/visible-clients.ts";
 
 describe("outreach preferences constants and configuration (F195 / F196 / F197 / F198 / F199 / F202)", () => {
   it("defines standard follow-up timing thresholds and clamping (F202)", () => {
@@ -114,10 +114,12 @@ describe("outreach preferences constants and configuration (F195 / F196 / F197 /
     assert.ok(SECTOR_CATEGORY_GROUPS.some((g) => g.category === "Poverty & Community"));
   });
 
-  it("defines standard sector keyword aliases for cross-source matching (F197)", () => {
-    assert.ok(SECTOR_KEYWORD_ALIASES.health.includes("healthcare"));
-    assert.ok(SECTOR_KEYWORD_ALIASES.education.includes("school"));
-    assert.ok(SECTOR_KEYWORD_ALIASES.environment.includes("sustainability"));
-    assert.ok(SECTOR_KEYWORD_ALIASES.poverty.includes("relief"));
+  it("defines canonical sector groups for cross-source queue matching (F197)", () => {
+    // Single source of truth lives with the matcher in visible-clients.ts;
+    // these assertions pin the aliases the presets rely on.
+    assert.ok(CANONICAL_SECTOR_GROUPS.health.includes("healthcare"));
+    assert.ok(CANONICAL_SECTOR_GROUPS.education.includes("school"));
+    assert.ok(CANONICAL_SECTOR_GROUPS.environment.includes("sustainability"));
+    assert.ok(CANONICAL_SECTOR_GROUPS.poverty.includes("homeless"));
   });
 });

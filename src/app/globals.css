@@ -206,6 +206,11 @@ a:hover .mail-sprite {
 }
 
 @layer base {
+  ::selection {
+    background: var(--brand);
+    color: #ffffff;
+  }
+
   body {
     background: var(--background);
     color: var(--foreground);
@@ -220,5 +225,88 @@ a:hover .mail-sprite {
   h6 {
     font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
   }
+}
+
+/**
+ * Text Accessibility Settings (F205)
+ * Root scaling, enhanced contrast, relaxed line height, and reduced motion modes.
+ */
+
+/* 1. Font Size Scaling (AC1 & AC2) */
+html[data-font-size="large"] {
+  font-size: 115%;
+}
+
+html[data-font-size="extra-large"] {
+  font-size: 130%;
+}
+
+/* 2. Line Spacing & Readability */
+html[data-line-spacing="relaxed"] body,
+html[data-line-spacing="relaxed"] p,
+html[data-line-spacing="relaxed"] dd,
+html[data-line-spacing="relaxed"] li {
+  line-height: 1.85 !important;
+  letter-spacing: 0.015em;
+}
+
+/* 3. High Contrast Mode (WCAG AAA 7:1+ contrast) */
+html[data-contrast="high"] {
+  --foreground: #000000;
+  --muted-foreground: #1c1a18;
+  --border: #2e3c2f;
+  --input: #2e3c2f;
+}
+
+html[data-contrast="high"] body {
+  color: #000000 !important;
+}
+
+html[data-contrast="high"] h1,
+html[data-contrast="high"] h2,
+html[data-contrast="high"] h3,
+html[data-contrast="high"] h4,
+html[data-contrast="high"] h5,
+html[data-contrast="high"] h6 {
+  color: #000000 !important;
+  font-weight: 700;
+}
+
+html[data-contrast="high"] .text-foreground\/65,
+html[data-contrast="high"] .text-foreground\/60,
+html[data-contrast="high"] .text-foreground\/55,
+html[data-contrast="high"] .text-foreground\/40,
+html[data-contrast="high"] .text-black\/55,
+html[data-contrast="high"] .text-black\/45,
+html[data-contrast="high"] .text-black\/40 {
+  color: #1a1a1a !important;
+}
+
+html[data-contrast="high"] .border-black\/\[0\.06\],
+html[data-contrast="high"] .border-black\/\[0\.08\],
+html[data-contrast="high"] .border-black\/10,
+html[data-contrast="high"] .border-black\/12 {
+  border-color: #333333 !important;
+}
+
+html[data-contrast="high"] input,
+html[data-contrast="high"] select,
+html[data-contrast="high"] textarea {
+  border-color: #000000 !important;
+  color: #000000 !important;
+}
+
+html[data-contrast="high"] *:focus-visible {
+  outline: 2px solid #000000 !important;
+  outline-offset: 2px !important;
+}
+
+/* 4. Reduced Motion */
+html[data-reduced-motion="reduced"] *,
+html[data-reduced-motion="reduced"] *::before,
+html[data-reduced-motion="reduced"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
 }
 

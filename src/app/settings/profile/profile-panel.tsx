@@ -23,8 +23,15 @@ const ROW =
 
 /**
  * The profile and account settings screen (F200 / F201):
- * - Displays name and role/email
+ * - Displays name, notification delivery, role/email
  * - Lets user update display name and notification delivery frequency in place
+ *
+ * Read-first rather than a form that happens to be pre-filled. Someone opening
+ * this screen is nearly always checking their details, not changing them, and a
+ * page of live inputs makes the common case look like unsaved work. Email and
+ * role never get an edit affordance at all — F200 AC2 keeps them off this
+ * screen, so offering a disabled control for them would advertise something
+ * that is not on the menu.
  */
 export function ProfilePanel({
   initialFullName,
@@ -37,6 +44,11 @@ export function ProfilePanel({
   email: string | null;
   role: string;
 }) {
+  // Submitted through `useTransition` rather than `useActionState`, because
+  // this form has to *do* something when the action returns — close the row and
+  // adopt the saved name. With `useActionState` that reaction can only live in
+  // an effect watching the result, which is a cascading render; here it is just
+  // the rest of the submit handler.
   const [state, setState] = useState<AccountSettingsState>(initialState);
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState(false);
@@ -53,6 +65,7 @@ export function ProfilePanel({
       const result = await saveAccountSettingsAction(state, formData);
       setState(result);
       if (result.status === "success") {
+        // The stored values, echoed back by the action — not the raw keystrokes.
         setSavedName(result.fullName ?? draft);
         setSavedFrequency(result.notificationFrequency ?? draftFrequency);
         setEditing(false);
@@ -220,6 +233,8 @@ export function ProfilePanel({
         an administrator — neither can be edited here.
       </p>
 
+      {/* Success lives outside the row so it survives the switch back to view
+          mode, where the edit form and its inline error are gone. */}
       {state.status === "success" && !editing && state.message ? (
         <p aria-live="polite" className="mt-3 px-1 text-sm font-bold text-brand">
           {state.message}

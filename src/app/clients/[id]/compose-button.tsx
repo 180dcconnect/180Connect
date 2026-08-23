@@ -3,11 +3,17 @@
 import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
+import { EMAIL_LENGTHS, type EmailLength } from "@/lib/outreach/stage-one-prompt";
 
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
 type Draft = { id: string; subject: string; body: string };
-type EmailLength = "short" | "standard" | "detailed";
+
+const EMAIL_LENGTH_LABELS: Record<EmailLength, string> = {
+  short: "Short",
+  standard: "Standard",
+  detailed: "Detailed",
+};
 
 /** F100 creates a review draft only, after the current outreach preflight passes. */
 export function ComposeButton({
@@ -94,9 +100,11 @@ export function ComposeButton({
           onChange={(event) => setLength(event.target.value as EmailLength)}
           value={length}
         >
-          <option value="short">Short</option>
-          <option value="standard">Standard</option>
-          <option value="detailed">Detailed</option>
+          {EMAIL_LENGTHS.map((value) => (
+            <option key={value} value={value}>
+              {EMAIL_LENGTH_LABELS[value]}
+            </option>
+          ))}
         </select>
       </label>
       <OriginButton variant="outline" size="sm" onClick={generate} disabled={busy} type="button">

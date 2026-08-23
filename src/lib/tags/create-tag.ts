@@ -1,4 +1,4 @@
-// F188: Create Tag — real entry point.
+// F188/F194: Create Tag — real entry point.
 //
 // createTag itself is intentionally thin: resolve the real actor and
 // Supabase client from the Next.js request (both require "server-only",
@@ -19,7 +19,10 @@ import { buildSupabaseTagInsertClient } from "./create-tag-supabase-client.ts";
 
 export type { CreateTagResult } from "./create-tag-core.ts";
 
-export async function createTag(rawName: string): Promise<CreateTagResult> {
+export async function createTag(
+  rawName: string,
+  rawColour?: unknown,
+): Promise<CreateTagResult> {
   const authorization = await getCurrentActor(CREATE_TAG_PERMISSION, {
     route: "tags.create",
   });
@@ -30,5 +33,5 @@ export async function createTag(rawName: string): Promise<CreateTagResult> {
   const supabase = await createClient();
   const client = buildSupabaseTagInsertClient(supabase);
 
-  return createTagCore(rawName, authorization.actor.id, client);
+  return createTagCore(rawName, authorization.actor.id, client, rawColour);
 }

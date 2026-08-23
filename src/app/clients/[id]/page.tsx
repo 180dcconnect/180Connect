@@ -179,7 +179,7 @@ export default async function ClientDetailPage({
   // list of tags for the assign dropdown.
   const { data: clientTagRows, error: clientTagsError } = await supabase
     .from("org_tags")
-    .select("tag_id, tags(name)")
+    .select("tag_id, tags(name, colour)")
     .eq("organisation_id", id);
   if (clientTagsError) {
     await reportError(clientTagsError, {
@@ -192,11 +192,13 @@ export default async function ClientDetailPage({
     .map((row) => ({
       id: row.tag_id,
       name: (row.tags as unknown as { name: string }).name,
+      colour:
+        (row.tags as unknown as { colour: string | null }).colour ?? null,
     }));
 
   const { data: allTagsData, error: allTagsError } = await supabase
     .from("tags")
-    .select("id, name")
+    .select("id, name, colour")
     .order("name");
   if (allTagsError) {
     await reportError(allTagsError, { operation: "clients.detail_all_tags" });

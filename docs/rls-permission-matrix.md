@@ -1149,7 +1149,7 @@ labels, not personal to their creator (F188 AC2) — creation is attributed via
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `TAGS` | any active user | admins + CAMs (`app.can_write()`, attribution required) | admin only (`app.is_admin()`) | — (never; F190 owns deletion) |
+| `TAGS` | any active user | admins + CAMs (`app.can_write()`, attribution required) · **colour only:** via `set_tag_colour` RPC for admins + CAMs | admin only (`app.is_admin()`) — colour is not writable by UPDATE, even for admins | — (never; F190 owns deletion) |
 | `ORG_TAGS` | any active user | admins + CAMs (`app.can_write()`, attribution required) | — | admins + CAMs (`app.can_write()`), any assignment |
 
 At the application layer every tag mutation gates on the dedicated
@@ -1166,8 +1166,21 @@ note resolved conservatively): RLS allows only `app.is_admin()`, and the app
 checks `role === "admin"` explicitly so a CAM gets a clear message rather
 than a silent RLS refusal. Assign/remove stay CAM-level — organising a client
 with existing labels is ordinary client work; reshaping the label set is not.
-No SECURITY DEFINER RPC or audit row: tags are not ownership, status, role or
-approval state (`docs/audit-log-pattern.md` §1). The fixed placeholder user
+
+**Colour is the one deliberate split** (F194): any CAM or admin may set or
+clear a tag's colour, but only through the `set_tag_colour` SECURITY DEFINER
+RPC (`20260829000000_tag_colour_check_and_set_colour_rpc.sql`), never a
+direct UPDATE — which stays admin-only even for admins, so the constraint and
+the RPC's format check are the only write paths to that column. The column
+detour exists because Postgres RLS sees rows, not columns: widening the
+UPDATE policy to `can_write()` would also have opened renames to CAMs at the
+DB layer. The RPC re-checks `is_active_user()` + `can_write()` in its body,
+raises `22023` for non-hex input before touching the table, and writes only
+`colour`. The `TAGS.colour` CHECK (`tags_colour_hex_format`) pins the format
+invariant (`#rrggbb` or null); palette *membership* is an application rule in
+`src/lib/tags/tag-colours.ts`, so the curated palette can evolve without a
+migration. No audit row: tags are not ownership, status, role or approval
+state (`docs/audit-log-pattern.md` §1). The fixed placeholder user
 (`20260821120100_create_deleted_user_placeholder_for_tags.sql`) exists so
 `created_by_user_id` can stay NOT NULL-able after a creator is hard-deleted;
 it is excluded from `/admin/users`.

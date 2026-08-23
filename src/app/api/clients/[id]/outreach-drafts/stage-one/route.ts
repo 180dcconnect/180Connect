@@ -9,7 +9,7 @@ import {
   createStageOneModelCall,
   generateStageOneDraft,
 } from "@/lib/outreach/stage-one-generation";
-import { EMAIL_LENGTHS } from "@/lib/outreach/stage-one-prompt";
+import { EMAIL_LENGTHS, EMAIL_VOICES } from "@/lib/outreach/stage-one-prompt";
 import {
   checkSuppressionBeforeSend,
   suppressionBlockedMessage,
@@ -40,6 +40,7 @@ export async function POST(
   const preferences = z
     .object({
       length: z.enum(EMAIL_LENGTHS).default("standard"),
+      voice: z.enum(EMAIL_VOICES).default("180dc"),
     })
     .safeParse(requestBody);
   if (!preferences.success) {
@@ -175,7 +176,7 @@ export async function POST(
       newsHooks: enrichment?.news_hooks,
     },
     callModel,
-    { length: preferences.data.length },
+    { length: preferences.data.length, voice: preferences.data.voice },
   );
   if ("error" in result) return NextResponse.json({ error: result.error }, { status: 502 });
 

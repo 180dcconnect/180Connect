@@ -15,11 +15,19 @@ export type StageOneContext = {
 
 export const EMAIL_LENGTHS = ["short", "standard", "detailed"] as const;
 export type EmailLength = (typeof EMAIL_LENGTHS)[number];
+export const EMAIL_VOICES = ["180dc", "consultative", "plain_language"] as const;
+export type EmailVoice = (typeof EMAIL_VOICES)[number];
 
 const LENGTH_INSTRUCTIONS: Record<EmailLength, string> = {
   short: "Keep the body between 70 and 100 words, with no more than three short paragraphs.",
   standard: "Keep the body between 130 and 170 words, with clear, readable paragraphs.",
   detailed: "Keep the body between 200 and 260 words, adding useful context without repetition.",
+};
+
+const VOICE_INSTRUCTIONS: Record<EmailVoice, string> = {
+  "180dc": "Use 180DC Sheffield's collective voice: capable, collaborative and socially minded; write as 'we'.",
+  consultative: "Use a consultative voice: curious, thoughtful and focused on understanding the charity before suggesting solutions; write as 'we'.",
+  plain_language: "Use a plain-language voice: direct, accessible and free of consultancy jargon; write as 'we'.",
 };
 
 function value(value: string | null | undefined): string {
@@ -32,14 +40,16 @@ function values(items: string[] | null | undefined): string {
 
 export function buildStageOnePrompt(
   context: StageOneContext,
-  options: { length?: EmailLength } = {},
+  options: { length?: EmailLength; voice?: EmailVoice } = {},
 ) {
   const length = options.length ?? "standard";
+  const voice = options.voice ?? "180dc";
   return {
     system: `You draft initial charity outreach emails for 180 Degrees Consulting Sheffield.
 Use only facts supplied in the client context. Never invent achievements, needs, people, partnerships, or news.
 Write a concise, warm and professional first-contact email. Explain that 180 Degrees Consulting Sheffield is a student-led consultancy supporting socially minded organisations. Do not promise outcomes or imply an existing relationship.
 ${LENGTH_INSTRUCTIONS[length]}
+${VOICE_INSTRUCTIONS[voice]}
 Return exactly one JSON object with two string properties: "subject" and "body". Do not use markdown fences. The body must be plain text and must not include a sender signature.`,
     prompt: `Draft a Stage 1 outreach email using this reviewed client context.
 

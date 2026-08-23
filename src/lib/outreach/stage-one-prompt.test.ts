@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { z } from "zod";
-import { buildStageOnePrompt, EMAIL_LENGTHS } from "./stage-one-prompt.ts";
+import { buildStageOnePrompt, EMAIL_LENGTHS, EMAIL_VOICES } from "./stage-one-prompt.ts";
 
 test("buildStageOnePrompt includes real profile and booklet context", () => {
   const result = buildStageOnePrompt({
@@ -42,6 +42,19 @@ test("buildStageOnePrompt defaults to standard when length is omitted", () => {
   assert.match(buildStageOnePrompt(context, {}).system, /130 and 170 words/);
 });
 
+test("buildStageOnePrompt applies each selected email voice", () => {
+  const context = { organisationName: "Example", organisationType: "charity" };
+  assert.match(buildStageOnePrompt(context, { voice: "180dc" }).system, /collective voice/);
+  assert.match(buildStageOnePrompt(context, { voice: "consultative" }).system, /curious, thoughtful/);
+  assert.match(buildStageOnePrompt(context, { voice: "plain_language" }).system, /free of consultancy jargon/);
+});
+
+test("buildStageOnePrompt defaults to the 180DC voice when voice is omitted", () => {
+  const context = { organisationName: "Example", organisationType: "charity" };
+  assert.match(buildStageOnePrompt(context).system, /collective voice/);
+  assert.match(buildStageOnePrompt(context, {}).system, /collective voice/);
+});
+
 test("email length validation rejects invalid values (route returns 400)", () => {
   const schema = z.object({ length: z.enum(EMAIL_LENGTHS).default("standard") });
   assert.equal(schema.safeParse({ length: "invalid" }).success, false);
@@ -52,4 +65,16 @@ test("email length validation rejects invalid values (route returns 400)", () =>
   assert.equal(schema.safeParse({ length: "detailed" }).success, true);
   assert.equal(schema.safeParse({}).success, true);
   assert.equal(schema.safeParse({}).data?.length, "standard");
+});
+
+test("email voice validation rejects invalid values (route returns 400)", () => {
+  const schema = z.object({ voice: z.enum(EMAIL_VOICES).default("180dc") });
+  assert.equal(schema.safeParse({ voice: "invalid" }).success, false);
+  assert.equal(schema.safeParse({ voice: "" }).success, false);
+  assert.equal(schema.safeParse({ voice: "180DC" }).success, false);
+  assert.equal(schema.safeParse({ voice: "180dc" }).success, true);
+  assert.equal(schema.safeParse({ voice: "consultative" }).success, true);
+  assert.equal(schema.safeParse({ voice: "plain_language" }).success, true);
+  assert.equal(schema.safeParse({}).success, true);
+  assert.equal(schema.safeParse({}).data?.voice, "180dc");
 });

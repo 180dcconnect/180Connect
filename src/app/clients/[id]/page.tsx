@@ -37,6 +37,15 @@ import { SuggestEditSection } from "./suggest-edit-section";
 import { buildNoteList, type NoteRow } from "@/lib/note-history";
 import { NotesSection } from "./notes-section";
 import { AddNoteForm } from "./add-note-form";
+import {
+  buildTimeline,
+  type AuditRow,
+  type NoteRow as TimelineNoteRow,
+  type OutreachMessageRow as TimelineOutreachRow,
+  type ReplyEventRow,
+} from "@/lib/timeline";
+import { TimelineSection } from "./timeline-section";
+import { TimelineRealtimeRefresher } from "./timeline-realtime";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -314,6 +323,103 @@ export default async function ClientDetailPage({
     id: authorization.actor.id,
     role: authorization.actor.role,
   });
+
+  // F075/F076: the four sources @/lib/timeline.ts's buildTimeline merges into
+  // one feed. Independent queries, not one join — the four tables share no
+  // join key that would make sense together (notes/outreach_messages/
+  // reply_events key off organisation_id; audit_log keys off
+  // target_table+target_id), and each fails independently the same way every
+  // other section on this page does (reported, not fatal).
+  const { data: timelineNoteRows, error: timelineNotesError } = await supabase
+    .from("notes")
+    .select("id, content, created_at, updated_at, author:users!notes_author_id_fkey(full_name)")
+    .eq("organisation_id", id);
+  if (timelineNotesError) {
+    await reportError(timelineNotesError, { operation: "clients.timeline_notes", organisationId: id });
+  }
+
+  const { data: timelineMessageRows, error: timelineMessagesError } = await supabase
+    .from("outreach_messages")
+    .select("id, subject, send_status, sent_at, sender:users!outreach_messages_sent_by_user_id_fkey(full_name)")
+    .eq("organisation_id", id);
+  if (timelineMessagesError) {
+    await reportError(timelineMessagesError, {
+      operation: "clients.timeline_messages",
+      organisationId: id,
+    });
+  }
+
+  const { data: replyRows, error: replyError } = await supabase
+    .from("reply_events")
+    .select("id, reply_body, received_at")
+    .eq("organisation_id", id);
+  if (replyError) {
+    await reportError(replyError, { operation: "clients.timeline_replies", organisationId: id });
+  }
+
+  // RLS (audit_log_select_client_timeline, 20260820110000) is what makes this
+  // readable by a CAM/viewer at all — without it every row here is invisible,
+  // not merely filtered, to anyone but an admin.
+  const { data: auditRows, error: auditError } = await supabase
+    .from("audit_log")
+    .select("id, actor_user_id, action, detail, created_at")
+    .eq("target_table", "organisations")
+    .eq("target_id", id)
+    .in("action", ["status_changed", "ownership_reassigned", "edit_suggestion_approved", "edit_suggestion_rejected"]);
+  if (auditError) {
+    await reportError(auditError, { operation: "clients.timeline_audit", organisationId: id });
+  }
+
+  // Degraded, not fatal: the four sources fail independently (each error is
+  // reported above), so whatever loaded still renders. `timelineDegraded`
+  // only downgrades the section to a warning above the surviving entries —
+  // a notes-query failure should not hide the emails and replies that did
+  // load. A total failure leaves entries empty and TimelineSection shows its
+  // full error state instead.
+  const timelineDegraded = Boolean(
+    timelineNotesError || timelineMessagesError || replyError || auditError,
+  );
+
+  // actor_user_id and detail.from/detail.to are bare uuids (detail is jsonb,
+  // not a foreign key PostgREST can embed), so they're resolved by hand in one
+  // batch rather than per-row. A name missing from this map — a deleted
+  // account, or a uuid audit_log carries no FK constraint to validate — reads
+  // as "A former team member" in @/lib/timeline.ts, never as a raw id or blank.
+  const referencedUserIds = new Set<string>();
+  for (const row of auditRows ?? []) {
+    if (row.actor_user_id) referencedUserIds.add(row.actor_user_id);
+    const from = row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).from : null;
+    const to = row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).to : null;
+    if (typeof from === "string") referencedUserIds.add(from);
+    if (typeof to === "string") referencedUserIds.add(to);
+    const requestedBy =
+      row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).requested_by : null;
+    if (typeof requestedBy === "string") referencedUserIds.add(requestedBy);
+  }
+
+  const timelineNames = new Map<string, string | null>();
+  if (referencedUserIds.size > 0) {
+    const { data: referencedUsers, error: namesError } = await supabase
+      .from("users")
+      .select("id, full_name")
+      .in("id", Array.from(referencedUserIds));
+    if (namesError) {
+      await reportError(namesError, { operation: "clients.timeline_names", organisationId: id });
+    }
+    for (const row of referencedUsers ?? []) {
+      timelineNames.set(row.id, row.full_name);
+    }
+  }
+
+  const timeline = buildTimeline(
+    {
+      notes: (timelineNoteRows ?? []) as unknown as TimelineNoteRow[],
+      outreachMessages: (timelineMessageRows ?? []) as unknown as TimelineOutreachRow[],
+      replyEvents: (replyRows ?? []) as unknown as ReplyEventRow[],
+      auditRows: (auditRows ?? []) as unknown as AuditRow[],
+    },
+    timelineNames,
+  );
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
@@ -679,6 +785,21 @@ export default async function ClientDetailPage({
             )}
           </Group>
         </div>
+
+        {/* F075/F076: Full-width, not squeezed into either column: this is the one
+            section that reads across every other one on this page — emails,
+            replies, notes, status, ownership — so it earns its own row rather
+            than fighting a narrow column for space. */}
+        <Rise>
+          <SectionCard
+            headingId="timeline-heading"
+            title="Timeline"
+            hint="Every email, reply, note and change for this client, in one place."
+          >
+            <TimelineSection entries={timeline} degraded={timelineDegraded} />
+          </SectionCard>
+        </Rise>
+        <TimelineRealtimeRefresher organisationId={client.id} />
       </Stage>
     </div>
   );

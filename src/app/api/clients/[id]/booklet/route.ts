@@ -17,6 +17,7 @@ import {
   createDefaultScrapeDependencies,
   fetchWebsiteContext,
 } from "@/lib/booklet/scrape-website";
+import { validateWebsiteFormat } from "@/lib/website-validation";
 
 // F084 — Use Website URL in Booklet: an optional URL the CAM pastes in, separate
 // from the stored organisation.website (which is always sent as a plain field
@@ -33,12 +34,21 @@ type WebsiteContextResult =
   | { status: "skipped"; reason: string };
 
 /**
- * F082 — Generate Client Booklet, extended by F084 — Use Website URL in Booklet.
- * Every call generates fresh from Gemini (F085's saved-booklet read/write is
- * separate, #382). After a successful generation the exact prompt and output are
- * written to booklet_generations — F082 AC5 / F112's audit requirement. See
- * generate-booklet.ts for the Gemini call and scrape-website.ts for the optional
+ * F082 — Generate Client Booklet, extended by F084 — Use Website URL in Booklet and
+ * F085 — Save Generated Booklet. After a successful generation the exact prompt and
+ * output are written to booklet_generations — F082 AC5 / F112's audit requirement.
+ * See generate-booklet.ts for the Gemini call and scrape-website.ts for the optional
  * website-context fetch this route does first.
+ *
+ * F085: a successful generation is upserted into CLIENT_BOOKLETS (one row per
+ * organisation — see that migration's header) alongside the F082 audit write, using
+ * the caller's own RLS-scoped session rather than a service-role bypass: the
+ * client_booklets write policies require app.can_contact_organisation(), the exact
+ * predicate this route's own client:contact gate already enforces, so there is
+ * nothing a passing request here could do at the DB layer that authorization above
+ * didn't already allow. A save failure is reported but does not fail the response —
+ * the CAM still gets the booklet they asked for this once, just as "generated"
+ * rather than "generated and saved" (see the `saved` field below).
  *
  * client:contact, not client:view — this calls a paid external API on every click,
  * same reasoning as gating the Outreach section on the client detail page.
@@ -167,5 +177,40 @@ export async function POST(
     });
   }
 
-  return NextResponse.json({ booklet: result.booklet, websiteContext: websiteContextResult });
+  // F085: save on success only — a failed generation (returned above) leaves any
+  // previously saved booklet untouched, matching the testing notes' "generation
+  // failure (nothing saved)" case. The URL stored is the F046-normalised form,
+  // not the raw pasted string — it already passed through validateWebsiteFormat
+  // inside fetchImportPage, so this is a formatting pass over known-valid input.
+  const generatedAt = new Date().toISOString();
+  const savedUrl =
+    websiteContextResult.status === "used" && websiteUrl
+      ? validateWebsiteFormat(websiteUrl).url
+      : null;
+  const { error: saveError } = await supabase
+    .from("client_booklets")
+    .upsert(
+      {
+        organisation_id: organisationId,
+        booklet_text: result.booklet,
+        website_url: savedUrl,
+        website_context_used: websiteContextResult.status === "used",
+        generated_at: generatedAt,
+      },
+      { onConflict: "organisation_id" },
+    );
+
+  if (saveError) {
+    await reportError(saveError, {
+      operation: "clients.generate_booklet.save",
+      organisationId,
+    });
+  }
+
+  return NextResponse.json({
+    booklet: result.booklet,
+    websiteContext: websiteContextResult,
+    generatedAt,
+    saved: !saveError,
+  });
 }

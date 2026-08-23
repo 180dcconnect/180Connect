@@ -49,6 +49,12 @@ import { TimelineRealtimeRefresher } from "./timeline-realtime";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
+type SavedBookletRow = {
+  booklet_text: string;
+  website_url: string | null;
+  website_context_used: boolean;
+  generated_at: string;
+};
 type LatestSuppression = {
   status: "pending" | "active" | "rejected" | "lifted";
   reason: string;
@@ -123,6 +129,22 @@ export default async function ClientDetailPage({
   // "link" to `1-1coco.org` navigated to /clients/1-1coco.org.
   const websiteLink = websiteHref(website);
   const email = validateClientEmail(client.contact_email);
+
+  // F085: a saved booklet, if one exists, so BookletPanel can render it immediately
+  // instead of triggering a fresh (billed) Gemini generation on every page open.
+  // An errored read is not fatal — the panel just falls back to its empty state.
+  const { data: savedBooklet, error: savedBookletError } = await supabase
+    .from("client_booklets")
+    .select("booklet_text, website_url, website_context_used, generated_at")
+    .eq("organisation_id", id)
+    .maybeSingle<SavedBookletRow>();
+
+  if (savedBookletError) {
+    await reportError(savedBookletError, {
+      operation: "clients.detail_saved_booklet",
+      organisationId: id,
+    });
+  }
 
   // ENRICHMENT_RESULTS is append-only (20260804180000_create_org_children.sql), so
   // the most recently enriched row is "the" mission statement, not the only one.
@@ -540,7 +562,17 @@ export default async function ClientDetailPage({
               <Rise>
                 <BookletPanel
                   organisationId={client.id}
-                  initialWebsiteUrl={website.status === "reachable" ? website.url : null}
+                  initialWebsiteUrl={
+                    savedBooklet?.website_url ?? (website.status === "reachable" ? website.url : null)
+                  }
+                  savedBooklet={
+                    savedBooklet && {
+                      text: savedBooklet.booklet_text,
+                      websiteUrl: savedBooklet.website_url,
+                      websiteContextUsed: savedBooklet.website_context_used,
+                      generatedAt: savedBooklet.generated_at,
+                    }
+                  }
                 />
               </Rise>
             )}

@@ -40,11 +40,13 @@ export type GeographyScoreResult = {
   /** True when the client had no usable location (missing/blank). */
   usedDefault: boolean;
   /**
-   * True when the caller passed NO priority regions at all — i.e. "no
+   * True when the caller passed no usable priority regions — i.e. "no
    * preference set" per the data dictionary's definition of an empty
-   * OUTREACH_PREFERENCES.preferred_cities array. Distinct from a configured
-   * preference that simply didn't match: no preference must be NEUTRAL, not
-   * a penalty applied to every recorded location.
+   * OUTREACH_PREFERENCES.preferred_cities array. A list containing only
+   * NULLs or blank strings carries no usable preference either, so it
+   * counts here too. Distinct from a configured preference that simply
+   * didn't match: no preference must be NEUTRAL, not a penalty applied to
+   * every recorded location.
    */
   noPreferenceSet: boolean;
   matchedPriorityRegion: boolean;
@@ -71,18 +73,17 @@ export function scoreByGeography(
   location: string | null | undefined,
   priorityRegions: readonly string[],
 ): GeographyScoreResult {
-  if (priorityRegions.length === 0) {
-    // Empty preferred_cities means "no preference set", not "nothing is
-    // priority" — treating every recorded location as non-priority here
-    // would silently depress every client's geography score whenever a CAM
-    // hasn't configured preferences yet.
-    return {
-      score: NEUTRAL_NO_SIGNAL_SCORE,
-      usedDefault: true,
-      noPreferenceSet: true,
-      matchedPriorityRegion: false,
-    };
-  }
+  // Postgres text[] columns can hold NULL elements, and preferred_cities is
+  // fed straight in — one bad row must not crash scoring for every client.
+  // A blank string carries no usable preference either, so it is dropped
+  // before the emptiness check below: a list of only NULLs/blanks is "no
+  // preference set", not a configured preference that matches nothing.
+  const configuredRegions = priorityRegions
+    .filter(
+      (region): region is string =>
+        typeof region === "string" && region.trim().length > 0,
+    )
+    .map((region) => region.trim().toLowerCase());
 
   const trimmed = location?.trim();
 
@@ -90,15 +91,25 @@ export function scoreByGeography(
     return {
       score: NEUTRAL_NO_SIGNAL_SCORE,
       usedDefault: true,
-      noPreferenceSet: false,
+      noPreferenceSet: configuredRegions.length === 0,
       matchedPriorityRegion: false,
     };
   }
 
-  const normalisedLocation = trimmed.toLowerCase();
-  const matched = priorityRegions.some(
-    (region) => region.trim().toLowerCase() === normalisedLocation,
-  );
+  if (configuredRegions.length === 0) {
+    // Empty preferred_cities means "no preference set", not "nothing is
+    // priority" — treating every recorded location as non-priority here
+    // would silently depress every client's geography score whenever a CAM
+    // hasn't configured preferences yet.
+    return {
+      score: NEUTRAL_NO_SIGNAL_SCORE,
+      usedDefault: false,
+      noPreferenceSet: true,
+      matchedPriorityRegion: false,
+    };
+  }
+
+  const matched = configuredRegions.includes(trimmed.toLowerCase());
 
   return {
     score: matched ? PRIORITY_REGION_SCORE : NON_PRIORITY_REGION_SCORE,

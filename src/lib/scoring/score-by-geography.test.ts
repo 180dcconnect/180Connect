@@ -10,6 +10,7 @@ describe("scoreByGeography — complete client data", () => {
     const result = scoreByGeography("London", PRIORITY_REGIONS);
     assert.equal(result.matchedPriorityRegion, true);
     assert.equal(result.usedDefault, false);
+    assert.ok(result.score > 0.5);
   });
 
   it("scores a non-priority location lower than a priority one", () => {
@@ -51,14 +52,24 @@ describe("scoreByGeography — personal preference impact / configurable regions
     assert.ok(asPriority.score > notPriority.score);
   });
 
-  it("an empty priority region list is neutral 'no preference set', not a penalty (AC2)", () => {
+  it("an empty priority region list is neutral 'no preference set', not a penalty", () => {
     // Empty preferred_cities means "no preference set" per the data
     // dictionary — every recorded location must keep its neutral score
     // rather than being scored as confirmed non-priority.
     const result = scoreByGeography("London", []);
     assert.equal(result.noPreferenceSet, true);
     assert.equal(result.matchedPriorityRegion, false);
+    assert.equal(result.usedDefault, false);
     assert.equal(result.score, 0.5);
+  });
+
+  it("a recorded location with no preference set is distinguishable from a missing location", () => {
+    const noPreference = scoreByGeography("London", []);
+    const missingLocation = scoreByGeography(null, ["London"]);
+    assert.equal(noPreference.noPreferenceSet, true);
+    assert.equal(noPreference.usedDefault, false);
+    assert.equal(missingLocation.noPreferenceSet, false);
+    assert.equal(missingLocation.usedDefault, true);
   });
 
   it("no preference set does not score a location below a configured non-match", () => {
@@ -74,9 +85,15 @@ describe("scoreByGeography — personal preference impact / configurable regions
     assert.equal(result.score, 0.5);
   });
 
-  it("whitespace-only regions never match", () => {
+  it("whitespace-only regions count as 'no preference set', not as a penalty", () => {
     const result = scoreByGeography("London", ["   ", ""]);
+    assert.equal(result.noPreferenceSet, true);
     assert.equal(result.matchedPriorityRegion, false);
-    assert.equal(result.noPreferenceSet, false);
+    assert.equal(result.score, 0.5);
+  });
+
+  it("null entries in the priority list are dropped, not fatal", () => {
+    const result = scoreByGeography("London", [null as unknown as string, "London"]);
+    assert.equal(result.matchedPriorityRegion, true);
   });
 });

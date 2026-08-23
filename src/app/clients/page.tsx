@@ -25,7 +25,12 @@ import {
   type ClientListRow,
   type OpenSuppression,
 } from "./visible-clients.ts";
-import { Sparkles } from "lucide-react";
+import { ChevronRight, Sparkles } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/animate-ui/components/radix/tooltip";
 import { BrandSearchBar } from "@/components/brand/search-bar";
 import { ClaimButton } from "./[id]/claim-button";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
@@ -113,6 +118,28 @@ const CLAIM_SLOT = "w-[6.5rem] shrink-0";
 
 /** Reserved width for the booklet quick-action (F082), same reasoning as CLAIM_SLOT. */
 const BOOKLET_SLOT = "w-[7rem] shrink-0";
+
+/** Short date for the booklet quick-action's hover tooltip, e.g. "18 Aug 2026". */
+function formatBookletDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+const BOOKLET_PREVIEW_CHARS = 160;
+
+/**
+ * A one-line, label-stripped snippet for the hover preview — not the same
+ * rendering as BookletContent (booklet-panel.tsx), which needs the full
+ * "Label:"/dash-list structure to build real headings. A tooltip has room for a
+ * couple of lines, not sections, so this just flattens whitespace and cuts on a
+ * word boundary.
+ */
+function truncateBookletPreview(text: string): string {
+  const flattened = text.replace(/\s+/g, " ").trim();
+  if (flattened.length <= BOOKLET_PREVIEW_CHARS) return flattened;
+  const cut = flattened.slice(0, BOOKLET_PREVIEW_CHARS);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${cut.slice(0, lastSpace > 0 ? lastSpace : BOOKLET_PREVIEW_CHARS)}…`;
+}
 
 /**
  * F062's checkbox column. Outside the row's Link, on the same reasoning the claim
@@ -447,6 +474,39 @@ export default async function ClientsPage({
         canStatus: canBulkUpdateStatus(authorization.actor, client),
       }))
     : [];
+
+  // F087-adjacent: the quick-action tooltip below needs to know, per row on this
+  // page only, whether a booklet already exists (and a preview of it) — scoped to
+  // the current page's 25 ids (not every organisation) since that's all the
+  // tooltip can ever show at once. client_booklets is append-only (F086), so a row
+  // can have several versions; ordering by generated_at desc and keeping the first
+  // hit per id gives the latest without a second round-trip per organisation.
+  const bookletClientIds = canGenerateBooklet ? clients.map((client) => client.id) : [];
+  const { data: bookletRows, error: bookletRowsError } =
+    bookletClientIds.length > 0
+      ? await supabase
+          .from("client_booklets")
+          .select("organisation_id, generated_at, booklet_text")
+          .in("organisation_id", bookletClientIds)
+          .order("generated_at", { ascending: false })
+      : {
+          data: [] as { organisation_id: string; generated_at: string; booklet_text: string }[],
+          error: null,
+        };
+
+  if (bookletRowsError) {
+    await reportError(bookletRowsError, { operation: "clients.page_booklet_existence" });
+  }
+
+  const latestBookletByOrg = new Map<string, { generatedAt: string; preview: string }>();
+  for (const row of bookletRows ?? []) {
+    if (!latestBookletByOrg.has(row.organisation_id)) {
+      latestBookletByOrg.set(row.organisation_id, {
+        generatedAt: row.generated_at,
+        preview: truncateBookletPreview(row.booklet_text),
+      });
+    }
+  }
 
   /**
    * Every link on this page is the current URL with one thing changed, so they
@@ -827,17 +887,74 @@ export default async function ClientsPage({
                             the list changes hands. */}
                         {(canGenerateBooklet || canClaim) && (
                           <span className="flex shrink-0 items-center gap-2">
-                            {canGenerateBooklet && (
+                            {canGenerateBooklet && (() => {
+                              const existingBooklet = latestBookletByOrg.get(client.id);
+                              return (
                               <span className={`${BOOKLET_SLOT} flex justify-end`}>
-                                <Link
-                                  className="flex items-center gap-1 rounded-full border border-brand/30 px-3 py-1 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
-                                  href={`/clients/${client.id}?booklet=generate`}
-                                >
-                                  <Sparkles aria-hidden="true" className="h-3 w-3" />
-                                  Booklet
-                                </Link>
+                                {/* Hover preview, in the same light brand-green the
+                                    rest of the dashboard's pills already use. An
+                                    existing booklet links straight to the client's
+                                    saved copy rather than ?booklet=generate, which
+                                    forces a fresh (billed) Gemini call — that's only
+                                    right for a client with no booklet yet. */}
+                                <Tooltip delayDuration={200}>
+                                  <TooltipTrigger asChild>
+                                    <Link
+                                      className="flex items-center gap-1 rounded-full border border-brand/30 px-3 py-1 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
+                                      href={
+                                        existingBooklet
+                                          ? `/clients/${client.id}`
+                                          : `/clients/${client.id}?booklet=generate`
+                                      }
+                                    >
+                                      <Sparkles aria-hidden="true" className="h-3 w-3" />
+                                      Booklet
+                                    </Link>
+                                  </TooltipTrigger>
+                                  <TooltipContent
+                                    className="rounded-2xl border border-brand/15 bg-gradient-to-br from-white to-brand/10 px-4 py-3 text-brand-hover shadow-lg shadow-brand/10"
+                                    showArrow={false}
+                                    side="top"
+                                    sideOffset={10}
+                                  >
+                                    {existingBooklet ? (
+                                      <span className="flex w-64 flex-col gap-1.5">
+                                        <span className="flex items-center gap-1.5">
+                                          <Sparkles aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-brand" />
+                                          <span className="text-sm font-bold">Booklet ready</span>
+                                          <span className="ml-auto text-[10px] font-semibold uppercase tracking-[0.06em] text-brand-hover/50">
+                                            {formatBookletDate(existingBooklet.generatedAt)}
+                                          </span>
+                                        </span>
+                                        {/* Capped-height snippet with a fade to the
+                                            card's own background at the bottom, rather
+                                            than a hard cut, so it reads as "there's
+                                            more" instead of "that's all of it". */}
+                                        <span className="relative block max-h-11 overflow-hidden">
+                                          <span className="text-[12.5px] leading-snug text-brand-hover/70">
+                                            {existingBooklet.preview}
+                                          </span>
+                                          <span
+                                            aria-hidden="true"
+                                            className="absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-[#eaf6de] to-transparent"
+                                          />
+                                        </span>
+                                        <span className="flex items-center gap-1 text-[11px] font-bold text-brand">
+                                          Click to view full booklet
+                                          <ChevronRight aria-hidden="true" className="h-3 w-3" />
+                                        </span>
+                                      </span>
+                                    ) : (
+                                      <span className="flex items-center gap-2 text-sm font-bold">
+                                        <Sparkles aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-brand" />
+                                        Click to create a new booklet
+                                      </span>
+                                    )}
+                                  </TooltipContent>
+                                </Tooltip>
                               </span>
-                            )}
+                              );
+                            })()}
                             {canClaim && (
                               <span className={`${CLAIM_SLOT} flex justify-end`}>
                                 {!client.ownerName && (

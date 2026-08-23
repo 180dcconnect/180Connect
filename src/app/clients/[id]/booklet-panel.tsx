@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Clock, ExternalLink, Globe, Sparkles } from "lucide-react";
+import { Clock, ExternalLink, Globe, ShieldCheck, Sparkles } from "lucide-react";
 import { parseBookletSections } from "@/lib/booklet/parse-sections";
+import type { BookletSource } from "@/lib/booklet/sources";
 
 /**
  * F082 — Generate Client Booklet. A one-shot user-triggered action, not the
@@ -38,6 +39,28 @@ import { parseBookletSections } from "@/lib/booklet/parse-sections";
  * SSRF-safe transport (scrape-website.ts) fresh on every click — nothing is cached,
  * same "no persistence yet" reasoning as the booklet itself. Whether the site's
  * content actually made it in is reported back as a status line under the booklet.
+ *
+ * F086 — Regenerate Client Booklet: CLIENT_BOOKLETS is append-only now (see that
+ * migration's F086 revision), so a regenerate is a new row, never an overwrite —
+ * AC2 needs the prior version to stay retrievable, not just timestamped. `history`
+ * holds every earlier version this component knows about (seeded from
+ * `priorVersions`, then grown in place each time generate() succeeds by archiving
+ * whatever was `currentVersion` before the call). `viewingVersionId` picks a
+ * historical entry to display read-only in place of the current one; it is purely
+ * a local view toggle; nothing about the DB records or Regenerate's own behavior
+ * changes while browsing history — regenerating always acts on "current", never on
+ * whatever old version happens to be on screen, so a browsed history entry never
+ * looks like it could be silently replaced by clicking Regenerate. Regenerate and
+ * the URL field are hidden while a historical entry is shown for exactly that
+ * reason; "Back to current" is the one action available there.
+ *
+ * F087 — Booklet Source References: every version (fresh or historical) carries a
+ * `sources` list (see sources.ts) rendered as a row of badges — profile data is
+ * always shown (verified: it's this CRM's own records), a website is only shown
+ * when it actually contributed (unverified: scraped external content). Applies to
+ * whatever `displayed` currently is, so browsing history shows that version's own
+ * sources, never the current version's.
+
  */
 
 const STATUS_MESSAGES = [
@@ -134,6 +157,29 @@ function LinkifiedText({ text }: { text: string }) {
   return <>{parts}</>;
 }
 
+/**
+ * F087 — AC2: verified (profile) and unverified (website) sources are visually
+ * distinct by more than color alone — icon and wording both change, not just the
+ * tone — so the distinction still reads for a CAM who can't rely on color.
+ */
+function SourceBadge({ source }: { source: BookletSource }) {
+  if (source.type === "profile") {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-brand/10 px-3 py-1 text-sm font-semibold text-brand-hover">
+        <ShieldCheck aria-hidden="true" className="h-3.5 w-3.5" />
+        Client profile — verified
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-800">
+      <Globe aria-hidden="true" className="h-3.5 w-3.5" />
+      Website: {source.hostname} — unverified
+    </span>
+  );
+
+}
+
 function BookletContent({ booklet }: { booklet: string }) {
   const blocks = parseBookletSections(booklet);
   return (
@@ -181,6 +227,7 @@ export type SavedBooklet = {
   websiteUrl: string | null;
   websiteContextUsed: boolean;
   generatedAt: string;
+  sources: BookletSource[];
 };
 
 function formatGeneratedAt(iso: string): string {
@@ -268,6 +315,7 @@ export function BookletPanel({
       ? (history.find((version) => version.id === viewingVersionId) ?? null)
       : null;
   const displayed = viewingVersion ?? currentVersion;
+  const displayedSources = displayed?.sources ?? [];
   const displayedWebsiteContext = viewingVersion
     ? initialWebsiteContext(viewingVersion)
     : (freshWebsiteContext ?? (currentVersion ? initialWebsiteContext(currentVersion) : null));
@@ -307,6 +355,9 @@ export function BookletPanel({
         websiteUrl: websiteContextResult?.status === "used" ? trimmedUrl || null : null,
         websiteContextUsed: websiteContextResult?.status === "used",
         generatedAt: (body.generatedAt as string | undefined) ?? new Date().toISOString(),
+        // F087: the route's own authoritative list for this exact call (sources.ts),
+        // not re-derived client-side — see route.ts's response comment.
+        sources: (body.sources as BookletSource[] | undefined) ?? [{ type: "profile", verified: true }],
       };
       // F086 AC2: archive whatever was current, never discard it — a regenerate
       // is additive to history, not a replacement of it.
@@ -474,16 +525,21 @@ export function BookletPanel({
             : "."}
         </p>
       )}
-      {displayed && !busy && displayedWebsiteContext && displayedWebsiteContext.status !== "not_provided" && (
-        <p
-          className={`mt-1 flex items-start gap-1.5 text-xs font-medium ${
-            displayedWebsiteContext.status === "used" ? "text-green-700" : "text-amber-700"
-          }`}
-        >
+      {/* F087 — Booklet Source References (AC1/AC2): profile data always shows,
+          website only when it actually contributed — never listed as a source it
+          wasn't (AC3). Rendered regardless of error state, consistent with the
+          saved-content-stays-visible behaviour above. */}
+      {displayed && !busy && displayedSources.length > 0 && (
+        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+          {displayedSources.map((source) => (
+            <SourceBadge key={source.type} source={source} />
+          ))}
+        </div>
+      )}
+      {displayed && !busy && displayedWebsiteContext?.status === "skipped" && (
+        <p className="mt-1.5 flex items-start gap-1.5 text-xs font-medium text-amber-700">
           <Globe aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          {displayedWebsiteContext.status === "used"
-            ? `Used live content from ${displayedWebsiteContext.hostname}.`
-            : `Website content not used — ${displayedWebsiteContext.reason}`}
+          {`Website content not used — ${displayedWebsiteContext.reason}`}
         </p>
       )}
       {displayed && !busy && <BookletContent booklet={displayed.text} />}

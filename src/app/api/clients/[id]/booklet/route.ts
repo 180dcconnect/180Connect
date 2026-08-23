@@ -18,6 +18,7 @@ import {
   fetchWebsiteContext,
 } from "@/lib/booklet/scrape-website";
 import { validateWebsiteFormat } from "@/lib/website-validation";
+import { deriveBookletSources } from "@/lib/booklet/sources";
 
 // F084 — Use Website URL in Booklet: an optional URL the CAM pastes in, separate
 // from the stored organisation.website (which is always sent as a plain field
@@ -52,6 +53,12 @@ type WebsiteContextResult =
  * "generated and saved" (see the `saved` field below). A regenerate (F086) is
  * the exact same insert, not an update — the prior row is left alone, satisfying
  * F086 AC2 (a bad regeneration never destroys the last good version).
+ *
+ * F087 — Booklet Source References: `sources` in the response is the tested,
+ * authoritative source list for this exact generation (sources.ts) — the CAM-facing
+ * list can never drift from what was actually sent to the model, since both come
+ * from the same `websiteContext` value.
+
  *
  * client:contact, not client:view — this calls a paid external API on every click,
  * same reasoning as gating the Outreach section on the client detail page.
@@ -214,6 +221,10 @@ export async function POST(
   return NextResponse.json({
     booklet: result.booklet,
     websiteContext: websiteContextResult,
+    // F087 — Booklet Source References: derived from the exact websiteContext
+    // value just handed to generateBooklet, so this can never list a source that
+    // wasn't actually sent to the model (AC1/AC3).
+    sources: deriveBookletSources(websiteContext),
     generatedAt,
     versionId: savedRow?.id ?? null,
     saved: !saveError,

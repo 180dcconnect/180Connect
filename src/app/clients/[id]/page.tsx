@@ -25,6 +25,7 @@ import { StatusSelect } from "./status-select";
 import { Pill, SectionCard } from "./section-card";
 import { TagsSection } from "./tags-section";
 import { BookletPanel } from "./booklet-panel";
+import { deriveSourcesFromSavedRow } from "@/lib/booklet/sources";
 import { formatAttachments, type AttachmentRow } from "@/lib/attachments";
 import { AttachmentsSection } from "./attachments-section";
 import { UploadAttachmentForm } from "./upload-attachment-form";
@@ -583,6 +584,13 @@ export default async function ClientDetailPage({
                       websiteUrl: savedBooklet.website_url,
                       websiteContextUsed: savedBooklet.website_context_used,
                       generatedAt: savedBooklet.generated_at,
+                      // F087: reconstructed from the stored used/not-used boolean
+                      // and URL — see sources.ts for why this can't drift from
+                      // what a fresh generation's own route response reports.
+                      sources: deriveSourcesFromSavedRow({
+                        websiteContextUsed: savedBooklet.website_context_used,
+                        websiteUrl: savedBooklet.website_url,
+                      }),
                     }
                   }
                   priorVersions={(bookletVersions ?? []).slice(1).map((version) => ({
@@ -591,6 +599,10 @@ export default async function ClientDetailPage({
                     websiteUrl: version.website_url,
                     websiteContextUsed: version.website_context_used,
                     generatedAt: version.generated_at,
+                    sources: deriveSourcesFromSavedRow({
+                      websiteContextUsed: version.website_context_used,
+                      websiteUrl: version.website_url,
+                    }),
                   }))}
                 />
               </Rise>

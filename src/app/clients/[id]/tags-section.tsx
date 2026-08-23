@@ -1,13 +1,13 @@
 "use client";
 
-// F191: assign an existing tag to this client, inline on the client
-// profile page. Currently-assigned tags are shown read-only here —
-// removing a tag is F192's own ticket/branch, kept out of this component
-// deliberately so this PR stays scoped to F191 alone, matching this
-// project's convention of one ticket/one reviewer per PR.
+// F191/F192: assign an existing tag to this client inline on the client
+// profile page, and remove an assigned tag via TagChips (F192) — no page
+// reload for either. This component owns the assigned-tags state so assign
+// and remove stay in sync with each other.
 
 import { useState, useTransition } from "react";
 import { assignTagAction } from "@/lib/tags/assign-tag-action";
+import { TagChips } from "@/lib/tags/tag-chips";
 
 export type ClientTag = { id: string; name: string };
 export type AvailableTag = { id: string; name: string };
@@ -50,21 +50,21 @@ export function TagsSection({
     });
   }
 
+  function handleRemoved(tagId: string) {
+    setClientTags((current) => current.filter((t) => t.id !== tagId));
+  }
+
   return (
     <div className="mt-3">
       {clientTags.length === 0 ? (
         <p className="text-sm leading-[1.7] text-foreground/55">No tags assigned yet.</p>
       ) : (
-        <div className="flex flex-wrap gap-1.5">
-          {clientTags.map((tag) => (
-            <span
-              key={tag.id}
-              className="inline-flex items-center rounded-full bg-brand/12 px-2.5 py-1 text-xs font-medium text-brand-hover"
-            >
-              {tag.name}
-            </span>
-          ))}
-        </div>
+        <TagChips
+          organisationId={organisationId}
+          tags={clientTags}
+          canEdit={canEdit}
+          onRemoved={handleRemoved}
+        />
       )}
 
       {canEdit && assignableTags.length > 0 && (

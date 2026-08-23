@@ -4922,6 +4922,110 @@ begin
 end;
 $$;
 
+-- F192 (Remove Tag from Client): the org_tags DELETE policy, the DELETE
+-- grant, and the Data Model's NOT NULL on added_by_user_id. Drives a real
+-- delete through RLS as each role against the same tag assigned to two
+-- organisations, so cross-assignment scoping (AC1) is exercised against the
+-- production query path, not just app code.
+create or replace function tests.suite_org_tags()
+returns setof text language plpgsql as $$
+declare
+  v_admin  uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_gone   uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer uuid := '00000000-0000-4000-a000-000000000005';
+  v_org_a  uuid := '00000000-0000-4000-b000-000000000002';
+  v_org_b  uuid := '00000000-0000-4000-b000-000000000003';
+  v_tag    uuid := '00000000-0000-4000-c000-000000000001';
+  v_count  bigint;
+begin
+  if not tests.tables_exist('users', 'organisations', 'tags', 'org_tags') then
+    return next skip(10, 'tags or org_tags table not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Fixtures run unimpersonated: the owner writes rows directly so only the
+  -- DELETE policy is under test here. The tag is shared by two clients and
+  -- both assignments record added_by_user_id (NOT NULL per the Data Model).
+  insert into public.tags (id, name, created_by_user_id)
+  values (v_tag, 'pgtap org_tags fixture', v_admin)
+  on conflict do nothing;
+
+  insert into public.org_tags (organisation_id, tag_id, added_by_user_id)
+  values
+    (v_org_a, v_tag, v_admin),
+    (v_org_b, v_tag, v_admin)
+  on conflict do nothing;
+
+  -- The grant F192's migration exists to add: without it every delete below
+  -- would silently match zero rows regardless of policy outcome.
+  return next ok(
+    has_table_privilege('authenticated', 'public.org_tags', 'DELETE'),
+    'authenticated holds the DELETE privilege on org_tags'
+  );
+
+  -- added_by_user_id must be truly required, matching ORG_TAGS in
+  -- 04-entities.md (Nullable = No), not nullable with ON DELETE SET NULL.
+  return next is(
+    (select is_nullable from information_schema.columns
+     where table_schema = 'public' and table_name = 'org_tags'
+       and column_name = 'added_by_user_id'),
+    'NO',
+    'org_tags.added_by_user_id is NOT NULL per the Data Model'
+  );
+
+  -- A viewer passes the SELECT policy but fails can_write(), so their delete
+  -- matches zero rows — no error, no removal.
+  perform tests.login_as(v_viewer);
+  delete from public.org_tags where organisation_id = v_org_a and tag_id = v_tag;
+  get diagnostics v_count = row_count;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a viewer cannot remove a tag assignment');
+
+  -- A deactivated CAM fails is_active_user() — same silent zero-row outcome.
+  perform tests.login_as(v_gone);
+  delete from public.org_tags where organisation_id = v_org_a and tag_id = v_tag;
+  get diagnostics v_count = row_count;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(
+    v_count, 0::bigint, 'a deactivated user cannot remove a tag assignment'
+  );
+
+  -- An active CAM removes one client's assignment. The policy is not
+  -- author-scoped: this row was added by the admin, not the deleting CAM.
+  perform tests.login_as(v_cam_a);
+  delete from public.org_tags where organisation_id = v_org_a and tag_id = v_tag;
+  get diagnostics v_count = row_count;
+  return next is(v_count, 1::bigint, 'an active CAM can remove a tag assignment');
+
+  -- AC1: removing one client's assignment leaves the same tag's assignment
+  -- on the other client untouched.
+  select count(*) into v_count from public.org_tags
+   where organisation_id = v_org_b and tag_id = v_tag;
+  return next is(
+    v_count, 1::bigint,
+    'removing an assignment from one client never touches another client''s assignment of the same tag'
+  );
+
+  -- AC3: removing the last assignment never deletes the parent tag.
+  delete from public.org_tags where organisation_id = v_org_b and tag_id = v_tag;
+  get diagnostics v_count = row_count;
+  return next is(v_count, 1::bigint, 'the second client''s assignment is also removable');
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select count(*) into v_count from public.tags where id = v_tag;
+  return next is(
+    v_count, 1::bigint,
+    'the tag itself survives after its last assignment is removed (deleting tags is F190''s job)'
+  );
+end;
+$$;
+
 select * from tests.suite_core();
 select * from tests.suite_viewer();
 select * from tests.suite_users();
@@ -4942,6 +5046,7 @@ select * from tests.suite_claim_ownership();
 select * from tests.suite_outreach_status();
 select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
+select * from tests.suite_org_tags();
 select * from tests.suite_ownership_requests();
 select * from tests.suite_edit_suggestions();
 select * from tests.suite_notifications();

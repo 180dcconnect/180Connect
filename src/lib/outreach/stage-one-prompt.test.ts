@@ -114,3 +114,8 @@ test("buildStageOnePrompt applies each opening approach safely", () => {
   assert.match(buildStageOnePrompt(context, { opening: "direct_intro" }).system, /direct introduction/);
   assert.match(buildStageOnePrompt(context, { opening: "news_hook" }).system, /without inventing news/);
 });
+
+test("buildStageOnePrompt defaults to a mission-led opening when no options are given", () => {
+  const context = { organisationName: "Example", organisationType: "charity" };
+  assert.match(buildStageOnePrompt(context).system, /supplied mission/);
+});

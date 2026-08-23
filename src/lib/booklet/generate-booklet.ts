@@ -17,6 +17,7 @@ import {
   buildBookletPrompt,
   type BookletEnrichmentInput,
   type BookletOrganisationInput,
+  type BookletWebsiteContext,
 } from "./build-prompt.ts";
 
 // PRD §"Performance and Reliability Targets": Client Booklet generation is ordinarily
@@ -101,6 +102,10 @@ export type GenerateBookletInput = {
   organisationId: string;
   organisation: BookletOrganisationInput;
   enrichment: BookletEnrichmentInput;
+  // F084: pre-fetched by the caller (route.ts) before generateBooklet is ever
+  // called, same way organisation/enrichment are already DB reads the route does
+  // up front — keeps this function's own concern limited to the Gemini call.
+  websiteContext?: BookletWebsiteContext;
 };
 
 /**
@@ -127,7 +132,11 @@ export async function generateBooklet(
     }
   | { error: string }
 > {
-  const { system, prompt } = buildBookletPrompt(input.organisation, input.enrichment);
+  const { system, prompt } = buildBookletPrompt(
+    input.organisation,
+    input.enrichment,
+    input.websiteContext ?? null,
+  );
   const startedAt = Date.now();
 
   try {

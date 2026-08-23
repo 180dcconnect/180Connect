@@ -538,7 +538,10 @@ export default async function ClientDetailPage({
                 else on the page. */}
             {hasPermission(authorization.actor.role, "client:contact") && (
               <Rise>
-                <BookletPanel organisationId={client.id} />
+                <BookletPanel
+                  organisationId={client.id}
+                  initialWebsiteUrl={website.status === "reachable" ? website.url : null}
+                />
               </Rise>
             )}
 

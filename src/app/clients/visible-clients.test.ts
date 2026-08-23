@@ -3,16 +3,24 @@ import { describe, it } from "node:test";
 import {
   filterByCity,
   filterByOwner,
-  filterBySource,
+  filterByTags,
   filterByStatus,
   formatLocation,
   formatOutreachStatus,
   prioritiseByGeography,
   prioritiseBySector,
   prioritiseBySize,
+  prioritiseByGrants,
   prioritiseQueue,
   resolveClientIncomeBand,
+  getGrantPriorityScore,
+  filterByCountry,
+  filterByType,
+  filterValues,
+  parseListDirection,
+  parseListSort,
   searchClients,
+  sortClients,
   visibleClients,
   type ClientListRow,
 } from "./visible-clients.ts";
@@ -28,9 +36,9 @@ function org(overrides: Partial<ClientListRow> = {}): ClientListRow {
     owner_id: null,
     owner: null,
     ...overrides,
+    org_tags: overrides.org_tags ?? [],
   };
 }
-
 describe("formatLocation", () => {
   it("uses the city when present", () => {
     assert.equal(formatLocation(org({ city: "Bristol", country_code: "GB" })), "Bristol");
@@ -129,6 +137,49 @@ describe("filterByOwner (F163)", () => {
   });
 });
 
+describe("filterByTags", () => {
+  const clients = visibleClients(
+    [
+      org({ id: "a", org_tags: [{ tag_id: "urgent" }] }),
+      org({ id: "b", org_tags: [{ tag_id: "urgent" }, { tag_id: "priority" }] }),
+      org({ id: "c", org_tags: [{ tag_id: "priority" }] }),
+      org({ id: "d", org_tags: [] }),
+    ],
+    [],
+  );
+  it("returns every client when no tags are selected", () => {
+    assert.deepEqual(filterByTags(clients, undefined).map((c) => c.id), [
+      "a", "b", "c", "d",
+    ]);
+    assert.deepEqual(filterByTags(clients, null).map((c) => c.id), [
+      "a", "b", "c", "d",
+    ]);
+    assert.deepEqual(filterByTags(clients, []).map((c) => c.id), [
+      "a", "b", "c", "d",
+    ]);
+  });
+  it("matches clients with any of the selected tags (OR logic, per AC2)", () => {
+    assert.deepEqual(filterByTags(clients, ["urgent"]).map((c) => c.id), [
+      "a", "b",
+    ]);
+    assert.deepEqual(filterByTags(clients, ["priority"]).map((c) => c.id), [
+      "b", "c",
+    ]);
+  });
+  it("selecting multiple tags is a union, not an intersection", () => {
+    assert.deepEqual(
+      filterByTags(clients, ["urgent", "priority"]).map((c) => c.id),
+      ["a", "b", "c"],
+    );
+  });
+  it("excludes clients with none of the selected tags", () => {
+    assert.deepEqual(filterByTags(clients, ["nonexistent-tag"]), []);
+  });
+  it("returns an empty list when filtering an empty client list", () => {
+    assert.deepEqual(filterByTags([], ["urgent"]), []);
+  });
+});
+
 describe("searchClients", () => {
   const clients = visibleClients(
     [
@@ -198,48 +249,9 @@ describe("filterByStatus", () => {
     assert.deepEqual(filterByStatus(clients, null).map((c) => c.id), ["a", "b", "c"]);
     assert.deepEqual(filterByStatus(clients, "").map((c) => c.id), ["a", "b", "c"]);
   });
-
-  it("matches against human-readable status label", () => {
-    assert.deepEqual(filterByStatus(clients, "Not contacted").map((c) => c.id), ["a", "c"]);
-    assert.deepEqual(filterByStatus(clients, "contacted").map((c) => c.id), ["b"]);
-  });
 });
 
-describe("filterBySource", () => {
-  const clients = visibleClients(
-    [
-      org({ id: "a", organisation_type: "charity" }),
-      org({ id: "b", organisation_type: "company" }),
-      org({ id: "c", organisation_type: "both" }),
-      org({ id: "d", organisation_type: "other" }),
-    ],
-    [],
-  );
-
-  it("returns every client when source filter is unset", () => {
-    assert.deepEqual(filterBySource(clients, undefined).map((c) => c.id), ["a", "b", "c", "d"]);
-    assert.deepEqual(filterBySource(clients, null).map((c) => c.id), ["a", "b", "c", "d"]);
-    assert.deepEqual(filterBySource(clients, "").map((c) => c.id), ["a", "b", "c", "d"]);
-  });
-
-  it("filters for charity commission organisations (including dual registered)", () => {
-    assert.deepEqual(filterBySource(clients, "charity commission").map((c) => c.id), ["a", "c"]);
-  });
-
-  it("filters for companies house organisations (including dual registered)", () => {
-    assert.deepEqual(filterBySource(clients, "companies house").map((c) => c.id), ["b", "c"]);
-  });
-
-  it("filters for strictly dual registered organisations", () => {
-    assert.deepEqual(filterBySource(clients, "dual-registered").map((c) => c.id), ["c"]);
-  });
-
-  it("filters for other organisations", () => {
-    assert.deepEqual(filterBySource(clients, "other").map((c) => c.id), ["d"]);
-  });
-});
-
-describe("prioritiseByGeography (F196 / F090 / F094)", () => {
+describe("prioritiseQueue — geography only (F196 / F090 / F094)", () => {
   const clients = visibleClients(
     [
       org({ id: "1", legal_name: "Action for Children", city: "London", country_code: "GB", geographic_reach: "national" }),
@@ -253,21 +265,21 @@ describe("prioritiseByGeography (F196 / F090 / F094)", () => {
 
   it("returns the unweighted default order when no preferences are passed", () => {
     assert.deepEqual(
-      prioritiseByGeography(clients, undefined).map((c) => c.id),
+      prioritiseQueue(clients, undefined).map((c) => c.id),
       ["1", "2", "3", "4", "5"],
     );
     assert.deepEqual(
-      prioritiseByGeography(clients, null).map((c) => c.id),
+      prioritiseQueue(clients, null).map((c) => c.id),
       ["1", "2", "3", "4", "5"],
     );
     assert.deepEqual(
-      prioritiseByGeography(clients, { preferred_geographic_reach: [], preferred_cities: [] }).map((c) => c.id),
+      prioritiseQueue(clients, { preferred_geographic_reach: [], preferred_cities: [] }).map((c) => c.id),
       ["1", "2", "3", "4", "5"],
     );
   });
 
   it("prioritises organisations matching preferred target cities", () => {
-    const result = prioritiseByGeography(clients, {
+    const result = prioritiseQueue(clients, {
       preferred_cities: ["Leeds", "Barnsley"],
       preferred_geographic_reach: [],
     });
@@ -276,7 +288,7 @@ describe("prioritiseByGeography (F196 / F090 / F094)", () => {
   });
 
   it("prioritises Sheffield when local reach or Sheffield city is preferred", () => {
-    const result = prioritiseByGeography(clients, {
+    const result = prioritiseQueue(clients, {
       preferred_cities: ["Sheffield"],
       preferred_geographic_reach: ["local"],
     });
@@ -284,7 +296,7 @@ describe("prioritiseByGeography (F196 / F090 / F094)", () => {
   });
 
   it("boosts South Yorkshire cities when South Yorkshire regional preference is set", () => {
-    const result = prioritiseByGeography(clients, {
+    const result = prioritiseQueue(clients, {
       preferred_cities: ["South Yorkshire"],
       preferred_geographic_reach: [],
     });
@@ -294,7 +306,7 @@ describe("prioritiseByGeography (F196 / F090 / F094)", () => {
   });
 
   it("prioritises matching geographic reach", () => {
-    const result = prioritiseByGeography(clients, {
+    const result = prioritiseQueue(clients, {
       preferred_geographic_reach: ["national"],
       preferred_cities: [],
     });
@@ -347,6 +359,42 @@ describe("prioritiseBySector (F197 / F089 / F094)", () => {
       preferred_sectors: ["Renewable Energy"],
     });
     assert.equal(result[0].id, "3");
+  });
+
+  it("matches aliases on whole words only — no accidental fragment boosts", () => {
+    const result = prioritiseBySector(clients, {
+      preferred_sectors: ["Arts & Culture"],
+    });
+    // None of these organisations is an arts organisation; raw substring
+    // matching could previously boost via fragments of unrelated words.
+    assert.deepEqual(result.map((c) => c.id), ["1", "2", "3", "4", "5"]);
+  });
+
+  it("does not let overlapping group vocabulary cross-match unrelated sectors", () => {
+    const result = prioritiseBySector(clients, {
+      preferred_sectors: ["Human Rights & Justice", "Social Enterprise"],
+    });
+    // Youth (#1) and poverty (#5) orgs share vocabulary with the justice and
+    // community groups but are neither — they keep the unweighted tail order.
+    assert.deepEqual(result.map((c) => c.id), ["1", "2", "3", "4", "5"]);
+  });
+
+  it("matches aliases on whole words only — no accidental fragment boosts", () => {
+    const result = prioritiseBySector(clients, {
+      preferred_sectors: ["Arts & Culture"],
+    });
+    // None of these organisations is an arts organisation; raw substring
+    // matching could previously boost via fragments of unrelated words.
+    assert.deepEqual(result.map((c) => c.id), ["1", "2", "3", "4", "5"]);
+  });
+
+  it("does not let overlapping group vocabulary cross-match unrelated sectors", () => {
+    const result = prioritiseBySector(clients, {
+      preferred_sectors: ["Human Rights & Justice", "Social Enterprise"],
+    });
+    // Youth (#1) and poverty (#5) orgs share vocabulary with the justice and
+    // community groups but are neither — they keep the unweighted tail order.
+    assert.deepEqual(result.map((c) => c.id), ["1", "2", "3", "4", "5"]);
   });
 });
 
@@ -423,27 +471,420 @@ describe("prioritiseBySize (F198 / F091 / F094)", () => {
   });
 });
 
-describe("prioritiseQueue (Combined F196 + F197 + F198)", () => {
+describe("prioritiseByGrants (F199 / F092 / F094)", () => {
   const clients = visibleClients(
     [
-      org({ id: "1", legal_name: "Alpha Bristol Health Small", city: "Bristol", sector: "Healthcare", income_band: "10k_100k" }),
-      org({ id: "2", legal_name: "Beta Sheffield Energy Medium", city: "Sheffield", sector: "Renewable Energy", income_band: "100k_1m" }),
-      org({ id: "3", legal_name: "Gamma Sheffield Health Medium", city: "Sheffield", sector: "Healthcare", income_band: "100k_1m" }),
-      org({ id: "4", legal_name: "Delta London Arts Large", city: "London", sector: "Arts & Culture", income_band: "over_1m" }),
+      org({ id: "1", legal_name: "Alpha Grant Recipient", grants: [{ id: "g1", funder_name: "National Lottery", amount_awarded: 50_000 }] }),
+      org({ id: "2", legal_name: "Beta No Grants Org" }),
+      org({ id: "3", legal_name: "Gamma Multi Grant Org", grants: [{ id: "g2", funder_name: "Trusthouse", amount_awarded: 20_000 }] }),
+      org({ id: "4", legal_name: "Delta Unfunded Charity" }),
     ],
     [],
   );
 
-  it("ranks organisations matching geography, sector, AND size highest", () => {
+  it("returns unweighted default order when grant prioritisation is false or unset", () => {
+    assert.deepEqual(
+      prioritiseByGrants(clients, undefined).map((c) => c.id),
+      ["1", "2", "3", "4"],
+    );
+    assert.deepEqual(
+      prioritiseByGrants(clients, { prioritise_grant_recipients: false }).map((c) => c.id),
+      ["1", "2", "3", "4"],
+    );
+  });
+
+  it("computes grant priority score correctly", () => {
+    assert.equal(getGrantPriorityScore(clients[0], true), 10);
+    assert.equal(getGrantPriorityScore(clients[1], true), 0);
+    assert.equal(getGrantPriorityScore(clients[0], false), 0);
+    assert.equal(getGrantPriorityScore(clients[0], null), 0);
+  });
+
+  it("prioritises organisations with previous grant history when enabled", () => {
+    const result = prioritiseByGrants(clients, {
+      prioritise_grant_recipients: true,
+    });
+    // Alpha (#1) and Gamma (#3) have grants, sorted alphabetically
+    assert.deepEqual(result.map((c) => c.id), ["1", "3", "2", "4"]);
+  });
+});
+
+describe("prioritiseQueue (Combined F196 + F197 + F198 + F199)", () => {
+  const clients = visibleClients(
+    [
+      org({ id: "1", legal_name: "Alpha Bristol Health Small", city: "Bristol", sector: "Healthcare", income_band: "10k_100k", grants: [] }),
+      org({ id: "2", legal_name: "Beta Sheffield Energy Medium", city: "Sheffield", sector: "Renewable Energy", income_band: "100k_1m", grants: [] }),
+      org({ id: "3", legal_name: "Gamma Sheffield Health Medium Funded", city: "Sheffield", sector: "Healthcare", income_band: "100k_1m", grants: [{ id: "g1", funder_name: "Paul Hamlyn", amount_awarded: 100_000 }] }),
+      org({ id: "4", legal_name: "Delta London Arts Large Funded", city: "London", sector: "Arts & Culture", income_band: "over_1m", grants: [{ id: "g2", funder_name: "Arts Council", amount_awarded: 50_000 }] }),
+    ],
+    [],
+  );
+
+  it("ranks organisations matching geography, sector, size, AND grant history highest", () => {
     const result = prioritiseQueue(clients, {
       preferred_cities: ["Sheffield"],
       preferred_sectors: ["Health & Social Care"],
       preferred_income_bands: ["100k_1m"],
+      prioritise_grant_recipients: true,
     });
-    // Gamma Sheffield Health Medium matches all 3 (City: 10 + Sector: 8 + Size: 10 = 28)
-    // Beta Sheffield Energy Medium matches City: 10 + Size: 10 = 20
-    // Alpha Bristol Health Small matches Sector: 8 = 8
-    // Delta London Arts Large matches 0 = 0
-    assert.deepEqual(result.map((c) => c.id), ["3", "2", "1", "4"]);
+    // Gamma matches all 4 (City: 10 + Sector: 8 + Size: 10 + Grants: 10 = 38)
+    // Beta matches City: 10 + Size: 10 = 20
+    // Delta matches Grants: 10 = 10
+    // Alpha matches Sector: 8 = 8
+    assert.deepEqual(result.map((c) => c.id), ["3", "2", "4", "1"]);
+  });
+});
+
+/* ─── List sorting (F060 #62, F061 #63) ────────────────────────────────── */
+
+/** sortClients works on VisibleClient, so fixtures go through visibleClients()
+ * once — the same path the page uses, so `location` and `outreachStatusLabel`
+ * are derived rather than hand-written and can't drift from the real ones. */
+function listOf(rows: Partial<ClientListRow>[]) {
+  return visibleClients(
+    rows.map((row, index) => org({ id: `org-${index}`, ...row })),
+    [],
+  );
+}
+
+const names = (clients: { legal_name: string }[]) => clients.map((c) => c.legal_name);
+
+describe("parseListSort", () => {
+  it("accepts the three sortable fields", () => {
+    assert.equal(parseListSort("name"), "name");
+    assert.equal(parseListSort("location"), "location");
+    assert.equal(parseListSort("status"), "status");
+  });
+
+  it("falls back to name for anything else", () => {
+    assert.equal(parseListSort("owner"), "name");
+    assert.equal(parseListSort(undefined), "name");
+    assert.equal(parseListSort(""), "name");
+    assert.equal(parseListSort("'; drop table organisations; --"), "name");
+  });
+});
+
+describe("parseListDirection", () => {
+  it("only descending is descending", () => {
+    assert.equal(parseListDirection("descending"), "descending");
+    assert.equal(parseListDirection("ascending"), "ascending");
+    assert.equal(parseListDirection("desc"), "ascending");
+    assert.equal(parseListDirection(undefined), "ascending");
+  });
+});
+
+describe("sortClients by name", () => {
+  it("sorts alphabetically, ignoring case", () => {
+    const clients = listOf([
+      { legal_name: "zebra trust" },
+      { legal_name: "Apple Fund" },
+      { legal_name: "Mango Aid" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "name", "ascending")), [
+      "Apple Fund",
+      "Mango Aid",
+      "zebra trust",
+    ]);
+  });
+
+  it("reverses on descending", () => {
+    const clients = listOf([{ legal_name: "Apple Fund" }, { legal_name: "Mango Aid" }]);
+    assert.deepEqual(names(sortClients(clients, "name", "descending")), [
+      "Mango Aid",
+      "Apple Fund",
+    ]);
+  });
+
+  it("leaves the caller's array alone", () => {
+    const clients = listOf([{ legal_name: "Zebra" }, { legal_name: "Apple" }]);
+    sortClients(clients, "name", "ascending");
+    assert.deepEqual(names(clients), ["Zebra", "Apple"]);
+  });
+
+  it("returns an empty list unchanged", () => {
+    assert.deepEqual(sortClients([], "location", "descending"), []);
+  });
+});
+
+describe("sortClients by location (F060)", () => {
+  it("sorts alphabetically on the displayed location", () => {
+    const clients = listOf([
+      { legal_name: "C", city: "York" },
+      { legal_name: "A", city: "Bristol" },
+      { legal_name: "B", city: "Leeds" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "location", "ascending")), ["A", "B", "C"]);
+  });
+
+  it("groups clients sharing a location adjacently, in name order (AC2)", () => {
+    const clients = listOf([
+      { legal_name: "Sheffield Two", city: "Sheffield" },
+      { legal_name: "Bristol One", city: "Bristol" },
+      { legal_name: "Sheffield One", city: "Sheffield" },
+      { legal_name: "Bristol Two", city: "Bristol" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "location", "ascending")), [
+      "Bristol One",
+      "Bristol Two",
+      "Sheffield One",
+      "Sheffield Two",
+    ]);
+  });
+
+  it("keeps the group together on descending, and the names inside it ascending", () => {
+    const clients = listOf([
+      { legal_name: "Sheffield Two", city: "Sheffield" },
+      { legal_name: "Bristol One", city: "Bristol" },
+      { legal_name: "Sheffield One", city: "Sheffield" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "location", "descending")), [
+      "Sheffield One",
+      "Sheffield Two",
+      "Bristol One",
+    ]);
+  });
+
+  it("sorts a missing city on its country code, the value the list shows", () => {
+    const clients = listOf([
+      { legal_name: "Has city", city: "Zanzibar" },
+      { legal_name: "No city", city: null, country_code: "AL" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "location", "ascending")), [
+      "No city",
+      "Has city",
+    ]);
+  });
+});
+
+describe("sortClients by outreach status (F061)", () => {
+  it("follows pipeline order, not alphabetical order of the label (AC1)", () => {
+    const clients = listOf([
+      { legal_name: "Converted", outreach_status: "converted" },
+      { legal_name: "Initial", outreach_status: "initial_outreach_sent" },
+      { legal_name: "Not contacted", outreach_status: "not_contacted" },
+    ]);
+    // Alphabetically the labels would be Converted, Initial…, Not contacted.
+    assert.deepEqual(names(sortClients(clients, "status", "ascending")), [
+      "Not contacted",
+      "Initial",
+      "Converted",
+    ]);
+  });
+
+  it("reverses the pipeline order on descending", () => {
+    const clients = listOf([
+      { legal_name: "Not contacted", outreach_status: "not_contacted" },
+      { legal_name: "Converted", outreach_status: "converted" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "status", "descending")), [
+      "Converted",
+      "Not contacted",
+    ]);
+  });
+
+  it("orders clients in the same status by name", () => {
+    const clients = listOf([
+      { legal_name: "Beta", outreach_status: "responded" },
+      { legal_name: "Alpha", outreach_status: "responded" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "status", "ascending")), ["Alpha", "Beta"]);
+  });
+
+  it("sorts an unrecognised status last rather than first", () => {
+    const clients = listOf([
+      { legal_name: "Unknown", outreach_status: "invented_status" },
+      { legal_name: "Converted", outreach_status: "converted" },
+      { legal_name: "Not contacted", outreach_status: "not_contacted" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "status", "ascending")), [
+      "Not contacted",
+      "Converted",
+      "Unknown",
+    ]);
+  });
+
+  it("keeps an unrecognised status last on descending too — never first (regression)", () => {
+    const clients = listOf([
+      { legal_name: "Unknown", outreach_status: "invented_status" },
+      { legal_name: "Converted", outreach_status: "converted" },
+      { legal_name: "Not contacted", outreach_status: "not_contacted" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "status", "descending")), [
+      "Converted",
+      "Not contacted",
+      "Unknown",
+    ]);
+  });
+
+  it("ties two unrecognised statuses by name in either direction", () => {
+    const clients = listOf([
+      { legal_name: "Zeta", outreach_status: "invented_b" },
+      { legal_name: "Alpha", outreach_status: "invented_a" },
+    ]);
+    assert.deepEqual(names(sortClients(clients, "status", "ascending")), ["Alpha", "Zeta"]);
+    assert.deepEqual(names(sortClients(clients, "status", "descending")), ["Alpha", "Zeta"]);
+  });
+});
+
+describe("sortClients combined with filters (F060 AC3 / F061 AC2)", () => {
+  it("sorts only what the filter left behind", () => {
+    const clients = listOf([
+      { legal_name: "Owned York", city: "York", owner_id: "cam-1" },
+      { legal_name: "Other Bristol", city: "Bristol", owner_id: "cam-2" },
+      { legal_name: "Owned Bristol", city: "Bristol", owner_id: "cam-1" },
+    ]);
+    const mine = filterByOwner(clients, "cam-1");
+    assert.deepEqual(names(sortClients(mine, "location", "ascending")), [
+      "Owned Bristol",
+      "Owned York",
+    ]);
+  });
+
+  it("sorts what the search left behind", () => {
+    const clients = listOf([
+      { legal_name: "Trust Zed", outreach_status: "converted" },
+      { legal_name: "Unrelated", outreach_status: "not_contacted" },
+      { legal_name: "Trust Alpha", outreach_status: "not_contacted" },
+    ]);
+    const found = searchClients(clients, "trust");
+    assert.deepEqual(names(sortClients(found, "status", "ascending")), [
+      "Trust Alpha",
+      "Trust Zed",
+    ]);
+  });
+});
+
+/* ─── Multi-select filters (F053 #55, F054 #56, F056 #58) ──────────────── */
+
+describe("filterValues", () => {
+  it("accepts a single value, an array, or nothing", () => {
+    assert.deepEqual(filterValues("Leeds"), ["Leeds"]);
+    assert.deepEqual(filterValues(["Leeds", "York"]), ["Leeds", "York"]);
+    assert.deepEqual(filterValues(undefined), []);
+    assert.deepEqual(filterValues(null), []);
+  });
+
+  it("drops blanks, so a stray ?city= shows everything rather than nothing", () => {
+    assert.deepEqual(filterValues(""), []);
+    assert.deepEqual(filterValues(["Leeds", "", "  "]), ["Leeds"]);
+  });
+});
+
+describe("filterByType (F053)", () => {
+  const clients = listOf([
+    { legal_name: "A charity", organisation_type: "charity" },
+    { legal_name: "A company", organisation_type: "company" },
+    { legal_name: "Both", organisation_type: "both" },
+    { legal_name: "Other", organisation_type: "other" },
+  ]);
+
+  it("filters on the stored type value", () => {
+    assert.deepEqual(names(filterByType(clients, "charity")), ["A charity"]);
+  });
+
+  it("AC2 — several types show clients matching any of them", () => {
+    assert.deepEqual(names(filterByType(clients, ["charity", "company"])), [
+      "A charity",
+      "A company",
+    ]);
+  });
+
+  it("does not treat 'both' as a match for charity or company", () => {
+    // "both" is its own standardised value, not a wildcard. The old
+    // source-based filter folded it into each, which is why no combination of
+    // options could express a plain union.
+    assert.deepEqual(names(filterByType(clients, "charity")), ["A charity"]);
+  });
+
+  it("an unknown value matches nothing, rather than silently showing everything", () => {
+    assert.deepEqual(names(filterByType(clients, "Charity Commission")), []);
+    assert.deepEqual(names(filterByType(clients, ["charity", "nonsense"])), ["A charity"]);
+  });
+
+  it("no filter shows everything", () => {
+    assert.equal(filterByType(clients, undefined).length, 4);
+    assert.equal(filterByType(clients, []).length, 4);
+  });
+});
+
+describe("filterByCity (F054)", () => {
+  const clients = listOf([
+    { legal_name: "Leeds one", city: "Leeds" },
+    { legal_name: "York one", city: "York" },
+    { legal_name: "Hull one", city: "Hull" },
+    { legal_name: "No city", city: null, country_code: "FR" },
+  ]);
+
+  it("matches case-insensitively", () => {
+    assert.deepEqual(names(filterByCity(clients, "leeds")), ["Leeds one"]);
+  });
+
+  it("AC — several cities show clients in any of them", () => {
+    assert.deepEqual(names(filterByCity(clients, ["Leeds", "Hull"])), [
+      "Leeds one",
+      "Hull one",
+    ]);
+  });
+
+  it("never matches a client with no city", () => {
+    assert.deepEqual(names(filterByCity(clients, ["Leeds", "York", "Hull"])), [
+      "Leeds one",
+      "York one",
+      "Hull one",
+    ]);
+  });
+});
+
+describe("filterByCountry (F054 AC1)", () => {
+  const clients = listOf([
+    { legal_name: "British", country_code: "GB" },
+    { legal_name: "French", country_code: "FR" },
+    { legal_name: "Dutch", country_code: "NL" },
+  ]);
+
+  it("filters on country_code, case-insensitively", () => {
+    assert.deepEqual(names(filterByCountry(clients, "gb")), ["British"]);
+  });
+
+  it("supports several countries at once", () => {
+    assert.deepEqual(names(filterByCountry(clients, ["FR", "NL"])), ["French", "Dutch"]);
+  });
+
+  it("combines with a city filter rather than replacing it", () => {
+    const mixed = listOf([
+      { legal_name: "Leeds GB", city: "Leeds", country_code: "GB" },
+      { legal_name: "Leeds NL", city: "Leeds", country_code: "NL" },
+      { legal_name: "York GB", city: "York", country_code: "GB" },
+    ]);
+    assert.deepEqual(names(filterByCountry(filterByCity(mixed, "Leeds"), "GB")), ["Leeds GB"]);
+  });
+});
+
+describe("filterByStatus (F056)", () => {
+  const clients = listOf([
+    { legal_name: "Fresh", outreach_status: "not_contacted" },
+    { legal_name: "Replied", outreach_status: "responded" },
+    { legal_name: "Won", outreach_status: "converted" },
+  ]);
+
+  it("matches the stored enum value, which the label used to break", () => {
+    // The old filter matched "Not contacted" and returned nothing for the value
+    // the database actually holds.
+    assert.deepEqual(names(filterByStatus(clients, "not_contacted")), ["Fresh"]);
+  });
+
+  it("does not match the formatted label", () => {
+    assert.deepEqual(names(filterByStatus(clients, "Not contacted")), []);
+  });
+
+  it("AC3 — several statuses show clients in any of them", () => {
+    assert.deepEqual(names(filterByStatus(clients, ["responded", "converted"])), [
+      "Replied",
+      "Won",
+    ]);
+  });
+
+  it("no filter shows everything", () => {
+    assert.equal(filterByStatus(clients, []).length, 3);
   });
 });

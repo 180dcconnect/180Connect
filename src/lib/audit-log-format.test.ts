@@ -103,6 +103,26 @@ describe("describeAuditEvent", () => {
     assert.equal(view.sentence, "Bashir Bobboi screened out an imported record");
   });
 
+  it("formats suppression lifted with actor and organisation", () => {
+    const view = describeAuditEvent(
+      row({
+        action: "suppression_lifted",
+        target_table: "organisations",
+        target_id: ORG,
+        detail: { reason: "Mistakenly suppressed" },
+      }),
+      resolvers,
+      NOW,
+    );
+    assert.equal(view.sentence, "Bashir Bobboi lifted the suppression of Oxfam GB");
+    assert.equal(view.label, "Suppression lifted");
+    assert.equal(view.tone, "positive");
+    assert.equal(view.icon, "suppression");
+    assert.deepEqual(view.details, [
+      { label: "Reason", value: "Mistakenly suppressed", kind: "note" },
+    ]);
+  });
+
   it("uses the anonymous noun when the row named no record at all", () => {
     const view = describeAuditEvent(
       { ...row({ action: "status_changed" }), target_table: "organisations", target_id: null },

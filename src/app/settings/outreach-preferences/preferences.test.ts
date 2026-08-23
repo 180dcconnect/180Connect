@@ -4,6 +4,8 @@ import {
   CITY_PRESETS,
   GEOGRAPHIC_REACH_OPTIONS,
   GEOGRAPHIC_REACH_LABELS,
+  GRANT_PREFERENCE_LABELS,
+  GRANT_PREFERENCE_DESCRIPTIONS,
   INCOME_BAND_OPTIONS,
   INCOME_BAND_LABELS,
   INCOME_BAND_DESCRIPTIONS,
@@ -14,10 +16,14 @@ import {
   MAX_SECTORS,
   SECTOR_CATEGORY_GROUPS,
   SECTOR_PRESETS,
-  SECTOR_KEYWORD_ALIASES,
 } from "./constants.ts";
+import { CANONICAL_SECTOR_GROUPS } from "../../clients/visible-clients.ts";
 
-describe("outreach preferences constants and configuration (F195 / F196 / F197 / F198)", () => {
+describe("outreach preferences constants and configuration (F195 / F196 / F197 / F198 / F199)", () => {
+  it("defines standard grant preference labels and descriptions (F199)", () => {
+    assert.ok(GRANT_PREFERENCE_LABELS.prioritise_grant_recipients.includes("360Giving"));
+    assert.ok(GRANT_PREFERENCE_DESCRIPTIONS.prioritise_grant_recipients.includes("grant funding"));
+  });
   it("defines standard geographic reach options and readable labels", () => {
     assert.deepEqual(GEOGRAPHIC_REACH_OPTIONS, ["local", "regional", "national", "international"]);
     assert.equal(GEOGRAPHIC_REACH_LABELS.local, "Local");
@@ -87,10 +93,12 @@ describe("outreach preferences constants and configuration (F195 / F196 / F197 /
     assert.ok(SECTOR_CATEGORY_GROUPS.some((g) => g.category === "Poverty & Community"));
   });
 
-  it("defines standard sector keyword aliases for cross-source matching (F197)", () => {
-    assert.ok(SECTOR_KEYWORD_ALIASES.health.includes("healthcare"));
-    assert.ok(SECTOR_KEYWORD_ALIASES.education.includes("school"));
-    assert.ok(SECTOR_KEYWORD_ALIASES.environment.includes("sustainability"));
-    assert.ok(SECTOR_KEYWORD_ALIASES.poverty.includes("relief"));
+  it("defines canonical sector groups for cross-source queue matching (F197)", () => {
+    // Single source of truth lives with the matcher in visible-clients.ts;
+    // these assertions pin the aliases the presets rely on.
+    assert.ok(CANONICAL_SECTOR_GROUPS.health.includes("healthcare"));
+    assert.ok(CANONICAL_SECTOR_GROUPS.education.includes("school"));
+    assert.ok(CANONICAL_SECTOR_GROUPS.environment.includes("sustainability"));
+    assert.ok(CANONICAL_SECTOR_GROUPS.poverty.includes("homeless"));
   });
 });

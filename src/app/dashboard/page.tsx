@@ -128,6 +128,7 @@ export default async function DashboardPage({
           .from("organisations")
           .select("id, legal_name, outreach_status, owner_id, updated_at, created_at")
           .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
           .range(from, from + step - 1)
           .overrideTypes<DashboardOrgRow[], { merge: false }>();
         if (error) return { data: null, error };
@@ -151,6 +152,7 @@ export default async function DashboardPage({
           .from("suppressions")
           .select("organisation_id, status")
           .in("status", ["pending", "active"])
+          .order("organisation_id", { ascending: true })
           .range(from, from + step - 1)
           .overrideTypes<OpenSuppression[], { merge: false }>();
         if (error) return { data: null, error };

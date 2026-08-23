@@ -3,6 +3,8 @@ import { z } from "zod";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
+import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   createDefaultGenerateBookletDeps,
   generateBooklet,
@@ -81,6 +83,24 @@ export async function POST(
       operation: "clients.generate_booklet.load_enrichment",
       organisationId,
     });
+  }
+
+  const admin = createAdminClient();
+  if (!admin) {
+    return NextResponse.json(
+      { error: "AI generation is temporarily unavailable. Contact an administrator." },
+      { status: 503 },
+    );
+  }
+  const allowance = await consumeAiGenerationAllowance(admin, authorization.actor.id);
+  if (!allowance.allowed) {
+    if ("unavailable" in allowance) {
+      return NextResponse.json({ error: allowance.message }, { status: 503 });
+    }
+    return NextResponse.json(
+      { error: allowance.message, retryAt: allowance.retryAt.toISOString() },
+      { status: 429, headers: { "Retry-After": String(allowance.retryAfterSeconds) } },
+    );
   }
 
   const result = await generateBooklet(

@@ -268,6 +268,28 @@ export const SCHEMA: readonly EnvVarSpec[] = [
         : "must be a valid email address",
   },
   {
+    name: "AI_GENERATION_RATE_LIMIT",
+    required: false,
+    secret: false,
+    description:
+      "Maximum Gemini generation requests each authenticated user may start per fixed window across booklet, Stage 1, and Stage 2 generation. Optional; defaults to 20.",
+    validate: (value) =>
+      /^\d+$/.test(value) && Number(value) > 0
+        ? null
+        : "must be a positive whole number of requests",
+  },
+  {
+    name: "AI_GENERATION_RATE_WINDOW_SECONDS",
+    required: false,
+    secret: false,
+    description:
+      "Fixed-window duration in seconds for AI_GENERATION_RATE_LIMIT. Optional; defaults to 3600 (one hour).",
+    validate: (value) =>
+      /^\d+$/.test(value) && Number(value) > 0
+        ? null
+        : "must be a positive whole number of seconds",
+  },
+  {
     name: "CHARITY_COMMISSION_BACKFILL_START",
     required: false,
     secret: false,

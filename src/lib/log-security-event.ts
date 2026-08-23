@@ -18,6 +18,8 @@ export type SecurityEvent =
   | "authentication.password_reset_request_failed"
   | "authentication.password_recovery_link_rejected"
   | "authentication.password_update_failed"
+  | "ai.generation_rate_limited"
+  | "ai.generation_rate_limit_unavailable"
   | "session.expired"
   | "session.recovery_confined"
   | "outreach.suppression_blocked"

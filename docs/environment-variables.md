@@ -223,6 +223,10 @@ NEXT_PUBLIC_SENTRY_DSN=<redacted>
 | `GMAIL_REFRESH_TOKEN` | dev token | prod token | Only server-side | **SENSITIVE:** Authorises mailbox access |
 | `GMAIL_SENDER_EMAIL` | outreach mailbox | outreach mailbox | Only server-side | Exact branch mailbox; no fallback sender |
 | `OPENAI_API_KEY` | test-key | prod-key | Only server-side | **SENSITIVE:** Never expose |
+| `GEMINI_API_KEY` | staging key | production key | Only server-side | **SENSITIVE:** Gemini credential used by booklet and outreach generation |
+| `GEMINI_MODEL` | approved model id | approved model id | Only server-side | Gemini model id; generation is unavailable when unset |
+| `AI_GENERATION_RATE_LIMIT` | `20` | `20` | Only server-side | Maximum Gemini requests per authenticated user in each fixed window; optional, defaults to 20 |
+| `AI_GENERATION_RATE_WINDOW_SECONDS` | `3600` | `3600` | Only server-side | AI fixed-window duration in seconds; optional, defaults to one hour |
 | `CRON_SECRET` | shared-secret | shared-secret | Only server-side | **SENSITIVE:** Auth for `/api/cron/*` routes |
 | `SESSION_ACTIVITY_SECRET` | random 32+ chars | random 32+ chars | Only server-side | **SENSITIVE:** Signs the inactivity record behind session expiry (F007). Optional — unset means sessions still expire after 30 idle minutes but the record is unsigned and forgeable, so set it everywhere hosted. `openssl rand -base64 32`. Rotating it signs every open session out once |
 | `NEXT_PUBLIC_POSTHOG_KEY` | dev-key | prod-key | Always | Public analytics key |

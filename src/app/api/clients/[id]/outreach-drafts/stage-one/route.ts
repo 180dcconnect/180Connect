@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { reportError } from "@/lib/error-logging";
+import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -82,6 +83,17 @@ export async function POST(
     return NextResponse.json(
       { error: "Email generation is not configured. Contact an administrator." },
       { status: 503 },
+    );
+  }
+
+  const allowance = await consumeAiGenerationAllowance(admin, authorization.actor.id);
+  if (!allowance.allowed) {
+    if ("unavailable" in allowance) {
+      return NextResponse.json({ error: allowance.message }, { status: 503 });
+    }
+    return NextResponse.json(
+      { error: allowance.message, retryAt: allowance.retryAt.toISOString() },
+      { status: 429, headers: { "Retry-After": String(allowance.retryAfterSeconds) } },
     );
   }
 

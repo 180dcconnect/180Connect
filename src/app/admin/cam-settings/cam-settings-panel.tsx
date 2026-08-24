@@ -190,9 +190,6 @@ export function CamSettingsPanel({
                   </span>
                 </p>
               </div>
-              <div className="rounded-xl border border-brand/20 bg-brand/[0.04] px-4 py-2 text-xs text-foreground/70">
-                <span className="font-bold text-brand">Read-only view (F187)</span>: Queue-specific preferences only.
-              </div>
             </div>
           </Rise>
 

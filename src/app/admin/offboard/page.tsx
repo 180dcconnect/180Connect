@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import { OffboardPanel, type HandoverUser } from "./offboard-panel";
 
 export default async function AdminOffboardPage() {
@@ -38,9 +39,12 @@ export default async function AdminOffboardPage() {
           automatically. Completed work stays credited to the person who did it.
         </p>
         {error && (
-          <p className="mt-5 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-800" role="alert">
-            The team list could not be loaded. Please refresh and try again.
-          </p>
+          <div className="mt-5">
+            <InlineAlert
+              variant="page"
+              message="The team list could not be loaded. Please refresh and try again."
+            />
+          </div>
         )}
         <OffboardPanel users={candidates} />
       </section>

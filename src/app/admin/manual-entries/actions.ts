@@ -59,7 +59,16 @@ type IdentifierRow = {
   identifier_value: string;
 };
 
-const organisationTypes = ["charity", "company", "both", "other"] as const;
+const organisationTypes = [
+  "charity",
+  "cio",
+  "cic",
+  "social_enterprise",
+  "ngo",
+  "company",
+  "both",
+  "other",
+] as const;
 type ManualOrganisationType = (typeof organisationTypes)[number];
 
 function isOrganisationType(value: string): value is ManualOrganisationType {

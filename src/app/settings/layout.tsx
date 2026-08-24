@@ -1,9 +1,9 @@
-import { AppShell } from "@/components/app-shell";
+import { SettingsShell } from "@/components/settings-shell";
 
 export default function SettingsSegmentLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return <AppShell>{children}</AppShell>;
+  return <SettingsShell>{children}</SettingsShell>;
 }

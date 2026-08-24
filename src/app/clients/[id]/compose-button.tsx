@@ -1,30 +1,43 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
-import { BOOKLET_GENERATED_EVENT, type BookletGeneratedDetail } from "@/lib/booklet/browser-event";
+import { EMAIL_LENGTHS, EMAIL_VOICES, type EmailLength, type EmailVoice } from "@/lib/outreach/stage-one-prompt";
 
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
 type Draft = { id: string; subject: string; body: string };
-type EmailLength = "short" | "standard" | "detailed";
-type EmailVoice = "180dc" | "consultative" | "plain_language";
-type EmailTone = "balanced" | "warm" | "formal" | "concise";
-type OpeningApproach = "mission_led" | "direct_intro" | "news_hook";
-type ClosingApproach = "soft_cta" | "meeting_request" | "open_question";
 
-/** F100 creates a review draft only, after the current outreach preflight passes. */
+const EMAIL_LENGTH_LABELS: Record<EmailLength, string> = {
+  short: "Short",
+  standard: "Standard",
+  detailed: "Detailed",
+};
+
+const EMAIL_VOICE_LABELS: Record<EmailVoice, string> = {
+  "180dc": "180DC Sheffield",
+  consultative: "Consultative",
+  plain_language: "Plain language",
+};
+
+/** F100 creates a review draft only, after the current outreach preflight passes.
+ *
+ * F103: `hasSavedBooklet` comes from the server page (does a saved booklet exist in
+ * client_booklets?) and only drives the hint text — the route itself re-reads the
+ * saved booklet, so the hint can never promise more than generation will use. */
 export function ComposeButton({
   blocked,
   organisationId,
   suppressionReason,
   ownershipWarning,
+  hasSavedBooklet = false,
 }: {
   blocked: boolean;
   organisationId: string;
   suppressionReason?: string;
   ownershipWarning?: string;
+  hasSavedBooklet?: boolean;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,19 +54,6 @@ export function ComposeButton({
   );
   const [length, setLength] = useState<EmailLength>("standard");
   const [voice, setVoice] = useState<EmailVoice>("180dc");
-  const [tone, setTone] = useState<EmailTone>("balanced");
-  const [opening, setOpening] = useState<OpeningApproach>("mission_led");
-  const [closing, setClosing] = useState<ClosingApproach>("soft_cta");
-  const [booklet, setBooklet] = useState<string | null>(null);
-
-  useEffect(() => {
-    function receiveBooklet(event: Event) {
-      const detail = (event as CustomEvent<BookletGeneratedDetail>).detail;
-      if (detail.organisationId === organisationId) setBooklet(detail.booklet);
-    }
-    window.addEventListener(BOOKLET_GENERATED_EVENT, receiveBooklet);
-    return () => window.removeEventListener(BOOKLET_GENERATED_EVENT, receiveBooklet);
-  }, [organisationId]);
 
   async function generate() {
     setBusy(true);
@@ -75,7 +75,7 @@ export function ComposeButton({
       const response = await fetch(`/api/clients/${organisationId}/outreach-drafts/stage-one`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ length, voice, tone, opening, closing, booklet }),
+        body: JSON.stringify({ length, voice }),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -106,8 +106,8 @@ export function ComposeButton({
   return (
     <div className="space-y-4">
       <p className="text-xs text-foreground/55" aria-live="polite">
-        {booklet
-          ? "The current generated client booklet will be used as additional context."
+        {hasSavedBooklet
+          ? "The client's saved booklet is included as additional context."
           : "Generate the client booklet first to include its insights in this email."}
       </p>
       <label className="block max-w-xs text-xs font-bold text-foreground/65">
@@ -118,34 +118,11 @@ export function ComposeButton({
           onChange={(event) => setLength(event.target.value as EmailLength)}
           value={length}
         >
-          <option value="short">Short</option>
-          <option value="standard">Standard</option>
-          <option value="detailed">Detailed</option>
-        </select>
-      </label>
-      <label className="block max-w-xs text-xs font-bold text-foreground/65">
-        Closing approach
-        <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setClosing(event.target.value as ClosingApproach)} value={closing}>
-          <option value="soft_cta">Soft invitation</option>
-          <option value="meeting_request">Request a short call</option>
-          <option value="open_question">Open question</option>
-        </select>
-      </label>
-      <label className="block max-w-xs text-xs font-bold text-foreground/65">
-        Opening approach
-        <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setOpening(event.target.value as OpeningApproach)} value={opening}>
-          <option value="mission_led">Mission-led</option>
-          <option value="direct_intro">Direct introduction</option>
-          <option value="news_hook">Relevant news hook</option>
-        </select>
-      </label>
-      <label className="block max-w-xs text-xs font-bold text-foreground/65">
-        Email tone
-        <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setTone(event.target.value as EmailTone)} value={tone}>
-          <option value="balanced">Balanced</option>
-          <option value="warm">Warm</option>
-          <option value="formal">Formal</option>
-          <option value="concise">Concise</option>
+          {EMAIL_LENGTHS.map((value) => (
+            <option key={value} value={value}>
+              {EMAIL_LENGTH_LABELS[value]}
+            </option>
+          ))}
         </select>
       </label>
       <label className="block max-w-xs text-xs font-bold text-foreground/65">
@@ -156,9 +133,11 @@ export function ComposeButton({
           onChange={(event) => setVoice(event.target.value as EmailVoice)}
           value={voice}
         >
-          <option value="180dc">180DC Sheffield</option>
-          <option value="consultative">Consultative</option>
-          <option value="plain_language">Plain language</option>
+          {EMAIL_VOICES.map((value) => (
+            <option key={value} value={value}>
+              {EMAIL_VOICE_LABELS[value]}
+            </option>
+          ))}
         </select>
       </label>
       <OriginButton variant="outline" size="sm" onClick={generate} disabled={busy} type="button">

@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion, type Variants } from "motion/react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { ArrowRight, Check, ChevronLeft, SlidersHorizontal, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -57,8 +57,8 @@ export function BrandSearchBar({
   subjects = DEFAULT_SUBJECTS,
   categories,
   params: paramNames,
-  defaultQuery = "",
-  defaultFilters = [],
+   defaultQuery = "",
+   defaultFilters = [],
 }: {
   className?: string;
   placeholder?: string;
@@ -71,9 +71,9 @@ export function BrandSearchBar({
    * this component's, and hard-coding one page's parameter names here is what
    * stopped a second page from reusing the bar.
    */
-  params?: Record<string, string>;
-  defaultQuery?: string;
-  defaultFilters?: { category: string; label: string; value: string }[];
+   params?: Record<string, string>;
+   defaultQuery?: string;
+   defaultFilters?: { category: string; label: string; value: string }[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -82,6 +82,7 @@ export function BrandSearchBar({
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [filterQuery, setFilterQuery] = useState("");
   const [selectedFilters, setSelectedFilters] = useState<{ category: string; label: string; value: string }[]>(defaultFilters);
+  const [, startTransition] = useTransition();
   const [isSearching, setIsSearching] = useState(false);
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -111,8 +112,10 @@ export function BrandSearchBar({
     return () => document.removeEventListener("pointerdown", onDown);
   }, [open]);
 
-  const FILTER_CATEGORIES: Record<string, FilterOption[]> = categories || DEFAULT_CATEGORIES;
-  const FILTER_PARAMS: Record<string, string> = paramNames || DEFAULT_PARAMS;
+  // Memoised so the options memo below doesn't re-run on every render — a
+  // fresh object literal here would defeat it.
+  const FILTER_CATEGORIES: Record<string, FilterOption[]> = useMemo(() => categories || DEFAULT_CATEGORIES, [categories]);
+  const FILTER_PARAMS: Record<string, string> = useMemo(() => paramNames || DEFAULT_PARAMS, [paramNames]);
 
   const submitSearch = (filters = selectedFilters, q = query, closePanel = true) => {
     if (isSearching) return;
@@ -129,17 +132,31 @@ export function BrandSearchBar({
 
     if (q) params.set("q", q);
 
-    filters.forEach(f => {
-      params.set(FILTER_PARAMS[f.category] ?? "filter", f.value);
+    // `append`, not `set`: the panel already lets several options be chosen in
+    // one category, but `set` overwrote each with the next, so only the last
+    // survived the trip through the URL and multi-select silently behaved like
+    // single-select. Repeating the parameter is what the host page reads back
+    // as an array.
+    filters.forEach((f) => {
+      params.append(FILTER_PARAMS[f.category] ?? "filter", f.value);
     });
 
-    // Plays the rolling square animation before navigating
+    // Plays the rolling square animation before navigating (dev's designed
+    // submit moment). Still a soft navigation — router.replace, no document
+    // reload — so F052's AC4 holds; the spinner doubles as the double-submit
+    // guard via `isSearching`.
     setTimeout(() => {
-      router.push(`?${params.toString()}`);
+      startTransition(() => {
+        router.replace(`?${params.toString()}`, { scroll: false });
+      });
       setTimeout(() => {
         setIsSearching(false);
       }, 400);
     }, 1500);
+
+    if (closePanel) {
+      setOpen(false);
+    }
   };
 
   const close = () => {
@@ -259,7 +276,7 @@ export function BrandSearchBar({
         </div>
 
         <AnimatePresence>
-          {(typing || selectedFilters.length > 0 || open || isSearching) && (
+          {(typing || selectedFilters.length > 0 || isSearching) && (
             <motion.div
               initial={{ width: 0, opacity: 0, scale: 0.8 }}
               animate={{ width: 30, opacity: 1, scale: 1 }}

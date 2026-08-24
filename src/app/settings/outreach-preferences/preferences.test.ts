@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   CITY_PRESETS,
+  DEFAULT_FIRST_FOLLOW_UP_DAYS,
+  DEFAULT_SECOND_FOLLOW_UP_DAYS,
   GEOGRAPHIC_REACH_OPTIONS,
   GEOGRAPHIC_REACH_LABELS,
   GRANT_PREFERENCE_LABELS,
@@ -9,6 +11,11 @@ import {
   INCOME_BAND_OPTIONS,
   INCOME_BAND_LABELS,
   INCOME_BAND_DESCRIPTIONS,
+  MAX_FIRST_FOLLOW_UP_DAYS,
+  MAX_SECOND_FOLLOW_UP_DAYS,
+  MIN_FOLLOW_UP_DAYS,
+  clampFollowUpDays,
+  validateFollowUpOrdering,
   deriveIncomeBand,
   MAX_CITY_LENGTH,
   MAX_CITIES,
@@ -19,7 +26,29 @@ import {
 } from "./constants.ts";
 import { CANONICAL_SECTOR_GROUPS } from "../../clients/visible-clients.ts";
 
-describe("outreach preferences constants and configuration (F195 / F196 / F197 / F198 / F199)", () => {
+describe("outreach preferences constants and configuration (F195 / F196 / F197 / F198 / F199 / F202)", () => {
+  it("defines standard follow-up timing thresholds and clamping (F202)", () => {
+    assert.equal(DEFAULT_FIRST_FOLLOW_UP_DAYS, 7);
+    assert.equal(DEFAULT_SECOND_FOLLOW_UP_DAYS, 14);
+    assert.equal(MIN_FOLLOW_UP_DAYS, 1);
+    assert.equal(MAX_FIRST_FOLLOW_UP_DAYS, 60);
+    assert.equal(MAX_SECOND_FOLLOW_UP_DAYS, 90);
+
+    assert.equal(clampFollowUpDays(5, 7, 1, 60), 5);
+    assert.equal(clampFollowUpDays(0, 7, 1, 60), 1);
+    assert.equal(clampFollowUpDays(100, 7, 1, 60), 60);
+    assert.equal(clampFollowUpDays("12", 7, 1, 60), 12);
+    assert.equal(clampFollowUpDays("invalid", 7, 1, 60), 7);
+    assert.equal(clampFollowUpDays(null, 7, 1, 60), 7);
+  });
+
+  it("rejects a second follow-up that fires before the first (F202 review)", () => {
+    assert.equal(validateFollowUpOrdering(7, 14), null);
+    assert.equal(validateFollowUpOrdering(5, 10), null);
+    assert.ok(validateFollowUpOrdering(20, 10));
+    assert.ok(validateFollowUpOrdering(10, 10));
+  });
+
   it("defines standard grant preference labels and descriptions (F199)", () => {
     assert.ok(GRANT_PREFERENCE_LABELS.prioritise_grant_recipients.includes("360Giving"));
     assert.ok(GRANT_PREFERENCE_DESCRIPTIONS.prioritise_grant_recipients.includes("grant funding"));

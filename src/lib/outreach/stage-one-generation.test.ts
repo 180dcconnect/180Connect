@@ -32,17 +32,17 @@ test("generateStageOneDraft forwards email length to prompt builder", async () =
   };
 
   await generateStageOneDraft("org-1", context, makeCallModel(), { length: "short" });
-  assert.match(captured[0]!.system, /70 and 110 words/);
+  assert.match(captured[0]!.system, /70 and 100 words/);
 
   captured.length = 0;
   await generateStageOneDraft("org-1", context, makeCallModel(), { length: "standard" });
-  assert.match(captured[0]!.system, /120 and 180 words/);
+  assert.match(captured[0]!.system, /130 and 170 words/);
 
   captured.length = 0;
   await generateStageOneDraft("org-1", context, makeCallModel(), { length: "detailed" });
-  assert.match(captured[0]!.system, /190 and 260 words/);
+  assert.match(captured[0]!.system, /200 and 260 words/);
 
   captured.length = 0;
   await generateStageOneDraft("org-1", context, makeCallModel());
-  assert.match(captured[0]!.system, /120 and 180 words/);
+  assert.match(captured[0]!.system, /130 and 170 words/);
 });

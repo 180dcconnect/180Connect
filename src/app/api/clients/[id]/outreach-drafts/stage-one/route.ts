@@ -40,15 +40,17 @@ export async function POST(
   // The booklet is deliberately NOT part of the request body: F103 reads the saved
   // booklet (F085/F086) straight from client_booklets so the text reaching the
   // prompt is exactly what RLS-protected storage holds, never a client-supplied string.
-  const preferences = z.object({
-    length: z.enum(EMAIL_LENGTHS).default("standard"),
-    voice: z.enum(EMAIL_VOICES).default("180dc"),
-    tone: z.enum(EMAIL_TONES).default("balanced"),
-    opening: z.enum(OPENING_APPROACHES).default("mission_led"),
-    closing: z.enum(CLOSING_APPROACHES).default("soft_cta"),
-  }).safeParse(requestBody);
+  const preferences = z
+    .object({
+      length: z.enum(EMAIL_LENGTHS).default("standard"),
+      voice: z.enum(EMAIL_VOICES).default("180dc"),
+      tone: z.enum(EMAIL_TONES).default("balanced"),
+      opening: z.enum(OPENING_APPROACHES).default("mission_led"),
+      closing: z.enum(CLOSING_APPROACHES).default("soft_cta"),
+    })
+    .safeParse(requestBody);
   if (!preferences.success) {
-    return NextResponse.json({ error: "Choose a valid email length and try again." }, { status: 400 });
+    return NextResponse.json({ error: "Choose a valid email length, voice, tone, opening and closing approach, then try again." }, { status: 400 });
   }
 
   const admin = createAdminClient();
@@ -62,7 +64,9 @@ export async function POST(
   const supabase = await createClient();
   const { data: organisation, error: organisationError } = await supabase
     .from("organisations")
-    .select("id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach, owner_id, owner:users!organisations_owner_id_fkey(full_name)")
+    .select(
+      "id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
+    )
     .eq("id", organisationId)
     .maybeSingle<{
       id: string;

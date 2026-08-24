@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
-import { EMAIL_LENGTHS, EMAIL_VOICES, type EmailLength, type EmailVoice } from "@/lib/outreach/stage-one-prompt";
+import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach } from "@/lib/outreach/stage-one-prompt";
 
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
@@ -19,6 +19,25 @@ const EMAIL_VOICE_LABELS: Record<EmailVoice, string> = {
   "180dc": "180DC Sheffield",
   consultative: "Consultative",
   plain_language: "Plain language",
+};
+
+const EMAIL_TONE_LABELS: Record<EmailTone, string> = {
+  balanced: "Balanced",
+  warm: "Warm",
+  formal: "Formal",
+  concise: "Concise",
+};
+
+const OPENING_APPROACH_LABELS: Record<OpeningApproach, string> = {
+  mission_led: "Mission-led",
+  direct_intro: "Direct introduction",
+  news_hook: "Relevant news hook",
+};
+
+const CLOSING_APPROACH_LABELS: Record<ClosingApproach, string> = {
+  soft_cta: "Soft invitation",
+  meeting_request: "Request a short call",
+  open_question: "Open question",
 };
 
 /** F100 creates a review draft only, after the current outreach preflight passes.
@@ -54,6 +73,9 @@ export function ComposeButton({
   );
   const [length, setLength] = useState<EmailLength>("standard");
   const [voice, setVoice] = useState<EmailVoice>("180dc");
+  const [tone, setTone] = useState<EmailTone>("balanced");
+  const [opening, setOpening] = useState<OpeningApproach>("mission_led");
+  const [closing, setClosing] = useState<ClosingApproach>("soft_cta");
 
   async function generate() {
     setBusy(true);
@@ -75,7 +97,7 @@ export function ComposeButton({
       const response = await fetch(`/api/clients/${organisationId}/outreach-drafts/stage-one`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ length, voice }),
+        body: JSON.stringify({ length, voice, tone, opening, closing }),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -124,6 +146,40 @@ export function ComposeButton({
             </option>
           ))}
         </select>
+        <span className="mt-1 block font-normal text-foreground/55">How long the email body should be.</span>
+      </label>
+      <label className="block max-w-xs text-xs font-bold text-foreground/65">
+        Closing approach
+        <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setClosing(event.target.value as ClosingApproach)} value={closing}>
+          {CLOSING_APPROACHES.map((value) => (
+            <option key={value} value={value}>
+              {CLOSING_APPROACH_LABELS[value]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="block max-w-xs text-xs font-bold text-foreground/65">
+        Opening approach
+        <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setOpening(event.target.value as OpeningApproach)} value={opening}>
+          {OPENING_APPROACHES.map((value) => (
+            <option key={value} value={value}>
+              {OPENING_APPROACH_LABELS[value]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="block max-w-xs text-xs font-bold text-foreground/65">
+        Email tone
+        <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setTone(event.target.value as EmailTone)} value={tone}>
+          {EMAIL_TONES.map((value) => (
+            <option key={value} value={value}>
+              {EMAIL_TONE_LABELS[value]}
+            </option>
+          ))}
+        </select>
+        <span className="mt-1 block font-normal text-foreground/55">
+          How friendly or formal the email reads — separate from its length and voice.
+        </span>
       </label>
       <label className="block max-w-xs text-xs font-bold text-foreground/65">
         Email voice
@@ -139,6 +195,7 @@ export function ComposeButton({
             </option>
           ))}
         </select>
+        <span className="mt-1 block font-normal text-foreground/55">Who the email is written as — our collective style or plainer wording.</span>
       </label>
       <OriginButton variant="outline" size="sm" onClick={generate} disabled={busy} type="button">
         <Sparkles aria-hidden="true" className="h-4 w-4" />

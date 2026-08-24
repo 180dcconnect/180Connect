@@ -21,6 +21,8 @@ export const EMAIL_TONES = ["balanced", "warm", "formal", "concise"] as const;
 export type EmailTone = (typeof EMAIL_TONES)[number];
 export const OPENING_APPROACHES = ["mission_led", "direct_intro", "news_hook"] as const;
 export type OpeningApproach = (typeof OPENING_APPROACHES)[number];
+export const CLOSING_APPROACHES = ["soft_cta", "meeting_request", "open_question"] as const;
+export type ClosingApproach = (typeof CLOSING_APPROACHES)[number];
 
 const LENGTH_INSTRUCTIONS: Record<EmailLength, string> = {
   short: "Keep the body between 70 and 100 words, with no more than three short paragraphs.",
@@ -47,6 +49,12 @@ const OPENING_INSTRUCTIONS: Record<OpeningApproach, string> = {
   news_hook: "Open with a supplied relevant news hook. If no news hook is supplied, fall back to a mission-led opening without inventing news.",
 };
 
+const CLOSING_INSTRUCTIONS: Record<ClosingApproach, string> = {
+  soft_cta: "Close with a low-pressure invitation to continue the conversation if the support sounds relevant.",
+  meeting_request: "Close by asking whether they would be open to a short introductory call, without proposing invented dates or urgency.",
+  open_question: "Close with one clear, open question about whether external consulting support could be useful to their current priorities.",
+};
+
 function value(value: string | null | undefined): string {
   return value?.trim() || "Not provided";
 }
@@ -57,12 +65,13 @@ function values(items: string[] | null | undefined): string {
 
 export function buildStageOnePrompt(
   context: StageOneContext,
-  options: { length?: EmailLength; voice?: EmailVoice; tone?: EmailTone; opening?: OpeningApproach } = {},
+  options: { length?: EmailLength; voice?: EmailVoice; tone?: EmailTone; opening?: OpeningApproach; closing?: ClosingApproach } = {},
 ) {
   const length = options.length ?? "standard";
   const voice = options.voice ?? "180dc";
   const tone = options.tone ?? "balanced";
   const opening = options.opening ?? "mission_led";
+  const closing = options.closing ?? "soft_cta";
   return {
     system: `You draft initial charity outreach emails for 180 Degrees Consulting Sheffield.
 Use only facts supplied in the client context. Never invent achievements, needs, people, partnerships, or news.
@@ -71,6 +80,7 @@ ${LENGTH_INSTRUCTIONS[length]}
 ${VOICE_INSTRUCTIONS[voice]}
 ${TONE_INSTRUCTIONS[tone]}
 ${OPENING_INSTRUCTIONS[opening]}
+${CLOSING_INSTRUCTIONS[closing]}
 Return exactly one JSON object with two string properties: "subject" and "body". Do not use markdown fences. The body must be plain text and must not include a sender signature.`,
     prompt: `Draft a Stage 1 outreach email using this reviewed client context.
 

@@ -9,7 +9,7 @@ import {
   createStageOneModelCall,
   generateStageOneDraft,
 } from "@/lib/outreach/stage-one-generation";
-import { EMAIL_LENGTHS, EMAIL_VOICES } from "@/lib/outreach/stage-one-prompt";
+import { EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES } from "@/lib/outreach/stage-one-prompt";
 import {
   checkSuppressionBeforeSend,
   suppressionBlockedMessage,
@@ -41,10 +41,11 @@ export async function POST(
     .object({
       length: z.enum(EMAIL_LENGTHS).default("standard"),
       voice: z.enum(EMAIL_VOICES).default("180dc"),
+      tone: z.enum(EMAIL_TONES).default("balanced"),
     })
     .safeParse(requestBody);
   if (!preferences.success) {
-    return NextResponse.json({ error: "Choose a valid email length and try again." }, { status: 400 });
+    return NextResponse.json({ error: "Choose a valid email length, voice and tone, then try again." }, { status: 400 });
   }
 
   const admin = createAdminClient();
@@ -176,7 +177,7 @@ export async function POST(
       newsHooks: enrichment?.news_hooks,
     },
     callModel,
-    { length: preferences.data.length, voice: preferences.data.voice },
+    { length: preferences.data.length, voice: preferences.data.voice, tone: preferences.data.tone },
   );
   if ("error" in result) return NextResponse.json({ error: result.error }, { status: 502 });
 

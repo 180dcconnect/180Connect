@@ -838,6 +838,7 @@ export default async function ClientDetailPage({
                       organisationId={client.id}
                       suppressionReason={suppressed ? latest?.reason : undefined}
                       ownershipWarning={ownershipConflict.hasConflict ? ownershipConflict.warning : undefined}
+                      hasSavedBooklet={savedBooklet !== null}
                     />
                   </div>
                 </SectionCard>

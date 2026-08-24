@@ -40,17 +40,23 @@ const CLOSING_APPROACH_LABELS: Record<ClosingApproach, string> = {
   open_question: "Open question",
 };
 
-/** F100 creates a review draft only, after the current outreach preflight passes. */
+/** F100 creates a review draft only, after the current outreach preflight passes.
+ *
+ * F103: `hasSavedBooklet` comes from the server page (does a saved booklet exist in
+ * client_booklets?) and only drives the hint text — the route itself re-reads the
+ * saved booklet, so the hint can never promise more than generation will use. */
 export function ComposeButton({
   blocked,
   organisationId,
   suppressionReason,
   ownershipWarning,
+  hasSavedBooklet = false,
 }: {
   blocked: boolean;
   organisationId: string;
   suppressionReason?: string;
   ownershipWarning?: string;
+  hasSavedBooklet?: boolean;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -121,6 +127,11 @@ export function ComposeButton({
 
   return (
     <div className="space-y-4">
+      <p className="text-xs text-foreground/55" aria-live="polite">
+        {hasSavedBooklet
+          ? "The client's saved booklet is included as additional context."
+          : "Generate the client booklet first to include its insights in this email."}
+      </p>
       <label className="block max-w-xs text-xs font-bold text-foreground/65">
         Email length
         <select

@@ -37,6 +37,9 @@ export async function POST(
   }
 
   const requestBody = await request.json().catch(() => ({}));
+  // The booklet is deliberately NOT part of the request body: F103 reads the saved
+  // booklet (F085/F086) straight from client_booklets so the text reaching the
+  // prompt is exactly what RLS-protected storage holds, never a client-supplied string.
   const preferences = z
     .object({
       length: z.enum(EMAIL_LENGTHS).default("standard"),
@@ -153,6 +156,21 @@ export async function POST(
   if (contactError) await reportError(contactError, { operation: "outreach.stage_one.load_contact", organisationId });
   if (enrichmentError) await reportError(enrichmentError, { operation: "outreach.stage_one.load_context", organisationId });
 
+  // F103 AC1: the client's saved booklet (latest version per F085/F086) is passed
+  // to generation as additional context. A missing booklet is not an error —
+  // generation continues on profile data alone (F102), so this is tolerant of a
+  // failed read the same way the enrichment lookup above is.
+  const { data: savedBooklet, error: bookletError } = await supabase
+    .from("client_booklets")
+    .select("booklet_text")
+    .eq("organisation_id", organisationId)
+    .order("generated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ booklet_text: string }>();
+  if (bookletError) {
+    await reportError(bookletError, { operation: "outreach.stage_one.load_booklet", organisationId });
+  }
+
   let callModel;
   try {
     callModel = createStageOneModelCall();
@@ -181,6 +199,7 @@ export async function POST(
       sector: enrichment?.sector,
       subSector: enrichment?.sub_sector,
       newsHooks: enrichment?.news_hooks,
+      booklet: savedBooklet?.booklet_text ?? null,
     },
     callModel,
     { length: preferences.data.length, voice: preferences.data.voice, tone: preferences.data.tone, opening: preferences.data.opening, closing: preferences.data.closing },

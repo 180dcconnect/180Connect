@@ -10,6 +10,7 @@ import {
   reviewManualEntryFields,
 } from "@/lib/manual-entry";
 import { createClient } from "@/lib/supabase/server";
+import { reportRescoreFailure, rescoreOrganisation } from "@/lib/scoring/rescore";
 import { checkWebsiteReachability } from "@/lib/website-reachability";
 
 export type ManualEntryState = {
@@ -209,6 +210,16 @@ export async function saveManualEntry(
     }
 
     const activeOrganisationId = String(organisationId);
+    // F058/F059 — score the client as it becomes one, reading its now-persisted
+    // row rather than the form snapshot. Best-effort: a missing service-role key
+    // or a failed upsert leaves the client visibly "unscored" on the list (F058
+    // AC3's explicit state) rather than failing the approval the admin just
+    // made; the error is logged and the backfill sweeps it up.
+    await reportRescoreFailure(
+      await rescoreOrganisation(activeOrganisationId),
+      "manual_entry.rescore_new_client",
+      activeOrganisationId,
+    );
     revalidatePath("/clients");
     revalidatePath(`/clients/${activeOrganisationId}`);
     return {

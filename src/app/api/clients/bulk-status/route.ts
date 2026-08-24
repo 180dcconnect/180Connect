@@ -11,6 +11,7 @@ import {
   parseBulkStatusResult,
   setOutreachStatusBulkRpcFailure,
 } from "@/lib/bulk-status";
+import { reportRescoreFailure, rescoreOrganisation } from "@/lib/scoring/rescore";
 
 /**
  * F064 — move every selected client to one pipeline status, reached from the bulk
@@ -99,6 +100,21 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
+
+  // F058/F059 AC2 — same freshness rule as the single-status route: every client
+  // whose pipeline moved just had its previous-contact factor move with it, so
+  // each persisted score is refreshed here rather than at the next backfill.
+  // Best-effort per id; a failed one logs and leaves that client visibly
+  // unscored-or-stale for the backfill to sweep.
+  await Promise.all(
+    ids.map(async (organisationId) =>
+      reportRescoreFailure(
+        await rescoreOrganisation(organisationId),
+        "clients.bulk_status.rescore",
+        organisationId,
+      ),
+    ),
+  );
 
   return NextResponse.json({ ...result, message: bulkStatusSummary(result, status) }, { status: 200 });
 }

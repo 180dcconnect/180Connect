@@ -10,17 +10,18 @@
  * combination comes back exactly — true by construction rather than by care.
  */
 
-import { SECTOR_FILTER_LABELS } from "./visible-clients.ts";
+import { SECTOR_FILTER_LABELS, priorityScoreFilterLabel } from "./visible-clients.ts";
 
 /**
  * The params a view remembers, and the order they are written back in.
  *
  * These are the AC's filter list mapped onto the params the page actually uses:
  * search (`q`), location (`city` and `country`), outreach status (`status`),
- * organisation type (`type`), and owner (`owner`). Since F053/F054/F056 the four
- * location/status/type filters are multi-select — the URL carries each chosen value
- * as a repeated param, so a view stores an array for those keys and `savedViewHref`
- * writes the repeats back.
+ * organisation type (`type`), owner (`owner`), and — since F058 — the priority
+ * score band (`score`, multi-select like the other band filters). Since F053/
+ * F054/F056 the location/status/type filters are multi-select — the URL carries
+ * each chosen value as a repeated param, so a view stores an array for those
+ * keys and `savedViewHref` writes the repeats back.
  *
  * Sector (F055) is captured as a multi-key like city/status/type: its values are
  * the canonical group keys from visible-clients.ts plus "unclassified", stored as
@@ -28,8 +29,8 @@ import { SECTOR_FILTER_LABELS } from "./visible-clients.ts";
  * column is jsonb.
  *
  * Deliberately not captured: `page`, the insight band's `stage`/`sort`/`dir`, and
- * the list's own `listSort`/`listDir`. A saved view is a filter combination — the AC
- * says so — and pinning someone to page 4 of a list whose contents have since
+ * the list's own `listSort`/`listDir`. A saved view is a filter combination — the
+ * AC says so — and pinning someone to page 4 of a list whose contents have since
  * changed is a bug, not a feature. Ordering is how the same list is read, not what
  * is in it.
  */
@@ -41,6 +42,7 @@ export const SAVED_VIEW_FILTER_KEYS = [
   "type",
   "sector",
   "owner",
+  "score",
 ] as const;
 
 /** Keys whose URL form is a repeated param, stored as arrays in `filters`. */
@@ -50,6 +52,7 @@ export const SAVED_VIEW_MULTI_KEYS: readonly SavedViewFilterKey[] = [
   "status",
   "type",
   "sector",
+  "score",
 ];
 
 export type SavedViewFilterKey = (typeof SAVED_VIEW_FILTER_KEYS)[number];
@@ -258,6 +261,11 @@ export function describeFilters(
     parts.push("Unassigned");
   } else if (filters.owner) {
     parts.push(ownerName || "A former team member");
+  }
+  // F058 — bands read by their chip labels ("High score (0.70+)"), not raw
+  // values, so a view's description says what selecting it will show.
+  if (filters.score) {
+    parts.push(describeValues(filters.score).split(", ").map((value) => priorityScoreFilterLabel(value)).join(", "));
   }
   return parts.length > 0 ? parts.join(" · ") : "No filters — the whole list";
 }

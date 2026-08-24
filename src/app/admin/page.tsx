@@ -124,6 +124,12 @@ export default async function AdminPage() {
               Attach grant and funding history to charities already in the pipeline.
             </p>
           </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/ai-generations">
+            <h2 className="font-bold">AI generation history</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Every generated email draft, by model — compare performance and cost.
+            </p>
+          </Link>
         </div>
       </section>
     </main>

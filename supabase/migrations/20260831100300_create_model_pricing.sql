@@ -21,6 +21,18 @@
 -- (a reasonable follow-up, not built here to keep this migration's scope to the
 -- table itself).
 --
+-- DECISION (Aug 2026): staying empty for now. The project's Gemini key is on the
+--   free tier, which bills $0 and instead caps throughput (~1,000-1,500 requests/
+--   day for Flash-class models, resetting midnight Pacific) — so seeding list
+--   prices today would record projected dollars as if they were invoiced spend.
+--   Seed on the day a billing account is linked, with:
+--     model 'gemini-3.6-flash' at 0.0015 input / 0.0075 output USD per 1K tokens
+--     ($1.50 / $7.50 per 1M, Google's standard paid tier, verified Aug 2026 —
+--     re-check ai.google.dev/gemini-api/docs/pricing first: a promotional rate of
+--     half that runs through Dec 31 2026, and pricing steps up Jan 1 2027).
+--   Note cost_usd is snapshotted per generation and never backfilled, so rows
+--   created before seeding stay "unknown" by design.
+--
 -- WRITE PATH: no INSERT/UPDATE/DELETE grant to authenticated, same as
 -- DATA_HANDLING_RULES and other admin-owned reference data — until a real
 -- editing RPC exists, changing a rate is a direct SQL statement by whoever is

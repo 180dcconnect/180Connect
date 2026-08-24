@@ -1,8 +1,10 @@
 "use client";
 
-// F189/F194: existing tags list with inline rename (admin-only, enforced
-// server-side regardless of what this UI shows) and inline recolour (F194,
-// any CAM or admin — enforced by the set_tag_colour RPC server-side).
+// F189/F194/F190: existing tags list with inline rename (admin-only,
+// enforced server-side regardless of what this UI shows), inline recolour
+// (F194, any CAM or admin — enforced by the set_tag_colour RPC
+// server-side) and delete (F190, admin-only — enforced by the
+// delete_unused_tag RPC server-side).
 // Clicking a tag's name turns it into an editable field; saving calls
 // editTagAction and updates the name in place, no page reload — renaming
 // here only ever touches the tags row itself, so every existing client
@@ -11,6 +13,7 @@
 import { useState, useTransition } from "react";
 import { editTagAction } from "@/lib/tags/edit-tag-action";
 import { setTagColourAction } from "@/lib/tags/set-tag-colour-action.ts";
+import { deleteTagAction } from "@/lib/tags/delete-tag-action.ts";
 import { TAG_COLOURS, tagPillStyle } from "@/lib/tags/tag-colours.ts";
 
 export type EditableTagEntry = { id: string; name: string; colour: string | null };
@@ -24,6 +27,11 @@ export function EditableTagList({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [colourId, setColourId] = useState<string | null>(null);
+  // F190 AC1: delete requires a two-step armed confirm — the first click
+  // only arms it, a second click on the same tag actually deletes.
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(
+    null,
+  );
   const [pending, startTransition] = useTransition();
   const [errorByTagId, setErrorByTagId] = useState<Record<string, string>>({});
 
@@ -45,6 +53,28 @@ export function EditableTagList({
   function cancelEditing() {
     setEditingId(null);
     setDraftName("");
+  }
+
+  // F190: admin delete with armed confirmation (AC1). The server-side RPC
+  // blocks in-use tags with the assignment count (AC2) and a genuinely
+  // deleted row disappears from assign/filter everywhere by construction
+  // (AC3).
+  function handleDeleteClick(tagId: string) {
+    if (confirmingDeleteId !== tagId) {
+      setConfirmingDeleteId(tagId);
+      return;
+    }
+
+    clearError(tagId);
+    startTransition(async () => {
+      const result = await deleteTagAction(tagId);
+      if (result.ok) {
+        setTags((current) => current.filter((t) => t.id !== tagId));
+      } else {
+        setErrorByTagId((prev) => ({ ...prev, [tagId]: result.message }));
+      }
+      setConfirmingDeleteId(null);
+    });
   }
 
   function saveEdit(tagId: string) {
@@ -153,6 +183,21 @@ export function EditableTagList({
                   className="text-xs font-medium text-black/40 hover:text-[--brand]"
                 >
                   Rename
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteClick(tag.id)}
+                  disabled={pending}
+                  aria-expanded={confirmingDeleteId === tag.id}
+                  className={`text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
+                    confirmingDeleteId === tag.id
+                      ? "text-red-700 underline"
+                      : "text-black/40 hover:text-red-700"
+                  }`}
+                >
+                  {confirmingDeleteId === tag.id
+                    ? "Click again to confirm delete"
+                    : "Delete"}
                 </button>
               </>
             )}

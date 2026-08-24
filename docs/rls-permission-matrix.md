@@ -1185,6 +1185,18 @@ state (`docs/audit-log-pattern.md` §1). The fixed placeholder user
 `created_by_user_id` can stay NOT NULL-able after a creator is hard-deleted;
 it is excluded from `/admin/users`.
 
+**Deletion is RPC-only, admin-only** (F190): the TAGS row above shows no
+DELETE path because there is deliberately none at the table level — no DELETE
+grant or policy on `TAGS` exists, so direct deletes fail on the missing GRANT
+regardless of role. The only deletion path is the `delete_unused_tag(uuid)`
+SECURITY DEFINER RPC (`20260830000000_create_delete_unused_tag_rpc.sql`),
+which re-checks `is_active_user()` + `is_admin()` in its body (DEFINER bypasses
+RLS), refuses tags that still have `ORG_TAGS` assignments — reporting their
+count rather than silently cascading them away — and takes an EXCLUSIVE lock
+on `ORG_TAGS` across the check-and-delete transaction, closing the race where
+an assignment committed between a separate count and delete would vanish to
+the `ON DELETE CASCADE`. No audit row: same §1 reasoning as colour.
+
 ---
 
 ## 4. Denial behaviour and feedback

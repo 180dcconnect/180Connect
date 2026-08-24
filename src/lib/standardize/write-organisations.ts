@@ -43,6 +43,7 @@
 import { buildAdminClient } from "../supabase/admin-client-factory.ts";
 import { checkClientCriteria, type ClientCriteriaResult } from "../client-criteria.ts";
 import { reportError } from "../error-logging.ts";
+import { persistLatestScore } from "../scoring/persist-latest-score.ts";
 import { checkWebsiteReachability } from "../website-reachability.ts";
 import type { WebsiteStatus } from "../website-validation.ts";
 import {
@@ -308,6 +309,25 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
         .single();
 
       if (error) return { error: error.message };
+
+      // F058/F059 — a freshly promoted organisation gets its LATEST_SCORES row in
+      // the same pass, so it never sits unscored until some future backfill runs.
+      // The rule engine degrades missing inputs (income, sector) to their documented
+      // neutrals, and the rescore hooks elsewhere refresh the row when real data
+      // arrives later. Best-effort: a scoring failure must not fail the promote —
+      // an unscored client is F058 AC3's explicit state, not an error.
+      const scored = await persistLatestScore(
+        supabase as unknown as Parameters<typeof persistLatestScore>[0],
+        data.id,
+        org,
+      );
+      if (!scored.ok) {
+        await reportError(new Error(scored.error), {
+          operation: "write_organisations.rescore_new_organisation",
+          organisationId: data.id,
+        });
+      }
+
       return { id: data.id };
     },
 

@@ -1,8 +1,8 @@
 # Client list sorting
 
 How the charity list at `/clients` is ordered, and why the outreach-status order
-is what it is. Covers **F060** (sort by location, #62) and **F061** (sort by
-outreach status, #63).
+is what it is. Covers **F060** (sort by location, #62), **F061** (sort by
+outreach status, #63), and **F059** (sort by priority score, #61).
 
 The code is `sortClients()` in [`src/app/clients/visible-clients.ts`](../src/app/clients/visible-clients.ts);
 the control is the "Sorted by …" sentence above the list.
@@ -22,10 +22,10 @@ other, since both are on screen at once.
 
 ## What the list can be sorted on
 
-`listSort` accepts `name`, `location` or `status`. `listDir` accepts `ascending`
-or `descending`. Anything else falls back to `name`, `ascending` — the order the
-list has always used — rather than erroring, because both are URL input and a
-pasted link should never break the page.
+`listSort` accepts `name`, `location`, `status` or `priority`. `listDir` accepts
+`ascending` or `descending`. Anything else falls back to `name`, `ascending` —
+the order the list has always used — rather than erroring, because both are URL
+input and a pasted link should never break the page.
 
 - **name** — `legal_name`, alphabetical, case-insensitive.
 - **location** — the location string the list actually displays: the city, or
@@ -33,11 +33,18 @@ pasted link should never break the page.
   displayed value rather than on `city` keeps the visible column and the order
   in agreement.
 - **status** — pipeline order, see below.
+- **priority** — the client's persisted rule-engine score (`LATEST_SCORES`
+  .priority_score, written by the F088 rescore path), highest first on a
+  descending sort. Unscored clients — no score row yet — are pinned **last in
+  both directions**: they must neither float to the top of "highest first" as
+  if perfect nor hide at the bottom of "lowest first" as if zero. They sit
+  visibly apart with an em-dash in the Score column, which is F058 AC3's
+  "handled explicitly" showing up in the sort as well as the filter.
 
 Sorting is applied **after** the filters and **before** pagination. That is what
-makes "sort combines with the active filters" (F060 AC3, F061 AC2) true, and it
-means page 2 is genuinely the second page of the sorted set rather than page 2
-re-shuffled on its own.
+makes "sort combines with the active filters" (F060 AC3, F061 AC2, F059 AC3)
+true, and it means page 2 is genuinely the second page of the sorted set rather
+than page 2 re-shuffled on its own.
 
 ## Ties, and why clients with the same location sit together
 

@@ -12,6 +12,7 @@ import {
   filterByCountry,
   filterByStatus,
   filterByTags,
+  filterByPriorityScore,
   prioritiseQueue,
   filterByType,
   filterBySector,
@@ -20,13 +21,17 @@ import {
   SECTOR_FILTER_OPTIONS,
   LIST_SORT_DIRECTIONS,
   LIST_SORT_FIELDS,
+  PRIORITY_SCORE_FILTERS,
   parseListDirection,
   parseListSort,
+  parsePriorityScoreFilter,
+  priorityScoreFilterLabel,
   searchClients,
   sortClients,
   visibleClients,
   type ClientListRow,
   type OpenSuppression,
+  type VisibleClient,
 } from "./visible-clients.ts";
 import { ChevronRight, Sparkles } from "lucide-react";
 import {
@@ -97,6 +102,9 @@ type SearchParams = Promise<{
   // F055 — sector is multi-select like the filters above; values are the
   // canonical group keys (see CANONICAL_SECTOR_GROUPS) plus "unclassified".
   sector?: string | string[];
+  // F058 — priority-score bands (`high` / `medium` / `low` / `unscored`), same
+  // repeated-param shape as the other multi-selects.
+  score?: string | string[];
   /** Funnel stage the breakdown counts. */
   stage?: string;
   /** Field the breakdown groups by, and which end of it to show. */
@@ -115,9 +123,40 @@ const PAGE_SIZE = 25;
  * The list's column track, shared by the header row and every row under it, so
  * the two can't drift apart. Columns only exist from `lg`: below that the row
  * folds back into name-over-subline, which is the only thing that fits.
+ * F058/F059 add the fixed-width score column between location and status —
+ * narrow on purpose: two decimals plus padding is all it ever holds.
  */
 const ROW_GRID =
-  "lg:grid lg:grid-cols-[2rem_minmax(0,1fr)_9rem_10rem_10rem_1rem] lg:items-center lg:gap-4";
+  "lg:grid lg:grid-cols-[2rem_minmax(0,1fr)_9rem_4.5rem_10rem_10rem_1rem] lg:items-center lg:gap-4";
+
+/**
+ * F058/F059 — one row's score pill. Colour rides the stored band so the pill
+ * and the filter's bands can't disagree: high wears the brand green, medium
+ * the amber already used for attention flags, low and unscored stay quiet.
+ */
+function PriorityScorePill({ client }: { client: VisibleClient }) {
+  if (client.priorityScore === null || client.priorityBand === null) {
+    return (
+      <span className="text-[12px] font-bold text-foreground/25" title="Not scored yet">
+        —
+      </span>
+    );
+  }
+  const tone =
+    client.priorityBand === "high"
+      ? "bg-brand/10 text-brand"
+      : client.priorityBand === "medium"
+        ? "bg-amber-50 text-amber-800"
+        : "bg-black/[0.05] text-foreground/55";
+  return (
+    <span
+      className={`inline-block w-full max-w-fit truncate rounded-full px-2 py-0.5 text-center text-[11px] font-bold tabular-nums tracking-[0.04em] ${tone}`}
+      title="Priority score (F088 rule engine)"
+    >
+      {client.priorityScore.toFixed(2)}
+    </span>
+  );
+}
 
 /** Reserved width for the claim button, held whether or not the row has one. */
 const CLAIM_SLOT = "w-[6.5rem] shrink-0";
@@ -199,6 +238,7 @@ export default async function ClientsPage({
     tags: tagsParam,
     type: typeFilter,
     sector: sectorParam,
+    score: scoreParam,
     stage: stageParam,
     sort: sortParam,
     dir: dirParam,
@@ -246,7 +286,7 @@ export default async function ClientsPage({
       const { data, error } = await supabase
         .from("organisations")
         .select(
-          "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id), financial_periods(income_band, total_income, period_end), grants(id, amount_awarded, funder_name, award_date)",
+          "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id), financial_periods(income_band, total_income, period_end), grants(id, amount_awarded, funder_name, award_date), latest_scores(priority_score, priority_band, scored_at)",
         )
         .order("legal_name", { ascending: true })
         .order("id", { ascending: true })
@@ -380,6 +420,9 @@ export default async function ClientsPage({
   // the mixed case leaves the URL instead of propagating (same reasoning as the
   // parsed listSort values in hrefWith below).
   const sectorValues = filterValues(sectorParam).map((value) => value.toLowerCase());
+  // F058 — unknown values are dropped at parse time, so a hand-edited URL
+  // carrying `?score=banana` filters nothing rather than matching nothing.
+  const scoreBands = parsePriorityScoreFilter(scoreParam);
 
   // BrandSearchBar always writes a multi-selected category as repeated params
   // (see its submitSearch), so this can legitimately arrive as one string or
@@ -395,6 +438,9 @@ export default async function ClientsPage({
   matchingClients = filterBySector(matchingClients, sectorValues);
   matchingClients = filterByTags(matchingClients, tagFilter);
   matchingClients = searchClients(matchingClients, search);
+  // F058 — bands narrow the searched set; unscored clients stay visible until a
+  // band is actually chosen (the filter's own AC3, enforced inside the function).
+  matchingClients = filterByPriorityScore(matchingClients, scoreBands);
 
   // F196 / F197 / F199 / F094: Prioritise matching clients based on the CAM's
   // geographic, sector, size and grant-history preferences
@@ -419,7 +465,8 @@ export default async function ClientsPage({
       statusValues.length ||
       typeValues.length ||
       sectorValues.length ||
-      tagFilter.length,
+      tagFilter.length ||
+      scoreBands.length,
   );
   // F166 AC1/AC3: this is the CAM viewing their own filter, not just any owner
   // filter — the heading, count label and empty state read "your clients" so the
@@ -447,6 +494,7 @@ export default async function ClientsPage({
     type: typeFilter,
     sector: sectorParam,
     owner: ownerFilter,
+    score: scoreParam,
   });
   const savedViewSummaries: SavedViewSummary[] = (savedViews.data ?? []).map((row) => {
     const filters = parseFilters(row.filters);
@@ -550,6 +598,9 @@ export default async function ClientsPage({
       type: typeValues,
       sector: sectorValues,
       tags: tagFilter,
+      // F058 — the parsed bands, not the raw param, for the same reason as
+      // listSort below: junk leaves the URL on the next click.
+      score: scoreBands,
       stage: stageParam,
       sort: sortParam,
       dir: dirParam,
@@ -658,6 +709,13 @@ export default async function ClientsPage({
                   value: tagId,
                   colour: tagColourById.get(tagId) ?? undefined,
                 })),
+                // F058 — one chip per selected band, reading the same labels the
+                // picker offered rather than the raw URL value.
+                ...scoreBands.map((band) => ({
+                  category: "Filter by priority score",
+                  label: priorityScoreFilterLabel(band),
+                  value: band,
+                })),
               ]}
               params={{
                 "Filter by city": "city",
@@ -667,6 +725,7 @@ export default async function ClientsPage({
                 "Filter by sector": "sector",
                 "Filter by owner": "owner",
                 "Filter by tag": "tags",
+                "Filter by priority score": "score",
               }}
               categories={{
                 "Filter by city": uniqueCities.map(c => ({ label: c, value: c })),
@@ -679,6 +738,10 @@ export default async function ClientsPage({
                   ...teamMembers.map(m => ({ label: m.full_name || "Unnamed CAM", value: m.id }))
                 ],
                 "Filter by tag": availableTags.map((t) => ({ label: t.name, value: t.id, colour: t.colour ?? undefined })),
+                "Filter by priority score": PRIORITY_SCORE_FILTERS.map((band) => ({
+                  label: band.label,
+                  value: band.value,
+                })),
               }}
             />
           }
@@ -817,6 +880,7 @@ export default async function ClientsPage({
                       <span />
                       <span>Client</span>
                       <span>Location</span>
+                      <span>Score</span>
                       <span>Status</span>
                       <span>Owner</span>
                       <span />
@@ -875,6 +939,10 @@ export default async function ClientsPage({
 
                           <span className="hidden min-w-0 truncate text-[13px] text-foreground/60 lg:block">
                             {client.location}
+                          </span>
+
+                          <span className="hidden min-w-0 lg:block">
+                            <PriorityScorePill client={client} />
                           </span>
 
                           <span className="hidden min-w-0 lg:block">

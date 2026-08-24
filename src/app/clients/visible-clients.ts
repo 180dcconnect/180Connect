@@ -32,6 +32,13 @@ export type GrantRow = {
   grant_programme?: string | null;
 };
 
+/** F058/F059 — the org's persisted score row (LATEST_SCORES), via the embedded join. */
+export type LatestScoreRow = {
+  priority_score: number | null;
+  priority_band: string | null;
+  scored_at: string | null;
+};
+
 export type ClientListRow = {
   id: string;
   legal_name: string;
@@ -46,6 +53,7 @@ export type ClientListRow = {
   financial_periods?: FinancialPeriodRow[] | null;
   grants?: GrantRow[] | null;
   has_grants?: boolean | null;
+  latest_scores?: LatestScoreRow | LatestScoreRow[] | null;
   outreach_status: string;
   owner_id: string | null;
   owner: { full_name: string | null } | null;
@@ -68,6 +76,12 @@ export type VisibleClient = ClientListRow & {
   tagIds: string[];
   income_band: string | null;
   has_grants: boolean;
+  /** F058/F059 — the persisted rule-engine score, or null when the client has
+   * never been scored (no LATEST_SCORES row yet: newly imported before the
+   * rescore hook ran, or a hook failure awaiting the backfill). Null is an
+   * explicit state the filter and sort both surface, never a silent zero. */
+  priorityScore: number | null;
+  priorityBand: "high" | "medium" | "low" | null;
 };
 
 /**
@@ -123,7 +137,29 @@ export function visibleClients(
       has_grants: Boolean(
         organisation.has_grants || (organisation.grants && organisation.grants.length > 0),
       ),
+      ...latestScoreOf(organisation),
     }));
+}
+
+/**
+ * F058/F059 — normalises the embedded LATEST_SCORES join into the two fields
+ * the list uses. PostgREST returns an object for a to-one join, but defensive
+ * normalisation costs one line and means an API-shape surprise degrades to
+ * "unscored" rather than crashing every row.
+ */
+function latestScoreOf(
+  organisation: ClientListRow,
+): { priorityScore: number | null; priorityBand: "high" | "medium" | "low" | null } {
+  const raw = organisation.latest_scores;
+  const row = Array.isArray(raw) ? raw[0] : raw;
+  const band =
+    row?.priority_band === "high" || row?.priority_band === "medium" || row?.priority_band === "low"
+      ? row.priority_band
+      : null;
+  return {
+    priorityScore: row?.priority_score ?? null,
+    priorityBand: band,
+  };
 }
 
 /** F163: filters visible clients down to those owned by a specific CAM. */
@@ -154,6 +190,74 @@ export function filterByTags(
   return clients.filter((client) =>
     client.tagIds.some((tagId) => tagFilter.includes(tagId)),
   );
+}
+
+/**
+ * F058 — priority-score band filter.
+ *
+ * The URL carries whole bands, not raw numbers (`?score=high&score=unscored`).
+ * That is a deliberate shape, not a shortcut on AC1's "above, below, or within
+ * a range": the bands ARE the ranges, cut at the thresholds recorded in
+ * MODEL_VERSIONS' SCOUT v1 config and in src/lib/scoring/score-client.ts —
+ *   high   >= 0.70
+ *   medium >= 0.40
+ *   low    <  0.40
+ * Selecting `high` alone is "above 0.70"; `low` alone is "below 0.40";
+ * `medium` + `high` is "within 0.40–1.0". A union of named ranges covers every
+ * case AC1 names while staying inside the same repeated-param multi-select
+ * pattern as city/country/status/type — and it reads the persisted
+ * `priority_band`, so the page never re-derives cut-offs that could drift from
+ * what scoring actually wrote.
+ *
+ * AC3 — unscored is explicit. A client with no LATEST_SCORES row matches only
+ * the `unscored` value: with no selection they stay visible (a missing score
+ * must not hide a client from the plain list), but the moment any band is
+ * chosen they drop out unless asked for by name. Silently excluding them from
+ * every band view would hide exactly the clients whose scores are missing —
+ * usually the newest imports, the ones a CAM most needs to see somewhere.
+ */
+export const PRIORITY_SCORE_FILTERS = [
+  { value: "high", label: "High score (0.70+)" },
+  { value: "medium", label: "Medium score (0.40–0.69)" },
+  { value: "low", label: "Low score (under 0.40)" },
+  { value: "unscored", label: "Unscored yet" },
+] as const;
+
+export type PriorityScoreFilter = (typeof PRIORITY_SCORE_FILTERS)[number]["value"];
+
+const PRIORITY_SCORE_VALUES = new Set<string>(
+  PRIORITY_SCORE_FILTERS.map((entry) => entry.value),
+);
+
+/** Labels for chips / saved-view descriptions, keyed by the URL value. */
+export function priorityScoreFilterLabel(value: string): string {
+  return PRIORITY_SCORE_FILTERS.find((entry) => entry.value === value)?.label ?? value;
+}
+
+export function parsePriorityScoreFilter(
+  value: string | string[] | null | undefined,
+): PriorityScoreFilter[] {
+  return filterValues(value).filter((entry): entry is PriorityScoreFilter =>
+    PRIORITY_SCORE_VALUES.has(entry),
+  );
+}
+
+export function filterByPriorityScore(
+  clients: VisibleClient[],
+  bandFilter: string | string[] | null | undefined,
+): VisibleClient[] {
+  const wanted = parsePriorityScoreFilter(bandFilter);
+  if (wanted.length === 0) return clients;
+  const wantUnscored = wanted.includes("unscored");
+  const wantedBands = wanted.filter((value): value is Exclude<PriorityScoreFilter, "unscored"> =>
+    value !== "unscored",
+  );
+  return clients.filter((client) => {
+    if (client.priorityBand === null) return wantUnscored;
+    // A scored client whose band is somehow outside the known vocabulary has no
+    // checkbox that could select it — excluded rather than leaking into a band.
+    return wantedBands.includes(client.priorityBand);
+  });
 }
 
 /**
@@ -698,7 +802,7 @@ export function prioritiseByGeography(
  * (`listSort`/`listDir` here, `sort`/`dir` there) so one can be changed without
  * disturbing the other — the two controls are visible on screen at once.
  */
-export type ListSortField = "name" | "location" | "status";
+export type ListSortField = "name" | "location" | "status" | "priority";
 /** Spelled out rather than asc/desc because the control is a sentence, and the
  * breakdown card next to it already uses these words (client-insights.ts). */
 export type ListSortDirection = "ascending" | "descending";
@@ -707,6 +811,7 @@ export const LIST_SORT_FIELDS: { key: ListSortField; label: string }[] = [
   { key: "name", label: "name" },
   { key: "location", label: "location" },
   { key: "status", label: "outreach status" },
+  { key: "priority", label: "priority score" },
 ];
 
 export const LIST_SORT_DIRECTIONS: ListSortDirection[] = ["ascending", "descending"];
@@ -789,6 +894,20 @@ export function sortClients(
         return rankA === UNKNOWN_STATUS_RANK ? 1 : -1;
       }
       primary = rankA - rankB;
+    } else if (field === "priority") {
+      // F059 AC2 — sort on the persisted score. Unscored clients (no
+      // LATEST_SCORES row) are pinned last in *both* directions, the same
+      // pre-sign pattern as the unknown status rank above: a client we have
+      // never scored must not float to the top of "highest first" as if it had
+      // a perfect score, nor hide at the bottom of "lowest first" as if scored
+      // zero. It sits visibly apart, saying "score me".
+      if ((a.priorityScore === null) !== (b.priorityScore === null)) {
+        return a.priorityScore === null ? 1 : -1;
+      }
+      primary =
+        a.priorityScore !== null && b.priorityScore !== null
+          ? a.priorityScore - b.priorityScore
+          : 0;
     } else {
       primary = byName(a, b);
     }

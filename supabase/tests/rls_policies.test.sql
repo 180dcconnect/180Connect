@@ -3693,6 +3693,103 @@ $$;
 -- personal-data.test.ts cannot reach: they run through a service_role client,
 -- which bypasses RLS.
 
+-- ---------------------------------------------------------------------------
+-- F058/F059 (#482) — MODEL_VERSIONS + LATEST_SCORES (20260831200000).
+--
+-- The permission paths the CI coverage gate cannot see: read-all on
+-- latest_scores (including deactivated users, whose is_active_user() gate must
+-- bite), admin-only reads on model_versions, and — asserted as 42501 rather
+-- than by policy, since neither table carries interactive write grants at all —
+-- that nobody-but-service-role can write scores. A CAM who could upsert their
+-- way to a 1.0 would own the sort and filter these tables feed.
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_latest_scores()
+returns setof text language plpgsql as $$
+declare
+  v_admin      uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a      uuid := '00000000-0000-4000-a000-000000000002';
+  v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
+  v_org        uuid := '00000000-0000-4000-b000-000000000002'; -- CAM A Org Ltd
+  v_count      bigint;
+begin
+  if not tests.tables_exist('latest_scores', 'model_versions') then
+    return next skip(9, 'F058/F059 scoring tables not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Fixture: one scored client. Inserted as the suite owner (postgres), which is
+  -- exactly how the rescore path's service role writes it.
+  insert into public.latest_scores (organisation_id, priority_score, priority_band)
+  values (v_org, 0.82, 'high');
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.latest_scores;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'LATEST_SCORES is read-all: an active CAM sees scores');
+
+  -- The deactivation gate rides every read policy; here it is what stops a
+  -- suspended account from still reading the queue it was taken off.
+  perform tests.login_as(v_deactivated);
+  select count(*) into v_count from public.latest_scores;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a deactivated user cannot read LATEST_SCORES');
+
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      format('update public.latest_scores set priority_score = 1.0 where organisation_id = %L', v_org)),
+    '42501',
+    'no CAM can rewrite a persisted score'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      format('insert into public.latest_scores (organisation_id, priority_score, priority_band) values (%L, 1.0, ''high'')', '00000000-0000-4000-b000-000000000003')),
+    '42501',
+    'no CAM can plant a score row'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      format('delete from public.latest_scores where organisation_id = %L', v_org)),
+    '42501',
+    'no CAM can delete a score row'
+  );
+
+  -- Weights are gameable knowledge: admin-only read (§3.6), now with the
+  -- no-interactive-write deviation documented there.
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.model_versions;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_count >= 1::bigint, 'an admin can read MODEL_VERSIONS (SCOUT v1 seeded by migration)');
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.model_versions;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a CAM cannot read the model weights');
+
+  return next is(
+    tests.sqlstate_of(v_admin,
+      'insert into public.model_versions (model_name, version, implementation_type) values (''SCOUT'', ''v2-test'', ''rules'')'),
+    '42501',
+    'not even an admin can insert a model version interactively (service-role only, §3.6 deviation)'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      'update public.model_versions set config = ''{}''::jsonb where version = ''v1'''),
+    '42501',
+    'a CAM cannot tamper with a model version'
+  );
+end;
+$$;
+
 create or replace function tests.suite_personal_data_exclusion()
 returns setof text language plpgsql as $$
 declare
@@ -5158,6 +5255,7 @@ select * from tests.suite_saved_views();
 select * from tests.suite_client_criteria();
 select * from tests.suite_data_handling_rules();
 select * from tests.suite_personal_data_exclusion();
+select * from tests.suite_latest_scores();
 
 select * from finish();
 

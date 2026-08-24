@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  bandForScore,
+} from "../../lib/scoring/score-client.ts";
+import {
   filterByCity,
   filterByOwner,
   filterByTags,
   filterByStatus,
+  filterByPriorityScore,
   formatLocation,
   formatOutreachStatus,
-  prioritiseByGeography,
+  parsePriorityScoreFilter,
   prioritiseBySector,
   prioritiseBySize,
   prioritiseByGrants,
@@ -552,10 +556,11 @@ function listOf(rows: Partial<ClientListRow>[]) {
 const names = (clients: { legal_name: string }[]) => clients.map((c) => c.legal_name);
 
 describe("parseListSort", () => {
-  it("accepts the three sortable fields", () => {
+  it("accepts the four sortable fields", () => {
     assert.equal(parseListSort("name"), "name");
     assert.equal(parseListSort("location"), "location");
     assert.equal(parseListSort("status"), "status");
+    assert.equal(parseListSort("priority"), "priority");
   });
 
   it("falls back to name for anything else", () => {
@@ -936,5 +941,199 @@ describe("filterByStatus (F056)", () => {
 
   it("no filter shows everything", () => {
     assert.equal(filterByStatus(clients, []).length, 3);
+  });
+});
+
+/* ─── Priority score (F058 #60, F059 #61) ──────────────────────────────── */
+
+/** A fixture with a persisted LATEST_SCORES row, as the page's embedded join
+ * delivers it. Array form exercised separately below. */
+function scored(
+  legal_name: string,
+  priority_score: number | null,
+  priority_band: string | null = null,
+): Partial<ClientListRow> {
+  return {
+    legal_name,
+    latest_scores: {
+      priority_score,
+      priority_band:
+        priority_band ?? (priority_score === null ? null : bandForScore(priority_score)),
+      scored_at: "2026-08-24T10:00:00Z",
+    },
+  };
+}
+
+describe("visibleClients — normalising the LATEST_SCORES join", () => {
+  it("carries the persisted score and band onto the visible client", () => {
+    const [client] = listOf([scored("Scored", 0.82, "high")]);
+    assert.equal(client.priorityScore, 0.82);
+    assert.equal(client.priorityBand, "high");
+  });
+
+  it("treats a missing row as explicitly unscored, not zero", () => {
+    const [client] = listOf([{ legal_name: "Unscored" }]);
+    assert.equal(client.priorityScore, null);
+    assert.equal(client.priorityBand, null);
+  });
+
+  it("survives the join arriving as an array instead of an object", () => {
+    const [client] = visibleClients(
+      [
+        org({
+          id: "arr",
+          legal_name: "Array Shape",
+          latest_scores: [{ priority_score: 0.55, priority_band: "medium", scored_at: null }],
+        }),
+      ],
+      [],
+    );
+    assert.equal(client.priorityScore, 0.55);
+    assert.equal(client.priorityBand, "medium");
+  });
+
+  it("degrades an out-of-vocabulary band to unscored rather than leaking it", () => {
+    const [client] = visibleClients(
+      [
+        org({
+          id: "weird",
+          legal_name: "Weird Band",
+          latest_scores: { priority_score: 0.9, priority_band: "transcendent", scored_at: null },
+        }),
+      ],
+      [],
+    );
+    assert.equal(client.priorityScore, 0.9);
+    assert.equal(client.priorityBand, null);
+  });
+});
+
+describe("parsePriorityScoreFilter", () => {
+  it("keeps known bands and drops junk URL input", () => {
+    assert.deepEqual(parsePriorityScoreFilter(["high", "banana", "unscored"]), [
+      "high",
+      "unscored",
+    ]);
+  });
+
+  it("returns nothing for absent or blank input", () => {
+    assert.deepEqual(parsePriorityScoreFilter(undefined), []);
+    assert.deepEqual(parsePriorityScoreFilter(["", "  "]), []);
+  });
+});
+
+describe("filterByPriorityScore (F058)", () => {
+  const clients = listOf([
+    scored("High", 0.85),
+    scored("Medium", 0.5),
+    scored("Low", 0.2),
+    { legal_name: "Never Scored" },
+  ]);
+
+  it("AC1 — one band alone is the range above or below its cut-off", () => {
+    assert.deepEqual(names(filterByPriorityScore(clients, "high")), ["High"]);
+    assert.deepEqual(names(filterByPriorityScore(clients, "low")), ["Low"]);
+  });
+
+  it("AC1 — several bands union into 'within' ranges", () => {
+    assert.deepEqual(names(filterByPriorityScore(clients, ["high", "medium"])), [
+      "High",
+      "Medium",
+    ]);
+  });
+
+  it("AC3 — unscored clients appear only when explicitly selected", () => {
+    assert.deepEqual(names(filterByPriorityScore(clients, "unscored")), ["Never Scored"]);
+    // And no selection at all shows everyone, unscored included.
+    assert.equal(filterByPriorityScore(clients, []).length, 4);
+    assert.equal(filterByPriorityScore(clients, undefined).length, 4);
+  });
+
+  it("matches the persisted band, not a re-derived one", () => {
+    // The stored band is what scoring wrote; the filter must not invent
+    // cut-offs that could drift from it.
+    const banded = listOf([
+      { legal_name: "Says High", latest_scores: { priority_score: 0.41, priority_band: "high", scored_at: null } },
+    ]);
+    assert.deepEqual(names(filterByPriorityScore(banded, "high")), ["Says High"]);
+    assert.deepEqual(names(filterByPriorityScore(banded, "medium")), []);
+  });
+});
+
+describe("sortClients by priority score (F059)", () => {
+  const clients = listOf([
+    { legal_name: "Charlie", ...scored("Charlie", 0.5) },
+    { legal_name: "Alpha", ...scored("Alpha", 0.9) },
+    { legal_name: "Unscored", latest_scores: null },
+    { legal_name: "Bravo", ...scored("Bravo", 0.1) },
+    { legal_name: "Also Unscored", latest_scores: null },
+  ]);
+
+  it("AC1 — descending puts the highest score first", () => {
+    assert.deepEqual(names(sortClients(clients, "priority", "descending")), [
+      "Alpha",
+      "Charlie",
+      "Bravo",
+      "Also Unscored",
+      "Unscored",
+    ]);
+  });
+
+  it("AC1 — ascending puts the lowest score first", () => {
+    assert.deepEqual(names(sortClients(clients, "priority", "ascending")), [
+      "Bravo",
+      "Charlie",
+      "Alpha",
+      "Also Unscored",
+      "Unscored",
+    ]);
+  });
+
+  it("pins unscored last in both directions, in name order within the group", () => {
+    for (const direction of ["ascending", "descending"] as const) {
+      const ordered = names(sortClients(clients, "priority", direction));
+      assert.deepEqual(ordered.slice(-2), ["Also Unscored", "Unscored"], direction);
+    }
+  });
+
+  it("ties break on legal_name ascending, not reversed by descending", () => {
+    const tied = listOf([
+      { legal_name: "Zebra", ...scored("Zebra", 0.7) },
+      { legal_name: "Aardvark", ...scored("Aardvark", 0.7) },
+    ]);
+    for (const direction of ["ascending", "descending"] as const) {
+      assert.deepEqual(names(sortClients(tied, "priority", direction)), [
+        "Aardvark",
+        "Zebra",
+      ]);
+    }
+  });
+
+  it("sorts an empty list without complaint", () => {
+    assert.deepEqual(sortClients([], "priority", "descending"), []);
+  });
+});
+
+describe("F058 + F059 combined (F059 AC3)", () => {
+  const clients = listOf([
+    { legal_name: "Filtered In High", city: "Leeds", ...scored("Filtered In High", 0.95) },
+    { legal_name: "Filtered Out Low", city: "Leeds", ...scored("Filtered Out Low", 0.15) },
+    { legal_name: "Other City High", city: "Hull", ...scored("Other City High", 0.8) },
+  ]);
+
+  it("filters to a city, then sorts that filtered set by score", () => {
+    const leeds = filterByCity(clients, "Leeds");
+    assert.deepEqual(names(sortClients(leeds, "priority", "descending")), [
+      "Filtered In High",
+      "Filtered Out Low",
+    ]);
+  });
+
+  it("a score band plus a sort respects both", () => {
+    const highOnly = filterByPriorityScore(clients, "high");
+    assert.deepEqual(names(sortClients(highOnly, "priority", "ascending")), [
+      "Other City High",
+      "Filtered In High",
+    ]);
   });
 });

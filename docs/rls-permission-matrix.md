@@ -455,6 +455,15 @@ rather than renaming the column.
 `LATEST_SCORES` is read-all: CAMs work the prioritised queue. The weights that
 produce the scores are not readable by CAMs — knowing the weights makes them gameable.
 
+Deviation recorded 24 Aug 2026 (F058/F059, #482): `MODEL_VERSIONS` is implemented
+**read-only for admins, with no INSERT/UPDATE/DELETE grant to any Postgres role**
+— writes stay service-role. The register's admin-writable cells assumed versions
+would be created through the app; in practice a version is seeded by its own
+migration (SCOUT v1 with EQUAL_WEIGHTS) and changed only by a future migration
+adding v2, so an interactive write path would be an unaudited way to rewrite what
+produced every stored score. If model management ever becomes a product surface,
+grant the verbs back here and behind an audited admin RPC.
+
 ### 3.7 Analytics
 
 §4.3: team analytics — admin full, CAM limited/personal, viewer read-only if authorised.

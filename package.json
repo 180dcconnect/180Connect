@@ -14,6 +14,7 @@
     "seed:test-accounts": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/create-test-accounts.mts",
     "verify:last-admin": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/verify-last-admin-guard.mts",
     "seed:clear": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/seed-clear.mts",
+    "backfill:scores": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-priority-scores.mts",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"src/**/*.test.ts\" \"scripts/**/*.test.mts\"",
     "export:data-model": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/export-data-model.mts",
     "ingest:companies-house": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/test-runner.mts",

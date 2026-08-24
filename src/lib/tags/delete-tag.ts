@@ -37,11 +37,13 @@ function outcomeFromRpc(
       case "forbidden":
         return { status: "forbidden" };
       case "in_use":
-        return {
-          status: "in_use",
-          assignedCount:
-            typeof raw.assigned_count === "number" ? raw.assigned_count : 0,
-        };
+        // No usable count means the outcome itself is untrustworthy — fall
+        // back to the honest check-failure rather than reporting an
+        // impossible "assigned to 0 clients".
+        if (typeof raw.assigned_count !== "number") {
+          return { status: "check_failed" };
+        }
+        return { status: "in_use", assignedCount: raw.assigned_count };
     }
   }
   // An unexpected shape is a failure of the check itself, not evidence the

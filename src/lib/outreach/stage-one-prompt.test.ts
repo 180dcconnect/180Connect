@@ -107,3 +107,15 @@ test("buildStageOnePrompt base line is tone-neutral", () => {
   assert.doesNotMatch(baseLine, /\bwarm\b/i);
   assert.doesNotMatch(baseLine, /\bconcise\b/i);
 });
+
+test("buildStageOnePrompt applies each opening approach safely", () => {
+  const context = { organisationName: "Example", organisationType: "charity" };
+  assert.match(buildStageOnePrompt(context, { opening: "mission_led" }).system, /supplied mission/);
+  assert.match(buildStageOnePrompt(context, { opening: "direct_intro" }).system, /direct introduction/);
+  assert.match(buildStageOnePrompt(context, { opening: "news_hook" }).system, /without inventing news/);
+});
+
+test("buildStageOnePrompt defaults to a mission-led opening when no options are given", () => {
+  const context = { organisationName: "Example", organisationType: "charity" };
+  assert.match(buildStageOnePrompt(context).system, /supplied mission/);
+});

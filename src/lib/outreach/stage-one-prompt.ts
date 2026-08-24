@@ -19,6 +19,8 @@ export const EMAIL_VOICES = ["180dc", "consultative", "plain_language"] as const
 export type EmailVoice = (typeof EMAIL_VOICES)[number];
 export const EMAIL_TONES = ["balanced", "warm", "formal", "concise"] as const;
 export type EmailTone = (typeof EMAIL_TONES)[number];
+export const OPENING_APPROACHES = ["mission_led", "direct_intro", "news_hook"] as const;
+export type OpeningApproach = (typeof OPENING_APPROACHES)[number];
 
 const LENGTH_INSTRUCTIONS: Record<EmailLength, string> = {
   short: "Keep the body between 70 and 100 words, with no more than three short paragraphs.",
@@ -39,6 +41,12 @@ const TONE_INSTRUCTIONS: Record<EmailTone, string> = {
   concise: "Use a concise, action-oriented tone with economical sentences and no filler.",
 };
 
+const OPENING_INSTRUCTIONS: Record<OpeningApproach, string> = {
+  mission_led: "Open with one specific, sincere observation about the charity's supplied mission or work, then introduce 180DC.",
+  direct_intro: "Open with a direct introduction to 180DC and the reason for contacting this organisation.",
+  news_hook: "Open with a supplied relevant news hook. If no news hook is supplied, fall back to a mission-led opening without inventing news.",
+};
+
 function value(value: string | null | undefined): string {
   return value?.trim() || "Not provided";
 }
@@ -49,11 +57,12 @@ function values(items: string[] | null | undefined): string {
 
 export function buildStageOnePrompt(
   context: StageOneContext,
-  options: { length?: EmailLength; voice?: EmailVoice; tone?: EmailTone } = {},
+  options: { length?: EmailLength; voice?: EmailVoice; tone?: EmailTone; opening?: OpeningApproach } = {},
 ) {
   const length = options.length ?? "standard";
   const voice = options.voice ?? "180dc";
   const tone = options.tone ?? "balanced";
+  const opening = options.opening ?? "mission_led";
   return {
     system: `You draft initial charity outreach emails for 180 Degrees Consulting Sheffield.
 Use only facts supplied in the client context. Never invent achievements, needs, people, partnerships, or news.
@@ -61,6 +70,7 @@ Write a professional first-contact email. Explain that 180 Degrees Consulting Sh
 ${LENGTH_INSTRUCTIONS[length]}
 ${VOICE_INSTRUCTIONS[voice]}
 ${TONE_INSTRUCTIONS[tone]}
+${OPENING_INSTRUCTIONS[opening]}
 Return exactly one JSON object with two string properties: "subject" and "body". Do not use markdown fences. The body must be plain text and must not include a sender signature.`,
     prompt: `Draft a Stage 1 outreach email using this reviewed client context.
 

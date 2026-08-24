@@ -48,8 +48,29 @@ export const fullNameSchema = z
       ),
   );
 
+export const NOTIFICATION_FREQUENCIES = ["immediate", "daily", "weekly"] as const;
+export type NotificationFrequency = (typeof NOTIFICATION_FREQUENCIES)[number];
+
+export const NOTIFICATION_FREQUENCY_LABELS: Record<NotificationFrequency, string> = {
+  immediate: "Immediate",
+  daily: "Daily digest",
+  weekly: "Weekly digest",
+};
+
+export const NOTIFICATION_FREQUENCY_DESCRIPTIONS: Record<NotificationFrequency, string> = {
+  immediate: "Receive alerts in real time as events and updates occur.",
+  daily: "Get a daily summary digest of relevant updates and follow-up reminders.",
+  weekly: "Receive a weekly roundup of team activity and pending items.",
+};
+
+export const notificationFrequencySchema = z.enum(NOTIFICATION_FREQUENCIES);
+
+export const INVALID_NOTIFICATION_FREQUENCY_MESSAGE =
+  "Choose a notification delivery frequency.";
+
 export const accountSettingsSchema = z.object({
   fullName: fullNameSchema,
+  notificationFrequency: notificationFrequencySchema,
 });
 
 export type AccountSettingsInput = z.infer<typeof accountSettingsSchema>;
@@ -59,17 +80,37 @@ export type ParsedAccountSettings =
   | { ok: false; message: string };
 
 /**
- * Parses the submitted form into the one field this screen may write.
+ * Parses the submitted form into the fields this screen may write (F200 / F201).
  *
  * A missing `full_name` entry is treated as an empty string rather than as a
  * separate "field absent" error: to the person filling in the form the two are
  * the same mistake, and the message they need is identical.
+ *
+ * `notification_frequency` gets no such leniency (F201 review): a missing or
+ * tampered value is rejected outright rather than silently resetting the
+ * person's saved cadence to `immediate` under a success message. The edit form
+ * always submits one of the three radio options, so reaching here without a
+ * valid value means the field was dropped or forged — never a legitimate save.
  */
 export function parseAccountSettings(input: {
   fullName: unknown;
+  notificationFrequency?: unknown;
 }): ParsedAccountSettings {
+  if (
+    typeof input.notificationFrequency !== "string" ||
+    !NOTIFICATION_FREQUENCIES.includes(
+      input.notificationFrequency as NotificationFrequency,
+    )
+  ) {
+    return {
+      ok: false,
+      message: INVALID_NOTIFICATION_FREQUENCY_MESSAGE,
+    };
+  }
+
   const result = accountSettingsSchema.safeParse({
     fullName: typeof input.fullName === "string" ? input.fullName : "",
+    notificationFrequency: input.notificationFrequency,
   });
 
   if (!result.success) {

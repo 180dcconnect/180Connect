@@ -130,4 +130,37 @@ export const CITY_PRESETS = [
 export const MAX_CITY_LENGTH = 60;
 export const MAX_CITIES = 20;
 
+// F202: Follow-Up Timing Settings (F160 / F161 / F202).
+export const DEFAULT_FIRST_FOLLOW_UP_DAYS = 7;
+export const DEFAULT_SECOND_FOLLOW_UP_DAYS = 14;
+export const MIN_FOLLOW_UP_DAYS = 1;
+export const MAX_FIRST_FOLLOW_UP_DAYS = 60;
+export const MAX_SECOND_FOLLOW_UP_DAYS = 90;
 
+export function clampFollowUpDays(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (value === null || value === undefined || value === "") return fallback;
+  const num = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(num) || Number.isNaN(num)) return fallback;
+  const rounded = Math.round(num);
+  return Math.min(Math.max(rounded, min), max);
+}
+
+/**
+ * The two thresholds are stored in independent columns with independent CHECK
+ * constraints (F202 review), so Postgres alone would happily accept a second
+ * reminder that fires before the first. This is the cross-field check the
+ * database cannot express; returns an error message, or null when the ordering
+ * is sensible.
+ */
+export function validateFollowUpOrdering(
+  firstFollowUpDays: number,
+  secondFollowUpDays: number,
+): string | null {
+  if (secondFollowUpDays > firstFollowUpDays) return null;
+  return "The 2nd reminder must be later than the 1st — set the second follow-up to more days than the first.";
+}

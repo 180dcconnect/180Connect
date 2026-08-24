@@ -16,6 +16,8 @@ import {
   getGrantPriorityScore,
   filterByCountry,
   filterByType,
+  filterBySector,
+  UNCLASSIFIED_SECTOR,
   filterValues,
   parseListDirection,
   parseListSort,
@@ -804,6 +806,54 @@ describe("filterByType (F053)", () => {
   it("no filter shows everything", () => {
     assert.equal(filterByType(clients, undefined).length, 4);
     assert.equal(filterByType(clients, []).length, 4);
+  });
+});
+
+describe("filterBySector (F055)", () => {
+  const clients = listOf([
+    { legal_name: "A clinic", sector: "Healthcare", sub_sector: null },
+    { legal_name: "A school", sector: null, sub_sector: "Schools & Colleges" },
+    { legal_name: "A food bank", sector: "Poverty Relief", sub_sector: null },
+    { legal_name: "An unclassified one", sector: null, sub_sector: null },
+    { legal_name: "A blank-string one", sector: "  ", sub_sector: null },
+  ]);
+
+  it("matches free-text sector values through the canonical alias table, case-insensitively", () => {
+    assert.deepEqual(names(filterBySector(clients, "health")), ["A clinic"]);
+    assert.deepEqual(names(filterBySector(clients, "education")), ["A school"]);
+  });
+
+  it("matches on sub-sector when the sector field itself is empty", () => {
+    // The school has no `sector`, only a sub-sector — it is still classified.
+    assert.deepEqual(names(filterBySector(clients, UNCLASSIFIED_SECTOR)), [
+      "An unclassified one",
+      "A blank-string one",
+    ]);
+  });
+
+  it("AC2 — several sectors show clients matching any of them", () => {
+    assert.deepEqual(names(filterBySector(clients, ["health", "poverty"])), [
+      "A clinic",
+      "A food bank",
+    ]);
+  });
+
+  it("AC3 — 'unclassified' selects charities with no sector recorded", () => {
+    const mixed = filterBySector(clients, ["education", UNCLASSIFIED_SECTOR]);
+    assert.deepEqual(names(mixed), ["A school", "An unclassified one", "A blank-string one"]);
+  });
+
+  it("an unknown value matches nothing, rather than silently showing everything", () => {
+    assert.deepEqual(names(filterBySector(clients, "Charity Commission")), []);
+    assert.deepEqual(
+      names(filterBySector(clients, ["health", "nonsense"])),
+      ["A clinic"],
+    );
+  });
+
+  it("no filter shows everything", () => {
+    assert.equal(filterBySector(clients, undefined).length, 5);
+    assert.equal(filterBySector(clients, []).length, 5);
   });
 });
 

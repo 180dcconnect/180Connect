@@ -220,6 +220,13 @@ describe("describeFilters", () => {
     assert.equal(describeFilters({ city: ["Leeds", "Sheffield"] }), "Leeds, Sheffield");
   });
 
+  it("reads sector values as their labels (F055)", () => {
+    assert.equal(
+      describeFilters({ sector: ["health", "unclassified"] }),
+      "Health, Unclassified",
+    );
+  });
+
   it("names the owner when one is known", () => {
     assert.equal(describeFilters({ owner: "user-1" }, "Amara Okafor"), "Amara Okafor");
   });

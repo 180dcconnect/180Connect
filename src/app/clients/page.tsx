@@ -14,7 +14,10 @@ import {
   filterByTags,
   prioritiseQueue,
   filterByType,
+  filterBySector,
   filterValues,
+  SECTOR_FILTER_LABELS,
+  SECTOR_FILTER_OPTIONS,
   LIST_SORT_DIRECTIONS,
   LIST_SORT_FIELDS,
   parseListDirection,
@@ -91,6 +94,9 @@ type SearchParams = Promise<{
   country?: string | string[];
   status?: string | string[];
   type?: string | string[];
+  // F055 — sector is multi-select like the filters above; values are the
+  // canonical group keys (see CANONICAL_SECTOR_GROUPS) plus "unclassified".
+  sector?: string | string[];
   /** Funnel stage the breakdown counts. */
   stage?: string;
   /** Field the breakdown groups by, and which end of it to show. */
@@ -192,6 +198,7 @@ export default async function ClientsPage({
     status,
     tags: tagsParam,
     type: typeFilter,
+    sector: sectorParam,
     stage: stageParam,
     sort: sortParam,
     dir: dirParam,
@@ -364,6 +371,7 @@ export default async function ClientsPage({
   const countryValues = filterValues(country);
   const statusValues = filterValues(status);
   const typeValues = filterValues(typeFilter);
+  const sectorValues = filterValues(sectorParam);
 
   // BrandSearchBar always writes a multi-selected category as repeated params
   // (see its submitSearch), so this can legitimately arrive as one string or
@@ -376,6 +384,7 @@ export default async function ClientsPage({
   matchingClients = filterByCountry(matchingClients, countryValues);
   matchingClients = filterByStatus(matchingClients, statusValues);
   matchingClients = filterByType(matchingClients, typeValues);
+  matchingClients = filterBySector(matchingClients, sectorValues);
   matchingClients = filterByTags(matchingClients, tagFilter);
   matchingClients = searchClients(matchingClients, search);
 
@@ -401,6 +410,7 @@ export default async function ClientsPage({
       countryValues.length ||
       statusValues.length ||
       typeValues.length ||
+      sectorValues.length ||
       tagFilter.length,
   );
   // F166 AC1/AC3: this is the CAM viewing their own filter, not just any owner
@@ -427,6 +437,7 @@ export default async function ClientsPage({
     country,
     status,
     type: typeFilter,
+    sector: sectorParam,
     owner: ownerFilter,
   });
   const savedViewSummaries: SavedViewSummary[] = (savedViews.data ?? []).map((row) => {
@@ -529,6 +540,7 @@ export default async function ClientsPage({
       country: countryValues,
       status: statusValues,
       type: typeValues,
+      sector: sectorValues,
       tags: tagFilter,
       stage: stageParam,
       sort: sortParam,
@@ -623,6 +635,11 @@ export default async function ClientsPage({
                   label: formatOrganisationType(value),
                   value,
                 })),
+                ...sectorValues.map((value) => ({
+                  category: "Filter by sector",
+                  label: SECTOR_FILTER_LABELS[value] ?? value,
+                  value,
+                })),
                 ...(ownerFilter === "unassigned" ? [{ category: "Filter by owner", label: "Unassigned", value: "unassigned" }] : []),
                 ...(ownerFilterLabel ? [{ category: "Filter by owner", label: ownerFilterLabel, value: ownerFilter as string }] : []),
                 // F193 — one chip per selected tag, so a three-tag filter reads as
@@ -639,6 +656,7 @@ export default async function ClientsPage({
                 "Filter by country": "country",
                 "Filter by outreach status": "status",
                 "Filter by organisation type": "type",
+                "Filter by sector": "sector",
                 "Filter by owner": "owner",
                 "Filter by tag": "tags",
               }}
@@ -647,6 +665,7 @@ export default async function ClientsPage({
                 "Filter by country": uniqueCountries.map(c => ({ label: c, value: c })),
                 "Filter by outreach status": statusOptions,
                 "Filter by organisation type": typeOptions,
+                "Filter by sector": SECTOR_FILTER_OPTIONS,
                 "Filter by owner": [
                   { label: "Unassigned", value: "unassigned" },
                   ...teamMembers.map(m => ({ label: m.full_name || "Unnamed CAM", value: m.id }))

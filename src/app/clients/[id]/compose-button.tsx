@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Sparkles } from "lucide-react";
+import Link from "next/link";
+import { History, Sparkles } from "lucide-react";
 import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
 
@@ -71,6 +72,15 @@ function sizeTemplateLabel(sizeTemplate: string | undefined): string {
  * Styled to match BookletPanel (booklet-panel.tsx), the app's other one-shot
  * Gemini-backed action: same brand-tinted card, same dashed empty-state box with
  * a prominent CTA, same small header pill once a result exists to regenerate.
+ *
+ * `historyHref`, when provided, links to this client's slice of
+ * /admin/ai-generations (F112 AC3's "accessible without direct database access"
+ * — this is the shortcut so nobody has to be walked through "go to the admin
+ * dashboard, open AI generation history, then find this client"). Only ever
+ * passed by page.tsx when the viewer actually has permission to land there —
+ * always shown regardless of local draft state, since this session's `draft` is
+ * null on every page load even when past generations exist from an earlier
+ * session or a different CAM.
  */
 export function ComposeButton({
   blocked,
@@ -79,6 +89,7 @@ export function ComposeButton({
   suppressionReason,
   ownershipWarning,
   hasSavedBooklet = false,
+  historyHref,
 }: {
   blocked: boolean;
   ownershipBlocked?: boolean;
@@ -86,6 +97,7 @@ export function ComposeButton({
   suppressionReason?: string;
   ownershipWarning?: string;
   hasSavedBooklet?: boolean;
+  historyHref?: string;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [subjectValue, setSubjectValue] = useState("");
@@ -167,20 +179,33 @@ export function ComposeButton({
     }
   }
 
+  const historyLink = historyHref && (
+    <Link
+      className="flex shrink-0 items-center gap-1.5 rounded-full border border-brand/30 px-4 py-2 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
+      href={historyHref}
+    >
+      <History aria-hidden="true" className="h-3.5 w-3.5" />
+      History
+    </Link>
+  );
+
   if (blocked || ownershipBlocked) {
     return (
       <section
         aria-labelledby="outreach-heading"
         className="overflow-hidden rounded-2xl border border-red-500/20 bg-gradient-to-br from-red-500/[0.05] via-white to-white p-6 shadow-sm"
       >
-        <div className="flex items-center gap-2.5">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-red-500/10 text-red-800">
-            <Sparkles aria-hidden="true" className="h-4 w-4" />
-          </span>
-          <div>
-            <h2 className="text-lg font-bold" id="outreach-heading">Stage 1 email</h2>
-            <p className="text-xs text-foreground/55">AI-generated outreach draft, for CAM review before sending</p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-red-500/10 text-red-800">
+              <Sparkles aria-hidden="true" className="h-4 w-4" />
+            </span>
+            <div>
+              <h2 className="text-lg font-bold" id="outreach-heading">Stage 1 email</h2>
+              <p className="text-xs text-foreground/55">AI-generated outreach draft, for CAM review before sending</p>
+            </div>
           </div>
+          {historyLink}
         </div>
         <p
           className={`mt-4 text-[13px] font-bold leading-[1.6] ${warning?.tone === "conflict" ? "text-amber-800" : "text-red-800"}`}
@@ -208,89 +233,91 @@ export function ComposeButton({
           </div>
         </div>
 
-        {(draft || error) && !busy && (
-          <button
-            className="shrink-0 rounded-full border border-brand/30 px-4 py-2 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
-            onClick={generate}
-            type="button"
-          >
-            Regenerate
-          </button>
-        )}
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {(draft || error) && !busy && (
+            <button
+              className="shrink-0 rounded-full border border-brand/30 px-4 py-2 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
+              onClick={generate}
+              type="button"
+            >
+              Regenerate
+            </button>
+          )}
+          {historyLink}
+        </div>
       </div>
 
       <div className="mt-4 space-y-3">
-          <p className="text-xs text-foreground/55" aria-live="polite">
-            {hasSavedBooklet
-              ? "The client's saved booklet is included as additional context."
-              : "Generate the client booklet first to include its insights in this email."}
-          </p>
-          <label className="block max-w-xs text-xs font-bold text-foreground/65">
-            Email length
-            <select
-              className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60"
-              disabled={busy}
-              onChange={(event) => setLength(event.target.value as EmailLength)}
-              value={length}
-            >
-              {EMAIL_LENGTHS.map((value) => (
-                <option key={value} value={value}>
-                  {EMAIL_LENGTH_LABELS[value]}
-                </option>
-              ))}
-            </select>
-            <span className="mt-1 block font-normal text-foreground/55">How long the email body should be.</span>
-          </label>
-          <label className="block max-w-xs text-xs font-bold text-foreground/65">
-            Closing approach
-            <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60" disabled={busy} onChange={(event) => setClosing(event.target.value as ClosingApproach)} value={closing}>
-              {CLOSING_APPROACHES.map((value) => (
-                <option key={value} value={value}>
-                  {CLOSING_APPROACH_LABELS[value]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block max-w-xs text-xs font-bold text-foreground/65">
-            Opening approach
-            <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60" disabled={busy} onChange={(event) => setOpening(event.target.value as OpeningApproach)} value={opening}>
-              {OPENING_APPROACHES.map((value) => (
-                <option key={value} value={value}>
-                  {OPENING_APPROACH_LABELS[value]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block max-w-xs text-xs font-bold text-foreground/65">
-            Email tone
-            <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60" disabled={busy} onChange={(event) => setTone(event.target.value as EmailTone)} value={tone}>
-              {EMAIL_TONES.map((value) => (
-                <option key={value} value={value}>
-                  {EMAIL_TONE_LABELS[value]}
-                </option>
-              ))}
-            </select>
-            <span className="mt-1 block font-normal text-foreground/55">
-              How friendly or formal the email reads — separate from its length and voice.
-            </span>
-          </label>
-          <label className="block max-w-xs text-xs font-bold text-foreground/65">
-            Email voice
-            <select
-              className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60"
-              disabled={busy}
-              onChange={(event) => setVoice(event.target.value as EmailVoice)}
-              value={voice}
-            >
-              {EMAIL_VOICES.map((value) => (
-                <option key={value} value={value}>
-                  {EMAIL_VOICE_LABELS[value]}
-                </option>
-              ))}
-            </select>
-            <span className="mt-1 block font-normal text-foreground/55">Who the email is written as — our collective style or plainer wording.</span>
-          </label>
-        </div>
+        <p className="text-xs text-foreground/55" aria-live="polite">
+          {hasSavedBooklet
+            ? "The client's saved booklet is included as additional context."
+            : "Generate the client booklet first to include its insights in this email."}
+        </p>
+        <label className="block max-w-xs text-xs font-bold text-foreground/65">
+          Email length
+          <select
+            className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60"
+            disabled={busy}
+            onChange={(event) => setLength(event.target.value as EmailLength)}
+            value={length}
+          >
+            {EMAIL_LENGTHS.map((value) => (
+              <option key={value} value={value}>
+                {EMAIL_LENGTH_LABELS[value]}
+              </option>
+            ))}
+          </select>
+          <span className="mt-1 block font-normal text-foreground/55">How long the email body should be.</span>
+        </label>
+        <label className="block max-w-xs text-xs font-bold text-foreground/65">
+          Closing approach
+          <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60" disabled={busy} onChange={(event) => setClosing(event.target.value as ClosingApproach)} value={closing}>
+            {CLOSING_APPROACHES.map((value) => (
+              <option key={value} value={value}>
+                {CLOSING_APPROACH_LABELS[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block max-w-xs text-xs font-bold text-foreground/65">
+          Opening approach
+          <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60" disabled={busy} onChange={(event) => setOpening(event.target.value as OpeningApproach)} value={opening}>
+            {OPENING_APPROACHES.map((value) => (
+              <option key={value} value={value}>
+                {OPENING_APPROACH_LABELS[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block max-w-xs text-xs font-bold text-foreground/65">
+          Email tone
+          <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60" disabled={busy} onChange={(event) => setTone(event.target.value as EmailTone)} value={tone}>
+            {EMAIL_TONES.map((value) => (
+              <option key={value} value={value}>
+                {EMAIL_TONE_LABELS[value]}
+              </option>
+            ))}
+          </select>
+          <span className="mt-1 block font-normal text-foreground/55">
+            How friendly or formal the email reads — separate from its length and voice.
+          </span>
+        </label>
+        <label className="block max-w-xs text-xs font-bold text-foreground/65">
+          Email voice
+          <select
+            className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60"
+            disabled={busy}
+            onChange={(event) => setVoice(event.target.value as EmailVoice)}
+            value={voice}
+          >
+            {EMAIL_VOICES.map((value) => (
+              <option key={value} value={value}>
+                {EMAIL_VOICE_LABELS[value]}
+              </option>
+            ))}
+          </select>
+          <span className="mt-1 block font-normal text-foreground/55">Who the email is written as — our collective style or plainer wording.</span>
+        </label>
       </div>
 
       {warning && (

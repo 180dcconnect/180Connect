@@ -18,6 +18,7 @@ import {
   MAX_FIRST_FOLLOW_UP_DAYS,
   MAX_SECOND_FOLLOW_UP_DAYS,
   clampFollowUpDays,
+  validateFollowUpOrdering,
   type GeographicReach,
   type IncomeBand,
 } from "./constants";
@@ -148,6 +149,13 @@ export async function saveOutreachPreferencesAction(
     firstFollowUpDays,
     secondFollowUpDays,
   } = parsePreferences(formData);
+
+  // F202 review: the DB CHECK constraints bound each threshold independently,
+  // so a 20/10 pair (second before first) would save cleanly without this.
+  const orderingError = validateFollowUpOrdering(firstFollowUpDays, secondFollowUpDays);
+  if (orderingError) {
+    return { status: "error", message: orderingError };
+  }
 
   const supabase = await createClient();
   const { error } = await supabase

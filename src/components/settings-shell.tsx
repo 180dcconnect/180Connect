@@ -28,6 +28,7 @@ export async function SettingsShell({ children }: { children: React.ReactNode })
   // F205 (merged from dev): accessibility applies to every role, so it always
   // has a rail row now that this shell wraps its page too.
   personal.items.push({ href: "/settings/accessibility", label: "Accessibility" });
+
   // Outreach preferences steer a CAM's own queue, so the row is only shown to
   // someone who can act on that queue — a viewer has no outreach to target.
   if (hasPermission(actor.role, "client:edit")) {

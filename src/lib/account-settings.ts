@@ -63,9 +63,10 @@ export const NOTIFICATION_FREQUENCY_DESCRIPTIONS: Record<NotificationFrequency, 
   weekly: "Receive a weekly roundup of team activity and pending items.",
 };
 
-export const notificationFrequencySchema = z
-  .enum(NOTIFICATION_FREQUENCIES)
-  .default("immediate");
+export const notificationFrequencySchema = z.enum(NOTIFICATION_FREQUENCIES);
+
+export const INVALID_NOTIFICATION_FREQUENCY_MESSAGE =
+  "Choose a notification delivery frequency.";
 
 export const accountSettingsSchema = z.object({
   fullName: fullNameSchema,
@@ -84,20 +85,32 @@ export type ParsedAccountSettings =
  * A missing `full_name` entry is treated as an empty string rather than as a
  * separate "field absent" error: to the person filling in the form the two are
  * the same mistake, and the message they need is identical.
+ *
+ * `notification_frequency` gets no such leniency (F201 review): a missing or
+ * tampered value is rejected outright rather than silently resetting the
+ * person's saved cadence to `immediate` under a success message. The edit form
+ * always submits one of the three radio options, so reaching here without a
+ * valid value means the field was dropped or forged — never a legitimate save.
  */
 export function parseAccountSettings(input: {
   fullName: unknown;
   notificationFrequency?: unknown;
 }): ParsedAccountSettings {
-  const rawFreq =
-    typeof input.notificationFrequency === "string" &&
-    NOTIFICATION_FREQUENCIES.includes(input.notificationFrequency as NotificationFrequency)
-      ? input.notificationFrequency
-      : "immediate";
+  if (
+    typeof input.notificationFrequency !== "string" ||
+    !NOTIFICATION_FREQUENCIES.includes(
+      input.notificationFrequency as NotificationFrequency,
+    )
+  ) {
+    return {
+      ok: false,
+      message: INVALID_NOTIFICATION_FREQUENCY_MESSAGE,
+    };
+  }
 
   const result = accountSettingsSchema.safeParse({
     fullName: typeof input.fullName === "string" ? input.fullName : "",
-    notificationFrequency: rawFreq,
+    notificationFrequency: input.notificationFrequency,
   });
 
   if (!result.success) {

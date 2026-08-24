@@ -10,6 +10,13 @@
 --   2. Extends OUTREACH_PREFERENCES with first_follow_up_days and second_follow_up_days
 --      integers to allow CAMs to configure personal reminder timing thresholds (F202/F161).
 --
+-- CONSUMER NOTE (PR #401 review, blocker 2):
+--   This PR lands the persisted settings contract only. Delivery of digests
+--   (F178 reading USERS.notification_frequency) and the reminder engine
+--   (F160/F161 reading these thresholds) are follow-up PRs that consume these
+--   columns; nothing in this migration or the settings screens needs them to
+--   exist yet.
+--
 -- Schema change approval record (SOP §7):
 --   Change        | Add notification_frequency to USERS; add first_follow_up_days & second_follow_up_days to OUTREACH_PREFERENCES
 --   Reason        | F201 & F202 — User notification delivery settings & CAM follow-up cadence settings.

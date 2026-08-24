@@ -1,4 +1,4 @@
--- F194 (#) — Tag Colours.
+-- F194 (#190) — Tag Colours.
 --
 -- Two additive changes to the TAGS table F188 created:
 --   1. A CHECK constraint on tags.colour so the column can only ever hold

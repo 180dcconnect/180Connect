@@ -24,6 +24,6 @@
 --                 | own header gives for why it needed both.
 --
 -- Reversibility: paired rollback in
---   ../rollback/20260820100100_grant_service_role_ai_generations_insert.down.sql
+--   ../rollback/20260831100100_grant_service_role_ai_generations_insert.down.sql
 
 grant insert on public.ai_generations to service_role;

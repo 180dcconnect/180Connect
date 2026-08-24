@@ -69,11 +69,15 @@ function formatCostCell(costUsd: number | null): string {
  * re-derived (see the stage-one route). This page is purely the "let an admin
  * see and filter it" half: F113 AC3 and F213 AC2.
  *
- * The spend-over-time chart and the model breakdown both always reflect every
- * generation regardless of the active `?model=` filter — they're "the whole
- * picture" the filter narrows the table against, not something the filter
- * itself re-shapes. `?metric=` (count/tokens/cost) governs both charts at once,
- * from one control, so they can't show two different metrics at the same time.
+ * The two charts answer different questions on purpose. The model breakdown
+ * always reflects every generation — it is "the whole picture" that shows what
+ * each model accounts for, and clicking a bar is how you set the filter in the
+ * first place, so pre-narrowing it would be circular. The spend-over-time chart
+ * is the one the active `?model=` filter reshapes: once you have picked a model,
+ * its trend line shows that model's day-by-day history (clearing the filter via
+ * the dropdown's "all models" option returns it to everything). `?metric=`
+ * (count/tokens/cost) governs both charts at once, from one control, so they
+ * can't show two different metrics at the same time.
  */
 export default async function AiGenerationsPage({
   searchParams,

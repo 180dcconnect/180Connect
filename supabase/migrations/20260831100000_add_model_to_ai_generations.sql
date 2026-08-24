@@ -38,7 +38,7 @@
 --                 | new one.
 --
 -- Reversibility: paired rollback in
---   ../rollback/20260820100000_add_model_to_ai_generations.down.sql
+--   ../rollback/20260831100000_add_model_to_ai_generations.down.sql
 
 alter table public.ai_generations
   add column model text not null;

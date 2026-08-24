@@ -1,4 +1,4 @@
--- Rollback for 20260820100200_add_usage_to_ai_generations.sql
+-- Rollback for 20260831100200_add_usage_to_ai_generations.sql
 -- Safe pre-merge only (see the migration header) — would discard real recorded
 -- spend data if ever run after generations have actually happened.
 

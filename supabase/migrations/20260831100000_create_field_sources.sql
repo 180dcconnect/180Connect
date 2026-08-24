@@ -94,7 +94,7 @@
 --                 | alongside this PR.
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260820100000_create_field_sources.down.sql — restores
+-- ../rollback/20260831100000_create_field_sources.down.sql — restores
 -- record_field_discrepancy / resolve_field_discrepancy to their pre-F044 bodies
 -- from 20260815090000, so a rollback doesn't leave F048 calling a dropped function.
 

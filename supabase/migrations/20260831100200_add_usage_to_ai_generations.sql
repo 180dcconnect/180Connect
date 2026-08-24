@@ -3,7 +3,7 @@
 -- Story: F213 LLM Cost Tracking (#208), building on F113 (#110)
 -- Spec: docs/rls-permission-matrix.md §"AI_GENERATIONS" (unchanged by this migration)
 --
--- WHY NULLABLE, UNLIKE model (20260820100000): F213 AC3 — "cost tracking failing
+-- WHY NULLABLE, UNLIKE model (20260831100000): F213 AC3 — "cost tracking failing
 --   does not stop CAMs from generating emails." The Gemini call itself can succeed
 --   while usage/pricing is unavailable (a provider that omits usage stats, or a
 --   model with no configured MODEL_PRICING row yet — see the next migration). A
@@ -18,7 +18,7 @@
 --   Reason        | F213 AC1 — every generation call has its associated cost or
 --                 | token usage recorded, so admin spend can be tracked (#208).
 --   Compatibility | Additive, nullable columns on a table with zero rows in any
---                 | shared environment (see 20260820100000's own header for why
+--                 | shared environment (see 20260831100000's own header for why
 --                 | that's true) — no backfill needed either way.
 --   Data migration| None.
 --   Security      | No RLS change — inherits the table's existing policies.
@@ -27,7 +27,7 @@
 --                 | its model column are already flagged under.
 --
 -- Reversibility: paired rollback in
---   ../rollback/20260820100200_add_usage_to_ai_generations.down.sql
+--   ../rollback/20260831100200_add_usage_to_ai_generations.down.sql
 
 alter table public.ai_generations
   add column input_tokens  integer,

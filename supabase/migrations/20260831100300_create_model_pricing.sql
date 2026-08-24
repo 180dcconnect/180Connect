@@ -1,5 +1,5 @@
 -- Migration: create_model_pricing
--- Sequence: fix-forward addition alongside 20260820100200_add_usage_to_ai_generations.sql.
+-- Sequence: fix-forward addition alongside 20260831100200_add_usage_to_ai_generations.sql.
 -- Story: F213 LLM Cost Tracking (#208)
 -- Spec: docs/rls-permission-matrix.md (new row added by this migration, see below)
 --
@@ -40,7 +40,7 @@
 --   Approved by   | Pending — flagged for Bashir per SOP §7, not yet confirmed.
 --
 -- Reversibility: paired rollback in
---   ../rollback/20260820100300_create_model_pricing.down.sql
+--   ../rollback/20260831100300_create_model_pricing.down.sql
 
 create table public.model_pricing (
   id                       uuid primary key default gen_random_uuid(),

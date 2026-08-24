@@ -236,12 +236,22 @@ export async function POST(
   // generation, which has already fully succeeded by this point — so this is a
   // best-effort read, never a thrown error the request could fail on. A missing
   // or errored rate prices as unknown (null), never a fabricated 0 — see
-  // generation-cost.ts and the model_pricing migration for why.
-  const { data: pricing } = await supabase
+  // generation-cost.ts and the model_pricing migration for why. "Best-effort"
+  // still means visible: an errored (as opposed to merely empty) lookup is
+  // reported like every other non-fatal read in this route — the DoD requires
+  // failures to reach ERROR_LOG even when the request itself succeeds.
+  const { data: pricing, error: pricingError } = await supabase
     .from("model_pricing")
     .select("input_usd_per_1k_tokens, output_usd_per_1k_tokens")
     .eq("model", model)
     .maybeSingle();
+  if (pricingError) {
+    await reportError(pricingError, {
+      operation: "outreach.stage_one.load_pricing",
+      organisationId,
+      model,
+    });
+  }
   const costUsd = computeCostUsd(
     { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens },
     pricing

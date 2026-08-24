@@ -105,11 +105,18 @@ export default async function AiGenerationsPage({
   const clientFilter = clientParam && z.uuid().safeParse(clientParam).success ? clientParam : undefined;
 
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("ai_generations")
-    .select(
-      "id, model, generated_subject, generated_body, prompt_system, prompt_user, cam_edited, created_at, total_tokens, cost_usd, outreach_message:outreach_messages(organisation_id, organisation:organisations(legal_name), sent_by:users(full_name))",
-    )
+  let query = supabase.from("ai_generations").select(
+    "id, model, generated_subject, generated_body, prompt_system, prompt_user, cam_edited, created_at, total_tokens, cost_usd, outreach_message:outreach_messages(organisation_id, organisation:organisations(legal_name), sent_by:users(full_name))",
+  );
+  // The client scope is a PostgREST filter on the embedded outreach message, not
+  // an in-JS pass over everything: rows carry full prompt/output text, so
+  // filtering after fetch would pull every other client's prompts only to throw
+  // them away. Same semantics as a JS filter — rows with no outreach message
+  // never match an organisation id either way.
+  if (clientFilter) {
+    query = query.eq("outreach_messages.organisation_id", clientFilter);
+  }
+  const { data, error } = await query
     .order("created_at", { ascending: false })
     .overrideTypes<GenerationRow[], { merge: false }>();
 
@@ -130,10 +137,8 @@ export default async function AiGenerationsPage({
     clientName = clientOrg?.legal_name ?? null;
   }
 
-  const allGenerations = data ?? [];
-  const generations = clientFilter
-    ? allGenerations.filter((row) => row.outreach_message?.organisation_id === clientFilter)
-    : allGenerations;
+  // Already scoped in the query above when `?client=` is set.
+  const generations = data ?? [];
   const records: GenerationRecord[] = generations.map((row) => ({
     model: row.model,
     createdAt: row.created_at,

@@ -3,15 +3,25 @@ import { describe, it } from "node:test";
 
 import { createTagCore, type TagInsertClient } from "./create-tag-core.ts";
 
-function fakeClient(overrides: Partial<TagInsertClient> = {}): {
+function fakeClient(
+  overrides: Partial<TagInsertClient> = {},
+): {
   client: TagInsertClient;
-  inserted: { name: string; createdByUserId: string }[];
+  inserted: {
+    name: string;
+    createdByUserId: string;
+    colour: string | null;
+  }[];
 } {
-  const inserted: { name: string; createdByUserId: string }[] = [];
+  const inserted: {
+    name: string;
+    createdByUserId: string;
+    colour: string | null;
+  }[] = [];
   const client: TagInsertClient = {
-    async insertTag(name, createdByUserId) {
-      inserted.push({ name, createdByUserId });
-      return { ok: true, tag: { id: "tag-1", name } };
+    async insertTag(name, createdByUserId, colour) {
+      inserted.push({ name, createdByUserId, colour });
+      return { ok: true, tag: { id: "tag-1", name, colour } };
     },
     ...overrides,
   };
@@ -43,8 +53,7 @@ describe("createTagCore — successful create", () => {
   });
 });
 
-describe("createTagCore — invalid name (AC3)", () => {
-  it("rejects an empty name without calling insert", async () => {
+describe("createTagCore — invalid name (AC3)", () => {  it("rejects an empty name without calling insert", async () => {
     const { client, inserted } = fakeClient();
 
     const result = await createTagCore("", "user-1", client);
@@ -100,5 +109,53 @@ describe("createTagCore — unexpected failure", () => {
       // Must not leak the raw database error/message to the user.
       assert.ok(!result.message.includes("connection failure"));
     }
+  });
+});
+describe("createTagCore — colour at creation (F194 AC1)", () => {
+  it("passes a chosen palette colour through to the insert", async () => {
+    const { client, inserted } = fakeClient();
+
+    const result = await createTagCore("Urgent", "user-1", client, "#175CD3");
+
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.tag.colour, "#175cd3");
+    assert.equal(inserted[0].colour, "#175cd3");
+  });
+
+  it("stores null when no colour was chosen", async () => {
+    const { client, inserted } = fakeClient();
+
+    const result = await createTagCore("Urgent", "user-1", client);
+
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.tag.colour, null);
+    assert.equal(inserted[0].colour, null);
+  });
+
+  it("stores null for an explicitly empty colour", async () => {
+    const { client, inserted } = fakeClient();
+    await createTagCore("Urgent", "user-1", client, "");
+    assert.equal(inserted[0].colour, null);
+  });
+
+  it("refuses an off-palette colour without calling insert", async () => {
+    const { client, inserted } = fakeClient();
+
+    const result = await createTagCore("Urgent", "user-1", client, "#ff0000");
+
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.message, "Pick a colour from the palette.");
+    }
+    assert.equal(inserted.length, 0);
+  });
+
+  it("refuses a non-hex colour without calling insert", async () => {
+    const { client, inserted } = fakeClient();
+
+    const result = await createTagCore("Urgent", "user-1", client, "red");
+
+    assert.equal(result.ok, false);
+    assert.equal(inserted.length, 0);
   });
 });

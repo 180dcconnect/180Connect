@@ -10,8 +10,9 @@
 
 import { useState, useTransition } from "react";
 import { removeTagAction } from "@/lib/tags/tag-actions";
+import { tagPillStyle } from "@/lib/tags/tag-colours";
 
-export type TagChip = { id: string; name: string };
+export type TagChip = { id: string; name: string; colour?: string | null };
 
 export function TagChips({
   organisationId,
@@ -54,25 +55,33 @@ export function TagChips({
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      {tags.map((tag) => (
-        <span
-          key={tag.id}
-          className="inline-flex items-center gap-1 rounded-full bg-brand/12 px-2.5 py-1 text-xs font-medium text-brand-hover"
-        >
-          {tag.name}
-          {canEdit && (
-            <button
-              type="button"
-              onClick={() => handleRemove(tag.id)}
-              disabled={pending}
-              aria-label={`Remove ${tag.name}`}
-              className="ml-0.5 rounded-full text-brand-hover/60 hover:text-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              ×
-            </button>
-          )}
-        </span>
-      ))}
+      {tags.map((tag) => {
+        // F194 AC2/AC4: a tag with a colour renders as a pill tinted with it;
+        // absent/unrecognised falls back to today's brand styling.
+        const pillStyle = tagPillStyle(tag.colour);
+        return (
+          <span
+            key={tag.id}
+            style={pillStyle ?? undefined}
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
+              pillStyle ? "" : "bg-brand/12 text-brand-hover"
+            }`}
+          >
+            {tag.name}
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => handleRemove(tag.id)}
+                disabled={pending}
+                aria-label={`Remove ${tag.name}`}
+                className="ml-0.5 rounded-full opacity-60 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
+              >
+                ×
+              </button>
+            )}
+          </span>
+        );
+      })}
       {errorTagId && (
         <span className="text-xs font-medium text-destructive" role="alert">
           Couldn&apos;t remove that tag. Try again.

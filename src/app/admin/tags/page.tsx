@@ -17,7 +17,7 @@ export default async function TagsPage() {
   const supabase = await createClient();
   const { data: tags, error } = await supabase
     .from("tags")
-    .select("id, name")
+    .select("id, name, colour")
     .order("name");
 
   if (error) {

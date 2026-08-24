@@ -7,7 +7,10 @@ import {
 } from "./create-tag-supabase-client.ts";
 
 function fakeSupabase(
-  result: { data: { id: string; name: string } | null; error: { code?: string | null; message: string } | null },
+  result: {
+    data: { id: string; name: string; colour: string | null } | null;
+    error: { code?: string | null; message: string } | null;
+  },
 ): { client: TagsTableClient; insertCalls: unknown[] } {
   const insertCalls: unknown[] = [];
   const client: TagsTableClient = {
@@ -34,17 +37,20 @@ function fakeSupabase(
 describe("buildSupabaseTagInsertClient — the real Supabase write", () => {
   it("calls insert with the correct row shape and returns the created tag", async () => {
     const { client, insertCalls } = fakeSupabase({
-      data: { id: "tag-1", name: "Urgent" },
+      data: { id: "tag-1", name: "Urgent", colour: null },
       error: null,
     });
 
     const insertClient = buildSupabaseTagInsertClient(client);
-    const result = await insertClient.insertTag("Urgent", "user-1");
+    const result = await insertClient.insertTag("Urgent", "user-1", null);
 
     assert.deepEqual(insertCalls, [
-      { name: "Urgent", created_by_user_id: "user-1" },
+      { name: "Urgent", created_by_user_id: "user-1", colour: null },
     ]);
-    assert.deepEqual(result, { ok: true, tag: { id: "tag-1", name: "Urgent" } });
+    assert.deepEqual(result, {
+      ok: true,
+      tag: { id: "tag-1", name: "Urgent", colour: null },
+    });
   });
 });
 
@@ -56,7 +62,7 @@ describe("buildSupabaseTagInsertClient — error reporting", () => {
     });
 
     const insertClient = buildSupabaseTagInsertClient(client);
-    const result = await insertClient.insertTag("Urgent", "user-1");
+    const result = await insertClient.insertTag("Urgent", "user-1", "#067647");
 
     assert.deepEqual(result, {
       ok: false,
@@ -72,7 +78,7 @@ describe("buildSupabaseTagInsertClient — error reporting", () => {
     });
 
     const insertClient = buildSupabaseTagInsertClient(client);
-    const result = await insertClient.insertTag("Urgent", "user-1");
+    const result = await insertClient.insertTag("Urgent", "user-1", "#067647");
 
     assert.equal(result.ok, false);
     if (!result.ok) {
@@ -105,7 +111,7 @@ describe("buildSupabaseTagInsertClient — error reporting", () => {
     };
 
     const insertClient = buildSupabaseTagInsertClient(client);
-    const result = await insertClient.insertTag("Urgent", "user-1");
+    const result = await insertClient.insertTag("Urgent", "user-1", "#067647");
 
     assert.deepEqual(result, {
       ok: false,

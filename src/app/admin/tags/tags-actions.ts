@@ -10,7 +10,10 @@ export async function createTagFormAction(
 ): Promise<CreateTagResult> {
   void previous;
   const name = String(formData.get("name") ?? "");
-  const result = await createTag(name);
+  // F194 AC1: "" (no swatch chosen) means colourless — createTagCore's
+  // parser treats absent as null, so the raw form value can go straight in.
+  const colour = formData.get("colour");
+  const result = await createTag(name, colour);
   if (result.ok) {
     revalidatePath("/admin/tags");
   }

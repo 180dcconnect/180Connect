@@ -286,9 +286,9 @@ export default async function ClientsPage({
       .overrideTypes<TeamMember[], { merge: false }>(),
     supabase
       .from("tags")
-      .select("id, name")
+      .select("id, name, colour")
       .order("name")
-      .overrideTypes<{ id: string; name: string }[], { merge: false }>(),
+      .overrideTypes<{ id: string; name: string; colour: string | null }[], { merge: false }>(),
     supabase
       .from("outreach_preferences")
       .select("preferred_geographic_reach, preferred_cities, preferred_sectors, preferred_income_bands, prioritise_grant_recipients")
@@ -331,6 +331,9 @@ export default async function ClientsPage({
 
   const availableTags = allTags.data ?? [];
   const tagNameById = new Map(availableTags.map((tag) => [tag.id, tag.name]));
+  // F194 AC2 — the filter picker options and active-filter chips wear the tag's
+  // colour, same as the chips on the profile and /admin/tags.
+  const tagColourById = new Map(availableTags.map((tag) => [tag.id, tag.colour]));
 
   const allVisibleClients = visibleClients(organisations.data ?? [], openSuppressions.data ?? []);
   // Place options come from the data — there is no list of every city a charity
@@ -628,6 +631,7 @@ export default async function ClientsPage({
                   category: "Filter by tag",
                   label: tagNameById.get(tagId) ?? tagId,
                   value: tagId,
+                  colour: tagColourById.get(tagId) ?? undefined,
                 })),
               ]}
               params={{
@@ -647,7 +651,7 @@ export default async function ClientsPage({
                   { label: "Unassigned", value: "unassigned" },
                   ...teamMembers.map(m => ({ label: m.full_name || "Unnamed CAM", value: m.id }))
                 ],
-                "Filter by tag": availableTags.map((t) => ({ label: t.name, value: t.id })),
+                "Filter by tag": availableTags.map((t) => ({ label: t.name, value: t.id, colour: t.colour ?? undefined })),
               }}
             />
           }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { scoreBySector } from "./score-by-sector.ts";
+import { scoreBySector, SECTOR_TAXONOMY } from "./score-by-sector.ts";
 
 const CATEGORY_SECTORS = [
   { sector: "Mental Health", category: "Health & Wellbeing" },
@@ -53,6 +53,38 @@ describe("scoreBySector — complete client data (AC1)", () => {
     const result = scoreBySector("Youth mental health charity");
     assert.equal(result.matchedTaxonomy, true);
     assert.equal(result.matchedCategory, "Health & Wellbeing");
+  });
+
+  it("degenerate short free text does not match any category", () => {
+    // One- and two-character values would substring-match every preset via
+    // term containment and silently score the top category.
+    for (const garbage of ["a", "&", "e", "ab", "th"]) {
+      const result = scoreBySector(garbage);
+      assert.equal(result.matchedTaxonomy, false, garbage);
+      assert.equal(result.matchedCategory, null, garbage);
+      assert.equal(result.usedDefault, false, garbage);
+      assert.equal(result.score, 0.5, garbage);
+    }
+  });
+
+  it("stays in sync with SECTOR_CATEGORY_GROUPS (settings F197 taxonomy)", async () => {
+    const { SECTOR_CATEGORY_GROUPS } = await import(
+      "../../app/settings/outreach-preferences/constants.ts"
+    );
+
+    assert.deepEqual(
+      Object.keys(SECTOR_TAXONOMY),
+      SECTOR_CATEGORY_GROUPS.map((group) => group.category),
+      "category list/order diverged from settings constants",
+    );
+
+    for (const group of SECTOR_CATEGORY_GROUPS) {
+      assert.deepEqual(
+        [...SECTOR_TAXONOMY[group.category]],
+        [...group.presets],
+        `presets diverged for ${group.category}`,
+      );
+    }
   });
 });
 

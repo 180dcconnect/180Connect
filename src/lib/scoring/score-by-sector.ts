@@ -65,10 +65,12 @@ const SECTOR_CATEGORY_SCORES = {
 
 /**
  * Standard sector taxonomy mirrored from SECTOR_CATEGORY_GROUPS (F197) in
- * src/app/settings/outreach-preferences/constants.ts — see the header note
- * about why it is copied rather than imported.
+ * src/app/settings/outreach-preferences/constants.ts — same categories, presets
+ * AND declaration order (order decides tie-breaks here), enforced by the
+ * taxonomy-sync test in score-by-sector.test.ts. See the header note about why
+ * it is copied rather than imported. Exported for the taxonomy-sync test.
  */
-const SECTOR_TAXONOMY = {
+export const SECTOR_TAXONOMY = {
   "Health & Wellbeing": [
     "Health & Social Care",
     "Mental Health",
@@ -81,27 +83,27 @@ const SECTOR_TAXONOMY = {
     "Schools & Colleges",
     "Skills & Employment",
   ],
-  "Poverty & Community": [
-    "Poverty Relief",
-    "Housing & Homelessness",
-    "Community Development",
-    "Social Inclusion",
-  ],
-  "Social Justice & Enterprise": [
-    "Social Enterprise",
-    "International Aid",
-    "Human Rights & Justice",
-  ],
   "Environment & Sustainability": [
     "Environment & Conservation",
     "Climate & Sustainability",
     "Renewable Energy",
     "Animal Welfare",
   ],
+  "Poverty & Community": [
+    "Poverty Relief",
+    "Housing & Homelessness",
+    "Community Development",
+    "Social Inclusion",
+  ],
   "Arts, Culture & Heritage": [
     "Arts & Culture",
     "Heritage & Museums",
     "Sports & Recreation",
+  ],
+  "Social Justice & Enterprise": [
+    "Social Enterprise",
+    "International Aid",
+    "Human Rights & Justice",
   ],
 } as const;
 
@@ -114,10 +116,18 @@ const SECTOR_TAXONOMY = {
  */
 const NEUTRAL_NO_SIGNAL_SCORE = 0.5;
 
+/**
+ * Minimum length for the loose "term contains value" direction. Without it,
+ * degenerate one-character free text ("a", "&") matches every preset via
+ * substring containment and silently scores the maximum category.
+ */
+const MIN_LOOSE_MATCH_LENGTH = 4;
+
 function matchesTerm(value: string, term: string): boolean {
   const v = value.toLowerCase();
   const t = term.toLowerCase();
-  return v.includes(t) || t.includes(v);
+  if (v.includes(t)) return true;
+  return v.length >= MIN_LOOSE_MATCH_LENGTH && t.includes(v);
 }
 
 export function scoreBySector(

@@ -121,6 +121,7 @@ export function ComposeButton({
             </option>
           ))}
         </select>
+        <span className="mt-1 block font-normal text-foreground/55">How long the email body should be.</span>
       </label>
       <label className="block max-w-xs text-xs font-bold text-foreground/65">
         Email tone
@@ -131,6 +132,9 @@ export function ComposeButton({
             </option>
           ))}
         </select>
+        <span className="mt-1 block font-normal text-foreground/55">
+          How friendly or formal the email reads — separate from its length and voice.
+        </span>
       </label>
       <label className="block max-w-xs text-xs font-bold text-foreground/65">
         Email voice
@@ -146,6 +150,7 @@ export function ComposeButton({
             </option>
           ))}
         </select>
+        <span className="mt-1 block font-normal text-foreground/55">Who the email is written as — our collective style or plainer wording.</span>
       </label>
       <OriginButton variant="outline" size="sm" onClick={generate} disabled={busy} type="button">
         <Sparkles aria-hidden="true" className="h-4 w-4" />

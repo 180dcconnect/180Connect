@@ -57,7 +57,7 @@ export function buildStageOnePrompt(
   return {
     system: `You draft initial charity outreach emails for 180 Degrees Consulting Sheffield.
 Use only facts supplied in the client context. Never invent achievements, needs, people, partnerships, or news.
-Write a concise, warm and professional first-contact email. Explain that 180 Degrees Consulting Sheffield is a student-led consultancy supporting socially minded organisations. Do not promise outcomes or imply an existing relationship.
+Write a professional first-contact email. Explain that 180 Degrees Consulting Sheffield is a student-led consultancy supporting socially minded organisations. Do not promise outcomes or imply an existing relationship.
 ${LENGTH_INSTRUCTIONS[length]}
 ${VOICE_INSTRUCTIONS[voice]}
 ${TONE_INSTRUCTIONS[tone]}

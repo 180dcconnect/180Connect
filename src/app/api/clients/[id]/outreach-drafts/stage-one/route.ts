@@ -45,7 +45,7 @@ export async function POST(
     })
     .safeParse(requestBody);
   if (!preferences.success) {
-    return NextResponse.json({ error: "Choose a valid email length and try again." }, { status: 400 });
+    return NextResponse.json({ error: "Choose a valid email length, voice and tone, then try again." }, { status: 400 });
   }
 
   const admin = createAdminClient();

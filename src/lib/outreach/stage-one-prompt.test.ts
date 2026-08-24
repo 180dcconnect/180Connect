@@ -99,3 +99,11 @@ test("email tone validation rejects invalid values (route returns 400)", () => {
   assert.equal(schema.safeParse({}).success, true);
   assert.equal(schema.safeParse({}).data?.tone, "balanced");
 });
+
+test("buildStageOnePrompt base line is tone-neutral", () => {
+  const context = { organisationName: "Example", organisationType: "charity" };
+  const baseLine = buildStageOnePrompt(context).system.split("\n").find((line) => line.startsWith("Write a"));
+  assert.ok(baseLine);
+  assert.doesNotMatch(baseLine, /\bwarm\b/i);
+  assert.doesNotMatch(baseLine, /\bconcise\b/i);
+});

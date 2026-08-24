@@ -2,6 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { ChevronsUpDown, CircleUserRound, LogOut, Sliders } from "lucide-react";
+import { AnimateIcon } from "@/components/animate-ui/icons/icon";
+import { Settings } from "@/components/animate-ui/icons/settings";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -66,7 +68,9 @@ export function SidebarAccountMenu({
         <button
           type="button"
           title={collapsed ? displayName : undefined}
-          className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-all hover:bg-black/10 data-[state=open]:bg-black/12"
+          className={`flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-all hover:bg-black/10 data-[state=open]:bg-black/12 md:pl-1.5 ${
+            collapsed ? "md:pr-1.5" : ""
+          }`}
         >
           <Avatar initials={initials} />
           {/* Hidden by class rather than unmounted: `collapsed` is a desktop-only
@@ -113,10 +117,17 @@ export function SidebarAccountMenu({
          * prop, so an item cannot *be* an anchor. `logout` redirects, so
          * calling the action directly ends the same way the form post did.
          */}
-        <DropdownMenuItem onSelect={() => router.push("/profile")}>
+        <DropdownMenuItem onSelect={() => router.push("/settings/profile")}>
           <CircleUserRound aria-hidden="true" />
-          Account
+          Profile
         </DropdownMenuItem>
+
+        <AnimateIcon animateOnHover asChild>
+          <DropdownMenuItem onSelect={() => router.push("/settings")}>
+            <Settings aria-hidden="true" />
+            Settings
+          </DropdownMenuItem>
+        </AnimateIcon>
 
         <DropdownMenuItem onSelect={() => router.push("/settings/accessibility")}>
           <Sliders aria-hidden="true" />

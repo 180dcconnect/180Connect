@@ -178,6 +178,7 @@
 | 04 Entities | USERS | invite_accepted_at | timestamp |  |  |
 | 04 Entities | USERS | onboarding_completed_at | timestamp |  | When the user finished the onboarding flow |
 | 04 Entities | USERS | onboarding_dismissed_at | timestamp |  | When the user dismissed the onboarding flow |
+| 04 Entities | USERS | notification_frequency | enum |  | Preferred notification delivery cadence (immediate, daily, weekly) |
 | 04 Entities | USER_ONBOARDING_STEPS | user_id | uuid | USERS | User completing the step |
 | 04 Entities | USER_ONBOARDING_STEPS | step_key | text |  | Key of the onboarding step |
 | 04 Entities | USER_ONBOARDING_STEPS | completed_at | timestamp |  | When the step was completed |
@@ -213,8 +214,12 @@
 | 04 Entities | OUTREACH_PREFERENCES | id | uuid |  | Primary key |
 | 04 Entities | OUTREACH_PREFERENCES | user_id | uuid | USERS | CAM these preferences belong to |
 | 04 Entities | OUTREACH_PREFERENCES | preferred_geographic_reach | enum[] |  | Subset of geographic_reach values the CAM wants prioritised |
+| 04 Entities | OUTREACH_PREFERENCES | preferred_cities | text[] |  | City/location values to prioritise, matched against ORGANISATIONS.city |
 | 04 Entities | OUTREACH_PREFERENCES | preferred_sectors | text[] |  | Sector values to prioritise, matched against ORGANISATIONS.sector |
 | 04 Entities | OUTREACH_PREFERENCES | preferred_income_bands | enum[] |  | Subset of income_band values to prioritise |
+| 04 Entities | OUTREACH_PREFERENCES | prioritise_grant_recipients | boolean |  | Prioritise organisations with previous grant/funding history (360Giving) |
+| 04 Entities | OUTREACH_PREFERENCES | first_follow_up_days | integer |  | Days before first follow-up reminder (default 7) |
+| 04 Entities | OUTREACH_PREFERENCES | second_follow_up_days | integer |  | Days before second follow-up reminder (default 14) |
 | 04 Entities | OUTREACH_PREFERENCES | created_at | timestamp |  | Row creation timestamp |
 | 04 Entities | OUTREACH_PREFERENCES | updated_at | timestamp |  | Last edit timestamp |
 | 04 Entities | SUPPRESSIONS | id | uuid |  | Primary key |
@@ -229,7 +234,7 @@
 | 04 Entities | SAVED_VIEWS | id | uuid |  | Primary key |
 | 04 Entities | SAVED_VIEWS | user_id | uuid | USERS | CAM the saved view belongs to |
 | 04 Entities | SAVED_VIEWS | name | text |  | Name the CAM gave the view; unique per user |
-| 04 Entities | SAVED_VIEWS | filters | jsonb |  | Filter combination the view re-applies (q, city, status, source, owner) |
+| 04 Entities | SAVED_VIEWS | filters | jsonb |  | Filter combination the view re-applies (q, city, country, status, type, owner — arrays for the multi-selects) |
 | 04 Entities | SAVED_VIEWS | created_at | timestamp |  | Row creation timestamp |
 | 04 Entities | SAVED_VIEWS | updated_at | timestamp |  | Last edit timestamp |
 | 04 Entities | OWNERSHIP_REQUESTS | id | uuid |  | Primary key |
@@ -461,3 +466,49 @@
 | 03 Raw Data | DATA_HANDLING_RULES | id | uuid |  | Primary key |
 | 03 Raw Data | DATA_HANDLING_RULES | rule_version | integer |  | The global rule version at the time this rule was created or last toggled |
 | 03 Raw Data | DATA_HANDLING_RULES | source | enum |  | Which source the rule applies to; null applies to every source |
+| 04 Entities | NOTIFICATIONS | id | uuid |  | Primary key |
+| 04 Entities | NOTIFICATIONS | recipient_user_id | uuid | USERS | User the notification is for |
+| 04 Entities | NOTIFICATIONS | actor_user_id | uuid | USERS | User whose action triggered the notification |
+| 04 Entities | NOTIFICATIONS | notification_type | enum |  | What kind of notification |
+| 04 Entities | NOTIFICATIONS | title | text |  | Short headline shown in the bell panel |
+| 04 Entities | NOTIFICATIONS | body | text |  | Optional longer description |
+| 04 Entities | NOTIFICATIONS | link_path | text |  | In-app route to navigate to on click |
+| 04 Entities | NOTIFICATIONS | target_table | text |  | Table of the linked record |
+| 04 Entities | NOTIFICATIONS | target_id | uuid |  | ID of the linked record |
+| 04 Entities | NOTIFICATIONS | read_at | timestamp |  | When the recipient marked it read |
+| 04 Entities | NOTIFICATIONS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | BOOKLET_GENERATIONS | id | uuid |  | Primary key |
+| 04 Entities | BOOKLET_GENERATIONS | organisation_id | uuid | ORGANISATIONS | Organisation this booklet belongs to |
+| 04 Entities | BOOKLET_GENERATIONS | generated_by | uuid | USERS | User who generated the booklet |
+| 04 Entities | BOOKLET_GENERATIONS | prompt_system | text |  | System prompt used |
+| 04 Entities | BOOKLET_GENERATIONS | prompt_user | text |  | User prompt used |
+| 04 Entities | BOOKLET_GENERATIONS | output | text |  | Generated output |
+| 04 Entities | BOOKLET_GENERATIONS | model | text |  | Model used for generation |
+| 04 Entities | BOOKLET_GENERATIONS | created_at | timestamptz |  | Row creation timestamp |
+| 04 Entities | EDIT_SUGGESTIONS | id | uuid |  | Primary key |
+| 04 Entities | EDIT_SUGGESTIONS | organisation_id | uuid | ORGANISATIONS | Client the correction is about |
+| 04 Entities | EDIT_SUGGESTIONS | field_name | text |  | One of the six sensitive fields |
+| 04 Entities | EDIT_SUGGESTIONS | current_value | text |  | Value at proposal time, captured server-side |
+| 04 Entities | EDIT_SUGGESTIONS | proposed_value | text |  | The CAM's corrected value |
+| 04 Entities | EDIT_SUGGESTIONS | status | enum |  | pending, approved, rejected, superseded |
+| 04 Entities | EDIT_SUGGESTIONS | requested_by | uuid | USERS | CAM making the proposal |
+| 04 Entities | EDIT_SUGGESTIONS | superseded_by | uuid | EDIT_SUGGESTIONS | Newer suggestion that replaced this one |
+| 04 Entities | EDIT_SUGGESTIONS | decided_by | uuid | USERS | Admin who approved/rejected |
+| 04 Entities | EDIT_SUGGESTIONS | decided_at | timestamp |  | When decided |
+| 04 Entities | EDIT_SUGGESTIONS | rejection_reason | text |  | Optional admin note for the CAM |
+| 04 Entities | EDIT_SUGGESTIONS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | EDIT_SUGGESTIONS | updated_at | timestamp |  | Last edit timestamp |
+| 04 Entities | ATTACHMENTS | id | uuid |  | Primary key |
+| 04 Entities | ATTACHMENTS | organisation_id | uuid | ORGANISATIONS | Client the file is attached to |
+| 04 Entities | ATTACHMENTS | filename | text |  | Original file name shown in the list |
+| 04 Entities | ATTACHMENTS | storage_path | text |  | Path inside the private client-attachments Storage bucket |
+| 04 Entities | ATTACHMENTS | content_type | text |  | MIME type of the file |
+| 04 Entities | ATTACHMENTS | size_bytes | bigint |  | File size in bytes |
+| 04 Entities | ATTACHMENTS | uploaded_by | uuid | USERS | Team member who attached the file |
+| 04 Entities | ATTACHMENTS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | id | uuid |  | Primary key |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | field_name | text |  | An ORGANISATIONS column CAMs may not write directly |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | active | boolean |  | False = retired: not enforced, not suggestible, row kept |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | reason | text |  | Why the field is restricted |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | added_by | uuid | USERS | Admin who added/re-added the restriction |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | created_at | timestamp |  | Row creation timestamp |

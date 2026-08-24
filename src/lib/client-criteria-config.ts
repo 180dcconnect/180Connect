@@ -24,13 +24,15 @@ export type ClientCriteriaConfig = {
 };
 
 export const CLIENT_CRITERIA: ClientCriteriaConfig = {
-  acceptedOrganisationTypes: ["charity", "both"],
-  // A plain company/other record may still be a social enterprise, NGO,
+  acceptedOrganisationTypes: ["charity", "cio", "cic", "social_enterprise", "both"],
+  // A plain company/other/ngo record may still be a social enterprise, NGO,
   // non-profit, or socially focused startup. It needs evidence and human review.
-  reviewOrganisationTypes: ["company", "other"],
-  // Today just "company" — Companies House Tier A/B legal-form evidence is the
-  // only strong-confidence signal this codebase produces so far.
-  strongEvidenceTypes: ["company"],
+  // ngo stays here until LLM enrichment can reliably classify it — not derived
+  // from Companies House alone.
+  reviewOrganisationTypes: ["company", "ngo", "other"],
+  // Strong-evidence (Tier A/B legal form) now bypasses review for the new
+  // CIC/CIO/social_enterprise types as well as plain company.
+  strongEvidenceTypes: ["company", "cic", "cio", "social_enterprise"],
   priorityCities: ["sheffield", "rotherham", "barnsley", "doncaster"],
   priorityPostcodePrefixes: ["S", "DN"],
   healthcareKeywords: ["health", "healthcare", "medical", "hospital", "patient"],

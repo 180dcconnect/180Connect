@@ -3,11 +3,17 @@
 import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
-import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach } from "@/lib/outreach/stage-one-prompt";
+import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
 
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
-type Draft = { id: string; subject: string; body: string };
+type Draft = { id: string; subject: string; body: string; sizeTemplate?: string };
+
+function sizeTemplateLabel(sizeTemplate: string | undefined): string {
+  return sizeTemplate && SIZE_TEMPLATES.includes(sizeTemplate as SizeTemplate)
+    ? SIZE_TONE_LABELS[sizeTemplate as SizeTemplate]
+    : SIZE_TONE_LABELS.default;
+}
 
 const EMAIL_LENGTH_LABELS: Record<EmailLength, string> = {
   short: "Short",
@@ -226,6 +232,9 @@ export function ComposeButton({
             <h3 className="text-sm font-bold" id="email-review-heading">Review generated draft</h3>
             <p className="mt-1 text-xs text-foreground/55">
               Saved as a draft. Review and edit it before a separate human send action is made available.
+            </p>
+            <p className="mt-1 text-xs text-foreground/65">
+              Size tone template: {sizeTemplateLabel(draft.sizeTemplate)}
             </p>
           </div>
           <label className="block text-xs font-bold text-foreground/65">

@@ -149,12 +149,18 @@ export async function POST(
     );
   }
 
-  const [{ data: contact, error: contactError }, { data: enrichment, error: enrichmentError }] = await Promise.all([
+  const [
+    { data: contact, error: contactError },
+    { data: enrichment, error: enrichmentError },
+    { data: financialPeriod, error: financialError },
+  ] = await Promise.all([
     supabase.from("contacts").select("id, first_name, last_name, job_title").eq("organisation_id", organisationId).order("is_primary", { ascending: false }).order("created_at", { ascending: true }).limit(1).maybeSingle(),
     supabase.from("enrichment_results").select("mission_statement, mission_keywords, sector, sub_sector, news_hooks").eq("organisation_id", organisationId).order("enriched_at", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("financial_periods").select("income_band").eq("organisation_id", organisationId).order("period_end", { ascending: false }).limit(1).maybeSingle(),
   ]);
   if (contactError) await reportError(contactError, { operation: "outreach.stage_one.load_contact", organisationId });
   if (enrichmentError) await reportError(enrichmentError, { operation: "outreach.stage_one.load_context", organisationId });
+  if (financialError) await reportError(financialError, { operation: "outreach.stage_one.load_financial_context", organisationId });
 
   // F103 AC1: the client's saved booklet (latest version per F085/F086) is passed
   // to generation as additional context. A missing booklet is not an error —
@@ -192,6 +198,7 @@ export async function POST(
       city: organisation.city,
       countryCode: organisation.country_code,
       geographicReach: organisation.geographic_reach,
+      incomeBand: financialPeriod?.income_band,
       contactName: contact ? [contact.first_name, contact.last_name].filter(Boolean).join(" ") : null,
       contactJobTitle: contact?.job_title,
       missionStatement: enrichment?.mission_statement,
@@ -243,5 +250,5 @@ export async function POST(
     return NextResponse.json({ error: "The draft could not be saved safely. Try again." }, { status: 500 });
   }
 
-  return NextResponse.json({ id: message.id, ...result.draft }, { status: 201 });
+  return NextResponse.json({ id: message.id, ...result.draft, sizeTemplate: result.sizeTemplate }, { status: 201 });
 }

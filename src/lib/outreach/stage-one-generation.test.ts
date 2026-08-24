@@ -10,6 +10,19 @@ test("generateStageOneDraft returns a structured draft", async () => {
   );
   assert.deepEqual(result, {
     draft: { subject: "Working together", body: "Hello, we would like to introduce 180DC." },
+    sizeTemplate: "default",
+  });
+});
+
+test("generateStageOneDraft reports the size template applied for the income band", async () => {
+  const result = await generateStageOneDraft(
+    "org-1",
+    { ...context, incomeBand: "over_1m" },
+    async () => JSON.stringify({ subject: "Working together", body: "Hello there." }),
+  );
+  assert.deepEqual(result, {
+    draft: { subject: "Working together", body: "Hello there." },
+    sizeTemplate: "over_1m",
   });
 });
 

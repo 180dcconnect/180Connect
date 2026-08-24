@@ -8,11 +8,6 @@ import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_A
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
 type Draft = { id: string; subject: string; body: string; sizeTemplate?: string };
-type EmailLength = "short" | "standard" | "detailed";
-type EmailVoice = "180dc" | "consultative" | "plain_language";
-type EmailTone = "balanced" | "warm" | "formal" | "concise";
-type OpeningApproach = "mission_led" | "direct_intro" | "news_hook";
-type ClosingApproach = "soft_cta" | "meeting_request" | "open_question";
 
 function sizeTemplateLabel(sizeTemplate: string | undefined): string {
   return sizeTemplate && SIZE_TEMPLATES.includes(sizeTemplate as SizeTemplate)

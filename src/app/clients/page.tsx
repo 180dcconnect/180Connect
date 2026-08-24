@@ -216,6 +216,9 @@ export default async function ClientsPage({
    */
   const canSelect = hasPermission(authorization.actor.role, "client:edit");
   const canBulkAssign = hasPermission(authorization.actor.role, "ownership:reassign");
+  // F063 — bulk tagging rides the same permission as F191's single assignment
+  // (`tags:manage`, held by CAMs and admins), so both paths to org_tags agree.
+  const canBulkTag = hasPermission(authorization.actor.role, "tags:manage");
   /**
    * F062/F064/F065 — which rows this actor may bulk-change status for.
    * The header checkbox only selects those, but every row is selectable for
@@ -1002,7 +1005,14 @@ export default async function ClientsPage({
           )}
           </Group>
         </SearchRail>
-        {canSelect && <BulkActionsBar team={teamMembers} canAssign={canBulkAssign} />}
+        {canSelect && (
+          <BulkActionsBar
+            team={teamMembers}
+            canAssign={canBulkAssign}
+            tags={availableTags}
+            canTag={canBulkTag}
+          />
+        )}
       </div>
   );
 }

@@ -320,7 +320,7 @@ export type GeographicPreference = OutreachQueuePreferences;
  */
 export const CANONICAL_SECTOR_GROUPS: Record<string, string[]> = {
   health: ["health", "healthcare", "medical", "hospital", "clinic", "mental health", "disability", "wellbeing", "social care"],
-  education: ["education", "training", "school", "college", "university", "learning", "literacy", "teaching", "skills"],
+  education: ["education", "training", "school", "schools", "college", "colleges", "university", "learning", "literacy", "teaching", "skills"],
   environment: ["environment", "conservation", "climate", "sustainability", "wildlife", "animal welfare", "renewable energy"],
   poverty: ["poverty", "food bank", "homeless", "housing", "hardship", "deprivation", "social inclusion"],
   community: ["community development", "youth", "children", "family support", "youth services"],
@@ -328,16 +328,104 @@ export const CANONICAL_SECTOR_GROUPS: Record<string, string[]> = {
   justice: ["human rights", "justice", "equality", "legal", "international aid", "social enterprise", "enterprise"],
 };
 
+/** F055 — the URL value for organisations with no sector recorded. A charity
+ * with neither a sector nor a sub-sector must remain reachable under an explicit
+ * "Unclassified" option rather than silently disappearing from every sector
+ * filter (F055 AC3). */
+export const UNCLASSIFIED_SECTOR = "unclassified";
+
+/** Display labels for the filter's URL values — the canonical group keys plus
+ * the unclassified sentinel. Saved-view descriptions reuse this map so a view
+ * never renders a bare key. */
+export const SECTOR_FILTER_LABELS: Record<string, string> = {
+  health: "Health",
+  education: "Education",
+  environment: "Environment & sustainability",
+  poverty: "Poverty & hardship",
+  community: "Community & youth",
+  arts: "Arts, culture & sport",
+  justice: "Justice & enterprise",
+  [UNCLASSIFIED_SECTOR]: "Unclassified",
+};
+
+/** The sector dropdown's options: the canonical taxonomy plus Unclassified,
+ * fixed like type/status (not derived from the rows on screen) so a group
+ * nobody currently matches never vanishes from the picker. */
+export const SECTOR_FILTER_OPTIONS: { label: string; value: string }[] = [
+  ...Object.keys(CANONICAL_SECTOR_GROUPS).map((value) => ({
+    value,
+    label: SECTOR_FILTER_LABELS[value] ?? value,
+  })),
+  { value: UNCLASSIFIED_SECTOR, label: SECTOR_FILTER_LABELS[UNCLASSIFIED_SECTOR] },
+];
+
+/** The text a client's sector is judged on: the standardised sector field plus
+ * its sub-sector refinement, lowercased. Both columns are LLM-classified free
+ * text (no enum yet), which is why matching goes through the alias table below
+ * rather than exact equality. */
+function clientSectorText(client: VisibleClient): string {
+  return `${(client.sector ?? "").trim()} ${(client.sub_sector ?? "").trim()}`
+    .toLowerCase();
+}
+
+/**
+ * F055 — sector. AC2: selecting several sectors shows charities matching *any*
+ * of them (OR logic, same convention as filterByTags/filterByType).
+ *
+ * The stored `sector`/`sub_sector` values are free text ("Mental Health",
+ * "Youth & Children"), so a selection matches through CANONICAL_SECTOR_GROUPS'
+ * whole-word aliases rather than exact equality — the same table the queue
+ * weighting (getSectorPriorityScore) uses, so filtering and prioritising agree
+ * on what "health" means. An unrecognised URL value matches nothing, mirroring
+ * filterByType: a stale link narrows visibly rather than showing everything.
+ *
+ * AC3: a charity with no sector recorded stays reachable — ?sector=unclassified
+ * selects exactly those whose sector and sub-sector are both blank.
+ */
+export function filterBySector(
+  clients: VisibleClient[],
+  sectorFilter: string | string[] | null | undefined,
+): VisibleClient[] {
+  const wanted = filterValues(sectorFilter).map((value) => value.toLowerCase());
+  if (wanted.length === 0) return clients;
+  return clients.filter((client) => {
+    const text = clientSectorText(client);
+    const classified = text.trim().length > 0;
+    return wanted.some((value) => {
+      if (value === UNCLASSIFIED_SECTOR) return !classified;
+      const aliases = CANONICAL_SECTOR_GROUPS[value];
+      // Not a known group: matches nothing rather than everything.
+      if (!aliases) return false;
+      return (
+        textContains(text, value) || aliases.some((alias) => textContains(text, alias))
+      );
+    });
+  });
+}
+
 /**
  * Whole-word containment, case-insensitive. Raw `.includes()` matched inside
  * words ("arts" in "parts") and let single-word aliases over-trigger; anchoring
  * on non-alphanumeric boundaries keeps phrase aliases like "mental health"
  * working across "&"-separated strings.
+ *
+ * Compiled patterns are memoised per needle: the alias table is small and
+ * fixed, but filterBySector used to rebuild a RegExp per client × selection ×
+ * alias, which is wasted work on large datasets (F055 review). Regexes without
+ * the `g` flag are stateless under `.test`, so sharing them is safe — this also
+ * speeds up getSectorPriorityScore, which matches through the same helper.
  */
+const TEXT_CONTAINS_CACHE = new Map<string, RegExp>();
+
 function textContains(haystack: string, needle: string): boolean {
   if (!haystack || !needle) return false;
-  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`).test(haystack);
+  let pattern = TEXT_CONTAINS_CACHE.get(needle);
+  if (!pattern) {
+    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    pattern = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`);
+    TEXT_CONTAINS_CACHE.set(needle, pattern);
+  }
+  return pattern.test(haystack);
 }
 
 const SOUTH_YORKSHIRE_CITIES = new Set(["sheffield", "rotherham", "barnsley", "doncaster"]);

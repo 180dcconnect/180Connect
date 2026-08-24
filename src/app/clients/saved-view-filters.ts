@@ -10,6 +10,8 @@
  * combination comes back exactly — true by construction rather than by care.
  */
 
+import { SECTOR_FILTER_LABELS } from "./visible-clients.ts";
+
 /**
  * The params a view remembers, and the order they are written back in.
  *
@@ -20,10 +22,10 @@
  * as a repeated param, so a view stores an array for those keys and `savedViewHref`
  * writes the repeats back.
  *
- * Sector is absent because there is no sector filter to capture: ORGANISATIONS has
- * no sector column (it lives on ENRICHMENT_RESULTS, LLM-classified) and F055 (#57)
- * is unbuilt. Adding it here later is a one-line change and no migration, which is
- * the reason the column is jsonb.
+ * Sector (F055) is captured as a multi-key like city/status/type: its values are
+ * the canonical group keys from visible-clients.ts plus "unclassified", stored as
+ * an array and written back as repeated params. No migration — which is why the
+ * column is jsonb.
  *
  * Deliberately not captured: `page`, the insight band's `stage`/`sort`/`dir`, and
  * the list's own `listSort`/`listDir`. A saved view is a filter combination — the AC
@@ -37,6 +39,7 @@ export const SAVED_VIEW_FILTER_KEYS = [
   "country",
   "status",
   "type",
+  "sector",
   "owner",
 ] as const;
 
@@ -46,6 +49,7 @@ export const SAVED_VIEW_MULTI_KEYS: readonly SavedViewFilterKey[] = [
   "country",
   "status",
   "type",
+  "sector",
 ];
 
 export type SavedViewFilterKey = (typeof SAVED_VIEW_FILTER_KEYS)[number];
@@ -220,6 +224,16 @@ function describeValues(value: SavedViewFilterValue): string {
   return (Array.isArray(value) ? value : [value]).join(", ");
 }
 
+/** Sector values are canonical keys, so they read as their labels; anything
+ * unrecognised (an old row, a tampered one) falls back to the raw value rather
+ * than disappearing from the description. */
+function describeSectorValues(value: SavedViewFilterValue): string {
+  const values = Array.isArray(value) ? value : [value];
+  return values
+    .map((entry) => SECTOR_FILTER_LABELS[entry] ?? entry)
+    .join(", ");
+}
+
 /**
  * A one-line human reading of a filter set, for the row under a view's name.
  *
@@ -239,6 +253,7 @@ export function describeFilters(
   if (filters.city) parts.push(describeValues(filters.city));
   if (filters.country) parts.push(describeValues(filters.country));
   if (filters.status) parts.push(describeValues(filters.status));
+  if (filters.sector) parts.push(describeSectorValues(filters.sector));
   if (filters.owner === "unassigned") {
     parts.push("Unassigned");
   } else if (filters.owner) {

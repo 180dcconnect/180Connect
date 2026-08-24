@@ -9,6 +9,7 @@ import {
 } from "@/lib/organisation-format";
 import { MAX_BULK_STATUS_CLIENTS } from "@/lib/bulk-status";
 import { MAX_BULK_NOTE_CLIENTS, MAX_NOTE_LENGTH, prepareComment } from "@/lib/bulk-note";
+import { MAX_BULK_TAG_CLIENTS } from "@/lib/bulk-tags";
 import { useBulkSelection } from "./bulk-selection";
 import {
   Select,
@@ -22,11 +23,12 @@ import { UsersGroupIcon } from "@/components/ui/users-group-icon";
 
 /**
  * Unified bulk action bar: F064 (status) + F065 (comment) + F253 (assign)
+ * + F063 (tags).
  * Keeps PR's sessionStorage-backed selection (useBulkSelection) so filter/page
  * navigation does not discard the selection (F062 AC3) and the narrower status
  * permission can be tracked per id (canStatus).
  *
- * One bar rather than three so the counts stay in sync and the sticky position
+ * One bar rather than four so the counts stay in sync and the sticky position
  * does not stack.
  */
 
@@ -34,13 +36,18 @@ const PLACEHOLDER = "";
 
 type Pending = "status" | "comment" | "assign";
 type TeamMember = { id: string; full_name: string | null };
+type TagOption = { id: string; name: string };
 
 export function BulkActionsBar({
   team,
   canAssign,
+  tags,
+  canTag,
 }: {
   team: TeamMember[];
   canAssign: boolean;
+  tags: TagOption[];
+  canTag: boolean;
 }) {
   const router = useRouter();
   const { ids, statusBlockedCount, selected, deselect, clear } = useBulkSelection();
@@ -56,10 +63,27 @@ export function BulkActionsBar({
   const [assignOwnerId, setAssignOwnerId] = useState("");
   const [assignReason, setAssignReason] = useState("");
 
+  // Tags state (F063) — the picker is inline rather than a pending modal
+  // because tagging is additive and reversible (F192 removes an assignment),
+  // so it does not need a confirm step the way status/comment/assign do.
+  const [tagPickerOpen, setTagPickerOpen] = useState(false);
+  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
+  const tagPickerRef = useRef<HTMLDivElement>(null);
+
   const count = ids.length;
   const overStatusLimit = count > MAX_BULK_STATUS_CLIENTS;
   const overNoteLimit = count > MAX_BULK_NOTE_CLIENTS;
+  const overTagLimit = count > MAX_BULK_TAG_CLIENTS;
   const preparedComment = prepareComment(comment);
+
+  useEffect(() => {
+    if (!tagPickerOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setTagPickerOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [tagPickerOpen]);
 
   useEffect(() => {
     if (pending === null) return;
@@ -155,6 +179,49 @@ export function BulkActionsBar({
   const deselectStatusBlocked = () =>
     deselect([...selected].filter(([, canStatus]) => !canStatus).map(([id]) => id));
 
+  // F063 AC1: one or more existing tags applied to every selected client in a
+  // single action. Applies immediately — no confirm step (additive, reversible
+  // via F192) — and reports through the same result/error lines as the rest of
+  // the bar, so all four actions read the same way.
+  async function applyTags() {
+    if (selectedTagIds.size === 0) {
+      setError("Choose at least one tag to apply.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/clients/bulk-tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, tagIds: [...selectedTagIds] }),
+      });
+      const body = await response.json();
+      if (response.ok) {
+        setTagPickerOpen(false);
+        setSelectedTagIds(new Set());
+        clear();
+        setResult(body.message ?? "The tags were applied to the selected clients.");
+        router.refresh();
+        return;
+      }
+      setError(body.error ?? "The tags could not be applied.");
+      setTagPickerOpen(false);
+    } catch {
+      setError("Could not reach the server. Nothing was changed — check your connection.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const toggleTag = (tagId: string) =>
+    setSelectedTagIds((current) => {
+      const next = new Set(current);
+      if (next.has(tagId)) next.delete(tagId);
+      else next.add(tagId);
+      return next;
+    });
+
   return (
     <>
       <div className="sticky bottom-4 z-30 mt-4">
@@ -203,6 +270,7 @@ export function BulkActionsBar({
                   clear();
                   setError(null);
                   setResult(null);
+                  setTagPickerOpen(false);
                 }}
               >
                 Clear selection
@@ -220,6 +288,67 @@ export function BulkActionsBar({
                 >
                   Assign owner
                 </button>
+              )}
+
+              {/* F063: bulk tag picker. Hidden when the account cannot tag
+                  (viewer) or when no tags exist yet to apply (F188 creates
+                  them under /admin/tags). */}
+              {canTag && tags.length > 0 && (
+                <div className="relative" ref={tagPickerRef}>
+                  <button
+                    type="button"
+                    className="rounded-full bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-50"
+                    disabled={busy || overTagLimit}
+                    aria-expanded={tagPickerOpen}
+                    onClick={() => {
+                      setError(null);
+                      setTagPickerOpen((open) => !open);
+                    }}
+                  >
+                    Add tags{selectedTagIds.size > 0 ? ` (${selectedTagIds.size})` : ""}
+                  </button>
+                  {tagPickerOpen && (
+                    <div className="absolute bottom-full left-0 z-40 mb-2 w-64 rounded-xl border border-black/10 bg-white p-3 shadow-xl">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/50">
+                        Tags to apply
+                      </p>
+                      <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto">
+                        {tags.map((tag) => (
+                          <li key={tag.id}>
+                            <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-black/[0.03]">
+                              <input
+                                type="checkbox"
+                                checked={selectedTagIds.has(tag.id)}
+                                onChange={() => toggleTag(tag.id)}
+                              />
+                              {tag.name}
+                            </label>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="mt-3 flex justify-end gap-2">
+                        <button
+                          type="button"
+                          className="rounded-full border border-black/10 px-3 py-1.5 text-xs font-bold hover:bg-black/[0.03]"
+                          disabled={busy}
+                          onClick={() => setTagPickerOpen(false)}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-full bg-brand px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+                          disabled={busy || selectedTagIds.size === 0}
+                          onClick={applyTags}
+                        >
+                          {busy
+                            ? "Applying…"
+                            : `Apply to ${count} client${count === 1 ? "" : "s"}`}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
 
               <div className="w-full">
@@ -275,16 +404,20 @@ export function BulkActionsBar({
             </p>
           )}
 
-          {(overStatusLimit || overNoteLimit) && (
+          {(overStatusLimit || overNoteLimit || overTagLimit) && (
             <p className="w-full text-sm font-bold text-amber-800">
               A single bulk{" "}
-              {overStatusLimit && overNoteLimit
+              {overStatusLimit && (overNoteLimit || overTagLimit)
                 ? "action"
                 : overStatusLimit
                   ? "status change"
-                  : "comment"}{" "}
-              covers at most {Math.min(MAX_BULK_STATUS_CLIENTS, MAX_BULK_NOTE_CLIENTS)} clients.
-              Deselect {count - Math.min(MAX_BULK_STATUS_CLIENTS, MAX_BULK_NOTE_CLIENTS)} to continue.
+                  : "action"}{" "}
+              covers at most{" "}
+              {Math.min(MAX_BULK_STATUS_CLIENTS, MAX_BULK_NOTE_CLIENTS, MAX_BULK_TAG_CLIENTS)}{" "}
+              clients. Deselect{" "}
+              {count -
+                Math.min(MAX_BULK_STATUS_CLIENTS, MAX_BULK_NOTE_CLIENTS, MAX_BULK_TAG_CLIENTS)}{" "}
+              to continue.
             </p>
           )}
 

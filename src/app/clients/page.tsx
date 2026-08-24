@@ -371,7 +371,12 @@ export default async function ClientsPage({
   const countryValues = filterValues(country);
   const statusValues = filterValues(status);
   const typeValues = filterValues(typeFilter);
-  const sectorValues = filterValues(sectorParam);
+  // Lowercased once, here, rather than inside the filter: chips and every
+  // generated link then carry the canonical value, so a hand-typed
+  // `?sector=Health` renders as a "Health"→"health" chip on the next render and
+  // the mixed case leaves the URL instead of propagating (same reasoning as the
+  // parsed listSort values in hrefWith below).
+  const sectorValues = filterValues(sectorParam).map((value) => value.toLowerCase());
 
   // BrandSearchBar always writes a multi-selected category as repeated params
   // (see its submitSearch), so this can legitimately arrive as one string or

@@ -408,11 +408,24 @@ export function filterBySector(
  * words ("arts" in "parts") and let single-word aliases over-trigger; anchoring
  * on non-alphanumeric boundaries keeps phrase aliases like "mental health"
  * working across "&"-separated strings.
+ *
+ * Compiled patterns are memoised per needle: the alias table is small and
+ * fixed, but filterBySector used to rebuild a RegExp per client × selection ×
+ * alias, which is wasted work on large datasets (F055 review). Regexes without
+ * the `g` flag are stateless under `.test`, so sharing them is safe — this also
+ * speeds up getSectorPriorityScore, which matches through the same helper.
  */
+const TEXT_CONTAINS_CACHE = new Map<string, RegExp>();
+
 function textContains(haystack: string, needle: string): boolean {
   if (!haystack || !needle) return false;
-  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`).test(haystack);
+  let pattern = TEXT_CONTAINS_CACHE.get(needle);
+  if (!pattern) {
+    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    pattern = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`);
+    TEXT_CONTAINS_CACHE.set(needle, pattern);
+  }
+  return pattern.test(haystack);
 }
 
 const SOUTH_YORKSHIRE_CITIES = new Set(["sheffield", "rotherham", "barnsley", "doncaster"]);

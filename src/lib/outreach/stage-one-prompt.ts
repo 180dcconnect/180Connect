@@ -66,6 +66,18 @@ const SIZE_TONE_INSTRUCTIONS: Record<NonNullable<StageOneContext["incomeBand"]>,
   over_1m: "This is a large charity. Use a polished, structured tone suitable for an established organisation, without assuming complex procurement or internal capacity.",
 };
 
+/** Mirrors public.income_band plus the explicit no-data fallback (F104). */
+export const SIZE_TEMPLATES = ["under_10k", "10k_100k", "100k_1m", "over_1m", "default"] as const;
+export type SizeTemplate = (typeof SIZE_TEMPLATES)[number];
+
+export const SIZE_TONE_LABELS: Record<SizeTemplate, string> = {
+  under_10k: "Very small charity (under £10k)",
+  "10k_100k": "Small charity (£10k – £100k)",
+  "100k_1m": "Medium charity (£100k – £1m)",
+  over_1m: "Large charity (over £1m)",
+  default: "Default — size not recorded",
+};
+
 function value(value: string | null | undefined): string {
   return value?.trim() || "Not provided";
 }
@@ -83,10 +95,16 @@ export function buildStageOnePrompt(
   const tone = options.tone ?? "balanced";
   const opening = options.opening ?? "mission_led";
   const closing = options.closing ?? "soft_cta";
-  const sizeTone = context.incomeBand
-    ? SIZE_TONE_INSTRUCTIONS[context.incomeBand]
-    : "Charity size is not available. Use the selected tone without making assumptions about budget, staff or organisational capacity.";
+  const sizeTemplate: SizeTemplate =
+    context.incomeBand && context.incomeBand in SIZE_TONE_INSTRUCTIONS
+      ? context.incomeBand
+      : "default";
+  const sizeTone =
+    sizeTemplate === "default"
+      ? "Charity size is not available. Use the selected tone without making assumptions about budget, staff or organisational capacity."
+      : SIZE_TONE_INSTRUCTIONS[sizeTemplate];
   return {
+    sizeTemplate,
     system: `You draft initial charity outreach emails for 180 Degrees Consulting Sheffield.
 Use only facts supplied in the client context. Never invent achievements, needs, people, partnerships, or news.
 Write a concise, warm and professional first-contact email. Explain that 180 Degrees Consulting Sheffield is a student-led consultancy supporting socially minded organisations. Do not promise outcomes or imply an existing relationship.

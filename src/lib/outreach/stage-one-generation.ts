@@ -9,6 +9,7 @@ import {
   type EmailTone,
   type OpeningApproach,
   type ClosingApproach,
+  type SizeTemplate,
   type StageOneContext,
 } from "./stage-one-prompt.ts";
 
@@ -54,13 +55,13 @@ export async function generateStageOneDraft(
   context: StageOneContext,
   callModel: CallStageOneModel,
   options: { length?: EmailLength; voice?: EmailVoice; tone?: EmailTone; opening?: OpeningApproach; closing?: ClosingApproach } = {},
-): Promise<{ draft: StageOneDraft } | { error: string }> {
+): Promise<{ draft: StageOneDraft; sizeTemplate: SizeTemplate } | { error: string }> {
   const prompt = buildStageOnePrompt(context, options);
   const startedAt = Date.now();
   try {
     const draft = parseDraft(await callModel(prompt));
     logApiHealth("gemini", "outreach.stage_one.generate", true, startedAt, { organisationId });
-    return { draft };
+    return { draft, sizeTemplate: prompt.sizeTemplate };
   } catch (error) {
     logApiHealth("gemini", "outreach.stage_one.generate", false, startedAt, { organisationId });
     await reportError(error, { operation: "outreach.stage_one.generate", organisationId });

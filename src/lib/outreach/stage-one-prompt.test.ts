@@ -73,9 +73,15 @@ test("buildStageOnePrompt applies each closing approach safely", () => {
 
 test("buildStageOnePrompt adapts its size guidance to the latest income band", () => {
   const context = { organisationName: "Example", organisationType: "charity" };
+  assert.equal(buildStageOnePrompt({ ...context, incomeBand: "under_10k" }).sizeTemplate, "under_10k");
   assert.match(buildStageOnePrompt({ ...context, incomeBand: "under_10k" }).system, /very small charity/);
+  assert.equal(buildStageOnePrompt({ ...context, incomeBand: "10k_100k" }).sizeTemplate, "10k_100k");
   assert.match(buildStageOnePrompt({ ...context, incomeBand: "10k_100k" }).system, /small charity/);
+  assert.equal(buildStageOnePrompt({ ...context, incomeBand: "100k_1m" }).sizeTemplate, "100k_1m");
   assert.match(buildStageOnePrompt({ ...context, incomeBand: "100k_1m" }).system, /medium-sized charity/);
+  assert.equal(buildStageOnePrompt({ ...context, incomeBand: "over_1m" }).sizeTemplate, "over_1m");
   assert.match(buildStageOnePrompt({ ...context, incomeBand: "over_1m" }).system, /large charity/);
-  assert.match(buildStageOnePrompt(context).system, /Charity size is not available/);
+  const fallback = buildStageOnePrompt(context);
+  assert.equal(fallback.sizeTemplate, "default");
+  assert.match(fallback.system, /Charity size is not available/);
 });

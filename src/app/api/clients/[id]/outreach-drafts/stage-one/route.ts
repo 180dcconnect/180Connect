@@ -138,5 +138,5 @@ export async function POST(
     return NextResponse.json({ error: "The draft could not be saved safely. Try again." }, { status: 500 });
   }
 
-  return NextResponse.json({ id: message.id, ...result.draft }, { status: 201 });
+  return NextResponse.json({ id: message.id, ...result.draft, sizeTemplate: result.sizeTemplate }, { status: 201 });
 }

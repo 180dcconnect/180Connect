@@ -4,15 +4,22 @@ import { useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
 import { BOOKLET_GENERATED_EVENT, type BookletGeneratedDetail } from "@/lib/booklet/browser-event";
+import { SIZE_TEMPLATES, SIZE_TONE_LABELS, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
 
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
-type Draft = { id: string; subject: string; body: string };
+type Draft = { id: string; subject: string; body: string; sizeTemplate?: string };
 type EmailLength = "short" | "standard" | "detailed";
 type EmailVoice = "180dc" | "consultative" | "plain_language";
 type EmailTone = "balanced" | "warm" | "formal" | "concise";
 type OpeningApproach = "mission_led" | "direct_intro" | "news_hook";
 type ClosingApproach = "soft_cta" | "meeting_request" | "open_question";
+
+function sizeTemplateLabel(sizeTemplate: string | undefined): string {
+  return sizeTemplate && SIZE_TEMPLATES.includes(sizeTemplate as SizeTemplate)
+    ? SIZE_TONE_LABELS[sizeTemplate as SizeTemplate]
+    : SIZE_TONE_LABELS.default;
+}
 
 /** F100 creates a review draft only, after the current outreach preflight passes. */
 export function ComposeButton({
@@ -190,6 +197,9 @@ export function ComposeButton({
             <h3 className="text-sm font-bold" id="email-review-heading">Review generated draft</h3>
             <p className="mt-1 text-xs text-foreground/55">
               Saved as a draft. Review and edit it before a separate human send action is made available.
+            </p>
+            <p className="mt-1 text-xs text-foreground/65">
+              Size tone template: {sizeTemplateLabel(draft.sizeTemplate)}
             </p>
           </div>
           <label className="block text-xs font-bold text-foreground/65">

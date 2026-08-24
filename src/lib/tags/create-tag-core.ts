@@ -1,4 +1,4 @@
-// F188: Create Tag — pure decision logic.
+// F188/F194: Create Tag — pure decision logic.
 //
 // Deliberately has no import of anything that pulls in "server-only" (i.e.
 // src/lib/supabase/server.ts), for the same reason admin-client-factory.ts
@@ -7,8 +7,10 @@
 // would break `node --test` for this file. The real Next.js entry point
 // (create-tag.ts) imports this module and supplies the real client.
 
+import { parseTagColour } from "./tag-colours.ts";
+
 export type CreateTagResult =
-  | { ok: true; tag: { id: string; name: string } }
+  | { ok: true; tag: { id: string; name: string; colour: string | null } }
   | { ok: false; message: string };
 
 /** The one Supabase operation this needs, behind an interface — same
@@ -18,8 +20,9 @@ export interface TagInsertClient {
   insertTag(
     name: string,
     createdByUserId: string,
+    colour: string | null,
   ): Promise<
-    | { ok: true; tag: { id: string; name: string } }
+    | { ok: true; tag: { id: string; name: string; colour: string | null } }
     | { ok: false; code: string | null; message: string }
   >;
 }
@@ -42,6 +45,7 @@ export async function createTagCore(
   rawName: string,
   actorId: string,
   client: TagInsertClient,
+  rawColour?: unknown,
 ): Promise<CreateTagResult> {
   // AC3: empty name is blocked with a clear message. Trimmed first so
   // whitespace-only input ("   ") is treated the same as truly empty.
@@ -50,7 +54,15 @@ export async function createTagCore(
     return { ok: false, message: "Enter a tag name." };
   }
 
-  const result = await client.insertTag(name, actorId);
+  // F194 AC1: an optional palette colour at creation. Validated before the
+  // insert so an off-palette value is refused with a clear message rather
+  // than silently created colourless (or tripping the DB constraint).
+  const parsedColour = parseTagColour(rawColour);
+  if (!parsedColour.valid) {
+    return { ok: false, message: parsedColour.message };
+  }
+
+  const result = await client.insertTag(name, actorId, parsedColour.colour);
 
   if (!result.ok) {
     // Postgres unique_violation. The DB's lower(name) index is the real

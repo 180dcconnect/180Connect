@@ -16,14 +16,18 @@ import type { TagInsertClient } from "./create-tag-core.ts";
  */
 export interface TagsTableClient {
   from(table: "tags"): {
-    insert(row: { name: string; created_by_user_id: string }): {
+    insert(row: {
+      name: string;
+      created_by_user_id: string;
+      colour: string | null;
+    }): {
       select(columns: string): {
         // PromiseLike, not Promise: the real Supabase query builder is
         // thenable but isn't a literal Promise (no .catch/.finally), and a
         // fake async function's real Promise still satisfies PromiseLike,
         // so this accepts both.
         single(): PromiseLike<{
-          data: { id: string; name: string } | null;
+          data: { id: string; name: string; colour: string | null } | null;
           error: { code?: string | null; message: string } | null;
         }>;
       };
@@ -41,12 +45,12 @@ export function buildSupabaseTagInsertClient(
   supabase: TagsTableClient,
 ): TagInsertClient {
   return {
-    async insertTag(name, createdByUserId) {
+    async insertTag(name, createdByUserId, colour) {
       try {
         const { data, error } = await supabase
           .from("tags")
-          .insert({ name, created_by_user_id: createdByUserId })
-          .select("id, name")
+          .insert({ name, created_by_user_id: createdByUserId, colour })
+          .select("id, name, colour")
           .single();
 
         if (error) {

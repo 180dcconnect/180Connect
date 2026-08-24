@@ -9,8 +9,8 @@ import { useState, useTransition } from "react";
 import { assignTagAction } from "@/lib/tags/assign-tag-action";
 import { TagChips } from "@/lib/tags/tag-chips";
 
-export type ClientTag = { id: string; name: string };
-export type AvailableTag = { id: string; name: string };
+export type ClientTag = { id: string; name: string; colour?: string | null };
+export type AvailableTag = { id: string; name: string; colour?: string | null };
 
 export function TagsSection({
   organisationId,

@@ -4009,6 +4009,103 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- F019 (#22) Read-only shared client visibility
+-- ---------------------------------------------------------------------------
+-- The read half of "any CAM can open any client's profile": notes and sent
+-- outreach on someone else's client are readable but not actionable. The
+-- write half (a CAM cannot insert outreach_messages on another CAM's client)
+-- is suite_core; this suite covers what that leaves out — the shared SELECT
+-- of relationship history, and the author-scoped note UPDATE/DELETE.
+--
+-- Like suite_sensitive, a denied UPDATE/DELETE here raises nothing: the
+-- policies are USING-based, so the write matches zero rows. Asserting the
+-- resulting row, not an SQLSTATE, is the only check that can actually fail.
+
+create or replace function tests.suite_shared_visibility()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a     uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b     uuid := '00000000-0000-4000-a000-000000000003';
+  v_org_cam_b uuid := '00000000-0000-4000-b000-000000000003';
+  -- Every assertion targets these rows by id, never by counting the org's
+  -- rows: suites share one transaction, so suite_core has already left CAM
+  -- A's own "test note" on this same organisation (and a future suite could
+  -- leave anything). A per-org count would measure the other suites, not RLS.
+  v_note_id   uuid;
+  v_message_id uuid;
+  v_count     bigint;
+begin
+  if not tests.tables_exist('notes', 'outreach_messages', 'organisations') then
+    return next skip(6, 'step 4 create_org_children / step 11 create_outreach not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- CAM B's history on their own client: one note, one sent email.
+  insert into public.notes (organisation_id, author_id, content)
+  values (v_org_cam_b, v_cam_b, 'CAM B private context')
+  returning id into v_note_id;
+
+  insert into public.outreach_messages (organisation_id, sent_by_user_id, subject, body, send_status, sent_at)
+  values (v_org_cam_b, v_cam_b, 'Intro', 'Hello', 'sent', now())
+  returning id into v_message_id;
+
+  -- AC1: the full communication timeline is visible regardless of who owns
+  -- the client — notes first.
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.notes where id = v_note_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'CAM reads another CAM''s notes on their client (shared visibility)');
+
+  -- ...then sent outreach (F070's outreach_messages_select_active is what a
+  -- non-owner's timeline render depends on).
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.outreach_messages where id = v_message_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'CAM reads another CAM''s sent outreach messages on their client');
+
+  -- AC2: visible context is not editable context. notes_update_own is
+  -- USING-based, so the update silently matches zero rows — assert content.
+  perform tests.login_as(v_cam_a);
+  update public.notes set content = 'hijacked' where id = v_note_id;
+  select count(*) into v_count from public.notes
+    where id = v_note_id and content = 'CAM B private context';
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'CAM cannot edit another CAM''s note (row survives unchanged)');
+
+  -- Same for delete: notes_delete_own filters the row out, so it survives.
+  perform tests.login_as(v_cam_a);
+  delete from public.notes where id = v_note_id;
+  select count(*) into v_count from public.notes where id = v_note_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'CAM cannot delete another CAM''s note (row survives)');
+
+  -- Anon reaches neither table at all — grant-level REVOKE, not policy (same
+  -- shape as the users check in suite_users).
+  return next ok(
+    not has_table_privilege('anon', 'public.notes', 'SELECT'),
+    'anon holds no SELECT privilege on notes'
+  );
+  return next ok(
+    not has_table_privilege('anon', 'public.outreach_messages', 'SELECT'),
+    'anon holds no SELECT privilege on outreach_messages'
+  );
+end;
+$$;
+
+select * from tests.suite_core();
+select * from tests.suite_shared_visibility();
+
+-- ---------------------------------------------------------------------------
 -- outreach preferences (F195 / F187)
 -- ---------------------------------------------------------------------------
 

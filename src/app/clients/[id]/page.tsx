@@ -6,6 +6,7 @@ import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
+import { splitOutreachHistory, type OutreachMessageRow } from "@/lib/outreach-history";
 import { validateClientEmail } from "@/lib/client-email-validation";
 import {
   formatOrganisationSources,
@@ -19,6 +20,7 @@ import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
 import { SuppressButton } from "./suppress-button";
 import { ComposeButton } from "./compose-button";
+import { OutreachHistorySection } from "./outreach-history";
 import { BasicInfoPanel } from "./basic-info-panel";
 import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
@@ -369,6 +371,26 @@ export default async function ClientDetailPage({
     id: authorization.actor.id,
     role: authorization.actor.role,
   });
+
+  // F070: every outreach message for this client, sent or not. RLS
+  // (outreach_messages_select_active) shares read across every active role, so
+  // this needs no ownership filter — same reasoning as the `client:view` gate
+  // above.
+  const { data: outreachRows, error: outreachError } = await supabase
+    .from("outreach_messages")
+    .select("id, subject, body, send_status, sent_at, scheduled_at, created_at")
+    .eq("organisation_id", id)
+    .order("created_at", { ascending: false });
+
+  if (outreachError) {
+    await reportError(outreachError, {
+      operation: "clients.detail_outreach",
+      organisationId: id,
+    });
+  }
+  const outreachHistory = splitOutreachHistory(
+    (outreachRows ?? []) as OutreachMessageRow[],
+  );
 
   // F075/F076: the four sources @/lib/timeline.ts's buildTimeline merges into
   // one feed. Independent queries, not one join — the four tables share no
@@ -831,21 +853,31 @@ export default async function ClientDetailPage({
               </Rise>
             )}
 
-            {hasPermission(authorization.actor.role, "client:contact") && (
-              <Rise>
-                <SectionCard headingId="outreach-heading" title="Outreach">
+            {/* F070: the history itself is readable by every active role
+                (outreach_messages_select_active), so the card is not gated on
+                client:contact — only ComposeButton inside it is.
+                F019 (#22): a non-owning CAM sees that button dead, with the
+                owner-naming warning rendered up front, rather than discovering
+                the block on click — the preflight behind it remains the
+                enforcement either way. */}
+            <Rise>
+              <SectionCard headingId="outreach-heading" title="Outreach">
+                <OutreachHistorySection history={outreachHistory} error={Boolean(outreachError)} />
+
+                {hasPermission(authorization.actor.role, "client:contact") && (
                   <div className="mt-4">
                     <ComposeButton
                       blocked={suppressed}
+                      ownershipBlocked={!suppressed && ownershipConflict.hasConflict}
                       organisationId={client.id}
                       suppressionReason={suppressed ? latest?.reason : undefined}
                       ownershipWarning={ownershipConflict.hasConflict ? ownershipConflict.warning : undefined}
                       hasSavedBooklet={savedBooklet !== null}
                     />
                   </div>
-                </SectionCard>
-              </Rise>
-            )}
+                )}
+              </SectionCard>
+            </Rise>
 
             {/* Only the action lives down here — the resulting state is the
                 banner at the top of the page, so there is nothing to show once

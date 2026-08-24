@@ -337,6 +337,16 @@ F019 (read-only shared client visibility) requires every CAM to read every note.
 |---|---|---|---|---|
 | `NOTES` | all roles | admin, cam (`author_id = auth.uid()`) | admin, own | admin, own |
 
+The UI side of F019 (shipped with #22): `/clients/[id]` renders every note to
+every active role, but the edit/delete controls come from
+`buildNoteList`'s server-side `canManage` (author-or-admin — the same predicate
+as `notes_update_own`/`notes_delete_own`), so a non-author never sees a control
+the policy would refuse. The PATCH/DELETE routes re-check before writing and
+return "you can only [edit/delete] your own notes" rather than a silent
+zero-row write. `suite_shared_visibility` (pgTAP) asserts both halves: another
+CAM's notes are readable, and an UPDATE/DELETE against them leaves the row
+unchanged.
+
 **F065 (bulk add comment) changes nothing in this row and adds no RPC.** It inserts N
 rows in one statement as the signed-in user, so `notes_insert_author` above is what
 authorises it — one transaction, and therefore the same all-or-nothing guarantee
@@ -352,6 +362,11 @@ CAM's client (`suite_core`), a viewer may not note anything (`suite_viewer`).
 
 The F018 contact-permission rule lives here. Read is shared (relationship history,
 F019); **send** is restricted.
+
+F019's UI side (#22): on `/clients/[id]` a CAM who does not own the client
+sees the compose action rendered disabled up front, with the owner-naming
+conflict warning, rather than clickable-then-refused — `checkOwnershipConflict`
+drives both the render and the preflight that remains the enforcement.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|

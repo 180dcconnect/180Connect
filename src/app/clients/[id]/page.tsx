@@ -651,6 +651,11 @@ export default async function ClientDetailPage({
                 <ComposeButton
                   blocked={suppressed}
                   ownershipBlocked={!suppressed && ownershipConflict.hasConflict}
+                  historyHref={
+                    hasPermission(authorization.actor.role, "platform-settings:manage")
+                      ? `/admin/ai-generations?client=${client.id}`
+                      : undefined
+                  }
                   organisationId={client.id}
                   suppressionReason={suppressed ? latest?.reason : undefined}
                   ownershipWarning={

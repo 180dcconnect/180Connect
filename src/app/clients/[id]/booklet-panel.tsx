@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useEffect, useRef, useState } from "react";
 import { Clock, ExternalLink, Globe, ShieldCheck, Sparkles } from "lucide-react";
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
 import { parseBookletSections } from "@/lib/booklet/parse-sections";

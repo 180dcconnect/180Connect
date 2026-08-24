@@ -311,6 +311,11 @@ export async function POST(
     // F113: the model in force at generation time, not a live lookup of the current
     // default — see the migration for why a later env change must never rewrite history.
     model,
+    // F112: the exact prompt this generation actually sent — every attempt (create
+    // or regenerate) gets its own row here, never overwritten, so this is also the
+    // audit trail AC3 asks for.
+    prompt_system: result.prompt.system,
+    prompt_user: result.prompt.user,
     input_tokens: result.usage.inputTokens ?? null,
     output_tokens: result.usage.outputTokens ?? null,
     total_tokens: result.usage.totalTokens ?? null,

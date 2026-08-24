@@ -10,14 +10,11 @@
 // rather than imported upwards (lib must not depend on app/); consolidate into a
 // single shared module when F055 defines the real classification.
 //
-// AC1: sector contributes according to a ranking. The ticket's own "Blocked By"
-// note flags the real sector weight/ranking as an open question the team has
-// NOT decided. Like F090's geography placeholders, PLACEHOLDER_CATEGORY_SCORES
-// below are deliberately marked stand-ins: the point is that each category has
-// its own defined value, so changing a client's sector between categories
-// actually moves the score today, and swapping in the team's real ranking later
-// is an edit to one map, nothing else. Do not read the current ordering as a
-// product decision.
+// AC1: sector contributes according to a ranking. The ticket's open question
+// ("Sector weight") was resolved with a provisional v1 ranking — see
+// SECTOR_CATEGORY_SCORES below for the per-category rationale. It is the first
+// working ordering, not a final answer: adjusting it later is an edit to one
+// map, nothing else.
 //
 // AC3: a client with no sector recorded gets explicit default treatment, not an
 // error or a silent zero — see DEFAULT_FOR_MISSING_SECTOR below.
@@ -33,14 +30,31 @@ export type SectorScoreResult = {
 };
 
 /**
- * TODO: placeholder ranking, not a real decision — replace these values with
- * the team's confirmed per-category weights once the "Sector weight" question
- * is settled. Constraints that matter more than the current numbers:
- * every category has a DISTINCT value (so cross-category sector edits always
- * recalculate), none equals the neutral 0.5 (so adding or removing a recorded
- * sector always moves the score away from/towards the default).
+ * Provisional v1 sector ranking (first-ever score set by PM decision, Aug 2026),
+ * grounded in what evidence exists rather than invented wholesale:
+ *
+ * - Health & Wellbeing — 0.7. The only sector-level preference documented in
+ *   branch strategy: docs/client-criteria.md (F047) states "Healthcare
+ *   alignment is desirable".
+ * - Education & Youth — 0.65. Natural mission fit for a student-led branch;
+ *   deep pool of local schools/college-adjacent orgs with well-scoped projects.
+ * - Poverty & Community — 0.6. Grassroots community orgs are the core 180DC
+ *   client profile, and the South Yorkshire pilot region has high deprivation
+ *   (docs/client-criteria.md prioritises Sheffield/Rotherham/Barnsley/Doncaster).
+ * - Social Justice & Enterprise — 0.55. Social enterprises have revenue models,
+ *   which make for richer strategy projects and more engaged clients.
+ * - Environment & Sustainability — 0.45. Growing demand and strong student
+ *   interest, but fewer established organisations locally and thinner
+ *   consultant expertise to draw on today.
+ * - Arts, Culture & Heritage — 0.4. Valid clients, but typically small
+ *   volunteer-run orgs with limited capacity to act on recommendations.
+ *
+ * Constraints that must survive any future edit: every category keeps a
+ * DISTINCT value (so cross-category sector edits always recalculate), and none
+ * equals the neutral 0.5 default (so adding or removing a recorded sector
+ * always moves the score).
  */
-const PLACEHOLDER_CATEGORY_SCORES = {
+const SECTOR_CATEGORY_SCORES = {
   "Health & Wellbeing": 0.7,
   "Education & Youth": 0.65,
   "Poverty & Community": 0.6,
@@ -126,8 +140,8 @@ export function scoreBySector(
   for (const [category, presets] of Object.entries(SECTOR_TAXONOMY)) {
     if (trimmed.toLowerCase() === category.toLowerCase()) {
       return {
-        score: PLACEHOLDER_CATEGORY_SCORES[
-          category as keyof typeof PLACEHOLDER_CATEGORY_SCORES
+        score: SECTOR_CATEGORY_SCORES[
+          category as keyof typeof SECTOR_CATEGORY_SCORES
         ],
         usedDefault: false,
         matchedTaxonomy: true,
@@ -137,8 +151,8 @@ export function scoreBySector(
 
     if (presets.some((preset) => trimmed.toLowerCase() === preset.toLowerCase())) {
       return {
-        score: PLACEHOLDER_CATEGORY_SCORES[
-          category as keyof typeof PLACEHOLDER_CATEGORY_SCORES
+        score: SECTOR_CATEGORY_SCORES[
+          category as keyof typeof SECTOR_CATEGORY_SCORES
         ],
         usedDefault: false,
         matchedTaxonomy: true,
@@ -153,8 +167,8 @@ export function scoreBySector(
       matchesTerm(trimmed, category)
     ) {
       return {
-        score: PLACEHOLDER_CATEGORY_SCORES[
-          category as keyof typeof PLACEHOLDER_CATEGORY_SCORES
+        score: SECTOR_CATEGORY_SCORES[
+          category as keyof typeof SECTOR_CATEGORY_SCORES
         ],
         usedDefault: false,
         matchedTaxonomy: true,

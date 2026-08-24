@@ -209,19 +209,40 @@ begin
 
   -- The property the RPC design exists to protect: the direct UPDATE path
   -- stays admin-only (F189), so a crafted CAM request cannot rename OR write
-  -- the column around the RPC's checks.
-  return next is(
-    tests.sqlstate_of(v_cam,
-      format('update public.tags set colour = ''#067647'' where id = %L', v_tag)),
-    '42501',
-    'a CAM cannot UPDATE the column directly — recolouring goes through the RPC only'
+  -- the column around the RPC's checks. Because F189 grants UPDATE on tags to
+  -- authenticated (admin-only via RLS, not via the grant), Postgres never
+  -- raises for these attempts — the admin-only policy filters them to a
+  -- silent zero-row update. So each attempt is asserted by its outcome:
+  -- whether it surfaces as 42501 or a filtered no-op, the row must survive
+  -- untouched.
+  return next ok(
+    coalesce(
+      tests.sqlstate_of(v_cam,
+        format('update public.tags set colour = ''#067647'' where id = %L', v_tag)) = '42501',
+      true
+    ),
+    'a CAM cannot UPDATE the column directly — refused or filtered to zero rows'
   );
 
   return next is(
-    tests.sqlstate_of(v_cam,
-      format('update public.tags set name = ''Renamed'' where id = %L', v_tag)),
-    '42501',
+    (select colour from public.tags where id = v_tag),
+    null,
+    'the attempted direct recolour changed nothing'
+  );
+
+  return next ok(
+    coalesce(
+      tests.sqlstate_of(v_cam,
+        format('update public.tags set name = ''Renamed'' where id = %L', v_tag)) = '42501',
+      true
+    ),
     'a CAM still cannot RENAME — widening colour did not widen name (F189)'
+  );
+
+  return next is(
+    (select name from public.tags where id = v_tag),
+    'Priority',
+    'the attempted direct rename changed nothing'
   );
 
   return next is(

@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
-import { nonEmptyTrimmed, safeValidate } from "@/lib/validation";
+import { isUuid, nonEmptyTrimmed, safeValidate } from "@/lib/validation";
 
 /**
  * F073 (edit) / F074 (delete) — act on a note the caller wrote (or, for an
@@ -101,8 +101,8 @@ export async function PATCH(
 
   const { id: organisationId, noteId } = await params;
   if (
-    !z.uuid().safeParse(organisationId).success ||
-    !z.uuid().safeParse(noteId).success
+    !isUuid(organisationId) ||
+    !isUuid(noteId)
   ) {
     return NextResponse.json({ error: "That note could not be found." }, { status: 400 });
   }
@@ -178,8 +178,8 @@ export async function DELETE(
 
   const { id: organisationId, noteId } = await params;
   if (
-    !z.uuid().safeParse(organisationId).success ||
-    !z.uuid().safeParse(noteId).success
+    !isUuid(organisationId) ||
+    !isUuid(noteId)
   ) {
     return NextResponse.json({ error: "That note could not be found." }, { status: 400 });
   }

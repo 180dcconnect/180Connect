@@ -1,19 +1,18 @@
 import Link from "next/link";
-import { Sparkles } from "lucide-react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
-import { InlineAlert } from "@/components/ui/inline-alert";
-import { EmptyState } from "@/components/ui/empty-state";
 import {
   emptyStateMessage,
   filterByOwner,
   filterByCity,
   filterByCountry,
   filterByStatus,
+  filterByTags,
+  prioritiseQueue,
   filterByType,
   filterValues,
   LIST_SORT_DIRECTIONS,
@@ -26,9 +25,14 @@ import {
   type ClientListRow,
   type OpenSuppression,
 } from "./visible-clients.ts";
+import { ChevronRight, Sparkles } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/animate-ui/components/radix/tooltip";
 import { BrandSearchBar } from "@/components/brand/search-bar";
 import { ClaimButton } from "./[id]/claim-button";
-import { ClientOwnerBadge } from "./client-owner-badge";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 import { Group, Rise } from "@/components/dashboard-stage";
 import { OriginButton } from "@/components/ui/origin-button";
@@ -36,7 +40,6 @@ import { SearchRail } from "@/components/search-rail";
 import {
   SOURCE_LABELS,
   breakdown,
-  breakdownLimit,
   parseDirection,
   parseField,
   parseStage,
@@ -51,12 +54,25 @@ import {
   formatOutreachStatus,
 } from "@/lib/organisation-format";
 import { PipelineReport } from "./pipeline-report";
+import {
+  captureFilters,
+  describeFilters,
+  isCurrentView,
+  parseFilters,
+  savedViewHref,
+} from "./saved-view-filters";
+import { SavedViewsPanel, type SavedViewSummary } from "./saved-views-panel";
 import { SortMenu as ListSortMenu } from "./sort-menu";
-import { BulkSelectProvider } from "./bulk-select-provider";
-import { ClientRowCheckbox, SelectAllCheckbox } from "./bulk-select-checkbox";
-import { BulkActionBar } from "./bulk-action-bar";
+import { bulkStatusBlockedReason, canBulkUpdateStatus } from "@/lib/bulk-status";
+import { ClientSelectCheckbox, SelectPageCheckbox } from "./bulk-selection";
+import { BulkActionsBar } from "./bulk-actions-bar";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ClientOwnerBadge } from "./client-owner-badge";
 
 type TeamMember = { id: string; full_name: string | null };
+
+/** F066 — a saved view as it comes out of the table. `filters` is jsonb. */
+type SavedViewRow = { id: string; name: string; filters: unknown };
 
 // Next.js 16: searchParams is a Promise on App Router pages — same pattern as
 // src/app/admin/audit-log/page.tsx.
@@ -64,6 +80,10 @@ type SearchParams = Promise<{
   owner?: string;
   q?: string;
   page?: string;
+  // F193 — tags is inherently multi-select (OR logic across selected tags),
+  // so unlike the single-value filters above it can arrive as a string[]
+  // when BrandSearchBar's panel has more than one tag checked.
+  tags?: string | string[];
   // F053/F054/F056: multi-select writes a parameter more than once, so each of
   // these arrives as a string[] when several values are chosen and a string when
   // one is. filterValues() flattens both.
@@ -94,9 +114,39 @@ const ROW_GRID =
   "lg:grid lg:grid-cols-[2rem_minmax(0,1fr)_9rem_10rem_10rem_1rem] lg:items-center lg:gap-4";
 
 /** Reserved width for the claim button, held whether or not the row has one. */
-const CLAIM_SLOT = "w-[8.5rem] shrink-0";
-/** Reserved width for the booklet link, held whether or not the row has one. */
+const CLAIM_SLOT = "w-[6.5rem] shrink-0";
+
+/** Reserved width for the booklet quick-action (F082), same reasoning as CLAIM_SLOT. */
 const BOOKLET_SLOT = "w-[7rem] shrink-0";
+
+/** Short date for the booklet quick-action's hover tooltip, e.g. "18 Aug 2026". */
+function formatBookletDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+const BOOKLET_PREVIEW_CHARS = 160;
+
+/**
+ * A one-line, label-stripped snippet for the hover preview — not the same
+ * rendering as BookletContent (booklet-panel.tsx), which needs the full
+ * "Label:"/dash-list structure to build real headings. A tooltip has room for a
+ * couple of lines, not sections, so this just flattens whitespace and cuts on a
+ * word boundary.
+ */
+function truncateBookletPreview(text: string): string {
+  const flattened = text.replace(/\s+/g, " ").trim();
+  if (flattened.length <= BOOKLET_PREVIEW_CHARS) return flattened;
+  const cut = flattened.slice(0, BOOKLET_PREVIEW_CHARS);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${cut.slice(0, lastSpace > 0 ? lastSpace : BOOKLET_PREVIEW_CHARS)}…`;
+}
+
+/**
+ * F062's checkbox column. Outside the row's Link, on the same reasoning the claim
+ * button is (a control nested in an anchor fires both), and a fixed slot so a row
+ * whose box is disabled still lines up with one whose box is not.
+ */
+const SELECT_SLOT = "flex w-5 shrink-0 justify-center";
 
 /**
  * F051 — the charity list view. Every organisation regardless of import method
@@ -119,13 +169,6 @@ const BOOKLET_SLOT = "w-[7rem] shrink-0";
  * every visit re-queries organisations, so a reassignment shows up on the next
  * normal navigation here, same as any other filter change.
  *
- * F052 (#54) search by organisation name: `q` was already read here, but as part
- * of a GET form, so applying or clearing it meant a full document reload — AC4
- * asks for neither. The bar now soft-navigates on submit (Enter or click) via
- * router.replace; this page keeps reading `q` from the URL exactly as before,
- * so pagination, deep links and searchClients() are unchanged. Search fires on
- * submit rather than per keystroke by design: deliberate over twitchy.
- * 
  * Restyled onto the same bone-ground/floating-card language as /dashboard
  * (docs/design-system.md's *character*, not its public palette — see that
  * page's comment). Filter bar, list, and pagination are three separate cards
@@ -147,6 +190,7 @@ export default async function ClientsPage({
     city,
     country,
     status,
+    tags: tagsParam,
     type: typeFilter,
     stage: stageParam,
     sort: sortParam,
@@ -172,26 +216,105 @@ export default async function ClientsPage({
    */
   const canSelect = hasPermission(authorization.actor.role, "client:edit");
   const canBulkAssign = hasPermission(authorization.actor.role, "ownership:reassign");
+  // F063 — bulk tagging rides the same permission as F191's single assignment
+  // (`tags:manage`, held by CAMs and admins), so both paths to org_tags agree.
+  const canBulkTag = hasPermission(authorization.actor.role, "tags:manage");
+  /**
+   * F062/F064/F065 — which rows this actor may bulk-change status for.
+   * The header checkbox only selects those, but every row is selectable for
+   * commenting (F065) — the narrower status rule rides per-row.
+   */
 
-  const [organisations, openSuppressions, team] = await Promise.all([
-    supabase
-      .from("organisations")
-      .select(
-        "id, legal_name, organisation_type, city, country_code, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
-      )
-      .order("legal_name")
-      .overrideTypes<ClientListRow[], { merge: false }>(),
-    supabase
-      .from("suppressions")
-      .select("organisation_id, status")
-      .in("status", ["pending", "active"])
-      .overrideTypes<OpenSuppression[], { merge: false }>(),
+  // PostgREST caps a single response at 1000 rows — same truncation the
+  // dashboard hit at 1794 orgs. Paginate organisations + suppressions so the
+  // client count and filters reflect the full pipeline.
+  async function fetchAllOrganisations(): Promise<{
+    data: ClientListRow[] | null;
+    error: { message: string } | null;
+  }> {
+    const all: ClientListRow[] = [];
+    let from = 0;
+    const step = 1000;
+    while (true) {
+      const { data, error } = await supabase
+        .from("organisations")
+        .select(
+          "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id), financial_periods(income_band, total_income, period_end), grants(id, amount_awarded, funder_name, award_date)",
+        )
+        .order("legal_name", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, from + step - 1)
+        .overrideTypes<ClientListRow[], { merge: false }>();
+      if (error) return { data: null, error };
+      if (!data || data.length === 0) break;
+      all.push(...data);
+      if (data.length < step) break;
+      from += step;
+    }
+    return { data: all, error: null };
+  }
+
+  async function fetchAllOpenSuppressions(): Promise<{
+    data: OpenSuppression[] | null;
+    error: { message: string } | null;
+  }> {
+    const all: OpenSuppression[] = [];
+    let from = 0;
+    const step = 1000;
+    while (true) {
+      const { data, error } = await supabase
+        .from("suppressions")
+        .select("organisation_id, status")
+        .in("status", ["pending", "active"])
+        .order("organisation_id", { ascending: true })
+        .range(from, from + step - 1)
+        .overrideTypes<OpenSuppression[], { merge: false }>();
+      if (error) return { data: null, error };
+      if (!data || data.length === 0) break;
+      all.push(...data);
+      if (data.length < step) break;
+      from += step;
+    }
+    return { data: all, error: null };
+  }
+
+  const [organisations, openSuppressions, team, allTags, outreachPrefs, savedViews] = await Promise.all([
+    fetchAllOrganisations(),
+    fetchAllOpenSuppressions(),
     supabase
       .from("users")
       .select("id, full_name")
       .eq("role", "cam")
       .order("full_name")
       .overrideTypes<TeamMember[], { merge: false }>(),
+    supabase
+      .from("tags")
+      .select("id, name, colour")
+      .order("name")
+      .overrideTypes<{ id: string; name: string; colour: string | null }[], { merge: false }>(),
+    supabase
+      .from("outreach_preferences")
+      .select("preferred_geographic_reach, preferred_cities, preferred_sectors, preferred_income_bands, prioritise_grant_recipients")
+      // F187 lets admins read every CAM's preferences row, so scope to the
+      // caller explicitly: an unfiltered maybeSingle would match all of them
+      // and error out for admins instead of weighting their own queue.
+      .eq("user_id", authorization.actor.id)
+      .maybeSingle<{
+        preferred_geographic_reach: string[] | null;
+        preferred_cities: string[] | null;
+        preferred_sectors: string[] | null;
+        preferred_income_bands: string[] | null;
+        prioritise_grant_recipients: boolean | null;
+      }>(),
+    // F066 — this CAM's own saved views. The `user_id` filter is belt and braces:
+    // the select policy (matrix §3.17) already scopes the table to auth.uid(), so
+    // this query cannot see anyone else's views with or without it.
+    supabase
+      .from("saved_views")
+      .select("id, name, filters")
+      .eq("user_id", authorization.actor.id)
+      .order("created_at", { ascending: false })
+      .overrideTypes<SavedViewRow[], { merge: false }>(),
   ]);
 
   if (organisations.error) {
@@ -203,9 +326,19 @@ export default async function ClientsPage({
   if (team.error) {
     await reportError(team.error, { operation: "clients.page_team" });
   }
+  // A saved-views read that fails costs the CAM their shortcuts, not their list, so
+  // it is logged and the panel renders empty rather than taking the page down.
+  if (savedViews.error) {
+    await reportError(savedViews.error, { operation: "clients.page_saved_views" });
+  }
+
+  const availableTags = allTags.data ?? [];
+  const tagNameById = new Map(availableTags.map((tag) => [tag.id, tag.name]));
+  // F194 AC2 — the filter picker options and active-filter chips wear the tag's
+  // colour, same as the chips on the profile and /admin/tags.
+  const tagColourById = new Map(availableTags.map((tag) => [tag.id, tag.colour]));
 
   const allVisibleClients = visibleClients(organisations.data ?? [], openSuppressions.data ?? []);
-  
   // Place options come from the data — there is no list of every city a charity
   // could be in, and one that nothing is in would be a dead end (F053 AC3's
   // reasoning, applied to places).
@@ -235,13 +368,23 @@ export default async function ClientsPage({
   const statusValues = filterValues(status);
   const typeValues = filterValues(typeFilter);
 
+  // BrandSearchBar always writes a multi-selected category as repeated params
+  // (see its submitSearch), so this can legitimately arrive as one string or
+  // several — normalise to an array once, here, rather than at every call site.
+  const tagFilter = tagsParam ? (Array.isArray(tagsParam) ? tagsParam : [tagsParam]) : [];
+
   let matchingClients = allVisibleClients;
   matchingClients = filterByOwner(matchingClients, ownerFilter);
   matchingClients = filterByCity(matchingClients, cityValues);
   matchingClients = filterByCountry(matchingClients, countryValues);
   matchingClients = filterByStatus(matchingClients, statusValues);
   matchingClients = filterByType(matchingClients, typeValues);
+  matchingClients = filterByTags(matchingClients, tagFilter);
   matchingClients = searchClients(matchingClients, search);
+
+  // F196 / F197 / F199 / F094: Prioritise matching clients based on the CAM's
+  // geographic, sector, size and grant-history preferences
+  matchingClients = prioritiseQueue(matchingClients, outreachPrefs.data);
   const teamMembers = team.data ?? [];
   // The owner dropdown lists CAMs only (F163), but `?owner=` can name anyone who
   // holds clients — an admin, or a deactivated former member — because the team
@@ -260,13 +403,54 @@ export default async function ClientsPage({
       cityValues.length ||
       countryValues.length ||
       statusValues.length ||
-      typeValues.length,
+      typeValues.length ||
+      tagFilter.length,
   );
   // F166 AC1/AC3: this is the CAM viewing their own filter, not just any owner
   // filter — the heading, count label and empty state read "your clients" so the
   // view reads as its own thing rather than a generic filtered list.
   const isOwnedView =
     authorization.actor.role === "cam" && ownerFilter === authorization.actor.id;
+
+  /**
+   * F066 (#68) — the filter combination this render was built from, and the CAM's
+   * saved views measured against it.
+   *
+   * `activeFilters` is what "save this view" stores: the same params the list
+   * above was filtered by, captured through the shared whitelist so the page and
+   * the server action cannot disagree about what a view is made of.
+   *
+   * A view whose filters equal the active ones is marked as showing — that is the
+   * only thing this page interprets about a saved view. Everything else about it
+   * is a link built from what it stored.
+   */
+  const activeFilters = captureFilters({
+    q: search,
+    city,
+    country,
+    status,
+    type: typeFilter,
+    owner: ownerFilter,
+  });
+  const savedViewSummaries: SavedViewSummary[] = (savedViews.data ?? []).map((row) => {
+    const filters = parseFilters(row.filters);
+    // The owner filter stores a user id. Name it from the team list, or say "you"
+    // when it is the caller — an admin filtering to themselves is not in that list
+    // (it is CAMs only), and reading "a former team member" about yourself is worse
+    // than the raw id it replaces.
+    const ownerName =
+      filters.owner === authorization.actor.id
+        ? "You"
+        : (teamMembers.find((member) => member.id === filters.owner)?.full_name ?? null);
+    return {
+      id: row.id,
+      name: row.name,
+      filters,
+      href: savedViewHref(filters),
+      description: describeFilters(filters, ownerName),
+      isCurrent: isCurrentView(filters, activeFilters),
+    };
+  });
 
   // F060/F061 — order the filtered set, then page it. Sorting after filtering
   // is what makes "sort combines with the active filters" true; sorting before
@@ -287,10 +471,55 @@ export default async function ClientsPage({
     currentPage * PAGE_SIZE,
   );
 
+  // F062/F064/F065 — selectable clients for the header checkbox.
+  // Every row is selectable for commenting; status needs owner-or-admin so the
+  // flag rides per row for the bar to count blocked rows.
+  const selectableClients = canSelect
+    ? clients.map((client) => ({
+        id: client.id,
+        canStatus: canBulkUpdateStatus(authorization.actor, client),
+      }))
+    : [];
+
+  // F087-adjacent: the quick-action tooltip below needs to know, per row on this
+  // page only, whether a booklet already exists (and a preview of it) — scoped to
+  // the current page's 25 ids (not every organisation) since that's all the
+  // tooltip can ever show at once. client_booklets is append-only (F086), so a row
+  // can have several versions; ordering by generated_at desc and keeping the first
+  // hit per id gives the latest without a second round-trip per organisation.
+  const bookletClientIds = canGenerateBooklet ? clients.map((client) => client.id) : [];
+  const { data: bookletRows, error: bookletRowsError } =
+    bookletClientIds.length > 0
+      ? await supabase
+          .from("client_booklets")
+          .select("organisation_id, generated_at, booklet_text")
+          .in("organisation_id", bookletClientIds)
+          .order("generated_at", { ascending: false })
+      : {
+          data: [] as { organisation_id: string; generated_at: string; booklet_text: string }[],
+          error: null,
+        };
+
+  if (bookletRowsError) {
+    await reportError(bookletRowsError, { operation: "clients.page_booklet_existence" });
+  }
+
+  const latestBookletByOrg = new Map<string, { generatedAt: string; preview: string }>();
+  for (const row of bookletRows ?? []) {
+    if (!latestBookletByOrg.has(row.organisation_id)) {
+      latestBookletByOrg.set(row.organisation_id, {
+        generatedAt: row.generated_at,
+        preview: truncateBookletPreview(row.booklet_text),
+      });
+    }
+  }
+
   /**
    * Every link on this page is the current URL with one thing changed, so they
    * all go through here rather than each rebuilding the query string and quietly
    * dropping the parameters it doesn't know about. `undefined` clears a key.
+   * `tags` is the one multi-value key, so a value here may be a string[] —
+   * written back as a repeated param, matching how BrandSearchBar writes it.
    */
   type HrefValue = string | number | string[] | undefined;
   const hrefWith = (changes: Record<string, HrefValue>) => {
@@ -303,6 +532,7 @@ export default async function ClientsPage({
       country: countryValues,
       status: statusValues,
       type: typeValues,
+      tags: tagFilter,
       stage: stageParam,
       sort: sortParam,
       dir: dirParam,
@@ -345,14 +575,12 @@ export default async function ClientsPage({
   const funnel = pipelineFunnel(matchingClients);
   // Every group carries all four stage counts, so the table reads across as that
   // group's own funnel; `stage` only decides which column the top three is
-  // ranked on. Grouped by owner the list is not a top three at all (F167 AC1):
-  // every owner is shown, so the panel is the whole team's workload.
+  // ranked on.
   const breakdownRows = breakdown(
     matchingClients,
     breakdownField,
     breakdownDirection,
     stage,
-    breakdownLimit(breakdownField),
   );
   const funnelCaption = filterActive
     ? `${matchingClients.length.toLocaleString()} filtered`
@@ -375,8 +603,7 @@ export default async function ClientsPage({
   const reviewingOwnClients = ownerFilter === authorization.actor.id;
 
   return (
-    <BulkSelectProvider>
-      <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
         {reviewingOwnClients && <RecordOnboardingStep step="review_clients" />}
         <SearchRail
           className="max-w-6xl"
@@ -400,7 +627,15 @@ export default async function ClientsPage({
                   value,
                 })),
                 ...(ownerFilter === "unassigned" ? [{ category: "Filter by owner", label: "Unassigned", value: "unassigned" }] : []),
-                ...(ownerFilterLabel ? [{ category: "Filter by owner", label: ownerFilterLabel, value: ownerFilter as string }] : [])
+                ...(ownerFilterLabel ? [{ category: "Filter by owner", label: ownerFilterLabel, value: ownerFilter as string }] : []),
+                // F193 — one chip per selected tag, so a three-tag filter reads as
+                // three removable chips rather than one that hides the others.
+                ...tagFilter.map((tagId) => ({
+                  category: "Filter by tag",
+                  label: tagNameById.get(tagId) ?? tagId,
+                  value: tagId,
+                  colour: tagColourById.get(tagId) ?? undefined,
+                })),
               ]}
               params={{
                 "Filter by city": "city",
@@ -408,6 +643,7 @@ export default async function ClientsPage({
                 "Filter by outreach status": "status",
                 "Filter by organisation type": "type",
                 "Filter by owner": "owner",
+                "Filter by tag": "tags",
               }}
               categories={{
                 "Filter by city": uniqueCities.map(c => ({ label: c, value: c })),
@@ -417,7 +653,8 @@ export default async function ClientsPage({
                 "Filter by owner": [
                   { label: "Unassigned", value: "unassigned" },
                   ...teamMembers.map(m => ({ label: m.full_name || "Unnamed CAM", value: m.id }))
-                ]
+                ],
+                "Filter by tag": availableTags.map((t) => ({ label: t.name, value: t.id, colour: t.colour ?? undefined })),
               }}
             />
           }
@@ -456,74 +693,84 @@ export default async function ClientsPage({
           }
         >
 
-          {(organisations.error || openSuppressions.error) && (
-            <Rise>
-              <InlineAlert
-                variant="page"
-                className="mb-8"
-                message="Some data could not be loaded. Refresh and try again."
-              />
+        {(organisations.error || openSuppressions.error || outreachPrefs.error) && (
+          <Rise>
+            <p
+              role="alert"
+              className="rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4 text-sm font-bold text-destructive mb-8"
+            >
+              Some data could not be loaded. Refresh and try again.
+            </p>
+          </Rise>
+        )}
+
+        <Group className="space-y-4">
+          {/* F066 — the CAM's saved filter combinations, above the report they
+              change. Selecting one is a link; saving one posts the filters this
+              render used. */}
+          <Rise>
+            <SavedViewsPanel
+              views={savedViewSummaries}
+              activeFilters={activeFilters}
+              hasActiveFilters={filterActive}
+            />
+          </Rise>
+
+          {/* Where the pipeline stands before the list of it: the four stage
+              totals, the stream between them, and the top three groups. Counts
+              whatever the list is currently showing. */}
+          <Rise>
+            <PipelineReport
+              stages={funnel}
+              selected={stage}
+              stageHref={stageHref}
+              caption={funnelCaption}
+              field={breakdownField}
+              direction={breakdownDirection}
+              rows={breakdownRows}
+              rowHref={rowHref}
+            />
+          </Rise>
+
+          {matchingClients.length > 0 && (
+            <Rise className="flex items-baseline justify-between gap-4 pt-4">
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
+                {matchingClients.length} client{matchingClients.length === 1 ? "" : "s"}
+                {isOwnedView ? " you own" : ""}
+              </p>
+              {/* F060/F061 — the list's own sort. Same sentence control the
+                  breakdown card uses, on its own pair of params, sitting on
+                  the line that already introduces the list. Shown at every
+                  width: the column headers below it are lg-only. */}
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
+                Sorted by{" "}
+                <ListSortMenu
+                  param="listSort"
+                  value={listSortField}
+                  ariaLabel="Sort the client list by"
+                  options={LIST_SORT_FIELDS.map((entry) => ({
+                    value: entry.key,
+                    label: entry.label,
+                  }))}
+                />
+                ,{" "}
+                <ListSortMenu
+                  param="listDir"
+                  value={listSortDirection}
+                  ariaLabel="Sort direction for the client list"
+                  options={LIST_SORT_DIRECTIONS.map((entry) => ({
+                    value: entry,
+                    label: entry,
+                  }))}
+                />
+              </p>
+              {totalPages > 1 && (
+                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
+                  Page {currentPage} of {totalPages}
+                </p>
+              )}
             </Rise>
           )}
-
-          <Group className="space-y-4">
-            {/* Where the pipeline stands before the list of it: the four stage
-                totals, the stream between them, and the grouped breakdown under
-                them — a top three, or every owner when grouped by owner. Counts
-                whatever the list is currently showing. */}
-            <Rise>
-              <PipelineReport
-                stages={funnel}
-                selected={stage}
-                stageHref={stageHref}
-                caption={funnelCaption}
-                field={breakdownField}
-                direction={breakdownDirection}
-                rows={breakdownRows}
-                rowsLabel={breakdownField === "owner" ? "Every owner" : undefined}
-                rowHref={rowHref}
-              />
-            </Rise>
-
-            {matchingClients.length > 0 && (
-              <Rise className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 pt-4">
-                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                  {matchingClients.length} client{matchingClients.length === 1 ? "" : "s"}
-                  {isOwnedView ? " you own" : ""}
-                </p>
-                {/* F060/F061 — the list's own sort. Same sentence control the
-                    breakdown card uses, on its own pair of params, sitting on
-                    the line that already introduces the list. Shown at every
-                    width: the column headers below it are lg-only. */}
-                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                  Sorted by{" "}
-                  <ListSortMenu
-                    param="listSort"
-                    value={listSortField}
-                    ariaLabel="Sort the client list by"
-                    options={LIST_SORT_FIELDS.map((entry) => ({
-                      value: entry.key,
-                      label: entry.label,
-                    }))}
-                  />
-                  ,{" "}
-                  <ListSortMenu
-                    param="listDir"
-                    value={listSortDirection}
-                    ariaLabel="Sort direction for the client list"
-                    options={LIST_SORT_DIRECTIONS.map((entry) => ({
-                      value: entry,
-                      label: entry,
-                    }))}
-                  />
-                </p>
-                {totalPages > 1 && (
-                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                    Page {currentPage} of {totalPages}
-                  </p>
-                )}
-              </Rise>
-            )}
 
             <Rise>
               {clients.length === 0 ? (
@@ -538,13 +785,8 @@ export default async function ClientsPage({
                     className="group/header hidden items-center gap-4 border-b border-black/[0.06] bg-black/[0.015] px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em] text-foreground/30 lg:flex"
                   >
                     {canSelect && (
-                      <span className="flex w-6 shrink-0 items-center justify-center">
-                        {/* F062 AC1 asks for "all currently visible (filtered)
-                            clients", which is the whole filtered set, not the 25
-                            of it this page happens to show. Passing the paginated
-                            slice made "select all" mean "select this page", so a
-                            bulk action on a 60-client filter silently touched 25. */}
-                        <SelectAllCheckbox clientIds={matchingClients.map((c) => c.id)} />
+                      <span className={SELECT_SLOT}>
+                        <SelectPageCheckbox clients={selectableClients} />
                       </span>
                     )}
                     <span className={`${ROW_GRID} min-w-0 flex-1`}>
@@ -570,10 +812,12 @@ export default async function ClientsPage({
                         className="group/row flex items-center gap-4 border-b border-black/[0.06] px-5 py-3.5 last:border-b-0"
                       >
                         {canSelect && (
-                          <span className="flex w-6 shrink-0 items-center justify-center">
-                            <ClientRowCheckbox
-                              organisationId={client.id}
-                              legalName={client.legal_name}
+                          <span className={SELECT_SLOT}>
+                            <ClientSelectCheckbox
+                              clientId={client.id}
+                              clientName={client.legal_name}
+                              canStatus={canBulkUpdateStatus(authorization.actor, client)}
+                              statusNote={bulkStatusBlockedReason(authorization.actor, client)}
                             />
                           </span>
                         )}
@@ -650,17 +894,74 @@ export default async function ClientsPage({
                             the list changes hands. */}
                         {(canGenerateBooklet || canClaim) && (
                           <span className="flex shrink-0 items-center gap-2">
-                            {canGenerateBooklet && (
+                            {canGenerateBooklet && (() => {
+                              const existingBooklet = latestBookletByOrg.get(client.id);
+                              return (
                               <span className={`${BOOKLET_SLOT} flex justify-end`}>
-                                <Link
-                                  className="flex items-center gap-1 rounded-full border border-brand/30 px-3 py-1 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
-                                  href={`/clients/${client.id}?booklet=generate`}
-                                >
-                                  <Sparkles aria-hidden="true" className="h-3 w-3" />
-                                  Booklet
-                                </Link>
+                                {/* Hover preview, in the same light brand-green the
+                                    rest of the dashboard's pills already use. An
+                                    existing booklet links straight to the client's
+                                    saved copy rather than ?booklet=generate, which
+                                    forces a fresh (billed) Gemini call — that's only
+                                    right for a client with no booklet yet. */}
+                                <Tooltip delayDuration={200}>
+                                  <TooltipTrigger asChild>
+                                    <Link
+                                      className="flex items-center gap-1 rounded-full border border-brand/30 px-3 py-1 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
+                                      href={
+                                        existingBooklet
+                                          ? `/clients/${client.id}`
+                                          : `/clients/${client.id}?booklet=generate`
+                                      }
+                                    >
+                                      <Sparkles aria-hidden="true" className="h-3 w-3" />
+                                      Booklet
+                                    </Link>
+                                  </TooltipTrigger>
+                                  <TooltipContent
+                                    className="rounded-2xl border border-brand/15 bg-gradient-to-br from-white to-brand/10 px-4 py-3 text-brand-hover shadow-lg shadow-brand/10"
+                                    showArrow={false}
+                                    side="top"
+                                    sideOffset={10}
+                                  >
+                                    {existingBooklet ? (
+                                      <span className="flex w-64 flex-col gap-1.5">
+                                        <span className="flex items-center gap-1.5">
+                                          <Sparkles aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-brand" />
+                                          <span className="text-sm font-bold">Booklet ready</span>
+                                          <span className="ml-auto text-[10px] font-semibold uppercase tracking-[0.06em] text-brand-hover/50">
+                                            {formatBookletDate(existingBooklet.generatedAt)}
+                                          </span>
+                                        </span>
+                                        {/* Capped-height snippet with a fade to the
+                                            card's own background at the bottom, rather
+                                            than a hard cut, so it reads as "there's
+                                            more" instead of "that's all of it". */}
+                                        <span className="relative block max-h-11 overflow-hidden">
+                                          <span className="text-[12.5px] leading-snug text-brand-hover/70">
+                                            {existingBooklet.preview}
+                                          </span>
+                                          <span
+                                            aria-hidden="true"
+                                            className="absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-[#eaf6de] to-transparent"
+                                          />
+                                        </span>
+                                        <span className="flex items-center gap-1 text-[11px] font-bold text-brand">
+                                          Click to view full booklet
+                                          <ChevronRight aria-hidden="true" className="h-3 w-3" />
+                                        </span>
+                                      </span>
+                                    ) : (
+                                      <span className="flex items-center gap-2 text-sm font-bold">
+                                        <Sparkles aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-brand" />
+                                        Click to create a new booklet
+                                      </span>
+                                    )}
+                                  </TooltipContent>
+                                </Tooltip>
                               </span>
-                            )}
+                              );
+                            })()}
                             {canClaim && (
                               <span className={`${CLAIM_SLOT} flex justify-end`}>
                                 {!client.ownerName && (
@@ -674,37 +975,44 @@ export default async function ClientsPage({
                     ))}
                   </ul>
                 </div>
+
+            )}
+          </Rise>
+
+          {totalPages > 1 && (
+            <Rise className="flex items-center justify-between gap-4 pt-4">
+              {currentPage > 1 ? (
+                <Link
+                  href={pageHref(currentPage - 1)}
+                  className="rounded-full bg-white px-5 py-2 text-[13px] font-bold shadow-sm ring-1 ring-black/[0.06] transition-shadow hover:shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                >
+                  ← Previous
+                </Link>
+              ) : (
+                <div />
+              )}
+              {currentPage < totalPages ? (
+                <Link
+                  href={pageHref(currentPage + 1)}
+                  className="rounded-full bg-white px-5 py-2 text-[13px] font-bold shadow-sm ring-1 ring-black/[0.06] transition-shadow hover:shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                >
+                  Next →
+                </Link>
+              ) : (
+                <div />
               )}
             </Rise>
-
-            {totalPages > 1 && (
-              <Rise className="flex items-center justify-between gap-4 pt-4">
-                {currentPage > 1 ? (
-                  <Link
-                    href={pageHref(currentPage - 1)}
-                    className="rounded-full bg-white px-5 py-2 text-[13px] font-bold shadow-sm ring-1 ring-black/[0.06] transition-shadow hover:shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-                  >
-                    ← Previous
-                  </Link>
-                ) : (
-                  <div />
-                )}
-                {currentPage < totalPages ? (
-                  <Link
-                    href={pageHref(currentPage + 1)}
-                    className="rounded-full bg-white px-5 py-2 text-[13px] font-bold shadow-sm ring-1 ring-black/[0.06] transition-shadow hover:shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-                  >
-                    Next →
-                  </Link>
-                ) : (
-                  <div />
-                )}
-              </Rise>
-            )}
+          )}
           </Group>
         </SearchRail>
-        {canSelect && <BulkActionBar team={teamMembers} canAssign={canBulkAssign} />}
+        {canSelect && (
+          <BulkActionsBar
+            team={teamMembers}
+            canAssign={canBulkAssign}
+            tags={availableTags}
+            canTag={canBulkTag}
+          />
+        )}
       </div>
-    </BulkSelectProvider>
   );
 }

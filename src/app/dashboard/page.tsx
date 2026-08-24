@@ -14,10 +14,21 @@ import {
   type OpenSuppression,
 } from "@/lib/dashboard-metrics";
 import { formatTeamActivities, type FormattedTeamActivity, type RawTeamActivityRow } from "@/lib/team-activity";
+import {
+  buildRecentUpdates,
+  recentUpdatesCutoff,
+  RECENT_UPDATES_SOURCE_FETCH_CAP,
+  type FormattedRecentUpdate,
+  type RecentAuditRow,
+  type RecentNoteRow,
+  type RecentOutreachMessageRow,
+  type RecentReplyEventRow,
+} from "@/lib/recent-updates";
 import { StatCard } from "@/components/stat-card";
 import ProgressMetricCard from "@/components/ui/progress-metric-card";
 import { AttentionList } from "@/components/attention-list";
 import { TeamActivityFeed } from "@/components/team-activity-feed";
+import { RecentUpdatesFeed } from "@/components/recent-updates-feed";
 import { FirstRunGuide } from "@/components/first-run-guide";
 import { OriginButton } from "@/components/ui/origin-button";
 import { OnboardingPreviewBar } from "@/components/onboarding-preview-bar";
@@ -85,22 +96,111 @@ export default async function DashboardPage({
 
   let rows: DashboardOrgRow[] = [];
   let teamActivities: FormattedTeamActivity[] = [];
+  let recentUpdates: FormattedRecentUpdate[] = [];
   let loadFailed = false;
 
   if (canViewClients) {
     const supabase = await createClient();
-    const [organisations, openSuppressions, rawActivity] = await Promise.all([
-      supabase
-        .from("organisations")
-        .select("id, legal_name, outreach_status, owner_id, updated_at, created_at")
-        .overrideTypes<DashboardOrgRow[], { merge: false }>(),
-      supabase
-        .from("suppressions")
-        .select("organisation_id, status")
-        .in("status", ["pending", "active"])
-        .overrideTypes<OpenSuppression[], { merge: false }>(),
-      supabase.rpc("get_recent_team_activity", { p_limit: 10 }),
-    ]);
+    // F028: each recent-updates source is windowed and capped at the query
+    // level; buildRecentUpdates re-filters by the same cutoff after merging,
+    // so a note created before the window but edited inside it still shows.
+    // ISO string, not a Date — postgrest-js interpolates filter values raw,
+    // so a Date would serialize as "Sat Aug 08 2026 … (Coordinated Universal
+    // Time)" and 400 every one of these queries.
+    const updateCutoff = recentUpdatesCutoff().toISOString();
+
+    // Organisations and suppressions are not windowed: the dashboard needs the
+    // full pipeline to compute metrics and to build the org-name map that
+    // recent-updates filters against. PostgREST caps a single response at
+    // 1000 rows, so a plain `.select()` silently truncates once the table grows
+    // past that — the 1794-row staging dataset already hit this, dropping the
+    // two recently-claimed orgs and making recent-updates and needs-attention
+    // appear empty. Paginate until the server returns fewer than a full page.
+    async function fetchAllOrganisations(): Promise<{
+      data: DashboardOrgRow[] | null;
+      error: { message: string } | null;
+    }> {
+      const all: DashboardOrgRow[] = [];
+      let from = 0;
+      const step = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("organisations")
+          .select("id, legal_name, outreach_status, owner_id, updated_at, created_at")
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, from + step - 1)
+          .overrideTypes<DashboardOrgRow[], { merge: false }>();
+        if (error) return { data: null, error };
+        if (!data || data.length === 0) break;
+        all.push(...data);
+        if (data.length < step) break;
+        from += step;
+      }
+      return { data: all, error: null };
+    }
+
+    async function fetchAllOpenSuppressions(): Promise<{
+      data: OpenSuppression[] | null;
+      error: { message: string } | null;
+    }> {
+      const all: OpenSuppression[] = [];
+      let from = 0;
+      const step = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("suppressions")
+          .select("organisation_id, status")
+          .in("status", ["pending", "active"])
+          .order("organisation_id", { ascending: true })
+          .range(from, from + step - 1)
+          .overrideTypes<OpenSuppression[], { merge: false }>();
+        if (error) return { data: null, error };
+        if (!data || data.length === 0) break;
+        all.push(...data);
+        if (data.length < step) break;
+        from += step;
+      }
+      return { data: all, error: null };
+    }
+
+    const [organisations, openSuppressions, rawActivity, rawUpdateNotes, rawUpdateMessages, rawUpdateReplies, rawUpdateAudit] =
+      await Promise.all([
+        fetchAllOrganisations(),
+        fetchAllOpenSuppressions(),
+        supabase.rpc("get_recent_team_activity", { p_limit: 10 }),
+        supabase
+          .from("notes")
+          .select(
+            "id, content, created_at, updated_at, organisation_id, author:users!notes_author_id_fkey(full_name)",
+          )
+          .or(`created_at.gte.${updateCutoff},updated_at.gte.${updateCutoff}`)
+          .order("created_at", { ascending: false })
+          .limit(RECENT_UPDATES_SOURCE_FETCH_CAP),
+        supabase
+          .from("outreach_messages")
+          .select(
+            "id, subject, send_status, sent_at, organisation_id, sender:users!outreach_messages_sent_by_user_id_fkey(full_name)",
+          )
+          .eq("send_status", "sent")
+          .gte("sent_at", updateCutoff)
+          .order("sent_at", { ascending: false })
+          .limit(RECENT_UPDATES_SOURCE_FETCH_CAP),
+        supabase
+          .from("reply_events")
+          .select("id, reply_body, received_at, organisation_id")
+          .gte("received_at", updateCutoff)
+          .order("received_at", { ascending: false })
+          .limit(RECENT_UPDATES_SOURCE_FETCH_CAP),
+        supabase
+          .from("audit_log")
+          .select("id, actor_user_id, action, detail, created_at, target_id")
+          .eq("target_table", "organisations")
+          .in("action", ["status_changed", "ownership_reassigned"])
+          .gte("created_at", updateCutoff)
+          .order("created_at", { ascending: false })
+          .limit(RECENT_UPDATES_SOURCE_FETCH_CAP),
+      ]);
 
     if (organisations.error) {
       await reportError(organisations.error, { operation: "dashboard.page_metrics" });
@@ -119,8 +219,64 @@ export default async function DashboardPage({
       );
     }
 
+    // F028 sources fail independently, like every other section on this page:
+    // reported, not fatal — a failed notes query shouldn't hide the replies
+    // that did load.
+    for (const [source, result] of [
+      ["recent_updates.notes", rawUpdateNotes],
+      ["recent_updates.messages", rawUpdateMessages],
+      ["recent_updates.replies", rawUpdateReplies],
+      ["recent_updates.audit", rawUpdateAudit],
+    ] as const) {
+      if (result.error) {
+        await reportError(result.error, { operation: `dashboard.${source}` });
+      }
+    }
+
     if (!loadFailed) {
       rows = filterActiveSuppressed(organisations.data ?? [], openSuppressions.data ?? []);
+
+      // The org-name map is built from the visible rows only, which is also
+      // how suppressed clients fall out of the feed: buildRecentUpdates drops
+      // entries whose organisation has no name here.
+      const orgNames = new Map(rows.map((row) => [row.id, row.legal_name]));
+
+      // audit_log's actor_user_id and detail.from/detail.to are bare uuids
+      // (jsonb, not an FK PostgREST can embed), resolved in one batch — same
+      // approach as the client timeline page.
+      const updateAuditRows = (rawUpdateAudit.data ?? []) as unknown as RecentAuditRow[];
+      const referencedUserIds = new Set<string>();
+      for (const row of updateAuditRows) {
+        if (row.actor_user_id) referencedUserIds.add(row.actor_user_id);
+        const detail =
+          row.detail && typeof row.detail === "object"
+            ? (row.detail as Record<string, unknown>)
+            : {};
+        if (typeof detail.from === "string") referencedUserIds.add(detail.from);
+        if (typeof detail.to === "string") referencedUserIds.add(detail.to);
+      }
+
+      const updateNames = new Map<string, string | null>();
+      if (referencedUserIds.size > 0) {
+        const { data: referencedUsers } = await supabase
+          .from("users")
+          .select("id, full_name")
+          .in("id", Array.from(referencedUserIds));
+        for (const row of referencedUsers ?? []) {
+          updateNames.set(row.id, row.full_name);
+        }
+      }
+
+      recentUpdates = buildRecentUpdates(
+        {
+          notes: (rawUpdateNotes.data ?? []) as unknown as RecentNoteRow[],
+          outreachMessages: (rawUpdateMessages.data ?? []) as unknown as RecentOutreachMessageRow[],
+          replyEvents: (rawUpdateReplies.data ?? []) as unknown as RecentReplyEventRow[],
+          auditRows: updateAuditRows,
+        },
+        orgNames,
+        updateNames,
+      );
     }
   }
 
@@ -384,6 +540,20 @@ export default async function DashboardPage({
 
               <Rise>
                 <AttentionList items={attentionItems} />
+              </Rise>
+            </Group>
+
+            {/* F028 — what changed across the platform, above who did it. */}
+            <Group className="space-y-4">
+              <Rise className="flex items-baseline justify-between gap-4">
+                <h2 className="text-xl font-semibold font-body tracking-[-0.02em]">Recent updates</h2>
+                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
+                  All clients · past 14 days
+                </p>
+              </Rise>
+
+              <Rise>
+                <RecentUpdatesFeed items={recentUpdates} />
               </Rise>
             </Group>
 

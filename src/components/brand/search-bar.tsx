@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 
 import { EASE, entranceIndexed, entranceSoft, stagger } from "@/components/brand/motion";
 import { LIP, SEARCH_GLASS, SEARCH_GLASS_OPEN } from "@/components/brand/tokens";
+import { tagPillStyle } from "@/lib/tags/tag-colours";
 
 /** Cycles behind the prompt while the field is empty and unfocused. */
 const DEFAULT_SUBJECTS = ["Charities", "Companies", "Grants", "Clients"] as const;
@@ -30,7 +31,13 @@ function rankOption(label: string, query: string): number {
   return l.includes(query) ? 2 : -1;
 }
 
-export type FilterOption = { label: string; value: string };
+/**
+ * F194 — `colour` is optional so only tag options carry it. In the dark glass
+ * panel a colour renders as a swatch dot (the palette's text hues are tuned
+ * for light surfaces, so tinting text here would be unreadable); on the light
+ * chip row below the bar the full pill tint is used instead.
+ */
+export type FilterOption = { label: string; value: string; colour?: string };
 
 /**
  * Demo content, used only when a host page passes no `categories`. The matching
@@ -73,7 +80,7 @@ export function BrandSearchBar({
    */
    params?: Record<string, string>;
    defaultQuery?: string;
-   defaultFilters?: { category: string; label: string; value: string }[];
+   defaultFilters?: (FilterOption & { category: string })[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -81,7 +88,7 @@ export function BrandSearchBar({
   const [subject, setSubject] = useState(0);
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [filterQuery, setFilterQuery] = useState("");
-  const [selectedFilters, setSelectedFilters] = useState<{ category: string; label: string; value: string }[]>(defaultFilters);
+  const [selectedFilters, setSelectedFilters] = useState<(FilterOption & { category: string })[]>(defaultFilters);
   const [, startTransition] = useTransition();
   const [isSearching, setIsSearching] = useState(false);
 
@@ -440,6 +447,7 @@ export function BrandSearchBar({
                                     category: activeFilter as string,
                                     label: option.label,
                                     value: option.value,
+                                    colour: option.colour,
                                   },
                                 ]);
                               }
@@ -450,7 +458,16 @@ export function BrandSearchBar({
                                 : "text-white hover:bg-white/10 hover:text-white"
                             }`}
                           >
-                            <span>{option.label}</span>
+                            <span className="flex items-center gap-2">
+                              {option.colour && (
+                                <span
+                                  aria-hidden="true"
+                                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                                  style={{ backgroundColor: option.colour }}
+                                />
+                              )}
+                              {option.label}
+                            </span>
                             {isSelected && (
                               <Check className="h-4 w-4 text-[#e6f5c0]" />
                             )}
@@ -494,15 +511,29 @@ export function BrandSearchBar({
           the open panel simply covers them. */}
       <div className="flex flex-wrap items-center gap-2 px-2 empty:hidden">
         <AnimatePresence>
-          {selectedFilters.map((filter) => (
+        {selectedFilters.map((filter) => {
+          // F194 AC2 — a coloured tag's chip wears the same pill tint the tag
+          // chips use everywhere else; uncoloured filters keep the bone chip.
+          const pill = tagPillStyle(filter.colour);
+          return (
             <motion.span
               key={`${filter.category}-${filter.value}`}
               initial={{ opacity: 0, scale: 0.8, y: -10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.8, y: -10 }}
               layout
-              className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#f4f4ef] text-[#1a1a1a] px-3 py-1.5 text-[14px] font-medium shadow-sm"
+              style={pill ?? undefined}
+              className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[14px] font-medium shadow-sm ${
+                pill ? "" : "bg-[#f4f4ef] text-[#1a1a1a]"
+              }`}
             >
+              {pill && (
+                <span
+                  aria-hidden="true"
+                  className="h-2 w-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: filter.colour }}
+                />
+              )}
               {filter.label}
               <button
                 type="button"
@@ -511,12 +542,15 @@ export function BrandSearchBar({
                     prev.filter((f) => f.value !== filter.value || f.category !== filter.category)
                   );
                 }}
-                className="hover:bg-black/10 focus:outline-none flex h-4 w-4 items-center justify-center rounded-full bg-black/5 transition-colors text-black/60"
+                className={`hover:bg-black/10 focus:outline-none flex h-4 w-4 items-center justify-center rounded-full transition-colors ${
+                  pill ? "bg-black/5 text-black/50" : "bg-black/5 text-black/60"
+                }`}
               >
                 <X className="h-3 w-3" />
               </button>
             </motion.span>
-          ))}
+          );
+        })}
         </AnimatePresence>
         {(selectedFilters.length > 0 || query) && (
           <button

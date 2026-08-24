@@ -5,36 +5,39 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
-import { InlineAlert } from "@/components/ui/inline-alert";
+import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
+import { splitOutreachHistory, type OutreachMessageRow } from "@/lib/outreach-history";
 import { validateClientEmail } from "@/lib/client-email-validation";
 import {
-  formatImportOrigin,
   formatOrganisationSources,
-  type ImportOriginRow,
   type OrganisationSourceRow,
 } from "@/lib/source-tracking";
-import { groupFieldSources, type FieldSourceRow } from "@/lib/field-sources";
 import { checkWebsiteReachabilityCached } from "@/lib/website-reachability-cache";
-import { safeWebsiteHref, websiteHref } from "@/lib/website-validation";
+import { websiteHref } from "@/lib/website-validation";
 import { formatLocation, formatOutreachStatus } from "@/lib/organisation-format";
+import { ExternalLink } from "lucide-react";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
-import { splitOutreachHistory, type OutreachMessageRow } from "@/lib/outreach-history";
 import { SuppressButton } from "./suppress-button";
-import { LiftSuppressionButton } from "./lift-suppression-button";
 import { ComposeButton } from "./compose-button";
+import { OutreachHistorySection } from "./outreach-history";
 import { BasicInfoPanel } from "./basic-info-panel";
-import { BookletPanel } from "./booklet-panel";
 import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
 import { Pill, SectionCard } from "./section-card";
-import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
+import { TagsSection } from "./tags-section";
+import { BookletPanel } from "./booklet-panel";
+import { deriveSourcesFromSavedRow } from "@/lib/booklet/sources";
+import { formatAttachments, type AttachmentRow } from "@/lib/attachments";
+import { AttachmentsSection } from "./attachments-section";
+import { UploadAttachmentForm } from "./upload-attachment-form";
 import {
-  ownershipRequestAvailability,
-  type OwnershipRequestStatus,
-} from "@/lib/ownership-requests";
-import { RequestOwnershipForm } from "./request-ownership-form";
+  EDIT_SUGGESTION_SELECT,
+  type EditSuggestionRow,
+  restrictedFieldLabel,
+} from "@/lib/edit-suggestions";
+import { SuggestEditSection } from "./suggest-edit-section";
 import { buildNoteList, type NoteRow } from "@/lib/note-history";
 import { NotesSection } from "./notes-section";
 import { AddNoteForm } from "./add-note-form";
@@ -47,12 +50,23 @@ import {
 } from "@/lib/timeline";
 import { TimelineSection } from "./timeline-section";
 import { TimelineRealtimeRefresher } from "./timeline-realtime";
-import { OutreachHistorySection } from "./outreach-history";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
-type LatestSuppression = {
+type SavedBookletRow = {
   id: string;
+  booklet_text: string;
+  website_url: string | null;
+  website_context_used: boolean;
+  generated_at: string;
+};
+
+// F086: how many past versions the page prefetches for the timeline. Capped
+// rather than unbounded — a client regenerated many times over months does not
+// need its entire history loaded on every page view; recent history is what a
+// CAM actually compares against.
+const BOOKLET_HISTORY_LIMIT = 20;
+type LatestSuppression = {
   status: "pending" | "active" | "rejected" | "lifted";
   reason: string;
   created_at: string;
@@ -71,43 +85,6 @@ type OwnerRow = {
  * F069-081) are still separate open tickets; each will slot in here as its own
  * `<section aria-labelledby>`, same shape as "Record sources" and this one, to
  * keep F067 AC2's "each reachable without excessive scrolling" true as they land.
- *
- * F071 (#73) View Notes / F072 (#74) Add Note / F073 (#75) Edit Own Note / F074
- * (#76) Delete Own Note are one such section: every `notes` row for this
- * client, from any CAM (F071 AC1), newest first (F071 AC3). AddNoteForm posts
- * to /api/clients/[id]/notes; NotesSection's inline edit/delete both post to
- * /api/clients/[id]/notes/[noteId] — see @/lib/note-history for the
- * ordering/permission logic shared by all three write paths. F074's own
- * "blocked by" question (soft-delete vs hard-delete) is confirmed: hard
- * delete, no retention anywhere, including in an audit trail — see that
- * route's header comment for the reasoning. None of the three write paths
- * touch `audit_log` — a plain author-owned write doesn't follow
- * docs/audit-log-pattern.md, which scopes that requirement to
- * ownership/status/role/approval changes.
- *
- * F070 (#72) View Previous Emails is one such section: the Outreach card below
- * now shows every outreach_messages row for this client, split into "Sent" and
- * "Not sent" (AC3) — see @/lib/outreach-history for the split/order logic and
- * outreach-history.tsx for the render. Gated on `client:view` like the rest of
- * this page (matches outreach_messages_select_active — read is shared across
- * all active roles, not ownership-scoped), not on `client:contact`, which still
- * gates only ComposeButton within the same card.
- *
- * F075 (#77) View Communication Timeline / F076 (#78) Timeline Event Types:
- * merges notes, sent emails, replies, status changes and ownership handovers
- * into one feed, each entry labelled and visually distinguishable — see
- * @/lib/timeline.ts for the per-source normalisation, the merge/sort, and the
- * event-type label/style maps; timeline-section.tsx for the render;
- * timeline-realtime.tsx for AC3's live-update subscriber. Two things this
- * needed that weren't already in place, both closed by
- * 20260820110000_widen_audit_log_for_client_timeline.sql: `audit_log` was
- * admin-only to SELECT (a CAM/viewer could not have read the
- * status_changed/ownership_reassigned rows at all), and none of
- * notes/outreach_messages/reply_events/audit_log were in the
- * `supabase_realtime` publication (AC3 could not have worked). F076's own
- * "final event type list" open question is resolved by construction: every
- * type in @/lib/timeline.ts's TimelineEventType maps to a real, already-wired
- * data source — there is nowhere to invent a type with nothing behind it.
  *
  * Started as F251 AC1/AC2's minimal client screen (name + suppression state only)
  * — see src/app/clients/page.tsx for that history. Extended here, not replaced.
@@ -141,7 +118,6 @@ export default async function ClientDetailPage({
 }) {
   const authorization = await getCurrentActor("client:view", { route: "/clients/[id]" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
-  const isAdmin = authorization.actor.role === "admin";
 
   const { id } = await params;
   const supabase = await createClient();
@@ -165,6 +141,26 @@ export default async function ClientDetailPage({
   const websiteLink = websiteHref(website);
   const email = validateClientEmail(client.contact_email);
 
+  // F085/F086: every saved version, most recent first, so BookletPanel can render
+  // the current one immediately (no fresh, billed Gemini call on page open) and
+  // list the rest as a timeline a CAM can browse (F086 AC2: a regeneration must
+  // never make a prior version unrecoverable).
+  const { data: bookletVersions, error: bookletVersionsError } = await supabase
+    .from("client_booklets")
+    .select("id, booklet_text, website_url, website_context_used, generated_at")
+    .eq("organisation_id", id)
+    .order("generated_at", { ascending: false })
+    .limit(BOOKLET_HISTORY_LIMIT)
+    .returns<SavedBookletRow[]>();
+
+  if (bookletVersionsError) {
+    await reportError(bookletVersionsError, {
+      operation: "clients.detail_saved_booklet",
+      organisationId: id,
+    });
+  }
+  const savedBooklet = bookletVersions?.[0] ?? null;
+
   // ENRICHMENT_RESULTS is append-only (20260804180000_create_org_children.sql), so
   // the most recently enriched row is "the" mission statement, not the only one.
   const { data: enrichment, error: enrichmentError } = await supabase
@@ -182,6 +178,36 @@ export default async function ClientDetailPage({
     });
   }
 
+  // F191/F192/F193: this client's currently assigned tags, and the full
+  // list of tags for the assign dropdown.
+  const { data: clientTagRows, error: clientTagsError } = await supabase
+    .from("org_tags")
+    .select("tag_id, tags(name, colour)")
+    .eq("organisation_id", id);
+  if (clientTagsError) {
+    await reportError(clientTagsError, {
+      operation: "clients.detail_tags",
+      organisationId: id,
+    });
+  }
+  const clientTags = (clientTagRows ?? [])
+    .filter((row) => row.tags)
+    .map((row) => ({
+      id: row.tag_id,
+      name: (row.tags as unknown as { name: string }).name,
+      colour:
+        (row.tags as unknown as { colour: string | null }).colour ?? null,
+    }));
+
+  const { data: allTagsData, error: allTagsError } = await supabase
+    .from("tags")
+    .select("id, name, colour")
+    .order("name");
+  if (allTagsError) {
+    await reportError(allTagsError, { operation: "clients.detail_all_tags" });
+  }
+  const allTags = allTagsData ?? [];
+
   // The generated Supabase types do not know about this branch's new RPC until the
   // remote schema is regenerated, so narrow its table-shaped result at this boundary.
   const { data: rawSourceRows, error: sourcesError } = await supabase
@@ -197,41 +223,26 @@ export default async function ClientDetailPage({
     (rawSourceRows ?? []) as OrganisationSourceRow[],
   );
 
-  // F044/F069 AC3: field-level provenance, on top of F043's record-level sources
-  // above. Only organisations built through the F037 URL import have this — most
-  // rows simply have nothing here, which formatImportOrigin treats as "no import".
-  const { data: rawImportOriginRows, error: importOriginError } = await supabase
-    .rpc("get_organisation_import_origin", { p_organisation_id: id });
+  // F080: RLS (attachments_select_active) shares read across every active
+  // role, same reasoning as the sources query above. No write path exists yet
+  // (F081) — see 20260823090000_create_attachments.sql's header — so this is
+  // empty for every client today; that is AC3's correct state, not a bug.
+  const { data: attachmentRows, error: attachmentsError } = await supabase
+    .from("attachments")
+    .select(
+      "id, filename, content_type, size_bytes, created_at, uploaded_by_user:users!attachments_uploaded_by_fkey(full_name)",
+    )
+    .eq("organisation_id", id)
+    .order("created_at", { ascending: false });
 
-  if (importOriginError) {
-    await reportError(importOriginError, {
-      operation: "clients.detail_import_origin",
+  if (attachmentsError) {
+    await reportError(attachmentsError, {
+      operation: "clients.detail_attachments",
       organisationId: id,
     });
   }
-  const importOrigin = formatImportOrigin(
-    ((rawImportOriginRows ?? []) as ImportOriginRow[])[0] ?? null,
-  );
-  // Reuses the website link's own safety check (scheme-less strings resolving as
-  // a relative path, unsafe hostnames) rather than re-deriving it: source_url is
-  // free text captured from a CAM-followed link, same trust level as `website`.
-  const importSourceHref = importOrigin ? safeWebsiteHref(importOrigin.sourceUrl) : null;
-
-  // F044: get_field_sources is admin-only (self-checks app.is_admin(), same as
-  // FIELD_DISCREPANCIES §3.16) — only fetched for an admin so a CAM view of this
-  // page doesn't spend a request on a call that's going to be refused anyway.
-  const { data: rawFieldSourceRows, error: fieldSourcesError } = isAdmin
-    ? await supabase.rpc("get_field_sources", { p_organisation_id: id })
-    : { data: null, error: null };
-
-  if (fieldSourcesError) {
-    await reportError(fieldSourcesError, {
-      operation: "clients.detail_field_sources",
-      organisationId: id,
-    });
-  }
-  const fieldSources = groupFieldSources(
-    (rawFieldSourceRows ?? []) as FieldSourceRow[],
+  const attachments = formatAttachments(
+    (attachmentRows ?? []) as unknown as AttachmentRow[],
   );
 
   // Most recent suppression row for this org, whatever its status — pending shows a
@@ -239,7 +250,7 @@ export default async function ClientDetailPage({
   // through to the suppress button.
   const { data: latest } = await supabase
     .from("suppressions")
-    .select("id, status, reason, created_at")
+    .select("status, reason, created_at")
     .eq("organisation_id", id)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -260,8 +271,7 @@ export default async function ClientDetailPage({
 
   // F071/F072/F073/F074: every note against this client, whoever wrote it
   // (F071 AC1). RLS (notes_select_active) shares read across every active
-  // role, so this needs no author filter — same reasoning as the sources
-  // query above.
+  // role, so this needs no author filter.
   const { data: noteRows, error: notesError } = await supabase
     .from("notes")
     .select("id, content, created_at, updated_at, author_id, author:users!notes_author_id_fkey(full_name)")
@@ -270,6 +280,97 @@ export default async function ClientDetailPage({
   if (notesError) {
     await reportError(notesError, { operation: "clients.detail_notes", organisationId: id });
   }
+
+  const canEdit = hasPermission(authorization.actor.role, "client:edit");
+  const canSuppress = canEdit;
+  const ownerId = ownerRow?.owner_id ?? null;
+  const ownerName = ownerRow?.owner?.full_name ?? (ownerId ? "A former team member" : null);
+  const isAdmin = authorization.actor.role === "admin";
+
+  // F165: warn the CAM up front when the client they are viewing is owned by
+  // someone else, so the compose flow explains a block the route would enforce.
+  const ownershipConflict = checkOwnershipConflict({
+    ownerId,
+    ownerName,
+    actorId: authorization.actor.id,
+    actorRole: authorization.actor.role,
+  });
+
+  // F163: admin's CAM picker. Only fetched for an admin — a CAM can't reach the
+  // assign form, so the query would be wasted on every other page view.
+  let team: { id: string; full_name: string | null }[] = [];
+  if (isAdmin) {
+    const { data: teamData, error: teamError } = await supabase
+      .from("users")
+      .select("id, full_name")
+      .eq("role", "cam")
+      .order("full_name");
+    if (teamError) {
+      await reportError(teamError, { operation: "clients.detail_team", organisationId: id });
+    }
+    team = teamData ?? [];
+  }
+
+  const statusLabel = formatOutreachStatus(client.outreach_status);
+  const suppressed = latest?.status === "active";
+  const suppressionPending = latest?.status === "pending";
+
+  // #79/#80/#81 (F077/F078/F079): this client's edit suggestions, fetched without a
+  // status filter and filtered in the component — RLS already scopes what each role
+  // may see (pending rows to every active CAM; authors also their own settled rows;
+  // admins everything), so the query can just ask for the org's rows. CAMs get their
+  // proposal form plus outcome notices; admins get inline decision cards. Viewers
+  // have no write access at all, so the section is not rendered for them.
+  let suggestions: EditSuggestionRow[] = [];
+  if (authorization.actor.role !== "viewer") {
+    const { data: suggestionRows, error: suggestionError } = await supabase
+      .from("edit_suggestions")
+      .select(EDIT_SUGGESTION_SELECT)
+      .eq("organisation_id", id)
+      .order("created_at", { ascending: false });
+    if (suggestionError) {
+      await reportError(suggestionError, {
+        operation: "clients.detail_edit_suggestions",
+        organisationId: id,
+      });
+    }
+    suggestions = (suggestionRows ?? []) as unknown as EditSuggestionRow[];
+  }
+
+  // #23 (F020): the restricted fields are configuration now, not a compile-time
+  // list — the proposal form offers exactly what RESTRICTED_EDIT_FIELDS says is
+  // active (RLS scopes the read to CAMs and admins). The current values come off the
+  // client row already fetched above, so "current vs proposed" reads in one glance.
+  let restrictedFields: { field_name: string; label: string }[] = [];
+  if (authorization.actor.role === "cam") {
+    const { data: fieldRows, error: fieldError } = await supabase
+      .from("restricted_edit_fields")
+      .select("field_name")
+      .eq("active", true)
+      .order("field_name");
+    if (fieldError) {
+      await reportError(fieldError, {
+        operation: "clients.detail_restricted_fields",
+        organisationId: id,
+      });
+    }
+    restrictedFields = (fieldRows ?? []).map((row) => ({
+      field_name: row.field_name,
+      label: restrictedFieldLabel(row.field_name),
+    }));
+  }
+
+  const sensitiveCurrentValues = Object.fromEntries(
+    restrictedFields.map((field) => [
+      field.field_name,
+      client[field.field_name as keyof typeof client] as string | null,
+    ]),
+  ) as Record<string, string | null>;
+
+  const noteList = buildNoteList((noteRows ?? []) as unknown as NoteRow[], {
+    id: authorization.actor.id,
+    role: authorization.actor.role,
+  });
 
   // F070: every outreach message for this client, sent or not. RLS
   // (outreach_messages_select_active) shares read across every active role, so
@@ -332,7 +433,7 @@ export default async function ClientDetailPage({
     .select("id, actor_user_id, action, detail, created_at")
     .eq("target_table", "organisations")
     .eq("target_id", id)
-    .in("action", ["status_changed", "ownership_reassigned"]);
+    .in("action", ["status_changed", "ownership_reassigned", "edit_suggestion_approved", "edit_suggestion_rejected"]);
   if (auditError) {
     await reportError(auditError, { operation: "clients.timeline_audit", organisationId: id });
   }
@@ -359,6 +460,9 @@ export default async function ClientDetailPage({
     const to = row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).to : null;
     if (typeof from === "string") referencedUserIds.add(from);
     if (typeof to === "string") referencedUserIds.add(to);
+    const requestedBy =
+      row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).requested_by : null;
+    if (typeof requestedBy === "string") referencedUserIds.add(requestedBy);
   }
 
   const timelineNames = new Map<string, string | null>();
@@ -379,79 +483,12 @@ export default async function ClientDetailPage({
     {
       notes: (timelineNoteRows ?? []) as unknown as TimelineNoteRow[],
       outreachMessages: (timelineMessageRows ?? []) as unknown as TimelineOutreachRow[],
-      replyEvents: (replyRows ?? []) as ReplyEventRow[],
-      auditRows: (auditRows ?? []) as AuditRow[],
+      replyEvents: (replyRows ?? []) as unknown as ReplyEventRow[],
+      auditRows: (auditRows ?? []) as unknown as AuditRow[],
     },
     timelineNames,
   );
 
-  const canEdit = hasPermission(authorization.actor.role, "client:edit");
-  const canSuppress = canEdit;
-  const ownerId = ownerRow?.owner_id ?? null;
-  const ownerName = ownerRow?.owner?.full_name ?? (ownerId ? "A former team member" : null);
-
-  // F163: admin's CAM picker. Only fetched for an admin — a CAM can't reach the
-  // assign form, so the query would be wasted on every other page view.
-  let team: { id: string; full_name: string | null }[] = [];
-  if (isAdmin) {
-    const { data: teamData, error: teamError } = await supabase
-      .from("users")
-      .select("id, full_name")
-      .eq("role", "cam")
-      .order("full_name");
-    if (teamError) {
-      await reportError(teamError, { operation: "clients.detail_team", organisationId: id });
-    }
-    team = teamData ?? [];
-  }
-
-  const statusLabel = formatOutreachStatus(client.outreach_status);
-  const suppressed = latest?.status === "active";
-  const suppressionPending = latest?.status === "pending";
-
-  // Deliberately not `ownerName`: that falls back to "A former team member" for a
-  // deleted owner, which the warning would read back as a person to go and talk to.
-  const ownershipConflict = checkOwnershipConflict({
-    ownerId,
-    ownerName: ownerRow?.owner?.full_name ?? null,
-    actorId: authorization.actor.id,
-    actorRole: authorization.actor.role,
-  });
-
-  // #408: this CAM's own most recent request for this client, so the conflict warning
-  // can offer the escalation — or, if they have already asked, say so instead of
-  // inviting a second ask the RPC would refuse. Only fetched when a conflict exists;
-  // there is nothing to request otherwise.
-  let ownRequest: { status: OwnershipRequestStatus; decision_note: string | null } | null = null;
-  if (ownershipConflict.hasConflict) {
-    const { data: requestRow, error: requestError } = await supabase
-      .from("ownership_requests")
-      .select("status, decision_note")
-      .eq("organisation_id", id)
-      .eq("requested_by", authorization.actor.id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle<{ status: OwnershipRequestStatus; decision_note: string | null }>();
-    if (requestError) {
-      await reportError(requestError, {
-        operation: "clients.detail_ownership_request",
-        organisationId: id,
-      });
-    }
-    ownRequest = requestRow ?? null;
-  }
-
-  const noteList = buildNoteList((noteRows ?? []) as unknown as NoteRow[], {
-    id: authorization.actor.id,
-    role: authorization.actor.role,
-  });
-
-  const requestAvailability = ownershipRequestAvailability({
-    ownerId,
-    actorId: authorization.actor.id,
-    actorRole: authorization.actor.role,
-    hasPendingRequest: ownRequest?.status === "pending",
-  });
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="mx-auto w-full max-w-5xl space-y-6">
@@ -486,12 +523,7 @@ export default async function ClientDetailPage({
             {ownerId && (
               <p className="text-sm leading-[1.7] text-foreground/50">
                 Owned by{" "}
-                <Link
-                  href={`/team/${ownerId}`}
-                  className="font-bold text-foreground/75 hover:text-brand hover:underline"
-                >
-                  {ownerName}
-                </Link>
+                <span className="font-bold text-foreground/75">{ownerName}</span>
                 {ownerId === authorization.actor.id ? " (you)" : ""}
               </p>
             )}
@@ -516,12 +548,6 @@ export default async function ClientDetailPage({
                 Hidden from the active working list. Outreach is blocked. Only an admin
                 can lift this.
               </p>
-              {isAdmin && (
-                <LiftSuppressionButton
-                  organisationId={client.id}
-                  suppressionId={latest.id}
-                />
-              )}
             </div>
           </Rise>
         )}
@@ -556,9 +582,63 @@ export default async function ClientDetailPage({
               />
             </Rise>
 
+            {/* #79/#80/#81 (F077/F078/F079): sits directly under the values it
+                governs, so "current vs proposed" reads in one glance. CAMs propose;
+                admins decide inline. Viewers are absent because they have no write
+                access at all. */}
+            {authorization.actor.role !== "viewer" && (
+              <Rise>
+                <SuggestEditSection
+                  organisationId={client.id}
+                  actorId={authorization.actor.id}
+                  actorRole={authorization.actor.role}
+                  restrictedFields={restrictedFields}
+                  currentValues={sensitiveCurrentValues}
+                  suggestions={suggestions}
+                />
+              </Rise>
+            )}
+
+            {/* F082 — Generate Client Booklet: kept as its own distinct
+                brand-tinted card rather than wrapped in SectionCard — it's the
+                flagship AI feature, not another plain record field, and right
+                after BasicInfoPanel since a CAM reads this before anything
+                else on the page. */}
             {hasPermission(authorization.actor.role, "client:contact") && (
               <Rise>
-                <BookletPanel organisationId={client.id} />
+                <BookletPanel
+                  organisationId={client.id}
+                  initialWebsiteUrl={
+                    savedBooklet?.website_url ?? (website.status === "reachable" ? website.url : null)
+                  }
+                  savedBooklet={
+                    savedBooklet && {
+                      id: savedBooklet.id,
+                      text: savedBooklet.booklet_text,
+                      websiteUrl: savedBooklet.website_url,
+                      websiteContextUsed: savedBooklet.website_context_used,
+                      generatedAt: savedBooklet.generated_at,
+                      // F087: reconstructed from the stored used/not-used boolean
+                      // and URL — see sources.ts for why this can't drift from
+                      // what a fresh generation's own route response reports.
+                      sources: deriveSourcesFromSavedRow({
+                        websiteContextUsed: savedBooklet.website_context_used,
+                        websiteUrl: savedBooklet.website_url,
+                      }),
+                    }
+                  }
+                  priorVersions={(bookletVersions ?? []).slice(1).map((version) => ({
+                    id: version.id,
+                    text: version.booklet_text,
+                    websiteUrl: version.website_url,
+                    websiteContextUsed: version.website_context_used,
+                    generatedAt: version.generated_at,
+                    sources: deriveSourcesFromSavedRow({
+                      websiteContextUsed: version.website_context_used,
+                      websiteUrl: version.website_url,
+                    }),
+                  }))}
+                />
               </Rise>
             )}
 
@@ -613,7 +693,8 @@ export default async function ClientDetailPage({
                     <dd className="w-full text-sm leading-[1.6]">
                       {websiteLink ? (
                         <a
-                          className={`break-all underline underline-offset-2 transition-colors ${
+                          aria-label={`Tap to open website ${websiteLink} in new tab`}
+                          className={`group inline-flex items-center gap-1.5 break-all underline decoration-1 underline-offset-2 transition-colors ${
                             website.status === "reachable"
                               ? "text-brand-hover hover:text-brand"
                               : "font-bold text-destructive"
@@ -621,8 +702,13 @@ export default async function ClientDetailPage({
                           href={websiteLink}
                           rel="noreferrer"
                           target="_blank"
+                          title="Tap to open website in new tab"
                         >
-                          {websiteLink}
+                          <span className="break-all">{websiteLink}</span>
+                          <ExternalLink
+                            aria-hidden="true"
+                            className="h-3.5 w-3.5 shrink-0 opacity-60 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                          />
                         </a>
                       ) : website.url ? (
                         // Malformed: show what is stored, as text. There is
@@ -632,6 +718,11 @@ export default async function ClientDetailPage({
                         <span className="text-foreground/35">Not provided</span>
                       )}
                     </dd>
+                    {websiteLink && (
+                      <p className="w-full text-[11px] font-medium tracking-wide text-foreground/40">
+                        Tap to open in new tab
+                      </p>
+                    )}
                     {website.message && (
                       <p className="w-full text-[13px] leading-[1.6] text-destructive/80" role="alert">
                         {website.message} Booklet generation may use unreliable or missing
@@ -650,7 +741,9 @@ export default async function ClientDetailPage({
                 hint="Where the information in this client record came from."
               >
                 {sourcesError ? (
-                  <InlineAlert message="Source information could not be loaded. Refresh and try again." />
+                  <p className="mt-4 text-sm font-bold text-destructive" role="alert">
+                    Source information could not be loaded. Refresh and try again.
+                  </p>
                 ) : sources.length === 0 ? (
                   <p className="mt-4 text-sm leading-[1.7] text-foreground/45">
                     No source information recorded.
@@ -658,56 +751,34 @@ export default async function ClientDetailPage({
                 ) : (
                   <ul className="mt-4 flex flex-wrap gap-2">
                     {sources.map((source) => (
-                      // AC2: manual entry reads as a distinct grey pill instead of the
-                      // brand-green used for every API-matched source, so a CAM can
-                      // tell them apart without reading the label text.
                       <li
                         key={source.source}
+                        className="rounded-full bg-brand/10 px-3 py-1.5 text-[13px] font-bold text-brand-hover"
                         title={`First recorded ${new Date(source.first_seen_at).toLocaleDateString("en-GB")}`}
                       >
-                        <Pill tone={source.source === "manual" ? "neutral" : "brand"}>
-                          {source.label}
-                          {source.source_actor_name ? ` · ${source.source_actor_name}` : ""}
-                        </Pill>
+                        {source.label}
+                        {source.source_actor_name ? ` · ${source.source_actor_name}` : ""}
                       </li>
                     ))}
                   </ul>
                 )}
-                {importOriginError ? (
-                  // Same visible-failure contract as `sourcesError` above: a broken
-                  // provenance lookup must not read as "this client was never imported".
-                  <p className="mt-3 text-sm font-bold text-destructive" role="alert">
-                    Import provenance could not be loaded. Refresh and try again.
-                  </p>
-                ) : (
-                  importOrigin &&
-                  importOrigin.fieldLabels.length > 0 && (
-                    // AC3: which fields specifically came from the import, not only
-                    // that an import contributed to the record somewhere.
-                    <p className="mt-3 text-[13px] leading-[1.6] text-foreground/50">
-                      <span className="font-bold text-foreground/65">
-                        {importOrigin.fieldLabels.length}{" "}
-                        field{importOrigin.fieldLabels.length === 1 ? "" : "s"}
-                      </span>{" "}
-                      imported from{" "}
-                      {importSourceHref ? (
-                        <a
-                          className="break-all font-bold text-brand-hover underline underline-offset-2 hover:text-brand"
-                          href={importSourceHref}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          {importOrigin.sourceUrl}
-                        </a>
-                      ) : (
-                        <span className="break-all font-bold text-foreground/65">
-                          {importOrigin.sourceUrl}
-                        </span>
-                      )}
-                      : {importOrigin.fieldLabels.join(", ")}.
-                    </p>
-                  )
-                )}
+              </SectionCard>
+            </Rise>
+
+            <Rise>
+              <SectionCard
+                headingId="attachments-heading"
+                title="Attachments"
+                hint="Files attached to this client."
+              >
+                <AttachmentsSection
+                  organisationId={client.id}
+                  attachments={attachments}
+                  error={Boolean(attachmentsError)}
+                />
+                {/* F081: upload sits inside the same card so the new file
+                    appears in the list directly above it on refresh (AC4). */}
+                {canEdit && <UploadAttachmentForm organisationId={client.id} />}
               </SectionCard>
             </Rise>
 
@@ -725,92 +796,16 @@ export default async function ClientDetailPage({
                 {canEdit && <AddNoteForm organisationId={client.id} />}
               </SectionCard>
             </Rise>
-
-            {isAdmin && (
-              <Rise>
-                <SectionCard
-                  headingId="field-sources-heading"
-                  title="Field sources"
-                  hint="Which source provided each field. Superseded values stay visible so a conflict can be reviewed, not just the one that was kept."
-                >
-                  {fieldSourcesError ? (
-                    <InlineAlert message="Field source information could not be loaded. Refresh and try again." />
-                  ) : fieldSources.length === 0 ? (
-                    <p className="mt-4 text-sm leading-[1.7] text-foreground/45">
-                      No field-level source information recorded.
-                    </p>
-                  ) : (
-                    <dl className="mt-4 divide-y divide-black/[0.05]">
-                      {fieldSources.map((field) => (
-                        <div key={field.fieldName} className="py-3.5 first:pt-0 last:pb-0">
-                          <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                            {field.fieldLabel}
-                          </dt>
-                          <dd className="mt-1.5 flex flex-wrap items-baseline gap-2">
-                            <span className="break-all text-sm leading-[1.6] text-foreground/80">
-                              {field.current?.value ?? "Not recorded"}
-                            </span>
-                            {field.current && <Pill tone="brand">{field.current.sourceLabel}</Pill>}
-                          </dd>
-                          {field.history.length > 0 && (
-                            <div className="mt-2 rounded-lg bg-black/[0.03] p-2.5">
-                              {/* "Previous", not "other sources": a newer import
-                                  from the same source supersedes the old value
-                                  too, and that is an update, not a conflict. */}
-                              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-                                Previous values
-                              </p>
-                              <ul className="mt-1 space-y-1">
-                                {field.history.map((entry, index) => (
-                                  <li
-                                    key={`${entry.source}-${index}`}
-                                    className="flex flex-wrap items-baseline gap-2 text-xs leading-[1.6] text-foreground/55"
-                                  >
-                                    <span className="break-all">{entry.value}</span>
-                                    <span className="font-bold">{entry.sourceLabel}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </dl>
-                  )}
-                </SectionCard>
-              </Rise>
-            )}
           </Group>
 
           <Group className="space-y-4">
             <Rise>
               <SectionCard headingId="ownership-heading" title="Ownership">
                 {ownerId ? (
-                  <>
-                    <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
-                      Owned by{" "}
-                      <Link
-                        href={`/team/${ownerId}`}
-                        className="font-bold text-foreground/85 hover:text-brand hover:underline"
-                      >
-                        {ownerName}
-                      </Link>
-                      {ownerId === authorization.actor.id ? " (you)" : ""}.
-                    </p>
-                    {/* #408: the only sanctioned route past a conflict. A CAM asks; an
-                        admin decides. There is no take-anyway action, here or in the
-                        RPC behind it. */}
-                    {(requestAvailability.available ||
-                      requestAvailability.reason === "already_pending" ||
-                      (ownershipConflict.hasConflict && ownRequest)) && (
-                      <RequestOwnershipForm
-                        organisationId={client.id}
-                        ownerName={ownerRow?.owner?.full_name ?? null}
-                        existingStatus={ownRequest?.status ?? null}
-                        decisionNote={ownRequest?.decision_note ?? null}
-                      />
-                    )}
-                  </>
+                  <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
+                    Owned by <span className="font-bold text-foreground/85">{ownerName}</span>
+                    {ownerId === authorization.actor.id ? " (you)" : ""}.
+                  </p>
                 ) : canEdit ? (
                   <div className="mt-3 space-y-3">
                     <p className="text-sm leading-[1.7] text-foreground/55">
@@ -833,7 +828,16 @@ export default async function ClientDetailPage({
                 )}
               </SectionCard>
             </Rise>
-
+            <Rise>
+              <SectionCard headingId="tags-heading" title="Tags">
+                <TagsSection
+                  organisationId={client.id}
+                  initialClientTags={clientTags}
+                  availableTags={allTags}
+                  canEdit={canEdit}
+                />
+              </SectionCard>
+            </Rise>
             {(isAdmin || ownerId === authorization.actor.id) && (
               <Rise>
                 <SectionCard
@@ -866,10 +870,9 @@ export default async function ClientDetailPage({
                       blocked={suppressed}
                       ownershipBlocked={!suppressed && ownershipConflict.hasConflict}
                       organisationId={client.id}
-                      suppressionReason={suppressed ? latest.reason : undefined}
-                      ownershipWarning={
-                        ownershipConflict.hasConflict ? ownershipConflict.warning : undefined
-                      }
+                      suppressionReason={suppressed ? latest?.reason : undefined}
+                      ownershipWarning={ownershipConflict.hasConflict ? ownershipConflict.warning : undefined}
+                      hasSavedBooklet={savedBooklet !== null}
                     />
                   </div>
                 )}
@@ -899,7 +902,7 @@ export default async function ClientDetailPage({
           </Group>
         </div>
 
-        {/* Full-width, not squeezed into either column: this is the one
+        {/* F075/F076: Full-width, not squeezed into either column: this is the one
             section that reads across every other one on this page — emails,
             replies, notes, status, ownership — so it earns its own row rather
             than fighting a narrow column for space. */}

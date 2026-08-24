@@ -84,6 +84,18 @@ export default async function AdminPage() {
               Decide who gets a client when a CAM asks for one another CAM owns.
             </p>
           </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/edit-suggestions">
+            <h2 className="font-bold">Suggested client edits</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Approve or reject CAM-proposed corrections to sensitive client fields.
+            </p>
+          </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/restricted-fields">
+            <h2 className="font-bold">Restricted client fields</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Choose which client fields CAMs must propose corrections to instead of editing.
+            </p>
+          </Link>
           <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/manual-entries">
             <h2 className="font-bold">Manual client entries</h2>
             <p className="mt-1 text-sm text-foreground/65">Review organisations submitted manually by CAMs.</p>

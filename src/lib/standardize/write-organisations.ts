@@ -480,11 +480,10 @@ export async function promotePendingCharityCommissionRecords(
   const pending = await store.loadPendingRecords("charity_commission");
   const counts = newCounts(pending.length);
 
-  // Loaded once per run, not once per record — cheap for a batch of a few hundred, and
-  // good enough for F042's scope. A record newly inserted earlier in this same batch is
-  // not visible to later matches in the batch; two near-simultaneous duplicates within
-  // one run are a narrower case than the cross-source one this ticket targets, and not
-  // covered by its AC.
+  // Loaded once per run, then augmented after each successful insert so
+  // later records in the same batch see earlier inserts (intra-batch dedup).
+  // Without the push, two raws with the same name+postcode in one batch both
+  // inserted — 756 duplicate pairs in staging (2026-08-11).
   const existingOrganisations = await store.loadExistingOrganisationsForMatching();
 
   // Criteria checked once per record up front and carried through — it's a
@@ -552,6 +551,15 @@ export async function promotePendingCharityCommissionRecords(
     await store.markRecordStatus(record.id, "validated", result.id);
     await recordFieldSourcesOrReport(store, result.id, org, "charity_commission", record);
     counts.inserted++;
+    // Intra-batch dedup: make this newly inserted organisation visible to
+    // subsequent records in the same run. Without this, two raws with the
+    // same name+postcode in one batch both insert (756 duplicate groups in
+    // staging, 2026-08-11). findDuplicateMatch compares legal_name+postcode.
+    existingOrganisations.push({
+      id: result.id,
+      legal_name: org.legal_name,
+      postcode: org.postcode ?? "",
+    });
   }
 
   return counts;
@@ -625,6 +633,11 @@ export async function promotePendingCompaniesHouseRecords(
     await store.markRecordStatus(record.id, "validated", result.id);
     await recordFieldSourcesOrReport(store, result.id, org, "companies_house", record);
     counts.inserted++;
+    existingOrganisations.push({
+      id: result.id,
+      legal_name: org.legal_name,
+      postcode: org.postcode ?? "",
+    });
   }
 
   return counts;
@@ -698,6 +711,11 @@ export async function promotePendingFindThatCharityRecords(
     await store.markRecordStatus(record.id, "validated", result.id);
     await recordFieldSourcesOrReport(store, result.id, org, "find_that_charity", record);
     counts.inserted++;
+    existingOrganisations.push({
+      id: result.id,
+      legal_name: org.legal_name,
+      postcode: org.postcode ?? "",
+    });
   }
 
   return counts;

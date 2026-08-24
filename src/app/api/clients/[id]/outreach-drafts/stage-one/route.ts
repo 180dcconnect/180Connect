@@ -9,6 +9,7 @@ import {
   createStageOneModelCall,
   generateStageOneDraft,
 } from "@/lib/outreach/stage-one-generation";
+import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES } from "@/lib/outreach/stage-one-prompt";
 import {
   checkSuppressionBeforeSend,
   suppressionBlockedMessage,
@@ -19,7 +20,7 @@ import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 export const maxDuration = 60;
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
@@ -35,6 +36,23 @@ export async function POST(
     return NextResponse.json({ error: "That client could not be found." }, { status: 400 });
   }
 
+  const requestBody = await request.json().catch(() => ({}));
+  // The booklet is deliberately NOT part of the request body: F103 reads the saved
+  // booklet (F085/F086) straight from client_booklets so the text reaching the
+  // prompt is exactly what RLS-protected storage holds, never a client-supplied string.
+  const preferences = z
+    .object({
+      length: z.enum(EMAIL_LENGTHS).default("standard"),
+      voice: z.enum(EMAIL_VOICES).default("180dc"),
+      tone: z.enum(EMAIL_TONES).default("balanced"),
+      opening: z.enum(OPENING_APPROACHES).default("mission_led"),
+      closing: z.enum(CLOSING_APPROACHES).default("soft_cta"),
+    })
+    .safeParse(requestBody);
+  if (!preferences.success) {
+    return NextResponse.json({ error: "Choose a valid email length, voice, tone, opening and closing approach, then try again." }, { status: 400 });
+  }
+
   const admin = createAdminClient();
   if (!admin) {
     return NextResponse.json(
@@ -47,16 +65,18 @@ export async function POST(
   const { data: organisation, error: organisationError } = await supabase
     .from("organisations")
     .select(
-      "id, legal_name, organisation_type, website, city, country_code, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
+      "id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
     )
     .eq("id", organisationId)
     .maybeSingle<{
       id: string;
       legal_name: string;
+      trading_name: string | null;
       organisation_type: string;
       website: string | null;
       city: string | null;
       country_code: string | null;
+      geographic_reach: string | null;
       owner_id: string | null;
       owner: { full_name: string | null } | null;
     }>();
@@ -129,12 +149,33 @@ export async function POST(
     );
   }
 
-  const [{ data: contact, error: contactError }, { data: enrichment, error: enrichmentError }] = await Promise.all([
+  const [
+    { data: contact, error: contactError },
+    { data: enrichment, error: enrichmentError },
+    { data: financialPeriod, error: financialError },
+  ] = await Promise.all([
     supabase.from("contacts").select("id, first_name, last_name, job_title").eq("organisation_id", organisationId).order("is_primary", { ascending: false }).order("created_at", { ascending: true }).limit(1).maybeSingle(),
     supabase.from("enrichment_results").select("mission_statement, mission_keywords, sector, sub_sector, news_hooks").eq("organisation_id", organisationId).order("enriched_at", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("financial_periods").select("income_band").eq("organisation_id", organisationId).order("period_end", { ascending: false }).limit(1).maybeSingle(),
   ]);
   if (contactError) await reportError(contactError, { operation: "outreach.stage_one.load_contact", organisationId });
   if (enrichmentError) await reportError(enrichmentError, { operation: "outreach.stage_one.load_context", organisationId });
+  if (financialError) await reportError(financialError, { operation: "outreach.stage_one.load_financial_context", organisationId });
+
+  // F103 AC1: the client's saved booklet (latest version per F085/F086) is passed
+  // to generation as additional context. A missing booklet is not an error —
+  // generation continues on profile data alone (F102), so this is tolerant of a
+  // failed read the same way the enrichment lookup above is.
+  const { data: savedBooklet, error: bookletError } = await supabase
+    .from("client_booklets")
+    .select("booklet_text")
+    .eq("organisation_id", organisationId)
+    .order("generated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ booklet_text: string }>();
+  if (bookletError) {
+    await reportError(bookletError, { operation: "outreach.stage_one.load_booklet", organisationId });
+  }
 
   let callModel;
   try {
@@ -151,10 +192,13 @@ export async function POST(
     organisationId,
     {
       organisationName: organisation.legal_name,
+      tradingName: organisation.trading_name,
       organisationType: organisation.organisation_type,
       website: organisation.website,
       city: organisation.city,
       countryCode: organisation.country_code,
+      geographicReach: organisation.geographic_reach,
+      incomeBand: financialPeriod?.income_band,
       contactName: contact ? [contact.first_name, contact.last_name].filter(Boolean).join(" ") : null,
       contactJobTitle: contact?.job_title,
       missionStatement: enrichment?.mission_statement,
@@ -162,8 +206,10 @@ export async function POST(
       sector: enrichment?.sector,
       subSector: enrichment?.sub_sector,
       newsHooks: enrichment?.news_hooks,
+      booklet: savedBooklet?.booklet_text ?? null,
     },
     callModel,
+    { length: preferences.data.length, voice: preferences.data.voice, tone: preferences.data.tone, opening: preferences.data.opening, closing: preferences.data.closing },
   );
   if ("error" in result) return NextResponse.json({ error: result.error }, { status: 502 });
 
@@ -204,5 +250,5 @@ export async function POST(
     return NextResponse.json({ error: "The draft could not be saved safely. Try again." }, { status: 500 });
   }
 
-  return NextResponse.json({ id: message.id, ...result.draft }, { status: 201 });
+  return NextResponse.json({ id: message.id, ...result.draft, sizeTemplate: result.sizeTemplate }, { status: 201 });
 }

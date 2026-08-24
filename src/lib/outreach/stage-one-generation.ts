@@ -2,7 +2,16 @@ import { generateText } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { logApiHealth } from "../api-health-log.ts";
 import { reportError } from "../error-logging.ts";
-import { buildStageOnePrompt, type StageOneContext } from "./stage-one-prompt.ts";
+import {
+  buildStageOnePrompt,
+  type EmailLength,
+  type EmailVoice,
+  type EmailTone,
+  type OpeningApproach,
+  type ClosingApproach,
+  type SizeTemplate,
+  type StageOneContext,
+} from "./stage-one-prompt.ts";
 
 const TIMEOUT_MS = 30_000;
 const MAX_OUTPUT_TOKENS = 1536;
@@ -45,13 +54,14 @@ export async function generateStageOneDraft(
   organisationId: string,
   context: StageOneContext,
   callModel: CallStageOneModel,
-): Promise<{ draft: StageOneDraft } | { error: string }> {
-  const prompt = buildStageOnePrompt(context);
+  options: { length?: EmailLength; voice?: EmailVoice; tone?: EmailTone; opening?: OpeningApproach; closing?: ClosingApproach } = {},
+): Promise<{ draft: StageOneDraft; sizeTemplate: SizeTemplate } | { error: string }> {
+  const prompt = buildStageOnePrompt(context, options);
   const startedAt = Date.now();
   try {
     const draft = parseDraft(await callModel(prompt));
     logApiHealth("gemini", "outreach.stage_one.generate", true, startedAt, { organisationId });
-    return { draft };
+    return { draft, sizeTemplate: prompt.sizeTemplate };
   } catch (error) {
     logApiHealth("gemini", "outreach.stage_one.generate", false, startedAt, { organisationId });
     await reportError(error, { operation: "outreach.stage_one.generate", organisationId });

@@ -6,6 +6,7 @@ export const PERMISSIONS = [
   "client:view",
   "client:edit",
   "client:contact",
+  "tags:manage",
   "user:manage",
   "ownership:reassign",
   "approval:manage",
@@ -37,7 +38,7 @@ export type AuthorizedProfileResult =
   | { ok: false; reason: PermissionFailureReason };
 
 const ROLE_PERMISSIONS: Record<AppRole, ReadonlySet<Permission>> = {
-  cam: new Set(["client:view", "client:edit", "client:contact"]),
+  cam: new Set(["client:view", "client:edit", "client:contact", "tags:manage"]),
   admin: new Set(PERMISSIONS),
   viewer: new Set(["client:view"]),
 };

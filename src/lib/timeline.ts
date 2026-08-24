@@ -14,13 +14,17 @@
  * and the style map below, invented here rather than found. "Final event type
  * list" (F076's own open question) is resolved by construction, not by
  * asking: every type below maps to a real, already-wired data source
- * (notes, outreach_messages, reply_events, or one of the two audit_log
- * actions this repo actually writes for a client) — there was nowhere to
+ * (notes, outreach_messages, reply_events, or one of the four audit_log
+ * actions this repo writes for a client) — there was nowhere to
  * invent a type with nothing behind it, and AC1's own "and similar" concedes
  * the list is not meant to be exhaustive forever.
  */
 
 import { formatOutreachStatus } from "./organisation-format.ts";
+import {
+  isSensitiveOrgField,
+  SENSITIVE_FIELD_LABELS,
+} from "./edit-suggestions.ts";
 
 export type TimelineEventType =
   | "email_sent"
@@ -28,7 +32,9 @@ export type TimelineEventType =
   | "note_added"
   | "note_edited"
   | "status_changed"
-  | "ownership_reassigned";
+  | "ownership_reassigned"
+  | "edit_applied"
+  | "edit_rejected";
 
 /** F076 AC1 — each entry labelled from this defined, finite set. */
 export const TIMELINE_EVENT_LABEL: Record<TimelineEventType, string> = {
@@ -38,31 +44,39 @@ export const TIMELINE_EVENT_LABEL: Record<TimelineEventType, string> = {
   note_edited: "Note edited",
   status_changed: "Status changed",
   ownership_reassigned: "Ownership changed",
+  edit_applied: "Suggested edit applied",
+  edit_rejected: "Suggested edit rejected",
 };
 
-/** The three tones this app's design system defines (docs/design-system.md), reused rather than inventing new ones. */
+/**
+ * The three tones this app's design system defines (docs/design-system.md), reused
+ * rather than inventing new ones.
+ */
 export type TimelineTone = "brand" | "neutral" | "warn";
+
+/**
+ * How the event dot is drawn. Three states rather than the original two because
+ * three tones × two fills could only distinguish six types and #80/#81 needed an
+ * seventh and eighth: "ring" is the same hue again but drawn as a heavier border
+ * over a faint tint instead of solid ink or a bare outline, so all eight pairings
+ * stay visually distinct at a glance (F076 AC2).
+ */
+export type TimelineFill = "solid" | "hollow" | "ring";
 
 export type TimelineStyle = {
   tone: TimelineTone;
-  /**
-   * F076 AC2 — three tones alone cannot give six event types six distinct
-   * looks, so each tone carries a filled (the "primary" member of its pair —
-   * something created) and a hollow (the "secondary" member — something
-   * received or changed) variant. Six types, six unique {tone, filled} pairs,
-   * asserted by timeline.test.ts so a future seventh type cannot silently
-   * collide with an existing one.
-   */
-  filled: boolean;
+  fill: TimelineFill;
 };
 
 export const TIMELINE_EVENT_STYLE: Record<TimelineEventType, TimelineStyle> = {
-  email_sent: { tone: "brand", filled: true },
-  reply_received: { tone: "brand", filled: false },
-  note_added: { tone: "neutral", filled: true },
-  note_edited: { tone: "neutral", filled: false },
-  status_changed: { tone: "warn", filled: true },
-  ownership_reassigned: { tone: "warn", filled: false },
+  email_sent: { tone: "brand", fill: "solid" },
+  reply_received: { tone: "brand", fill: "hollow" },
+  note_added: { tone: "neutral", fill: "solid" },
+  note_edited: { tone: "neutral", fill: "hollow" },
+  status_changed: { tone: "warn", fill: "solid" },
+  ownership_reassigned: { tone: "warn", fill: "hollow" },
+  edit_applied: { tone: "brand", fill: "ring" },
+  edit_rejected: { tone: "warn", fill: "ring" },
 };
 
 export type TimelineEntry = {
@@ -243,6 +257,45 @@ export function buildOwnershipReassignedEntry(
   };
 }
 
+/**
+ * decide_edit_suggestion (20260822150500) writes `detail: {field, from, to,
+ * requested_by, reason}` — the field is a raw ORGANISATIONS column name, so
+ * SENSITIVE_FIELD_LABELS renders it the way the suggest-edit form named it. `to`
+ * is only set on approval (nothing was written on rejection); `reason` only on
+ * rejection.
+ */
+export function buildEditSuggestionEntry(
+  row: AuditRow,
+  names: ReadonlyMap<string, string | null>,
+): TimelineEntry {
+  const approved = row.action === "edit_suggestion_approved";
+  const fieldKey = detailString(row.detail, "field");
+  const fieldLabel =
+    fieldKey && isSensitiveOrgField(fieldKey)
+      ? SENSITIVE_FIELD_LABELS[fieldKey]
+      : (fieldKey ?? "a field");
+  const to = detailString(row.detail, "to");
+  const reason = detailString(row.detail, "reason");
+  const proposedBy = detailString(row.detail, "requested_by");
+  const proposerName = proposedBy ? resolveName(proposedBy, names) : null;
+
+  const summary = approved
+    ? `Applied a suggested edit to ${fieldLabel}${to ? ` — now "${to}"` : ""}${
+        proposerName ? ` (proposed by ${proposerName})` : ""
+      }.`
+    : `Declined a suggested edit to ${fieldLabel} — the record is unchanged.${
+        reason ? ` Reason: ${reason}` : ""
+      }`;
+
+  return {
+    id: `edit-suggestion-${row.id}`,
+    type: approved ? "edit_applied" : "edit_rejected",
+    timestamp: row.created_at,
+    actorName: resolveName(row.actor_user_id, names),
+    summary,
+  };
+}
+
 export type TimelineSources = {
   notes: readonly NoteRow[];
   outreachMessages: readonly OutreachMessageRow[];
@@ -257,7 +310,7 @@ export type TimelineSources = {
  *
  * F076 AC3 — an `auditRows` entry not matching a recognised `action` is
  * silently dropped, never turned into a generic "unlabelled" entry. Every
- * `TimelineEntry` this function can produce is built by one of the six typed
+ * `TimelineEntry` this function can produce is built by one of the seven typed
  * functions above, each of which hardcodes a valid `TimelineEventType` — there
  * is no code path in this file that can construct an entry without one.
  */
@@ -281,6 +334,11 @@ export function buildTimeline(
       entries.push(buildStatusChangedEntry(row, names));
     } else if (row.action === "ownership_reassigned") {
       entries.push(buildOwnershipReassignedEntry(row, names));
+    } else if (
+      row.action === "edit_suggestion_approved" ||
+      row.action === "edit_suggestion_rejected"
+    ) {
+      entries.push(buildEditSuggestionEntry(row, names));
     }
   }
 

@@ -4,6 +4,7 @@ import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
+import { safeValidate } from "@/lib/validation";
 import {
   MAX_BULK_NOTE_CLIENTS,
   MAX_NOTE_LENGTH,
@@ -62,11 +63,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "The request body must be valid JSON." }, { status: 400 });
   }
 
-  const parsed = bodySchema.safeParse(input);
+  // F222: validation goes through the shared wrapper so error shape stays
+  // consistent with the rest of the app's routes and actions (same as
+  // /api/clients/bulk-tags).
+  const parsed = safeValidate(bodySchema, input);
   if (!parsed.success) {
     logSecurityEvent("validation.rejected", {
       route: "/api/clients/bulk-note",
-      fieldCount: parsed.error.issues.length,
+      fieldCount: Object.keys(parsed.fieldErrors).length,
     });
     return NextResponse.json(
       { error: `Select between 1 and ${MAX_BULK_NOTE_CLIENTS} clients and write a comment.` },

@@ -69,7 +69,6 @@ export function BulkActionsBar({
   const [tagPickerOpen, setTagPickerOpen] = useState(false);
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
   const tagPickerRef = useRef<HTMLDivElement>(null);
-
   const count = ids.length;
   const overStatusLimit = count > MAX_BULK_STATUS_CLIENTS;
   const overNoteLimit = count > MAX_BULK_NOTE_CLIENTS;
@@ -81,8 +80,19 @@ export function BulkActionsBar({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setTagPickerOpen(false);
     };
+    // Click/tap anywhere outside the picker (button included — its own onClick
+    // toggles) closes it, matching how the rest of the bar's controls behave.
+    const onPointerDown = (event: PointerEvent) => {
+      if (tagPickerRef.current && !tagPickerRef.current.contains(event.target as Node)) {
+        setTagPickerOpen(false);
+      }
+    };
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
   }, [tagPickerOpen]);
 
   useEffect(() => {
@@ -290,15 +300,21 @@ export function BulkActionsBar({
                 </button>
               )}
 
-              {/* F063: bulk tag picker. Hidden when the account cannot tag
-                  (viewer) or when no tags exist yet to apply (F188 creates
-                  them under /admin/tags). */}
-              {canTag && tags.length > 0 && (
+              {/* F063: bulk tag picker. Rendered for any account that can tag;
+                  disabled (with a hint) rather than hidden when no tags exist
+                  yet, so discoverability does not depend on F188 having been
+                  used first. */}
+              {canTag && (
                 <div className="relative" ref={tagPickerRef}>
                   <button
                     type="button"
                     className="rounded-full bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-50"
-                    disabled={busy || overTagLimit}
+                    disabled={busy || overTagLimit || tags.length === 0}
+                    title={
+                      tags.length === 0
+                        ? "No tags exist yet — create them under Admin → Tags first."
+                        : undefined
+                    }
                     aria-expanded={tagPickerOpen}
                     onClick={() => {
                       setError(null);

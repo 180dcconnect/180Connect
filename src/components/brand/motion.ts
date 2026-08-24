@@ -167,10 +167,10 @@ export const ctaDisc = (ringColor: string): Variants => ({
  * 100% (fully off right) to -20% of the pill.
  */
 export const ctaWash: Variants = {
-  rest: { x: "0%", transition: { duration: 0.28, ease: EASE } },
+  rest: { x: "0%", transition: { duration: 0.28, ease: EASE, type: "tween" } },
   hover: {
     x: "-60%",
-    transition: { duration: CTA_WASH, ease: EASE, delay: CTA_FILL },
+    transition: { duration: CTA_WASH, ease: EASE, delay: CTA_FILL, type: "tween" },
   },
 };
 
@@ -190,10 +190,11 @@ export const ctaLabel = (restColor: string, hoverColor: string): Variants => ({
  * than waiting on the fill stage — at that scale the wait reads as lag.
  */
 export const ctaArrow = (travel: number, delay: number): Variants => ({
-  rest: { x: 0, transition: { duration: 0.25, ease: EASE } },
+  rest: { x: 0, transition: { duration: 0.25, ease: EASE, type: "tween" } },
   hover: {
     x: [0, travel, -travel, 0],
     transition: {
+      type: "tween",
       duration: delay ? 0.7 : 0.6,
       delay,
       times: [0, 0.45, 0.4501, 1],

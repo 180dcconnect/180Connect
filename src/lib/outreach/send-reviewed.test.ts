@@ -7,7 +7,7 @@ const valid = {
   organisationId: "00000000-0000-4000-a000-000000000001",
   messageId: "00000000-0000-4000-a000-000000000002",
   subject: "Hello",
-  body: "Reviewed body text",
+  body: "<p>Reviewed body text</p>",
   explicitlyApproved: true,
 };
 
@@ -33,6 +33,15 @@ test("blank or missing subject/body are refused before anything can be sent", ()
     for (const value of ["", "   ", undefined]) {
       assert.notEqual(firstError({ ...valid, [field]: value }), "", `${field}=${JSON.stringify(value)} should fail`);
     }
+  }
+});
+
+test("a formatted but visually empty body is refused, not just a blank string", () => {
+  // These are exactly what Tiptap's own empty document looks like, not a
+  // hand-picked edge case — this is the shape validation actually has to
+  // catch when a CAM clears the editor.
+  for (const body of ["<p></p>", "<p><br></p>"]) {
+    assert.notEqual(firstError({ ...valid, body }), "", `body=${JSON.stringify(body)} should fail`);
   }
 });
 

@@ -5,6 +5,7 @@ import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { canSendClientOutreach } from "@/lib/client-email-validation";
 import { reportError } from "@/lib/error-logging";
 import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
+import { emailHtmlToPlainText, sanitizeEmailHtml } from "@/lib/outreach/email-html";
 import { reviewedEmailSchema } from "@/lib/outreach/send-reviewed";
 import { checkSuppressionBeforeSend, suppressionBlockedMessage } from "@/lib/outreach/suppression-check";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -31,7 +32,18 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   }
   const isAdmin = authorization.actor.role === "admin";
 
-  const { organisationId, messageId, subject, body, explicitlyApproved } = parsed.data;
+  const { organisationId, messageId, subject, explicitlyApproved } = parsed.data;
+  // F117: never trust client-side sanitization alone — this is the one place
+  // that decides what actually gets stored and sent, regardless of what
+  // reached this action. Re-checked for real content after sanitizing, not
+  // just after the schema's own check on the raw input: a body built entirely
+  // out of disallowed markup (never producible by the editor itself, but not
+  // ruled out for a request built by hand) could pass schema validation and
+  // still sanitize down to nothing.
+  const body = sanitizeEmailHtml(parsed.data.body);
+  if (emailHtmlToPlainText(body).length === 0) {
+    return { ok: false, message: "Add email content before sending." };
+  }
   const supabase = await createClient();
   const { data: draft, error: draftError } = await supabase
     .from("outreach_messages")
@@ -121,7 +133,12 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
     return { ok: false, message: "This email is already being sent, or was just sent. Refresh to see its current state." };
   }
 
-  const sent = await sendBranchOutreach({ to: decision.recipient, subject, text: body });
+  const sent = await sendBranchOutreach({
+    to: decision.recipient,
+    subject,
+    text: emailHtmlToPlainText(body),
+    html: body,
+  });
 
   if (!sent.ok) {
     // Definite refusal (bad credentials, suppressed-at-provider, malformed

@@ -2,6 +2,7 @@ import {
   describeSendStatus,
   type OutreachHistory as OutreachHistoryData,
 } from "@/lib/outreach-history";
+import { isRichEmailHtml, sanitizeEmailHtml } from "@/lib/outreach/email-html";
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleDateString("en-GB", {
@@ -9,6 +10,26 @@ function formatDate(value: string): string {
     month: "short",
     year: "numeric",
   });
+}
+
+/**
+ * F117: a row's body is either legacy plain text (sent before this feature)
+ * or HTML from the rich-text editor — `isRichEmailHtml` tells them apart so
+ * both keep rendering correctly with no data migration. The HTML branch
+ * re-sanitizes on every render rather than trusting what was stored, so a
+ * write path that ever skipped sanitizing still can't reach
+ * `dangerouslySetInnerHTML` unsanitized.
+ */
+function EmailBodyPreview({ body }: { body: string }) {
+  if (isRichEmailHtml(body)) {
+    return (
+      <div
+        className="mt-2 text-sm text-foreground/80 [&_a]:text-brand [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-black/15 [&_blockquote]:pl-3 [&_blockquote]:text-foreground/70 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 [&_p:last-child]:mb-0 [&_ul]:list-disc [&_ul]:pl-5"
+        dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(body) }}
+      />
+    );
+  }
+  return <p className="mt-2 whitespace-pre-wrap text-sm text-foreground/80">{body}</p>;
 }
 
 /**
@@ -53,9 +74,7 @@ export function OutreachHistorySection({
                     {message.sent_at ? formatDate(message.sent_at) : ""}
                   </span>
                 </summary>
-                <p className="mt-2 whitespace-pre-wrap text-sm text-foreground/80">
-                  {message.body}
-                </p>
+                <EmailBodyPreview body={message.body} />
                 {/* F125: the exact final content plus who delivered it — sent
                     rows are immutable history, so attribution is fixed at send
                     time and falls back for senders since removed from users. */}
@@ -97,9 +116,7 @@ export function OutreachHistorySection({
                     </span>
                   </span>
                 </summary>
-                <p className="mt-2 whitespace-pre-wrap text-sm text-foreground/80">
-                  {message.body}
-                </p>
+                <EmailBodyPreview body={message.body} />
               </details>
             </li>
           ))}

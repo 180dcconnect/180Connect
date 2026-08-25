@@ -330,6 +330,8 @@
 | output_tokens | integer |  | Yes | Response tokens the provider reported | System | Taken from the provider's API response | Same rule as above |
 | total_tokens | integer |  | Yes | Total tokens as the provider reported them | System | Taken from the provider's API response | Stored as reported, may differ slightly from input + output |
 | cost_usd | decimal(12,6) |  | Yes | Cost in US dollars, priced at generation time | System | Computed against MODEL_PRICING when the draft is generated | Blank = unknown cost (no price configured yet); never 0 |
+| prompt_system | text |  | No | Exact system instruction sent to the model | System | Captured verbatim when the draft is generated | Constant today, but stored per row so a future edit never rewrites what an older row says was sent |
+| prompt_user | text |  | No | Exact user-turn prompt sent to the model | System | Built from client context when the draft is generated |  |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 
 ## MODEL_PRICING

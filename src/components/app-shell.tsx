@@ -92,29 +92,14 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
 
     const completedCount = steps.filter((s) => s.done).length;
 
-    // Show whenever eligible, or always in development so you can see and test it live
-    const show = isEligible || process.env.NODE_ENV !== "production";
-
     onboarding = {
       steps,
       completedCount,
       totalCount: steps.length,
-      show,
+      show: isEligible,
     };
   } catch {
-    if (process.env.NODE_ENV !== "production") {
-      onboarding = {
-        steps: ONBOARDING_STEPS.map((s) => ({
-          key: s.key,
-          title: s.title,
-          href: s.href,
-          done: false,
-        })),
-        completedCount: 0,
-        totalCount: ONBOARDING_STEPS.length,
-        show: true,
-      };
-    }
+    // A failed read hides the widget rather than showing fake state.
   }
 
   return (

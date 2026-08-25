@@ -31,10 +31,10 @@ export default function PreviewButtonsPage() {
           </div>
           <div className="flex items-center gap-3">
             <Link
-              href="/preview-guide"
+              href="/dashboard"
               className="rounded-full bg-black/5 px-4 py-2 text-xs font-bold text-foreground transition-colors hover:bg-black/10"
             >
-              ← Back to Guide Preview
+              ← Back to Dashboard
             </Link>
           </div>
         </Rise>

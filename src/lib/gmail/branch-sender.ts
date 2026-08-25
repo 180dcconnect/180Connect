@@ -4,6 +4,8 @@ export type BranchEmail = {
   to: string;
   subject: string;
   text: string;
+  /** F117: sanitized outreach HTML. Omitted, the email sends as plain text only. */
+  html?: string;
   inReplyTo?: string;
   references?: readonly string[];
   threadId?: string;
@@ -40,6 +42,7 @@ export async function sendBranchOutreach(
       to: email.to,
       subject: email.subject,
       text: email.text,
+      html: email.html,
       inReplyTo: email.inReplyTo,
       references: email.references,
     },

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { emailField, nonEmptyTrimmed } from "../validation.ts";
+import { emailHtmlToPlainText } from "./email-html.ts";
 
 /**
  * F123: the payload for sendReviewedEmail. Lives outside the "use server" file so
@@ -15,7 +16,16 @@ export const reviewedEmailSchema = z.object({
   // subject and body already follow.
   recipient: emailField("Add a valid recipient email address before sending."),
   subject: nonEmptyTrimmed(998, "Add a subject before sending."),
-  body: nonEmptyTrimmed(100_000, "Add email content before sending."),
+  // F117: body is HTML from the rich-text editor. A trimmed, non-empty string
+  // is not enough on its own — an editor left as "<p></p>" is non-empty text
+  // with no real content, so this also requires actual text once the markup
+  // is stripped. `emailHtmlToPlainText` is the same function that derives the
+  // plain-text MIME part, so "has content" and "what the plain part contains"
+  // can never disagree.
+  body: z
+    .string()
+    .max(200_000, "Must be 200000 characters or fewer.")
+    .refine((html) => emailHtmlToPlainText(html).length > 0, "Add email content before sending."),
   explicitlyApproved: z.literal(true, {
     error: "Review the email and confirm approval before sending.",
   }),

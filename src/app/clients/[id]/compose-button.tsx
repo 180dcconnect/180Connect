@@ -6,13 +6,14 @@ import { History, Sparkles } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
 import { RichTextEmailEditor } from "@/components/rich-text-email-editor";
 import { sendReviewedEmail } from "./outreach-actions";
+import { validateClientEmail } from "@/lib/client-email-validation";
 import { emailHtmlToPlainText, plainTextToEditorHtml } from "@/lib/outreach/email-html";
 import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
 
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
-type Draft = { id: string; subject: string; body: string; sizeTemplate?: string };
+type Draft = { id: string; subject: string; body: string; sizeTemplate?: string; recipientOnFile: string | null };
 
 const STATUS_MESSAGES = [
   "Checking outreach permissions…",
@@ -106,6 +107,7 @@ export function ComposeButton({
   const [draft, setDraft] = useState<Draft | null>(null);
   // F123: the reviewed content is what actually gets sent, and any edit resets
   // approval. These also drive F111's regenerate-confirm (edits vs draft).
+  const [recipient, setRecipient] = useState("");
   const [subject, setSubject] = useState("");
   // F117: HTML from the rich-text editor, not plain text — compared against
   // `plainTextToEditorHtml(draft.body)` (the AI's plain text in the same
@@ -143,7 +145,12 @@ export function ComposeButton({
     // replaces the visible draft outright (AC2), which would silently throw away
     // any edits the CAM already made to it. Confirm first, but only when there's
     // actually something to lose.
-    if (draft && (subject !== draft.subject || body !== plainTextToEditorHtml(draft.body))) {
+    if (
+      draft &&
+      (recipient !== (draft.recipientOnFile ?? "") ||
+        subject !== draft.subject ||
+        body !== plainTextToEditorHtml(draft.body))
+    ) {
       if (!window.confirm("Regenerating will replace this draft and discard your edits. Continue?")) {
         return;
       }
@@ -188,6 +195,7 @@ export function ComposeButton({
       }
       const nextDraft = payload as Draft;
       setDraft(nextDraft);
+      setRecipient(nextDraft.recipientOnFile ?? "");
       setSubject(nextDraft.subject);
       setBody(plainTextToEditorHtml(nextDraft.body));
       setGeneration((current) => current + 1);
@@ -207,6 +215,7 @@ export function ComposeButton({
     const result = await sendReviewedEmail({
       organisationId,
       messageId: draft.id,
+      recipient,
       subject,
       body,
       explicitlyApproved: approved,
@@ -402,7 +411,13 @@ export function ComposeButton({
         </div>
       )}
 
-      {draft && !busy && (
+      {draft && !busy && (() => {
+        const recipientValidation = validateClientEmail(recipient);
+        const recipientMismatch =
+          recipientValidation.status === "valid" &&
+          Boolean(draft.recipientOnFile) &&
+          recipientValidation.value !== draft.recipientOnFile!.trim().toLowerCase();
+        return (
         <div className="mt-5 space-y-3">
           <div>
             <h3 className="text-sm font-bold" id="email-review-heading">Review generated draft</h3>
@@ -413,6 +428,31 @@ export function ComposeButton({
               Size tone template: {sizeTemplateLabel(draft.sizeTemplate)}
             </p>
           </div>
+          <label className="block text-xs font-bold text-foreground/65">
+            Recipient
+            <input
+              aria-describedby={recipientValidation.status !== "valid" ? "recipient-error" : recipientMismatch ? "recipient-mismatch-warning" : undefined}
+              aria-invalid={recipientValidation.status !== "valid"}
+              className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+              onChange={(event) => { setRecipient(event.target.value); setApproved(false); }}
+              value={recipient}
+            />
+          </label>
+          {/* F116 AC2: same format rule F045 uses (validateClientEmail), reused
+              client-side so the CAM sees this before ever attempting to send —
+              send-reviewed.ts enforces the identical rule server-side regardless. */}
+          {recipientValidation.status !== "valid" && (
+            <p className="text-xs font-bold text-red-800" id="recipient-error" role="alert">
+              {recipientValidation.message}
+            </p>
+          )}
+          {/* F116 AC3: advisory only, not a block — a CAM may deliberately send to
+              an address other than the one on file (e.g. a different contact). */}
+          {recipientMismatch && (
+            <p className="text-xs font-bold text-amber-800" id="recipient-mismatch-warning" role="alert">
+              This doesn&rsquo;t match the client&rsquo;s email on file ({draft.recipientOnFile}). Double-check before sending.
+            </p>
+          )}
           <label className="block text-xs font-bold text-foreground/65">
             Subject
             <input
@@ -457,7 +497,13 @@ export function ComposeButton({
             I have reviewed the recipient, subject and body and approve this email for sending.
           </label>
           <OriginButton
-            disabled={!approved || sending || !subject.trim() || emailHtmlToPlainText(body).length === 0}
+            disabled={
+              !approved ||
+              sending ||
+              recipientValidation.status !== "valid" ||
+              !subject.trim() ||
+              emailHtmlToPlainText(body).length === 0
+            }
             onClick={send}
             type="button"
           >
@@ -467,7 +513,8 @@ export function ComposeButton({
             {sendMessage ?? "Not sent — explicit human review and send are required."}
           </p>
         </div>
-      )}
+        );
+      })()}
     </section>
   );
 }

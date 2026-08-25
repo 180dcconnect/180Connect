@@ -32,7 +32,7 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   }
   const isAdmin = authorization.actor.role === "admin";
 
-  const { organisationId, messageId, subject, explicitlyApproved } = parsed.data;
+  const { organisationId, messageId, recipient, subject, explicitlyApproved } = parsed.data;
   // F117: never trust client-side sanitization alone — this is the one place
   // that decides what actually gets stored and sent, regardless of what
   // reached this action. Re-checked for real content after sanitizing, not
@@ -47,7 +47,7 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   const supabase = await createClient();
   const { data: draft, error: draftError } = await supabase
     .from("outreach_messages")
-    .select("id, organisation_id, contact_id, send_status, sent_by_user_id, contacts(email), organisations(contact_email)")
+    .select("id, organisation_id, contact_id, send_status, sent_by_user_id")
     .eq("id", messageId)
     .eq("organisation_id", organisationId)
     .maybeSingle();
@@ -89,11 +89,12 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
     };
   }
 
-  const contact = Array.isArray(draft.contacts) ? draft.contacts[0] : draft.contacts;
-  const organisation = Array.isArray(draft.organisations)
-    ? draft.organisations[0]
-    : draft.organisations;
-  const decision = canSendClientOutreach(contact?.email ?? organisation?.contact_email, explicitlyApproved);
+  // F116: the recipient is whatever the CAM reviewed and approved, not a value
+  // re-derived from the contact/organisation record — same rule subject and body
+  // already follow. The editor warns on a mismatch against the record but does
+  // not block one; this is the only server-side gate, re-checking the exact
+  // format rule F045 uses regardless of what the client-side check already did.
+  const decision = canSendClientOutreach(recipient, explicitlyApproved);
   if (!decision.allowed) return { ok: false, message: decision.warning };
 
   // Save the exact reviewed content first, and REQUIRE the write to have matched:

@@ -6,6 +6,7 @@ import { reviewedEmailSchema } from "./send-reviewed.ts";
 const valid = {
   organisationId: "00000000-0000-4000-a000-000000000001",
   messageId: "00000000-0000-4000-a000-000000000002",
+  recipient: "client@example.org",
   subject: "Hello",
   body: "<p>Reviewed body text</p>",
   explicitlyApproved: true,
@@ -42,6 +43,12 @@ test("a formatted but visually empty body is refused, not just a blank string", 
   // catch when a CAM clears the editor.
   for (const body of ["<p></p>", "<p><br></p>"]) {
     assert.notEqual(firstError({ ...valid, body }), "", `body=${JSON.stringify(body)} should fail`);
+  }
+});
+
+test("a missing or malformed recipient is refused before anything can be sent", () => {
+  for (const recipient of ["", "   ", undefined, "not-an-email", "client@"]) {
+    assert.notEqual(firstError({ ...valid, recipient }), "", `recipient=${JSON.stringify(recipient)} should fail`);
   }
 });
 

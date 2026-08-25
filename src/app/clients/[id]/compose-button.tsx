@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { History, Sparkles } from "lucide-react";
+import { OriginButton } from "@/components/ui/origin-button";
+import { sendReviewedEmail } from "./outreach-actions";
 import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
 
@@ -100,8 +102,13 @@ export function ComposeButton({
   historyHref?: string;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [subjectValue, setSubjectValue] = useState("");
-  const [bodyValue, setBodyValue] = useState("");
+  // F123: the reviewed content is what actually gets sent, and any edit resets
+  // approval. These also drive F111's regenerate-confirm (edits vs draft).
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [approved, setApproved] = useState(false);
+  const [sendMessage, setSendMessage] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [warning, setWarning] = useState<Warning | null>(
@@ -125,7 +132,7 @@ export function ComposeButton({
     // replaces the visible draft outright (AC2), which would silently throw away
     // any edits the CAM already made to it. Confirm first, but only when there's
     // actually something to lose.
-    if (draft && (subjectValue !== draft.subject || bodyValue !== draft.body)) {
+    if (draft && (subject !== draft.subject || body !== draft.body)) {
       if (!window.confirm("Regenerating will replace this draft and discard your edits. Continue?")) {
         return;
       }
@@ -170,13 +177,31 @@ export function ComposeButton({
       }
       const nextDraft = payload as Draft;
       setDraft(nextDraft);
-      setSubjectValue(nextDraft.subject);
-      setBodyValue(nextDraft.body);
+      setSubject(nextDraft.subject);
+      setBody(nextDraft.body);
+      setApproved(false);
+      setSendMessage(null);
     } catch {
       setError("Could not reach the server. Check your connection and try again.");
     } finally {
       setBusy(false);
     }
+  }
+
+  async function send() {
+    if (!draft) return;
+    setSending(true);
+    setSendMessage(null);
+    const result = await sendReviewedEmail({
+      organisationId,
+      messageId: draft.id,
+      subject,
+      body,
+      explicitlyApproved: approved,
+    });
+    setSendMessage(result.message);
+    if (result.ok) setDraft(null);
+    setSending(false);
   }
 
   const historyLink = historyHref && (
@@ -369,8 +394,8 @@ export function ComposeButton({
         <div className="mt-5 space-y-3">
           <div>
             <h3 className="text-sm font-bold" id="email-review-heading">Review generated draft</h3>
-            <p className="mt-1 text-xs text-foreground/45">
-              Saved as a draft. Review and edit it before a separate human send action is made available.
+            <p className="mt-1 text-xs text-foreground/55">
+              Saved as a draft. Review and edit it, then approve below to send it from the branch mailbox.
             </p>
             <p className="mt-1 text-xs text-foreground/65">
               Size tone template: {sizeTemplateLabel(draft.sizeTemplate)}
@@ -378,22 +403,23 @@ export function ComposeButton({
           </div>
           <label className="block text-xs font-bold text-foreground/65">
             Subject
-            <input
-              className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-              onChange={(event) => setSubjectValue(event.target.value)}
-              value={subjectValue}
-            />
+            <input className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" onChange={(event) => { setSubject(event.target.value); setApproved(false); }} value={subject} />
           </label>
           <label className="block text-xs font-bold text-foreground/65">
             Body
-            <textarea
-              className="mt-1 min-h-64 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm leading-relaxed"
-              onChange={(event) => setBodyValue(event.target.value)}
-              value={bodyValue}
-            />
+            {/* key={draft.id}: a regenerated draft replaces any edits and resets
+                approval, so the reviewer always sees exactly what will be sent. */}
+            <textarea key={draft.id} className="mt-1 min-h-64 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm leading-relaxed" onChange={(event) => { setBody(event.target.value); setApproved(false); }} value={body} />
           </label>
+          <label className="flex items-start gap-2 text-xs font-bold text-foreground/70">
+            <input checked={approved} className="mt-0.5" onChange={(event) => setApproved(event.target.checked)} type="checkbox" />
+            I have reviewed the recipient, subject and body and approve this email for sending.
+          </label>
+          <OriginButton disabled={!approved || sending || !subject.trim() || !body.trim()} onClick={send} type="button">
+            {sending ? "Sending…" : "Send reviewed email"}
+          </OriginButton>
           <p className="text-xs font-bold text-amber-800" role="status">
-            Not sent — explicit human review and send are required.
+            {sendMessage ?? "Not sent — explicit human review and send are required."}
           </p>
         </div>
       )}

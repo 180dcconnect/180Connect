@@ -168,6 +168,44 @@ describe("buildRecentUpdates — normal data (F028 testing notes)", () => {
     }
   });
 
+  it("gives every entry an actor-first sentence so rows read naturally", () => {
+    const feed = buildRecentUpdates(
+      {
+        notes: [noteRow({ id: "note-a", updated_at: "2026-08-14T10:00:00Z" })],
+        outreachMessages: [messageRow({ id: "msg-a" })],
+        replyEvents: [replyRow({ id: "reply-a" })],
+        auditRows: [
+          auditRow({ id: "status-a", created_at: "2026-08-12T09:00:00Z" }),
+          auditRow({
+            id: "ownership-a",
+            action: "ownership_reassigned",
+            created_at: "2026-08-13T16:00:00Z",
+            detail: { from: CAM_A, to: CAM_B, reason: "Handover" },
+          }),
+        ],
+      },
+      ORG_NAMES,
+      NAMES,
+      NOW,
+    );
+
+    // Newest first. A reply inverts the sentence: the client is its own
+    // subject, so the client name doesn't trail as well.
+    assert.deepEqual(
+      feed.map((entry) => ({
+        sentence: `${entry.subjectName} ${entry.actionPhrase}${entry.mentionsClient ? ` ${entry.orgName}` : ""}`,
+      })),
+      [
+        { sentence: "Amnesty International replied to your outreach" },
+        { sentence: "Ada Lovelace edited a note on Oxford Homeless Project" },
+        { sentence: "Ada Lovelace added a note on Oxford Homeless Project" },
+        { sentence: "Bashir Bobboi reassigned ownership of Amnesty International" },
+        { sentence: "Ada Lovelace sent an email to Oxford Homeless Project" },
+        { sentence: "Bashir Bobboi updated the pipeline status on Amnesty International" },
+      ],
+    );
+  });
+
   it("drops entries for organisations missing from the visible set (e.g. suppressed)", () => {
     const feed = buildRecentUpdates(
       {

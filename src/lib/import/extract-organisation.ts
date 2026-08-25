@@ -319,19 +319,106 @@ function addressFrom(node: JsonLdNode | null): {
   };
 }
 
-/** Two-letter code, accepting the handful of full names a UK site actually writes. */
+/**
+ * Aliases for countries whose common English name differs from the CLDR short
+ * name that Intl.DisplayNames produces. Kept to unambiguous cases — "Congo"
+ * (two countries), "Korea" (two), "India"-style short forms that CLDR already
+ * handles — are deliberately absent rather than guessed.
+ */
+const COUNTRY_ALIASES: Readonly<Record<string, string>> = {
+  holland: "NL",
+  "czech republic": "CZ",
+  "ivory coast": "CI",
+  "cape verde": "CV",
+  "east timor": "TL",
+  burma: "MM",
+  swaziland: "SZ",
+  macedonia: "MK",
+  vatican: "VA",
+};
+
+/**
+ * Lowercases, strips diacritics and punctuation, and collapses spacing so
+ * "Côte d'Ivoire", "cote divoire" and "COTE D'IVOIRE" all match one key.
+ */
+function normaliseForMatch(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+let countryNamesByCode: ReadonlyMap<string, string> | null = null;
+
+/**
+ * Every ISO 3166-1 alpha-2 code mapped from its English short name, built once
+ * from the runtime's own CLDR data rather than a hand-typed 249-row table that
+ * would silently rot. Codes the CLDR does not name come back as the code
+ * itself under fallback:"code", which is exactly how they are filtered out.
+ */
+function countryNameIndex(): ReadonlyMap<string, string> {
+  if (countryNamesByCode) return countryNamesByCode;
+  const display = new Intl.DisplayNames(["en"], { type: "region", fallback: "code" });
+  const index = new Map<string, string>();
+  for (let first = 65; first <= 90; first++) {
+    for (let second = 65; second <= 90; second++) {
+      const code = String.fromCharCode(first, second);
+      const name = display.of(code);
+      if (!name || name === code) continue;
+      // Judge the normalised form, not raw punctuation — CLDR writes
+      // "Côte d’Ivoire" with a typographic apostrophe an ASCII-only check
+      // would reject.
+      const key = normaliseForMatch(name);
+      if (!key || /[^a-z ]/.test(key)) continue;
+      index.set(key, code);
+    }
+  }
+  countryNamesByCode = index;
+  return index;
+}
+
+/**
+ * A two-letter country code from whatever form a site states its country in —
+ * "NG", "Nigeria", "Côte d'Ivoire", anything the CLDR names.
+ *
+ * Named forms are checked before the two-letter shortcut, or "UK" — which is
+ * not the ISO code for the United Kingdom — would pass straight through as
+ * "UK".
+ */
 export function normaliseCountry(value: string | null): string | null {
   if (!value) return null;
   const text = value.trim().toLowerCase();
-  // Named forms are checked before the two-letter shortcut, or "UK" — which is not
-  // the ISO code for the United Kingdom — would pass straight through as "UK".
   if (/united kingdom|great britain|^uk$|^gb$|england|scotland|wales|northern ireland/.test(text)) {
     return "GB";
   }
   if (/^ireland$|republic of ireland/.test(text)) return "IE";
   if (/united states|^usa$/.test(text)) return "US";
   if (/^[a-z]{2}$/.test(text)) return text.toUpperCase();
-  return null;
+
+  const key = normaliseForMatch(text);
+  return COUNTRY_ALIASES[key] ?? countryNameIndex().get(key) ?? null;
+}
+
+/**
+ * Country inferred from the domain's ccTLD — wakamate.ng → NG, example.co.uk →
+ * GB — as the weakest kind of evidence, used only when the page states no
+ * country of its own. Generic TLDs (.com, .org, .io …) are three characters or
+ * longer, so a two-character public suffix is by definition a country code;
+ * .uk is the one ccTLD that is not its own ISO code.
+ */
+export function countryFromHost(url: string): string | null {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  const tld = host.split(".").pop() ?? "";
+  if (!/^[a-z]{2}$/.test(tld)) return null;
+  return tld === "uk" ? "GB" : tld.toUpperCase();
 }
 
 const SOCIAL_HOSTS = [
@@ -520,10 +607,12 @@ export function extractOrganisation(html: string, finalUrl: string): WebsiteExtr
     addressLine1: address.addressLine1,
     city: address.city ? normalizeCity(address.city) : null,
     postcode,
-    // A UK register number or a UK postcode is stronger evidence of country than
-    // anything else on a page, and most sites never state a country at all.
+    // Evidence of country, strongest first: the site's own stated address, then
+    // a UK register number or UK-format postcode, then the ccTLD — a .ng domain
+    // is weak but honest evidence that never contradicts a stronger statement.
     countryCode: address.countryCode
-      ?? (charity || companyNumber || postcode ? "GB" : null),
+      ?? (charity || companyNumber || postcode ? "GB" : null)
+      ?? countryFromHost(finalUrl),
     charity,
     companyNumber,
     website,

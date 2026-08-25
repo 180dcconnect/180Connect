@@ -14,6 +14,8 @@ export type StageTwoGenerationInsert = {
   output_tokens: number | null;
   total_tokens: number | null;
   cost_usd: number | null;
+  prompt_system: string;
+  prompt_user: string;
 };
 
 export function buildStageTwoGenerationInsert(input: {
@@ -26,6 +28,7 @@ export function buildStageTwoGenerationInsert(input: {
     totalTokens: number | undefined;
   };
   costUsd: number | null;
+  prompt: { system: string; user: string };
 }): StageTwoGenerationInsert {
   return {
     outreach_message_id: input.outreachMessageId,
@@ -38,5 +41,11 @@ export function buildStageTwoGenerationInsert(input: {
     output_tokens: input.usage.outputTokens ?? null,
     total_tokens: input.usage.totalTokens ?? null,
     cost_usd: input.costUsd,
+    // NOT NULL in ai_generations since F112 (20260901100000): the exact prompt
+    // sent, stored verbatim per row. Omitting either column fails every real
+    // insert at runtime — see this file's header for the F113 precedent that
+    // makes the regression test below exist.
+    prompt_system: input.prompt.system,
+    prompt_user: input.prompt.user,
   };
 }

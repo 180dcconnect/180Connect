@@ -57,7 +57,7 @@
 --               | refresh; noted here so the gap is deliberate, not missed.
 --   Approved by   | Bashir (Project Leader), 25 Aug 2026.
 --
--- Reversibility: paired rollback in ../rollback/20260901090000_send_reviewed_outreach_safety.down.sql
+-- Reversibility: paired rollback in ../rollback/20260901110000_send_reviewed_outreach_safety.down.sql
 
 -- ---------------------------------------------------------------------------
 -- The claim column

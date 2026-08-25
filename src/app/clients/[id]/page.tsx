@@ -643,6 +643,29 @@ export default async function ClientDetailPage({
               </Rise>
             )}
 
+            {/* Styled to match BookletPanel directly above it — both are
+                one-shot Gemini-backed actions, so they read as a pair rather
+                than one flagship feature and one plain bordered card. */}
+            {hasPermission(authorization.actor.role, "client:contact") && (
+              <Rise>
+                <ComposeButton
+                  blocked={suppressed}
+                  ownershipBlocked={!suppressed && ownershipConflict.hasConflict}
+                  historyHref={
+                    hasPermission(authorization.actor.role, "platform-settings:manage")
+                      ? `/admin/ai-generations?client=${client.id}`
+                      : undefined
+                  }
+                  organisationId={client.id}
+                  suppressionReason={suppressed ? latest?.reason : undefined}
+                  ownershipWarning={
+                    ownershipConflict.hasConflict ? ownershipConflict.warning : undefined
+                  }
+                  hasSavedBooklet={savedBooklet !== null}
+                />
+              </Rise>
+            )}
+
             {/* Email and website were two near-identical cards — same
                 heading-plus-validity-pill shape, same failure copy — so they
                 read as one "can we actually reach them?" card instead. */}
@@ -867,14 +890,6 @@ export default async function ClientDetailPage({
 
                 {hasPermission(authorization.actor.role, "client:contact") && (
                   <div className="mt-4">
-                    <ComposeButton
-                      blocked={suppressed}
-                      ownershipBlocked={!suppressed && ownershipConflict.hasConflict}
-                      organisationId={client.id}
-                      suppressionReason={suppressed ? latest?.reason : undefined}
-                      ownershipWarning={ownershipConflict.hasConflict ? ownershipConflict.warning : undefined}
-                      hasSavedBooklet={savedBooklet !== null}
-                    />
                     {/* F101: the follow-up trigger only exists while the client sits at
                         initial_outreach_sent — Stage 1 sent, nothing since. The route
                         re-enforces eligibility (isStageTwoEligible) server-side, so this

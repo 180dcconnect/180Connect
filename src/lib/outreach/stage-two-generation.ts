@@ -62,6 +62,11 @@ export function createStageTwoModelCall(): { callModel: CallStageTwoModel; model
   return { callModel, model };
 }
 
+// F112 — Save AI Prompt and Output: the exact {system, user} pair sent travels
+// back out with the draft, so the ai_generations row can record verbatim what
+// the model received — same shape and reasoning as Stage 1's StageOnePromptSent.
+export type StageTwoPromptSent = { system: string; user: string };
+
 export async function generateStageTwoDraft(
   organisationId: string,
   context: StageTwoContext,
@@ -73,14 +78,17 @@ export async function generateStageTwoDraft(
     closing?: ClosingApproach;
     newsEnabled?: boolean;
   } = {},
-): Promise<{ draft: StageTwoDraft; usage: StageTwoUsage } | { error: string }> {
+): Promise<
+  | { draft: StageTwoDraft; usage: StageTwoUsage; prompt: StageTwoPromptSent }
+  | { error: string }
+> {
   const prompt = buildStageTwoPrompt(context, options);
   const startedAt = Date.now();
   try {
     const { text, usage } = await callModel(prompt);
     const draft = parseDraft(text);
     logApiHealth("gemini", "outreach.stage_two.generate", true, startedAt, { organisationId });
-    return { draft, usage };
+    return { draft, usage, prompt: { system: prompt.system, user: prompt.prompt } };
   } catch (error) {
     logApiHealth("gemini", "outreach.stage_two.generate", false, startedAt, { organisationId });
     await reportError(error, { operation: "outreach.stage_two.generate", organisationId });

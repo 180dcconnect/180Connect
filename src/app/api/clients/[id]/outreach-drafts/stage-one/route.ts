@@ -20,6 +20,13 @@ import { computeCostUsd } from "@/lib/outreach/generation-cost";
 
 export const maxDuration = 60;
 
+// F111 — Regenerate Email Draft: a request with no draftId (or an omitted body) is
+// the first generation for this review session; a request that names an existing
+// draft is a regeneration and updates that same row in place rather than stacking a
+// second draft next to it (AC2). Either way generation itself is identical — only
+// how the result is persisted differs.
+const bodySchema = z.object({ draftId: z.uuid().optional() });
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -37,7 +44,21 @@ export async function POST(
     return NextResponse.json({ error: "That client could not be found." }, { status: 400 });
   }
 
-  const requestBody = await request.json().catch(() => ({}));
+  // No body at all is the common case (first generation) — treat it the same as `{}`
+  // rather than rejecting it, since only a regeneration ever needs to send a draftId.
+  const rawBody = await request.text();
+  let parsedInput: unknown = {};
+  try {
+    parsedInput = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    return NextResponse.json({ error: "That draft could not be identified." }, { status: 400 });
+  }
+  const parsedBody = bodySchema.safeParse(parsedInput);
+  if (!parsedBody.success) {
+    return NextResponse.json({ error: "That draft could not be identified." }, { status: 400 });
+  }
+  const { draftId } = parsedBody.data;
+
   // The booklet is deliberately NOT part of the request body: F103 reads the saved
   // booklet (F085/F086) straight from client_booklets so the text reaching the
   // prompt is exactly what RLS-protected storage holds, never a client-supplied string.
@@ -49,7 +70,7 @@ export async function POST(
       opening: z.enum(OPENING_APPROACHES).default("mission_led"),
       closing: z.enum(CLOSING_APPROACHES).default("soft_cta"),
     })
-    .safeParse(requestBody);
+    .safeParse(parsedInput);
   if (!preferences.success) {
     return NextResponse.json({ error: "Choose a valid email length, voice, tone, opening and closing approach, then try again." }, { status: 400 });
   }
@@ -215,18 +236,39 @@ export async function POST(
   );
   if ("error" in result) return NextResponse.json({ error: result.error }, { status: 502 });
 
-  const { data: message, error: draftError } = await supabase
-    .from("outreach_messages")
-    .insert({
-      organisation_id: organisationId,
-      contact_id: contact?.id ?? null,
-      sent_by_user_id: authorization.actor.id,
-      subject: result.draft.subject,
-      body: result.draft.body,
-      send_status: "draft",
-    })
-    .select("id")
-    .single();
+  // F111 — Regenerate Email Draft (#108) AC2: a regeneration updates the same
+  // outreach_messages row rather than inserting a new one, so only ever one draft is
+  // on screen (or in the table) per review session. RLS's own drafts-only update
+  // policies (organisation_id + send_status = 'draft') double as the check that the
+  // named draft is still this org's and still editable — a stale or already-sent id
+  // matches zero rows rather than silently updating the wrong thing.
+  const isRegeneration = draftId !== undefined;
+  const { data: message, error: draftError } = isRegeneration
+    ? await supabase
+        .from("outreach_messages")
+        .update({ subject: result.draft.subject, body: result.draft.body })
+        .eq("id", draftId)
+        .eq("organisation_id", organisationId)
+        .select("id")
+        .maybeSingle()
+    : await supabase
+        .from("outreach_messages")
+        .insert({
+          organisation_id: organisationId,
+          contact_id: contact?.id ?? null,
+          sent_by_user_id: authorization.actor.id,
+          subject: result.draft.subject,
+          body: result.draft.body,
+          send_status: "draft",
+        })
+        .select("id")
+        .single();
+  if (isRegeneration && !draftError && !message) {
+    return NextResponse.json(
+      { error: "This draft could not be found — it may have already been sent or removed. Refresh and try again." },
+      { status: 409 },
+    );
+  }
   if (draftError || !message) {
     await reportError(draftError ?? new Error("Draft insert returned no row."), { operation: "outreach.stage_one.save_draft", organisationId });
     return NextResponse.json({ error: "The draft was generated but could not be saved. Try again." }, { status: 500 });
@@ -269,25 +311,38 @@ export async function POST(
     // F113: the model in force at generation time, not a live lookup of the current
     // default — see the migration for why a later env change must never rewrite history.
     model,
+    // F112: the exact prompt this generation actually sent — every attempt (create
+    // or regenerate) gets its own row here, never overwritten, so this is also the
+    // audit trail AC3 asks for.
+    prompt_system: result.prompt.system,
+    prompt_user: result.prompt.user,
     input_tokens: result.usage.inputTokens ?? null,
     output_tokens: result.usage.outputTokens ?? null,
     total_tokens: result.usage.totalTokens ?? null,
     cost_usd: costUsd,
   });
   if (generationError) {
-    // Compensating delete: roll back the orphan draft. If the rollback itself
+    // Compensating delete: roll back the orphan draft — but only a fresh one. A
+    // regeneration's outreach_messages row pre-dates this request and holds the
+    // CAM's own prior content; deleting it on an audit-log write failure would
+    // destroy real work over a secondary write issue. If the rollback itself
     // fails, report it rather than silently leaving an outreach_messages row
     // with no ai_generations record behind.
-    const { error: rollbackError } = await supabase
-      .from("outreach_messages")
-      .delete()
-      .eq("id", message.id);
-    if (rollbackError) {
-      await reportError(rollbackError, { operation: "outreach.stage_one.rollback_draft", organisationId, outreachMessageId: message.id });
+    if (!isRegeneration) {
+      const { error: rollbackError } = await supabase
+        .from("outreach_messages")
+        .delete()
+        .eq("id", message.id);
+      if (rollbackError) {
+        await reportError(rollbackError, { operation: "outreach.stage_one.rollback_draft", organisationId, outreachMessageId: message.id });
+      }
     }
     await reportError(generationError, { operation: "outreach.stage_one.save_generation", organisationId, outreachMessageId: message.id });
     return NextResponse.json({ error: "The draft could not be saved safely. Try again." }, { status: 500 });
   }
 
-  return NextResponse.json({ id: message.id, ...result.draft, sizeTemplate: result.sizeTemplate }, { status: 201 });
+  return NextResponse.json(
+    { id: message.id, ...result.draft, sizeTemplate: result.sizeTemplate },
+    { status: isRegeneration ? 200 : 201 },
+  );
 }

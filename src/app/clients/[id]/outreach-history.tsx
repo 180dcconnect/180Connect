@@ -56,6 +56,14 @@ export function OutreachHistorySection({
                 <p className="mt-2 whitespace-pre-wrap text-sm text-foreground/80">
                   {message.body}
                 </p>
+                {/* F125: the exact final content plus who delivered it — sent
+                    rows are immutable history, so attribution is fixed at send
+                    time and falls back for senders since removed from users. */}
+                <p className="mt-2 text-xs text-foreground/55">
+                  Sent by{" "}
+                  {message.sender?.full_name?.trim() || "a former team member"}
+                  {message.sent_at ? ` on ${formatDate(message.sent_at)}` : ""}
+                </p>
               </details>
             </li>
           ))}

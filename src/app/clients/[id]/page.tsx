@@ -76,13 +76,6 @@ type OwnerRow = {
   owner_id: string | null;
   owner: { full_name: string | null } | null;
 };
-type SentEmailRow = {
-  id: string;
-  subject: string;
-  body: string;
-  sent_at: string;
-  sent_by_user: { full_name: string | null } | null;
-};
 
 /**
  * F067 (#69) Client Detail Page / F068 (#70) View Client Basic Info: opens from the
@@ -323,19 +316,6 @@ export default async function ClientDetailPage({
   const suppressed = latest?.status === "active";
   const suppressionPending = latest?.status === "pending";
 
-  // F125: immutable sent records are the communication history. Drafts and failed
-  // attempts are deliberately excluded so this section says what actually left.
-  const { data: sentEmails, error: sentEmailsError } = await supabase
-    .from("outreach_messages")
-    .select("id, subject, body, sent_at, sent_by_user:users!outreach_messages_sent_by_user_id_fkey(full_name)")
-    .eq("organisation_id", id)
-    .eq("send_status", "sent")
-    .order("sent_at", { ascending: false })
-    .returns<SentEmailRow[]>();
-  if (sentEmailsError) {
-    await reportError(sentEmailsError, { operation: "clients.detail_sent_emails", organisationId: id });
-  }
-
   // #79/#80/#81 (F077/F078/F079): this client's edit suggestions, fetched without a
   // status filter and filtered in the component — RLS already scopes what each role
   // may see (pending rows to every active CAM; authors also their own settled rows;
@@ -396,10 +376,11 @@ export default async function ClientDetailPage({
   // F070: every outreach message for this client, sent or not. RLS
   // (outreach_messages_select_active) shares read across every active role, so
   // this needs no ownership filter — same reasoning as the `client:view` gate
-  // above.
+  // above. The sender join backs F125's "record who sent it" attribution in the
+  // Sent list (the timeline resolves the same column for its actor name).
   const { data: outreachRows, error: outreachError } = await supabase
     .from("outreach_messages")
-    .select("id, subject, body, send_status, sent_at, scheduled_at, created_at")
+    .select("id, subject, body, send_status, sent_at, scheduled_at, created_at, sender:users!outreach_messages_sent_by_user_id_fkey(full_name)")
     .eq("organisation_id", id)
     .order("created_at", { ascending: false });
 
@@ -410,7 +391,9 @@ export default async function ClientDetailPage({
     });
   }
   const outreachHistory = splitOutreachHistory(
-    (outreachRows ?? []) as OutreachMessageRow[],
+    // `as unknown` — supabase-js infers the users join as an array; timeline
+    // rows below need the same escape hatch.
+    (outreachRows ?? []) as unknown as OutreachMessageRow[],
   );
 
   // F075/F076: the four sources @/lib/timeline.ts's buildTimeline merges into
@@ -685,34 +668,6 @@ export default async function ClientDetailPage({
                 />
               </Rise>
             )}
-
-            <Rise>
-              <SectionCard
-                headingId="email-history-heading"
-                title="Sent email history"
-                hint="The exact final content delivered after human review. Sent records cannot be edited."
-              >
-                <div className="mt-4 space-y-3">
-                  {(sentEmails ?? []).length === 0 ? (
-                    <p className="text-sm text-foreground/55">No outreach emails have been sent yet.</p>
-                  ) : (
-                    (sentEmails ?? []).map((message) => (
-                      <details className="rounded-lg border border-black/10 bg-white p-3" key={message.id}>
-                        <summary className="cursor-pointer text-sm font-bold">
-                          {message.subject} — {new Date(message.sent_at).toLocaleString("en-GB")}
-                        </summary>
-                        <p className="mt-2 text-xs text-foreground/55">
-                          Sent by {message.sent_by_user?.full_name ?? "a former team member"}
-                        </p>
-                        <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground/75">
-                          {message.body}
-                        </p>
-                      </details>
-                    ))
-                  )}
-                </div>
-              </SectionCard>
-            </Rise>
 
             {/* Email and website were two near-identical cards — same
                 heading-plus-validity-pill shape, same failure copy — so they

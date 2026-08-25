@@ -34,6 +34,15 @@ test("no recipient or approval field is required, unlike sending", () => {
   });
 });
 
+test("the recipient is saved verbatim without send-time format rules (F119 AC1)", () => {
+  // A work-in-progress address — half-typed, or deliberately overridden to
+  // something unusual — is a valid thing to save; validation happens at send.
+  for (const recipient of ["", "  client@example.org  ", "half-typed@", "client@"]) {
+    assert.equal(firstError({ ...valid, recipient }), "", `recipient=${JSON.stringify(recipient)} should pass`);
+  }
+  assert.notEqual(firstError({ ...valid, recipient: "x".repeat(321) }), "");
+});
+
 test("malformed identifiers are refused", () => {
   for (const field of ["organisationId", "messageId"] as const) {
     assert.match(firstError({ ...valid, [field]: "not-a-uuid" }), /invalid/i);

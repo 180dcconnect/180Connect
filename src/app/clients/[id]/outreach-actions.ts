@@ -51,8 +51,7 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
     .select("id, organisation_id, contact_id, send_status, sent_by_user_id")
     .eq("id", messageId)
     .eq("organisation_id", organisationId)
-    .maybeSingle();
-  if (draftError || !draft) {
+    .maybeSingle();  if (draftError || !draft) {
     if (draftError) await reportError(draftError, { operation: "outreach.send.load_draft", messageId });
     return { ok: false, message: "That draft could not be loaded. Refresh and try again." };
   }
@@ -102,7 +101,8 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   // `.eq(send_status)` + `.single()` turns a raced or already-sent draft into an
   // error here rather than a silent zero-row update that Gmail then makes real.
   // A failed provider call leaves an editable draft containing precisely what the
-  // CAM attempted, never the earlier AI output.
+  // CAM attempted, never the earlier AI output. The reviewed recipient is saved
+  // alongside (F119 AC1), so a sent row records who the email actually went to.
   //
   // sent_by_user_id deliberately records whoever actually hit Send, including an
   // admin sending another CAM's generated draft — "who sent an email is a fact
@@ -110,7 +110,7 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   // mark_outreach_sent carries the same actor.
   const { data: saved, error: saveError } = await supabase
     .from("outreach_messages")
-    .update({ subject, body, sent_by_user_id: authorization.actor.id })
+    .update({ subject, body, sent_to_email: recipient })
     .eq("id", messageId)
     .eq("organisation_id", organisationId)
     .eq("send_status", "draft")
@@ -224,10 +224,12 @@ export type SaveDraftResult =
 
 /**
  * F119: saves the CAM's in-progress edits without sending. Deliberately
- * lighter than sendReviewedEmail — no recipient, no approval, no suppression
- * check, no Gmail call — this only ever writes subject/body to a still-draft
- * row so a CAM can return to exactly what they left, per F070's client
- * profile reopening it.
+ * lighter than sendReviewedEmail — no recipient validation, no approval, no
+ * suppression check, no Gmail call — this only ever writes subject/body/
+ * recipient to a still-draft row so a CAM can return to exactly what they
+ * left, per F070's client profile reopening it. The recipient is persisted
+ * verbatim (F119 AC1): a manually overridden address must survive the
+ * save/reopen round-trip instead of being recomputed from contacts.email.
  */
 export async function saveEmailDraft(input: unknown): Promise<SaveDraftResult> {
   const parsed = safeValidate(saveDraftSchema, input);
@@ -248,6 +250,7 @@ export async function saveEmailDraft(input: unknown): Promise<SaveDraftResult> {
   // Same reasoning as sendReviewedEmail: never trust client-side sanitization
   // alone for what actually lands in the database.
   const body = sanitizeEmailHtml(parsed.data.body);
+  const recipient = parsed.data.recipient?.trim() || null;
 
   const supabase = await createClient();
   const { data: draft, error: draftError } = await supabase
@@ -269,15 +272,27 @@ export async function saveEmailDraft(input: unknown): Promise<SaveDraftResult> {
     return { ok: false, message: "You can only edit drafts you generated yourself." };
   }
 
-  const { error: saveError } = await supabase
+  // Same raced-send guard as sending: require the row to still be a draft when
+  // the UPDATE lands — a concurrent send flipping the status between the load
+  // check above and this write must surface as an error, not a silent zero-row
+  // update that still tells the user "Draft saved."
+  const { data: saved, error: saveError } = await supabase
     .from("outreach_messages")
-    .update({ subject, body })
+    .update({ subject, body, sent_to_email: recipient })
     .eq("id", messageId)
     .eq("organisation_id", organisationId)
-    .eq("send_status", "draft");
+    .eq("send_status", "draft")
+    .select("id")
+    .single();
   if (saveError) {
     await reportError(saveError, { operation: "outreach.save_draft.write", messageId });
     return { ok: false, message: "The draft could not be saved. Try again." };
+  }
+  if (!saved) {
+    // Zero rows matched without an error: the draft was sent (or removed)
+    // between the load check above and this write.
+    await reportError(new Error("Draft save matched no rows."), { operation: "outreach.save_draft.write", messageId });
+    return { ok: false, message: "This email is no longer an unsent draft." };
   }
 
   revalidatePath(`/clients/${organisationId}`);

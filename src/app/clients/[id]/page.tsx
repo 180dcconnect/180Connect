@@ -397,18 +397,37 @@ export default async function ClientDetailPage({
   // exactly as it was saved instead of always starting blank. A separate
   // query (not reused from outreachRows above) because it needs contact_id,
   // which the history list has no use for.
-  const { data: existingDraftRow, error: existingDraftError } = await supabase
-    .from("outreach_messages")
-    .select("id, subject, body, contact_id")
-    .eq("organisation_id", id)
-    .eq("send_status", "draft")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<{ id: string; subject: string; body: string; contact_id: string | null }>();
-  if (existingDraftError) {
-    await reportError(existingDraftError, { operation: "clients.detail_existing_draft", organisationId: id });
+  //
+  // Gated on not_contacted deliberately: stage-two drafts can only ever be
+  // created while the client sits at initial_outreach_sent (isStageTwoEligible),
+  // so outside not_contacted the newest draft row may be a follow-up — and
+  // reopening that in the Stage 1 card would let "Save draft" overwrite a
+  // follow-up's content with Stage 1 state. At not_contacted every draft row is
+  // guaranteed stage-one, so hydration is safe exactly there. A stage-one draft
+  // abandoned after the pipeline advanced is still visible in the history; it
+  // just isn't reopened into this card.
+  const existingDraftResult =
+    client.outreach_status === "not_contacted"
+      ? await supabase
+          .from("outreach_messages")
+          .select("id, subject, body, sent_to_email, contact_id")
+          .eq("organisation_id", id)
+          .eq("send_status", "draft")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle<{ id: string; subject: string; body: string; sent_to_email: string | null; contact_id: string | null }>()
+      : { data: null, error: null };
+  const existingDraftRow = existingDraftResult.data;
+  if (existingDraftResult.error) {
+    await reportError(existingDraftResult.error, { operation: "clients.detail_existing_draft", organisationId: id });
   }
-  let existingDraft: { id: string; subject: string; body: string; recipientOnFile: string | null } | null = null;
+  let existingDraft: {
+    id: string;
+    subject: string;
+    body: string;
+    savedRecipient: string | null;
+    recipientOnFile: string | null;
+  } | null = null;
   if (existingDraftRow) {
     let contactEmail: string | null = null;
     if (existingDraftRow.contact_id) {
@@ -423,6 +442,11 @@ export default async function ClientDetailPage({
       id: existingDraftRow.id,
       subject: existingDraftRow.subject,
       body: existingDraftRow.body,
+      // F119 AC1/AC2: the recipient reopens exactly as saved — a reviewed
+      // override must survive the round-trip, not be recomputed from
+      // contacts.email. The on-file address stays separate purely as the
+      // mismatch-warning baseline (F116 AC3).
+      savedRecipient: existingDraftRow.sent_to_email?.trim() || null,
       recipientOnFile: contactEmail?.trim() || client.contact_email?.trim() || null,
     };
   }

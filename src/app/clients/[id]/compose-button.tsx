@@ -13,8 +13,19 @@ import { AiLoadingState } from "@/components/ui/ai-loading-state";
 
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
-type Draft = { id: string; subject: string; body: string; sizeTemplate?: string; recipientOnFile: string | null };
-type ExistingDraft = { id: string; subject: string; body: string; recipientOnFile: string | null };
+type Draft = {
+  id: string;
+  subject: string;
+  body: string;
+  sizeTemplate?: string;
+  recipientOnFile: string | null;
+  // The recipient exactly as last persisted (F119 AC1). Undefined on a
+  // freshly generated draft (nothing saved yet); set once saved or when the
+  // draft was reopened from the database. Drives the regenerate-confirm
+  // baseline together with recipientOnFile.
+  savedRecipient?: string | null;
+};
+type ExistingDraft = Draft & { savedRecipient: string | null };
 
 /**
  * F119: a saved draft's body may already be sanitized editor HTML (if it was
@@ -125,7 +136,9 @@ export function ComposeButton({
   );
   // F123: the reviewed content is what actually gets sent, and any edit resets
   // approval. These also drive F111's regenerate-confirm (edits vs draft).
-  const [recipient, setRecipient] = useState(existingDraft?.recipientOnFile ?? "");
+  const [recipient, setRecipient] = useState(
+    existingDraft?.savedRecipient ?? existingDraft?.recipientOnFile ?? "",
+  );
   const [subject, setSubject] = useState(existingDraft?.subject ?? "");
   // F117: HTML from the rich-text editor, not plain text.
   const [body, setBody] = useState(existingDraft ? hydrateBody(existingDraft.body) : "");
@@ -170,7 +183,7 @@ export function ComposeButton({
     // actually something to lose.
     if (
       draft &&
-      (recipient !== (draft.recipientOnFile ?? "") ||
+      (recipient !== (draft.savedRecipient ?? draft.recipientOnFile ?? "") ||
         subject !== draft.subject ||
         bodyEdited)
     ) {
@@ -218,7 +231,7 @@ export function ComposeButton({
       }
       const nextDraft = payload as Draft;
       setDraft(nextDraft);
-      setRecipient(nextDraft.recipientOnFile ?? "");
+      setRecipient(nextDraft.savedRecipient ?? nextDraft.recipientOnFile ?? "");
       setSubject(nextDraft.subject);
       setBody(plainTextToEditorHtml(nextDraft.body));
       setBodyEdited(false);
@@ -262,12 +275,16 @@ export function ComposeButton({
     const result = await saveEmailDraft({
       organisationId,
       messageId: draft.id,
+      recipient,
       subject,
       body,
     });
     setSaveMessage(result.message);
     if (result.ok) {
-      setDraft((current) => (current ? { ...current, subject, body } : current));
+      // Sync the whole saved state — including the recipient (F119 AC1) — so
+      // the regenerate-confirm baselines treat this draft as clean, exactly
+      // like the bodyEdited reset below.
+      setDraft((current) => (current ? { ...current, subject, body, savedRecipient: recipient } : current));
       // The saved content is now durable — the regenerate-confirm must treat
       // this draft as clean, exactly like the subject/body sync above does.
       setBodyEdited(false);

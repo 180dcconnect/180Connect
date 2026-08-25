@@ -282,6 +282,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         model,
         usage: result.usage,
         costUsd,
+        prompt: result.prompt,
       }),
     );
   if (generationError) {

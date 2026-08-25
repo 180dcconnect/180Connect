@@ -34,13 +34,23 @@ export function ModelBreakdown({
   metric,
   activeModel,
   basePath,
+  clientFilter,
 }: {
   breakdown: GenerationModelBreakdown[];
   metric: GenerationMetric;
   activeModel: string | null;
   basePath: string;
+  clientFilter?: string | null;
 }) {
   const reducedMotion = useReducedMotion();
+
+  function hrefFor(model: string | null) {
+    const params = new URLSearchParams();
+    if (model) params.set("model", model);
+    if (clientFilter) params.set("client", clientFilter);
+    const qs = params.toString();
+    return qs ? `${basePath}?${qs}` : basePath;
+  }
 
   if (breakdown.length === 0) {
     return (
@@ -69,7 +79,7 @@ export function ModelBreakdown({
                 className={`group block rounded-xl px-3 py-2.5 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand ${
                   isActive ? "bg-brand/10" : "hover:bg-black/[0.03]"
                 }`}
-                href={isActive ? basePath : `${basePath}?model=${encodeURIComponent(entry.model)}`}
+                href={isActive ? hrefFor(null) : hrefFor(entry.model)}
               >
                 <div className="flex items-center justify-between gap-3">
                   <span

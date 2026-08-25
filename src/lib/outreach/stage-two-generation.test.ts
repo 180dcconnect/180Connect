@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { generateStageTwoDraft, isStageTwoEligible } from "./stage-two-generation.ts";
+import { buildStageTwoPrompt } from "./stage-two-prompt.ts";
 
 const context = { organisationName: "Example Charity", organisationType: "charity" };
 
@@ -23,9 +24,11 @@ test("generateStageTwoDraft returns a structured review draft with the model's u
     context,
     okCallModel(JSON.stringify({ subject: "Following up", body: "I wanted to follow up on my earlier email." })),
   );
+  const expectedPrompt = buildStageTwoPrompt(context);
   assert.deepEqual(result, {
     draft: { subject: "Following up", body: "I wanted to follow up on my earlier email." },
     usage,
+    prompt: { system: expectedPrompt.system, user: expectedPrompt.prompt },
   });
 });
 

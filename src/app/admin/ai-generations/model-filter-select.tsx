@@ -12,10 +12,12 @@ export function ModelFilterSelect({
   models,
   activeModel,
   basePath,
+  clientFilter,
 }: {
   models: readonly string[];
   activeModel: string | null;
   basePath: string;
+  clientFilter?: string | null;
 }) {
   const router = useRouter();
 
@@ -28,7 +30,11 @@ export function ModelFilterSelect({
         className="rounded-lg border border-black/15 bg-white px-3 py-1.5 text-sm font-bold text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
         onChange={(event) => {
           const value = event.target.value;
-          router.push(value ? `${basePath}?model=${encodeURIComponent(value)}` : basePath);
+          const params = new URLSearchParams();
+          if (value) params.set("model", value);
+          if (clientFilter) params.set("client", clientFilter);
+          const qs = params.toString();
+          router.push(qs ? `${basePath}?${qs}` : basePath);
         }}
         value={activeModel ?? ""}
       >

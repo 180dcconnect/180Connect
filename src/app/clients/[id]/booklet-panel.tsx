@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Clock, ExternalLink, Globe, ShieldCheck, Sparkles } from "lucide-react";
+import { AiLoadingState } from "@/components/ui/ai-loading-state";
 import { parseBookletSections } from "@/lib/booklet/parse-sections";
 import type { BookletSource } from "@/lib/booklet/sources";
 
@@ -20,10 +20,11 @@ import type { BookletSource } from "@/lib/booklet/sources";
  * the raw fields below it, not after.
  *
  * Real generations against Gemini ran ~1-20s during testing — long enough that a
- * static "Generating…" line reads as stalled. BookletLoadingState cycles through
- * short status lines instead, same crossfade technique components/brand/search-bar.tsx
- * already uses for its placeholder text, and respects prefers-reduced-motion the
- * way spectrumui/password-strength.tsx does.
+ * static "Generating…" line reads as stalled. AiLoadingState (shared with
+ * ComposeButton) cycles through short status lines instead, same crossfade
+ * technique components/brand/search-bar.tsx already uses for its placeholder
+ * text, and respects prefers-reduced-motion the way spectrumui/password-strength.tsx
+ * does.
  *
  * The rendered booklet is not raw text: parseBookletSections (parse-sections.ts)
  * turns the "Label:" lines the system prompt asks Gemini for into real headings,
@@ -69,52 +70,6 @@ const STATUS_MESSAGES = [
   "Drafting outreach angles…",
   "Polishing the summary…",
 ];
-
-function BookletLoadingState() {
-  const reducedMotion = useReducedMotion();
-  const [messageIndex, setMessageIndex] = useState(0);
-
-  useEffect(() => {
-    if (reducedMotion) return;
-    const interval = setInterval(() => {
-      setMessageIndex((current) => (current + 1) % STATUS_MESSAGES.length);
-    }, 3200);
-    return () => clearInterval(interval);
-  }, [reducedMotion]);
-
-  return (
-    <div aria-live="polite" className="mt-5 flex items-center gap-3">
-      <div aria-hidden="true" className="flex gap-1.5">
-        {[0, 1, 2].map((dot) => (
-          <motion.span
-            animate={reducedMotion ? undefined : { opacity: [0.25, 1, 0.25], y: [0, -4, 0] }}
-            className="h-2 w-2 rounded-full bg-brand"
-            key={dot}
-            transition={{ duration: 1, repeat: Infinity, delay: dot * 0.15, ease: "easeInOut" }}
-          />
-        ))}
-      </div>
-      {reducedMotion ? (
-        <p className="text-sm font-medium text-foreground/70">
-          Generating booklet — this can take several seconds…
-        </p>
-      ) : (
-        <AnimatePresence mode="wait">
-          <motion.p
-            animate={{ opacity: 1, y: 0 }}
-            className="text-sm font-medium text-foreground/70"
-            exit={{ opacity: 0, y: -4 }}
-            initial={{ opacity: 0, y: 4 }}
-            key={messageIndex}
-            transition={{ duration: 0.35 }}
-          >
-            {STATUS_MESSAGES[messageIndex]}
-          </motion.p>
-        </AnimatePresence>
-      )}
-    </div>
-  );
-}
 
 // Matches bare URLs Gemini may emit (the prompt says "plain text only").
 // Trailing punctuation like "." or ")" is stripped so "https://example.org." links correctly.
@@ -477,7 +432,12 @@ export function BookletPanel({
         </div>
       )}
 
-      {busy && <BookletLoadingState />}
+      {busy && (
+        <AiLoadingState
+          messages={STATUS_MESSAGES}
+          reducedMotionLabel="Generating booklet — this can take several seconds…"
+        />
+      )}
 
       {error && !busy && (
         <div className="mt-5 rounded-lg bg-red-50 p-3" role="alert">

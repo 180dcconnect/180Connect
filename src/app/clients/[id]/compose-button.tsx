@@ -127,11 +127,14 @@ export function ComposeButton({
   // approval. These also drive F111's regenerate-confirm (edits vs draft).
   const [recipient, setRecipient] = useState(existingDraft?.recipientOnFile ?? "");
   const [subject, setSubject] = useState(existingDraft?.subject ?? "");
-  // F117: HTML from the rich-text editor, not plain text — compared against
-  // `hydrateBody(draft.body)` (the same representation, whichever shape it's
-  // actually in), never against `draft.body` directly, or every fresh draft
-  // would look "edited" the instant it loads.
+  // F117: HTML from the rich-text editor, not plain text.
   const [body, setBody] = useState(existingDraft ? hydrateBody(existingDraft.body) : "");
+  // Tracks whether the editor has actually fired an update since the current
+  // draft loaded. The regenerate-confirm uses this instead of comparing live
+  // editor HTML against `hydrateBody(draft.body)`, because Tiptap's serializer
+  // can differ cosmetically from that hydration output — a string comparison
+  // could prompt "discard your edits?" even when nothing changed.
+  const [bodyEdited, setBodyEdited] = useState(false);
   // Regeneration updates the same outreach_messages row in place (F111 AC2),
   // so `draft.id` does not change and cannot key the editor's remount. This
   // does, incremented on every successful (re)generate, forcing the
@@ -169,7 +172,7 @@ export function ComposeButton({
       draft &&
       (recipient !== (draft.recipientOnFile ?? "") ||
         subject !== draft.subject ||
-        body !== hydrateBody(draft.body))
+        bodyEdited)
     ) {
       if (!window.confirm("Regenerating will replace this draft and discard your edits. Continue?")) {
         return;
@@ -218,6 +221,7 @@ export function ComposeButton({
       setRecipient(nextDraft.recipientOnFile ?? "");
       setSubject(nextDraft.subject);
       setBody(plainTextToEditorHtml(nextDraft.body));
+      setBodyEdited(false);
       setGeneration((current) => current + 1);
       setApproved(false);
       setSendMessage(null);
@@ -264,6 +268,9 @@ export function ComposeButton({
     setSaveMessage(result.message);
     if (result.ok) {
       setDraft((current) => (current ? { ...current, subject, body } : current));
+      // The saved content is now durable — the regenerate-confirm must treat
+      // this draft as clean, exactly like the subject/body sync above does.
+      setBodyEdited(false);
     }
     setSavingDraft(false);
   }
@@ -530,6 +537,7 @@ export function ComposeButton({
                 key={generation}
                 onChange={(html) => {
                   setBody(html);
+                  setBodyEdited(true);
                   setApproved(false);
                 }}
               />

@@ -78,3 +78,9 @@ test("isRichEmailHtml distinguishes legacy plain text from new HTML rows", () =>
   assert.equal(isRichEmailHtml("<p>Hello</p>"), true);
   assert.equal(isRichEmailHtml("<strong>Bold</strong> text"), true);
 });
+
+test("isRichEmailHtml ignores markup mentioned mid-sentence in legacy plain text", () => {
+  assert.equal(isRichEmailHtml("Wrap it in <p> tags before sending."), false);
+  assert.equal(isRichEmailHtml("Use <strong>bold</strong> for emphasis in the newsletter."), false);
+  assert.equal(isRichEmailHtml("  \n<p>Leading whitespace still counts as rich</p>"), true);
+});

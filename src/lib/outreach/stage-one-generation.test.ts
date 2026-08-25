@@ -23,19 +23,21 @@ test("generateStageOneDraft returns a structured draft, the reported usage, and 
 });
 
 test("generateStageOneDraft reports the size template applied for the income band", async () => {
+  const over1mContext = { ...context, incomeBand: "over_1m" } as const;
   const result = await generateStageOneDraft(
     "org-1",
-    { ...context, incomeBand: "over_1m" },
+    over1mContext,
     async () => ({
       text: JSON.stringify({ subject: "Working together", body: "Hello there." }),
       usage: USAGE,
     }),
   );
+  const expectedPrompt = buildStageOnePrompt(over1mContext);
   assert.deepEqual(result, {
     draft: { subject: "Working together", body: "Hello there." },
     sizeTemplate: "over_1m",
     usage: USAGE,
-    prompt: { system: EXPECTED_PROMPT.system, user: EXPECTED_PROMPT.prompt },
+    prompt: { system: expectedPrompt.system, user: expectedPrompt.prompt },
   });
 });
 

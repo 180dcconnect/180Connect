@@ -109,7 +109,9 @@ begin
     -- Freshly claimed: the worker is mid-Gmail-call for it, per F123's claim column.
     ('00000000-0000-4000-d000-000000000015', '00000000-0000-4000-c000-000000000011', v_cam_a, 'In flight S',   'Body', 'scheduled', null, now() + interval '1 hour', now()),
     -- Stale claim (crashed worker): must NOT block scheduling or cancelling.
-    ('00000000-0000-4000-d000-000000000016', '00000000-0000-4000-c000-000000000011', v_cam_a, 'Stale claim S', 'Body', 'scheduled', null, now() + interval '1 hour', now() - interval '10 minutes');
+    ('00000000-0000-4000-d000-000000000016', '00000000-0000-4000-c000-000000000011', v_cam_a, 'Stale claim S', 'Body', 'scheduled', null, now() + interval '1 hour', now() - interval '10 minutes'),
+    -- Freshly claimed draft: a previous manual send is still in flight.
+    ('00000000-0000-4000-d000-000000000017', '00000000-0000-4000-c000-000000000011', v_cam_a, 'Claimed draft S', 'Body', 'draft', null, null, now());
 
   insert into public.suppressions (organisation_id, status, reason, requested_by, decided_by, decided_at)
   values ('00000000-0000-4000-c000-000000000013', 'active', 'Do not contact (test)', v_cam_a, v_admin, now())
@@ -133,6 +135,7 @@ declare
   v_already_out uuid := '00000000-0000-4000-d000-000000000014';
   v_in_flight uuid := '00000000-0000-4000-d000-000000000015';
   v_stale_claim uuid := '00000000-0000-4000-d000-000000000016';
+  v_claimed_draft uuid := '00000000-0000-4000-d000-000000000017';
 begin
   -- Lets the file merge ahead of its migration, same convention as the RLS suite.
   if to_regprocedure('public.schedule_outreach_send(uuid,text,text,timestamptz)') is null
@@ -195,6 +198,15 @@ begin
     ),
     'P0001',
     'cancelling while the worker holds a fresh delivery claim is refused — the email may already be leaving'
+  );
+
+  return next is(
+    tests.sqlstate_of(
+      v_cam_a,
+      format('select public.schedule_outreach_send(%L, ''Subj'', ''Body'', now() + interval ''1 day'')', v_claimed_draft)
+    ),
+    'P0001',
+    'scheduling a draft whose fresh claim is held (manual send in flight) is refused, not raced'
   );
 
   return next is(

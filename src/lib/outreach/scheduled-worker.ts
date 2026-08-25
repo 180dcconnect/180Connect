@@ -1,4 +1,5 @@
 import { reportError } from "../error-logging.ts";
+import { emailHtmlToPlainText } from "./email-html.ts";
 
 /**
  * The Supabase/Gmail adapters are imported lazily inside sendDueReviewedEmails,
@@ -140,7 +141,10 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
             organisationId: row.organisation_id,
             subject: row.subject,
             html: row.body,
-            text: row.body,
+            // The stored body is sanitised HTML (F117) — the plain-text MIME
+            // part must be derived from it, exactly like the manual send path,
+            // not the markup itself.
+            text: emailHtmlToPlainText(row.body),
             recipient,
           }];
         });

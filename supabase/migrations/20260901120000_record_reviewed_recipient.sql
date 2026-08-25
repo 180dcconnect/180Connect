@@ -53,12 +53,10 @@
 --               | DEFINER with search_path pinned, still re-checks active-user +
 --               | ownership inside the body; EXECUTE revoked from public/anon,
 --               | granted to authenticated.
---   Documentation | Data Model tab 07: outreach_messages is not yet projected in
---               | docs/data-model/ on dev (same gap noted by
---               | 20260901110000_send_reviewed_outreach_safety), so there is no
---               | generated file to update in this PR. The spreadsheet row for
---               | sent_to_email should be added at the next projection refresh;
---               | noted here so the gap is deliberate, not missed.
+--   Documentation | Data Model updated in this PR: OUTREACH_MESSAGES.sent_to_email
+--               | added to tab 07 Outreach & Outcomes and tab 02 Data Dictionary
+--               | (with the previously unrecorded send_claimed_at from F123), and
+--               | docs/data-model/ regenerated via npm run export:data-model.
 --   Approved by   | Bashir (Project Leader), 25 Aug 2026.
 --
 -- Reversibility: paired rollback in ../rollback/20260901120000_record_reviewed_recipient.down.sql

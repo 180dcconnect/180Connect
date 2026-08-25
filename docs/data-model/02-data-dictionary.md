@@ -337,6 +337,8 @@
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | send_status | enum |  | draft / scheduled / sent / failed |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | scheduled_at | timestamp |  | Date and time the message was scheduled for sending; null if not scheduled |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | sent_at | timestamp |  | Date and time Gmail successfully sent the message; null until sent |
+| 07 Outreach & Outcomes | OUTREACH_MESSAGES | sent_to_email | text |  | The email address this message was actually sent to, exactly as reviewed and approved by the CAM before sending; never re-derived from the contact record. Null until sent, and null for messages sent before recipient review existed |
+| 07 Outreach & Outcomes | OUTREACH_MESSAGES | send_claimed_at | timestamp |  | Set while a reviewed send is in flight and cleared when the attempt ends without delivery; older than five minutes means stale and may be reclaimed |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | agent_run_id | uuid |  | Links to the VOICE AGENT_RUNS record that generated the draft |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | created_at | timestamp |  | Row creation timestamp |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | updated_at | timestamp |  | Date and time the record was last updated |

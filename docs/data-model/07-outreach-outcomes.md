@@ -19,6 +19,8 @@
 | send_status | enum | draft / scheduled / sent / failed |
 | scheduled_at | timestamp | Date and time the message was scheduled for sending; null if not scheduled |
 | sent_at | timestamp | Date and time Gmail successfully sent the message; null until sent |
+| sent_to_email | text | The email address this message was actually sent to, exactly as reviewed and approved by the CAM before sending; never re-derived from the contact record. Null until sent, and null for messages sent before recipient review existed |
+| send_claimed_at | timestamp | Set while a reviewed send is in flight and cleared when the attempt ends without delivery; older than five minutes means stale and may be reclaimed |
 | agent_run_id | uuid | Links to the VOICE AGENT_RUNS record that generated the draft |
 | created_at | timestamp | Row creation timestamp |
 | updated_at | timestamp | Date and time the record was last updated |

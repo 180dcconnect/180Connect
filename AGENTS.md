@@ -80,3 +80,4 @@ npm run seed:clear               # remove all is_seed rows
 - [`docs/environment-variables.md`](docs/environment-variables.md) — every env var, where to get it
 - [`supabase/MIGRATIONS.md`](supabase/MIGRATIONS.md) — migration conventions and workflow
 - [`docs/audit-log-pattern.md`](docs/audit-log-pattern.md) — required pattern for privileged writes
+- [`docs/client-list-sorting.md`](docs/client-list-sorting.md) — how `/clients` is ordered, and the pipeline-status order

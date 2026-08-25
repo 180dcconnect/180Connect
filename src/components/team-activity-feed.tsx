@@ -37,16 +37,30 @@ export function TeamActivityFeed({ items }: { items: FormattedTeamActivity[] }) 
                     {item.relativeTime}
                   </p>
                 </div>
-                <span className="shrink-0 rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/55">
-                  {item.actionLabel}
-                </span>
-                {item.targetHref && (
-                  <span
-                    aria-hidden="true"
-                    className="shrink-0 text-foreground/25 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-foreground/55"
-                  >
-                    →
+                {item.actionButton ? (
+                  <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-brand/10 px-3 py-1 text-xs font-bold text-brand transition-colors group-hover:bg-brand/20">
+                    {item.actionButton.label}
+                    <span
+                      aria-hidden="true"
+                      className="transition-transform duration-200 group-hover:translate-x-0.5"
+                    >
+                      →
+                    </span>
                   </span>
+                ) : (
+                  <>
+                    <span className="shrink-0 rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/55">
+                      {item.actionLabel}
+                    </span>
+                    {item.targetHref && (
+                      <span
+                        aria-hidden="true"
+                        className="shrink-0 text-foreground/25 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-foreground/55"
+                      >
+                        →
+                      </span>
+                    )}
+                  </>
                 )}
               </>
             );

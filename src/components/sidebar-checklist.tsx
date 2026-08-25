@@ -97,7 +97,7 @@ export function SidebarChecklist({
       <Tooltip delayDuration={300}>
         <TooltipTrigger asChild>
           <Link
-            href="/dashboard?preview_guide=0"
+            href="/dashboard"
             className={`group relative mx-auto flex h-10 w-10 items-center justify-center rounded-xl transition-all ${
               currentTheme === "dark"
                 ? "bg-[#161b21] text-white hover:bg-[#1f252d] border border-white/10"

@@ -1,35 +1,79 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
-import { BOOKLET_GENERATED_EVENT, type BookletGeneratedDetail } from "@/lib/booklet/browser-event";
-import { sendReviewedEmail } from "./outreach-actions";
+import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
 
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
-type Draft = { id: string; subject: string; body: string };
-type EmailLength = "short" | "standard" | "detailed";
-type EmailVoice = "180dc" | "consultative" | "plain_language";
-type EmailTone = "balanced" | "warm" | "formal" | "concise";
-type OpeningApproach = "mission_led" | "direct_intro" | "news_hook";
-type ClosingApproach = "soft_cta" | "meeting_request" | "open_question";
+type Draft = { id: string; subject: string; body: string; sizeTemplate?: string };
 
-/** F100 creates a review draft only, after the current outreach preflight passes. */
+function sizeTemplateLabel(sizeTemplate: string | undefined): string {
+  return sizeTemplate && SIZE_TEMPLATES.includes(sizeTemplate as SizeTemplate)
+    ? SIZE_TONE_LABELS[sizeTemplate as SizeTemplate]
+    : SIZE_TONE_LABELS.default;
+}
+
+const EMAIL_LENGTH_LABELS: Record<EmailLength, string> = {
+  short: "Short",
+  standard: "Standard",
+  detailed: "Detailed",
+};
+
+const EMAIL_VOICE_LABELS: Record<EmailVoice, string> = {
+  "180dc": "180DC Sheffield",
+  consultative: "Consultative",
+  plain_language: "Plain language",
+};
+
+const EMAIL_TONE_LABELS: Record<EmailTone, string> = {
+  balanced: "Balanced",
+  warm: "Warm",
+  formal: "Formal",
+  concise: "Concise",
+};
+
+const OPENING_APPROACH_LABELS: Record<OpeningApproach, string> = {
+  mission_led: "Mission-led",
+  direct_intro: "Direct introduction",
+  news_hook: "Relevant news hook",
+};
+
+const CLOSING_APPROACH_LABELS: Record<ClosingApproach, string> = {
+  soft_cta: "Soft invitation",
+  meeting_request: "Request a short call",
+  open_question: "Open question",
+};
+
+/**
+ * F019 (#22): a client owned by another CAM is visible in full, but its
+ * outreach actions are not available — the button is dead on arrival rather
+ * than clickable-then-refused. `blocked` stays the harder state (suppression);
+ * `ownershipBlocked` renders the same disabled shape in the softer conflict
+ * tone. The server-side preflight behind `generate()` still re-checks both,
+ * so this is presentation over an enforcement that does not depend on it.
+ *
+ * F100 creates a review draft only, after the current outreach preflight passes.
+ *
+ * F103: `hasSavedBooklet` comes from the server page (does a saved booklet exist in
+ * client_booklets?) and only drives the hint text — the route itself re-reads the
+ * saved booklet, so the hint can never promise more than generation will use. */
 export function ComposeButton({
   blocked,
+  ownershipBlocked = false,
   organisationId,
-  outreachStatus,
   suppressionReason,
   ownershipWarning,
+  hasSavedBooklet = false,
 }: {
   blocked: boolean;
+  ownershipBlocked?: boolean;
   organisationId: string;
-  outreachStatus: string;
   suppressionReason?: string;
   ownershipWarning?: string;
+  hasSavedBooklet?: boolean;
 }) {
-  const isStageTwo = outreachStatus === "initial_outreach_sent";
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,8 +83,8 @@ export function ComposeButton({
           text: `This client is suppressed. Outreach is blocked. Reason: ${suppressionReason ?? "No reason was recorded."}`,
           tone: "block",
         }
-      : ownershipWarning
-        ? { text: ownershipWarning, tone: "conflict" }
+      : ownershipBlocked || ownershipWarning
+        ? { text: ownershipWarning ?? "Outreach is unavailable on this client.", tone: "conflict" }
         : null,
   );
   const [length, setLength] = useState<EmailLength>("standard");
@@ -48,21 +92,6 @@ export function ComposeButton({
   const [tone, setTone] = useState<EmailTone>("balanced");
   const [opening, setOpening] = useState<OpeningApproach>("mission_led");
   const [closing, setClosing] = useState<ClosingApproach>("soft_cta");
-  const [booklet, setBooklet] = useState<string | null>(null);
-  const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
-  const [approved, setApproved] = useState(false);
-  const [sendMessage, setSendMessage] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-
-  useEffect(() => {
-    function receiveBooklet(event: Event) {
-      const detail = (event as CustomEvent<BookletGeneratedDetail>).detail;
-      if (detail.organisationId === organisationId) setBooklet(detail.booklet);
-    }
-    window.addEventListener(BOOKLET_GENERATED_EVENT, receiveBooklet);
-    return () => window.removeEventListener(BOOKLET_GENERATED_EVENT, receiveBooklet);
-  }, [organisationId]);
 
   async function generate() {
     setBusy(true);
@@ -81,23 +110,17 @@ export function ComposeButton({
         return;
       }
 
-      const stagePath = isStageTwo ? "stage-two" : "stage-one";
-      const response = await fetch(`/api/clients/${organisationId}/outreach-drafts/${stagePath}`, {
+      const response = await fetch(`/api/clients/${organisationId}/outreach-drafts/stage-one`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ length, voice, tone, opening, closing, booklet }),
+        body: JSON.stringify({ length, voice, tone, opening, closing }),
       });
       const payload = await response.json();
       if (!response.ok) {
         setError(payload.error ?? "The email draft could not be generated. Try again.");
         return;
       }
-      const nextDraft = payload as Draft;
-      setDraft(nextDraft);
-      setSubject(nextDraft.subject);
-      setBody(nextDraft.body);
-      setApproved(false);
-      setSendMessage(null);
+      setDraft(payload as Draft);
     } catch {
       setError("Could not reach the server. Check your connection and try again.");
     } finally {
@@ -105,29 +128,16 @@ export function ComposeButton({
     }
   }
 
-  async function send() {
-    if (!draft) return;
-    setSending(true);
-    setSendMessage(null);
-    const result = await sendReviewedEmail({
-      organisationId,
-      messageId: draft.id,
-      subject,
-      body,
-      explicitlyApproved: approved,
-    });
-    setSendMessage(result.message);
-    if (result.ok) setDraft(null);
-    setSending(false);
-  }
-
-  if (blocked) {
+  if (blocked || ownershipBlocked) {
     return (
       <div>
         <OriginButton variant="outline" size="sm" disabled type="button">
-          {isStageTwo ? "Generate Stage 2 follow-up" : "Generate Stage 1 email"}
+          Generate Stage 1 email
         </OriginButton>
-        <p className="mt-2.5 text-[13px] font-bold leading-[1.6] text-red-800" role="alert">
+        <p
+          className={`mt-2.5 text-[13px] font-bold leading-[1.6] ${warning?.tone === "conflict" ? "text-amber-800" : "text-red-800"}`}
+          role="alert"
+        >
           {warning?.text}
         </p>
       </div>
@@ -137,8 +147,8 @@ export function ComposeButton({
   return (
     <div className="space-y-4">
       <p className="text-xs text-foreground/55" aria-live="polite">
-        {booklet
-          ? "The current generated client booklet will be used as additional context."
+        {hasSavedBooklet
+          ? "The client's saved booklet is included as additional context."
           : "Generate the client booklet first to include its insights in this email."}
       </p>
       <label className="block max-w-xs text-xs font-bold text-foreground/65">
@@ -149,37 +159,46 @@ export function ComposeButton({
           onChange={(event) => setLength(event.target.value as EmailLength)}
           value={length}
         >
-          <option value="short">Short</option>
-          <option value="standard">Standard</option>
-          <option value="detailed">Detailed</option>
+          {EMAIL_LENGTHS.map((value) => (
+            <option key={value} value={value}>
+              {EMAIL_LENGTH_LABELS[value]}
+            </option>
+          ))}
         </select>
+        <span className="mt-1 block font-normal text-foreground/55">How long the email body should be.</span>
       </label>
       <label className="block max-w-xs text-xs font-bold text-foreground/65">
         Closing approach
         <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setClosing(event.target.value as ClosingApproach)} value={closing}>
-          <option value="soft_cta">Soft invitation</option>
-          <option value="meeting_request">Request a short call</option>
-          <option value="open_question">Open question</option>
+          {CLOSING_APPROACHES.map((value) => (
+            <option key={value} value={value}>
+              {CLOSING_APPROACH_LABELS[value]}
+            </option>
+          ))}
         </select>
       </label>
-      {!isStageTwo && (
-        <label className="block max-w-xs text-xs font-bold text-foreground/65">
-          Opening approach
-          <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setOpening(event.target.value as OpeningApproach)} value={opening}>
-            <option value="mission_led">Mission-led</option>
-            <option value="direct_intro">Direct introduction</option>
-            <option value="news_hook">Relevant news hook</option>
-          </select>
-        </label>
-      )}
+      <label className="block max-w-xs text-xs font-bold text-foreground/65">
+        Opening approach
+        <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setOpening(event.target.value as OpeningApproach)} value={opening}>
+          {OPENING_APPROACHES.map((value) => (
+            <option key={value} value={value}>
+              {OPENING_APPROACH_LABELS[value]}
+            </option>
+          ))}
+        </select>
+      </label>
       <label className="block max-w-xs text-xs font-bold text-foreground/65">
         Email tone
         <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setTone(event.target.value as EmailTone)} value={tone}>
-          <option value="balanced">Balanced</option>
-          <option value="warm">Warm</option>
-          <option value="formal">Formal</option>
-          <option value="concise">Concise</option>
+          {EMAIL_TONES.map((value) => (
+            <option key={value} value={value}>
+              {EMAIL_TONE_LABELS[value]}
+            </option>
+          ))}
         </select>
+        <span className="mt-1 block font-normal text-foreground/55">
+          How friendly or formal the email reads — separate from its length and voice.
+        </span>
       </label>
       <label className="block max-w-xs text-xs font-bold text-foreground/65">
         Email voice
@@ -189,18 +208,17 @@ export function ComposeButton({
           onChange={(event) => setVoice(event.target.value as EmailVoice)}
           value={voice}
         >
-          <option value="180dc">180DC Sheffield</option>
-          <option value="consultative">Consultative</option>
-          <option value="plain_language">Plain language</option>
+          {EMAIL_VOICES.map((value) => (
+            <option key={value} value={value}>
+              {EMAIL_VOICE_LABELS[value]}
+            </option>
+          ))}
         </select>
+        <span className="mt-1 block font-normal text-foreground/55">Who the email is written as — our collective style or plainer wording.</span>
       </label>
       <OriginButton variant="outline" size="sm" onClick={generate} disabled={busy} type="button">
         <Sparkles aria-hidden="true" className="h-4 w-4" />
-        {busy
-          ? "Checking and generating…"
-          : draft
-            ? `Regenerate ${isStageTwo ? "Stage 2 follow-up" : "Stage 1 email"}`
-            : `Generate ${isStageTwo ? "Stage 2 follow-up" : "Stage 1 email"}`}
+        {busy ? "Checking and generating…" : draft ? "Regenerate Stage 1 email" : "Generate Stage 1 email"}
       </OriginButton>
 
       {warning && (
@@ -222,32 +240,26 @@ export function ComposeButton({
       )}
 
       {draft && !busy && (
-        <section key={draft.id} aria-labelledby="email-review-heading" className="space-y-3 rounded-xl border border-brand/20 bg-brand/[0.04] p-4">
+        <section aria-labelledby="email-review-heading" className="space-y-3 rounded-xl border border-brand/20 bg-brand/[0.04] p-4">
           <div>
-            <h3 className="text-sm font-bold" id="email-review-heading">
-              Review generated {isStageTwo ? "follow-up " : ""}draft
-            </h3>
+            <h3 className="text-sm font-bold" id="email-review-heading">Review generated draft</h3>
             <p className="mt-1 text-xs text-foreground/55">
               Saved as a draft. Review and edit it before a separate human send action is made available.
+            </p>
+            <p className="mt-1 text-xs text-foreground/65">
+              Size tone template: {sizeTemplateLabel(draft.sizeTemplate)}
             </p>
           </div>
           <label className="block text-xs font-bold text-foreground/65">
             Subject
-            <input className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" onChange={(event) => { setSubject(event.target.value); setApproved(false); }} value={subject} />
+            <input className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" defaultValue={draft.subject} />
           </label>
           <label className="block text-xs font-bold text-foreground/65">
             Body
-            <textarea className="mt-1 min-h-64 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm leading-relaxed" onChange={(event) => { setBody(event.target.value); setApproved(false); }} value={body} />
+            <textarea className="mt-1 min-h-64 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm leading-relaxed" defaultValue={draft.body} />
           </label>
-          <label className="flex items-start gap-2 text-xs font-bold text-foreground/70">
-            <input checked={approved} className="mt-0.5" onChange={(event) => setApproved(event.target.checked)} type="checkbox" />
-            I have reviewed the recipient, subject and body and approve this email for sending.
-          </label>
-          <OriginButton disabled={!approved || sending || !subject.trim() || !body.trim()} onClick={send} type="button">
-            {sending ? "Sending…" : "Send reviewed email"}
-          </OriginButton>
           <p className="text-xs font-bold text-amber-800" role="status">
-            {sendMessage ?? "Not sent — explicit human review and Send action are required."}
+            Not sent — explicit human review and send are required.
           </p>
         </section>
       )}

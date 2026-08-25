@@ -101,7 +101,10 @@ export async function sendInviteAction(
     lookupExistingUser,
     adminClient,
     authorization.actor.id,
-    { email: formData.get("email"), role: formData.get("role") },
+    {
+      email: formData.get("email"),
+      role: formData.get("role"),
+    },
     redirectTo,
     undefined,
     {
@@ -124,8 +127,7 @@ export async function sendInviteAction(
   );
 
   if (outcome.ok) {
-    // So the pending-invites list on /admin/users shows the new row immediately,
-    // without the admin having to refresh (AC5).
+    // So the pending-invites list on /admin/users shows the new invite immediately.
     revalidatePath("/admin/users");
   }
 

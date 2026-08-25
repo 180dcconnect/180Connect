@@ -60,7 +60,7 @@ describe("Past Clients URL Import Scenarios", () => {
     assert.equal(draft.fields.legal_name, "IRISE INTERNATIONAL");
     assert.equal(draft.fields.organisation_type, "charity");
     assert.equal(draft.fields.address_line_1, "18 Upperthorpe");
-    assert.equal(draft.fields.city, "SHEFFIELD");
+    assert.equal(draft.fields.city, "Sheffield");
     assert.equal(draft.fields.postcode, "S6 3NA");
     assert.equal(draft.fields.country_code, "GB");
     assert.equal(draft.fields.website, "https://www.irise.org.uk");
@@ -195,7 +195,7 @@ describe("Past Clients URL Import Scenarios", () => {
     assert.equal(draft.fields.legal_name, "THE LINK COMMUNITY HUB");
     assert.equal(draft.fields.organisation_type, "charity");
     assert.equal(draft.fields.address_line_1, "83 STRADBROKE DRIVE");
-    assert.equal(draft.fields.city, "SHEFFIELD");
+    assert.equal(draft.fields.city, "Sheffield");
     assert.equal(draft.fields.postcode, "S13 8SE");
     assert.equal(draft.importedFieldPaths.length, 11);
   });
@@ -234,7 +234,7 @@ describe("Past Clients URL Import Scenarios", () => {
     assert.equal(draft.fields.legal_name, "MULTIPLE SCLEROSIS TRUST");
     assert.equal(draft.fields.organisation_type, "charity");
     assert.equal(draft.fields.address_line_1, "SPIRELLA BUILDING");
-    assert.equal(draft.fields.city, "LETCHWORTH GARDEN CITY");
+    assert.equal(draft.fields.city, "Letchworth Garden City");
     assert.equal(draft.fields.postcode, "SG6 4ET");
     assert.equal(draft.importedFieldPaths.length, 11);
   });
@@ -257,12 +257,15 @@ describe("Past Clients URL Import Scenarios", () => {
     assert.equal(extraction.legalName, "Labre's Hope");
     assert.ok(extraction.missionStatement?.includes("end homelessness"));
     assert.equal(extraction.website, "https://www.labreshope.co.uk");
+    // No stated country on the page — the .co.uk ccTLD is the evidence.
+    assert.equal(extraction.countryCode, "GB");
 
     const draft = buildImportDraft(extraction, [], []);
     assert.equal(draft.fields.legal_name, "Labre's Hope");
     assert.equal(draft.fields.website, "https://www.labreshope.co.uk");
     assert.ok(draft.fields.mission_statement?.includes("end homelessness"));
-    assert.equal(draft.importedFieldPaths.length, 3);
+    assert.equal(draft.fields.country_code, "GB");
+    assert.equal(draft.importedFieldPaths.length, 4);
   });
 
   it("7. Sustainability Learning CIC — resolves Community Interest Company (10 / 11 fields)", async () => {
@@ -319,7 +322,9 @@ describe("Past Clients URL Import Scenarios", () => {
     const draft = buildImportDraft(extraction, [], []);
     assert.equal(draft.fields.legal_name, null);
     assert.equal(draft.fields.website, "https://www.7roadlight.co.uk");
-    assert.equal(draft.importedFieldPaths.length, 1);
+    // Even an empty shell still yields what the domain itself proves.
+    assert.equal(draft.fields.country_code, "GB");
+    assert.equal(draft.importedFieldPaths.length, 2);
   });
 
   it("9. Tickets for Good — extracts metadata and Sheffield postcode (5 fields)", () => {

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
+import { sendReviewedEmail } from "./outreach-actions";
 import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
 
 type Tone = "block" | "conflict";
@@ -75,6 +76,11 @@ export function ComposeButton({
   hasSavedBooklet?: boolean;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [approved, setApproved] = useState(false);
+  const [sendMessage, setSendMessage] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [warning, setWarning] = useState<Warning | null>(
@@ -120,12 +126,33 @@ export function ComposeButton({
         setError(payload.error ?? "The email draft could not be generated. Try again.");
         return;
       }
-      setDraft(payload as Draft);
+      const nextDraft = payload as Draft;
+      setDraft(nextDraft);
+      setSubject(nextDraft.subject);
+      setBody(nextDraft.body);
+      setApproved(false);
+      setSendMessage(null);
     } catch {
       setError("Could not reach the server. Check your connection and try again.");
     } finally {
       setBusy(false);
     }
+  }
+
+  async function send() {
+    if (!draft) return;
+    setSending(true);
+    setSendMessage(null);
+    const result = await sendReviewedEmail({
+      organisationId,
+      messageId: draft.id,
+      subject,
+      body,
+      explicitlyApproved: approved,
+    });
+    setSendMessage(result.message);
+    if (result.ok) setDraft(null);
+    setSending(false);
   }
 
   if (blocked || ownershipBlocked) {
@@ -252,14 +279,23 @@ export function ComposeButton({
           </div>
           <label className="block text-xs font-bold text-foreground/65">
             Subject
-            <input className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" defaultValue={draft.subject} />
+            <input className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" onChange={(event) => { setSubject(event.target.value); setApproved(false); }} value={subject} />
           </label>
           <label className="block text-xs font-bold text-foreground/65">
             Body
-            <textarea className="mt-1 min-h-64 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm leading-relaxed" defaultValue={draft.body} />
+            {/* key={draft.id}: a regenerated draft replaces any edits and resets
+                approval, so the reviewer always sees exactly what will be sent. */}
+            <textarea key={draft.id} className="mt-1 min-h-64 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm leading-relaxed" onChange={(event) => { setBody(event.target.value); setApproved(false); }} value={body} />
           </label>
+          <label className="flex items-start gap-2 text-xs font-bold text-foreground/70">
+            <input checked={approved} className="mt-0.5" onChange={(event) => setApproved(event.target.checked)} type="checkbox" />
+            I have reviewed the recipient, subject and body and approve this email for sending.
+          </label>
+          <OriginButton disabled={!approved || sending || !subject.trim() || !body.trim()} onClick={send} type="button">
+            {sending ? "Sending…" : "Send reviewed email"}
+          </OriginButton>
           <p className="text-xs font-bold text-amber-800" role="status">
-            Not sent — explicit human review and send are required.
+            {sendMessage ?? "Not sent — explicit human review and send are required."}
           </p>
         </section>
       )}

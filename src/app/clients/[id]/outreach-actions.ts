@@ -1,25 +1,15 @@
 "use server";
 
-import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { canSendClientOutreach } from "@/lib/client-email-validation";
 import { reportError } from "@/lib/error-logging";
 import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
+import { reviewedEmailSchema } from "@/lib/outreach/send-reviewed";
 import { checkSuppressionBeforeSend, suppressionBlockedMessage } from "@/lib/outreach/suppression-check";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { nonEmptyTrimmed, safeValidate } from "@/lib/validation";
-
-const reviewedEmailSchema = z.object({
-  organisationId: z.uuid(),
-  messageId: z.uuid(),
-  subject: nonEmptyTrimmed(998, "Add a subject before sending."),
-  body: nonEmptyTrimmed(100_000, "Add email content before sending."),
-  explicitlyApproved: z.literal(true, {
-    error: "Review the email and confirm approval before sending.",
-  }),
-});
+import { safeValidate } from "@/lib/validation";
 
 export type ReviewedSendResult =
   | { ok: true; message: string }
@@ -39,12 +29,13 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   if (!authorization.ok) {
     return { ok: false, message: actorFailureMessage(authorization.reason) };
   }
+  const isAdmin = authorization.actor.role === "admin";
 
   const { organisationId, messageId, subject, body, explicitlyApproved } = parsed.data;
   const supabase = await createClient();
   const { data: draft, error: draftError } = await supabase
     .from("outreach_messages")
-    .select("id, organisation_id, contact_id, send_status, contacts(email), organisations(contact_email)")
+    .select("id, organisation_id, contact_id, send_status, sent_by_user_id, contacts(email), organisations(contact_email)")
     .eq("id", messageId)
     .eq("organisation_id", organisationId)
     .maybeSingle();
@@ -56,12 +47,23 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
     return { ok: false, message: "This email is no longer an unsent draft." };
   }
 
+  // F123 AC4 — the "unauthorised sender" case: RLS lets every active user READ
+  // every draft, and would only silently no-op a foreign UPDATE, so ownership has
+  // to be asserted here before anything is sent. The RPCs below re-check it
+  // inside their SECURITY DEFINER bodies regardless; this early return just gives
+  // the honest UI error instead of a confusing later one.
+  if (!isAdmin && draft.sent_by_user_id !== authorization.actor.id) {
+    return { ok: false, message: "You can only send drafts you generated yourself." };
+  }
+
   const suppression = await checkSuppressionBeforeSend(organisationId, async (id) => {
     const { data, error } = await supabase
       .from("suppressions")
       .select("id, reason")
       .eq("organisation_id", id)
       .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
     if (error) throw error;
     return data;
@@ -82,43 +84,98 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   const decision = canSendClientOutreach(contact?.email ?? organisation?.contact_email, explicitlyApproved);
   if (!decision.allowed) return { ok: false, message: decision.warning };
 
-  // Save the exact reviewed content first. A failed provider call leaves an editable
-  // draft containing precisely what the CAM attempted, never the earlier AI output.
-  const { error: saveError } = await supabase
+  // Save the exact reviewed content first, and REQUIRE the write to have matched:
+  // `.eq(send_status)` + `.single()` turns a raced or already-sent draft into an
+  // error here rather than a silent zero-row update that Gmail then makes real.
+  // A failed provider call leaves an editable draft containing precisely what the
+  // CAM attempted, never the earlier AI output.
+  const { data: saved, error: saveError } = await supabase
     .from("outreach_messages")
     .update({ subject, body, sent_by_user_id: authorization.actor.id })
     .eq("id", messageId)
-    .eq("send_status", "draft");
-  if (saveError) {
-    await reportError(saveError, { operation: "outreach.send.save_review", messageId });
-    return { ok: false, message: "The reviewed email could not be saved. Nothing was sent." };
+    .eq("organisation_id", organisationId)
+    .eq("send_status", "draft")
+    .select("id")
+    .single();
+  if (saveError || !saved) {
+    await reportError(saveError ?? new Error("Draft save matched no rows."), { operation: "outreach.send.save_review", messageId });
+    return { ok: false, message: "This email is no longer an unsent draft." };
+  }
+
+  // Atomic claim (F123): exactly one concurrent sender may proceed to Gmail for
+  // this draft; everyone else gets refused before any provider call. The claim
+  // self-expires after send_claim_staleness_window(), so a crashed tab cannot lock
+  // a draft forever.
+  const { data: claimed, error: claimError } = await supabase
+    .rpc("claim_outreach_send", { p_message_id: messageId });
+  if (claimError) {
+    await reportError(claimError, { operation: "outreach.send.claim", messageId });
+    return { ok: false, message: "The send could not be started safely. Nothing was sent. Try again." };
+  }
+  if (claimed !== true) {
+    return { ok: false, message: "This email is already being sent, or was just sent. Refresh to see its current state." };
   }
 
   const sent = await sendBranchOutreach({ to: decision.recipient, subject, text: body });
-  if (!sent.ok) return { ok: false, message: sent.reason };
 
-  const sentAt = new Date().toISOString();
-  const { error: statusError } = await supabase
-    .from("outreach_messages")
-    .update({ send_status: "sent", sent_at: sentAt, scheduled_at: null })
-    .eq("id", messageId)
-    .eq("send_status", "draft");
-  if (statusError) {
-    await reportError(statusError, { operation: "outreach.send.record_status", messageId });
+  if (!sent.ok) {
+    // Definite refusal (bad credentials, suppressed-at-provider, malformed
+    // request): nothing went out, so release the claim for a clean retry. An
+    // ambiguous failure (timeout/5xx — the email may actually have been delivered)
+    // deliberately KEEPS the claim: auto-retrying an unknown-outcome send risks a
+    // duplicate email to the client, which is worse than asking a human to check
+    // the mailbox. Stale claims expire via send_claim_staleness_window().
+    if (!sent.retryable) {
+      const { error: unclaimError } = await supabase
+        .from("outreach_messages")
+        .update({ send_claimed_at: null })
+        .eq("id", messageId)
+        .eq("send_status", "draft");
+      if (unclaimError) {
+        await reportError(unclaimError, { operation: "outreach.send.unclaim", messageId });
+      }
+    } else {
+      await reportError(new Error(`Gmail send failed with retryable outcome (${sent.reason}).`), {
+        operation: "outreach.send.ambiguous_failure",
+        messageId,
+      });
+    }
+    return { ok: false, message: sent.retryable
+      ? `${sent.reason} If you are unsure whether it went out, check the mailbox before retrying.`
+      : sent.reason };
+  }
+
+  // Audited draft→sent transition (F123/audit-log pattern §1): the RPC flips the
+  // status conditionally on still-draft and writes the audit_log row in the same
+  // transaction, so a lost race raises instead of double-recording.
+  const { error: markError } = await supabase.rpc("mark_outreach_sent", {
+    p_message_id: messageId,
+    p_provider_message_id: sent.providerMessageId,
+    p_provider_thread_id: sent.providerThreadId,
+  });
+  if (markError) {
+    // The email IS out; this must stay visible even though the request succeeds
+    // overall — the DoD requires failures to reach ERROR_LOG.
+    await reportError(markError, { operation: "outreach.send.record_sent", messageId });
     return { ok: false, message: "The email was sent, but its status could not be recorded. Contact an administrator." };
   }
 
   const admin = createAdminClient();
   if (admin) {
+    // Best-effort delivery record: the send itself is already durable in
+    // outreach_messages + audit_log above; this enriches the timeline only.
     const { error: eventError } = await admin.from("send_events").insert({
       outreach_message_id: messageId,
       event_type: "sent",
-      occurred_at: sentAt,
+      occurred_at: new Date().toISOString(),
       metadata: { provider: "gmail", message_id: sent.providerMessageId, thread_id: sent.providerThreadId },
     });
     if (eventError) await reportError(eventError, { operation: "outreach.send.record_event", messageId });
   }
 
+  // Pipeline advance via set_outreach_status (its own audited RPC). Best-effort by
+  // design — the email is factually out either way, and a failed status flip is
+  // reported above rather than pretending the send didn't happen.
   const { data: organisationRow } = await supabase
     .from("organisations")
     .select("outreach_status")

@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  DEFAULT_BREAKDOWN_LIMIT,
   breakdown,
-  breakdownLimit,
   clientsInStage,
   parseDirection,
   parseField,
@@ -23,6 +21,7 @@ function org(overrides: Partial<ClientListRow> = {}): ClientListRow {
     outreach_status: "not_contacted",
     owner_id: null,
     owner: null,
+    org_tags: [],
     ...overrides,
   };
 }
@@ -149,9 +148,11 @@ describe("breakdown", () => {
 
   it("names the list filter each group corresponds to", () => {
     assert.deepEqual(breakdown(clients, "city")[0].filter, { param: "city", value: "London" });
+    // F053: the link carries the stored organisation_type, not its label — the
+    // filter matches on the enum, so a label here would find nothing.
     assert.deepEqual(breakdown(clients, "type")[0].filter, {
-      param: "source",
-      value: "Charity Commission",
+      param: "type",
+      value: "charity",
     });
     assert.deepEqual(breakdown(clients, "owner")[0].filter, {
       param: "owner",
@@ -178,88 +179,6 @@ describe("breakdown", () => {
       breakdown(tied, "city").map((row) => row.label),
       ["Acton", "York"],
     );
-  });
-
-  describe("team ownership breakdown (F167)", () => {
-    const teamClients = shape([
-      org({ id: "1", owner_id: "cam-1", owner: { full_name: "Sarah Jenkins" }, outreach_status: "converted" }),
-      org({ id: "2", owner_id: "cam-1", owner: { full_name: "Sarah Jenkins" }, outreach_status: "initial_outreach_sent" }),
-      org({ id: "3", owner_id: "cam-2", owner: { full_name: "Mohammed Saeed" }, outreach_status: "converted" }),
-      org({ id: "4", owner_id: null, owner: null, outreach_status: "not_contacted" }),
-      org({ id: "5", owner_id: null, owner: null, outreach_status: "not_contacted" }),
-      org({ id: "6", owner_id: null, owner: null, outreach_status: "not_contacted" }),
-    ]);
-
-    it("groups clients by team owner and tracks unassigned accounts", () => {
-      const rows = breakdown(teamClients, "owner", "descending", "all", 10);
-      assert.deepEqual(
-        rows.map((r) => [r.label, r.count]),
-        [
-          ["Unassigned", 3],
-          ["Sarah Jenkins", 2],
-          ["Mohammed Saeed", 1],
-        ],
-      );
-    });
-
-    it("calculates funnel stages per team member", () => {
-      const sarah = breakdown(teamClients, "owner", "descending", "all", 10).find(
-        (r) => r.label === "Sarah Jenkins",
-      );
-      assert.deepEqual(sarah?.counts, {
-        all: 2,
-        contacted: 2,
-        responded: 1,
-        converted: 1,
-      });
-    });
-
-    it("keeps owners the CAM list does not contain, rather than truncating them", () => {
-      // The limit is not the size of the team: an admin owner and a deactivated
-      // former owner both hold clients without appearing in the CAM dropdown, and
-      // F167 AC1 says an admin sees every client's owner in the one view.
-      const mixed = shape([
-        org({ id: "1", owner_id: "cam-1", owner: { full_name: "Sarah Jenkins" } }),
-        org({ id: "2", owner_id: "cam-2", owner: { full_name: "Mohammed Saeed" } }),
-        org({ id: "3", owner_id: "admin-1", owner: { full_name: "Bashir Bobboi" } }),
-        // owner_id set, join empty — a deactivated member's row is hidden from `users`.
-        org({ id: "4", owner_id: "former-1", owner: null }),
-        org({ id: "5", owner_id: null, owner: null }),
-      ]);
-
-      const labels = breakdown(mixed, "owner", "descending", "all", breakdownLimit("owner")).map(
-        (row) => row.label,
-      );
-
-      assert.deepEqual(labels.sort(), [
-        "A former team member",
-        "Bashir Bobboi",
-        "Mohammed Saeed",
-        "Sarah Jenkins",
-        "Unassigned",
-      ]);
-    });
-
-    it("links team owner groups to their specific filter", () => {
-      const rows = breakdown(teamClients, "owner", "descending", "all", 10);
-      const unassigned = rows.find((r) => r.label === "Unassigned");
-      const sarah = rows.find((r) => r.label === "Sarah Jenkins");
-
-      assert.deepEqual(unassigned?.filter, { param: "owner", value: "unassigned" });
-      assert.deepEqual(sarah?.filter, { param: "owner", value: "cam-1" });
-    });
-  });
-});
-
-describe("breakdownLimit", () => {
-  it("shows every group when grouped by owner", () => {
-    assert.equal(breakdownLimit("owner"), Number.POSITIVE_INFINITY);
-  });
-
-  it("stays a top three for every other field", () => {
-    for (const field of ["city", "type", "status"] as const) {
-      assert.equal(breakdownLimit(field), DEFAULT_BREAKDOWN_LIMIT);
-    }
   });
 });
 

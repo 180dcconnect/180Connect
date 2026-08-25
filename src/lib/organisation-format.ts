@@ -33,3 +33,39 @@ export const PIPELINE_STATUSES = [
 ] as const;
 
 export type PipelineStatus = (typeof PIPELINE_STATUSES)[number];
+
+/** F041/F053 — the standardised `organisation_type` values, and how each is
+ * written in the UI. Expanded from four (charity/company/both/other) to eight
+ * so CAMs can filter to specific types (charity, NGO, social enterprise, CIC,
+ * CIO etc.) via the F041 field. The list is the filter's option set, so the
+ * options can never drift from the values the column actually allows (F053 AC3).
+ * "both" means registered as a charity *and* as a company, not a third kind. */
+export const ORGANISATION_TYPES = [
+  "charity",
+  "cio",
+  "cic",
+  "social_enterprise",
+  "ngo",
+  "company",
+  "both",
+  "other",
+] as const;
+
+export type OrganisationType = (typeof ORGANISATION_TYPES)[number];
+
+const ORGANISATION_TYPE_LABELS: Record<string, string> = {
+  charity: "Charity",
+  cio: "CIO",
+  cic: "CIC",
+  social_enterprise: "Social enterprise",
+  ngo: "NGO",
+  company: "Company",
+  both: "Charity and company",
+  other: "Other",
+};
+
+/** Falls back to the raw value rather than hiding it: a type the database grew
+ * before this file heard about it should read oddly, not vanish. */
+export function formatOrganisationType(type: string): string {
+  return ORGANISATION_TYPE_LABELS[type] ?? type;
+}

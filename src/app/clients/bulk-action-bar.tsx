@@ -19,11 +19,24 @@ type TeamMember = { id: string; full_name: string | null };
 
 /**
  * F253: Bulk Assign Action Bar & Dialog.
- * When one or more clients are selected on the list by an admin, this floating action bar
+ * When one or more clients are selected on the list, this floating action bar
  * slides up from the bottom of the viewport. Opening the modal allows picking a target CAM
  * and providing a mandatory audit reason, executing the bulk assignment via the F253 API.
  */
-export function BulkActionBar({ team }: { team: TeamMember[] }) {
+export function BulkActionBar({
+  team,
+  canAssign,
+}: {
+  team: TeamMember[];
+  /**
+   * Whether this actor may reassign ownership (`ownership:reassign`, admins).
+   * The bar itself shows for anyone who can select — a CAM still needs to see
+   * how many rows they have picked and be able to clear them (F062 AC2) — but
+   * the assign action only appears for someone allowed to perform it, rather
+   * than being offered and then refused by the API.
+   */
+  canAssign: boolean;
+}) {
   const router = useRouter();
   const { selectedIds, selectedCount, clearSelection } = useBulkSelect();
   const [modalOpen, setModalOpen] = useState(false);
@@ -117,16 +130,18 @@ export function BulkActionBar({ team }: { team: TeamMember[] }) {
               >
                 Clear
               </button>
-              <OriginButton
-                size="sm"
-                variant="default"
-                onClick={() => {
-                  setError(null);
-                  setModalOpen(true);
-                }}
-              >
-                Assign owner
-              </OriginButton>
+              {canAssign && (
+                <OriginButton
+                  size="sm"
+                  variant="default"
+                  onClick={() => {
+                    setError(null);
+                    setModalOpen(true);
+                  }}
+                >
+                  Assign owner
+                </OriginButton>
+              )}
             </div>
           </motion.div>
         )}

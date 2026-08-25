@@ -24,6 +24,7 @@
 // this mapper is written to be correct either way: it reads whatever fields
 // are present on the raw payload and standardises them, nothing more.
 
+import { normalizeCity } from "../city.ts";
 import {
   computeCompletenessScore,
   type StandardOrganisation,
@@ -179,7 +180,7 @@ export function standardizeCharityCommissionRecord(
     // address_line_one/two so there was nothing to map a town from; confirmed
     // live on 2026-08-17 that it carries five lines and the town is the last of
     // them. See splitCharityCommissionAddress for how they are read.
-    city: address.city,
+    city: normalizeCity(address.city),
     postcode: raw.address_post_code ?? "",
     // geographic_reach has no source signal at all yet — null, not a guess.
     geographic_reach: null,

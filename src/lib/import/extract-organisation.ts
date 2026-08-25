@@ -1,3 +1,5 @@
+import { normalizeCity } from "../city.ts";
+
 // Turns one fetched page into the fields F037 can offer a CAM for review.
 //
 // Pure function, no network, no database — same reasoning as the F041 source mappers
@@ -516,7 +518,7 @@ export function extractOrganisation(html: string, finalUrl: string): WebsiteExtr
     missionStatement,
     contactEmail: emailFrom(html, node),
     addressLine1: address.addressLine1,
-    city: address.city,
+    city: address.city ? normalizeCity(address.city) : null,
     postcode,
     // A UK register number or a UK postcode is stronger evidence of country than
     // anything else on a page, and most sites never state a country at all.

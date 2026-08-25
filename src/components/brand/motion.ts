@@ -150,22 +150,27 @@ export const ctaDisc = (ringColor: string): Variants => ({
  * a `rounded-l-full` block at the pill's full height caps its radius at height/2
  * exactly like `rounded-full` does on the pill itself.
  *
- * It settles at -20%, not 0%, and that matters. This block's `rounded-l-full`
- * and the parent's `overflow-hidden` clip are two independently antialiased
- * curves, and Chrome subpixel-rounds them a hair apart — so at 0% the parent's
- * dark background shows through as a hairline at the arc even though both radii
- * resolve to the same number on paper. -20% drives this cap's curve past the
- * parent's corner entirely, leaving the flat part of the rectangle for the
- * corner to clip: one curve draws the edge, not two fighting over it.
+ * It settles past the left edge rather than flush against it, and that matters.
+ * This block's `rounded-l-full` and the parent's `overflow-hidden` clip are two
+ * independently antialiased curves, and browsers subpixel-round them a hair
+ * apart — so flush, the parent's dark background shows through as a hairline at
+ * the arc even though both radii resolve to the same number on paper. Driving
+ * the cap past the parent's corner entirely leaves the flat part of the
+ * rectangle for the corner to clip: one curve draws the edge, not two fighting
+ * over it.
  *
- * The element is also `-inset-y-[1px]` at the call site, for the same reason
- * along the top and bottom edges.
+ * The element is `-inset-y-[2px]` and `w-[200%]` at the call site, anchored at
+ * the pill's right edge. Travel runs as a transform (`x`), not `left`: `left`
+ * forces layout plus a repaint every frame, which Safari stutters on behind the
+ * pill's backdrop-blur, while a transform composites on the GPU. The element is
+ * twice the pill's width, so the settle point is -60% of its own width: from
+ * 100% (fully off right) to -20% of the pill.
  */
 export const ctaWash: Variants = {
-  rest: { left: "100%", transition: { duration: 0.28, ease: EASE } },
+  rest: { x: "0%", transition: { duration: 0.28, ease: EASE, type: "tween" } },
   hover: {
-    left: "-20%",
-    transition: { duration: CTA_WASH, ease: EASE, delay: CTA_FILL },
+    x: "-60%",
+    transition: { duration: CTA_WASH, ease: EASE, delay: CTA_FILL, type: "tween" },
   },
 };
 
@@ -185,10 +190,11 @@ export const ctaLabel = (restColor: string, hoverColor: string): Variants => ({
  * than waiting on the fill stage — at that scale the wait reads as lag.
  */
 export const ctaArrow = (travel: number, delay: number): Variants => ({
-  rest: { x: 0, transition: { duration: 0.25, ease: EASE } },
+  rest: { x: 0, transition: { duration: 0.25, ease: EASE, type: "tween" } },
   hover: {
     x: [0, travel, -travel, 0],
     transition: {
+      type: "tween",
       duration: delay ? 0.7 : 0.6,
       delay,
       times: [0, 0.45, 0.4501, 1],

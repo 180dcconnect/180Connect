@@ -35,6 +35,7 @@ import {
   generateOrganisations,
   type SeedOrganisation,
 } from "../src/lib/seed/fixtures.ts";
+import { computePriorityScore } from "../src/lib/scoring/score-client.ts";
 
 /** Columns written by the seed, in the order the insert binds them. */
 const COLUMNS = [
@@ -120,10 +121,96 @@ async function main(): Promise<void> {
     const insert = buildInsert(organisations);
     await client.query(insert.text, insert.values);
 
+    // F058/F059 — seeded clients get LATEST_SCORES rows in the same transaction,
+    // so staging demos exercise the score filter, sort and pills instead of
+    // showing an all-dash column. Same pure engine the rescore hooks use.
+    //
+    // Seeded orgs also get one filed financial period each, cycling through the
+    // four canonical income bands: without it every size factor sits at its
+    // neutral default, all fifty clients band "medium", and neither the F058
+    // filter nor the F059 sort has anything interesting to show in a demo.
+    const { rows: seededOrgs } = await client.query<{
+      id: string;
+      city: string | null;
+      outreach_status: string;
+    }>(
+      "select id, city, outreach_status from public.organisations where is_seed order by created_at",
+    );
+    if (seededOrgs.length > 0) {
+      // One demo income per band, cycled deterministically across the rows.
+      const DEMO_INCOMES = [8_000, 45_000, 500_000, 2_000_000];
+      const DEMO_BANDS = ["under_10k", "10k_100k", "100k_1m", "over_1m"] as const;
+      const fpValues: unknown[] = [];
+      const fpPlaceholders = seededOrgs.map((row, index) => {
+        const slot = index % DEMO_INCOMES.length;
+        fpValues.push(
+          row.id,
+          "2024-04-01",
+          "2025-03-31",
+          DEMO_INCOMES[slot],
+          DEMO_BANDS[slot],
+          "charity_commission",
+        );
+        const base = fpValues.length - 6;
+        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6})`;
+      });
+      await client.query(
+        `
+        insert into public.financial_periods
+          (organisation_id, period_start, period_end, total_income, income_band, financial_source)
+        values ${fpPlaceholders.join(",\n       ")}
+        `,
+        fpValues,
+      );
+
+      const { rows: scoredOrgs } = await client.query<{
+        id: string;
+        city: string | null;
+        outreach_status: string;
+        total_income: string | null;
+      }>(
+        `
+        select
+          o.id,
+          o.city,
+          o.outreach_status,
+          (
+            select fp.total_income::text
+            from public.financial_periods fp
+            where fp.organisation_id = o.id
+            order by fp.period_end desc nulls last
+            limit 1
+          ) as total_income
+        from public.organisations o
+        where o.is_seed
+        `,
+      );
+      const scoreValues: unknown[] = [];
+      const scorePlaceholders = scoredOrgs.map((row) => {
+        const { score, band } = computePriorityScore({
+          city: row.city,
+          outreach_status: row.outreach_status,
+          total_income: row.total_income === null ? null : Number(row.total_income),
+        });
+        scoreValues.push(row.id, score, band);
+        return `($${scoreValues.length - 2}, $${scoreValues.length - 1}, $${scoreValues.length}, 'rule_engine', now())`;
+      });
+      await client.query(
+        `
+        insert into public.latest_scores
+          (organisation_id, priority_score, priority_band, score_source, scored_at)
+        values ${scorePlaceholders.join(",\n       ")}
+        on conflict (organisation_id) do nothing
+        `,
+        scoreValues,
+      );
+    }
+
     await client.query("commit");
 
     console.log(`[seed] removed ${removed ?? 0} existing seed rows`);
     console.log(`[seed] inserted ${organisations.length} organisations`);
+    console.log(`[seed] scored ${seededOrgs.length} organisations into latest_scores`);
     console.log(summarise(organisations));
     console.log(
       "\n[seed] every row has is_seed = true — " +

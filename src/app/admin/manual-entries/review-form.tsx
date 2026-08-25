@@ -30,7 +30,7 @@ export function ManualEntryReviewForm({
   organisationType,
 }: {
   entryId: string;
-  organisationType: "charity" | "company" | "both" | "other";
+  organisationType: "charity" | "cio" | "cic" | "social_enterprise" | "ngo" | "company" | "both" | "other";
 }) {
   const [state, checkAction, checking] = useActionState(
     checkAvailableManualEntryDependencies,
@@ -54,7 +54,7 @@ export function ManualEntryReviewForm({
       </p>
       <form action={checkAction} className="mt-3 space-y-3">
         <input name="id" type="hidden" value={entryId} />
-        {(organisationType === "company" || organisationType === "other") && (
+        {(organisationType === "company" || organisationType === "other" || organisationType === "ngo") && (
           <label className="flex items-start gap-2 text-sm">
             <input className="mt-1" name="adminConfirmedEligible" type="checkbox" />
             <span>

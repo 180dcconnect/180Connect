@@ -288,7 +288,7 @@ export async function saveEmailDraft(input: unknown): Promise<SaveDraftResult> {
   // the UPDATE lands — a concurrent send flipping the status between the load
   // check above and this write must surface as an error, not a silent zero-row
   // update that still tells the user "Draft saved."
-  const { data: saved, error: saveError } = await supabase
+  const { error: saveError } = await supabase
     .from("outreach_messages")
     .update({ subject, body, sent_to_email: recipient })
     .eq("id", messageId)
@@ -297,14 +297,16 @@ export async function saveEmailDraft(input: unknown): Promise<SaveDraftResult> {
     .select("id")
     .single();
   if (saveError) {
+    // `.single()` reports a zero-row match as PGRST116, so this is where the
+    // raced-send case actually lands: the draft was sent or removed between
+    // the load check above and this write. Distinguish it from a transient DB
+    // failure — "try again" would be a lie when the draft is simply gone.
+    if ((saveError as { code?: string }).code === "PGRST116") {
+      await reportError(saveError, { operation: "outreach.save_draft.write", messageId });
+      return { ok: false, message: "This email is no longer an unsent draft." };
+    }
     await reportError(saveError, { operation: "outreach.save_draft.write", messageId });
     return { ok: false, message: "The draft could not be saved. Try again." };
-  }
-  if (!saved) {
-    // Zero rows matched without an error: the draft was sent (or removed)
-    // between the load check above and this write.
-    await reportError(new Error("Draft save matched no rows."), { operation: "outreach.save_draft.write", messageId });
-    return { ok: false, message: "This email is no longer an unsent draft." };
   }
 
   revalidatePath(`/clients/${organisationId}`);

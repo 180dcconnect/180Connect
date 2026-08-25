@@ -419,8 +419,23 @@ export function ComposeButton({
           </div>
           <label className="block text-xs font-bold text-foreground/65">
             Subject
-            <input className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" onChange={(event) => { setSubject(event.target.value); setApproved(false); }} value={subject} />
+            <input
+              aria-describedby={subject.trim() ? undefined : "subject-error"}
+              aria-invalid={!subject.trim()}
+              className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+              onChange={(event) => { setSubject(event.target.value); setApproved(false); }}
+              value={subject}
+            />
           </label>
+          {/* F115 AC2: the Send button already stays disabled with an empty subject
+              (see below) — this makes *why* visible instead of a silently inert
+              button, using the same wording send-reviewed.ts's server-side check
+              would give if this were ever bypassed. */}
+          {!subject.trim() && (
+            <p className="text-xs font-bold text-red-800" id="subject-error" role="alert">
+              Add a subject before sending.
+            </p>
+          )}
           <div>
             <p className="text-xs font-bold text-foreground/65" id="email-body-heading">
               Body

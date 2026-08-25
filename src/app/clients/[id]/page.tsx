@@ -20,6 +20,7 @@ import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
 import { SuppressButton } from "./suppress-button";
 import { ComposeButton } from "./compose-button";
+import { FollowUpButton } from "./follow-up-button";
 import { OutreachHistorySection } from "./outreach-history";
 import { BasicInfoPanel } from "./basic-info-panel";
 import { ClaimButton } from "./claim-button";
@@ -874,6 +875,22 @@ export default async function ClientDetailPage({
                       ownershipWarning={ownershipConflict.hasConflict ? ownershipConflict.warning : undefined}
                       hasSavedBooklet={savedBooklet !== null}
                     />
+                    {/* F101: the follow-up trigger only exists while the client sits at
+                        initial_outreach_sent — Stage 1 sent, nothing since. The route
+                        re-enforces eligibility (isStageTwoEligible) server-side, so this
+                        presentation gate is convenience over an enforcement that does not
+                        depend on it; once the pipeline moves on, the action disappears. */}
+                    {client.outreach_status === "initial_outreach_sent" && (
+                      <div className="mt-4">
+                        <FollowUpButton
+                          blocked={suppressed}
+                          ownershipBlocked={!suppressed && ownershipConflict.hasConflict}
+                          organisationId={client.id}
+                          suppressionReason={suppressed ? latest?.reason : undefined}
+                          ownershipWarning={ownershipConflict.hasConflict ? ownershipConflict.warning : undefined}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </SectionCard>

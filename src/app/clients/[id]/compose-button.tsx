@@ -4,7 +4,9 @@ import { useState } from "react";
 import Link from "next/link";
 import { History, Sparkles } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
+import { RichTextEmailEditor } from "@/components/rich-text-email-editor";
 import { sendReviewedEmail } from "./outreach-actions";
+import { emailHtmlToPlainText, plainTextToEditorHtml } from "@/lib/outreach/email-html";
 import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
 
@@ -105,7 +107,19 @@ export function ComposeButton({
   // F123: the reviewed content is what actually gets sent, and any edit resets
   // approval. These also drive F111's regenerate-confirm (edits vs draft).
   const [subject, setSubject] = useState("");
+  // F117: HTML from the rich-text editor, not plain text.
   const [body, setBody] = useState("");
+  // Tracks whether the editor has actually fired an update since the current
+  // draft loaded. The regenerate-confirm uses this instead of comparing live
+  // editor HTML against `plainTextToEditorHtml(draft.body)`, because Tiptap's
+  // serializer can differ cosmetically from that hydration output — a string
+  // comparison could prompt "discard your edits?" even when nothing changed.
+  const [bodyEdited, setBodyEdited] = useState(false);
+  // Regeneration updates the same outreach_messages row in place (F111 AC2),
+  // so `draft.id` does not change and cannot key the editor's remount. This
+  // does, incremented on every successful (re)generate, forcing the
+  // uncontrolled editor to reinitialize with the new content.
+  const [generation, setGeneration] = useState(0);
   const [approved, setApproved] = useState(false);
   const [sendMessage, setSendMessage] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -132,7 +146,7 @@ export function ComposeButton({
     // replaces the visible draft outright (AC2), which would silently throw away
     // any edits the CAM already made to it. Confirm first, but only when there's
     // actually something to lose.
-    if (draft && (subject !== draft.subject || body !== draft.body)) {
+    if (draft && (subject !== draft.subject || bodyEdited)) {
       if (!window.confirm("Regenerating will replace this draft and discard your edits. Continue?")) {
         return;
       }
@@ -178,7 +192,9 @@ export function ComposeButton({
       const nextDraft = payload as Draft;
       setDraft(nextDraft);
       setSubject(nextDraft.subject);
-      setBody(nextDraft.body);
+      setBody(plainTextToEditorHtml(nextDraft.body));
+      setBodyEdited(false);
+      setGeneration((current) => current + 1);
       setApproved(false);
       setSendMessage(null);
     } catch {
@@ -420,17 +436,36 @@ export function ComposeButton({
               Add a subject before sending.
             </p>
           )}
-          <label className="block text-xs font-bold text-foreground/65">
-            Body
-            {/* key={draft.id}: a regenerated draft replaces any edits and resets
-                approval, so the reviewer always sees exactly what will be sent. */}
-            <textarea key={draft.id} className="mt-1 min-h-64 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm leading-relaxed" onChange={(event) => { setBody(event.target.value); setApproved(false); }} value={body} />
-          </label>
+          <div>
+            <p className="text-xs font-bold text-foreground/65" id="email-body-heading">
+              Body
+            </p>
+            {/* key={generation}: forces the uncontrolled editor to reinitialize
+                with the new draft's content — draft.id cannot be used here, since
+                a regeneration updates the same row in place (F111 AC2). */}
+            <div className="mt-1">
+              <RichTextEmailEditor
+                ariaLabelledBy="email-body-heading"
+                disabled={busy}
+                initialContent={body}
+                key={generation}
+                onChange={(html) => {
+                  setBody(html);
+                  setBodyEdited(true);
+                  setApproved(false);
+                }}
+              />
+            </div>
+          </div>
           <label className="flex items-start gap-2 text-xs font-bold text-foreground/70">
             <input checked={approved} className="mt-0.5" onChange={(event) => setApproved(event.target.checked)} type="checkbox" />
             I have reviewed the recipient, subject and body and approve this email for sending.
           </label>
-          <OriginButton disabled={!approved || sending || !subject.trim() || !body.trim()} onClick={send} type="button">
+          <OriginButton
+            disabled={!approved || sending || !subject.trim() || emailHtmlToPlainText(body).length === 0}
+            onClick={send}
+            type="button"
+          >
             {sending ? "Sending…" : "Send reviewed email"}
           </OriginButton>
           <p className="text-xs font-bold text-amber-800" role="status">

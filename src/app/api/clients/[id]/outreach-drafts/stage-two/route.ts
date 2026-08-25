@@ -11,6 +11,7 @@ import {
   isStageTwoEligible,
 } from "@/lib/outreach/stage-two-generation";
 import { buildStageTwoGenerationInsert } from "@/lib/outreach/stage-two-persistence";
+import { emailHtmlToPlainText } from "@/lib/outreach/email-html";
 import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES } from "@/lib/outreach/stage-one-prompt";
 import {
   checkSuppressionBeforeSend,
@@ -216,7 +217,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       newsHooks: enrichment?.news_hooks,
       booklet: savedBooklet?.booklet_text ?? null,
       previousSubject: previousMessage.subject,
-      previousBody: previousMessage.body,
+      // F117: the sent message's body may be HTML (new) or plain text (sent
+      // before this feature) — either way the model prompt wants readable
+      // plain text, not markup.
+      previousBody: emailHtmlToPlainText(previousMessage.body),
     },
     callModel,
     {

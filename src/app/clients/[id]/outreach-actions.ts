@@ -5,6 +5,7 @@ import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { canSendClientOutreach } from "@/lib/client-email-validation";
 import { reportError } from "@/lib/error-logging";
 import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
+import { discardDraftSchema } from "@/lib/outreach/discard-draft";
 import { emailHtmlToPlainText, sanitizeEmailHtml } from "@/lib/outreach/email-html";
 import { saveDraftSchema } from "@/lib/outreach/save-draft";
 import { reviewedEmailSchema } from "@/lib/outreach/send-reviewed";
@@ -311,4 +312,71 @@ export async function saveEmailDraft(input: unknown): Promise<SaveDraftResult> {
 
   revalidatePath(`/clients/${organisationId}`);
   return { ok: true, message: "Draft saved." };
+}
+
+export type DiscardDraftResult =
+  | { ok: true; message: string }
+  | { ok: false; message: string };
+
+/**
+ * F120: removes an unsent draft outright. The confirmation step lives in the
+ * UI (compose-button.tsx), since the content is genuinely lost once this
+ * runs — this action itself does exactly one thing once called.
+ *
+ * A plain row delete rather than a status flip: outreach_messages_delete_admin
+ * and outreach_messages_delete_own_draft (create_outreach.sql) were written
+ * for this ticket specifically, gated to send_status = 'draft' the same way
+ * the update policies are, so RLS already refuses to remove anything sent.
+ * ai_generations rows for this draft go with it via ON DELETE CASCADE.
+ */
+export async function discardEmailDraft(input: unknown): Promise<DiscardDraftResult> {
+  const parsed = safeValidate(discardDraftSchema, input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: Object.values(parsed.fieldErrors).flat().find(Boolean) ?? "Check the draft and try again.",
+    };
+  }
+
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const isAdmin = authorization.actor.role === "admin";
+
+  const { organisationId, messageId } = parsed.data;
+  const supabase = await createClient();
+  const { data: draft, error: draftError } = await supabase
+    .from("outreach_messages")
+    .select("id, send_status, sent_by_user_id")
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+  if (draftError || !draft) {
+    if (draftError) await reportError(draftError, { operation: "outreach.discard_draft.load", messageId });
+    return { ok: false, message: "That draft could not be loaded. Refresh and try again." };
+  }
+  if (draft.send_status !== "draft") {
+    return { ok: false, message: "This email is no longer an unsent draft." };
+  }
+  // Same ownership rule as saving and sending (F123 AC4): RLS lets every
+  // active user READ every draft, so write access is asserted here too.
+  if (!isAdmin && draft.sent_by_user_id !== authorization.actor.id) {
+    return { ok: false, message: "You can only discard drafts you generated yourself." };
+  }
+
+  const { data: deleted, error: deleteError } = await supabase
+    .from("outreach_messages")
+    .delete()
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .eq("send_status", "draft")
+    .select("id");
+  if (deleteError || !deleted || deleted.length === 0) {
+    if (deleteError) await reportError(deleteError, { operation: "outreach.discard_draft.write", messageId });
+    return { ok: false, message: "The draft could not be discarded. Refresh and try again." };
+  }
+
+  revalidatePath(`/clients/${organisationId}`);
+  return { ok: true, message: "Draft discarded." };
 }

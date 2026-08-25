@@ -396,6 +396,14 @@ export function ComposeButton({
 
       {draft && !busy && (() => {
         const recipientValidation = validateClientEmail(recipient);
+        // An emptied input is not the same fact as a client with no email on
+        // file: say what the CAM should do, not what the record lacks.
+        const recipientError =
+          recipientValidation.status === "missing"
+            ? "Add a recipient email address."
+            : recipientValidation.status === "invalid"
+              ? recipientValidation.message
+              : null;
         const recipientMismatch =
           recipientValidation.status === "valid" &&
           Boolean(draft.recipientOnFile) &&
@@ -424,9 +432,9 @@ export function ComposeButton({
           {/* F116 AC2: same format rule F045 uses (validateClientEmail), reused
               client-side so the CAM sees this before ever attempting to send —
               send-reviewed.ts enforces the identical rule server-side regardless. */}
-          {recipientValidation.status !== "valid" && (
+          {recipientError && (
             <p className="text-xs font-bold text-red-800" id="recipient-error" role="alert">
-              {recipientValidation.message}
+              {recipientError}
             </p>
           )}
           {/* F116 AC3: advisory only, not a block — a CAM may deliberately send to

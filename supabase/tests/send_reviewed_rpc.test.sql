@@ -7,7 +7,9 @@
 -- (42501) rather than silently matching zero rows while the email still goes out;
 -- only one of two competing sends can win the claim; an already-sent draft cannot be
 -- recorded as sent again; suppressed clients are refused at point-of-send; and the
--- draft→sent flip lands its audit_log row in the same transaction.
+-- draft→sent flip lands its audit_log row in the same transaction — with the actual
+-- delivered recipient recorded on both the row and the audit entry (F116 review
+-- follow-up).
 --
 -- Like bulk_status_rpc.test.sql these run as real end-user roles, never as
 -- service_role or the owning role: the RPCs are SECURITY DEFINER, so testing them
@@ -147,7 +149,7 @@ declare
 begin
   -- Lets the file merge ahead of its migration, same convention as the RLS suite.
   if to_regprocedure('public.claim_outreach_send(uuid)') is null
-     or to_regprocedure('public.mark_outreach_sent(uuid,text,text)') is null then
+     or to_regprocedure('public.mark_outreach_sent(uuid,text,text,text)') is null then
     return next skip(1, 'send-reviewed RPCs not yet migrated');
     return;
   end if;
@@ -166,7 +168,7 @@ begin
   return next is(
     tests.sqlstate_of(
       v_cam_b,
-      format('select public.mark_outreach_sent(%L, ''pm'', ''pt'')', v_draft_a)
+      format('select public.mark_outreach_sent(%L, ''pm'', ''pt'', ''client@example.org'')', v_draft_a)
     ),
     '42501',
     'AC4: another CAM recording a send on someone else''s draft is refused'
@@ -202,7 +204,7 @@ begin
   return next is(
     tests.sqlstate_of(
       v_cam_a,
-      format('select public.mark_outreach_sent(%L, ''pm-1'', ''pt-1'')', v_already_out)
+      format('select public.mark_outreach_sent(%L, ''pm-1'', ''pt-1'', ''on-file@example.org'')', v_already_out)
     ),
     'P0002',
     'recording a send against an already-sent message raises instead of double-recording'
@@ -211,7 +213,9 @@ begin
   return next is(
     tests.uuid_as(
       v_cam_a,
-      format('select public.mark_outreach_sent(%L, ''pm-1'', ''pt-1'')', v_draft_a)
+      -- F116 review follow-up: the deliberately overridden address, NOT the one
+      -- on file, is what this draft is recorded as having delivered.
+      format('select public.mark_outreach_sent(%L, ''pm-1'', ''pt-1'', ''override@example.org'')', v_draft_a)
     ),
     v_draft_a,
     'success path: the owner records the delivery'
@@ -221,6 +225,12 @@ begin
     (select send_status = 'sent' and sent_at is not null
        from public.outreach_messages where id = v_draft_a),
     'the transition flipped draft→sent with its timestamp'
+  );
+
+  return next is(
+    (select sent_to_email from public.outreach_messages where id = v_draft_a),
+    'override@example.org',
+    'F116: the delivered recipient is persisted exactly as passed, override included'
   );
 
   return next ok(
@@ -233,9 +243,17 @@ begin
   );
 
   return next is(
+    (select detail ->> 'sent_to' from public.audit_log
+      where target_table = 'outreach_messages' and target_id = v_draft_a
+        and action = 'outreach_email_sent'),
+    'override@example.org',
+    'F116: the audit row names who actually received the email'
+  );
+
+  return next is(
     tests.sqlstate_of(
       v_cam_a,
-      format('select public.mark_outreach_sent(%L, ''pm-2'', ''pt-2'')', v_draft_a)
+      format('select public.mark_outreach_sent(%L, ''pm-2'', ''pt-2'', ''again@example.org'')', v_draft_a)
     ),
     'P0002',
     'double-recordal: a second mark after success raises'

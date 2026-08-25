@@ -30,12 +30,25 @@ export function RecentUpdatesFeed({ items }: { items: FormattedRecentUpdate[] })
                   {String(index + 1).padStart(2, "0")}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="line-clamp-2 text-[14px] leading-snug font-medium text-foreground">
-                    <span className="font-bold">{item.orgName}</span>{" "}
-                    <span className="text-foreground/70">— {item.summary}</span>
+                  {/* Reads as a sentence in natural order: who did what, and
+                      to which client — no jumping to the pill to learn the
+                      action. For a client reply the client itself is the
+                      subject ("Acme Ltd replied to your outreach"). */}
+                  <p className="line-clamp-2 text-[14px] leading-snug text-foreground">
+                    <span className="font-semibold">{item.subjectName}</span>{" "}
+                    <span className="text-foreground/70">{item.actionPhrase}</span>
+                    {item.mentionsClient && (
+                      <>
+                        {" "}
+                        <span className="font-bold">{item.orgName}</span>
+                      </>
+                    )}
+                  </p>
+                  <p className="mt-0.5 line-clamp-1 text-[12px] text-foreground/45">
+                    {item.summary}
                   </p>
                   <p className="mt-0.5 text-[11px] text-foreground/40">
-                    {item.actorName} · {item.relativeTime}
+                    {item.relativeTime}
                   </p>
                 </div>
                 <span className="shrink-0 rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/55">

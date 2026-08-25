@@ -73,10 +73,41 @@ export type FormattedRecentUpdate = {
   orgName: string;
   href: string;
   eventLabel: string;
+  /**
+   * The sentence's subject — normally the actor, but for a client reply the
+   * client itself ("Amnesty International *replied to your outreach*"), since
+   * a generic "The client" subject would leave the reader asking who replied.
+   */
+  subjectName: string;
+  /**
+   * The verb phrase that completes the sentence when placed after the
+   * subject — "Ada Lovelace *added a note on* Oxford Homeless Project".
+   * Keyed off the same finite F076 event set as eventLabel.
+   */
+  actionPhrase: string;
+  /** Whether the client name trails the phrase as the sentence's object. */
+  mentionsClient: boolean;
   actorName: string;
   summary: string;
   relativeTime: string;
   timestamp: string;
+};
+
+/**
+ * Actor-first phrasing per F076 event type, so the dashboard feed reads as a
+ * sentence in natural order — who did what, to which client — rather than
+ * making the reader start at the client name and jump to a pill on the far
+ * right to learn what actually happened. A reply is inverted: the client is
+ * both subject and object of the event, so it leads the sentence and nothing
+ * trails.
+ */
+const ACTION_PHRASE: Record<string, { phrase: string; subjectIsActor: boolean }> = {
+  email_sent: { phrase: "sent an email to", subjectIsActor: true },
+  reply_received: { phrase: "replied to your outreach", subjectIsActor: false },
+  note_added: { phrase: "added a note on", subjectIsActor: true },
+  note_edited: { phrase: "edited a note on", subjectIsActor: true },
+  status_changed: { phrase: "updated the pipeline status on", subjectIsActor: true },
+  ownership_reassigned: { phrase: "reassigned ownership of", subjectIsActor: true },
 };
 
 type ScopedEntry = TimelineEntry & { orgId: string; orgName: string };
@@ -153,6 +184,12 @@ export function buildRecentUpdates(
       orgName: entry.orgName,
       href: `/clients/${entry.orgId}`,
       eventLabel: TIMELINE_EVENT_LABEL[entry.type],
+      subjectName:
+        ACTION_PHRASE[entry.type] && !ACTION_PHRASE[entry.type].subjectIsActor
+          ? entry.orgName
+          : entry.actorName,
+      actionPhrase: ACTION_PHRASE[entry.type]?.phrase ?? "updated",
+      mentionsClient: ACTION_PHRASE[entry.type]?.subjectIsActor ?? true,
       actorName: entry.actorName,
       summary: entry.summary,
       relativeTime: formatRelativeTime(new Date(entry.timestamp), now),

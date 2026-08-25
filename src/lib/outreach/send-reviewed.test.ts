@@ -37,6 +37,12 @@ test("blank or missing subject/body are refused before anything can be sent", ()
   }
 });
 
+test("a missing or malformed recipient is refused before anything can be sent", () => {
+  for (const recipient of ["", "   ", undefined, "not-an-email", "client@"]) {
+    assert.notEqual(firstError({ ...valid, recipient }), "", `recipient=${JSON.stringify(recipient)} should fail`);
+  }
+});
+
 test("a formatted but visually empty body is refused, not just a blank string", () => {
   // These are exactly what Tiptap's own empty document looks like, not a
   // hand-picked edge case — this is the shape validation actually has to

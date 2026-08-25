@@ -181,6 +181,9 @@ export function ComposeButton({
     // replaces the visible draft outright (AC2), which would silently throw away
     // any edits the CAM already made to it. Confirm first, but only when there's
     // actually something to lose.
+    // F116: an edited recipient counts as "something to lose" too — the confirm
+    // must fire before regeneration resets it. The saved recipient is the clean
+    // baseline once persisted (F119), falling back to the on-file address.
     if (
       draft &&
       (recipient !== (draft.savedRecipient ?? draft.recipientOnFile ?? "") ||
@@ -480,6 +483,14 @@ export function ComposeButton({
 
       {draft && !busy && (() => {
         const recipientValidation = validateClientEmail(recipient);
+        // An emptied input is not the same fact as a client with no email on
+        // file: say what the CAM should do, not what the record lacks.
+        const recipientError =
+          recipientValidation.status === "missing"
+            ? "Add a recipient email address."
+            : recipientValidation.status === "invalid"
+              ? recipientValidation.message
+              : null;
         const recipientMismatch =
           recipientValidation.status === "valid" &&
           Boolean(draft.recipientOnFile) &&
@@ -508,9 +519,9 @@ export function ComposeButton({
           {/* F116 AC2: same format rule F045 uses (validateClientEmail), reused
               client-side so the CAM sees this before ever attempting to send —
               send-reviewed.ts enforces the identical rule server-side regardless. */}
-          {recipientValidation.status !== "valid" && (
+          {recipientError && (
             <p className="text-xs font-bold text-red-800" id="recipient-error" role="alert">
-              {recipientValidation.message}
+              {recipientError}
             </p>
           )}
           {/* F116 AC3: advisory only, not a block — a CAM may deliberately send to
@@ -572,13 +583,7 @@ export function ComposeButton({
               {savingDraft ? "Saving…" : "Save draft"}
             </OriginButton>
             <OriginButton
-              disabled={
-                !approved ||
-                sending ||
-                recipientValidation.status !== "valid" ||
-                !subject.trim() ||
-                emailHtmlToPlainText(body).length === 0
-              }
+              disabled={!approved || sending || recipientValidation.status !== "valid" || !subject.trim() || emailHtmlToPlainText(body).length === 0}
               onClick={send}
               type="button"
             >

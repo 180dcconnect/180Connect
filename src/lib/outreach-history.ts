@@ -17,6 +17,9 @@ export type OutreachMessageRow = {
   sent_at: string | null;
   scheduled_at: string | null;
   created_at: string;
+  /** F125: who actually sent it. Only meaningful on sent rows; optional so
+   * existing call sites and tests that don't join the sender still typecheck. */
+  sender?: { full_name: string | null } | null;
 };
 
 export type OutreachHistory = {

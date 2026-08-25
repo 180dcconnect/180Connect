@@ -108,9 +108,13 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   // admin sending another CAM's generated draft — "who sent an email is a fact
   // about the email" (create_outreach.sql), and the audit_log row written by
   // mark_outreach_sent carries the same actor.
+  //
+  // sent_to_email (F116 review follow-up): persist exactly who this attempt
+  // targets alongside the reviewed content, so even a failed or ambiguous send
+  // leaves a trace of who the CAM aimed at rather than only the on-file record.
   const { data: saved, error: saveError } = await supabase
     .from("outreach_messages")
-    .update({ subject, body, sent_to_email: recipient })
+    .update({ subject, body, sent_to_email: decision.recipient, sent_by_user_id: authorization.actor.id })
     .eq("id", messageId)
     .eq("organisation_id", organisationId)
     .eq("send_status", "draft")
@@ -171,11 +175,14 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
 
   // Audited draft→sent transition (F123/audit-log pattern §1): the RPC flips the
   // status conditionally on still-draft and writes the audit_log row in the same
-  // transaction, so a lost race raises instead of double-recording.
+  // transaction, so a lost race raises instead of double-recording. The reviewed
+  // recipient is passed explicitly (F116 review follow-up) so the audited fact is
+  // exactly what the transport was given, not a value re-derived at recordal time.
   const { error: markError } = await supabase.rpc("mark_outreach_sent", {
     p_message_id: messageId,
     p_provider_message_id: sent.providerMessageId,
     p_provider_thread_id: sent.providerThreadId,
+    p_recipient_email: decision.recipient,
   });
   if (markError) {
     // The email IS out; this must stay visible even though the request succeeds
@@ -192,7 +199,12 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
       outreach_message_id: messageId,
       event_type: "sent",
       occurred_at: new Date().toISOString(),
-      metadata: { provider: "gmail", message_id: sent.providerMessageId, thread_id: sent.providerThreadId },
+      metadata: {
+        provider: "gmail",
+        message_id: sent.providerMessageId,
+        thread_id: sent.providerThreadId,
+        recipient: decision.recipient,
+      },
     });
     if (eventError) await reportError(eventError, { operation: "outreach.send.record_event", messageId });
   }

@@ -376,10 +376,11 @@ export default async function ClientDetailPage({
   // F070: every outreach message for this client, sent or not. RLS
   // (outreach_messages_select_active) shares read across every active role, so
   // this needs no ownership filter — same reasoning as the `client:view` gate
-  // above.
+  // above. The sender join backs F125's "record who sent it" attribution in the
+  // Sent list (the timeline resolves the same column for its actor name).
   const { data: outreachRows, error: outreachError } = await supabase
     .from("outreach_messages")
-    .select("id, subject, body, send_status, sent_at, scheduled_at, created_at")
+    .select("id, subject, body, send_status, sent_at, scheduled_at, created_at, sender:users!outreach_messages_sent_by_user_id_fkey(full_name)")
     .eq("organisation_id", id)
     .order("created_at", { ascending: false });
 
@@ -390,7 +391,9 @@ export default async function ClientDetailPage({
     });
   }
   const outreachHistory = splitOutreachHistory(
-    (outreachRows ?? []) as OutreachMessageRow[],
+    // `as unknown` — supabase-js infers the users join as an array; timeline
+    // rows below need the same escape hatch.
+    (outreachRows ?? []) as unknown as OutreachMessageRow[],
   );
 
   // F119: the most recent still-unsent draft, so ComposeButton can reopen it

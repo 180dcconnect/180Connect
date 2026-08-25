@@ -32,7 +32,7 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   }
   const isAdmin = authorization.actor.role === "admin";
 
-  const { organisationId, messageId, subject, explicitlyApproved } = parsed.data;
+  const { organisationId, messageId, recipient, subject, explicitlyApproved } = parsed.data;
   // F117: never trust client-side sanitization alone — this is the one place
   // that decides what actually gets stored and sent, regardless of what
   // reached this action. Re-checked for real content after sanitizing, not
@@ -47,7 +47,7 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   const supabase = await createClient();
   const { data: draft, error: draftError } = await supabase
     .from("outreach_messages")
-    .select("id, organisation_id, contact_id, send_status, sent_by_user_id, contacts(email), organisations(contact_email)")
+    .select("id, organisation_id, contact_id, send_status, sent_by_user_id")
     .eq("id", messageId)
     .eq("organisation_id", organisationId)
     .maybeSingle();
@@ -89,11 +89,12 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
     };
   }
 
-  const contact = Array.isArray(draft.contacts) ? draft.contacts[0] : draft.contacts;
-  const organisation = Array.isArray(draft.organisations)
-    ? draft.organisations[0]
-    : draft.organisations;
-  const decision = canSendClientOutreach(contact?.email ?? organisation?.contact_email, explicitlyApproved);
+  // F116: the recipient is whatever the CAM reviewed and approved, not a value
+  // re-derived from the contact/organisation record — same rule subject and body
+  // already follow. The editor warns on a mismatch against the record but does
+  // not block one; this is the only server-side gate, re-checking the exact
+  // format rule F045 uses regardless of what the client-side check already did.
+  const decision = canSendClientOutreach(recipient, explicitlyApproved);
   if (!decision.allowed) return { ok: false, message: decision.warning };
 
   // Save the exact reviewed content first, and REQUIRE the write to have matched:
@@ -106,9 +107,13 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   // admin sending another CAM's generated draft — "who sent an email is a fact
   // about the email" (create_outreach.sql), and the audit_log row written by
   // mark_outreach_sent carries the same actor.
+  //
+  // sent_to_email (F116 review follow-up): persist exactly who this attempt
+  // targets alongside the reviewed content, so even a failed or ambiguous send
+  // leaves a trace of who the CAM aimed at rather than only the on-file record.
   const { data: saved, error: saveError } = await supabase
     .from("outreach_messages")
-    .update({ subject, body, sent_by_user_id: authorization.actor.id })
+    .update({ subject, body, sent_to_email: decision.recipient, sent_by_user_id: authorization.actor.id })
     .eq("id", messageId)
     .eq("organisation_id", organisationId)
     .eq("send_status", "draft")
@@ -169,11 +174,14 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
 
   // Audited draft→sent transition (F123/audit-log pattern §1): the RPC flips the
   // status conditionally on still-draft and writes the audit_log row in the same
-  // transaction, so a lost race raises instead of double-recording.
+  // transaction, so a lost race raises instead of double-recording. The reviewed
+  // recipient is passed explicitly (F116 review follow-up) so the audited fact is
+  // exactly what the transport was given, not a value re-derived at recordal time.
   const { error: markError } = await supabase.rpc("mark_outreach_sent", {
     p_message_id: messageId,
     p_provider_message_id: sent.providerMessageId,
     p_provider_thread_id: sent.providerThreadId,
+    p_recipient_email: decision.recipient,
   });
   if (markError) {
     // The email IS out; this must stay visible even though the request succeeds
@@ -190,7 +198,12 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
       outreach_message_id: messageId,
       event_type: "sent",
       occurred_at: new Date().toISOString(),
-      metadata: { provider: "gmail", message_id: sent.providerMessageId, thread_id: sent.providerThreadId },
+      metadata: {
+        provider: "gmail",
+        message_id: sent.providerMessageId,
+        thread_id: sent.providerThreadId,
+        recipient: decision.recipient,
+      },
     });
     if (eventError) await reportError(eventError, { operation: "outreach.send.record_event", messageId });
   }

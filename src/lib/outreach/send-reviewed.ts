@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { nonEmptyTrimmed } from "../validation.ts";
+import { emailField, nonEmptyTrimmed } from "../validation.ts";
 import { emailHtmlToPlainText } from "./email-html.ts";
 
 /**
@@ -11,6 +11,10 @@ import { emailHtmlToPlainText } from "./email-html.ts";
 export const reviewedEmailSchema = z.object({
   organisationId: z.uuid(),
   messageId: z.uuid(),
+  // F116: the CAM-reviewed recipient, not a value re-derived from the
+  // organisation/contact record — same "reviewed content is what sends" rule
+  // subject and body already follow.
+  recipient: emailField("Add a valid recipient email address before sending."),
   subject: nonEmptyTrimmed(998, "Add a subject before sending."),
   // F117: body is HTML from the rich-text editor. A trimmed, non-empty string
   // is not enough on its own — an editor left as "<p></p>" is non-empty text

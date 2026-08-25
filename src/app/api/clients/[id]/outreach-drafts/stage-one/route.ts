@@ -87,7 +87,7 @@ export async function POST(
   const { data: organisation, error: organisationError } = await supabase
     .from("organisations")
     .select(
-      "id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
+      "id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach, owner_id, contact_email, owner:users!organisations_owner_id_fkey(full_name)",
     )
     .eq("id", organisationId)
     .maybeSingle<{
@@ -100,6 +100,7 @@ export async function POST(
       country_code: string | null;
       geographic_reach: string | null;
       owner_id: string | null;
+      contact_email: string | null;
       owner: { full_name: string | null } | null;
     }>();
   if (organisationError || !organisation) {
@@ -176,7 +177,7 @@ export async function POST(
     { data: enrichment, error: enrichmentError },
     { data: financialPeriod, error: financialError },
   ] = await Promise.all([
-    supabase.from("contacts").select("id, first_name, last_name, job_title").eq("organisation_id", organisationId).order("is_primary", { ascending: false }).order("created_at", { ascending: true }).limit(1).maybeSingle(),
+    supabase.from("contacts").select("id, first_name, last_name, job_title, email").eq("organisation_id", organisationId).order("is_primary", { ascending: false }).order("created_at", { ascending: true }).limit(1).maybeSingle(),
     supabase.from("enrichment_results").select("mission_statement, mission_keywords, sector, sub_sector, news_hooks").eq("organisation_id", organisationId).order("enriched_at", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("financial_periods").select("income_band").eq("organisation_id", organisationId).order("period_end", { ascending: false }).limit(1).maybeSingle(),
   ]);
@@ -342,7 +343,15 @@ export async function POST(
   }
 
   return NextResponse.json(
-    { id: message.id, ...result.draft, sizeTemplate: result.sizeTemplate },
+    {
+      id: message.id,
+      ...result.draft,
+      sizeTemplate: result.sizeTemplate,
+      // F116: the recipient the CAM's review starts from — whichever email
+      // sendReviewedEmail would otherwise fall back to. Editable from here on;
+      // the editor compares later edits against this to warn on drift.
+      recipientOnFile: contact?.email?.trim() || organisation.contact_email?.trim() || null,
+    },
     { status: isRegeneration ? 200 : 201 },
   );
 }

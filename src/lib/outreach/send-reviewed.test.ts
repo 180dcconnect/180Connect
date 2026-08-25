@@ -6,6 +6,7 @@ import { reviewedEmailSchema } from "./send-reviewed.ts";
 const valid = {
   organisationId: "00000000-0000-4000-a000-000000000001",
   messageId: "00000000-0000-4000-a000-000000000002",
+  recipient: "client@example.org",
   subject: "Hello",
   body: "<p>Reviewed body text</p>",
   explicitlyApproved: true,
@@ -33,6 +34,12 @@ test("blank or missing subject/body are refused before anything can be sent", ()
     for (const value of ["", "   ", undefined]) {
       assert.notEqual(firstError({ ...valid, [field]: value }), "", `${field}=${JSON.stringify(value)} should fail`);
     }
+  }
+});
+
+test("a missing or malformed recipient is refused before anything can be sent", () => {
+  for (const recipient of ["", "   ", undefined, "not-an-email", "client@"]) {
+    assert.notEqual(firstError({ ...valid, recipient }), "", `recipient=${JSON.stringify(recipient)} should fail`);
   }
 });
 

@@ -100,12 +100,16 @@ begin
     ('00000000-0000-4000-c000-000000000012', 'S CAM B Client',      'manual', 'other', v_cam_b),
     ('00000000-0000-4000-c000-000000000013', 'S Suppressed Client', 'manual', 'other', v_cam_a);
 
-  insert into public.outreach_messages (id, organisation_id, sent_by_user_id, subject, body, send_status, sent_at, scheduled_at)
+  insert into public.outreach_messages (id, organisation_id, sent_by_user_id, subject, body, send_status, sent_at, scheduled_at, send_claimed_at)
   values
-    ('00000000-0000-4000-d000-000000000011', '00000000-0000-4000-c000-000000000011', v_cam_a, 'Hello S',       'Body', 'draft',     null, null),
-    ('00000000-0000-4000-d000-000000000012', '00000000-0000-4000-c000-000000000013', v_cam_a, 'Suppressed S',  'Body', 'draft',     null, null),
-    ('00000000-0000-4000-d000-000000000013', '00000000-0000-4000-c000-000000000011', v_cam_a, 'Scheduled S',   'Body', 'scheduled', null, now() + interval '1 hour'),
-    ('00000000-0000-4000-d000-000000000014', '00000000-0000-4000-c000-000000000011', v_cam_a, 'Already out S', 'Body', 'sent',      now(), null);
+    ('00000000-0000-4000-d000-000000000011', '00000000-0000-4000-c000-000000000011', v_cam_a, 'Hello S',       'Body', 'draft',     null, null, null),
+    ('00000000-0000-4000-d000-000000000012', '00000000-0000-4000-c000-000000000013', v_cam_a, 'Suppressed S',  'Body', 'draft',     null, null, null),
+    ('00000000-0000-4000-d000-000000000013', '00000000-0000-4000-c000-000000000011', v_cam_a, 'Scheduled S',   'Body', 'scheduled', null, now() + interval '1 hour', null),
+    ('00000000-0000-4000-d000-000000000014', '00000000-0000-4000-c000-000000000011', v_cam_a, 'Already out S', 'Body', 'sent',      now(), null, null),
+    -- Freshly claimed: the worker is mid-Gmail-call for it, per F123's claim column.
+    ('00000000-0000-4000-d000-000000000015', '00000000-0000-4000-c000-000000000011', v_cam_a, 'In flight S',   'Body', 'scheduled', null, now() + interval '1 hour', now()),
+    -- Stale claim (crashed worker): must NOT block scheduling or cancelling.
+    ('00000000-0000-4000-d000-000000000016', '00000000-0000-4000-c000-000000000011', v_cam_a, 'Stale claim S', 'Body', 'scheduled', null, now() + interval '1 hour', now() - interval '10 minutes');
 
   insert into public.suppressions (organisation_id, status, reason, requested_by, decided_by, decided_at)
   values ('00000000-0000-4000-c000-000000000013', 'active', 'Do not contact (test)', v_cam_a, v_admin, now())
@@ -127,6 +131,8 @@ declare
   v_suppressed uuid := '00000000-0000-4000-d000-000000000012';
   v_scheduled uuid := '00000000-0000-4000-d000-000000000013';
   v_already_out uuid := '00000000-0000-4000-d000-000000000014';
+  v_in_flight uuid := '00000000-0000-4000-d000-000000000015';
+  v_stale_claim uuid := '00000000-0000-4000-d000-000000000016';
 begin
   -- Lets the file merge ahead of its migration, same convention as the RLS suite.
   if to_regprocedure('public.schedule_outreach_send(uuid,text,text,timestamptz)') is null
@@ -180,6 +186,30 @@ begin
     ),
     'P0002',
     'cancelling a sent message is impossible — sent records stay immutable'
+  );
+
+  return next is(
+    tests.sqlstate_of(
+      v_cam_a,
+      format('select public.cancel_outreach_schedule(%L)', v_in_flight)
+    ),
+    'P0001',
+    'cancelling while the worker holds a fresh delivery claim is refused — the email may already be leaving'
+  );
+
+  return next is(
+    tests.uuid_as(
+      v_cam_a,
+      format('select public.cancel_outreach_schedule(%L)', v_stale_claim)
+    ),
+    v_stale_claim,
+    'a STALE claim does not block cancellation — crashed workers must not lock schedules forever'
+  );
+
+  return next ok(
+    (select send_status = 'draft' and scheduled_at is null and send_claimed_at is null
+       from public.outreach_messages where id = v_stale_claim),
+    'cancellation cleared the stale claim along with the schedule'
   );
 
   return next is(

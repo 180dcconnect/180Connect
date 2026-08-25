@@ -29,6 +29,13 @@
 -- fact about the email" (F125) — attribution must survive until delivery even
 -- though no human is present at the moment Gmail is called.
 --
+-- Both RPCs refuse while a fresh send claim (send_claimed_at, F123) is held:
+-- that means the cron worker is mid-Gmail-call for this message. Cancelling
+-- then would tell the CAM "cancelled" while the email was already leaving;
+-- re-scheduling then could flip the row out from under markSent's
+-- still-scheduled condition. Claims older than the staleness window are stale
+-- (crashed worker) and do not block.
+--
 -- Schema change approval record (SOP §7):
 --   Change        | Add schedule_outreach_send(uuid,text,text,timestamptz) and
 --               | cancel_outreach_schedule(uuid) SECURITY DEFINER RPCs.
@@ -82,7 +89,8 @@ begin
   select m.id,
          m.sent_by_user_id,
          m.organisation_id,
-         o.owner_id as org_owner_id
+         o.owner_id as org_owner_id,
+         m.send_claimed_at
     into v_message
     from public.outreach_messages m
     join public.organisations o on o.id = m.organisation_id
@@ -92,6 +100,11 @@ begin
   if v_message.id is null then
     raise exception 'that draft could not be found'
       using errcode = 'P0002';
+  end if;
+
+  if v_message.send_claimed_at > now() - public.send_claim_staleness_window() then
+    raise exception 'this email is being delivered right now'
+      using errcode = 'P0001';
   end if;
 
   -- Authorisation re-checked inside the SECURITY DEFINER body: the CAM who owns
@@ -179,7 +192,9 @@ begin
   select m.id,
          m.sent_by_user_id,
          m.organisation_id,
-         o.owner_id as org_owner_id
+         o.owner_id as org_owner_id,
+         m.send_claimed_at,
+         m.scheduled_at as was_scheduled_for
     into v_message
     from public.outreach_messages m
     join public.organisations o on o.id = m.organisation_id
@@ -189,6 +204,14 @@ begin
   if v_message.id is null then
     raise exception 'that scheduled email could not be found'
       using errcode = 'P0002';
+  end if;
+
+  -- A fresh claim means the cron worker is mid-Gmail-call for this message.
+  -- Cancelling now would report success while the email was already leaving —
+  -- refuse, and let the CAM retry once the claim goes stale or clears.
+  if v_message.send_claimed_at > now() - public.send_claim_staleness_window() then
+    raise exception 'this email is being delivered right now and can no longer be cancelled'
+      using errcode = 'P0001';
   end if;
 
   if not (
@@ -201,8 +224,9 @@ begin
   end if;
 
   update public.outreach_messages m
-     set send_status  = 'draft',
-         scheduled_at = null
+     set send_status      = 'draft',
+         scheduled_at     = null,
+         send_claimed_at  = null
     where m.id = v_message.id
       and m.send_status = 'scheduled'
    returning * into v_row;
@@ -217,7 +241,8 @@ begin
     v_actor, 'outreach_schedule_cancelled', 'outreach_messages', v_row.id,
     jsonb_build_object(
       'organisation_id', v_message.organisation_id,
-      'was_scheduled_for', v_row.scheduled_at
+      -- Pre-update value: v_row's scheduled_at is already nulled by the flip.
+      'was_scheduled_for', v_message.was_scheduled_for
     )
   );
 

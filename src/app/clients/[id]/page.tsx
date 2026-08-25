@@ -38,10 +38,6 @@ import {
   type EditSuggestionRow,
   restrictedFieldLabel,
 } from "@/lib/edit-suggestions";
-import {
-  ownershipRequestAvailability,
-  type OwnershipRequestStatus,
-} from "@/lib/ownership-requests";
 import { SuggestEditSection } from "./suggest-edit-section";
 import { buildNoteList, type NoteRow } from "@/lib/note-history";
 import { NotesSection } from "./notes-section";
@@ -353,7 +349,8 @@ export default async function ClientDetailPage({
   if (authorization.actor.role !== "viewer") {
     const { data: suggestionRows, error: suggestionError } = await supabase
       .from("edit_suggestions")
-      .select(EDIT_SUGGESTION_SELECT)      .eq("organisation_id", id)
+      .select(EDIT_SUGGESTION_SELECT)
+      .eq("organisation_id", id)
       .order("created_at", { ascending: false });
     if (suggestionError) {
       await reportError(suggestionError, {

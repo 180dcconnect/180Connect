@@ -41,7 +41,9 @@ export async function scheduleReviewedEmail(input: unknown): Promise<ReviewedSen
   }
   const isAdmin = authorization.actor.role === "admin";
 
-  const { organisationId, messageId, subject, explicitlyApproved } = parsed.data;
+  // explicitlyApproved is enforced by scheduleSchema (z.literal(true)) — the
+  // same review gate the send path uses; it needs no further reference here.
+  const { organisationId, messageId, subject } = parsed.data;
   // F117: never trust client-side sanitization alone — identical rule to the
   // send path, since what is stored here is exactly what the cron worker will
   // deliver later.

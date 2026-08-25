@@ -21,6 +21,17 @@ const STATUS_MESSAGES = [
   "Polishing the subject line…",
 ];
 
+/**
+ * F126: `datetime-local` inputs speak wall-clock time in the viewer's timezone,
+ * but `toISOString()` speaks UTC — using it for the picker's `min` offset the
+ * earliest choosable time by the viewer's UTC offset. This renders a Date in
+ * the input's own local format instead.
+ */
+function localDatetimeLocal(date: Date): string {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
 const EMAIL_LENGTH_LABELS: Record<EmailLength, string> = {
   short: "Short",
   standard: "Standard",
@@ -500,7 +511,7 @@ export function ComposeButton({
               Or schedule for later
               <input
                 className="mt-1 block rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-                min={new Date().toISOString().slice(0, 16)}
+                min={localDatetimeLocal(new Date())}
                 onChange={(event) => setScheduledAt(event.target.value)}
                 type="datetime-local"
                 value={scheduledAt}

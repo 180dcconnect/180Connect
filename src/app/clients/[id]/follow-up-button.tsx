@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
+import { RichTextEmailEditor } from "@/components/rich-text-email-editor";
+import { plainTextToEditorHtml } from "@/lib/outreach/email-html";
 import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice } from "@/lib/outreach/stage-one-prompt";
 
 type Tone = "block" | "conflict";
@@ -213,10 +215,17 @@ export function FollowUpButton({
             Subject
             <input className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" defaultValue={draft.subject} />
           </label>
-          <label className="block text-xs font-bold text-foreground/65">
-            Body
-            <textarea className="mt-1 min-h-64 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm leading-relaxed" defaultValue={draft.body} />
-          </label>
+          <div>
+            <p className="text-xs font-bold text-foreground/65" id="followup-body-heading">
+              Body
+            </p>
+            <div className="mt-1">
+              <RichTextEmailEditor
+                ariaLabelledBy="followup-body-heading"
+                initialContent={plainTextToEditorHtml(draft.body)}
+              />
+            </div>
+          </div>
           <p className="text-xs font-bold text-amber-800" role="status">
             Not sent — explicit human review and send are required.
           </p>

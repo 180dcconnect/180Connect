@@ -119,7 +119,12 @@ export function plainTextToEditorHtml(text: string): string {
   return paragraphs.map((paragraph) => `<p>${paragraph}</p>`).join("");
 }
 
-const RICH_TAG_PATTERN = /<\/?(p|br|strong|b|em|i|u|s|ul|ol|li|blockquote|a|span)[\s/>]/i;
+// Anchored to the start of the body on purpose. Every row this app writes
+// begins with a tag (Tiptap always wraps content in blocks and sanitize-html
+// preserves them), while legacy plain text only ever contains tags as literal
+// prose mid-sentence — e.g. "wrap it in <p> tags". A substring sniff would
+// misrender those rows as mangled HTML; an anchored one cannot.
+const RICH_TAG_PATTERN = /^\s*<\/?(p|br|strong|b|em|i|u|s|ul|ol|li|blockquote|a|span)[\s/>]/i;
 
 /**
  * Historical rows predate this feature and are plain text with no markup.

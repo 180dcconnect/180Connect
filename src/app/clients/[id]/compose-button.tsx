@@ -107,11 +107,14 @@ export function ComposeButton({
   // F123: the reviewed content is what actually gets sent, and any edit resets
   // approval. These also drive F111's regenerate-confirm (edits vs draft).
   const [subject, setSubject] = useState("");
-  // F117: HTML from the rich-text editor, not plain text — compared against
-  // `plainTextToEditorHtml(draft.body)` (the AI's plain text in the same
-  // representation), never against `draft.body` directly, or every fresh
-  // draft would look "edited" the instant it loads.
+  // F117: HTML from the rich-text editor, not plain text.
   const [body, setBody] = useState("");
+  // Tracks whether the editor has actually fired an update since the current
+  // draft loaded. The regenerate-confirm uses this instead of comparing live
+  // editor HTML against `plainTextToEditorHtml(draft.body)`, because Tiptap's
+  // serializer can differ cosmetically from that hydration output — a string
+  // comparison could prompt "discard your edits?" even when nothing changed.
+  const [bodyEdited, setBodyEdited] = useState(false);
   // Regeneration updates the same outreach_messages row in place (F111 AC2),
   // so `draft.id` does not change and cannot key the editor's remount. This
   // does, incremented on every successful (re)generate, forcing the
@@ -143,7 +146,7 @@ export function ComposeButton({
     // replaces the visible draft outright (AC2), which would silently throw away
     // any edits the CAM already made to it. Confirm first, but only when there's
     // actually something to lose.
-    if (draft && (subject !== draft.subject || body !== plainTextToEditorHtml(draft.body))) {
+    if (draft && (subject !== draft.subject || bodyEdited)) {
       if (!window.confirm("Regenerating will replace this draft and discard your edits. Continue?")) {
         return;
       }
@@ -190,6 +193,7 @@ export function ComposeButton({
       setDraft(nextDraft);
       setSubject(nextDraft.subject);
       setBody(plainTextToEditorHtml(nextDraft.body));
+      setBodyEdited(false);
       setGeneration((current) => current + 1);
       setApproved(false);
       setSendMessage(null);
@@ -432,6 +436,7 @@ export function ComposeButton({
                 key={generation}
                 onChange={(html) => {
                   setBody(html);
+                  setBodyEdited(true);
                   setApproved(false);
                 }}
               />

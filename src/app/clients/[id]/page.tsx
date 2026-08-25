@@ -393,6 +393,40 @@ export default async function ClientDetailPage({
     (outreachRows ?? []) as OutreachMessageRow[],
   );
 
+  // F119: the most recent still-unsent draft, so ComposeButton can reopen it
+  // exactly as it was saved instead of always starting blank. A separate
+  // query (not reused from outreachRows above) because it needs contact_id,
+  // which the history list has no use for.
+  const { data: existingDraftRow, error: existingDraftError } = await supabase
+    .from("outreach_messages")
+    .select("id, subject, body, contact_id")
+    .eq("organisation_id", id)
+    .eq("send_status", "draft")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ id: string; subject: string; body: string; contact_id: string | null }>();
+  if (existingDraftError) {
+    await reportError(existingDraftError, { operation: "clients.detail_existing_draft", organisationId: id });
+  }
+  let existingDraft: { id: string; subject: string; body: string; recipientOnFile: string | null } | null = null;
+  if (existingDraftRow) {
+    let contactEmail: string | null = null;
+    if (existingDraftRow.contact_id) {
+      const { data: draftContact } = await supabase
+        .from("contacts")
+        .select("email")
+        .eq("id", existingDraftRow.contact_id)
+        .maybeSingle<{ email: string | null }>();
+      contactEmail = draftContact?.email ?? null;
+    }
+    existingDraft = {
+      id: existingDraftRow.id,
+      subject: existingDraftRow.subject,
+      body: existingDraftRow.body,
+      recipientOnFile: contactEmail?.trim() || client.contact_email?.trim() || null,
+    };
+  }
+
   // F075/F076: the four sources @/lib/timeline.ts's buildTimeline merges into
   // one feed. Independent queries, not one join — the four tables share no
   // join key that would make sense together (notes/outreach_messages/
@@ -662,6 +696,7 @@ export default async function ClientDetailPage({
                     ownershipConflict.hasConflict ? ownershipConflict.warning : undefined
                   }
                   hasSavedBooklet={savedBooklet !== null}
+                  existingDraft={existingDraft}
                 />
               </Rise>
             )}

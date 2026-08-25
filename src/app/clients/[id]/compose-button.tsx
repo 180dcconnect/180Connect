@@ -5,15 +5,27 @@ import Link from "next/link";
 import { History, Sparkles } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
 import { RichTextEmailEditor } from "@/components/rich-text-email-editor";
-import { sendReviewedEmail } from "./outreach-actions";
+import { saveEmailDraft, sendReviewedEmail } from "./outreach-actions";
 import { validateClientEmail } from "@/lib/client-email-validation";
-import { emailHtmlToPlainText, plainTextToEditorHtml } from "@/lib/outreach/email-html";
+import { emailHtmlToPlainText, isRichEmailHtml, plainTextToEditorHtml } from "@/lib/outreach/email-html";
 import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
 
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
 type Draft = { id: string; subject: string; body: string; sizeTemplate?: string; recipientOnFile: string | null };
+type ExistingDraft = { id: string; subject: string; body: string; recipientOnFile: string | null };
+
+/**
+ * F119: a saved draft's body may already be sanitized editor HTML (if it was
+ * saved after this feature shipped) or still the model's plain text (an AI
+ * draft that was never saved, or one saved before this feature existed) —
+ * `isRichEmailHtml` tells them apart the same way outreach-history.tsx does,
+ * so either shape opens correctly in the rich editor.
+ */
+function hydrateBody(raw: string): string {
+  return isRichEmailHtml(raw) ? raw : plainTextToEditorHtml(raw);
+}
 
 const STATUS_MESSAGES = [
   "Checking outreach permissions…",
@@ -83,9 +95,11 @@ function sizeTemplateLabel(sizeTemplate: string | undefined): string {
  * — this is the shortcut so nobody has to be walked through "go to the admin
  * dashboard, open AI generation history, then find this client"). Only ever
  * passed by page.tsx when the viewer actually has permission to land there —
- * always shown regardless of local draft state, since this session's `draft` is
- * null on every page load even when past generations exist from an earlier
- * session or a different CAM.
+ * always shown regardless of local draft state.
+ *
+ * F119: `existingDraft`, when page.tsx found one, hydrates the review section
+ * on first render so a CAM reopening this client sees exactly what they last
+ * saved instead of a blank editor — see `saveDraft` below for the write side.
  */
 export function ComposeButton({
   blocked,
@@ -95,6 +109,7 @@ export function ComposeButton({
   ownershipWarning,
   hasSavedBooklet = false,
   historyHref,
+  existingDraft = null,
 }: {
   blocked: boolean;
   ownershipBlocked?: boolean;
@@ -103,17 +118,20 @@ export function ComposeButton({
   ownershipWarning?: string;
   hasSavedBooklet?: boolean;
   historyHref?: string;
+  existingDraft?: ExistingDraft | null;
 }) {
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(
+    existingDraft ? { ...existingDraft, sizeTemplate: undefined } : null,
+  );
   // F123: the reviewed content is what actually gets sent, and any edit resets
   // approval. These also drive F111's regenerate-confirm (edits vs draft).
-  const [recipient, setRecipient] = useState("");
-  const [subject, setSubject] = useState("");
+  const [recipient, setRecipient] = useState(existingDraft?.recipientOnFile ?? "");
+  const [subject, setSubject] = useState(existingDraft?.subject ?? "");
   // F117: HTML from the rich-text editor, not plain text — compared against
-  // `plainTextToEditorHtml(draft.body)` (the AI's plain text in the same
-  // representation), never against `draft.body` directly, or every fresh
-  // draft would look "edited" the instant it loads.
-  const [body, setBody] = useState("");
+  // `hydrateBody(draft.body)` (the same representation, whichever shape it's
+  // actually in), never against `draft.body` directly, or every fresh draft
+  // would look "edited" the instant it loads.
+  const [body, setBody] = useState(existingDraft ? hydrateBody(existingDraft.body) : "");
   // Regeneration updates the same outreach_messages row in place (F111 AC2),
   // so `draft.id` does not change and cannot key the editor's remount. This
   // does, incremented on every successful (re)generate, forcing the
@@ -122,6 +140,8 @@ export function ComposeButton({
   const [approved, setApproved] = useState(false);
   const [sendMessage, setSendMessage] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [warning, setWarning] = useState<Warning | null>(
@@ -149,7 +169,7 @@ export function ComposeButton({
       draft &&
       (recipient !== (draft.recipientOnFile ?? "") ||
         subject !== draft.subject ||
-        body !== plainTextToEditorHtml(draft.body))
+        body !== hydrateBody(draft.body))
     ) {
       if (!window.confirm("Regenerating will replace this draft and discard your edits. Continue?")) {
         return;
@@ -223,6 +243,29 @@ export function ComposeButton({
     setSendMessage(result.message);
     if (result.ok) setDraft(null);
     setSending(false);
+  }
+
+  /**
+   * F119: saves the reviewed content without sending. Unlike `send`, this
+   * keeps the draft open for further editing — it updates `draft` to the
+   * just-saved subject/body so the regenerate-confirm dirty check treats
+   * a saved-and-unchanged draft as clean, not as edits about to be lost.
+   */
+  async function saveDraft() {
+    if (!draft) return;
+    setSavingDraft(true);
+    setSaveMessage(null);
+    const result = await saveEmailDraft({
+      organisationId,
+      messageId: draft.id,
+      subject,
+      body,
+    });
+    setSaveMessage(result.message);
+    if (result.ok) {
+      setDraft((current) => (current ? { ...current, subject, body } : current));
+    }
+    setSavingDraft(false);
   }
 
   const historyLink = historyHref && (
@@ -496,19 +539,32 @@ export function ComposeButton({
             <input checked={approved} className="mt-0.5" onChange={(event) => setApproved(event.target.checked)} type="checkbox" />
             I have reviewed the recipient, subject and body and approve this email for sending.
           </label>
-          <OriginButton
-            disabled={
-              !approved ||
-              sending ||
-              recipientValidation.status !== "valid" ||
-              !subject.trim() ||
-              emailHtmlToPlainText(body).length === 0
-            }
-            onClick={send}
-            type="button"
-          >
-            {sending ? "Sending…" : "Send reviewed email"}
-          </OriginButton>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* F119: saving has none of sending's requirements — no approval
+                checkbox, no valid recipient, not even a non-empty subject or
+                body — a work-in-progress draft is exactly what this is for. */}
+            <OriginButton disabled={savingDraft || sending} onClick={saveDraft} type="button" variant="outline">
+              {savingDraft ? "Saving…" : "Save draft"}
+            </OriginButton>
+            <OriginButton
+              disabled={
+                !approved ||
+                sending ||
+                recipientValidation.status !== "valid" ||
+                !subject.trim() ||
+                emailHtmlToPlainText(body).length === 0
+              }
+              onClick={send}
+              type="button"
+            >
+              {sending ? "Sending…" : "Send reviewed email"}
+            </OriginButton>
+          </div>
+          {saveMessage && (
+            <p className="text-xs font-bold text-foreground/65" role="status">
+              {saveMessage}
+            </p>
+          )}
           <p className="text-xs font-bold text-amber-800" role="status">
             {sendMessage ?? "Not sent — explicit human review and send are required."}
           </p>

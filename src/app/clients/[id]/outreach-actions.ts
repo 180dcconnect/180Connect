@@ -6,6 +6,7 @@ import { canSendClientOutreach } from "@/lib/client-email-validation";
 import { reportError } from "@/lib/error-logging";
 import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
 import { emailHtmlToPlainText, sanitizeEmailHtml } from "@/lib/outreach/email-html";
+import { saveDraftSchema } from "@/lib/outreach/save-draft";
 import { reviewedEmailSchema } from "@/lib/outreach/send-reviewed";
 import { checkSuppressionBeforeSend, suppressionBlockedMessage } from "@/lib/outreach/suppression-check";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -215,4 +216,70 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
 
   revalidatePath(`/clients/${organisationId}`);
   return { ok: true, message: "Email sent from the Sheffield outreach mailbox." };
+}
+
+export type SaveDraftResult =
+  | { ok: true; message: string }
+  | { ok: false; message: string };
+
+/**
+ * F119: saves the CAM's in-progress edits without sending. Deliberately
+ * lighter than sendReviewedEmail — no recipient, no approval, no suppression
+ * check, no Gmail call — this only ever writes subject/body to a still-draft
+ * row so a CAM can return to exactly what they left, per F070's client
+ * profile reopening it.
+ */
+export async function saveEmailDraft(input: unknown): Promise<SaveDraftResult> {
+  const parsed = safeValidate(saveDraftSchema, input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: Object.values(parsed.fieldErrors).flat().find(Boolean) ?? "Check the draft and try again.",
+    };
+  }
+
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const isAdmin = authorization.actor.role === "admin";
+
+  const { organisationId, messageId, subject } = parsed.data;
+  // Same reasoning as sendReviewedEmail: never trust client-side sanitization
+  // alone for what actually lands in the database.
+  const body = sanitizeEmailHtml(parsed.data.body);
+
+  const supabase = await createClient();
+  const { data: draft, error: draftError } = await supabase
+    .from("outreach_messages")
+    .select("id, send_status, sent_by_user_id")
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+  if (draftError || !draft) {
+    if (draftError) await reportError(draftError, { operation: "outreach.save_draft.load", messageId });
+    return { ok: false, message: "That draft could not be loaded. Refresh and try again." };
+  }
+  if (draft.send_status !== "draft") {
+    return { ok: false, message: "This email is no longer an unsent draft." };
+  }
+  // Same ownership rule as sending (F123 AC4): RLS lets every active user READ
+  // every draft, so write access is asserted here, not left to a silent no-op.
+  if (!isAdmin && draft.sent_by_user_id !== authorization.actor.id) {
+    return { ok: false, message: "You can only edit drafts you generated yourself." };
+  }
+
+  const { error: saveError } = await supabase
+    .from("outreach_messages")
+    .update({ subject, body })
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .eq("send_status", "draft");
+  if (saveError) {
+    await reportError(saveError, { operation: "outreach.save_draft.write", messageId });
+    return { ok: false, message: "The draft could not be saved. Try again." };
+  }
+
+  revalidatePath(`/clients/${organisationId}`);
+  return { ok: true, message: "Draft saved." };
 }

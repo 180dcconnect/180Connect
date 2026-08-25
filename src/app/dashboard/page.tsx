@@ -31,7 +31,6 @@ import { TeamActivityFeed } from "@/components/team-activity-feed";
 import { RecentUpdatesFeed } from "@/components/recent-updates-feed";
 import { FirstRunGuide } from "@/components/first-run-guide";
 import { OriginButton } from "@/components/ui/origin-button";
-import { OnboardingPreviewBar } from "@/components/onboarding-preview-bar";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import {
   REVIEW_CLIENTS_EMPTY_STATE,
@@ -62,9 +61,9 @@ import { shouldPromptFeedback } from "@/lib/feedback";
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; preview_guide?: string; preview_feedback?: string }>;
+  searchParams: Promise<{ error?: string; preview_feedback?: string }>;
 }) {
-  const { error, preview_guide, preview_feedback } = await searchParams;
+  const { error, preview_feedback } = await searchParams;
   let user;
 
   try {
@@ -300,35 +299,10 @@ export default async function DashboardPage({
   // (user_onboarding_steps). A failure to read either is not worth failing the
   // dashboard over — the guide simply doesn't render, and the CAM sees the normal
   // screen rather than an error about a checklist.
-  //
-  // In addition, if `preview_guide` is present in searchParams, we force the guide
-  // into one of several preview states for dev/testing regardless of account status.
   let guide: ReturnType<typeof guideProgress> | null = null;
   let ownsAnyClient = false;
 
-  if (preview_guide !== undefined) {
-    if (preview_guide === "1") {
-      guide = guideProgress(["outreach_preferences"]);
-      ownsAnyClient = rows.some((row) => row.owner_id === actor.id);
-    } else if (preview_guide === "2" || preview_guide === "complete") {
-      guide = guideProgress(["outreach_preferences", "review_clients"]);
-      ownsAnyClient = true;
-    } else if (preview_guide === "empty") {
-      guide = guideProgress([]);
-      ownsAnyClient = false;
-    } else if (preview_guide === "live") {
-      const supabase = await createClient();
-      const completedSteps = await supabase.from("user_onboarding_steps").select("step_key");
-      guide = guideProgress(
-        (completedSteps.data ?? []).map((row: { step_key: string }) => row.step_key),
-      );
-      ownsAnyClient = rows.some((row) => row.owner_id === actor.id);
-    } else {
-      // preview_guide === "0" or "true" or default preview
-      guide = guideProgress([]);
-      ownsAnyClient = rows.some((row) => row.owner_id === actor.id);
-    }
-  } else if (actor.role === "cam") {
+  if (actor.role === "cam") {
     const supabase = await createClient();
     const [profile, completedSteps] = await Promise.all([
       supabase
@@ -496,6 +470,7 @@ export default async function DashboardPage({
                     { label: "Past 14 days", points: 14 },
                     { label: "Past 30 days" },
                   ]}
+                  allowCustomRange
                   showFooter={false}
                   className="rounded-2xl border-black/[0.06] shadow-sm"
                 />
@@ -572,7 +547,6 @@ export default async function DashboardPage({
           </>
         )}
       </Stage>
-      {preview_guide !== undefined && <OnboardingPreviewBar currentMode={preview_guide} />}
       {showFeedback && <FeedbackPrompt pageContext="/dashboard" />}
     </div>
   );

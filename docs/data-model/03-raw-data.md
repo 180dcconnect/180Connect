@@ -152,7 +152,7 @@
 | id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
 | organisation_id | uuid | ORGANISATIONS | No | Organisation this field value belongs to | System | Set when field is written |  |
 | field_name | text |  | No | Which ORGANISATIONS column this value is for | System | Identified by the write path | legal_name, website, contact_email, address_line_1, city, postcode (mission is explicitly excluded) |
-| value | text |  | No | Value written for this field by this source | System | Taken from raw payload or manual entry | Null if source provided no value |
+| value | text |  | No | Value written for this field by this source | System | Taken from raw payload or manual entry | Not NULL |
 | source | text |  | No | Which source produced this value | System | Inherited from raw source record or manual entry | Reuse RAW_SOURCE_RECORDS.record_source enum + "manual" |
 | raw_source_record_id | uuid | RAW_SOURCE_RECORDS | Yes | The raw record this value was taken from | System | Set for API-sourced values | Null for manual entries |
 | is_current | boolean |  | No | Whether this is the value currently live on ORGANISATIONS for this field | System | Set true on write, flipped false when superseded | Default true |

@@ -88,6 +88,11 @@ GMAIL_SENDER_EMAIL=clients.sheffield@180dc.org
 # LLM (Development API key — ask team)
 OPENAI_API_KEY=sk-proj-test-key-local-only
 
+# Gemini (F082 Client Booklet generation) — free-tier key from
+# aistudio.google.com; copy the model id from the AI Studio model picker
+GEMINI_API_KEY=<redacted>
+GEMINI_MODEL=<model-id-from-ai-studio>
+
 # Feature flags & logging
 NEXT_PUBLIC_LOG_LEVEL=debug
 NEXT_PUBLIC_ENABLE_AI_BOOKLETS=true
@@ -140,6 +145,10 @@ GMAIL_SENDER_EMAIL=clients.sheffield@180dc.org
 # LLM (Development API key)
 OPENAI_API_KEY=<redacted>
 
+# Gemini (F082 Client Booklet generation)
+GEMINI_API_KEY=<redacted>
+GEMINI_MODEL=<model-id-from-ai-studio>
+
 # Feature flags
 NEXT_PUBLIC_LOG_LEVEL=info
 NEXT_PUBLIC_ENABLE_AI_BOOKLETS=true
@@ -185,6 +194,10 @@ GMAIL_SENDER_EMAIL=clients.sheffield@180dc.org
 # LLM (Production API key)
 OPENAI_API_KEY=<redacted>
 
+# Gemini (F082 Client Booklet generation)
+GEMINI_API_KEY=<redacted>
+GEMINI_MODEL=<model-id-from-ai-studio>
+
 # Feature flags
 NEXT_PUBLIC_LOG_LEVEL=warn
 NEXT_PUBLIC_ENABLE_AI_BOOKLETS=true
@@ -223,6 +236,8 @@ NEXT_PUBLIC_SENTRY_DSN=<redacted>
 | `GMAIL_REFRESH_TOKEN` | dev token | prod token | Only server-side | **SENSITIVE:** Authorises mailbox access |
 | `GMAIL_SENDER_EMAIL` | outreach mailbox | outreach mailbox | Only server-side | Exact branch mailbox; no fallback sender |
 | `OPENAI_API_KEY` | test-key | prod-key | Only server-side | **SENSITIVE:** Never expose |
+| `GEMINI_API_KEY` | free-tier key from [aistudio.google.com](https://aistudio.google.com) | prod key | Only server-side | **SENSITIVE:** Never expose. Gemini key for LLM calls — F082 Client Booklet generation today, F100 email drafts later. Declared in `SCHEMA` (`src/lib/env.ts`) and passed explicitly to the AI SDK rather than read under its default `GOOGLE_GENERATIVE_AI_API_KEY` name. Unset ⇒ booklet generation returns a clear error |
+| `GEMINI_MODEL` | Flash-tier model id copied from the AI Studio model picker | same | Only server-side | Exact model id booklet generation calls (F082). No hardcoded default in code — Google retires model ids often enough that one would go stale. Unset ⇒ booklet generation cannot run |
 | `CRON_SECRET` | shared-secret | shared-secret | Only server-side | **SENSITIVE:** Auth for `/api/cron/*` routes |
 | `SESSION_ACTIVITY_SECRET` | random 32+ chars | random 32+ chars | Only server-side | **SENSITIVE:** Signs the inactivity record behind session expiry (F007). Optional — unset means sessions still expire after 30 idle minutes but the record is unsigned and forgeable, so set it everywhere hosted. `openssl rand -base64 32`. Rotating it signs every open session out once |
 | `NEXT_PUBLIC_POSTHOG_KEY` | dev-key | prod-key | Always | Public analytics key |

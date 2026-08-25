@@ -20,6 +20,7 @@ export type FormattedTeamActivity = {
   sentence: string;
   targetName: string | null;
   targetHref: string | null;
+  actionButton?: { label: string; href: string } | null;
   relativeTime: string;
   createdAt: string;
 };
@@ -32,10 +33,12 @@ export type FormattedTeamActivity = {
  * - "5 clients added by Mohammed Saeed"
  * - "Mohammed Saeed claimed ownership of Oxford Homeless Project"
  * - "Sarah Jenkins moved Amnesty International to Initial outreach sent"
+ * - "Sarah Jenkins joined the team" (with "Assign clients" CTA if 0 clients owned)
  */
 export function formatTeamActivity(
   row: RawTeamActivityRow,
   now: Date = new Date(),
+  ownedClientCount?: number,
 ): FormattedTeamActivity {
   const actorName = row.actor_name?.trim() || "A team member";
   const target = row.target_name?.trim() || "a client";
@@ -44,6 +47,8 @@ export function formatTeamActivity(
 
   let sentence: string;
   let actionLabel = "Team";
+  let actionButton: { label: string; href: string } | null = null;
+  let targetHref: string | null = null;
 
   // Check for batch client addition (AC1 example format: "5 clients added by X")
   if (
@@ -96,8 +101,15 @@ export function formatTeamActivity(
         break;
 
       case "invite_accepted":
-        actionLabel = "Team";
+        actionLabel = "Joined";
         sentence = `${actorName} joined the team`;
+        if (ownedClientCount === undefined || ownedClientCount === 0) {
+          actionButton = {
+            label: "Assign clients",
+            href: "/clients?owner=unassigned",
+          };
+          targetHref = "/clients?owner=unassigned";
+        }
         break;
 
       case "organisation_status_flagged":
@@ -132,10 +144,9 @@ export function formatTeamActivity(
     }
   }
 
-  const targetHref =
-    row.target_table === "organisations" && row.target_id
-      ? `/clients/${row.target_id}`
-      : null;
+  if (!targetHref && row.target_table === "organisations" && row.target_id) {
+    targetHref = `/clients/${row.target_id}`;
+  }
 
   return {
     id: row.id,
@@ -144,6 +155,7 @@ export function formatTeamActivity(
     sentence,
     targetName: row.target_name,
     targetHref,
+    actionButton,
     relativeTime: formatRelativeTime(when, now),
     createdAt: row.created_at,
   };
@@ -158,10 +170,14 @@ export function formatTeamActivities(
   rows: RawTeamActivityRow[],
   excludeActorId?: string | null,
   now: Date = new Date(),
+  ownedCounts?: Map<string, number>,
 ): FormattedTeamActivity[] {
   const filtered = excludeActorId
     ? rows.filter((row) => row.actor_user_id !== excludeActorId)
     : rows;
 
-  return filtered.map((row) => formatTeamActivity(row, now));
+  return filtered.map((row) => {
+    const count = row.actor_user_id ? ownedCounts?.get(row.actor_user_id) : undefined;
+    return formatTeamActivity(row, now, count);
+  });
 }

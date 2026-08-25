@@ -8,6 +8,8 @@ so assigning or removing Admin access takes effect without a new login.
 | View clients and shared history | Yes | Yes | Yes |
 | Edit permitted client data | Yes | Yes | No |
 | Contact permitted clients | Yes | Yes | No |
+| Create, assign and remove shared tags (`tags:manage`) | Yes | Yes | No |
+| Rename shared tags (admin-only, F189) | No | Yes | No |
 | Manage users and roles | No | Yes | No |
 | Reassign ownership | No | Yes | No |
 | Manage approvals | No | Yes | No |

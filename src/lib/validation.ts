@@ -47,6 +47,15 @@ export function emailField(message = "Enter a valid email address.") {
   return z.string().trim().toLowerCase().pipe(z.email(message));
 }
 
+/**
+ * Route-param identity check: true only for a well-formed UUID. Route
+ * handlers guard every lookup with this so a malformed id never reaches a
+ * Postgres cast (which 500s) instead of a clean 400.
+ */
+export function isUuid(value: unknown): boolean {
+  return z.uuid().safeParse(value).success;
+}
+
 /** Absolute http:// or https:// URL. */
 export function urlField(message = "Enter a valid URL.") {
   return z.string().trim().pipe(z.url({ protocol: /^https?$/, message }));

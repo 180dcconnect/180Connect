@@ -1,0 +1,30 @@
+import { z } from "zod";
+import { nonEmptyTrimmed } from "../validation.ts";
+import { emailHtmlToPlainText } from "./email-html.ts";
+
+/**
+ * F123: the payload for sendReviewedEmail. Lives outside the "use server" file so
+ * its rejection rules (missing approval, blank subject/body) are unit-testable
+ * without a Next.js runtime — the no-approval path is one of issue #120's named
+ * testing cases.
+ */
+export const reviewedEmailSchema = z.object({
+  organisationId: z.uuid(),
+  messageId: z.uuid(),
+  subject: nonEmptyTrimmed(998, "Add a subject before sending."),
+  // F117: body is HTML from the rich-text editor. A trimmed, non-empty string
+  // is not enough on its own — an editor left as "<p></p>" is non-empty text
+  // with no real content, so this also requires actual text once the markup
+  // is stripped. `emailHtmlToPlainText` is the same function that derives the
+  // plain-text MIME part, so "has content" and "what the plain part contains"
+  // can never disagree.
+  body: z
+    .string()
+    .max(200_000, "Must be 200000 characters or fewer.")
+    .refine((html) => emailHtmlToPlainText(html).length > 0, "Add email content before sending."),
+  explicitlyApproved: z.literal(true, {
+    error: "Review the email and confirm approval before sending.",
+  }),
+});
+
+export type ReviewedEmailInput = z.infer<typeof reviewedEmailSchema>;

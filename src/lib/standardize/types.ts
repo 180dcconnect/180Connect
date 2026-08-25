@@ -6,7 +6,15 @@
 // share yet).
 
 export type EntryMethod = "api" | "manual";
-export type OrganisationType = "charity" | "company" | "both" | "other";
+export type OrganisationType =
+  | "charity"
+  | "cio"
+  | "cic"
+  | "social_enterprise"
+  | "ngo"
+  | "company"
+  | "both"
+  | "other";
 export type GeographicReach =
   | "local"
   | "regional"

@@ -16,9 +16,8 @@ import {
 
 /**
  * The pipeline report — one white card above the client list, in three parts:
- * the four stage totals, the stream that connects them, and the grouped
- * breakdown under it — a top three, or the complete list when the caller says so
- * (`rowsLabel`), which is what grouping by owner does.
+ * the four stage totals, the stream that connects them, and the top-three
+ * breakdown under it.
  *
  * White on the bone ground, in the app's own tokens, because the logged-in app
  * is a light tool and one dark slab at the top of a light page reads as a widget
@@ -64,7 +63,6 @@ export function PipelineReport({
   field,
   direction,
   rows,
-  rowsLabel,
   rowHref,
 }: {
   stages: FunnelStage[];
@@ -75,8 +73,6 @@ export function PipelineReport({
   field: BreakdownField;
   direction: SortDirection;
   rows: BreakdownRow[];
-  /** Overrides the "Top N" corner label when the rows are not a top N. */
-  rowsLabel?: string;
   rowHref: (filter: NonNullable<BreakdownRow["filter"]>) => string;
 }) {
   const chartData = stages.map((stage) => ({
@@ -196,7 +192,7 @@ export function PipelineReport({
             />
           </p>
           <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/30">
-            {rowsLabel ?? `Top ${rows.length || 3}`}
+            Top {rows.length || 3}
           </p>
         </div>
 

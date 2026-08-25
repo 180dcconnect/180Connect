@@ -271,7 +271,7 @@ export function ComposeButton({
           <div>
             <h3 className="text-sm font-bold" id="email-review-heading">Review generated draft</h3>
             <p className="mt-1 text-xs text-foreground/55">
-              Saved as a draft. Review and edit it before a separate human send action is made available.
+              Saved as a draft. Review and edit it, then approve below to send it from the branch mailbox.
             </p>
             <p className="mt-1 text-xs text-foreground/65">
               Size tone template: {sizeTemplateLabel(draft.sizeTemplate)}

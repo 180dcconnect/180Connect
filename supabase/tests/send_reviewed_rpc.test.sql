@@ -263,4 +263,8 @@ $$;
 
 select * from tests.suite_send_reviewed();
 
+-- Emits the deferred plan (no_plan above) — without this pg_prove reports
+-- "No plan found in TAP output" even when every subtest passed.
+select * from finish();
+
 rollback;

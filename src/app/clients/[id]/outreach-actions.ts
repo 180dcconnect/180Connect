@@ -89,6 +89,11 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   // error here rather than a silent zero-row update that Gmail then makes real.
   // A failed provider call leaves an editable draft containing precisely what the
   // CAM attempted, never the earlier AI output.
+  //
+  // sent_by_user_id deliberately records whoever actually hit Send, including an
+  // admin sending another CAM's generated draft — "who sent an email is a fact
+  // about the email" (create_outreach.sql), and the audit_log row written by
+  // mark_outreach_sent carries the same actor.
   const { data: saved, error: saveError } = await supabase
     .from("outreach_messages")
     .update({ subject, body, sent_by_user_id: authorization.actor.id })

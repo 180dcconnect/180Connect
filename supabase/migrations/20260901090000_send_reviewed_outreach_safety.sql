@@ -50,8 +50,11 @@
 --   Security      | Both RPCs are SECURITY DEFINER with search_path pinned, both
 --               | re-check active-user + ownership + suppression inside the body;
 --               | EXECUTE revoked from public/anon, granted to authenticated.
---   Documentation | Data Model tab 07 projection regenerated via
---               | npm run export:data-model in the same PR.
+--   Documentation | Data Model tab 07: outreach_messages is not yet projected in
+--               | docs/data-model/ on dev (neither are client_booklets etc.), so
+--               | there is no generated file to update in this PR. The spreadsheet
+--               | row for send_claimed_at should be added at the next projection
+--               | refresh; noted here so the gap is deliberate, not missed.
 --   Approved by   | Bashir (Project Leader), 25 Aug 2026.
 --
 -- Reversibility: paired rollback in ../rollback/20260901090000_send_reviewed_outreach_safety.down.sql

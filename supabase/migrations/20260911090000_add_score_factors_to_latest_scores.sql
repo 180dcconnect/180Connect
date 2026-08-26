@@ -30,6 +30,12 @@ alter table public.latest_scores
 -- object carrying a five-key factor object (each a number in [0,1]) and a
 -- weights object. Deep weight validation stays in the application layer
 -- (sanitizeWeights), which is the only writer.
+--
+-- Every factor condition is preceded by a `?` existence check: `->` on a
+-- missing key yields NULL, and a bare `jsonb_typeof(NULL) = 'number'` is NULL
+-- too — which a CHECK treats as pass. A missing key must fail the constraint,
+-- not silently satisfy it (caught by the pgTAP suite in CI). `?` itself is
+-- never NULL, so FALSE AND anything stays FALSE down the chain.
 alter table public.latest_scores
   add constraint latest_scores_score_factors_shape
   check (
@@ -38,14 +44,19 @@ alter table public.latest_scores
       jsonb_typeof(score_factors) = 'object'
       and jsonb_typeof(score_factors -> 'factors') = 'object'
       and jsonb_typeof(score_factors -> 'weights') = 'object'
+      and (score_factors -> 'factors') ? 'sector'
       and jsonb_typeof(score_factors -> 'factors' -> 'sector') = 'number'
       and (score_factors -> 'factors' ->> 'sector')::numeric between 0 and 1
+      and (score_factors -> 'factors') ? 'geography'
       and jsonb_typeof(score_factors -> 'factors' -> 'geography') = 'number'
       and (score_factors -> 'factors' ->> 'geography')::numeric between 0 and 1
+      and (score_factors -> 'factors') ? 'size'
       and jsonb_typeof(score_factors -> 'factors' -> 'size') = 'number'
       and (score_factors -> 'factors' ->> 'size')::numeric between 0 and 1
+      and (score_factors -> 'factors') ? 'partnershipHistory'
       and jsonb_typeof(score_factors -> 'factors' -> 'partnershipHistory') = 'number'
       and (score_factors -> 'factors' ->> 'partnershipHistory')::numeric between 0 and 1
+      and (score_factors -> 'factors') ? 'previousContact'
       and jsonb_typeof(score_factors -> 'factors' -> 'previousContact') = 'number'
       and (score_factors -> 'factors' ->> 'previousContact')::numeric between 0 and 1
     )

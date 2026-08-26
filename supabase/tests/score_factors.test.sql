@@ -98,6 +98,17 @@ begin
     'a payload missing the sector factor is refused'
   );
 
+  -- Regression for the CI-caught CHECK NULL leak: an absent key must fail the
+  -- constraint, not satisfy it via jsonb_typeof(NULL) evaluating to NULL.
+  return next is(
+    tests.sqlstate_of_null(
+      format('update public.latest_scores set score_factors = ''%s''::jsonb where organisation_id = %L',
+        '{"factors": {"sector": 0.7, "geography": 0.5, "partnershipHistory": 0.5, "previousContact": 1}, "weights": {}}',
+        v_org)),
+    '23514',
+    'a payload missing the size factor is refused too'
+  );
+
   return next is(
     tests.sqlstate_of_null(
       format('update public.latest_scores set score_factors = ''%s''::jsonb where organisation_id = %L',

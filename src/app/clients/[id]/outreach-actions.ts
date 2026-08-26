@@ -13,10 +13,136 @@ import { checkSuppressionBeforeSend, suppressionBlockedMessage } from "@/lib/out
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { safeValidate } from "@/lib/validation";
+import { z } from "zod";
 
 export type ReviewedSendResult =
   | { ok: true; message: string }
   | { ok: false; message: string };
+
+const scheduleSchema = reviewedEmailSchema.extend({ scheduledAt: z.iso.datetime() });
+
+/**
+ * F126 (#122): queue a reviewed email for future delivery. Same review gate as
+ * sendReviewedEmail — the approval checkbox is required either way — and the
+ * same audited-RPC pattern as F123's send path: schedule_outreach_send
+ * re-checks authorisation and suppression inside its SECURITY DEFINER body and
+ * records the draft→scheduled transition in audit_log in the same transaction.
+ */
+export async function scheduleReviewedEmail(input: unknown): Promise<ReviewedSendResult> {
+  const parsed = safeValidate(scheduleSchema, input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: Object.values(parsed.fieldErrors).flat().find(Boolean) ?? "Check the schedule and try again.",
+    };
+  }
+
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const isAdmin = authorization.actor.role === "admin";
+
+  // explicitlyApproved is enforced by scheduleSchema (z.literal(true)) — the
+  // same review gate the send path uses; it needs no further reference here.
+  const { organisationId, messageId, subject } = parsed.data;
+  // F117: never trust client-side sanitization alone — identical rule to the
+  // send path, since what is stored here is exactly what the cron worker will
+  // deliver later.
+  const body = sanitizeEmailHtml(parsed.data.body);
+  if (emailHtmlToPlainText(body).length === 0) {
+    return { ok: false, message: "Add email content before scheduling." };
+  }
+  const supabase = await createClient();
+
+  // F123 AC4's ownership assertion, before the RPC gives a database-shaped error:
+  // RLS lets every active user READ every draft, so ownership has to be asserted
+  // here for an honest UI message (the RPC re-checks it regardless).
+  const { data: draft } = await supabase
+    .from("outreach_messages")
+    .select("send_status, sent_by_user_id")
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+  if (!draft || draft.send_status !== "draft") {
+    return { ok: false, message: "This email is no longer an unsent draft." };
+  }
+  if (!isAdmin && draft.sent_by_user_id !== authorization.actor.id) {
+    return { ok: false, message: "You can only schedule drafts you generated yourself." };
+  }
+
+  // Suppression at point-of-scheduling — the worker re-checks at point-of-send,
+  // but refusing here gives the CAM an immediate answer instead of a silent skip.
+  const suppression = await checkSuppressionBeforeSend(organisationId, async (id) => {
+    const { data, error } = await supabase
+      .from("suppressions")
+      .select("id, reason")
+      .eq("organisation_id", id)
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  });
+  if (!suppression.allowed) {
+    return {
+      ok: false,
+      message: suppression.kind === "suppressed"
+        ? suppressionBlockedMessage(suppression.reason)
+        : "Suppression status could not be verified. Nothing was scheduled.",
+    };
+  }
+
+  const scheduledAtIso = new Date(parsed.data.scheduledAt);
+  if (scheduledAtIso.getTime() <= Date.now()) {
+    return { ok: false, message: "Choose a future date and time." };
+  }
+  const { data: scheduled, error } = await supabase.rpc("schedule_outreach_send", {
+    p_message_id: messageId,
+    p_subject: subject,
+    p_body: body,
+    p_scheduled_at: scheduledAtIso.toISOString(),
+  });
+  if (error || !scheduled) {
+    await reportError(error ?? new Error("Schedule matched no rows."), { operation: "outreach.schedule", messageId });
+    return { ok: false, message: "The email could not be scheduled. Try again." };
+  }
+
+  revalidatePath(`/clients/${organisationId}`);
+  return { ok: true, message: `Email scheduled for ${scheduledAtIso.toLocaleString("en-GB")}.` };
+}
+
+/**
+ * F126 AC: cancel a pending schedule. Goes through cancel_outreach_schedule
+ * because RLS pins every direct outreach_messages UPDATE to draft rows — a
+ * plain client update could never un-schedule anything. The RPC re-checks
+ * authorisation and audits scheduled→draft in the same transaction.
+ */
+export async function cancelScheduledEmail(input: unknown): Promise<ReviewedSendResult> {
+  const parsed = safeValidate(z.object({ organisationId: z.uuid(), messageId: z.uuid() }), input);
+  if (!parsed.success) {
+    return { ok: false, message: "That scheduled email could not be identified." };
+  }
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const supabase = await createClient();
+  const { data: cancelled, error } = await supabase.rpc("cancel_outreach_schedule", {
+    p_message_id: parsed.data.messageId,
+  });
+  if (error || !cancelled) {
+    await reportError(error ?? new Error("Cancel matched no rows."), {
+      operation: "outreach.schedule.cancel",
+      messageId: parsed.data.messageId,
+    });
+    return { ok: false, message: "The scheduled email could not be cancelled." };
+  }
+
+  revalidatePath(`/clients/${parsed.data.organisationId}`);
+  return { ok: true, message: "Scheduled send cancelled. The email is a draft again." };
+}
 
 /** F123/F250: the sole deliberate, human-approved outreach send action. */
 export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendResult> {

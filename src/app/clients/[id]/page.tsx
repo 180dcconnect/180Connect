@@ -51,6 +51,8 @@ import {
 } from "@/lib/timeline";
 import { TimelineSection } from "./timeline-section";
 import { TimelineRealtimeRefresher } from "./timeline-realtime";
+import { RequestOwnershipForm } from "./request-ownership-form";
+import { ScheduledEmailList } from "./scheduled-email-list";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -76,6 +78,14 @@ type OwnerRow = {
   owner_id: string | null;
   owner: { full_name: string | null } | null;
 };
+type SentEmailRow = {
+  id: string;
+  subject: string;
+  body: string;
+  sent_at: string;
+  sent_by_user: { full_name: string | null } | null;
+};
+type ScheduledEmailRow = { id: string; subject: string; scheduled_at: string };
 
 /**
  * F067 (#69) Client Detail Page / F068 (#70) View Client Basic Info: opens from the
@@ -315,6 +325,19 @@ export default async function ClientDetailPage({
   const statusLabel = formatOutreachStatus(client.outreach_status);
   const suppressed = latest?.status === "active";
   const suppressionPending = latest?.status === "pending";
+
+  // F126: emails queued for future delivery. Ascending — the next one due is
+  // the one a CAM most needs to see.
+  const { data: scheduledEmails, error: scheduledEmailsError } = await supabase
+    .from("outreach_messages")
+    .select("id, subject, scheduled_at")
+    .eq("organisation_id", id)
+    .eq("send_status", "scheduled")
+    .order("scheduled_at", { ascending: true })
+    .returns<ScheduledEmailRow[]>();
+  if (scheduledEmailsError) {
+    await reportError(scheduledEmailsError, { operation: "clients.detail_scheduled_emails", organisationId: id });
+  }
 
   // #79/#80/#81 (F077/F078/F079): this client's edit suggestions, fetched without a
   // status filter and filtered in the component — RLS already scopes what each role
@@ -725,6 +748,9 @@ export default async function ClientDetailPage({
                   hasSavedBooklet={savedBooklet !== null}
                   existingDraft={existingDraft}
                 />
+                {/* F126: what is queued for later, with cancel — shown in the same
+                    card as the compose flow that created the schedule. */}
+                <ScheduledEmailList organisationId={client.id} messages={scheduledEmails ?? []} />
               </Rise>
             )}
 

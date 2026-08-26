@@ -37,6 +37,7 @@ function harness(options: {
   flipSucceeds?: boolean;
   failFlipSucceeds?: boolean;
   underLimit?: boolean;
+  underDailyLimit?: boolean;
 }) {
   const calls: string[] = [];
   const deps: ScheduledOutreachDeps = {
@@ -47,6 +48,10 @@ function harness(options: {
     async isSuppressed() {
       calls.push("isSuppressed");
       return options.suppressed ?? false;
+    },
+    async underDailySendLimit() {
+      calls.push("underDailySendLimit");
+      return options.underDailyLimit ?? true;
     },
     async underSendLimit(sentByUserId) {
       calls.push(`underSendLimit:${sentByUserId}`);
@@ -84,6 +89,7 @@ test("a due message is claimed, delivered and marked sent", async () => {
   assert.deepEqual(calls, [
     "loadDue:2026-09-01T10:00:00.000Z",
     "isSuppressed",
+    "underDailySendLimit",
     `underSendLimit:00000000-0000-4000-a000-000000000001`,
     `claim:00000000-0000-4000-d000-000000000001`,
     "deliver:client@example.org",
@@ -99,6 +105,17 @@ test("an exhausted send limit blocks the delivery before any claim or Gmail call
   // NOT failed and its scheduler is not notified.
   assert.ok(!calls.some((c) => c.startsWith("claim:") || c.startsWith("deliver:")), "no claim or delivery when over the F227 limit");
   assert.ok(!calls.some((c) => c.startsWith("markFailed:") || c.startsWith("notify:")), "a transient rate-limit block must not fail the message");
+});
+
+test("an exhausted daily send limit blocks the delivery before the per-CAM check, claim, or Gmail call", async () => {
+  const { deps, calls } = harness({ due: [message()], underDailyLimit: false });
+  const summary = await deliverDueScheduledEmails(deps);
+  assert.deepEqual(summary, { sent: 0, blocked: 1, failed: 0 });
+  // F128: same transient treatment as F227's per-CAM block — the message
+  // stays scheduled, it is NOT failed and its scheduler is not notified.
+  assert.ok(!calls.some((c) => c.startsWith("underSendLimit:")), "the branch-wide cap is checked before the per-CAM one");
+  assert.ok(!calls.some((c) => c.startsWith("claim:") || c.startsWith("deliver:")), "no claim or delivery when over the daily limit");
+  assert.ok(!calls.some((c) => c.startsWith("markFailed:") || c.startsWith("notify:")), "a transient daily-limit block must not fail the message");
 });
 
 test("an unattributable scheduled email is failed — it would otherwise loop forever", async () => {
@@ -194,6 +211,9 @@ test("mixed outcomes across a batch are counted independently", async () => {
     },
     async isSuppressed(organisationId) {
       return organisationId.endsWith("2"); // second message's client was suppressed after scheduling
+    },
+    async underDailySendLimit() {
+      return true;
     },
     async underSendLimit() {
       return true;

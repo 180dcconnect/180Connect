@@ -1,5 +1,6 @@
 import { reportError } from "../error-logging.ts";
 import { logSecurityEvent } from "../log-security-event.ts";
+import { dailySendWindowStart, resolveOutreachDailyLimit } from "./daily-send-limit.ts";
 import { emailHtmlToPlainText } from "./email-html.ts";
 import { resolveEmailSendLimit } from "./send-rate-limit.ts";
 
@@ -67,6 +68,11 @@ export type ScheduledOutreachDeps = {
   loadDue(nowIso: string): Promise<DueScheduledMessage[]>;
   /** True iff an ACTIVE suppression exists for this organisation. */
   isSuppressed(organisationId: string): Promise<boolean>;
+  /** F128: false when the branch-wide daily cap is exhausted, or the count
+   * cannot be verified (fail-closed). Every CAM shares the one branch
+   * mailbox, so this is checked before the per-CAM limit below — it is the
+   * broader gate. */
+  underDailySendLimit(): Promise<boolean>;
   /** F227: false when the scheduler's fixed-window email quota is exhausted,
    * or the count cannot be verified (fail-closed). */
   underSendLimit(sentByUserId: string): Promise<boolean>;
@@ -137,6 +143,15 @@ export async function deliverDueScheduledEmails(
         }
         continue;
       }
+      summary.blocked += 1;
+      continue;
+    }
+
+    // F128: the branch-wide daily cap, checked before anything sender-specific
+    // — every CAM shares the one branch mailbox. Same transient treatment as
+    // F227's block below: stays scheduled, not failed, since the cap resets
+    // at midnight UTC and needs no human attention.
+    if (!(await deps.underDailySendLimit())) {
       summary.blocked += 1;
       continue;
     }
@@ -256,6 +271,39 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
           .maybeSingle();
         if (error || data) return true;
         return false;
+      },
+
+      // F128: same branch-wide daily cap the manual send path enforces. An
+      // unresolvable count fails closed (over limit).
+      async underDailySendLimit() {
+        const dailyLimit = await resolveOutreachDailyLimit(async () => {
+          const { data, error } = await admin
+            .from("outreach_daily_send_limit")
+            .select("daily_limit")
+            .eq("id", true)
+            .maybeSingle();
+          if (error) throw error;
+          return data?.daily_limit ?? null;
+        });
+        const { count, error } = await admin
+          .from("outreach_messages")
+          .select("id", { count: "exact", head: true })
+          .eq("send_status", "sent")
+          .gte("sent_at", dailySendWindowStart(now));
+        if (error || count === null) {
+          await reportError(error ?? new Error("Daily send-limit count returned no total."), {
+            operation: "outreach.scheduler.daily_limit",
+          });
+          logSecurityEvent("outreach.daily_send_limit_unavailable", {
+            cause: error?.message ?? "no count returned",
+          });
+          return false;
+        }
+        if (count >= dailyLimit) {
+          logSecurityEvent("outreach.daily_send_limit_reached", { dailyLimit, todaySentCount: count });
+          return false;
+        }
+        return true;
       },
 
       // F227: same fixed-window count the manual send path enforces — a

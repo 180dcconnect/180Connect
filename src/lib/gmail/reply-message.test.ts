@@ -60,7 +60,31 @@ test("matches only the sent thread, branch recipient, and client sender", () => 
     detail: { organisation_id: "org-1", provider_thread_id: "thread-1", sent_to: "contact@charity.org" },
   };
   assert.equal(matchInboundReply(reply, [row], "branch@180dc.org"), row);
-  assert.equal(matchInboundReply({ ...reply, providerThreadId: "unrelated" }, [row], "branch@180dc.org"), null);
+  assert.equal(matchInboundReply({ ...reply, providerThreadId: "unrelated", hasReplyHeaders: false }, [row], "branch@180dc.org"), null);
   assert.equal(matchInboundReply({ ...reply, from: "other@example.org" }, [row], "branch@180dc.org"), null);
   assert.equal(matchInboundReply({ ...reply, to: "personal@180dc.org" }, [row], "branch@180dc.org"), null);
+});
+
+test("falls back to a unique client email match but flags ambiguous senders", () => {
+  const reply: ParsedInboundReply = {
+    providerMessageId: "reply-2", providerThreadId: "provider-thread-drifted",
+    from: "shared@charity.org", to: "branch@180dc.org", subject: "Re: Hello",
+    body: "Following up", receivedAt: "2026-08-26T10:00:00.000Z", hasReplyHeaders: true,
+  };
+  const newest = {
+    target_id: "outreach-2", created_at: "2026-08-25T10:00:00Z",
+    detail: { organisation_id: "org-1", provider_thread_id: "old-2", sent_to: "shared@charity.org" },
+  };
+  const older = {
+    target_id: "outreach-1", created_at: "2026-08-20T10:00:00Z",
+    detail: { organisation_id: "org-1", provider_thread_id: "old-1", sent_to: "shared@charity.org" },
+  };
+  assert.equal(matchInboundReply(reply, [older, newest], "branch@180dc.org"), newest);
+  assert.equal(matchInboundReply({ ...reply, hasReplyHeaders: false }, [newest], "branch@180dc.org"), null);
+
+  const anotherClient = {
+    target_id: "outreach-3", created_at: "2026-08-26T09:00:00Z",
+    detail: { organisation_id: "org-2", provider_thread_id: "old-3", sent_to: "shared@charity.org" },
+  };
+  assert.equal(matchInboundReply(reply, [newest, anotherClient], "branch@180dc.org"), null);
 });

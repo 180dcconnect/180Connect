@@ -63,7 +63,7 @@ export async function syncGmailReplies(deps?: Dependencies): Promise<ReplySyncRe
 
     const { data: sentRows, error: sentError } = await admin
       .from("audit_log")
-      .select("target_id, detail")
+      .select("target_id, detail, created_at")
       .eq("action", "outreach_email_sent")
       .eq("target_table", "outreach_messages");
     if (sentError) throw sentError;
@@ -82,7 +82,17 @@ export async function syncGmailReplies(deps?: Dependencies): Promise<ReplySyncRe
         if (!reply) { result.ignored += 1; continue; }
         const match = matchInboundReply(reply, threads, sender);
         if (!match || typeof match.detail.organisation_id !== "string") {
-          result.unmatched += 1;
+          const { data, error } = await admin.rpc("flag_unmatched_gmail_reply", {
+            p_provider_message_id: reply.providerMessageId,
+            p_provider_thread_id: reply.providerThreadId,
+            p_sender_email: reply.from,
+            p_subject: reply.subject,
+            p_reply_body: reply.body,
+            p_received_at: reply.receivedAt,
+          });
+          if (error) throw error;
+          if (data === null) result.duplicates += 1;
+          else result.unmatched += 1;
           continue;
         }
         const { data, error } = await admin.rpc("capture_gmail_reply", {

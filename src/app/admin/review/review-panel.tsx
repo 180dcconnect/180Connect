@@ -33,6 +33,24 @@ export type StatusFlagRow = {
   organisations: { legal_name: string } | null;
 };
 
+export type UnmatchedReplyRow = {
+  id: string;
+  created_at: string;
+  detail: {
+    provider_message_id?: unknown;
+    provider_thread_id?: unknown;
+    sender_email?: unknown;
+    subject?: unknown;
+    reply_body?: unknown;
+    received_at?: unknown;
+  };
+};
+
+function detailText(row: UnmatchedReplyRow, key: keyof UnmatchedReplyRow["detail"]): string {
+  const value = row.detail[key];
+  return typeof value === "string" && value.trim() ? value : "";
+}
+
 const RULE_LABEL: Record<string, string> = {
   client_criteria_needs_review: "Needs review",
   client_criteria_does_not_meet: "Does not meet criteria",
@@ -61,12 +79,15 @@ function recordName(payload: unknown): string {
 export function ReviewPanel({
   initialEvents,
   initialFlags,
+  initialUnmatchedReplies,
 }: {
   initialEvents: DataQualityEventRow[];
   initialFlags: StatusFlagRow[];
+  initialUnmatchedReplies: UnmatchedReplyRow[];
 }) {
   const [events, setEvents] = useState(initialEvents);
   const [flags, setFlags] = useState(initialFlags);
+  const [unmatchedReplies, setUnmatchedReplies] = useState(initialUnmatchedReplies);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<{ text: string; tone: "success" | "error" } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -77,6 +98,7 @@ export function ReviewPanel({
     const body = await response.json();
     setEvents(body.events as DataQualityEventRow[]);
     setFlags(body.flags as StatusFlagRow[]);
+    setUnmatchedReplies(body.unmatchedReplies as UnmatchedReplyRow[]);
   }
 
   async function decide(type: "data_quality_event" | "status_flag", id: string, successMessage: string) {
@@ -112,6 +134,38 @@ export function ReviewPanel({
     <div className="mt-8 space-y-10">
       <div className="min-h-6">
         {status && <InlineAlert tone={status.tone} message={status.text} />}
+      </div>
+
+      <div>
+        <h2 className="text-sm font-bold">Unmatched email replies</h2>
+        <p className="mt-1 text-sm text-foreground/65">
+          Gmail replies that could not be linked confidently by thread or sender.
+          Review these manually; they have not been attached to any client.
+        </p>
+        {unmatchedReplies.length === 0 ? (
+          <p className="mt-3 text-sm text-foreground/65">No unmatched replies waiting for review.</p>
+        ) : (
+          <ul className="mt-4 space-y-4">
+            {unmatchedReplies.map((reply) => {
+              const sender = detailText(reply, "sender_email") || "Unknown sender";
+              const subject = detailText(reply, "subject") || "No subject";
+              const body = detailText(reply, "reply_body") || "No readable message body.";
+              const receivedAt = detailText(reply, "received_at") || reply.created_at;
+              return (
+                <li key={reply.id} className="rounded-xl border border-black/10 p-4">
+                  <p className="font-bold">{subject}</p>
+                  <p className="mt-1 text-sm text-foreground/75">From {sender}</p>
+                  <p className="mt-1 text-xs text-foreground/50">
+                    Received {new Date(receivedAt).toLocaleString("en-GB")}
+                  </p>
+                  <p className="mt-3 whitespace-pre-wrap rounded-lg bg-black/5 p-3 text-sm text-foreground/80">
+                    {body}
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
 
       <div>

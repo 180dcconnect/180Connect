@@ -26,6 +26,7 @@ export type ParsedInboundReply = {
 
 export type SentThreadReference = {
   target_id: string;
+  created_at?: string;
   detail: { organisation_id?: unknown; provider_thread_id?: unknown; sent_to?: unknown };
 };
 
@@ -125,11 +126,28 @@ export function matchInboundReply(
 ): SentThreadReference | null {
   if (reply.to !== branchSender.toLowerCase()) return null;
   const candidates = rows.filter((row) => row.detail.provider_thread_id === reply.providerThreadId);
-  if (candidates.length === 0) return null;
   const exact = candidates.find((row) =>
     typeof row.detail.sent_to === "string" && row.detail.sent_to.toLowerCase() === reply.from,
   );
   if (exact) return exact;
   const legacy = candidates.length === 1 && typeof candidates[0].detail.sent_to !== "string";
-  return reply.hasReplyHeaders && legacy ? candidates[0] : null;
+  if (reply.hasReplyHeaders && legacy) return candidates[0];
+
+  // F132 email fallback: only a message carrying reply ancestry may use it, and
+  // every sent row for that address must resolve to the same organisation. This
+  // catches provider thread drift without attaching ordinary inbound mail—or an
+  // address shared by two client records—to whichever row happened to come first.
+  if (!reply.hasReplyHeaders) return null;
+  const senderMatches = rows.filter((row) =>
+    typeof row.detail.sent_to === "string" && row.detail.sent_to.toLowerCase() === reply.from,
+  );
+  const organisationIds = new Set(
+    senderMatches
+      .map((row) => row.detail.organisation_id)
+      .filter((value): value is string => typeof value === "string"),
+  );
+  if (organisationIds.size !== 1) return null;
+  return senderMatches.sort((a, b) =>
+    (b.created_at ?? "").localeCompare(a.created_at ?? ""),
+  )[0] ?? null;
 }

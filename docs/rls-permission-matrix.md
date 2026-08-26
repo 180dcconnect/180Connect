@@ -456,6 +456,13 @@ RPCs (EXECUTE revoked from every role). Manual status changes remain
 `set_outreach_status` / `set_outreach_status_bulk` (§3.2) — a send advances the
 pipeline automatically; a human corrects it through the ordinary RPCs.
 
+**Last-activity read for recommendations (F160, `20260910100000`).**
+`get_clients_last_activity(uuid[])` is a read-only aggregation: per requested
+client, the newest sent email, received reply and audited status change — the
+clock F160 measures silence against. Owner-scoped unless admin, matching the
+Needs Attention panel it feeds; ids the caller cannot access are dropped
+silently rather than erroring. EXECUTE granted to `authenticated` only.
+
 ### 3.5 Raw ingestion and data quality — admin only
 
 §4.3 "View raw source records: Yes/technical admin, CAM no".

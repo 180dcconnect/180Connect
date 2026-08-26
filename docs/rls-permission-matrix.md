@@ -386,7 +386,7 @@ drives both the render and the preflight that remains the enforcement.
 | `MODEL_PRICING` | all roles | — (direct SQL only, no RPC yet — F213) | — | — |
 | `SEND_EVENTS` | all roles | — (service role, Gmail webhook) | — | — |
 | `REPLY_EVENTS` | all roles | — (service role) | — | — |
-| `OUTCOMES` | all roles | admin, cam (`recorded_by_user_id = auth.uid()`) | admin, own | admin |
+| `OUTCOMES` | all roles | admin. cam: withdrawn — every value is system-managed, written/withdrawn only by `set_outreach_status` / `set_outreach_status_bulk` / `advance_outreach_pipeline_on_send` (F143/F144) | admin | admin |
 | `BOOKLET_GENERATIONS` | admin, cam (`app.can_contact_organisation(organisation_id)`); viewer: none | admin, cam (`app.can_contact_organisation(organisation_id)` **and** `generated_by = auth.uid()`); append-only audit of booklet prompt/output (F082 AC5 / F112, `20260822130000`) | — | — |
 
 `BOOKLET_GENERATIONS` lives here rather than in a new section because it is the

@@ -375,7 +375,7 @@
 | 07 Outreach & Outcomes | OUTCOMES | id | uuid |  | Primary key |
 | 07 Outreach & Outcomes | OUTCOMES | organisation_id | uuid |  | Links to the ORGANISATIONS record associated with the outcome |
 | 07 Outreach & Outcomes | OUTCOMES | outreach_message_id | uuid |  | Links to the OUTREACH_MESSAGES record that led to this outcome |
-| 07 Outreach & Outcomes | OUTCOMES | outcome_type | enum |  | converted / no_response / rejected / follow_up / referral |
+| 07 Outreach & Outcomes | OUTCOMES | outcome_type | enum |  | reply / converted / no_response / soft_no / hard_no |
 | 07 Outreach & Outcomes | OUTCOMES | notes | text |  | CAM notes describing what happened and any relevant context |
 | 07 Outreach & Outcomes | OUTCOMES | recorded_by_user_id | uuid |  | Links to the USERS record for the CAM who logged the outcome |
 | 07 Outreach & Outcomes | OUTCOMES | created_at | timestamp |  | Row creation timestamp |

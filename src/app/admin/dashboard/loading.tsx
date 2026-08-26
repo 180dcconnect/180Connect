@@ -1,3 +1,12 @@
+// Loading skeleton for /admin/dashboard (F180).
+// Mirrors all 6 sections of the live dashboard to avoid layout shifts:
+// 1. Header & action links (review queue & team pipeline)
+// 2. 30-day organisation growth metric card
+// 3. Funnel stat cards (contacted, responses, converted)
+// 4. Pipeline stage pills
+// 5. Ownership load & priority bands side-by-side grid
+// 6. Sector concentration table
+
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Loading() {

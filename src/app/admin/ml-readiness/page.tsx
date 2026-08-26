@@ -16,35 +16,30 @@ import { Group, Rise, Stage } from "@/components/dashboard-stage";
  * re-checked in the page itself, not just at the nav layer.
  */
 export default async function MlReadinessPage() {
-  const authorization = await getCurrentActor("user:manage", {
+  const authorization = await getCurrentActor("platform-settings:manage", {
     route: "/admin/ml-readiness",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
   const supabase = await createClient();
-  const { count, error } = await supabase
+  const { data: rows, error } = await supabase
     .from("training_examples")
-    .select("outreach_message_id", { count: "exact", head: true })
-    .not("outcome_label", "is", null);
+    .select("outcome_label")
+    .not("outcome_label", "is", null)
+    .overrideTypes<{ outcome_label: string }[], { merge: false }>();
 
   if (error) {
     await reportError(error, { operation: "admin.ml_readiness.count" });
   }
 
   // A live count on every page load is the "no manual report" requirement —
-  // no scheduler, no separate generation step.
-  const readiness = outcomeReadiness(error ? 0 : (count ?? 0));
-
-  // Tiny label histogram (same view, admin-readable; extra colour for the demo).
-  const { data: byLabel } = await supabase
-    .from("training_examples")
-    .select("outcome_label")
-    .not("outcome_label", "is", null)
-    .limit(5000)
-    .overrideTypes<{ outcome_label: string }[], { merge: false }>();
+  // no scheduler, no separate generation step. Single query drives both the
+  // progress bar and the breakdown, so they cannot disagree.
+  const count = error ? 0 : (rows?.length ?? 0);
+  const readiness = outcomeReadiness(count);
 
   const labelCounts = new Map<string, number>();
-  for (const row of byLabel ?? []) {
+  for (const row of rows ?? []) {
     labelCounts.set(row.outcome_label, (labelCounts.get(row.outcome_label) ?? 0) + 1);
   }
 

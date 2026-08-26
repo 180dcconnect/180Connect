@@ -26,6 +26,12 @@ export const reviewedEmailSchema = z.object({
     .string()
     .max(200_000, "Must be 200000 characters or fewer.")
     .refine((html) => emailHtmlToPlainText(html).length > 0, "Add email content before sending."),
+  // F121 + review defence-in-depth: approval must be literally true at the
+  // schema boundary — validation refuses unapproved payloads outright, so
+  // safety does not depend on a future caller remembering the checkpoint.
+  // @/lib/outreach/human-review remains the single source of the refusal
+  // message and the rule every stage (including ones without a schema yet)
+  // must pass.
   explicitlyApproved: z.literal(true, {
     error: "Review the email and confirm approval before sending.",
   }),

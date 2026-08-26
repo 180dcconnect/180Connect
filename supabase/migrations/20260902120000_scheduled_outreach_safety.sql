@@ -9,9 +9,12 @@
 --
 -- WHAT THIS CHANGES — two SECURITY DEFINER RPCs, no schema change:
 --
---   1. schedule_outreach_send(message_id, subject, body, scheduled_at): the ONLY
---      ordinary write path for draft→scheduled. Saves the exact reviewed content
---      and the requested delivery time on the still-draft row. Conditional on
+--   1. schedule_outreach_send(message_id, scheduled_at): the ONLY ordinary
+--      write path for draft→scheduled. The reviewed content itself is saved to
+--      the draft row by the calling Server Action through the app's sanitizing
+--      write paths (F117) BEFORE this RPC runs — the RPC takes no content and
+--      only flips the status, so a direct PostgREST caller can never inject
+--      raw markup for the cron worker to deliver. Conditional on
 --      send_status='draft' (a raced or already-sent draft raises instead of
 --      silently matching zero rows), re-checks authorisation and suppression
 --      INSIDE the function (SECURITY DEFINER bypasses RLS, per audit-log-pattern
@@ -37,7 +40,7 @@
 -- (crashed worker) and do not block.
 --
 -- Schema change approval record (SOP §7):
---   Change        | Add schedule_outreach_send(uuid,text,text,timestamptz) and
+--   Change        | Add schedule_outreach_send(uuid,timestamptz) and
 --               | cancel_outreach_schedule(uuid) SECURITY DEFINER RPCs.
 --   Reason        | F126 AC: a reviewed email can be queued for future delivery
 --               | and cancelled; DoD "all database writes follow the approved
@@ -59,11 +62,18 @@
 
 -- ---------------------------------------------------------------------------
 -- schedule_outreach_send — the audited draft→scheduled transition
+--
+-- DELIBERATELY TAKES NO CONTENT: subject/body are saved to the draft row by
+-- the calling Server Action through the app's sanitizing write paths (F117),
+-- and this RPC only flips the status. A caller that bypasses the app and
+-- invokes the RPC directly can therefore only schedule content that already
+-- went through those paths — never inject raw markup for the cron worker to
+-- deliver. (The residual "schedule a saved draft directly" path is accepted:
+-- approval is a human fact no persisted flag can prove, and the direct caller
+-- is an authenticated insider acting deliberately on their own draft.)
 -- ---------------------------------------------------------------------------
 create or replace function public.schedule_outreach_send(
   p_message_id uuid,
-  p_subject text,
-  p_body text,
   p_scheduled_at timestamptz
 )
 returns uuid
@@ -135,9 +145,7 @@ begin
   -- Conditional on still being a draft, like mark_outreach_sent: a second
   -- invocation or a raced send raises instead of silently matching zero rows.
   update public.outreach_messages m
-     set subject          = p_subject,
-         body             = p_body,
-         sent_by_user_id  = v_actor,
+     set sent_by_user_id  = v_actor,
          send_status      = 'scheduled',
          scheduled_at     = p_scheduled_at
     where m.id = v_message.id
@@ -155,7 +163,7 @@ begin
     jsonb_build_object(
       'organisation_id', v_message.organisation_id,
       'scheduled_at', p_scheduled_at,
-      'subject', p_subject
+      'subject', v_row.subject
     )
   );
 
@@ -163,12 +171,14 @@ begin
 end;
 $$;
 
-comment on function public.schedule_outreach_send(uuid, text, text, timestamptz) is
+comment on function public.schedule_outreach_send(uuid, timestamptz) is
   'F126: queues a reviewed outreach email for future delivery — the only ordinary '
   'write path for draft→scheduled, conditional on send_status=''draft'', '
   'authorisation- and suppression-rechecked inside, and audited in the same '
   'transaction per docs/audit-log-pattern.md. Records the scheduler as '
-  'sent_by_user_id so attribution survives until the worker delivers.';
+  'sent_by_user_id so attribution survives until the worker delivers. Takes no '
+  'content parameters — reviewed subject/body are saved by the Server Action '
+  'through the sanitizing app paths first.';
 
 -- ---------------------------------------------------------------------------
 -- cancel_outreach_schedule — the audited scheduled→draft transition
@@ -256,9 +266,9 @@ comment on function public.cancel_outreach_schedule(uuid) is
   'UPDATE policy is pinned to send_status=''draft''. Audited per '
   'docs/audit-log-pattern.md.';
 
-revoke execute on function public.schedule_outreach_send(uuid, text, text, timestamptz) from public;
-revoke execute on function public.schedule_outreach_send(uuid, text, text, timestamptz) from anon;
-grant execute on function public.schedule_outreach_send(uuid, text, text, timestamptz) to authenticated;
+revoke execute on function public.schedule_outreach_send(uuid, timestamptz) from public;
+revoke execute on function public.schedule_outreach_send(uuid, timestamptz) from anon;
+grant execute on function public.schedule_outreach_send(uuid, timestamptz) to authenticated;
 
 revoke execute on function public.cancel_outreach_schedule(uuid) from public;
 revoke execute on function public.cancel_outreach_schedule(uuid) from anon;

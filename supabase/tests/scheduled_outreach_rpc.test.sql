@@ -138,7 +138,7 @@ declare
   v_claimed_draft uuid := '00000000-0000-4000-d000-000000000017';
 begin
   -- Lets the file merge ahead of its migration, same convention as the RLS suite.
-  if to_regprocedure('public.schedule_outreach_send(uuid,text,text,timestamptz)') is null
+  if to_regprocedure('public.schedule_outreach_send(uuid,timestamptz)') is null
      or to_regprocedure('public.cancel_outreach_schedule(uuid)') is null then
     return next skip(1, 'scheduled-outreach RPCs not yet migrated');
     return;
@@ -149,7 +149,7 @@ begin
   return next is(
     tests.sqlstate_of(
       v_cam_b,
-      format('select public.schedule_outreach_send(%L, ''Subj'', ''Body'', now() + interval ''1 day'')', v_draft)
+      format('select public.schedule_outreach_send(%L, now() + interval ''1 day'')', v_draft)
     ),
     '42501',
     'another CAM scheduling someone else''s draft is refused, not silently no-oped'
@@ -167,7 +167,7 @@ begin
   return next is(
     tests.sqlstate_of(
       v_cam_a,
-      format('select public.schedule_outreach_send(%L, ''Subj'', ''Body'', now() + interval ''1 day'')', v_suppressed)
+      format('select public.schedule_outreach_send(%L, now() + interval ''1 day'')', v_suppressed)
     ),
     'P0001',
     'a suppressed client cannot gain a pending delivery at schedule time'
@@ -203,7 +203,7 @@ begin
   return next is(
     tests.sqlstate_of(
       v_cam_a,
-      format('select public.schedule_outreach_send(%L, ''Subj'', ''Body'', now() + interval ''1 day'')', v_claimed_draft)
+      format('select public.schedule_outreach_send(%L, now() + interval ''1 day'')', v_claimed_draft)
     ),
     'P0001',
     'scheduling a draft whose fresh claim is held (manual send in flight) is refused, not raced'
@@ -227,7 +227,7 @@ begin
   return next is(
     tests.sqlstate_of(
       v_cam_a,
-      format('select public.schedule_outreach_send(%L, ''Subj'', ''Body'', now() - interval ''1 hour'')', v_draft)
+      format('select public.schedule_outreach_send(%L, now() - interval ''1 hour'')', v_draft)
     ),
     '22007',
     'a past delivery time is refused outright'
@@ -236,7 +236,7 @@ begin
   return next is(
     tests.uuid_as(
       v_cam_a,
-      format('select public.schedule_outreach_send(%L, ''Queued subject'', ''Queued body'', now() + interval ''2 hours'')', v_draft)
+      format('select public.schedule_outreach_send(%L, now() + interval ''2 hours'')', v_draft)
     ),
     v_draft,
     'success path: the draft''s own CAM schedules it'
@@ -245,11 +245,11 @@ begin
   return next ok(
     (select send_status = 'scheduled'
         and scheduled_at > now()
-        and subject = 'Queued subject'
-        and body = 'Queued body'
+        and subject = 'Hello S'
+        and body = 'Body'
         and sent_by_user_id = v_cam_a
        from public.outreach_messages where id = v_draft),
-    'the transition flipped draft→scheduled with content, time and scheduler recorded'
+    'the transition flipped draft→scheduled with time and scheduler recorded — and left the saved content untouched (the RPC takes none)'
   );
 
   return next ok(
@@ -264,7 +264,7 @@ begin
   return next is(
     tests.sqlstate_of(
       v_cam_a,
-      format('select public.schedule_outreach_send(%L, ''Again'', ''Again'', now() + interval ''3 hours'')', v_draft)
+      format('select public.schedule_outreach_send(%L, now() + interval ''3 hours'')', v_draft)
     ),
     'P0002',
     'double-scheduling: a second schedule after success raises'
@@ -306,7 +306,7 @@ begin
   return next is(
     tests.uuid_as(
       v_admin,
-      format('select public.schedule_outreach_send(%L, ''Admin subj'', ''Admin body'', now() + interval ''4 hours'')', v_draft)
+      format('select public.schedule_outreach_send(%L, now() + interval ''4 hours'')', v_draft)
     ),
     v_draft,
     'an admin may schedule any draft, same rule as sending'

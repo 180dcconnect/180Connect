@@ -238,6 +238,7 @@
 | 04 Entities | OWNERSHIP_REQUESTS | organisation_id | uuid | ORGANISATIONS | Client being asked for |
 | 04 Entities | OWNERSHIP_REQUESTS | requested_by | uuid | USERS | CAM making the ask |
 | 04 Entities | OWNERSHIP_REQUESTS | current_owner_id | uuid | USERS | Owner at request time, snapshotted |
+| 06 - Predictions | LATEST_SCORES | score_factors | jsonb |  | Per-factor inputs behind priority_score: {"factors": {sector, geography, size, partnershipHistory, previousContact}, "weights": {the SCOUT weights applied}}. Written by persistLatestScore with the score itself, so the breakdown always reproduces the stored number. Null for rows scored before F095; populated by backfill:scores. |
 | 04 Entities | OWNERSHIP_REQUESTS | status | enum |  | pending, approved, rejected |
 | 04 Entities | OWNERSHIP_REQUESTS | reason | text |  | Why this CAM should take it on |
 | 04 Entities | OWNERSHIP_REQUESTS | decided_by | uuid | USERS | Admin who approved/rejected |
@@ -375,7 +376,7 @@
 | 07 Outreach & Outcomes | OUTCOMES | id | uuid |  | Primary key |
 | 07 Outreach & Outcomes | OUTCOMES | organisation_id | uuid |  | Links to the ORGANISATIONS record associated with the outcome |
 | 07 Outreach & Outcomes | OUTCOMES | outreach_message_id | uuid |  | Links to the OUTREACH_MESSAGES record that led to this outcome |
-| 07 Outreach & Outcomes | OUTCOMES | outcome_type | enum |  | converted / no_response / rejected / follow_up / referral |
+| 07 Outreach & Outcomes | OUTCOMES | outcome_type | enum |  | reply / converted / no_response / soft_no / hard_no |
 | 07 Outreach & Outcomes | OUTCOMES | notes | text |  | CAM notes describing what happened and any relevant context |
 | 07 Outreach & Outcomes | OUTCOMES | recorded_by_user_id | uuid |  | Links to the USERS record for the CAM who logged the outcome |
 | 07 Outreach & Outcomes | OUTCOMES | created_at | timestamp |  | Row creation timestamp |

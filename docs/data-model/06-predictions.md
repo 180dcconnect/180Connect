@@ -43,6 +43,7 @@
 | compass_run_id | uuid | Links to the AGENT_RUNS row that produced the latest COMPASS score. DEFERRED: column not created yet — migration 20260831200000 (F058/F059) omits it rather than creating a dangling FK; add it in whichever migration lands AGENT_RUNS. |
 | scored_at | timestamp | Date and time the organisation was last scored |
 | updated_at | timestamp | Date and time this latest-score record was last updated |
+| score_factors | jsonb | Per-factor inputs behind priority_score: {"factors": {sector, geography, size, partnershipHistory, previousContact}, "weights": {the SCOUT weights applied}}. Written by persistLatestScore with the score itself, so the breakdown always reproduces the stored number. Null for rows scored before F095; populated by backfill:scores. |
 
 ## MODEL_VERSIONS
 

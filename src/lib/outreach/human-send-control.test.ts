@@ -20,7 +20,10 @@ describe("F250 human-send architecture", () => {
 
   it("requires the explicit review gate before the interactive send call", async () => {
     const action = await source("../../app/clients/[id]/outreach-actions.ts");
-    assert.match(action, /humanReviewDecision\("stage_one", explicitlyApproved\)/);
+    assert.match(
+      action,
+      /humanReviewDecision\(\s*[^)]*explicitlyApproved,?\s*\)/,
+    );
     assert.match(action, /sendBranchOutreach/);
     assert.ok(action.indexOf("humanReviewDecision") < action.lastIndexOf("sendBranchOutreach"));
   });

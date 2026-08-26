@@ -76,6 +76,7 @@ jobs:
       - run: npm ci
 
       - uses: supabase/setup-cli@v1
+        id: supabase-cli
         with:
           # Pinned, not `latest`. Resolving `latest` costs an unauthenticated
           # call to the GitHub releases API, which is rate-limited per runner IP
@@ -122,8 +123,13 @@ jobs:
           ANON_KEY="$(supabase status -o json | jq -r '.ANON_KEY')"
           scripts/verify-anon-lockout.sh "http://127.0.0.1:54321" "$ANON_KEY"
 
+      # Only meaningful when the stack was actually started — and the CLI only
+      # exists once setup-cli has run. Gating on that step's conclusion stops a
+      # job that failed before installation (e.g. the timestamp check above)
+      # from ending in a confusing "supabase: command not found" 127 on top of
+      # the real failure.
       - name: Stop local stack
-        if: always()
+        if: always() && steps.supabase-cli.conclusion == 'success'
         run: supabase stop --no-backup
 
   apply-staging:

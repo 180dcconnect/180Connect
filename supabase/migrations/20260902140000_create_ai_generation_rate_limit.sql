@@ -12,7 +12,7 @@
 --   Security      | RLS enabled; admin SELECT only; writes are RPC-only; RPC executable
 --                 | by service_role only. User ids are server-derived after permission checks.
 --   Documentation | Data Model tabs 02, 08 and 11; matrix §3.18.
--- Reversibility: paired rollback in ../rollback/20260902120200_create_ai_generation_rate_limit.down.sql
+-- Reversibility: paired rollback in ../rollback/20260902140000_create_ai_generation_rate_limit.down.sql
 
 create table public.ai_generation_rate_limit (
   id                uuid primary key default gen_random_uuid(),

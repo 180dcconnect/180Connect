@@ -52,6 +52,12 @@ test("a formatted but visually empty body is refused, not just a blank string", 
   }
 });
 
+test("a missing or malformed recipient is refused before anything can be sent", () => {
+  for (const recipient of ["", "   ", undefined, "not-an-email", "client@"]) {
+    assert.notEqual(firstError({ ...valid, recipient }), "", `recipient=${JSON.stringify(recipient)} should fail`);
+  }
+});
+
 test("malformed identifiers are refused", () => {
   for (const field of ["organisationId", "messageId"] as const) {
     assert.match(firstError({ ...valid, [field]: "not-a-uuid" }, ), /invalid/i);

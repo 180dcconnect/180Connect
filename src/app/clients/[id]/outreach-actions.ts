@@ -6,6 +6,7 @@ import { canSendClientOutreach } from "@/lib/client-email-validation";
 import { reportError } from "@/lib/error-logging";
 import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
 import { emailHtmlToPlainText, sanitizeEmailHtml } from "@/lib/outreach/email-html";
+import { saveDraftSchema } from "@/lib/outreach/save-draft";
 import { reviewedEmailSchema } from "@/lib/outreach/send-reviewed";
 import { checkSuppressionBeforeSend, suppressionBlockedMessage } from "@/lib/outreach/suppression-check";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -176,8 +177,7 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
     .select("id, organisation_id, contact_id, send_status, sent_by_user_id")
     .eq("id", messageId)
     .eq("organisation_id", organisationId)
-    .maybeSingle();
-  if (draftError || !draft) {
+    .maybeSingle();  if (draftError || !draft) {
     if (draftError) await reportError(draftError, { operation: "outreach.send.load_draft", messageId });
     return { ok: false, message: "That draft could not be loaded. Refresh and try again." };
   }
@@ -227,7 +227,8 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   // `.eq(send_status)` + `.single()` turns a raced or already-sent draft into an
   // error here rather than a silent zero-row update that Gmail then makes real.
   // A failed provider call leaves an editable draft containing precisely what the
-  // CAM attempted, never the earlier AI output.
+  // CAM attempted, never the earlier AI output. The reviewed recipient is saved
+  // alongside (F119 AC1), so a sent row records who the email actually went to.
   //
   // sent_by_user_id deliberately records whoever actually hit Send, including an
   // admin sending another CAM's generated draft — "who sent an email is a fact
@@ -353,4 +354,87 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
 
   revalidatePath(`/clients/${organisationId}`);
   return { ok: true, message: "Email sent from the Sheffield outreach mailbox." };
+}
+
+export type SaveDraftResult =
+  | { ok: true; message: string }
+  | { ok: false; message: string };
+
+/**
+ * F119: saves the CAM's in-progress edits without sending. Deliberately
+ * lighter than sendReviewedEmail — no recipient validation, no approval, no
+ * suppression check, no Gmail call — this only ever writes subject/body/
+ * recipient to a still-draft row so a CAM can return to exactly what they
+ * left, per F070's client profile reopening it. The recipient is persisted
+ * verbatim (F119 AC1): a manually overridden address must survive the
+ * save/reopen round-trip instead of being recomputed from contacts.email.
+ */
+export async function saveEmailDraft(input: unknown): Promise<SaveDraftResult> {
+  const parsed = safeValidate(saveDraftSchema, input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: Object.values(parsed.fieldErrors).flat().find(Boolean) ?? "Check the draft and try again.",
+    };
+  }
+
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const isAdmin = authorization.actor.role === "admin";
+
+  const { organisationId, messageId, subject } = parsed.data;
+  // Same reasoning as sendReviewedEmail: never trust client-side sanitization
+  // alone for what actually lands in the database.
+  const body = sanitizeEmailHtml(parsed.data.body);
+  const recipient = parsed.data.recipient?.trim() || null;
+
+  const supabase = await createClient();
+  const { data: draft, error: draftError } = await supabase
+    .from("outreach_messages")
+    .select("id, send_status, sent_by_user_id")
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+  if (draftError || !draft) {
+    if (draftError) await reportError(draftError, { operation: "outreach.save_draft.load", messageId });
+    return { ok: false, message: "That draft could not be loaded. Refresh and try again." };
+  }
+  if (draft.send_status !== "draft") {
+    return { ok: false, message: "This email is no longer an unsent draft." };
+  }
+  // Same ownership rule as sending (F123 AC4): RLS lets every active user READ
+  // every draft, so write access is asserted here, not left to a silent no-op.
+  if (!isAdmin && draft.sent_by_user_id !== authorization.actor.id) {
+    return { ok: false, message: "You can only edit drafts you generated yourself." };
+  }
+
+  // Same raced-send guard as sending: require the row to still be a draft when
+  // the UPDATE lands — a concurrent send flipping the status between the load
+  // check above and this write must surface as an error, not a silent zero-row
+  // update that still tells the user "Draft saved."
+  const { error: saveError } = await supabase
+    .from("outreach_messages")
+    .update({ subject, body, sent_to_email: recipient })
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .eq("send_status", "draft")
+    .select("id")
+    .single();
+  if (saveError) {
+    // `.single()` reports a zero-row match as PGRST116, so this is where the
+    // raced-send case actually lands: the draft was sent or removed between
+    // the load check above and this write. Distinguish it from a transient DB
+    // failure — "try again" would be a lie when the draft is simply gone.
+    if ((saveError as { code?: string }).code === "PGRST116") {
+      await reportError(saveError, { operation: "outreach.save_draft.write", messageId });
+      return { ok: false, message: "This email is no longer an unsent draft." };
+    }
+    await reportError(saveError, { operation: "outreach.save_draft.write", messageId });
+    return { ok: false, message: "The draft could not be saved. Try again." };
+  }
+
+  revalidatePath(`/clients/${organisationId}`);
+  return { ok: true, message: "Draft saved." };
 }

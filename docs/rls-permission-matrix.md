@@ -299,6 +299,17 @@ distinguishing them from single edits without inventing a second action token. T
 UI disables the checkbox on rows the actor could not change one at a time, so the
 permission exception is a backstop against a crafted request rather than the normal path.
 
+**Hard No files a suppression request (F153).** Moving a client to `hard_no` — through
+either status RPC or any other update — also files a **pending** suppression request for
+that organisation (`20260904090000_hard_no_files_suppression_request.sql`, a BEFORE UPDATE
+trigger firing inside the same transaction, with its own `suppression_requested` audit row).
+Pending, not active: the F251 rule that admins decide suppressions is untouched, so a Hard
+No does not by itself block outreach — an admin activating the request (F248) does. The
+trigger skips `is_seed` rows (fixture cycling must not litter staging with requests),
+organisations that already have an open suppression (the partial unique index would reject
+the second row anyway), and writes with no attributable actor; Soft No deliberately fires
+nothing (F152 AC2 keeps it outside DNC).
+
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
 | `ORGANISATIONS` | all roles | admin | admin any row; CAM may edit one they own (WITH CHECK pins `owner_id` to self) — claiming an **unowned** row is RPC-only, see below. `outreach_status` is excluded from this grant entirely — RPC-only (`set_outreach_status` for one client, `set_outreach_status_bulk` for many), see above | admin |

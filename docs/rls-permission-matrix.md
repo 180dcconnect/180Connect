@@ -427,6 +427,35 @@ direct table write (RLS pins every non-draft row shut):
   reviewed send path with its audited gates; writes `outreach_send_reopened`
   to `AUDIT_LOG`. Anyone else raises 42501.
 
+**Delivery recordal and the automatic pipeline advance (F157,
+`20260909090000`).** Recording that an email actually left is audited on both
+send paths, and the client's pipeline status moves in the SAME transaction as
+the recordal — never as a separate step that could fail independently (F157
+AC3):
+
+- `mark_outreach_sent(message_id, provider ids, recipient)` —
+  **authenticated** (active user; the client's owner, admin, or the draft's
+  sender). Draft→sent plus the `outreach_email_sent` audit row, **plus** the
+  pipeline advance: `not_contacted → initial_outreach_sent`, any later send →
+  `follow_up_sent`, each with its own `status_changed` audit row shaped for
+  the timeline. Locks both the message and the organisation row up front, so
+  two near-simultaneous sends serialize and the second lands on
+  `follow_up_sent`, never a second "initial".
+- `mark_scheduled_outreach_delivered(message_id, provider ids, claim_token)` —
+  **service_role only** (same `auth.uid() is null` line as
+  `mark_outreach_send_failed`; EXECUTE revoked from every non-service role).
+  The cron worker's replacement for its former raw UPDATE: claim-pinned
+  scheduled→sent flip, the `SEND_EVENTS` `'sent'` row, the system-attributed
+  `outreach_email_sent` audit entry, and the same pipeline advance — one
+  transaction. Pinned to the claiming run's exact token so a raced cancel or
+  re-claim wins with `false` (ambiguous: the email may be out, never retried).
+
+The advance rule itself lives once, in the internal definer helper
+`advance_outreach_pipeline_on_send(org_id, actor)`, called only by those two
+RPCs (EXECUTE revoked from every role). Manual status changes remain
+`set_outreach_status` / `set_outreach_status_bulk` (§3.2) — a send advances the
+pipeline automatically; a human corrects it through the ordinary RPCs.
+
 ### 3.5 Raw ingestion and data quality — admin only
 
 §4.3 "View raw source records: Yes/technical admin, CAM no".

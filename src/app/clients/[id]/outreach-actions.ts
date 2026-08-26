@@ -12,7 +12,6 @@ import { logSecurityEvent } from "@/lib/log-security-event";
 import { saveDraftSchema } from "@/lib/outreach/save-draft";
 import { reviewedEmailSchema } from "@/lib/outreach/send-reviewed";
 import { emailLimitMessage, resolveEmailSendLimit } from "@/lib/outreach/send-rate-limit";
-import { nextStatusAfterSend, UNREADABLE_STATUS_FALLBACK } from "@/lib/outreach/status-after-send";
 import { checkSuppressionBeforeSend, suppressionBlockedMessage } from "@/lib/outreach/suppression-check";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -395,6 +394,10 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   // transaction, so a lost race raises instead of double-recording. The reviewed
   // recipient is passed explicitly (F116 review follow-up) so the audited fact is
   // exactly what the transport was given, not a value re-derived at recordal time.
+  // F157: the SAME transaction also advances the client's pipeline status (first
+  // send initial_outreach_sent, later sends follow_up_sent) and records its own
+  // status_changed audit row — no separate best-effort step that could fail and
+  // leave the dashboard stale.
   const { error: markError } = await supabase.rpc("mark_outreach_sent", {
     p_message_id: messageId,
     p_provider_message_id: sent.providerMessageId,
@@ -403,7 +406,8 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   });
   if (markError) {
     // The email IS out; this must stay visible even though the request succeeds
-    // overall — the DoD requires failures to reach ERROR_LOG.
+    // overall — the DoD requires failures to reach ERROR_LOG. The pipeline was
+    // not advanced either: the whole recordal rolled back together.
     await reportError(markError, { operation: "outreach.send.record_sent", messageId });
     return { ok: false, message: "The email was sent, but its status could not be recorded. Contact an administrator." };
   }
@@ -425,28 +429,6 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
     });
     if (eventError) await reportError(eventError, { operation: "outreach.send.record_event", messageId });
   }
-
-  // Pipeline advance via set_outreach_status (its own audited RPC). Best-effort by
-  // design — the email is factually out either way, and a failed status flip is
-  // reported above rather than pretending the send didn't happen. F147: the
-  // first send reads initial_outreach_sent, any later one follow_up_sent —
-  // nextStatusAfterSend owns that branch and its tests. An unreadable current
-  // status falls back to follow_up_sent (the conservative under-label, which
-  // self-heals on the next send) — never to not_contacted, which would
-  // mislabel a repeat send as the first one.
-  const { data: organisationRow } = await supabase
-    .from("organisations")
-    .select("outreach_status")
-    .eq("id", organisationId)
-    .single();
-  const nextStatus = nextStatusAfterSend(
-    organisationRow?.outreach_status ?? UNREADABLE_STATUS_FALLBACK,
-  );
-  const { error: pipelineError } = await supabase.rpc("set_outreach_status", {
-    p_org_id: organisationId,
-    p_new_status: nextStatus,
-  });
-  if (pipelineError) await reportError(pipelineError, { operation: "outreach.send.pipeline", messageId });
 
   revalidatePath(`/clients/${organisationId}`);
   return { ok: true, message: "Email sent from the Sheffield outreach mailbox." };

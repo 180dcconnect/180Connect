@@ -11,6 +11,11 @@
 -- delivered recipient recorded on both the row and the audit entry (F116 review
 -- follow-up).
 --
+-- F157 (#152): recording a send ALSO advances the client's pipeline status in the
+-- same transaction — first send not_contacted → initial_outreach_sent, a later
+-- send → follow_up_sent, each with its own audited from/to row — and a refused
+-- double-record leaves the pipeline untouched.
+--
 -- Like bulk_status_rpc.test.sql these run as real end-user roles, never as
 -- service_role or the owning role: the RPCs are SECURITY DEFINER, so testing them
 -- as a superuser would exercise a code path no user can reach.
@@ -118,13 +123,15 @@ begin
     ('00000000-0000-4000-c000-000000000003', 'Suppressed Client',   'manual', 'other', v_cam_a);
 
   -- cam_a owns one draft on their own client; cam_b owns one on theirs; cam_a also
-  -- owns a draft on the suppressed client; one already-sent message for resend tests.
+  -- owns a draft on the suppressed client; one already-sent message for resend tests;
+  -- and a second draft on CAM A's own client for F157's second-send (follow-up) case.
   insert into public.outreach_messages (id, organisation_id, sent_by_user_id, subject, body, send_status, sent_at)
   values
     ('00000000-0000-4000-d000-000000000001', '00000000-0000-4000-c000-000000000001', v_cam_a, 'Hello',      'Body', 'draft', null),
     ('00000000-0000-4000-d000-000000000002', '00000000-0000-4000-c000-000000000002', v_cam_b, 'Hello B',    'Body', 'draft', null),
     ('00000000-0000-4000-d000-000000000003', '00000000-0000-4000-c000-000000000003', v_cam_a, 'Suppressed', 'Body', 'draft', null),
-    ('00000000-0000-4000-d000-000000000004', '00000000-0000-4000-c000-000000000001', v_cam_a, 'Already out','Body', 'sent',  now());
+    ('00000000-0000-4000-d000-000000000004', '00000000-0000-4000-c000-000000000001', v_cam_a, 'Already out','Body', 'sent',  now()),
+    ('00000000-0000-4000-d000-000000000005', '00000000-0000-4000-c000-000000000001', v_cam_a, 'Second one', 'Body', 'draft', null);
 
   insert into public.suppressions (organisation_id, status, reason, requested_by, decided_by, decided_at)
   values ('00000000-0000-4000-c000-000000000003', 'active', 'Do not contact (test)', v_cam_a, v_admin, now())
@@ -146,6 +153,8 @@ declare
   v_draft_b     uuid := '00000000-0000-4000-d000-000000000002';
   v_suppressed  uuid := '00000000-0000-4000-d000-000000000003';
   v_already_out uuid := '00000000-0000-4000-d000-000000000004';
+  v_second      uuid := '00000000-0000-4000-d000-000000000005';
+  v_org_a       uuid := '00000000-0000-4000-c000-000000000001';
 begin
   -- Lets the file merge ahead of its migration, same convention as the RLS suite.
   if to_regprocedure('public.claim_outreach_send(uuid)') is null
@@ -250,6 +259,41 @@ begin
     'F116: the audit row names who actually received the email'
   );
 
+  -- F157 AC1: recording the first send moved the client out of not_contacted in
+  -- the SAME transaction — no separate best-effort step can have failed quietly.
+  return next is(
+    (select outreach_status from public.organisations where id = v_org_a),
+    'initial_outreach_sent'::public.outreach_status,
+    'F157 AC1: the first recorded send advanced the client''s pipeline in the same transaction'
+  );
+
+  return next is(
+    (select jsonb_build_object('from', detail ->> 'from', 'to', detail ->> 'to')
+       from public.audit_log
+      where action = 'status_changed' and target_table = 'organisations'
+        and target_id = v_org_a),
+    jsonb_build_object('from', 'not_contacted', 'to', 'initial_outreach_sent'),
+    'F157: the advance carries its own audited before/after row, timeline-shaped'
+  );
+
+  -- F157 AC2: a second send to the same client moves FORWARD rather than staying
+  -- on "initial" — the exact-one-email vs multiple distinction must survive.
+  return next is(
+    tests.bool_as(v_cam_a, format('select public.claim_outreach_send(%L)', v_second)),
+    true,
+    'the second draft on the same client is claimable'
+  );
+  return next is(
+    tests.uuid_as(v_cam_a, format('select public.mark_outreach_sent(%L, ''pm-3'', ''pt-3'', ''client@example.org'')', v_second)),
+    v_second,
+    'the second send to the same client records successfully'
+  );
+  return next is(
+    (select outreach_status from public.organisations where id = v_org_a),
+    'follow_up_sent'::public.outreach_status,
+    'F157 AC2: the second send reads follow_up_sent, never a second initial'
+  );
+
   return next is(
     tests.sqlstate_of(
       v_cam_a,
@@ -257,6 +301,16 @@ begin
     ),
     'P0002',
     'double-recordal: a second mark after success raises'
+  );
+
+  -- Atomicity proof for the above: the refused double-record rolled back whole,
+  -- so it wrote no third status_changed row and did not move the pipeline.
+  return next is(
+    (select count(*) from public.audit_log
+      where action = 'status_changed' and target_table = 'organisations'
+        and target_id = v_org_a),
+    2::bigint,
+    'a refused double-record leaves the pipeline advance untouched'
   );
 
   return next is(

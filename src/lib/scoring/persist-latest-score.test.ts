@@ -66,7 +66,7 @@ describe("persistLatestScore — score_factors payload (F095)", () => {
 
     // The weights snapshot is what was actually applied.
     assert.deepEqual(stored.weights, DEFAULT_WEIGHTS);
-    // The SQL shape guard (migration 20260905100000) requires both keys.
+    // The SQL shape guard (migration 20260911090000) requires both keys.
     assert.ok("factors" in stored && "weights" in stored);
   });
 

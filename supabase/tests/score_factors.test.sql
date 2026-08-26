@@ -1,6 +1,6 @@
 -- Score Breakdown persistence tests — F095. Run by `supabase test db` (pg_prove).
 --
--- Covers what migration 20260905100000 changes: the score_factors column exists
+-- Covers what migration 20260911090000 changes: the score_factors column exists
 -- on latest_scores, accepts null (rows scored before F095) and a well-formed
 -- {factors, weights} payload, and refuses payloads whose factor values are
 -- missing, non-numeric or outside [0,1]. The constraint is the database's

@@ -38,7 +38,7 @@ export type PersistedScoreResult =
  * breakdown row always reproduces its own priority_score exactly (weighted sum
  * normalised by weight sum), even after admins reweight and old SCOUT
  * generations go inactive. Shape-guarded in SQL by
- * latest_scores_score_factors_shape (migration 20260905100000).
+ * latest_scores_score_factors_shape (migration 20260911090000).
  */
 export type ScoreFactorsRecord = {
   factors: {

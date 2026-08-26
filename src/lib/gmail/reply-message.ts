@@ -151,3 +151,27 @@ export function matchInboundReply(
     (b.created_at ?? "").localeCompare(a.created_at ?? ""),
   )[0] ?? null;
 }
+
+export type ReviewFlagDetail = { provider_message_id?: unknown };
+
+/**
+ * A reply first flagged for manual review can later be captured, if a
+ * subsequent sync run's sent-outreach snapshot resolves the match (see
+ * capture_gmail_reply's gmail_reply_review_resolved write). Without this
+ * filter the review queue would keep showing an item that is already sitting
+ * on the client's timeline.
+ */
+export function excludeResolvedReviewFlags<T extends { detail: ReviewFlagDetail }>(
+  rows: readonly T[],
+  resolvedRows: readonly { detail: ReviewFlagDetail }[],
+): T[] {
+  const resolvedIds = new Set(
+    resolvedRows
+      .map((row) => row.detail.provider_message_id)
+      .filter((value): value is string => typeof value === "string"),
+  );
+  return rows.filter((row) => {
+    const id = row.detail.provider_message_id;
+    return !(typeof id === "string" && resolvedIds.has(id));
+  });
+}

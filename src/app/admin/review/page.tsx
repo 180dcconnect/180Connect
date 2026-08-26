@@ -4,6 +4,7 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
+import { excludeResolvedReviewFlags } from "@/lib/gmail/reply-message";
 import {
   ReviewPanel,
   type DataQualityEventRow,
@@ -20,7 +21,7 @@ export default async function ReviewQueuePage() {
 
   const supabase = await createClient();
 
-  const [events, flags, unmatchedReplies] = await Promise.all([
+  const [events, flags, unmatchedReplies, resolvedReplies] = await Promise.all([
     supabase
       .from("data_quality_events")
       .select(
@@ -48,13 +49,24 @@ export default async function ReviewQueuePage() {
       .order("created_at", { ascending: false })
       .limit(200)
       .overrideTypes<UnmatchedReplyRow[], { merge: false }>(),
+    supabase
+      .from("audit_log")
+      .select("detail")
+      .eq("action", "gmail_reply_review_resolved")
+      .limit(500)
+      .overrideTypes<{ detail: { provider_message_id?: unknown } }[], { merge: false }>(),
   ]);
 
-  if (events.error || flags.error || unmatchedReplies.error) {
-    await reportError(events.error ?? flags.error ?? unmatchedReplies.error, {
+  if (events.error || flags.error || unmatchedReplies.error || resolvedReplies.error) {
+    await reportError(events.error ?? flags.error ?? unmatchedReplies.error ?? resolvedReplies.error, {
       operation: "admin.review.page_load",
     });
   }
+
+  const openUnmatchedReplies = excludeResolvedReviewFlags(
+    unmatchedReplies.data ?? [],
+    resolvedReplies.data ?? [],
+  );
 
   return (
     <main className="min-h-screen bg-[#f1f2f4] p-6">
@@ -72,7 +84,7 @@ export default async function ReviewQueuePage() {
           </Link>
         </div>
 
-        {(events.error || flags.error || unmatchedReplies.error) ? (
+        {(events.error || flags.error || unmatchedReplies.error || resolvedReplies.error) ? (
           <div className="mt-8">
             <InlineAlert
               variant="page"
@@ -83,7 +95,7 @@ export default async function ReviewQueuePage() {
           <ReviewPanel
             initialEvents={events.data ?? []}
             initialFlags={flags.data ?? []}
-            initialUnmatchedReplies={unmatchedReplies.data ?? []}
+            initialUnmatchedReplies={openUnmatchedReplies}
           />
         )}
       </section>

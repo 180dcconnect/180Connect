@@ -6,7 +6,13 @@ export const maxDuration = 300;
 
 export async function POST(request: Request) {
   const secret = process.env.CRON_SECRET?.trim();
-  if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
+  if (!secret) {
+    await reportError(new Error("CRON_SECRET is not configured"), {
+      operation: "gmail.reply_sync.route",
+    });
+    return NextResponse.json({ error: "Unauthorised." }, { status: 401 });
+  }
+  if (request.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorised." }, { status: 401 });
   }
   try {

@@ -1,7 +1,7 @@
 -- F131 Detect Replies database contract. Run with `supabase test db`.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(8);
+select plan(10);
 
 select ok(
   not has_function_privilege(
@@ -58,6 +58,43 @@ select is(
 );
 
 select is((select count(*) from public.reply_events where organisation_id = '00000000-0000-4000-c131-000000000001'), 1::bigint, 'the duplicate creates no second timeline event');
+
+-- Two overlapping cron runs can disagree on a match (different sent-outreach
+-- snapshots): one flags a reply for review, another later captures it once
+-- matched. Capturing must resolve the earlier flag, not leave it looking
+-- unresolved in the review queue.
+select public.flag_unmatched_gmail_reply(
+  'gmail-f131-2', 'thread-2', 'contact@example.org', 'Re: Hello', 'Following up', '2026-08-26T09:00:00Z'
+);
+
+insert into public.outreach_messages (
+  id, organisation_id, subject, body, send_status, sent_at, sent_to_email
+) values (
+  '00000000-0000-4000-d131-000000000002',
+  '00000000-0000-4000-c131-000000000001',
+  'F131 hello 2', 'Hello', 'sent', now(), 'contact@example.org'
+);
+
+select isnt(
+  public.capture_gmail_reply(
+    'gmail-f131-2',
+    '00000000-0000-4000-d131-000000000002',
+    '00000000-0000-4000-c131-000000000001',
+    'Following up',
+    '2026-08-26T10:05:00Z',
+    'contact@example.org'
+  ),
+  null,
+  'a reply first flagged for review can still be captured once matched'
+);
+
+select is(
+  (select count(*) from public.audit_log
+    where action = 'gmail_reply_review_resolved'
+      and detail ->> 'provider_message_id' = 'gmail-f131-2'),
+  1::bigint,
+  'capturing a previously flagged reply resolves the review flag'
+);
 
 select * from finish();
 rollback;

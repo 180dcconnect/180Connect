@@ -13,7 +13,7 @@
 -- two days; storing only a pointer could make the item impossible to review later.
 --
 -- Security: service_role only. AUDIT_LOG remains admin-readable and append-only.
--- Reversibility: ../rollback/20260911120000_flag_unmatched_gmail_replies.down.sql
+-- Reversibility: ../rollback/20260912160200_flag_unmatched_gmail_replies.down.sql
 
 create function public.flag_unmatched_gmail_reply(
   p_provider_message_id text,

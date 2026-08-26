@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
+import { excludeResolvedReviewFlags } from "@/lib/gmail/reply-message";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
 
@@ -43,7 +44,7 @@ export async function GET() {
 
   const supabase = await createClient();
 
-  const [events, flags, unmatchedReplies] = await Promise.all([
+  const [events, flags, unmatchedReplies, resolvedReplies] = await Promise.all([
     supabase
       .from("data_quality_events")
       .select(
@@ -68,10 +69,15 @@ export async function GET() {
       .eq("target_table", "gmail_unmatched_replies")
       .order("created_at", { ascending: false })
       .limit(200),
+    supabase
+      .from("audit_log")
+      .select("detail")
+      .eq("action", "gmail_reply_review_resolved")
+      .limit(500),
   ]);
 
-  if (events.error || flags.error || unmatchedReplies.error) {
-    await reportError(events.error ?? flags.error ?? unmatchedReplies.error, {
+  if (events.error || flags.error || unmatchedReplies.error || resolvedReplies.error) {
+    await reportError(events.error ?? flags.error ?? unmatchedReplies.error ?? resolvedReplies.error, {
       operation: "admin.review.list",
     });
     return NextResponse.json(
@@ -83,7 +89,7 @@ export async function GET() {
   return NextResponse.json({
     events: events.data ?? [],
     flags: flags.data ?? [],
-    unmatchedReplies: unmatchedReplies.data ?? [],
+    unmatchedReplies: excludeResolvedReviewFlags(unmatchedReplies.data ?? [], resolvedReplies.data ?? []),
   });
 }
 

@@ -2,7 +2,7 @@
 -- convention. Reuses the approved cron base URL, protection bypass, and CRON_SECRET
 -- vault entries documented by 20260902120100_schedule_scheduled_outreach_cron.sql.
 -- No table/schema-model change; this is a new scheduled integration trigger only.
--- Reversibility: ../rollback/20260911110000_schedule_gmail_reply_sync.down.sql
+-- Reversibility: ../rollback/20260912160100_schedule_gmail_reply_sync.down.sql
 
 select cron.schedule(
   'gmail_reply_sync',

@@ -14,7 +14,7 @@
 --
 -- Security: service_role only. End users retain no write access to REPLY_EVENTS.
 -- Reversibility: paired rollback in
--- ../rollback/20260911100000_capture_gmail_replies.down.sql
+-- ../rollback/20260912160000_capture_gmail_replies.down.sql
 
 create function public.capture_gmail_reply(
   p_provider_message_id text,
@@ -81,6 +81,31 @@ begin
     )
   );
 
+  -- A prior cron run may have been unable to match this same message and
+  -- flagged it for manual review (flag_unmatched_gmail_reply). The two RPCs
+  -- use different advisory-lock salts, so overlapping runs seeing different
+  -- snapshots of the sent-outreach list can genuinely disagree — this closes
+  -- the resulting gap rather than leaving a resolved review item looking
+  -- unresolved. Append-only, same as every other audit_log write here.
+  if exists (
+    select 1
+      from public.audit_log
+     where action = 'gmail_reply_needs_review'
+       and detail ->> 'provider_message_id' = p_provider_message_id
+  ) then
+    insert into public.audit_log (actor_user_id, action, target_table, target_id, detail)
+    values (
+      null,
+      'gmail_reply_review_resolved',
+      'reply_events',
+      v_reply_id,
+      jsonb_build_object(
+        'provider_message_id', p_provider_message_id,
+        'organisation_id', p_organisation_id
+      )
+    );
+  end if;
+
   select outreach_status into v_old_status
     from public.organisations
    where id = p_organisation_id
@@ -112,7 +137,8 @@ $$;
 
 comment on function public.capture_gmail_reply(text, uuid, uuid, text, timestamptz, text) is
   'F131: atomically deduplicates and captures a matched Gmail reply, marks the '
-  'organisation responded, and audits both writes. Service-role sync only.';
+  'organisation responded, and audits both writes. Resolves a prior unmatched-reply '
+  'review flag for the same provider message id, if one exists. Service-role sync only.';
 
 revoke execute on function public.capture_gmail_reply(text, uuid, uuid, text, timestamptz, text) from public;
 revoke execute on function public.capture_gmail_reply(text, uuid, uuid, text, timestamptz, text) from anon;

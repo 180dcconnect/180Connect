@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   describeSendStatus,
   describeStatusFilter,
+  buildEmailThread,
   filterOutreachHistory,
   splitOutreachHistory,
   STATUS_FILTERS,
@@ -94,6 +95,53 @@ describe("splitOutreachHistory", () => {
 
     assert.deepEqual(history.sent.map((m) => m.id), ["old-sent"]);
     assert.deepEqual(history.notSent.map((m) => m.id), ["new-draft"]);
+  });
+});
+
+describe("buildEmailThread (F134)", () => {
+  it("merges original emails and replies in chronological order", () => {
+    const sent = [
+      message({ id: "email-2", subject: "Follow-up", body: "Any thoughts?", sent_at: "2026-08-03T09:00:00Z" }),
+      message({ id: "email-1", subject: "Introduction", body: "Hello", sent_at: "2026-08-01T09:00:00Z" }),
+    ];
+    const thread = buildEmailThread(sent, [
+      { id: "reply-2", outreach_message_id: "email-2", reply_body: "Let's talk.", received_at: "2026-08-04T09:00:00Z" },
+      { id: "reply-1", outreach_message_id: "email-1", reply_body: "Thanks.", received_at: "2026-08-02T09:00:00Z" },
+    ]);
+
+    assert.deepEqual(thread.map((entry) => entry.id), ["email-1", "reply-1", "email-2", "reply-2"]);
+    assert.deepEqual(thread.map((entry) => entry.kind), ["outgoing", "incoming", "outgoing", "incoming"]);
+  });
+
+  it("supports several back-and-forth messages without dropping older entries", () => {
+    const thread = buildEmailThread(
+      [message({ id: "email-1" }), message({ id: "email-2", sent_at: "2026-08-03T09:00:00Z" })],
+      [
+        { id: "reply-1", outreach_message_id: "email-1", reply_body: "First reply", received_at: "2026-08-02T09:00:00Z" },
+        { id: "reply-2", outreach_message_id: "email-2", reply_body: "Second reply", received_at: "2026-08-04T09:00:00Z" },
+      ],
+    );
+
+    assert.equal(thread.length, 4);
+    assert.deepEqual(thread.map((entry) => entry.body), [
+      "Hi there, following up on our call last week...",
+      "First reply",
+      "Hi there, following up on our call last week...",
+      "Second reply",
+    ]);
+  });
+
+  it("keeps an unmatched-to-message reply visible with no invented subject", () => {
+    const thread = buildEmailThread([], [
+      { id: "reply-orphan", outreach_message_id: null, reply_body: "Still here", received_at: "2026-08-02T09:00:00Z" },
+    ]);
+
+    assert.equal(thread[0]?.subject, null);
+    assert.equal(thread[0]?.body, "Still here");
+  });
+
+  it("returns a clear empty model when there is no conversation", () => {
+    assert.deepEqual(buildEmailThread([], []), []);
   });
 });
 

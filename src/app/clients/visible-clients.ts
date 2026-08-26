@@ -634,23 +634,18 @@ function getGeographicPriorityScore(
  *
  * Re-orders clients so that organisations matching the CAM's preferred sectors
  * are prioritised higher in the CAM's personal queue.
+ *
+ * A single-dimension view over `prioritiseQueue`: only the sector preference is
+ * passed through, so the ordering (and the F094 base-score tie-break) is exactly
+ * what the unified queue produces for a CAM whose only active preference is
+ * sector. Kept as a named entry point for readability at call sites.
  */
 export function prioritiseBySector(
   clients: VisibleClient[],
   preferences?: OutreachQueuePreferences | null,
 ): VisibleClient[] {
-  if (!preferences) return clients;
-
-  const preferredSectors = (preferences.preferred_sectors ?? []).map((s) => s.toLowerCase().trim());
-  if (preferredSectors.length === 0) return clients;
-
-  return [...clients].sort((a, b) => {
-    const scoreA = getSectorPriorityScore(a, preferredSectors);
-    const scoreB = getSectorPriorityScore(b, preferredSectors);
-    if (scoreB !== scoreA) {
-      return scoreB - scoreA;
-    }
-    return a.legal_name.localeCompare(b.legal_name);
+  return prioritiseQueue(clients, {
+    preferred_sectors: preferences?.preferred_sectors ?? null,
   });
 }
 
@@ -677,23 +672,17 @@ export function getSizePriorityScore(
  *
  * Re-orders clients so that organisations matching the CAM's preferred size tiers
  * are prioritised higher in the CAM's personal queue.
+ *
+ * A single-dimension view over `prioritiseQueue` (see prioritiseBySector): only
+ * the income-band preference is passed through, so ties break on the F094 base
+ * score rather than the alphabet.
  */
 export function prioritiseBySize(
   clients: VisibleClient[],
   preferences?: OutreachQueuePreferences | null,
 ): VisibleClient[] {
-  if (!preferences) return clients;
-
-  const preferredBands = (preferences.preferred_income_bands ?? []).map((b) => b.toLowerCase().trim());
-  if (preferredBands.length === 0) return clients;
-
-  return [...clients].sort((a, b) => {
-    const scoreA = getSizePriorityScore(a, preferredBands);
-    const scoreB = getSizePriorityScore(b, preferredBands);
-    if (scoreB !== scoreA) {
-      return scoreB - scoreA;
-    }
-    return a.legal_name.localeCompare(b.legal_name);
+  return prioritiseQueue(clients, {
+    preferred_income_bands: preferences?.preferred_income_bands ?? null,
   });
 }
 
@@ -713,20 +702,17 @@ export function getGrantPriorityScore(
  *
  * Re-orders clients so that organisations with documented grant awards (360Giving)
  * are prioritised higher in the CAM's personal queue.
+ *
+ * A single-dimension view over `prioritiseQueue` (see prioritiseBySector): only
+ * the grant toggle is passed through, so ties break on the F094 base score
+ * rather than the alphabet.
  */
 export function prioritiseByGrants(
   clients: VisibleClient[],
   preferences?: OutreachQueuePreferences | null,
 ): VisibleClient[] {
-  if (!preferences?.prioritise_grant_recipients) return clients;
-
-  return [...clients].sort((a, b) => {
-    const scoreA = getGrantPriorityScore(a, preferences.prioritise_grant_recipients);
-    const scoreB = getGrantPriorityScore(b, preferences.prioritise_grant_recipients);
-    if (scoreB !== scoreA) {
-      return scoreB - scoreA;
-    }
-    return a.legal_name.localeCompare(b.legal_name);
+  return prioritiseQueue(clients, {
+    prioritise_grant_recipients: preferences?.prioritise_grant_recipients ?? false,
   });
 }
 

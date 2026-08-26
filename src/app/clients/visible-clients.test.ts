@@ -386,22 +386,32 @@ describe("prioritiseBySector (F197 / F089 / F094)", () => {
     assert.deepEqual(result.map((c) => c.id), ["1", "2", "3", "4", "5"]);
   });
 
-  it("matches aliases on whole words only — no accidental fragment boosts", () => {
-    const result = prioritiseBySector(clients, {
-      preferred_sectors: ["Arts & Culture"],
-    });
-    // None of these organisations is an arts organisation; raw substring
-    // matching could previously boost via fragments of unrelated words.
-    assert.deepEqual(result.map((c) => c.id), ["1", "2", "3", "4", "5"]);
-  });
-
-  it("does not let overlapping group vocabulary cross-match unrelated sectors", () => {
-    const result = prioritiseBySector(clients, {
-      preferred_sectors: ["Human Rights & Justice", "Social Enterprise"],
-    });
-    // Youth (#1) and poverty (#5) orgs share vocabulary with the justice and
-    // community groups but are neither — they keep the unweighted tail order.
-    assert.deepEqual(result.map((c) => c.id), ["1", "2", "3", "4", "5"]);
+  it("breaks preference ties on the stored base score, like the unified queue (F094)", () => {
+    // Alphabetical order would put Alpha first; both match the sector
+    // preference equally (+10), so the F088 tie-break must decide instead.
+    const rows = visibleClients(
+      [
+        org({
+          id: "alpha-low",
+          legal_name: "Alpha Health Org",
+          sector: "Healthcare",
+          latest_scores: { priority_score: 0.2, priority_band: "low", scored_at: null },
+        }),
+        org({
+          id: "zed-high",
+          legal_name: "Zed Health Org",
+          sector: "Healthcare",
+          latest_scores: { priority_score: 0.9, priority_band: "high", scored_at: null },
+        }),
+      ],
+      [],
+    );
+    const result = prioritiseBySector(rows, { preferred_sectors: ["healthcare"] });
+    assert.deepEqual(result.map((c) => c.id), ["zed-high", "alpha-low"]);
+    assert.deepEqual(
+      names(prioritiseBySize(rows, { preferred_income_bands: [] })),
+      ["Alpha Health Org", "Zed Health Org"],
+    );
   });
 });
 

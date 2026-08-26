@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { reportError } from "@/lib/error-logging";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 function unauthorized() {
   return NextResponse.json({ error: "Unauthorised." }, { status: 401 });
@@ -9,7 +9,11 @@ function unauthorized() {
 
 export async function POST(request: Request) {
   const secret = process.env.CRON_SECRET?.trim();
-  if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
+  if (!secret) {
+    await reportError(new Error("CRON_SECRET is not configured"), { operation: "stall_sweep.missing_secret" });
+    return unauthorized();
+  }
+  if (request.headers.get("authorization") !== `Bearer ${secret}`) {
     return unauthorized();
   }
   try {

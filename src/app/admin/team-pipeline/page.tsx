@@ -31,7 +31,10 @@ import {
   formatOutreachStatus,
   PIPELINE_STATUSES,
 } from "@/lib/organisation-format";
-import { DEFAULT_FOLLOW_UP_THRESHOLDS } from "@/lib/outreach/follow-up-recommendations";
+import {
+  DEFAULT_FOLLOW_UP_THRESHOLDS,
+  type FollowUpThresholds,
+} from "@/lib/outreach/follow-up-recommendations";
 import { stalledClients } from "@/lib/outreach/stall-detection";
 import {
   filterTeamPipelineClients,
@@ -154,7 +157,7 @@ export default async function AdminTeamPipelinePage({
       await reportError(openError, { operation: "admin.team_pipeline.open_actions_list" });
     }
 
-    const thresholdsByOwner = new Map<string, { first: number; second: number }>();
+    const thresholdsByOwner = new Map<string, FollowUpThresholds>();
     for (const row of prefRows ?? []) {
       thresholdsByOwner.set(row.user_id, {
         first: row.first_follow_up_days ?? DEFAULT_FOLLOW_UP_THRESHOLDS.first,
@@ -195,12 +198,10 @@ export default async function AdminTeamPipelinePage({
     }));
     const flags = stalledClients(candidates, activityByOrg, thresholdsByOwner, openIds, now);
     const flagById = new Map(flags.map((f) => [f.organisationId, f.daysWaiting]));
-    if (flags.length > 0) {
-      clients = baseClients.map((c) => {
-        const days = flagById.get(c.id);
-        return days == null ? c : { ...c, isStalled: true, stalledDaysWaiting: days };
-      });
-    }
+    clients = baseClients.map((c) => {
+      const days = flagById.get(c.id);
+      return days == null ? { ...c, isStalled: false } : { ...c, isStalled: true, stalledDaysWaiting: days };
+    });
   }
 
   // Counts describe the whole pipeline; filters only narrow the table.

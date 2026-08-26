@@ -1,10 +1,36 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
 async function source(relative: string) {
   return readFile(new URL(relative, import.meta.url), "utf8");
 }
+
+const SRC_ROOT = new URL("../../", import.meta.url);
+
+/** Every non-test TypeScript source under src/, relative to src/. */
+async function allSources(): Promise<Map<string, string>> {
+  const paths = (await readdir(SRC_ROOT, { recursive: true })).filter(
+    (p) => /\.(ts|tsx)$/.test(p) && !p.endsWith(".test.ts"),
+  );
+  return new Map(
+    await Promise.all(
+      paths.map(async (p) => [p.replaceAll("\\", "/"), await readFile(new URL(p, SRC_ROOT), "utf8")] as const),
+    ),
+  );
+}
+
+/**
+ * The only files allowed to reach the Gmail transport. Anything else that
+ * starts importing it — a new route, action, script, dependency graph drift —
+ * fails this test before it can ship a hidden send path.
+ */
+const GMAIL_TRANSPORT_ALLOWLIST = new Set([
+  "lib/gmail/branch-sender.ts",
+  "lib/gmail/client.ts",
+  "app/clients/[id]/outreach-actions.ts",
+  "lib/outreach/scheduled-worker.ts",
+]);
 
 describe("F250 human-send architecture", () => {
   it("keeps Gmail transport out of every AI generation endpoint", async () => {
@@ -25,12 +51,49 @@ describe("F250 human-send architecture", () => {
       /humanReviewDecision\(\s*[^)]*explicitlyApproved,?\s*\)/,
     );
     assert.match(action, /sendBranchOutreach/);
-    assert.ok(action.indexOf("humanReviewDecision") < action.lastIndexOf("sendBranchOutreach"));
+    const lastGateCall = action.lastIndexOf("humanReviewDecision(");
+    const sendCall = action.indexOf("await sendBranchOutreach({");
+    assert.ok(sendCall > -1, "the interactive send call site must exist");
+    assert.ok(lastGateCall > -1, "a review-gate call site must exist");
+    assert.ok(lastGateCall < sendCall, "every review-gate call must precede the Gmail send call");
   });
 
   it("makes the deliberate control unambiguous to the CAM", async () => {
     const editor = await source("../../app/clients/[id]/compose-button.tsx");
     assert.match(editor, /Send reviewed email/);
     assert.match(editor, /I have reviewed the recipient, subject and body/);
+  });
+
+  it("cron delivery only ever picks up rows whose status proves prior human approval", async () => {
+    const worker = await source("../../lib/outreach/scheduled-worker.ts");
+    const entryStart = worker.indexOf("export async function sendDueReviewedEmails");
+    assert.ok(entryStart > -1, "the cron entry point must exist");
+    const entry = worker.slice(entryStart);
+    const loadDue = entry.slice(entry.indexOf("async loadDue"), entry.indexOf("async isSuppressed"));
+    const claim = entry.slice(entry.indexOf("async claim("), entry.indexOf("async deliver("));
+    const markSent = entry.slice(entry.indexOf("async markSent("));
+    for (const [adapter, section] of [["loadDue", loadDue], ["claim", claim], ["markSent", markSent]] as const) {
+      assert.match(
+        section,
+        /\.eq\("send_status", "scheduled"\)/,
+        `${adapter} must be conditioned on send_status='scheduled'`,
+      );
+    }
+    assert.doesNotMatch(
+      worker,
+      /\.eq\(\s*"send_status"\s*,\s*"draft"\s*\)/,
+      "the cron worker must never touch draft rows",
+    );
+  });
+
+  it("keeps the Gmail send surface limited to the reviewed-send call sites", async () => {
+    const sources = await allSources();
+    const offenders: string[] = [];
+    for (const [path, text] of sources) {
+      if (!GMAIL_TRANSPORT_ALLOWLIST.has(path) && /gmail\/(branch-sender|client)(\.ts)?["']/.test(text)) {
+        offenders.push(path);
+      }
+    }
+    assert.deepEqual(offenders, [], "only the interactive send action, the cron worker and the transport itself may reach Gmail");
   });
 });

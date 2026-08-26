@@ -360,40 +360,34 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
       },
 
       async markSent(messageId, outcome, sentAtIso) {
-        // Pinned to OUR claim (this run's timestamp), not just still-scheduled:
-        // a successful Gmail call followed by an unexpected zero-row flip must
-        // be reported as ambiguous, never retried (F123's duplicate-email rule).
-        const { data: flipped, error } = await admin
-          .from("outreach_messages")
-          .update({
-            send_status: "sent",
-            sent_at: sentAtIso,
-            scheduled_at: null,
-            send_claimed_at: null,
-          })
-          .eq("id", messageId)
-          .eq("send_status", "scheduled")
-          .eq("send_claimed_at", sentAtIso)
-          .select("id");
-        if (error || (flipped?.length ?? 0) !== 1) {
-          await reportError(error ?? new Error("Sent-flip matched no rows — the message was cancelled or re-claimed mid-delivery. The email MAY already be out."), {
+        // F157: the whole recordal is one audited RPC — claim-pinned
+        // scheduled→sent flip, SEND_EVENTS 'sent' row, outreach_email_sent
+        // audit entry, AND the client's pipeline advance, in one transaction.
+        // The claim token is this run's nowIso, the same value the claim step
+        // wrote into send_claimed_at, so only the run that owns the message can
+        // record it. False = raced away (cancelled/re-claimed mid-delivery):
+        // the email MAY already be out, so it is reported as ambiguous and
+        // never retried (F123's duplicate-email rule).
+        const { data: flipped, error } = await admin.rpc("mark_scheduled_outreach_delivered", {
+          p_message_id: messageId,
+          p_provider_message_id: outcome.providerMessageId ?? null,
+          p_provider_thread_id: outcome.providerThreadId ?? null,
+          p_claim_token: sentAtIso,
+        });
+        if (error) {
+          await reportError(error, {
             operation: "outreach.scheduler.record",
             messageId,
           });
           return false;
         }
-        const { error: eventError } = await admin.from("send_events").insert({
-          outreach_message_id: messageId,
-          event_type: "sent",
-          occurred_at: sentAtIso,
-          metadata: {
-            provider: "gmail",
-            message_id: outcome.providerMessageId ?? null,
-            thread_id: outcome.providerThreadId ?? null,
-            scheduled: true,
-          },
-        });
-        if (eventError) await reportError(eventError, { operation: "outreach.scheduler.record_event", messageId });
+        if (flipped !== true) {
+          await reportError(new Error("Sent-flip matched no rows — the message was cancelled or re-claimed mid-delivery. The email MAY already be out."), {
+            operation: "outreach.scheduler.record",
+            messageId,
+          });
+          return false;
+        }
         return true;
       },
     },

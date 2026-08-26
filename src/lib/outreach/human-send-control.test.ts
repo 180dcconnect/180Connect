@@ -72,13 +72,28 @@ describe("F250 human-send architecture", () => {
     const loadDue = entry.slice(entry.indexOf("async loadDue"), entry.indexOf("async isSuppressed"));
     const claim = entry.slice(entry.indexOf("async claim("), entry.indexOf("async deliver("));
     const markSent = entry.slice(entry.indexOf("async markSent("));
-    for (const [adapter, section] of [["loadDue", loadDue], ["claim", claim], ["markSent", markSent]] as const) {
+    for (const [adapter, section] of [["loadDue", loadDue], ["claim", claim]] as const) {
       assert.match(
         section,
         /\.eq\("send_status", "scheduled"\)/,
         `${adapter} must be conditioned on send_status='scheduled'`,
       );
     }
+    // F157: the recordal itself moved into the audited service-role RPC — so
+    // the scheduled-only condition must be pinned THERE, not in this adapter.
+    assert.match(
+      markSent,
+      /mark_scheduled_outreach_delivered/,
+      "the worker must record deliveries through the audited F157 RPC",
+    );
+    const rpcMigration = await readFile(
+      new URL(
+        "../../../supabase/migrations/20260905100000_atomic_send_status.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    assert.match(rpcMigration, /send_claimed_at = p_claim_token/, "the RPC must stay pinned to the claiming run's token");
     assert.doesNotMatch(
       worker,
       /\.eq\(\s*"send_status"\s*,\s*"draft"\s*\)/,

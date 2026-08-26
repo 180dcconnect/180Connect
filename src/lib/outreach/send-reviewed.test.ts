@@ -22,7 +22,7 @@ test("a fully reviewed and approved email passes validation", () => {
   assert.deepEqual(safeValidate(reviewedEmailSchema, valid), { success: true, data: valid });
 });
 
-test("sending without explicit approval is refused", () => {
+test("sending without explicit approval is refused at the schema boundary (F121 defence-in-depth)", () => {
   for (const explicitlyApproved of [false, undefined, "yes"]) {
     const message = firstError({ ...valid, explicitlyApproved });
     assert.match(message, /approval/i, `explicitlyApproved=${String(explicitlyApproved)} should name approval`);

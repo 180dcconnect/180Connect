@@ -7,6 +7,7 @@ import { reportError } from "@/lib/error-logging";
 import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
 import { discardDraftSchema } from "@/lib/outreach/discard-draft";
 import { emailHtmlToPlainText, sanitizeEmailHtml } from "@/lib/outreach/email-html";
+import { HUMAN_REVIEW_REQUIRED_MESSAGE, humanReviewDecision } from "@/lib/outreach/human-review";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { saveDraftSchema } from "@/lib/outreach/save-draft";
 import { reviewedEmailSchema } from "@/lib/outreach/send-reviewed";
@@ -39,14 +40,18 @@ export async function scheduleReviewedEmail(input: unknown): Promise<ReviewedSen
     };
   }
 
+  // F121: the human-review checkpoint — scheduling is a commitment to deliver
+  // this exact content later, so an unapproved email never gets this far.
+  const review = humanReviewDecision("scheduled", parsed.data.explicitlyApproved);
+  if (!review.allowed) return { ok: false, message: review.message };
+
   const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
   if (!authorization.ok) {
     return { ok: false, message: actorFailureMessage(authorization.reason) };
   }
   const isAdmin = authorization.actor.role === "admin";
 
-  // explicitlyApproved is enforced by scheduleSchema (z.literal(true)) — the
-  // same review gate the send path uses; it needs no further reference here.
+  // explicitlyApproved has been consumed by the F121 checkpoint above.
   const { organisationId, messageId, subject } = parsed.data;
   // F117: never trust client-side sanitization alone — identical rule to the
   // send path, since what is stored here is exactly what the cron worker will
@@ -100,10 +105,27 @@ export async function scheduleReviewedEmail(input: unknown): Promise<ReviewedSen
   if (scheduledAtIso.getTime() <= Date.now()) {
     return { ok: false, message: "Choose a future date and time." };
   }
+
+  // Save the exact reviewed content FIRST, through the app's sanitizing write
+  // path, and REQUIRE the write to have matched. The RPC deliberately takes no
+  // content parameters (F227-review hardening): a caller that bypasses the app
+  // and invokes it directly can only schedule what these paths already saved —
+  // never inject raw markup for the cron worker to deliver.
+  const { data: saved, error: saveError } = await supabase
+    .from("outreach_messages")
+    .update({ subject, body, sent_by_user_id: authorization.actor.id })
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .eq("send_status", "draft")
+    .select("id")
+    .single();
+  if (saveError || !saved) {
+    await reportError(saveError ?? new Error("Draft save matched no rows."), { operation: "outreach.schedule.save_review", messageId });
+    return { ok: false, message: "This email is no longer an unsent draft." };
+  }
+
   const { data: scheduled, error } = await supabase.rpc("schedule_outreach_send", {
     p_message_id: messageId,
-    p_subject: subject,
-    p_body: body,
     p_scheduled_at: scheduledAtIso.toISOString(),
   });
   if (error || !scheduled) {
@@ -162,7 +184,13 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   }
   const isAdmin = authorization.actor.role === "admin";
 
+  // F121: the human-review checkpoint. The gate itself runs before anything
+  // else; the stage label resolves from the client's pipeline position after
+  // the draft loads, so Stage 2 follow-ups are recorded as what they are.
   const { organisationId, messageId, recipient, subject, explicitlyApproved } = parsed.data;
+  if (!explicitlyApproved) {
+    return { ok: false, message: HUMAN_REVIEW_REQUIRED_MESSAGE };
+  }
   // F117: never trust client-side sanitization alone — this is the one place
   // that decides what actually gets stored and sent, regardless of what
   // reached this action. Re-checked for real content after sanitizing, not
@@ -177,13 +205,23 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   const supabase = await createClient();
   const { data: draft, error: draftError } = await supabase
     .from("outreach_messages")
-    .select("id, organisation_id, contact_id, send_status, sent_by_user_id")
+    .select("id, organisation_id, contact_id, send_status, sent_by_user_id, organisations(outreach_status)")
     .eq("id", messageId)
     .eq("organisation_id", organisationId)
-    .maybeSingle();  if (draftError || !draft) {
+    .maybeSingle();
+  if (draftError || !draft) {
     if (draftError) await reportError(draftError, { operation: "outreach.send.load_draft", messageId });
     return { ok: false, message: "That draft could not be loaded. Refresh and try again." };
   }
+  // F121 stage label: the pipeline position decides whether this send is a
+  // Stage 1 first contact or a Stage 2 follow-up — same rule the pipeline
+  // advance at the end of this action uses.
+  const organisation = Array.isArray(draft.organisations) ? draft.organisations[0] : draft.organisations;
+  const review = humanReviewDecision(
+    organisation?.outreach_status === "not_contacted" ? "stage_one" : "stage_two",
+    explicitlyApproved,
+  );
+  if (!review.allowed) return { ok: false, message: review.message };
   if (draft.send_status !== "draft") {
     return { ok: false, message: "This email is no longer an unsent draft." };
   }

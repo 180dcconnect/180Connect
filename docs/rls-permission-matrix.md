@@ -481,6 +481,15 @@ adding v2, so an interactive write path would be an unaudited way to rewrite wha
 produced every stored score. If model management ever becomes a product surface,
 grant the verbs back here and behind an audited admin RPC.
 
+Update 26 Aug 2026 (F096, #95): model management became a product surface, and
+the predicted shape held — `public.set_scout_weights(jsonb)`
+(`20260903120000_create_set_scout_weights_rpc.sql`), a SECURITY DEFINER RPC that
+re-checks `app.is_admin()` itself, retires the active SCOUT generation and inserts
+the next one, and writes an `audit_log` row (`scout_weights_changed`) in the same
+transaction. **No table verbs were granted**: MODEL_VERSIONS stays SELECT-admin,
+INSERT/UPDATE/DELETE stay service-role-only, so the RPC remains the only door.
+Same accepted advisor exception as `set_user_role` (§7).
+
 ### 3.7 Analytics
 
 §4.3: team analytics — admin full, CAM limited/personal, viewer read-only if authorised.

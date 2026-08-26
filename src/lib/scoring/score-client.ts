@@ -11,10 +11,12 @@
 //
 // FACTOR COVERAGE — what feeds each of the five factors today:
 //
-//   sector          NEUTRAL (F089_UNBUILT_SECTOR_FACTOR below). There is no
-//                   sector scorer yet — ORGANISATIONS.sector only gained a
-//                   column in 20260824100000, and no ticket defines how a raw
-//                   sector becomes a 0-1 signal. Neutral until F089 lands.
+//   sector          scoreBySector(ORGANISATIONS.sector) — F089 wired in. The
+//                   scorer ranks the standard six-category taxonomy (mirrored
+//                   from the F197 settings presets) with a PM-approved v1
+//                   ranking; free text that matches nothing and a missing
+//                   sector both land on the explicit neutral 0.5, told apart
+//                   by the scorer's flags rather than here.
 //
 //   partnershipHistory scoreByPartnershipHistory(matched grant count) — F096
 //                   wired this fifth parameter into the base score: the scorer
@@ -56,6 +58,7 @@ import {
   type ScoutWeights,
 } from "./calculate-priority-score.ts";
 import { scoreByGeography } from "./score-by-geography.ts";
+import { scoreBySector } from "./score-by-sector.ts";
 import { scoreByOrganisationSize } from "./score-by-organisation-size.ts";
 import { scoreByPartnershipHistory } from "./score-by-partnership-history.ts";
 import { scoreByPreviousContact } from "./score-by-previous-contact.ts";
@@ -74,9 +77,6 @@ export function bandForScore(score: number): PriorityBand {
   if (score >= PRIORITY_BAND_THRESHOLDS.medium) return "medium";
   return "low";
 }
-
-/** Neutral 0-1 factor for a scorer that has not been built yet (see header). */
-const UNBUILT_FACTOR_NEUTRAL = 0.5;
 
 /**
  * The slice of an organisation row this module needs. Structurally satisfied
@@ -131,7 +131,9 @@ export function priorityFactorsFor(
   priorityRegions: readonly string[] = [],
 ): PriorityFactors {
   return {
-    sector: UNBUILT_FACTOR_NEUTRAL,
+    // F089 — the sector scorer's own neutral covers both "no sector recorded"
+    // and "free text matching nothing"; this layer just passes the value through.
+    sector: scoreBySector(org.sector ?? null).score,
     geography: scoreByGeography(org.city, priorityRegions).score,
     size: scoreByOrganisationSize(latestTotalIncome(org)).score,
     partnershipHistory: scoreByPartnershipHistory(org.matched_grant_count).score,
@@ -151,17 +153,27 @@ export function priorityFactorsFor(
  * F096: weights come from the caller — the active SCOUT config the score will
  * be persisted under — not from a hard-coded table, so an interactive rescore
  * and a backfill run under the same weights simply by loading them once each.
+ *
+ * F095: the result carries the exact inputs behind the score — the five
+ * normalised factors and the sanitized weights actually applied — so the
+ * persistence layer can store a breakdown that provably reproduces
+ * `priority_score` no matter how weights change afterwards.
  */
+export type ComputedScore = {
+  score: number;
+  band: PriorityBand;
+  factors: PriorityFactors;
+  weights: ScoutWeights;
+};
+
 export function computePriorityScore(
   org: ScoreableOrganisation,
   priorityRegions: readonly string[] = [],
   weights?: unknown,
-): { score: number; band: PriorityBand } {
-  const effectiveWeights: ScoutWeights | undefined =
-    weights === undefined ? undefined : sanitizeWeights(weights);
-  const score = calculatePriorityScore(
-    priorityFactorsFor(org, priorityRegions),
-    effectiveWeights,
-  );
-  return { score, band: bandForScore(score) };
+): ComputedScore {
+  const effectiveWeights =
+    weights === undefined ? sanitizeWeights(undefined) : sanitizeWeights(weights);
+  const factors = priorityFactorsFor(org, priorityRegions);
+  const score = calculatePriorityScore(factors, effectiveWeights);
+  return { score, band: bandForScore(score), factors, weights: effectiveWeights };
 }

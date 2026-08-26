@@ -61,13 +61,39 @@ describe("latestTotalIncome", () => {
 });
 
 describe("priorityFactorsFor — factor coverage matches the header's honesty table", () => {
-  it("keeps sector neutral while F089 is unbuilt, with or without a value", () => {
+  it("feeds the recorded sector into the sector factor (F089 wired in)", () => {
+    // A taxonomy match carries real ranking signal, not the neutral.
+    const matched = priorityFactorsFor({
+      sector: "Health & Social Care",
+      outreach_status: "not_contacted",
+    });
+    assert.equal(matched.sector, 0.7);
+  });
+
+  it("keeps sector at the explicit neutral when no usable value exists", () => {
+    // Missing/blank sector: the scorer's documented AC3 default — unknown
+    // neither gains nor loses. Free text matching nothing lands here too.
     assert.equal(priorityFactorsFor({ outreach_status: "not_contacted" }).sector, 0.5);
+    assert.equal(priorityFactorsFor({ sector: "  ", outreach_status: "not_contacted" }).sector, 0.5);
     assert.equal(
-      priorityFactorsFor({ sector: "Arts & Culture", outreach_status: "not_contacted" })
+      priorityFactorsFor({ sector: "Completely Unclassified Trust", outreach_status: "not_contacted" })
         .sector,
       0.5,
     );
+  });
+
+  it("changes the score when a client's sector is added or reclassified", () => {
+    const unscored = computePriorityScore({ outreach_status: "converted" }).score;
+    const health = computePriorityScore({
+      sector: "Mental Health",
+      outreach_status: "converted",
+    }).score;
+    const arts = computePriorityScore({
+      sector: "Arts & Culture",
+      outreach_status: "converted",
+    }).score;
+    assert.ok(health > arts); // taxonomy ranks Health & Wellbeing above Arts
+    assert.ok(health > unscored); // adding a strong sector must move the score
   });
 
   it("keeps geography neutral while no branch priority regions exist", () => {

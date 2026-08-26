@@ -1080,6 +1080,9 @@ This register is generated from the backlog entries selected by the Gantt. Prior
 | `F120` | P1 | Discard Email Draft | As a CAM, I want to discard a draft, so that poor drafts do not clutter the system. | F114, F119 |
 | `F121` | P1 | Human Review Checkpoint | As an admin, I want every AI-generated email to require human approval before sending, so that mistakes are not sent automatically. | F114, F250 |
 | `F122` | P2 | Admin Approval Queue | As an admin, I want to review emails before they are sent, so that quality can be controlled. | F114, F121, F181 |
+
+> **Descoped 26 Aug 2026:** F122 will not be built (#119 closed as not planned). The team decided the admin approval step is inefficient; after CAM review (F114/F121), the CAM sends directly with no admin gate. Human approval before send is still enforced at the CAM level by F121. F181 (Approval Tab) is unaffected — it also covers pending client-edit suggestions (F077–F079).
+
 ### Email Sending
 | ID | Priority | Feature | User story | Dependencies |
 |---|---|---|---|---|

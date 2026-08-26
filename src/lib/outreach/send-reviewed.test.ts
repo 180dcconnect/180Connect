@@ -22,18 +22,10 @@ test("a fully reviewed and approved email passes validation", () => {
   assert.deepEqual(safeValidate(reviewedEmailSchema, valid), { success: true, data: valid });
 });
 
-test("F121: approval is carried through validation, not judged by it", () => {
-  // Since F121 the approval checkpoint is @/lib/outreach/human-review (one
-  // rule for every stage), so the schema deliberately passes `false` through
-  // — covered there, including the refusal message.
-  for (const explicitlyApproved of [false, true]) {
-    assert.deepEqual(
-      safeValidate(reviewedEmailSchema, { ...valid, explicitlyApproved }),
-      { success: true, data: { ...valid, explicitlyApproved } },
-    );
-  }
-  for (const explicitlyApproved of [undefined, "yes"]) {
-    assert.notEqual(firstError({ ...valid, explicitlyApproved }), "", `explicitlyApproved=${String(explicitlyApproved)} should fail`);
+test("sending without explicit approval is refused at the schema boundary (F121 defence-in-depth)", () => {
+  for (const explicitlyApproved of [false, undefined, "yes"]) {
+    const message = firstError({ ...valid, explicitlyApproved });
+    assert.match(message, /approval/i, `explicitlyApproved=${String(explicitlyApproved)} should name approval`);
   }
 });
 

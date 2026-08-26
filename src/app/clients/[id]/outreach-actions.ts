@@ -7,7 +7,7 @@ import { reportError } from "@/lib/error-logging";
 import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
 import { discardDraftSchema } from "@/lib/outreach/discard-draft";
 import { emailHtmlToPlainText, sanitizeEmailHtml } from "@/lib/outreach/email-html";
-import { humanReviewDecision } from "@/lib/outreach/human-review";
+import { HUMAN_REVIEW_REQUIRED_MESSAGE, humanReviewDecision } from "@/lib/outreach/human-review";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { saveDraftSchema } from "@/lib/outreach/save-draft";
 import { reviewedEmailSchema } from "@/lib/outreach/send-reviewed";
@@ -167,11 +167,13 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   }
   const isAdmin = authorization.actor.role === "admin";
 
-  // F121: the human-review checkpoint, before any other work — an unapproved
-  // email must never reach a provider call, whatever else is wrong with it.
+  // F121: the human-review checkpoint. The gate itself runs before anything
+  // else; the stage label resolves from the client's pipeline position after
+  // the draft loads, so Stage 2 follow-ups are recorded as what they are.
   const { organisationId, messageId, recipient, subject, explicitlyApproved } = parsed.data;
-  const review = humanReviewDecision("stage_one", explicitlyApproved);
-  if (!review.allowed) return { ok: false, message: review.message };
+  if (!explicitlyApproved) {
+    return { ok: false, message: HUMAN_REVIEW_REQUIRED_MESSAGE };
+  }
   // F117: never trust client-side sanitization alone — this is the one place
   // that decides what actually gets stored and sent, regardless of what
   // reached this action. Re-checked for real content after sanitizing, not
@@ -186,13 +188,23 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   const supabase = await createClient();
   const { data: draft, error: draftError } = await supabase
     .from("outreach_messages")
-    .select("id, organisation_id, contact_id, send_status, sent_by_user_id")
+    .select("id, organisation_id, contact_id, send_status, sent_by_user_id, organisations(outreach_status)")
     .eq("id", messageId)
     .eq("organisation_id", organisationId)
-    .maybeSingle();  if (draftError || !draft) {
+    .maybeSingle();
+  if (draftError || !draft) {
     if (draftError) await reportError(draftError, { operation: "outreach.send.load_draft", messageId });
     return { ok: false, message: "That draft could not be loaded. Refresh and try again." };
   }
+  // F121 stage label: the pipeline position decides whether this send is a
+  // Stage 1 first contact or a Stage 2 follow-up — same rule the pipeline
+  // advance at the end of this action uses.
+  const organisation = Array.isArray(draft.organisations) ? draft.organisations[0] : draft.organisations;
+  const review = humanReviewDecision(
+    organisation?.outreach_status === "not_contacted" ? "stage_one" : "stage_two",
+    explicitlyApproved,
+  );
+  if (!review.allowed) return { ok: false, message: review.message };
   if (draft.send_status !== "draft") {
     return { ok: false, message: "This email is no longer an unsent draft." };
   }

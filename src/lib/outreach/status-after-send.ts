@@ -15,3 +15,12 @@ import type { PipelineStatus } from "../organisation-format.ts";
 export function nextStatusAfterSend(currentStatus: string): PipelineStatus {
   return currentStatus === "not_contacted" ? "initial_outreach_sent" : "follow_up_sent";
 }
+
+/**
+ * The caller's fallback when the client's current status cannot be read at
+ * send time (transient select failure after the email is already out).
+ * follow_up_sent is the conservative under-label: it self-heals on the next
+ * send, whereas defaulting to not_contacted would mislabel a repeat send as
+ * the first one and write a false audit row.
+ */
+export const UNREADABLE_STATUS_FALLBACK: PipelineStatus = "follow_up_sent";

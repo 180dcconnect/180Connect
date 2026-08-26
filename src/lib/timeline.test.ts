@@ -175,6 +175,23 @@ describe("buildStatusChangedEntry", () => {
     );
     assert.equal(entry.actorName, "Ada Lovelace");
   });
+
+  it("renders the F147 auto-transition (first outreach email sent) in plain labels", () => {
+    const entry = buildStatusChangedEntry(
+      auditRow({ detail: { from: "not_contacted", to: "initial_outreach_sent" } }),
+      NAMES,
+    );
+    assert.equal(entry.type, "status_changed");
+    assert.equal(entry.summary, "Status changed from Not contacted to Initial outreach sent.");
+  });
+
+  it("renders the F148 transition (a later send) distinctly from the initial one (F147 AC2)", () => {
+    const entry = buildStatusChangedEntry(
+      auditRow({ detail: { from: "initial_outreach_sent", to: "follow_up_sent" } }),
+      NAMES,
+    );
+    assert.equal(entry.summary, "Status changed from Initial outreach sent to Follow up sent.");
+  });
 });
 
 describe("buildEditSuggestionEntry (#80/#81)", () => {

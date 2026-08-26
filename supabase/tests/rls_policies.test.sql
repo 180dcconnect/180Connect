@@ -2098,7 +2098,7 @@ declare
 begin
   if not tests.tables_exist('organisations', 'users', 'audit_log')
      or to_regprocedure('public.set_outreach_status(uuid, public.outreach_status)') is null then
-    return next skip(15, 'set_outreach_status RPC not yet migrated');
+    return next skip(17, 'set_outreach_status RPC not yet migrated');
     return;
   end if;
 
@@ -2199,6 +2199,25 @@ begin
   return next ok(
     not has_column_privilege('authenticated', 'public.organisations', 'outreach_status', 'UPDATE'),
     'authenticated holds no direct UPDATE privilege on organisations.outreach_status'
+  );
+
+  -- F147 testing notes ("invalid transition"): with no transition-rule table
+  -- (deliberate — a CAM who mislabels a client must be able to take it back,
+  -- and the audit_log trail is the safety measure), "invalid" means a value
+  -- outside the enum, and an attempted end-run around the RPC.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.set_outreach_status(%L, ''definitely_not_a_status'')', v_org_cam_a)),
+    '22P02',
+    'a status value outside the outreach_status enum is rejected outright'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set outreach_status = ''responded'' where id = %L',
+      v_org_cam_a)),
+    '42501',
+    'the owning CAM still cannot bypass the RPC with a direct column write'
   );
 
   return next ok(

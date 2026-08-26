@@ -50,6 +50,12 @@ import {
   type OutreachMessageRow as TimelineOutreachRow,
   type ReplyEventRow,
 } from "@/lib/timeline";
+import {
+  CHANGE_HISTORY_ACTIONS,
+  buildChangeHistory,
+  type ChangeHistoryRow,
+} from "@/lib/change-history";
+import { ChangeHistorySection } from "./change-history-section";
 import { TimelineSection } from "./timeline-section";
 import { TimelineRealtimeRefresher } from "./timeline-realtime";
 import { RequestOwnershipForm } from "./request-ownership-form";
@@ -610,6 +616,29 @@ export default async function ClientDetailPage({
     await reportError(auditError, { operation: "clients.timeline_audit", organisationId: id });
   }
 
+  // F186: the admin's field-level change history. Admin-only — the extra
+  // actions it needs (the two field_discrepancy_* tokens) are invisible to
+  // every other role anyway (only audit_log_select_admin admits them), and
+  // admins read every row here through that same policy, so no RLS change
+  // was needed. Fetched independently of the timeline's four actions above:
+  // a different action set, and one query failing must not blank the other.
+  let changeHistoryRows: ChangeHistoryRow[] = [];
+  let changeHistoryDegraded = false;
+  if (isAdmin) {
+    const { data, error } = await supabase
+      .from("audit_log")
+      .select("id, actor_user_id, action, detail, created_at")
+      .eq("target_table", "organisations")
+      .eq("target_id", id)
+      .in("action", [...CHANGE_HISTORY_ACTIONS])
+      .order("created_at", { ascending: false });
+    if (error) {
+      changeHistoryDegraded = true;
+      await reportError(error, { operation: "clients.change_history", organisationId: id });
+    }
+    changeHistoryRows = (data ?? []) as unknown as ChangeHistoryRow[];
+  }
+
   // Degraded, not fatal: the four sources fail independently (each error is
   // reported above), so whatever loaded still renders. `timelineDegraded`
   // only downgrades the section to a warning above the surviving entries —
@@ -626,16 +655,18 @@ export default async function ClientDetailPage({
   // account, or a uuid audit_log carries no FK constraint to validate — reads
   // as "A former team member" in @/lib/timeline.ts, never as a raw id or blank.
   const referencedUserIds = new Set<string>();
-  for (const row of auditRows ?? []) {
-    if (row.actor_user_id) referencedUserIds.add(row.actor_user_id);
-    const from = row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).from : null;
-    const to = row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).to : null;
-    if (typeof from === "string") referencedUserIds.add(from);
-    if (typeof to === "string") referencedUserIds.add(to);
-    const requestedBy =
-      row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).requested_by : null;
-    if (typeof requestedBy === "string") referencedUserIds.add(requestedBy);
-  }
+  const collectReferencedUsers = (rows: { actor_user_id: string | null; detail: Record<string, unknown> | null }[]) => {
+    for (const row of rows) {
+      if (row.actor_user_id) referencedUserIds.add(row.actor_user_id);
+      const detail = row.detail && typeof row.detail === "object" ? row.detail : null;
+      for (const key of ["from", "to", "requested_by"]) {
+        const value = detail ? detail[key] : null;
+        if (typeof value === "string") referencedUserIds.add(value);
+      }
+    }
+  };
+  collectReferencedUsers(auditRows ?? []);
+  collectReferencedUsers(changeHistoryRows);
 
   const timelineNames = new Map<string, string | null>();
   if (referencedUserIds.size > 0) {
@@ -660,6 +691,8 @@ export default async function ClientDetailPage({
     },
     timelineNames,
   );
+
+  const changeHistory = buildChangeHistory(changeHistoryRows, timelineNames);
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
@@ -1143,6 +1176,24 @@ export default async function ClientDetailPage({
           </SectionCard>
         </Rise>
         <TimelineRealtimeRefresher organisationId={client.id} />
+
+        {/* F186: admin-only. The timeline tells everyone what happened; this
+            is the audit view of what changed on the record itself — field
+            transitions, discrepancy resolutions, declined suggestions — which
+            only an admin may read (audit_log_select_admin). Full-width like
+            the timeline it sits beside: a change history squeezed into a
+            narrow column is where from → to chips go to wrap badly. */}
+        {isAdmin && (
+          <Rise>
+            <SectionCard
+              headingId="change-history-heading"
+              title="Change history"
+              hint="Every recorded change to this client's fields, including discrepancies resolved automatically and suggested edits that were declined."
+            >
+              <ChangeHistorySection entries={changeHistory} degraded={changeHistoryDegraded} />
+            </SectionCard>
+          </Rise>
+        )}
       </Stage>
     </div>
   );

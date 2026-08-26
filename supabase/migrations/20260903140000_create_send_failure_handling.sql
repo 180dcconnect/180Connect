@@ -195,4 +195,4 @@ revoke execute on function public.reopen_outreach_draft(uuid) from public;
 revoke execute on function public.reopen_outreach_draft(uuid) from anon;
 grant execute on function public.reopen_outreach_draft(uuid) to authenticated;
 
--- ../rollback/20260903090000_create_send_failure_handling.down.sql
+-- ../rollback/20260903140000_create_send_failure_handling.down.sql

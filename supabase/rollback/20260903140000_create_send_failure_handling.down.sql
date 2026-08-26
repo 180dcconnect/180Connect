@@ -1,4 +1,4 @@
--- Rollback of 20260903090000_create_send_failure_handling.sql.
+-- Rollback of 20260903140000_create_send_failure_handling.sql.
 -- Drops the two F129 RPCs.
 --
 -- NOTE: the 'failed' value added to public.send_event_type cannot be removed

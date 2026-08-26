@@ -32,6 +32,25 @@ export type PersistedScoreResult =
   | { ok: true; score: number; band: string }
   | { ok: false; error: string };
 
+/**
+ * F095 — what lands in latest_scores.score_factors: the five normalised factor
+ * values and the sanitized weights actually applied, stored together so a
+ * breakdown row always reproduces its own priority_score exactly (weighted sum
+ * normalised by weight sum), even after admins reweight and old SCOUT
+ * generations go inactive. Shape-guarded in SQL by
+ * latest_scores_score_factors_shape (migration 20260911090000).
+ */
+export type ScoreFactorsRecord = {
+  factors: {
+    sector: number;
+    geography: number;
+    size: number;
+    partnershipHistory: number;
+    previousContact: number;
+  };
+  weights: ScoutWeights;
+};
+
 export async function persistLatestScore(
   db: UpsertDb,
   organisationId: string,
@@ -41,7 +60,8 @@ export async function persistLatestScore(
   // the MVP equal weights for callers that predate configurable scoring.
   weights: ScoutWeights = DEFAULT_WEIGHTS,
 ): Promise<PersistedScoreResult> {
-  const { score, band } = computePriorityScore(org, [], weights);
+  const { score, band, factors, weights: applied } = computePriorityScore(org, [], weights);
+  const scoreFactors: ScoreFactorsRecord = { factors, weights: applied };
   const { error } = await db
     .from("latest_scores")
     .upsert(
@@ -49,6 +69,7 @@ export async function persistLatestScore(
         organisation_id: organisationId,
         priority_score: score,
         priority_band: band,
+        score_factors: scoreFactors,
         score_source: "rule_engine",
         scored_at: new Date().toISOString(),
       },

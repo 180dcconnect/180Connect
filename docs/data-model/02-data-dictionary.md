@@ -238,6 +238,7 @@
 | 04 Entities | OWNERSHIP_REQUESTS | organisation_id | uuid | ORGANISATIONS | Client being asked for |
 | 04 Entities | OWNERSHIP_REQUESTS | requested_by | uuid | USERS | CAM making the ask |
 | 04 Entities | OWNERSHIP_REQUESTS | current_owner_id | uuid | USERS | Owner at request time, snapshotted |
+| 06 - Predictions | LATEST_SCORES | score_factors | jsonb |  | Per-factor inputs behind priority_score: {"factors": {sector, geography, size, partnershipHistory, previousContact}, "weights": {the SCOUT weights applied}}. Written by persistLatestScore with the score itself, so the breakdown always reproduces the stored number. Null for rows scored before F095; populated by backfill:scores. |
 | 04 Entities | OWNERSHIP_REQUESTS | status | enum |  | pending, approved, rejected |
 | 04 Entities | OWNERSHIP_REQUESTS | reason | text |  | Why this CAM should take it on |
 | 04 Entities | OWNERSHIP_REQUESTS | decided_by | uuid | USERS | Admin who approved/rejected |

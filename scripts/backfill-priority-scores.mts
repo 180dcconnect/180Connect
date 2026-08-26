@@ -120,24 +120,33 @@ async function main(): Promise<void> {
       const batch = rows.slice(offset, offset + BATCH_SIZE);
       const values: unknown[] = [];
       const placeholders = batch.map((row) => {
-        const { score, band } = computePriorityScore(row, [], weights);
+        // F095: store the inputs beside the score so the breakdown UI can
+        // reproduce this exact number later (see persist-latest-score.ts).
+        const { score, band, factors, weights: applied } = computePriorityScore(
+          row,
+          [],
+          weights,
+        );
         scoredCount += 1;
         [
           row.id,
           score,
           band,
+          JSON.stringify({ factors, weights: applied }),
         ].forEach((value) => values.push(value));
-        return `($${values.length - 2}, $${values.length - 1}, $${values.length}, 'rule_engine', now())`;
+        const scoreFactorsParam = values.length; // last pushed
+        return `($${scoreFactorsParam - 3}, $${scoreFactorsParam - 2}, $${scoreFactorsParam - 1}, $${scoreFactorsParam}::jsonb, 'rule_engine', now())`;
       });
 
       await client.query(
         `
         insert into public.latest_scores
-          (organisation_id, priority_score, priority_band, score_source, scored_at)
+          (organisation_id, priority_score, priority_band, score_factors, score_source, scored_at)
         values ${placeholders.join(",\n       ")}
         on conflict (organisation_id) do update set
           priority_score = excluded.priority_score,
           priority_band = excluded.priority_band,
+          score_factors = excluded.score_factors,
           score_source = excluded.score_source,
           scored_at = now(),
           updated_at = now()
@@ -158,8 +167,9 @@ async function main(): Promise<void> {
         `    low              ${byBand.low}`,
     );
     console.log(
-      "\n[backfill:scores] sector factor stands at its documented neutral until F089" +
-        "\nlands — see src/lib/scoring/score-client.ts's header.",
+      "\n[backfill:scores] sector is scored via the F089 taxonomy (score-by-sector.ts);" +
+        "\nrows with no recorded sector sit at its neutral 0.5 by design, not by omission." +
+        "\nF095: score_factors now carries each row's per-factor inputs for the breakdown UI.",
     );
   } catch (error) {
     await client.query("rollback").catch(() => {});

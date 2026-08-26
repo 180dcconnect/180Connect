@@ -27,6 +27,7 @@ import { ClaimButton } from "./claim-button";
 import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
 import { Pill, SectionCard } from "./section-card";
+import { ScoreBreakdownCard, type LatestScoreDetailRow } from "./score-breakdown";
 import { TagsSection } from "./tags-section";
 import { BookletPanel } from "./booklet-panel";
 import { deriveSourcesFromSavedRow } from "@/lib/booklet/sources";
@@ -174,6 +175,23 @@ export default async function ClientDetailPage({
     });
   }
   const savedBooklet = bookletVersions?.[0] ?? null;
+
+  // F095 — the persisted priority score and the per-factor inputs behind it.
+  // One row per client (unique on organisation_id); read follows the page's
+  // independent-query convention: a failed read is logged and the card renders
+  // its error state, never taking the profile down. LATEST_SCORES grants
+  // SELECT to every active user, so no role gating here — same as Ownership.
+  const { data: latestScore, error: latestScoreError } = await supabase
+    .from("latest_scores")
+    .select("priority_score, priority_band, score_factors")
+    .eq("organisation_id", id)
+    .maybeSingle<LatestScoreDetailRow>();
+  if (latestScoreError) {
+    await reportError(latestScoreError, {
+      operation: "clients.detail_score_breakdown",
+      organisationId: id,
+    });
+  }
 
   // ENRICHMENT_RESULTS is append-only (20260804180000_create_org_children.sql), so
   // the most recently enriched row is "the" mission statement, not the only one.
@@ -733,6 +751,19 @@ export default async function ClientDetailPage({
                 organisation={client}
                 missionStatement={enrichment?.mission_statement ?? null}
                 missionEnrichedAt={enrichment?.enriched_at ?? null}
+              />
+            </Rise>
+
+            {/* F095 — why this client ranks where it does. Directly under the
+                basic info so the "who is this" and "why is it ranked so" read
+                as one pass; before the booklet/compose actions, which a CAM
+                only acts on once they trust the ranking. */}
+            <Rise>
+              <ScoreBreakdownCard
+                score={latestScore?.priority_score ?? null}
+                band={latestScore?.priority_band ?? null}
+                factors={latestScore?.score_factors ?? null}
+                error={Boolean(latestScoreError)}
               />
             </Rise>
 

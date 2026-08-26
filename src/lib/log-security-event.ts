@@ -20,6 +20,8 @@ export type SecurityEvent =
   | "authentication.password_update_failed"
   | "ai.generation_rate_limited"
   | "ai.generation_rate_limit_unavailable"
+  | "outreach.send_rate_limited"
+  | "outreach.send_rate_limit_unavailable"
   | "session.expired"
   | "session.recovery_confined"
   | "outreach.suppression_blocked"

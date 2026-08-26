@@ -1,4 +1,5 @@
 import { reportError } from "../error-logging.ts";
+import { logSecurityEvent } from "../log-security-event.ts";
 import { emailHtmlToPlainText } from "./email-html.ts";
 import { resolveEmailSendLimit } from "./send-rate-limit.ts";
 
@@ -198,9 +199,21 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
           await reportError(error ?? new Error("Send-limit count returned no total."), {
             operation: "outreach.scheduler.rate_limit",
           });
+          logSecurityEvent("outreach.send_rate_limit_unavailable", {
+            userId: sentByUserId,
+            cause: error?.message ?? "no count returned",
+          });
           return false;
         }
-        return count < limit.maximum;
+        if (count >= limit.maximum) {
+          logSecurityEvent("outreach.send_rate_limited", {
+            userId: sentByUserId,
+            windowSeconds: limit.windowSeconds,
+            sentInWindow: count,
+          });
+          return false;
+        }
+        return true;
       },
 
       async claim(messageId, nowIso) {

@@ -6,6 +6,7 @@ import { canSendClientOutreach } from "@/lib/client-email-validation";
 import { reportError } from "@/lib/error-logging";
 import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
 import { emailHtmlToPlainText, sanitizeEmailHtml } from "@/lib/outreach/email-html";
+import { logSecurityEvent } from "@/lib/log-security-event";
 import { saveDraftSchema } from "@/lib/outreach/save-draft";
 import { reviewedEmailSchema } from "@/lib/outreach/send-reviewed";
 import { emailLimitMessage, resolveEmailSendLimit } from "@/lib/outreach/send-rate-limit";
@@ -236,9 +237,18 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
     .gte("sent_at", windowStart);
   if (limitError || recentSendCount === null) {
     if (limitError) await reportError(limitError, { operation: "outreach.send.rate_limit", messageId });
+    logSecurityEvent("outreach.send_rate_limit_unavailable", {
+      userId: authorization.actor.id,
+      cause: limitError?.message ?? "no count returned",
+    });
     return { ok: false, message: "The sending limit could not be checked. Nothing was sent." };
   }
   if (recentSendCount >= sendLimit.maximum) {
+    logSecurityEvent("outreach.send_rate_limited", {
+      userId: authorization.actor.id,
+      windowSeconds: sendLimit.windowSeconds,
+      sentInWindow: recentSendCount,
+    });
     return { ok: false, message: emailLimitMessage(sendLimit.windowSeconds) };
   }
 

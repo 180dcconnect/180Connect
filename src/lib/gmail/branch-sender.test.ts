@@ -27,6 +27,21 @@ describe("sendBranchOutreach", () => {
     assert.equal(result.ok, true);
   });
 
+  it("passes the sanitized HTML body through to the transport", async () => {
+    let html: string | undefined;
+    await sendBranchOutreach(
+      { to: "charity@example.org", subject: "Hello", text: "Body", html: "<p>Body</p>" },
+      {
+        source: complete,
+        send: async (message) => {
+          html = message.html;
+          return { ok: true, providerMessageId: "m1", providerThreadId: "t1" };
+        },
+      },
+    );
+    assert.equal(html, "<p>Body</p>");
+  });
+
   it("fails closed instead of selecting a fallback sender", async () => {
     let called = false;
     const result = await sendBranchOutreach(

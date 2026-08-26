@@ -10,10 +10,12 @@ Adds the Stage 2 follow-up email generation flow for CAMs. A follow-up can only 
 - Added server-side Stage 2 pipeline eligibility enforcement.
 - Loads the latest sent outreach email so the follow-up acknowledges the previous contact.
 - Reuses client profile, booklet, financial, contact, and enrichment context from Stage 1.
+- Reads the saved booklet from `client_booklets` server-side — never from the request body, matching Stage 1's F103 decision.
+- Enforces the same server-side suppression and ownership-conflict gates as Stage 1 before paying for generation.
 - Includes relevant stored news hooks when available.
 - Saves generated follow-ups as `draft` outreach messages only.
-- Stores the original model output in `ai_generations` for human-review tracking.
-- Displays the generated follow-up in the existing review editor.
+- Stores the original model output in `ai_generations` together with the model used and token/cost figures (F113/F213).
+- Adds a CAM-facing follow-up trigger on the client page, shown only at `initial_outreach_sent`, rendering into a review editor.
 - Supports regeneration and refreshes the editor with the latest result.
 - Records Gemini success/failure through API health logging.
 - Records generation, configuration, loading, and persistence failures through application error logging.
@@ -45,6 +47,7 @@ The API repeats this check server-side, so changing the browser UI or calling th
   - eligible and ineligible pipeline statuses;
   - successful structured follow-up generation;
   - safe handling of LLM failures;
+  - the `ai_generations` persistence payload against the current schema (NOT NULL `model`, token/cost columns);
   - acknowledgement of the previous email;
   - inclusion of booklet and previous-email context;
   - conditional inclusion of relevant news hooks.

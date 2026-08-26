@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { buildAdminClient } from "./admin-client-factory";
+import { buildAdminClient } from "./admin-client-factory.ts";
 
 /**
  * A Supabase client holding the service-role key.

@@ -105,10 +105,27 @@ export async function scheduleReviewedEmail(input: unknown): Promise<ReviewedSen
   if (scheduledAtIso.getTime() <= Date.now()) {
     return { ok: false, message: "Choose a future date and time." };
   }
+
+  // Save the exact reviewed content FIRST, through the app's sanitizing write
+  // path, and REQUIRE the write to have matched. The RPC deliberately takes no
+  // content parameters (F227-review hardening): a caller that bypasses the app
+  // and invokes it directly can only schedule what these paths already saved —
+  // never inject raw markup for the cron worker to deliver.
+  const { data: saved, error: saveError } = await supabase
+    .from("outreach_messages")
+    .update({ subject, body, sent_by_user_id: authorization.actor.id })
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .eq("send_status", "draft")
+    .select("id")
+    .single();
+  if (saveError || !saved) {
+    await reportError(saveError ?? new Error("Draft save matched no rows."), { operation: "outreach.schedule.save_review", messageId });
+    return { ok: false, message: "This email is no longer an unsent draft." };
+  }
+
   const { data: scheduled, error } = await supabase.rpc("schedule_outreach_send", {
     p_message_id: messageId,
-    p_subject: subject,
-    p_body: body,
     p_scheduled_at: scheduledAtIso.toISOString(),
   });
   if (error || !scheduled) {

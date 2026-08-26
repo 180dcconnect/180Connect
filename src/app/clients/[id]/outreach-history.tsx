@@ -31,7 +31,7 @@ function EmailBodyPreview({ body }: { body: string }) {
   if (isRichEmailHtml(body)) {
     return (
       <div
-        className="mt-2 text-sm text-foreground/80 [&_a]:text-brand [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-black/15 [&_blockquote]:pl-3 [&_blockquote]:text-foreground/70 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 [&_p:last-child]:mb-0 [&_ul]:list-disc [&_ul]:list-inside"
+        className="mt-2 text-sm text-foreground/80 [&_a]:text-brand [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-black/15 [&_blockquote]:pl-3 [&_blockquote]:text-foreground/70 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 [&_p:last-child]:mb-0 [&_ul]:list-disc [&_ul]:pl-5"
         dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(body) }}
       />
     );
@@ -73,7 +73,7 @@ export function OutreachHistorySection({
   const [filter, setFilter] = useState<StatusFilter>("all");
   const filtered = filterOutreachHistory(history, filter);
   const nothingMatches =
-    !error && filter !== "all" && filtered.sent.length === 0 && filtered.notSent.length === 0;
+    filter !== "all" && filtered.sent.length === 0 && filtered.notSent.length === 0;
 
   if (error) {
     return (
@@ -111,7 +111,7 @@ export function OutreachHistorySection({
 
       {nothingMatches && (
         <p className="mt-4 text-sm text-foreground/65">
-          No {describeStatusFilter(filter).toLowerCase()} emails for this client.
+          No emails with status {describeStatusFilter(filter)} for this client.
         </p>
       )}
 

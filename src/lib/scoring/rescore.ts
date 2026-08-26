@@ -31,7 +31,29 @@ type OrgRow = {
   total_income: number | null;
   financial_periods: { total_income: number | null; period_end: string | null }[] | null;
   grants: { count: number }[] | null;
+  outreach_messages: { sent_at: string | null }[] | null;
 };
+
+/**
+ * F093: the recency half of the previous-contact signal — the org's most
+ * recent *sent* message timestamp. Draft/scheduled/failed rows carry a null
+ * sent_at and are ignored naturally by the max; an org with no messages at
+ * all yields null, meaning status-only scoring.
+ *
+ * The lexicographic string comparison is safe because PostgREST emits
+ * timestamps as uniform ISO-8601 UTC strings; revisit if that ever changes.
+ */
+function lastContactedFrom(
+  messages: { sent_at: string | null }[] | null,
+): string | null {
+  let latest: string | null = null;
+  for (const message of messages ?? []) {
+    if (message.sent_at && (latest === null || message.sent_at > latest)) {
+      latest = message.sent_at;
+    }
+  }
+  return latest;
+}
 
 /**
  * Rescores one organisation using its current database state — the entry point
@@ -50,8 +72,18 @@ export async function rescoreOrganisation(
   const { data: org, error } = await admin
     .from("organisations")
     .select(
-      "city, sector, outreach_status, total_income, financial_periods(total_income, period_end), grants(count)",
+      "city, sector, outreach_status, total_income, financial_periods(total_income, period_end), grants(count), outreach_messages(sent_at)",
     )
+    // F093: only the newest sent message matters for the recency signal —
+    // cap the embed server-side. nullsFirst: false because Postgres sorts
+    // DESC with NULLS FIRST by default, which would let a draft's null
+    // sent_at crowd out the real maximum.
+    .order("sent_at", {
+      referencedTable: "outreach_messages",
+      ascending: false,
+      nullsFirst: false,
+    })
+    .limit(1, { referencedTable: "outreach_messages" })
     .eq("id", organisationId)
     .maybeSingle<OrgRow>();
 
@@ -64,6 +96,7 @@ export async function rescoreOrganisation(
     outreach_status: org.outreach_status,
     total_income: org.total_income,
     financial_periods: org.financial_periods ?? [],
+    last_contacted_at: lastContactedFrom(org.outreach_messages),
     matched_grant_count: org.grants?.[0]?.count ?? null,
   };
 

@@ -242,6 +242,24 @@ begin
     'a soft-no-then-converted client carries exactly one row: where it stands now'
   );
 
+  -- The third status writer maintains the mirror too: #503's automatic advance
+  -- on send pulls a terminal-status client back to follow_up_sent, and the
+  -- outcome row must go with it — this is the path that drifted once already.
+  perform public.advance_outreach_pipeline_on_send(v_progression, v_admin);
+
+  return next is(
+    (select count(*)::int from public.outcomes where organisation_id = v_progression),
+    0,
+    'a second send advancing a converted client withdraws its outcome row'
+  );
+
+  return next ok(
+    (select count(*)::int from public.audit_log
+      where action = 'outcome_deleted' and target_table = 'outcomes'
+        and detail->>'organisation_id' = v_progression::text) >= 1,
+    'the send-driven withdrawal is audited like every other'
+  );
+
   -- AC2: non-terminal statuses are not forced into an outcome.
   perform tests.status_as(v_cam_a, v_bulk, 'initial_outreach_sent');
   perform tests.status_as(v_cam_a, v_bulk, 'follow_up_sent');

@@ -295,6 +295,70 @@ comment on function public.set_outreach_status_bulk(uuid[], public.outreach_stat
   'recent sent email; rows moved off ''converted'' have theirs deleted (audited).';
 
 -- ---------------------------------------------------------------------------
+-- advance_outreach_pipeline_on_send — back to the #503 body as merged (0cd522c)
+--
+-- Restored verbatim so the rollback returns every writer to its pre-F144
+-- shape; under the restored model only 'converted' rows exist and #503's
+-- original leaves them alone, which is what that model wants.
+-- ---------------------------------------------------------------------------
+
+create or replace function public.advance_outreach_pipeline_on_send(
+  p_organisation_id uuid,
+  p_actor uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_current public.outreach_status;
+  v_next    public.outreach_status;
+begin
+  -- Lock the row: serializes two near-simultaneous sends so the second sees
+  -- the first's committed status and lands on follow_up_sent, never a second
+  -- 'initial'.
+  select o.outreach_status into v_current
+    from public.organisations o
+   where o.id = p_organisation_id
+     for update;
+
+  if v_current is null then
+    -- The message's organisation vanished mid-transaction; there is nothing to
+    -- advance and nothing to audit. The caller's own flip already succeeded.
+    return;
+  end if;
+
+  -- F147 AC1/AC2: the very first send leaves not_contacted; any later send
+  -- reads follow_up_sent, whatever the client currently says.
+  v_next := case when v_current = 'not_contacted'
+                 then 'initial_outreach_sent'::public.outreach_status
+                 else 'follow_up_sent'::public.outreach_status end;
+
+  if v_current = v_next then
+    return;  -- same-status no-op is not audited (audit-log-pattern.md §5)
+  end if;
+
+  update public.organisations
+     set outreach_status = v_next
+   where id = p_organisation_id;
+
+  insert into public.audit_log (actor_user_id, action, target_table, target_id, detail)
+  values (
+    p_actor, 'status_changed', 'organisations', p_organisation_id,
+    jsonb_build_object('from', v_current, 'to', v_next)
+  );
+end;
+$$;
+
+comment on function public.advance_outreach_pipeline_on_send(uuid, uuid) is
+  'F157 internal: advances a client''s pipeline status after a confirmed send '
+  '(not_contacted → initial_outreach_sent, else → follow_up_sent) and writes the '
+  'status_changed audit row under the caller''s transaction. Called only by '
+  'mark_outreach_sent and mark_scheduled_outreach_delivered; EXECUTE revoked from '
+  'every role.';
+
+-- ---------------------------------------------------------------------------
 -- Mirror rows without an old-model counterpart
 -- ---------------------------------------------------------------------------
 

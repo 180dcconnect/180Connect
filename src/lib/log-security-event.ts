@@ -28,6 +28,7 @@ export type SecurityEvent =
   | "session.recovery_confined"
   | "outreach.suppression_blocked"
   | "outreach.ownership_conflict_blocked"
+  | "outreach.contact_permission_unavailable"
   | "user.invited"
   | "user.invite_resent"
   | "user.invite_cancelled"

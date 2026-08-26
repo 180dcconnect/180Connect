@@ -23,12 +23,16 @@ export type TeamPipelineClient = {
   owner_id: string | null;
   /** Resolved from the owner join server-side; null when unowned or unnamed. */
   owner_name: string | null;
+  /** F183 — present when stall detection has annotated the row. */
+  isStalled?: boolean;
+  stalledDaysWaiting?: number;
 };
 
 export type TeamPipelineFilters = {
   q: string;
   statuses: string[];
   owners: string[];
+  stalledOnly: boolean;
 };
 
 export type StatusCount = { status: string; count: number };
@@ -86,6 +90,7 @@ export function filterTeamPipelineClients(
         return false;
       }
     }
+    if (filters.stalledOnly && !client.isStalled) return false;
     return true;
   });
 }
@@ -171,7 +176,8 @@ export function parseTeamPipelineFilters(params: RawSearchParams): {
     (value) => isUuid(value) || value === UNASSIGNED_OWNER,
   );
   const q = (paramValues(params, "q")[0] ?? "").trim();
+  const stalledOnly = paramValues(params, "stalled").some((value) => value === "1" || value === "true");
   const parsedPage = Number(paramValues(params, "page")[0]);
   const page = Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1;
-  return { filters: { q, statuses, owners }, page };
+  return { filters: { q, statuses, owners, stalledOnly }, page };
 }

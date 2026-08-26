@@ -32,6 +32,11 @@ import {
   PIPELINE_STATUSES,
 } from "@/lib/organisation-format";
 import {
+  DEFAULT_FOLLOW_UP_THRESHOLDS,
+  type FollowUpThresholds,
+} from "@/lib/outreach/follow-up-recommendations";
+import { stalledClients } from "@/lib/outreach/stall-detection";
+import {
   filterTeamPipelineClients,
   ownerOptions,
   paginateTeamPipelineClients,
@@ -39,6 +44,7 @@ import {
   pipelineCounts,
   sortTeamPipelineClients,
   UNASSIGNED_OWNER,
+  type TeamPipelineClient,
 } from "@/lib/admin/team-pipeline";
 import { TeamPipelineTable } from "./team-pipeline-table";
 
@@ -96,7 +102,7 @@ export default async function AdminTeamPipelinePage({
     await reportError(listError, { operation: "admin.team_pipeline.page_list" });
   }
 
-  const clients = all.map((row) => ({
+  const baseClients: TeamPipelineClient[] = all.map((row) => ({
     id: row.id,
     legal_name: row.legal_name,
     outreach_status: row.outreach_status,
@@ -104,23 +110,120 @@ export default async function AdminTeamPipelinePage({
     owner_name: row.owner?.full_name ?? null,
   }));
 
+  // F183 — stall flags are computed live on every render so the view is never
+  // stale (and the daily cron records the same set to audit_log for AC3).
+  // All three reads degrade gracefully — a failed activity fetch simply means
+  // no client is flagged stalled on this render, rather than hiding the table.
+  let clients: TeamPipelineClient[] = baseClients;
+  if (baseClients.length > 0) {
+    const now = new Date();
+    const RPC_CHUNK = 500;
+    const ACTION_STEP = 1000;
+
+    const [{ data: prefRows, error: prefError }, { data: openActions, error: openError }] =
+      await Promise.all([
+        supabase
+          .from("outreach_preferences")
+          .select("user_id, first_follow_up_days, second_follow_up_days")
+          .overrideTypes<
+            { user_id: string; first_follow_up_days: number | null; second_follow_up_days: number | null }[],
+            { merge: false }
+          >(),
+        (async () => {
+          const ids = new Set<string>();
+          let offset = 0;
+          while (true) {
+            const { data, error } = await supabase
+              .from("actions")
+              .select("organisation_id")
+              .eq("status", "open")
+              .order("organisation_id", { ascending: true })
+              .range(offset, offset + ACTION_STEP - 1)
+              .overrideTypes<{ organisation_id: string }[], { merge: false }>();
+            if (error) return { data: [...ids], error };
+            if (!data || data.length === 0) break;
+            for (const row of data) ids.add(row.organisation_id);
+            if (data.length < ACTION_STEP) break;
+            offset += ACTION_STEP;
+          }
+          return { data: [...ids], error: null as null };
+        })(),
+      ]);
+
+    if (prefError) {
+      await reportError(prefError, { operation: "admin.team_pipeline.preferences_list" });
+    }
+    if (openError) {
+      await reportError(openError, { operation: "admin.team_pipeline.open_actions_list" });
+    }
+
+    const thresholdsByOwner = new Map<string, FollowUpThresholds>();
+    for (const row of prefRows ?? []) {
+      thresholdsByOwner.set(row.user_id, {
+        first: row.first_follow_up_days ?? DEFAULT_FOLLOW_UP_THRESHOLDS.first,
+        second: row.second_follow_up_days ?? DEFAULT_FOLLOW_UP_THRESHOLDS.second,
+      });
+    }
+
+    const activityByOrg = new Map<string, { lastEmailSentAt: string | null; lastReplyReceivedAt: string | null; lastStatusChangeAt: string | null }>();
+    for (let i = 0; i < baseClients.length; i += RPC_CHUNK) {
+      const chunkIds = baseClients.slice(i, i + RPC_CHUNK).map((c) => c.id);
+      const { data, error } = await supabase.rpc("get_clients_last_activity", {
+        p_organisation_ids: chunkIds,
+      });
+      if (error) {
+        await reportError(error, { operation: "admin.team_pipeline.activity_chunk" });
+        continue;
+      }
+      for (const row of (data ?? []) as {
+        organisation_id: string;
+        last_email_sent_at: string | null;
+        last_reply_received_at: string | null;
+        last_status_change_at: string | null;
+      }[]) {
+        activityByOrg.set(row.organisation_id, {
+          lastEmailSentAt: row.last_email_sent_at,
+          lastReplyReceivedAt: row.last_reply_received_at,
+          lastStatusChangeAt: row.last_status_change_at,
+        });
+      }
+    }
+
+    const openIds = new Set<string>(openActions ?? []);
+    const candidates = baseClients.map((c) => ({
+      id: c.id,
+      legal_name: c.legal_name,
+      outreach_status: c.outreach_status,
+      owner_id: c.owner_id,
+    }));
+    const flags = stalledClients(candidates, activityByOrg, thresholdsByOwner, openIds, now);
+    const flagById = new Map(flags.map((f) => [f.organisationId, f.daysWaiting]));
+    clients = baseClients.map((c) => {
+      const days = flagById.get(c.id);
+      return days == null ? { ...c, isStalled: false } : { ...c, isStalled: true, stalledDaysWaiting: days };
+    });
+  }
+
   // Counts describe the whole pipeline; filters only narrow the table.
-  const counts = pipelineCounts(clients);
+  const counts = pipelineCounts(baseClients);
+  const stalledCount = clients.filter((c) => c.isStalled).length;
   const filtered = sortTeamPipelineClients(filterTeamPipelineClients(clients, filters));
   const paginated = paginateTeamPipelineClients(filtered, page);
 
-  const owners = ownerOptions(clients);
+  const owners = ownerOptions(baseClients);
   const filtersActive =
-    filters.q !== "" || filters.statuses.length > 0 || filters.owners.length > 0;
+    filters.q !== "" || filters.statuses.length > 0 || filters.owners.length > 0 || filters.stalledOnly;
 
-  function hrefFor(changes: { q?: string; statuses?: string[]; owners?: string[]; page?: number }) {
+  function hrefFor(changes: { q?: string; statuses?: string[]; owners?: string[]; stalledOnly?: boolean; page?: number }) {
     const next = new URLSearchParams();
     const q = changes.q ?? filters.q;
     const statuses = changes.statuses ?? filters.statuses;
     const owners = changes.owners ?? filters.owners;
+    const stalledOnly = changes.stalledOnly ?? filters.stalledOnly;
     if (q) next.set("q", q);
     for (const status of statuses) next.append("status", status);
     for (const owner of owners) next.append("owner", owner);
+    if (stalledOnly) next.set("stalled", "1");
     const targetPage = changes.page ?? paginated.page;
     if (targetPage > 1) next.set("page", String(targetPage));
     const query = next.toString();
@@ -207,6 +310,19 @@ export default async function AdminTeamPipelinePage({
             </Rise>
 
             <Rise className="flex flex-wrap gap-2">
+              {stalledCount > 0 && (
+                <Link
+                  aria-pressed={filters.stalledOnly}
+                  className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-bold tabular-nums transition-colors ${
+                    filters.stalledOnly
+                      ? "border-red-300 bg-red-50 text-red-700"
+                      : "border-red-200 bg-white text-red-700 hover:border-red-300 hover:bg-red-50"
+                  }`}
+                  href={hrefFor({ stalledOnly: !filters.stalledOnly })}
+                >
+                  Stalled · {stalledCount.toLocaleString()}
+                </Link>
+              )}
               {counts.length > 0 &&
                 counts.map(({ status, count }) => {
                   const active = filters.statuses.includes(status);

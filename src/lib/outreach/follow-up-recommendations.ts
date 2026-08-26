@@ -81,7 +81,12 @@ export function lastActivityAt(activity: ClientActivity): string | null {
   return newest === null ? null : new Date(newest).toISOString();
 }
 
-function normaliseThresholds(thresholds: FollowUpThresholds): { first: number; second: number } {
+/**
+ * Folds a threshold pair so "due" is always reachable before "urgent": a CAM
+ * who sets first above second would otherwise invert the escalation. Shared
+ * with F183's stall detection, which fires at the second (urgent) boundary.
+ */
+export function normaliseThresholds(thresholds: FollowUpThresholds): { first: number; second: number } {
   // A CAM who sets first above second would make "due" unreachable while
   // "urgent" fires — fold the pair so the lower value always comes first.
   const lower = Math.max(1, Math.min(thresholds.first, thresholds.second));

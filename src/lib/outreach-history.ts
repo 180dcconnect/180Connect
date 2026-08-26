@@ -29,6 +29,23 @@ export type OutreachHistory = {
   notSent: OutreachMessageRow[];
 };
 
+/** F134: the reply fields needed to rebuild a client's conversation. */
+export type ThreadReplyRow = {
+  id: string;
+  outreach_message_id: string | null;
+  reply_body: string;
+  received_at: string;
+};
+
+export type EmailThreadEntry = {
+  id: string;
+  kind: "outgoing" | "incoming";
+  body: string;
+  occurredAt: string;
+  subject: string | null;
+  senderName: string | null;
+};
+
 /** Newest first; a missing date sorts last rather than throwing off the order. */
 function compareDatesDesc(a: string | null, b: string | null): number {
   if (!a && !b) return 0;
@@ -58,6 +75,48 @@ export function splitOutreachHistory(
     .sort((a, b) => compareDatesDesc(a.created_at, b.created_at));
 
   return { sent, notSent };
+}
+
+/**
+ * F134: merges every delivered outreach email and linked client reply into one
+ * oldest-first conversation. Replies retain their original message subject when
+ * that message still exists; the reply itself remains visible if it does not.
+ */
+export function buildEmailThread(
+  sentMessages: readonly OutreachMessageRow[],
+  replies: readonly ThreadReplyRow[],
+): EmailThreadEntry[] {
+  const subjectsByMessage = new Map(sentMessages.map((message) => [message.id, message.subject]));
+  const entries: EmailThreadEntry[] = [
+    ...sentMessages.flatMap((message) =>
+      message.sent_at
+        ? [{
+            id: message.id,
+            kind: "outgoing" as const,
+            body: message.body,
+            occurredAt: message.sent_at,
+            subject: message.subject,
+            senderName: message.sender?.full_name?.trim() || null,
+          }]
+        : [],
+    ),
+    ...replies.map((reply) => ({
+      id: reply.id,
+      kind: "incoming" as const,
+      body: reply.reply_body,
+      occurredAt: reply.received_at,
+      subject: reply.outreach_message_id
+        ? subjectsByMessage.get(reply.outreach_message_id) ?? null
+        : null,
+      senderName: null,
+    })),
+  ];
+
+  return entries.sort((a, b) =>
+    a.occurredAt === b.occurredAt
+      ? a.id.localeCompare(b.id)
+      : a.occurredAt.localeCompare(b.occurredAt),
+  );
 }
 
 const NOT_SENT_LABEL: Record<Exclude<SendStatus, "sent">, string> = {

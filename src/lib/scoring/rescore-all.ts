@@ -41,8 +41,17 @@ type SweepRow = {
   outreach_messages: { sent_at: string | null }[] | null;
 };
 
-/** F093: most recent sent-message timestamp; null sent_at rows (drafts,
- * scheduled, failed) are skipped naturally. Mirrors rescore.ts's helper. */
+/**
+ * F093: most recent sent-message timestamp; null sent_at rows (drafts,
+ * scheduled, failed) are skipped naturally. The query orders the embed by
+ * sent_at descending and limits it to one row (PR #498 review), so PostgREST
+ * does the max work instead of shipping every message per org — this helper
+ * then just unwraps that single row.
+ *
+ * The lexicographic string comparison is safe because PostgREST emits
+ * timestamps as uniform ISO-8601 UTC strings; revisit if that ever changes.
+ * Mirrors rescore.ts's helper.
+ */
 function lastContactedFrom(
   messages: { sent_at: string | null }[] | null,
 ): string | null {
@@ -112,6 +121,17 @@ export async function rescoreAllOrganisations(): Promise<RescoreAllResult> {
       .select(
         "id, city, sector, outreach_status, total_income, financial_periods(total_income, period_end), grants(count), outreach_messages(sent_at)",
       )
+      // F093: only the newest sent message matters for the recency signal, so
+      // the embed is ordered and capped server-side rather than pulling an
+      // org's whole message history into the sweep. nullsFirst: false matters
+      // — Postgres sorts DESC with NULLS FIRST by default, which would let a
+      // draft's null sent_at crowd out the real maximum.
+      .order("sent_at", {
+        referencedTable: "outreach_messages",
+        ascending: false,
+        nullsFirst: false,
+      })
+      .limit(1, { referencedTable: "outreach_messages" })
       .order("id")
       .range(from, from + PAGE_SIZE - 1)
       .returns<SweepRow[]>();

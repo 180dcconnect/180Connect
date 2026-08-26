@@ -39,6 +39,9 @@ type OrgRow = {
  * recent *sent* message timestamp. Draft/scheduled/failed rows carry a null
  * sent_at and are ignored naturally by the max; an org with no messages at
  * all yields null, meaning status-only scoring.
+ *
+ * The lexicographic string comparison is safe because PostgREST emits
+ * timestamps as uniform ISO-8601 UTC strings; revisit if that ever changes.
  */
 function lastContactedFrom(
   messages: { sent_at: string | null }[] | null,
@@ -71,6 +74,16 @@ export async function rescoreOrganisation(
     .select(
       "city, sector, outreach_status, total_income, financial_periods(total_income, period_end), grants(count), outreach_messages(sent_at)",
     )
+    // F093: only the newest sent message matters for the recency signal —
+    // cap the embed server-side. nullsFirst: false because Postgres sorts
+    // DESC with NULLS FIRST by default, which would let a draft's null
+    // sent_at crowd out the real maximum.
+    .order("sent_at", {
+      referencedTable: "outreach_messages",
+      ascending: false,
+      nullsFirst: false,
+    })
+    .limit(1, { referencedTable: "outreach_messages" })
     .eq("id", organisationId)
     .maybeSingle<OrgRow>();
 

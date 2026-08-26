@@ -62,13 +62,13 @@ describe("pipelineCounts", () => {
 describe("filterTeamPipelineClients", () => {
   it("keeps everything when no filters are set", () => {
     assert.equal(
-      filterTeamPipelineClients(rows, { q: "", statuses: [], owners: [] }).length,
+      filterTeamPipelineClients(rows, { q: "", statuses: [], owners: [], stalledOnly: false }).length,
       rows.length,
     );
   });
 
   it("matches free text against the client name, case-insensitively", () => {
-    const filtered = filterTeamPipelineClients(rows, { q: "ALPHA", statuses: [], owners: [] });
+    const filtered = filterTeamPipelineClients(rows, { q: "ALPHA", statuses: [], owners: [], stalledOnly: false });
     assert.deepEqual(filtered.map((row) => row.id).sort(), ["a", "d"]);
   });
 
@@ -77,12 +77,13 @@ describe("filterTeamPipelineClients", () => {
       q: "",
       statuses: ["responded", "converted"],
       owners: [],
+      stalledOnly: false,
     });
     assert.deepEqual(filtered.map((row) => row.id).sort(), ["a", "d"]);
   });
 
   it("filters by owning CAM", () => {
-    const filtered = filterTeamPipelineClients(rows, { q: "", statuses: [], owners: [CAM_B] });
+    const filtered = filterTeamPipelineClients(rows, { q: "", statuses: [], owners: [CAM_B], stalledOnly: false });
     assert.deepEqual(filtered.map((row) => row.id), ["c"]);
   });
 
@@ -91,6 +92,7 @@ describe("filterTeamPipelineClients", () => {
       q: "",
       statuses: [],
       owners: [UNASSIGNED_OWNER],
+      stalledOnly: false,
     });
     assert.deepEqual(filtered.map((row) => row.id), ["b"]);
   });
@@ -100,6 +102,7 @@ describe("filterTeamPipelineClients", () => {
       q: "",
       statuses: [],
       owners: [CAM_A, UNASSIGNED_OWNER],
+      stalledOnly: false,
     });
     assert.deepEqual(filtered.map((row) => row.id).sort(), ["a", "b", "d"]);
   });
@@ -109,8 +112,38 @@ describe("filterTeamPipelineClients", () => {
       q: "alpha",
       statuses: ["converted"],
       owners: [CAM_A],
+      stalledOnly: false,
     });
     assert.deepEqual(filtered.map((row) => row.id), ["d"]);
+  });
+
+  it("keeps only stalled clients when stalledOnly is true", () => {
+    const withStalled = [
+      client({ id: "s1", isStalled: true }),
+      client({ id: "s2", isStalled: false }),
+      client({ id: "s3" }),
+    ];
+    const filtered = filterTeamPipelineClients(withStalled, {
+      q: "",
+      statuses: [],
+      owners: [],
+      stalledOnly: true,
+    });
+    assert.deepEqual(filtered.map((row) => row.id), ["s1"]);
+  });
+
+  it("stalledOnly composes with other filters", () => {
+    const withStalled = [
+      client({ id: "s1", legal_name: "Alpha", isStalled: true, outreach_status: "follow_up_sent", owner_id: CAM_A }),
+      client({ id: "s2", legal_name: "Alpha Two", isStalled: true, outreach_status: "follow_up_sent", owner_id: CAM_B }),
+    ];
+    const filtered = filterTeamPipelineClients(withStalled, {
+      q: "alpha",
+      statuses: ["follow_up_sent"],
+      owners: [CAM_A],
+      stalledOnly: true,
+    });
+    assert.deepEqual(filtered.map((row) => row.id), ["s1"]);
   });
 });
 
@@ -180,7 +213,7 @@ describe("ownerOptions", () => {
 describe("parseTeamPipelineFilters", () => {
   it("reads single values", () => {
     const parsed = parseTeamPipelineFilters({ status: "responded", owner: CAM_A, q: " alpha ", page: "2" });
-    assert.deepEqual(parsed.filters, { q: "alpha", statuses: ["responded"], owners: [CAM_A] });
+    assert.deepEqual(parsed.filters, { q: "alpha", statuses: ["responded"], owners: [CAM_A], stalledOnly: false });
     assert.equal(parsed.page, 2);
   });
 
@@ -206,8 +239,14 @@ describe("parseTeamPipelineFilters", () => {
 
   it("treats missing params as no filters", () => {
     assert.deepEqual(parseTeamPipelineFilters({}), {
-      filters: { q: "", statuses: [], owners: [] },
+      filters: { q: "", statuses: [], owners: [], stalledOnly: false },
       page: 1,
     });
+  });
+
+  it("reads stalled=1 as stalledOnly true", () => {
+    assert.equal(parseTeamPipelineFilters({ stalled: "1" }).filters.stalledOnly, true);
+    assert.equal(parseTeamPipelineFilters({ stalled: "true" }).filters.stalledOnly, true);
+    assert.equal(parseTeamPipelineFilters({}).filters.stalledOnly, false);
   });
 });

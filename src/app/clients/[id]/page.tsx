@@ -6,7 +6,12 @@ import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
-import { splitOutreachHistory, type OutreachMessageRow } from "@/lib/outreach-history";
+import {
+  buildEmailThread,
+  splitOutreachHistory,
+  type OutreachMessageRow,
+  type ThreadReplyRow,
+} from "@/lib/outreach-history";
 import { validateClientEmail } from "@/lib/client-email-validation";
 import {
   formatOrganisationSources,
@@ -591,11 +596,20 @@ export default async function ClientDetailPage({
 
   const { data: replyRows, error: replyError } = await supabase
     .from("reply_events")
-    .select("id, reply_body, received_at")
+    .select("id, outreach_message_id, reply_body, received_at")
     .eq("organisation_id", id);
   if (replyError) {
     await reportError(replyError, { operation: "clients.timeline_replies", organisationId: id });
   }
+
+  // F134: only delivered messages belong in the client-visible conversation;
+  // drafts, scheduled messages and failures remain in the separate F070 list.
+  // reply_events is RLS-protected by the same active-user rule as outreach, so
+  // this introduces no wider access path and makes no external API request.
+  const emailThread = buildEmailThread(
+    outreachHistory.sent,
+    (replyRows ?? []) as ThreadReplyRow[],
+  );
 
   // RLS (audit_log_select_client_timeline, 20260820110000) is what makes this
   // readable by a CAM/viewer at all — without it every row here is invisible,
@@ -1081,7 +1095,12 @@ export default async function ClientDetailPage({
                     Your sending volume: {sendingVolume.count} of your {sendingVolume.limit} emails in the current {sendingVolume.windowMinutes}-minute window.{sendingVolume.warning ? " You are close to the configured threshold; sends are refused once it is reached." : ""}
                   </p>
                 )}
-                <OutreachHistorySection history={outreachHistory} error={Boolean(outreachError)} />
+                <OutreachHistorySection
+                  history={outreachHistory}
+                  error={Boolean(outreachError)}
+                  thread={emailThread}
+                  threadError={Boolean(outreachError || replyError)}
+                />
 
                 {hasPermission(authorization.actor.role, "client:contact") && (
                   <div className="mt-4">

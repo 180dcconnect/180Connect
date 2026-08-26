@@ -158,7 +158,7 @@ declare
 begin
   -- Lets the file merge ahead of its migration, same convention as the RLS suite.
   if to_regprocedure('public.claim_outreach_send(uuid)') is null
-     or to_regprocedure('public.mark_outreach_sent(uuid,text,text,text)') is null then
+     or to_regprocedure('public.mark_outreach_sent(uuid,text,text,text,jsonb)') is null then
     return next skip(1, 'send-reviewed RPCs not yet migrated');
     return;
   end if;

@@ -13,6 +13,7 @@ import { saveDraftSchema } from "@/lib/outreach/save-draft";
 import { reviewedEmailSchema } from "@/lib/outreach/send-reviewed";
 import { emailLimitMessage, resolveEmailSendLimit } from "@/lib/outreach/send-rate-limit";
 import { checkSuppressionBeforeSend, suppressionBlockedMessage } from "@/lib/outreach/suppression-check";
+import { buildScoreSnapshot } from "@/lib/scoring/build-score-snapshot";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { safeValidate } from "@/lib/validation";
@@ -398,11 +399,17 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   // send initial_outreach_sent, later sends follow_up_sent) and records its own
   // status_changed audit row — no separate best-effort step that could fail and
   // leave the dashboard stale.
+  //
+  // F097: the point-in-time scoring vector is captured BEFORE this call so the
+  // factors describe pre-send state, then inserted by the same transaction. A
+  // failed build logs and passes null rather than blocking the send.
+  const scoreSnapshot = await buildScoreSnapshot(organisationId);
   const { error: markError } = await supabase.rpc("mark_outreach_sent", {
     p_message_id: messageId,
     p_provider_message_id: sent.providerMessageId,
     p_provider_thread_id: sent.providerThreadId,
     p_recipient_email: decision.recipient,
+    p_score_snapshot: scoreSnapshot,
   });
   if (markError) {
     // The email IS out; this must stay visible even though the request succeeds

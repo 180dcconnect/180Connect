@@ -59,3 +59,21 @@
 | created_by_user_id | uuid | User who created or activated this model version |
 | created_at | timestamp | Row creation timestamp |
 | deprecated_at | timestamp | Date and time the version was replaced or retired; null while active |
+
+## SCORE_SNAPSHOTS
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| id | uuid | Primary key. Point-in-time scoring features captured at send time; the feature half of the ML training set. Labels live in OUTCOMES joined by outreach_message_id. Admin read, service-role write via send RPCs. |
+| organisation_id | uuid | FK→ORGANISATIONS |
+| outreach_message_id | uuid | FK→OUTREACH_MESSAGES (unique) |
+| model_version_id | uuid | FK→MODEL_VERSIONS (nullable) |
+| sector | numeric | 0–1 |
+| geography | numeric | 0–1 |
+| size | numeric | 0–1 |
+| partnership_history | numeric | 0–1 |
+| previous_contact | numeric | 0–1 |
+| priority_score | numeric | 0–1 |
+| priority_band | enum | high/medium/low |
+| scored_at | timestamp |  |
+| created_at | timestamp |  |

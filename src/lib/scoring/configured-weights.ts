@@ -26,11 +26,14 @@ import { sanitizeWeights, DEFAULT_WEIGHTS, type ScoutWeights } from "./calculate
 export type ActiveScoutConfig = {
   weights: ScoutWeights;
   version: string | null;
+  /** F097: the active MODEL_VERSIONS row's id — what a score snapshot cites. */
+  id: string | null;
   /** True when the database could not be read/parsed and defaults were used. */
   degraded: boolean;
 };
 
 type ModelVersionRow = {
+  id: string;
   version: string;
   config: { weights?: unknown } | null;
 };
@@ -41,12 +44,12 @@ export async function getActiveScoutConfig(): Promise<ActiveScoutConfig> {
     await reportError(new Error("Service-role client unavailable for SCOUT config"), {
       operation: "scout_config.load",
     });
-    return { weights: DEFAULT_WEIGHTS, version: null, degraded: true };
+    return { weights: DEFAULT_WEIGHTS, version: null, id: null, degraded: true };
   }
 
   const { data, error } = await admin
     .from("model_versions")
-    .select("version, config")
+    .select("id, version, config")
     .eq("model_name", "SCOUT")
     .eq("is_active", true)
     .limit(1)
@@ -57,7 +60,12 @@ export async function getActiveScoutConfig(): Promise<ActiveScoutConfig> {
       error ?? new Error("No active SCOUT model version row found"),
       { operation: "scout_config.load" },
     );
-    return { weights: DEFAULT_WEIGHTS, version: data?.version ?? null, degraded: true };
+    return {
+      weights: DEFAULT_WEIGHTS,
+      version: data?.version ?? null,
+      id: data?.id ?? null,
+      degraded: true,
+    };
   }
 
   // v1 predates the partnership-history parameter (four-key config); sanitize
@@ -66,6 +74,7 @@ export async function getActiveScoutConfig(): Promise<ActiveScoutConfig> {
   return {
     weights: sanitizeWeights(data.config?.weights),
     version: data.version,
+    id: data.id,
     degraded: false,
   };
 }

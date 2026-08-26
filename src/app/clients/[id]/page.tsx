@@ -53,6 +53,7 @@ import { TimelineSection } from "./timeline-section";
 import { TimelineRealtimeRefresher } from "./timeline-realtime";
 import { RequestOwnershipForm } from "./request-ownership-form";
 import { ScheduledEmailList } from "./scheduled-email-list";
+import { FailedEmailList } from "./failed-email-list";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -86,6 +87,7 @@ type SentEmailRow = {
   sent_by_user: { full_name: string | null } | null;
 };
 type ScheduledEmailRow = { id: string; subject: string; scheduled_at: string };
+type FailedEmailRow = { id: string; subject: string; updated_at: string };
 
 /**
  * F067 (#69) Client Detail Page / F068 (#70) View Client Basic Info: opens from the
@@ -338,6 +340,47 @@ export default async function ClientDetailPage({
   if (scheduledEmailsError) {
     await reportError(scheduledEmailsError, { operation: "clients.detail_scheduled_emails", organisationId: id });
   }
+
+  // F129: sends that did not leave, newest first, with the reason from the
+  // newest SEND_EVENTS 'failed' record per message (two queries — send_events
+  // has no "latest per group" join; the pick happens client-side).
+  const { data: failedEmailRows, error: failedEmailsError } = await supabase
+    .from("outreach_messages")
+    .select("id, subject, updated_at")
+    .eq("organisation_id", id)
+    .eq("send_status", "failed")
+    .order("updated_at", { ascending: false })
+    .returns<FailedEmailRow[]>();
+  if (failedEmailsError) {
+    await reportError(failedEmailsError, { operation: "clients.detail_failed_emails", organisationId: id });
+  }
+  const failedEmailIds = (failedEmailRows ?? []).map((row) => row.id);
+  const failureReasons = new Map<string, string>();
+  if (failedEmailIds.length > 0) {
+    const { data: failedEventRows, error: failedEventsError } = await supabase
+      .from("send_events")
+      .select("outreach_message_id, metadata, occurred_at")
+      .in("outreach_message_id", failedEmailIds)
+      .eq("event_type", "failed")
+      .order("occurred_at", { ascending: false });
+    if (failedEventsError) {
+      await reportError(failedEventsError, { operation: "clients.detail_failed_email_events", organisationId: id });
+    }
+    for (const event of failedEventRows ?? []) {
+      const existing = failureReasons.get(event.outreach_message_id);
+      if (existing) continue;
+      const reason =
+        event.metadata && typeof event.metadata === "object" && typeof event.metadata.reason === "string"
+          ? event.metadata.reason
+          : "The email could not be sent.";
+      failureReasons.set(event.outreach_message_id, reason);
+    }
+  }
+  const failedEmails = (failedEmailRows ?? []).map((row) => ({
+    id: row.id,
+    subject: row.subject,
+    reason: failureReasons.get(row.id) ?? "The email could not be sent.",
+  }));
 
   // #79/#80/#81 (F077/F078/F079): this client's edit suggestions, fetched without a
   // status filter and filtered in the component — RLS already scopes what each role
@@ -751,6 +794,8 @@ export default async function ClientDetailPage({
                 {/* F126: what is queued for later, with cancel — shown in the same
                     card as the compose flow that created the schedule. */}
                 <ScheduledEmailList organisationId={client.id} messages={scheduledEmails ?? []} />
+                {/* F129: what did not leave, with retry — same card, same story. */}
+                <FailedEmailList organisationId={client.id} messages={failedEmails} />
               </Rise>
             )}
 

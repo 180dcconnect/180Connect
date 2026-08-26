@@ -399,6 +399,23 @@ the bug.
 
 A sent message is immutable: the UPDATE predicate requires `send_status = 'draft'`.
 
+**Send-failure lifecycle RPCs (F129, `20260903090000`).** Two `SECURITY DEFINER`
+RPCs complete the failure half of this section — neither is reachable as a
+direct table write (RLS pins every non-draft row shut):
+
+- `mark_outreach_send_failed(message_id, reason)` — **service_role only**
+  (EXECUTE granted to service_role alone; the definer body re-checks that
+  `auth.uid()` is null). The cron worker records a due delivery that did not
+  leave: scheduled→failed, one `SEND_EVENTS` `'failed'` row carrying the
+  transport's reason, one `audit_log` row — same transaction. Conditional on
+  still-scheduled so a raced cancel wins. No authenticated role can execute it:
+  a CAM must not be able to stamp someone else's queued email failed.
+- `reopen_outreach_draft(message_id)` — **authenticated**, sender or admin
+  re-checked inside the definer body (`app.is_active_user()` + ownership line,
+  same rule as sending). failed→draft so the retry flows through the ordinary
+  reviewed send path with its audited gates; writes `outreach_send_reopened`
+  to `AUDIT_LOG`. Anyone else raises 42501.
+
 ### 3.5 Raw ingestion and data quality — admin only
 
 §4.3 "View raw source records: Yes/technical admin, CAM no".

@@ -166,6 +166,9 @@ export function ComposeButton({
   const [generation, setGeneration] = useState(0);
   const [approved, setApproved] = useState(false);
   const [sendMessage, setSendMessage] = useState<string | null>(null);
+  // F129: distinguishes a failed send attempt (red alert) from the standing
+  // "not sent yet" notice (amber).
+  const [sendFailed, setSendFailed] = useState(false);
   const [sending, setSending] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -255,6 +258,7 @@ export function ComposeButton({
       setGeneration((current) => current + 1);
       setApproved(false);
       setSendMessage(null);
+      setSendFailed(false);
     } catch {
       setError("Could not reach the server. Check your connection and try again.");
     } finally {
@@ -274,6 +278,9 @@ export function ComposeButton({
       body,
       explicitlyApproved: approved,
     });
+    // F129 AC1: a failed send is a red alert, not the amber "not sent yet"
+    // default — and the draft stays open, so retrying is one click away.
+    setSendFailed(!result.ok);
     setSendMessage(result.message);
     if (result.ok) setDraft(null);
     setSending(false);
@@ -329,6 +336,7 @@ export function ComposeButton({
       setBody("");
       setApproved(false);
       setSendMessage(null);
+      setSendFailed(false);
     } else {
       setSaveMessage(result.message);
     }
@@ -690,7 +698,10 @@ export function ComposeButton({
               Schedule reviewed email
             </OriginButton>
           </div>
-          <p className="text-xs font-bold text-amber-800" role="status">
+          <p
+            className={`text-xs font-bold ${sendFailed ? "text-red-800" : "text-amber-800"}`}
+            role={sendFailed ? "alert" : "status"}
+          >
             {sendMessage ?? "Not sent — explicit human review and send are required."}
           </p>
         </div>

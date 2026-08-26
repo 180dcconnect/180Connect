@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
+import { excludeResolvedReviewFlags } from "@/lib/gmail/reply-message";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
 
@@ -43,7 +44,7 @@ export async function GET() {
 
   const supabase = await createClient();
 
-  const [events, flags] = await Promise.all([
+  const [events, flags, unmatchedReplies, resolvedReplies] = await Promise.all([
     supabase
       .from("data_quality_events")
       .select(
@@ -61,17 +62,35 @@ export async function GET() {
       )
       .order("detected_at", { ascending: false })
       .limit(200),
+    supabase
+      .from("audit_log")
+      .select("id, detail, created_at")
+      .eq("action", "gmail_reply_needs_review")
+      .eq("target_table", "gmail_unmatched_replies")
+      .order("created_at", { ascending: false })
+      .limit(200),
+    supabase
+      .from("audit_log")
+      .select("detail")
+      .eq("action", "gmail_reply_review_resolved")
+      .limit(500),
   ]);
 
-  if (events.error || flags.error) {
-    await reportError(events.error ?? flags.error, { operation: "admin.review.list" });
+  if (events.error || flags.error || unmatchedReplies.error || resolvedReplies.error) {
+    await reportError(events.error ?? flags.error ?? unmatchedReplies.error ?? resolvedReplies.error, {
+      operation: "admin.review.list",
+    });
     return NextResponse.json(
       { error: "The review queue could not be loaded. Please try again." },
       { status: 500 },
     );
   }
 
-  return NextResponse.json({ events: events.data ?? [], flags: flags.data ?? [] });
+  return NextResponse.json({
+    events: events.data ?? [],
+    flags: flags.data ?? [],
+    unmatchedReplies: excludeResolvedReviewFlags(unmatchedReplies.data ?? [], resolvedReplies.data ?? []),
+  });
 }
 
 export async function PATCH(request: Request) {

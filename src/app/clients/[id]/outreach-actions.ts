@@ -341,6 +341,28 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   });
 
   if (!sent.ok) {
+    // F129 AC2: persist the failed attempt against the message itself, so the
+    // CAM and any later diagnosis can see what happened and when — the
+    // transport's own reportError/API-health logging covers ERROR_LOG and
+    // API_HEALTH_LOGS; this row is the per-message record. Best-effort: a
+    // logging outage must not mask the failure message below.
+    const failureLogger = createAdminClient();
+    if (failureLogger) {
+      const { error: failureEventError } = await failureLogger.from("send_events").insert({
+        outreach_message_id: messageId,
+        event_type: "failed",
+        occurred_at: new Date().toISOString(),
+        metadata: {
+          provider: "gmail",
+          reason: sent.reason,
+          retryable: sent.retryable,
+        },
+      });
+      if (failureEventError) {
+        await reportError(failureEventError, { operation: "outreach.send.record_failure", messageId });
+      }
+    }
+
     // Definite refusal (bad credentials, suppressed-at-provider, malformed
     // request): nothing went out, so release the claim for a clean retry. An
     // ambiguous failure (timeout/5xx — the email may actually have been delivered)
@@ -422,6 +444,96 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
 
   revalidatePath(`/clients/${organisationId}`);
   return { ok: true, message: "Email sent from the Sheffield outreach mailbox." };
+}
+
+export type RetryFailedResult =
+  | { ok: true; message: string }
+  | { ok: false; message: string };
+
+/**
+ * F129 AC3: retry a failed scheduled delivery without recreating the draft.
+ *
+ * The content being retried is exactly what the CAM reviewed and approved when
+ * they scheduled it (schedule_outreach_send stores the sanitised body and
+ * required the approval checkbox), so this action re-sends that same content
+ * rather than asking for it again. Every gate the original send had is re-run,
+ * not assumed: actor authorisation, admin-or-sender ownership, suppression at
+ * point-of-send, recipient validity and the F227 send limit all apply to the
+ * retry through the ordinary sendReviewedEmail path.
+ */
+export async function retryFailedEmail(input: unknown): Promise<RetryFailedResult> {
+  const parsed = safeValidate(z.object({ organisationId: z.uuid(), messageId: z.uuid() }), input);
+  if (!parsed.success) {
+    return { ok: false, message: "That failed email could not be identified." };
+  }
+
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const isAdmin = authorization.actor.role === "admin";
+
+  const { organisationId, messageId } = parsed.data;
+  const supabase = await createClient();
+  const { data: failed, error: loadError } = await supabase
+    .from("outreach_messages")
+    .select(
+      "id, subject, body, send_status, sent_by_user_id, sent_to_email, contacts(email), organisations(contact_email)",
+    )
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+  if (loadError || !failed) {
+    if (loadError) await reportError(loadError, { operation: "outreach.retry.load", messageId });
+    return { ok: false, message: "That email could not be loaded. Refresh and try again." };
+  }
+  if (failed.send_status !== "failed") {
+    return { ok: false, message: "This email is not waiting to be retried." };
+  }
+  // Same ownership rule as sending: RLS lets every active user READ every row,
+  // so the line is drawn here before anything moves.
+  if (!isAdmin && failed.sent_by_user_id !== authorization.actor.id) {
+    return { ok: false, message: "You can only retry emails you scheduled yourself." };
+  }
+
+  // F129 recovery transition (audited in the RPC): failed→draft, so the retry
+  // flows through the one audited send path instead of a parallel one.
+  const { data: reopened, error: reopenError } = await supabase.rpc("reopen_outreach_draft", {
+    p_message_id: messageId,
+  });
+  if (reopenError || !reopened) {
+    await reportError(reopenError ?? new Error("Reopen matched no rows."), {
+      operation: "outreach.retry.reopen",
+      messageId,
+    });
+    return { ok: false, message: "This email is no longer waiting to be retried." };
+  }
+  // The row just changed state regardless of how the resend below goes.
+  revalidatePath(`/clients/${organisationId}`);
+
+  // The reviewed recipient wins; fall back to the on-file record only for rows
+  // that predate recipient review (F116). With neither, the draft is reopened
+  // but nothing can be addressed — say so rather than guessing.
+  const contact = Array.isArray(failed.contacts) ? failed.contacts[0] : failed.contacts;
+  const organisation = Array.isArray(failed.organisations) ? failed.organisations[0] : failed.organisations;
+  const recipient =
+    failed.sent_to_email?.trim() || contact?.email?.trim() || organisation?.contact_email?.trim() || "";
+  if (!recipient) {
+    return {
+      ok: false,
+      message:
+        "Moved back to drafts, but no recipient address is on file. Add one to the client record first.",
+    };
+  }
+
+  return await sendReviewedEmail({
+    organisationId,
+    messageId,
+    recipient,
+    subject: failed.subject,
+    body: failed.body,
+    explicitlyApproved: true,
+  });
 }
 
 export type SaveDraftResult =

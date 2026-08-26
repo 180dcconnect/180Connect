@@ -26,6 +26,14 @@ import { resolveEmailSendLimit } from "./send-rate-limit.ts";
  * sendDueReviewedEmails is the only thing that touches Supabase/Gmail, so the
  * failure paths (suppression skip, provider refusal, lost claim) are unit
  * testable without a database or network (issue #122 testing notes).
+ *
+ * F129 (#124): a delivery that cannot leave must never loop silently. A
+ * provider refusal, an active suppression, a missing recipient or a missing
+ * sender flips the message scheduled→failed through mark_outreach_send_failed
+ * (SEND_EVENTS 'failed' row + audit_log in the same transaction) and notifies
+ * the CAM who scheduled it. Only the F227 rate-limit block stays 'scheduled' —
+ * that one is transient by construction (the window passes) and re-fires next
+ * run without human attention.
  */
 
 /** How long a delivery claim blocks re-delivery. Mirrors the SQL constant
@@ -45,12 +53,14 @@ export type DueScheduledMessage = {
   /** Sanitised HTML body, exactly what schedule_outreach_send stored. */
   html: string;
   text: string;
-  recipient: string;
+  /** Null when neither the contact nor the organisation has an address on
+   * file — such a message can never leave and is failed, not skipped. */
+  recipient: string | null;
 };
 
 export type DeliveryOutcome =
   | { ok: true; providerMessageId?: string; providerThreadId?: string }
-  | { ok: false };
+  | { ok: false; reason: string };
 
 export type ScheduledOutreachDeps = {
   /** Due messages (send_status='scheduled', scheduled_at <= now), oldest due first. */
@@ -67,6 +77,13 @@ export type ScheduledOutreachDeps = {
   /** Flips scheduled→sent. False means the flip matched no rows — reported,
    * not retried, since the email may already be out (F123's rule). */
   markSent(messageId: string, outcome: Extract<DeliveryOutcome, { ok: true }>, sentAtIso: string): Promise<boolean>;
+  /** F129: scheduled→failed via mark_outreach_send_failed (SEND_EVENTS +
+   * audit_log atomically). False = raced away (cancelled/decided elsewhere);
+   * never notified in that case. */
+  markFailed(messageId: string, reason: string): Promise<boolean>;
+  /** F129 AC1: tells the CAM who scheduled the email that its delivery
+   * failed. Best-effort — a notification outage must not fail the run. */
+  notifySendFailed(recipientUserId: string, messageId: string, organisationId: string, reason: string): Promise<void>;
 };
 
 export type ScheduledRunSummary = { sent: number; blocked: number; failed: number };
@@ -80,18 +97,58 @@ export async function deliverDueScheduledEmails(
   const summary: ScheduledRunSummary = { sent: 0, blocked: 0, failed: 0 };
 
   for (const message of due) {
+    // F129: a message with no address on file can never leave — fail it now
+    // (visible to the CAM, retryable once an email exists) rather than letting
+    // it sit scheduled forever.
+    if (!message.recipient) {
+      if (
+        await deps.markFailed(message.id, "No recipient email address is on file for this client.")
+      ) {
+        summary.failed += 1;
+        continue;
+      }
+      summary.blocked += 1;
+      continue;
+    }
+
     // DNC re-checked at point-of-send, not just at schedule time: a client can
     // be suppressed after the CAM queued the email, and the suppression wins.
+    // F129: that refusal is permanent for this attempt — the message is failed
+    // (and its scheduler told) instead of being re-skipped on every run; if
+    // the suppression is later lifted, retry re-runs every check.
     if (await deps.isSuppressed(message.organisationId)) {
+      const suppressedReason =
+        "This client is suppressed, so the scheduled email was not sent.";
+      if (await deps.markFailed(message.id, suppressedReason)) {
+        summary.failed += 1;
+        if (message.sentByUserId) {
+          await deps.notifySendFailed(
+            message.sentByUserId,
+            message.id,
+            message.organisationId,
+            suppressedReason,
+          );
+        }
+        continue;
+      }
       summary.blocked += 1;
       continue;
     }
 
     // F227: a scheduled delivery counts against its scheduler's send limit.
-    // An unattributable message is counted failed — nothing may leave without
-    // a known sender.
+    // Deliberately NOT failed (F129): the block is transient — the window
+    // passes — so the message stays scheduled and goes out on a later run.
+    // An unattributable message cannot be limit-checked at all: nothing may
+    // leave without a known sender, and it would loop here forever, so it is
+    // failed outright.
     if (!message.sentByUserId) {
-      summary.failed += 1;
+      if (
+        await deps.markFailed(message.id, "No sender was recorded for this email, so it cannot be sent safely.")
+      ) {
+        summary.failed += 1;
+        continue;
+      }
+      summary.blocked += 1;
       continue;
     }
     if (!(await deps.underSendLimit(message.sentByUserId))) {
@@ -110,7 +167,21 @@ export async function deliverDueScheduledEmails(
       html: message.html,
     });
     if (!outcome.ok) {
-      summary.failed += 1;
+      // F129 AC1/AC2: record the failure durably and tell the CAM — never a
+      // silent skip-and-retry-forever loop.
+      if (await deps.markFailed(message.id, outcome.reason)) {
+        summary.failed += 1;
+        if (message.sentByUserId) {
+          await deps.notifySendFailed(
+            message.sentByUserId,
+            message.id,
+            message.organisationId,
+            outcome.reason,
+          );
+        }
+        continue;
+      }
+      summary.blocked += 1;
       continue;
     }
     if (await deps.markSent(message.id, outcome, nowIso)) {
@@ -153,22 +224,20 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
           .limit(BATCH_LIMIT)
           .returns<ScheduledRow[]>();
         if (error) throw error;
-        return (data ?? []).flatMap((row) => {
-          const recipient = row.contacts?.email ?? row.organisations?.contact_email;
-          if (!recipient) return [];
-          return [{
-            id: row.id,
-            organisationId: row.organisation_id,
-            sentByUserId: row.sent_by_user_id,
-            subject: row.subject,
-            html: row.body,
-            // The stored body is sanitised HTML (F117) — the plain-text MIME
-            // part must be derived from it, exactly like the manual send path,
-            // not the markup itself.
-            text: emailHtmlToPlainText(row.body),
-            recipient,
-          }];
-        });
+        return (data ?? []).map((row) => ({
+          id: row.id,
+          organisationId: row.organisation_id,
+          sentByUserId: row.sent_by_user_id,
+          subject: row.subject,
+          html: row.body,
+          // The stored body is sanitised HTML (F117) — the plain-text MIME
+          // part must be derived from it, exactly like the manual send path,
+          // not the markup itself.
+          text: emailHtmlToPlainText(row.body),
+          // F129: kept null rather than filtered out so the loop can fail the
+          // message visibly instead of it looping as invisible scheduled rows.
+          recipient: row.contacts?.email ?? row.organisations?.contact_email ?? null,
+        }));
       },
 
       async isSuppressed(organisationId) {
@@ -240,13 +309,54 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
           await reportError(new Error(result.reason), {
             operation: "outreach.scheduler.deliver",
           });
-          return { ok: false };
+          return { ok: false, reason: result.reason };
         }
         return {
           ok: true,
           providerMessageId: result.providerMessageId,
           providerThreadId: result.providerThreadId,
         };
+      },
+
+      // F129: the scheduled→failed flip goes through the audited RPC so the
+      // SEND_EVENTS 'failed' row and audit_log entry land atomically with the
+      // status change (docs/audit-log-pattern.md §1).
+      async markFailed(messageId, reason) {
+        const { data: failed, error } = await admin
+          .rpc("mark_outreach_send_failed", {
+            p_message_id: messageId,
+            p_reason: reason,
+          });
+        if (error) {
+          await reportError(error, { operation: "outreach.scheduler.mark_failed", messageId });
+          return false;
+        }
+        if (!failed) {
+          await reportError(new Error("Failed-flip matched no rows — the message was decided elsewhere mid-run."), {
+            operation: "outreach.scheduler.mark_failed",
+            messageId,
+          });
+        }
+        return failed === true;
+      },
+
+      // F129 AC1: the CAM who queued this email hears about the failure in-app
+      // (F173 producer RPC; service_role is an allowed system producer).
+      // Best-effort by design — never fail the run over a notification.
+      async notifySendFailed(recipientUserId, messageId, organisationId, reason) {
+        const { error } = await admin.rpc("create_notification", {
+          p_recipient_user_id: recipientUserId,
+          p_notification_type: "outreach_send_failed",
+          p_title: "A scheduled email could not be sent",
+          p_body: reason,
+          p_link_path: `/clients/${organisationId}`,
+          p_target_table: "outreach_messages",
+          p_target_id: messageId,
+          p_actor_user_id: null,
+        });
+        if (error) {
+          await reportError(error, { operation: "outreach.scheduler.notify", messageId });
+        }
       },
 
       async markSent(messageId, outcome, sentAtIso) {

@@ -38,7 +38,22 @@ type SweepRow = {
   total_income: number | null;
   financial_periods: { total_income: number | null; period_end: string | null }[] | null;
   grants: { count: number }[] | null;
+  outreach_messages: { sent_at: string | null }[] | null;
 };
+
+/** F093: most recent sent-message timestamp; null sent_at rows (drafts,
+ * scheduled, failed) are skipped naturally. Mirrors rescore.ts's helper. */
+function lastContactedFrom(
+  messages: { sent_at: string | null }[] | null,
+): string | null {
+  let latest: string | null = null;
+  for (const message of messages ?? []) {
+    if (message.sent_at && (latest === null || message.sent_at > latest)) {
+      latest = message.sent_at;
+    }
+  }
+  return latest;
+}
 
 export type RescoreAllResult = {
   ok: boolean;
@@ -95,7 +110,7 @@ export async function rescoreAllOrganisations(): Promise<RescoreAllResult> {
     const { data, error } = await admin
       .from("organisations")
       .select(
-        "id, city, sector, outreach_status, total_income, financial_periods(total_income, period_end), grants(count)",
+        "id, city, sector, outreach_status, total_income, financial_periods(total_income, period_end), grants(count), outreach_messages(sent_at)",
       )
       .order("id")
       .range(from, from + PAGE_SIZE - 1)
@@ -120,6 +135,7 @@ export async function rescoreAllOrganisations(): Promise<RescoreAllResult> {
             outreach_status: row.outreach_status,
             total_income: row.total_income,
             financial_periods: row.financial_periods ?? [],
+            last_contacted_at: lastContactedFrom(row.outreach_messages),
             matched_grant_count: row.grants?.[0]?.count ?? null,
           };
           const result = await persistLatestScore(admin, row.id, scoreable, config.weights);

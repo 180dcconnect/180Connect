@@ -31,7 +31,26 @@ type OrgRow = {
   total_income: number | null;
   financial_periods: { total_income: number | null; period_end: string | null }[] | null;
   grants: { count: number }[] | null;
+  outreach_messages: { sent_at: string | null }[] | null;
 };
+
+/**
+ * F093: the recency half of the previous-contact signal — the org's most
+ * recent *sent* message timestamp. Draft/scheduled/failed rows carry a null
+ * sent_at and are ignored naturally by the max; an org with no messages at
+ * all yields null, meaning status-only scoring.
+ */
+function lastContactedFrom(
+  messages: { sent_at: string | null }[] | null,
+): string | null {
+  let latest: string | null = null;
+  for (const message of messages ?? []) {
+    if (message.sent_at && (latest === null || message.sent_at > latest)) {
+      latest = message.sent_at;
+    }
+  }
+  return latest;
+}
 
 /**
  * Rescores one organisation using its current database state — the entry point
@@ -50,7 +69,7 @@ export async function rescoreOrganisation(
   const { data: org, error } = await admin
     .from("organisations")
     .select(
-      "city, sector, outreach_status, total_income, financial_periods(total_income, period_end), grants(count)",
+      "city, sector, outreach_status, total_income, financial_periods(total_income, period_end), grants(count), outreach_messages(sent_at)",
     )
     .eq("id", organisationId)
     .maybeSingle<OrgRow>();
@@ -64,6 +83,7 @@ export async function rescoreOrganisation(
     outreach_status: org.outreach_status,
     total_income: org.total_income,
     financial_periods: org.financial_periods ?? [],
+    last_contacted_at: lastContactedFrom(org.outreach_messages),
     matched_grant_count: org.grants?.[0]?.count ?? null,
   };
 

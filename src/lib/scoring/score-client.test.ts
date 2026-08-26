@@ -90,18 +90,35 @@ describe("priorityFactorsFor — factor coverage matches the header's honesty ta
     );
   });
 
-  it("maps warmer pipeline statuses to a higher previous-contact factor", () => {
+  it("maps warmer pipeline statuses to a higher previous-contact factor (F093)", () => {
     const warm = priorityFactorsFor({ outreach_status: "responded" }).previousContact;
     const cold = priorityFactorsFor({ outreach_status: "hard_no" }).previousContact;
     assert.ok(warm > cold);
-    // Never contacted is unknown, not bad: neutral.
+    // F093 ideology: converted is gold, and never-contacted outranks every
+    // negative or unresolved outreach state.
     assert.equal(
-      priorityFactorsFor({ outreach_status: "not_contacted" }).previousContact,
-      0.5,
+      priorityFactorsFor({ outreach_status: "converted" }).previousContact,
+      1.0,
     );
-    // A status the mapping has never heard of degrades to neutral rather than
+    const untouched = priorityFactorsFor({ outreach_status: "not_contacted" })
+      .previousContact;
+    assert.ok(untouched > cold);
+    // A status the scorer has never heard of degrades to neutral rather than
     // throwing or silently scoring as fully-engaged.
     assert.equal(priorityFactorsFor({ outreach_status: "mystery" }).previousContact, 0.5);
+  });
+
+  it("feeds last-contact recency into the previous-contact factor (F093 AC1)", () => {
+    const stale = priorityFactorsFor({
+      outreach_status: "follow_up_sent",
+      last_contacted_at: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
+    }).previousContact;
+    const fresh = priorityFactorsFor({
+      outreach_status: "follow_up_sent",
+      last_contacted_at: new Date().toISOString(),
+    }).previousContact;
+    // A client chased very recently must score below one whose chase went stale.
+    assert.ok(fresh < stale);
   });
 });
 

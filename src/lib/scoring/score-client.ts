@@ -35,15 +35,14 @@
 //                   .total_income) — real signal, the same derivation the
 //                   income_band column itself uses.
 //
-//   previousContact PLACEHOLDER mapping from outreach_status, marked as such
-//                   below. F093 (the ticket that would define "previous
-//                   contact") does not exist, and there is no contact-history
-//                   table yet; the pipeline status is the only signal in the
-//                   database today that says whether we have ever engaged this
-//                   client. Values are guesses pending F093, in the same
-//                   spirit as the marked placeholders in score-by-geography
-//                   and score-by-partnership-history — swap them in one place
-//                   when the real definition arrives.
+//   previousContact  scoreByPreviousContact(outreach_status, last_contacted_at)
+//                   — F093 replaced the old placeholder mapping with a real
+//                   scorer (see that module for the confirmed ranking ideology:
+//                   converted is gold, future_potential beats not_contacted,
+//                   hard_no floors). The recency half of the signal comes from
+//                   the organisation's most recent sent OUTREACH_MESSAGES row;
+//                   callers that do not fetch it simply get the status-only
+//                   score, never an error.
 //
 // BANDS — high >= 0.70, medium >= 0.40, low < 0.40. Thresholds proposed with
 // F058/F059, pending team confirmation; they live here AND in MODEL_VERSIONS'
@@ -59,6 +58,7 @@ import {
 import { scoreByGeography } from "./score-by-geography.ts";
 import { scoreByOrganisationSize } from "./score-by-organisation-size.ts";
 import { scoreByPartnershipHistory } from "./score-by-partnership-history.ts";
+import { scoreByPreviousContact } from "./score-by-previous-contact.ts";
 
 /** The vocabulary LATEST_SCORES.priority_band stores (check-constrained). */
 export type PriorityBand = "high" | "medium" | "low";
@@ -91,6 +91,12 @@ export type ScoreableOrganisation = {
     | { total_income?: number | null; period_end?: string | null }[]
     | null;
   outreach_status: string;
+  /**
+   * F093: timestamp of the organisation's most recent *sent* outreach message
+   * (OUTREACH_MESSAGES.sent_at). Optional — a caller without it gets the
+   * status-only score; the recency decay simply does not apply.
+   */
+  last_contacted_at?: string | Date | null;
   /** Matched 360Giving grant count (F092). Omitted/null = no-history neutral. */
   matched_grant_count?: number | null;
 };
@@ -116,27 +122,6 @@ export function latestTotalIncome(
 }
 
 /**
- * PLACEHOLDER values pending F093 — warmer statuses read as more prior
- * engagement, `not_contacted` sits at neutral (never engaged is unknown, not
- * bad), and closed-lost outcomes sit low. Not a decision; see header.
- */
-const PREVIOUS_CONTACT_BY_STATUS: Record<string, number> = {
-  converted: 1.0,
-  responded: 0.9,
-  follow_up_sent: 0.7,
-  initial_outreach_sent: 0.6,
-  future_potential: 0.6,
-  loss_due_timing: 0.4,
-  soft_no: 0.3,
-  no_response: 0.2,
-  hard_no: 0.1,
-};
-
-function previousContactFactor(outreachStatus: string): number {
-  return PREVIOUS_CONTACT_BY_STATUS[outreachStatus] ?? UNBUILT_FACTOR_NEUTRAL;
-}
-
-/**
  * The five normalised factors for one organisation. Exported because the
  * backfill reports which factors were carrying real signal versus standing at
  * neutral — the honest way to show a stakeholder why two clients score alike.
@@ -150,7 +135,10 @@ export function priorityFactorsFor(
     geography: scoreByGeography(org.city, priorityRegions).score,
     size: scoreByOrganisationSize(latestTotalIncome(org)).score,
     partnershipHistory: scoreByPartnershipHistory(org.matched_grant_count).score,
-    previousContact: previousContactFactor(org.outreach_status),
+    previousContact: scoreByPreviousContact(
+      org.outreach_status,
+      org.last_contacted_at,
+    ).score,
   };
 }
 

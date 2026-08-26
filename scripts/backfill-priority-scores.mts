@@ -41,6 +41,8 @@ type OrgRow = {
   outreach_status: string;
   total_income: number | null;
   matched_grant_count: number | null;
+  /** F093: most recent sent outreach message; pg parses timestamptz to Date. */
+  last_contacted_at: Date | null;
 };
 
 /**
@@ -94,7 +96,12 @@ async function main(): Promise<void> {
           select count(*)::int
           from public.grants g
           where g.organisation_id = o.id
-        ) as matched_grant_count
+        ) as matched_grant_count,
+        (
+          select max(om.sent_at)
+          from public.outreach_messages om
+          where om.organisation_id = o.id
+        ) as last_contacted_at
       from public.organisations o
       `,
     );

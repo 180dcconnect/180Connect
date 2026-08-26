@@ -16,3 +16,13 @@ export function emailLimitMessage(windowSeconds: number): string {
 export function emailSendWindowStart(windowSeconds: number, now = Date.now()): string {
   return new Date(now - windowSeconds * 1000).toISOString();
 }
+
+/**
+ * F228: true once a sender's window usage reaches the warn-before-block
+ * threshold (80% of the limit, rounded up so small limits still get a
+ * warning step — e.g. limit 7 warns from the 6th email). The same scope the
+ * F227 enforcement counts: one sender's sends, not the branch total.
+ */
+export function isNearSendLimit(sentInWindow: number, maximum: number): boolean {
+  return sentInWindow >= Math.ceil(maximum * 0.8);
+}

@@ -53,7 +53,7 @@ import { TimelineSection } from "./timeline-section";
 import { TimelineRealtimeRefresher } from "./timeline-realtime";
 import { RequestOwnershipForm } from "./request-ownership-form";
 import { ScheduledEmailList } from "./scheduled-email-list";
-import { emailSendWindowStart, resolveEmailSendLimit } from "@/lib/outreach/send-rate-limit";
+import { emailSendWindowStart, isNearSendLimit, resolveEmailSendLimit } from "@/lib/outreach/send-rate-limit";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -299,20 +299,29 @@ export default async function ClientDetailPage({
   const ownerName = ownerRow?.owner?.full_name ?? (ownerId ? "A former team member" : null);
   const isAdmin = authorization.actor.role === "admin";
 
-  // F228: admins see the branch's position against the F227 send limit, so the
-  // warning arrives before sends start failing rather than after. Counted from
-  // the same audited sent_at window the limit itself enforces.
-  let sendingVolume: { count: number; limit: number; warning: boolean } | null = null;
+  // F228: the admin sees their own position against the F227 send limit, so
+  // the warning arrives before sends start failing rather than after. Counted
+  // per-sender — the exact scope the enforcement (outreach-actions.ts and the
+  // scheduled worker) counts — from the same audited sent_at window.
+  let sendingVolume: { count: number; limit: number; warning: boolean; windowMinutes: number } | null = null;
   if (isAdmin) {
     const limit = resolveEmailSendLimit();
     const since = emailSendWindowStart(limit.windowSeconds);
     const { count, error: volumeError } = await supabase
       .from("outreach_messages")
       .select("id", { count: "exact", head: true })
+      .eq("sent_by_user_id", authorization.actor.id)
       .eq("send_status", "sent")
       .gte("sent_at", since);
     if (volumeError) await reportError(volumeError, { operation: "clients.detail_sending_volume" });
-    if (count !== null) sendingVolume = { count, limit: limit.maximum, warning: count >= Math.ceil(limit.maximum * 0.8) };
+    if (count !== null) {
+      sendingVolume = {
+        count,
+        limit: limit.maximum,
+        warning: isNearSendLimit(count, limit.maximum),
+        windowMinutes: Math.ceil(limit.windowSeconds / 60),
+      };
+    }
   }
 
   // F165: warn the CAM up front when the client they are viewing is owned by
@@ -993,7 +1002,7 @@ export default async function ClientDetailPage({
               <SectionCard headingId="outreach-heading" title="Outreach">
                 {sendingVolume && (
                   <p className={`mt-3 rounded-lg p-3 text-sm font-bold ${sendingVolume.warning ? "bg-amber-50 text-amber-900" : "bg-black/[0.03] text-foreground/60"}`} role={sendingVolume.warning ? "alert" : "status"}>
-                    Branch sending volume: {sendingVolume.count} of {sendingVolume.limit} emails in the current limit window.{sendingVolume.warning ? " The configured threshold is close; review volume before sending more." : ""}
+                    Your sending volume: {sendingVolume.count} of your {sendingVolume.limit} emails in the current {sendingVolume.windowMinutes}-minute window.{sendingVolume.warning ? " You are close to the configured threshold; sends are refused once it is reached." : ""}
                   </p>
                 )}
                 <OutreachHistorySection history={outreachHistory} error={Boolean(outreachError)} />

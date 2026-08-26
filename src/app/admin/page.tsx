@@ -44,6 +44,12 @@ export default async function AdminPage() {
               Reassign an outgoing CAM&apos;s clients and open actions to another team member.
             </p>
           </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/team-pipeline">
+            <h2 className="font-bold">Team pipeline</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Every client&apos;s pipeline stage across the whole team, by stage or owning CAM.
+            </p>
+          </Link>
           <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/review">
             <h2 className="font-bold">Review queue</h2>
             <p className="mt-1 text-sm text-foreground/65">

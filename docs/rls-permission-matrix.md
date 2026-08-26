@@ -402,6 +402,28 @@ The CAM INSERT check on `OUTREACH_MESSAGES` is the database-layer expression of
 "Send to an organisation owned by another CAM: Admin yes, CAM no". This is the
 policy the acceptance criteria's "misuse attempt" test must target.
 
+F018 (#21, `20260911130000`) extends that rule from INSERT-time to the whole
+send lifecycle. The three send-path SECURITY DEFINER RPCs —
+`claim_outreach_send`, `schedule_outreach_send`, `mark_outreach_sent` —
+re-check authorisation inside their definer bodies under the same predicate:
+**admin, or the client's owner, or (only while the client is unowned) the
+draft's author.** Previously a draft's author could claim/schedule/record a
+send regardless of who owned the client, so a draft generated before a client
+was reassigned stayed sendable by its original author — including via direct
+API call. The predicate is coalesced: with an unowned client,
+`org_owner_id = actor` is NULL, and an uncoalesced NULL would make
+`IF NOT (...)` silently allow. Ownership is the sanctioned route to contacting
+a client another CAM works on (PM decision, Bashir, Aug 2026) — there is
+deliberately no per-CAM grant table; request ownership instead. The app layer
+enforces the same rule at the actions themselves (`assertContactPermission` in
+`src/lib/outreach/contact-permission.ts`, called by `sendReviewedEmail` /
+`scheduleReviewedEmail`) so the refusal carries the owner-naming message, and
+an admin sending on another CAM's client is asked to confirm a last-resort
+override dialog naming the owner first. Scheduled sends are checked at
+schedule time only: a schedule permitted when queued is delivered even if
+ownership changes before it fires (grandfathered, same PM decision) — the
+service-role worker never had an `auth.uid()` to check against.
+
 Both INSERT policies additionally require `app.can_contact_organisation(organisation_id)`
 (F050, #52) — a suppressed org (F251 §3.14) blocks every insert, admin included. Fixed
 20260806120000: the admin policy originally omitted this check entirely, so an admin's

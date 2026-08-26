@@ -5,7 +5,7 @@ import Link from "next/link";
 import { History, Sparkles } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
 import { RichTextEmailEditor } from "@/components/rich-text-email-editor";
-import { saveEmailDraft, scheduleReviewedEmail, sendReviewedEmail } from "./outreach-actions";
+import { discardEmailDraft, saveEmailDraft, scheduleReviewedEmail, sendReviewedEmail } from "./outreach-actions";
 import { validateClientEmail } from "@/lib/client-email-validation";
 import { emailHtmlToPlainText, isRichEmailHtml, plainTextToEditorHtml } from "@/lib/outreach/email-html";
 import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
@@ -169,6 +169,7 @@ export function ComposeButton({
   const [sending, setSending] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [discarding, setDiscarding] = useState(false);
   // F126: when set, the reviewed email is queued for this time instead of sent now.
   const [scheduledAt, setScheduledAt] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -306,6 +307,32 @@ export function ComposeButton({
       setBodyEdited(false);
     }
     setSavingDraft(false);
+  }
+
+  /**
+   * F120: removes the draft outright, so a confirmation step comes first
+   * (AC2) — the content is genuinely gone once the action below runs, unlike
+   * `saveDraft`. Clears local state back to the empty "generate" view on
+   * success, matching what a reopened client profile would show once the
+   * row is gone from page.tsx's existingDraft query.
+   */
+  async function discardDraft() {
+    if (!draft) return;
+    if (!window.confirm("Discard this draft? Its content will be lost.")) return;
+    setDiscarding(true);
+    setSaveMessage(null);
+    const result = await discardEmailDraft({ organisationId, messageId: draft.id });
+    if (result.ok) {
+      setDraft(null);
+      setRecipient("");
+      setSubject("");
+      setBody("");
+      setApproved(false);
+      setSendMessage(null);
+    } else {
+      setSaveMessage(result.message);
+    }
+    setDiscarding(false);
   }
 
   // F126: same review gate as send() — the approval checkbox is required either
@@ -614,7 +641,7 @@ export function ComposeButton({
             {/* F119: saving has none of sending's requirements — no approval
                 checkbox, no valid recipient, not even a non-empty subject or
                 body — a work-in-progress draft is exactly what this is for. */}
-            <OriginButton disabled={savingDraft || sending} onClick={saveDraft} type="button" variant="outline">
+            <OriginButton disabled={savingDraft || sending || discarding} onClick={saveDraft} type="button" variant="outline">
               {savingDraft ? "Saving…" : "Save draft"}
             </OriginButton>
             <OriginButton
@@ -624,6 +651,16 @@ export function ComposeButton({
             >
               {sending ? "Sending…" : "Send reviewed email"}
             </OriginButton>
+            {/* F120: same drafts-only reach as Save — a sent email is never
+                reachable here, so there is no "discard a sent email" case to guard. */}
+            <button
+              className="shrink-0 rounded-full border border-red-800/25 px-4 py-2 text-xs font-bold text-red-800 transition-colors hover:bg-red-50 disabled:opacity-60"
+              disabled={savingDraft || sending || discarding}
+              onClick={discardDraft}
+              type="button"
+            >
+              {discarding ? "Discarding…" : "Discard draft"}
+            </button>
           </div>
           {saveMessage && (
             <p className="text-xs font-bold text-foreground/65" role="status">

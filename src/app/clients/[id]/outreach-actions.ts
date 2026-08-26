@@ -5,6 +5,7 @@ import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { canSendClientOutreach } from "@/lib/client-email-validation";
 import { reportError } from "@/lib/error-logging";
 import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
+import { discardDraftSchema } from "@/lib/outreach/discard-draft";
 import { emailHtmlToPlainText, sanitizeEmailHtml } from "@/lib/outreach/email-html";
 import { saveDraftSchema } from "@/lib/outreach/save-draft";
 import { reviewedEmailSchema } from "@/lib/outreach/send-reviewed";
@@ -437,4 +438,75 @@ export async function saveEmailDraft(input: unknown): Promise<SaveDraftResult> {
 
   revalidatePath(`/clients/${organisationId}`);
   return { ok: true, message: "Draft saved." };
+}
+
+export type DiscardDraftResult =
+  | { ok: true; message: string }
+  | { ok: false; message: string };
+
+/**
+ * F120: removes an unsent draft outright. The confirmation step lives in the
+ * UI (compose-button.tsx), since the content is genuinely lost once this
+ * runs — this action itself does exactly one thing once called.
+ *
+ * Goes through the discard_outreach_draft RPC rather than a plain row delete
+ * (PR #493 review): docs/audit-log-pattern.md §1 requires status-changing or
+ * destructive writes to land an audit_log entry in the same transaction, and a
+ * bare DELETE would leave nothing to answer "what happened to that draft?" —
+ * the ai_generations cascade goes with it. The RPC (20260902130000) re-checks
+ * active user + admin/ownership inside its SECURITY DEFINER body, writes the
+ * outreach_email_draft_discarded audit row, then deletes — mirroring F042's
+ * discard_manual_entry_draft precedent. The RLS delete policies stay enabled
+ * as defense-in-depth for direct SQL.
+ */
+export async function discardEmailDraft(input: unknown): Promise<DiscardDraftResult> {
+  const parsed = safeValidate(discardDraftSchema, input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: Object.values(parsed.fieldErrors).flat().find(Boolean) ?? "Check the draft and try again.",
+    };
+  }
+
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const isAdmin = authorization.actor.role === "admin";
+
+  const { organisationId, messageId } = parsed.data;
+  const supabase = await createClient();
+  const { data: draft, error: draftError } = await supabase
+    .from("outreach_messages")
+    .select("id, send_status, sent_by_user_id")
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+  if (draftError || !draft) {
+    if (draftError) await reportError(draftError, { operation: "outreach.discard_draft.load", messageId });
+    return { ok: false, message: "That draft could not be loaded. Refresh and try again." };
+  }
+  if (draft.send_status !== "draft") {
+    return { ok: false, message: "This email is no longer an unsent draft." };
+  }
+  // Same ownership rule as saving and sending (F123 AC4): RLS lets every
+  // active user READ every draft, so write access is asserted here too.
+  if (!isAdmin && draft.sent_by_user_id !== authorization.actor.id) {
+    return { ok: false, message: "You can only discard drafts you generated yourself." };
+  }
+
+  const { error: rpcError } = await supabase.rpc("discard_outreach_draft", { p_message_id: messageId });
+  if (rpcError) {
+    await reportError(rpcError, { operation: "outreach.discard_draft.write", messageId });
+    // A 42501 from the RPC means the authoritative re-check refused: raced send,
+    // removed elsewhere, or lost an ownership race. Say that, not "try again" —
+    // retrying can never succeed.
+    if ((rpcError as { code?: string }).code === "42501") {
+      return { ok: false, message: "This email is no longer an unsent draft." };
+    }
+    return { ok: false, message: "The draft could not be discarded. Refresh and try again." };
+  }
+
+  revalidatePath(`/clients/${organisationId}`);
+  return { ok: true, message: "Draft discarded." };
 }

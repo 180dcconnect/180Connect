@@ -428,7 +428,7 @@ direct table write (RLS pins every non-draft row shut):
   to `AUDIT_LOG`. Anyone else raises 42501.
 
 **Delivery recordal and the automatic pipeline advance (F157,
-`20260905100000`).** Recording that an email actually left is audited on both
+`20260909090000`).** Recording that an email actually left is audited on both
 send paths, and the client's pipeline status moves in the SAME transaction as
 the recordal — never as a separate step that could fail independently (F157
 AC3):

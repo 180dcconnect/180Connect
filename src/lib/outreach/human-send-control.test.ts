@@ -88,7 +88,7 @@ describe("F250 human-send architecture", () => {
     );
     const rpcMigration = await readFile(
       new URL(
-        "../../../supabase/migrations/20260905100000_atomic_send_status.sql",
+        "../../../supabase/migrations/20260909090000_atomic_send_status.sql",
         import.meta.url,
       ),
       "utf8",

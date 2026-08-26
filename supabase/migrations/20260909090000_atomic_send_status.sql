@@ -64,7 +64,7 @@
 --               | No Data Model tab changes: no tables or columns added.
 --   Approved by   | Bashir (Project Manager), 26 Aug 2026.
 --
--- Reversibility: paired rollback in ../rollback/20260905100000_atomic_send_status.down.sql
+-- Reversibility: paired rollback in ../rollback/20260909090000_atomic_send_status.down.sql
 
 -- ---------------------------------------------------------------------------
 -- Shared pipeline advance — internal, definer-called only

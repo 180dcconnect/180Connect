@@ -1,4 +1,4 @@
--- Rollback of 20260905100000_atomic_send_status (F157 #152).
+-- Rollback of 20260909090000_atomic_send_status (F157 #152).
 -- Restores:
 --   1. mark_outreach_sent v2 — the F116 four-argument version WITHOUT the
 --      pipeline advance (body verbatim from 20260901120000).

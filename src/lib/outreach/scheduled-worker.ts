@@ -75,8 +75,14 @@ export type ScheduledOutreachDeps = {
   claim(messageId: string, nowIso: string): Promise<boolean>;
   deliver(input: { recipient: string; subject: string; text: string; html: string }): Promise<DeliveryOutcome>;
   /** Flips scheduled→sent. False means the flip matched no rows — reported,
-   * not retried, since the email may already be out (F123's rule). */
-  markSent(messageId: string, outcome: Extract<DeliveryOutcome, { ok: true }>, sentAtIso: string): Promise<boolean>;
+   * not retried, since the email may already be out (F123's rule).
+   * organisationId lets the F097 score snapshot ride the same RPC call. */
+  markSent(
+    messageId: string,
+    organisationId: string,
+    outcome: Extract<DeliveryOutcome, { ok: true }>,
+    sentAtIso: string,
+  ): Promise<boolean>;
   /** F129: scheduled→failed via mark_outreach_send_failed (SEND_EVENTS +
    * audit_log atomically). False = raced away (cancelled/decided elsewhere);
    * never notified in that case. */
@@ -184,7 +190,7 @@ export async function deliverDueScheduledEmails(
       summary.blocked += 1;
       continue;
     }
-    if (await deps.markSent(message.id, outcome, nowIso)) {
+    if (await deps.markSent(message.id, message.organisationId, outcome, nowIso)) {
       summary.sent += 1;
     } else {
       summary.failed += 1;
@@ -359,7 +365,7 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
         }
       },
 
-      async markSent(messageId, outcome, sentAtIso) {
+      async markSent(messageId, organisationId, outcome, sentAtIso) {
         // F157: the whole recordal is one audited RPC — claim-pinned
         // scheduled→sent flip, SEND_EVENTS 'sent' row, outreach_email_sent
         // audit entry, AND the client's pipeline advance, in one transaction.
@@ -368,11 +374,19 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
         // record it. False = raced away (cancelled/re-claimed mid-delivery):
         // the email MAY already be out, so it is reported as ambiguous and
         // never retried (F123's duplicate-email rule).
+        //
+        // F097: the point-in-time scoring vector rides the same call — built
+        // from pre-send state (the RPC's own advance happens inside its
+        // transaction, after this read). Best-effort: a failed build logs and
+        // passes null rather than failing a delivered email.
+        const { buildScoreSnapshot } = await import("../scoring/build-score-snapshot.ts");
+        const scoreSnapshot = await buildScoreSnapshot(organisationId);
         const { data: flipped, error } = await admin.rpc("mark_scheduled_outreach_delivered", {
           p_message_id: messageId,
           p_provider_message_id: outcome.providerMessageId ?? null,
           p_provider_thread_id: outcome.providerThreadId ?? null,
           p_claim_token: sentAtIso,
+          p_score_snapshot: scoreSnapshot,
         });
         if (error) {
           await reportError(error, {

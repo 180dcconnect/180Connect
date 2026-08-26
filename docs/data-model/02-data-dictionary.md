@@ -329,6 +329,19 @@
 | 06 - Predictions | MODEL_VERSIONS | created_by_user_id | uuid |  | User who created or activated this model version |
 | 06 - Predictions | MODEL_VERSIONS | created_at | timestamp |  | Row creation timestamp |
 | 06 - Predictions | MODEL_VERSIONS | deprecated_at | timestamp |  | Date and time the version was replaced or retired; null while active |
+| 06 - Predictions | SCORE_SNAPSHOTS | id | uuid |  | Primary key. Point-in-time scoring features captured at send time; the feature half of the ML training set. Labels live in OUTCOMES joined by outreach_message_id. Admin read, service-role write via send RPCs. |
+| 06 - Predictions | SCORE_SNAPSHOTS | organisation_id | uuid | ORGANISATIONS |  |
+| 06 - Predictions | SCORE_SNAPSHOTS | outreach_message_id | uuid | OUTREACH_MESSAGES | unique |
+| 06 - Predictions | SCORE_SNAPSHOTS | model_version_id | uuid | MODEL_VERSIONS | nullable |
+| 06 - Predictions | SCORE_SNAPSHOTS | sector | numeric |  | 0–1 |
+| 06 - Predictions | SCORE_SNAPSHOTS | geography | numeric |  | 0–1 |
+| 06 - Predictions | SCORE_SNAPSHOTS | size | numeric |  | 0–1 |
+| 06 - Predictions | SCORE_SNAPSHOTS | partnership_history | numeric |  | 0–1 |
+| 06 - Predictions | SCORE_SNAPSHOTS | previous_contact | numeric |  | 0–1 |
+| 06 - Predictions | SCORE_SNAPSHOTS | priority_score | numeric |  | 0–1 |
+| 06 - Predictions | SCORE_SNAPSHOTS | priority_band | enum |  | high/medium/low |
+| 06 - Predictions | SCORE_SNAPSHOTS | scored_at | timestamp |  |  |
+| 06 - Predictions | SCORE_SNAPSHOTS | created_at | timestamp |  |  |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | id | uuid |  | Primary key |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | organisation_id | uuid |  | Organisation that received the outreach message |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | contact_id | uuid |  | Specific contact the message was sent to |

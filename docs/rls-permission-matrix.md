@@ -514,10 +514,19 @@ rather than renaming the column.
 | `AGENT_PROMPTS` | admin | admin | admin | — |
 | `AGENT_RUNS` | admin | — (service role) | — | — |
 | `LATEST_SCORES` | all roles | — (service role) | — | — |
+| `SCORE_SNAPSHOTS` | admin | — (service role, via send RPCs) | — | — |
 | `EMAIL_PERFORMANCE_LIBRARY` | admin, cam | — (service role) | — | admin |
 
 `LATEST_SCORES` is read-all: CAMs work the prioritised queue. The weights that
 produce the scores are not readable by CAMs — knowing the weights makes them gameable.
+
+F097 (#96, 20260911120000): `SCORE_SNAPSHOTS` joins the same family as
+MODEL_VERSIONS on the read side — SELECT for admins only, because a snapshot row
+is exactly "these factors under that weights generation", i.e. gameable knowledge
+by construction. Writes carry no grant at all: rows are inserted only inside the
+SECURITY DEFINER send RPCs' transactions (mark_outreach_sent /
+mark_scheduled_outreach_delivered) via the internal insert_score_snapshot helper,
+so a snapshot always commits with its send and can never be written directly.
 
 Deviation recorded 24 Aug 2026 (F058/F059, #482): `MODEL_VERSIONS` is implemented
 **read-only for admins, with no INSERT/UPDATE/DELETE grant to any Postgres role**

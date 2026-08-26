@@ -108,7 +108,7 @@ declare
   v_token_1 timestamptz := '2026-09-05T10:00:00Z';
   v_token_2 timestamptz := '2026-09-05T10:05:00Z';
 begin
-  if to_regprocedure('public.mark_scheduled_outreach_delivered(uuid,text,text,timestamptz)') is null then
+  if to_regprocedure('public.mark_scheduled_outreach_delivered(uuid,text,text,timestamptz,jsonb)') is null then
     return next skip(1, 'mark_scheduled_outreach_delivered not yet migrated');
     return;
   end if;
@@ -226,12 +226,12 @@ begin
 
   return next ok(
     not has_function_privilege('authenticated',
-      'public.mark_scheduled_outreach_delivered(uuid,text,text,timestamptz)', 'EXECUTE'),
+      'public.mark_scheduled_outreach_delivered(uuid,text,text,timestamptz,jsonb)', 'EXECUTE'),
     'authenticated holds no EXECUTE on the worker RPC'
   );
   return next ok(
     not has_function_privilege('anon',
-      'public.mark_scheduled_outreach_delivered(uuid,text,text,timestamptz)', 'EXECUTE'),
+      'public.mark_scheduled_outreach_delivered(uuid,text,text,timestamptz,jsonb)', 'EXECUTE'),
     'anon holds no EXECUTE on the worker RPC'
   );
 end;

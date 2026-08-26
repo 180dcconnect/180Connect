@@ -14,6 +14,7 @@ import {
   type OpenSuppression,
 } from "@/lib/dashboard-metrics";
 import { formatTeamActivities, type FormattedTeamActivity, type RawTeamActivityRow } from "@/lib/team-activity";
+import { followUpRecommendations, DEFAULT_FOLLOW_UP_THRESHOLDS, type FollowUpRecommendation } from "@/lib/outreach/follow-up-recommendations";
 import {
   buildRecentUpdates,
   recentUpdatesCutoff,
@@ -280,7 +281,70 @@ export default async function DashboardPage({
   }
 
   const metrics = computeDashboardMetrics(rows);
-  const attentionItems = needsAttention(rows, actor.id);
+  // F160 — silence is measured from the client's last real activity (latest of
+  // sent email, received reply, audited status change), aggregated per client by
+  // get_clients_last_activity; the thresholds are this CAM's own preferences
+  // (defaults 7/14). Both reads fail soft: a failed activity query degrades the
+  // panel back to its pre-F160 status-only list rather than hiding it.
+  let attentionItems = needsAttention(rows, actor.id);
+  if (!loadFailed && attentionItems.length > 0) {
+    const supabase = await createClient();
+    const myClientIds = rows
+      .filter((row) => row.owner_id === actor.id)
+      .map((row) => row.id);
+    if (myClientIds.length > 0) {
+      const [preferences, activity] = await Promise.all([
+        supabase
+          .from("outreach_preferences")
+          .select("first_follow_up_days, second_follow_up_days")
+          .eq("user_id", actor.id)
+          .maybeSingle(),
+        supabase.rpc("get_clients_last_activity", {
+          p_organisation_ids: myClientIds,
+        }),
+      ]);
+      if (activity.error) {
+        await reportError(activity.error, { operation: "dashboard.follow_up_activity" });
+      }
+      if (preferences.error) {
+        await reportError(preferences.error, { operation: "dashboard.follow_up_preferences" });
+      }
+
+      const recommendations: FollowUpRecommendation[] = followUpRecommendations(
+        rows
+          .filter((row) => row.owner_id === actor.id)
+          .map((row) => ({ id: row.id, legal_name: row.legal_name, outreach_status: row.outreach_status })),
+        new Map(
+          (activity.data ?? []).map(
+            (row: {
+              organisation_id: string;
+              last_email_sent_at: string | null;
+              last_reply_received_at: string | null;
+              last_status_change_at: string | null;
+            }) => [
+              row.organisation_id,
+              {
+                lastEmailSentAt: row.last_email_sent_at,
+                lastReplyReceivedAt: row.last_reply_received_at,
+                lastStatusChangeAt: row.last_status_change_at,
+              },
+            ],
+          ),
+        ),
+        {
+          first: preferences.data?.first_follow_up_days ?? DEFAULT_FOLLOW_UP_THRESHOLDS.first,
+          second: preferences.data?.second_follow_up_days ?? DEFAULT_FOLLOW_UP_THRESHOLDS.second,
+        },
+      );
+      const byOrganisation = new Map(recommendations.map((rec) => [rec.organisationId, rec]));
+      attentionItems = attentionItems.map((item) => {
+        const rec = byOrganisation.get(item.id);
+        return rec
+          ? { ...item, followUp: { daysWaiting: rec.daysWaiting, urgency: rec.urgency } }
+          : item;
+      });
+    }
+  }
   // F022 — the total is now shown as a curve rather than a single number, so the
   // dashboard says how the pipeline got here, not only where it is.
   const growth = organisationGrowthSeries(rows);

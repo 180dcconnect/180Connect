@@ -1,4 +1,5 @@
 import { formatOutreachStatus } from "./organisation-format.ts";
+import type { FollowUpUrgency } from "./outreach/follow-up-recommendations.ts";
 
 /**
  * F021/F022-F025/F027 — the dedicated outreach-send (F123/F125/F157), response
@@ -138,6 +139,12 @@ export type NeedsAttentionItem = {
   id: string;
   legalName: string;
   outreachStatusLabel: string;
+  /**
+   * F160 — set when the client's silence has crossed the owner's follow-up
+   * thresholds. Absent for clients still inside the window; `urgent` marks the
+   * second threshold, which AC2 requires to read as more pressing than `due`.
+   */
+  followUp?: { daysWaiting: number; urgency: FollowUpUrgency };
 };
 
 /**

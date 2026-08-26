@@ -95,12 +95,7 @@ create table public.score_snapshots (
   priority_band      text not null constraint score_snapshots_band_check check (priority_band in ('high', 'medium', 'low')),
   -- When the inputs were read (≈ send moment), distinct from created_at.
   scored_at          timestamptz not null default now(),
-  created_at         timestamptz not null default now(),
-
-  -- A stored score must say which band it was banded into — same invariant as
-  -- latest_scores; here both are NOT NULL because a sent email always has a
-  -- computable vector (missing inputs degrade to documented neutrals).
-  constraint score_snapshots_message_exists check (outreach_message_id is not null)
+  created_at         timestamptz not null default now()
 );
 
 comment on table public.score_snapshots is
@@ -176,11 +171,16 @@ begin
     end if;
   end loop;
 
-  v_score := (p_snapshot ->> 'priority_score')::double precision;
-  if v_score is null or v_score < 0 or v_score > 1 then
+  v_factor := p_snapshot -> 'priority_score';
+  if v_factor is null
+     or jsonb_typeof(v_factor) <> 'number'
+     or (v_factor #>> '{}')::double precision is null
+     or (v_factor #>> '{}')::double precision < 0
+     or (v_factor #>> '{}')::double precision > 1 then
     raise exception 'score snapshot priority_score must be a number between 0 and 1'
       using errcode = '22023';
   end if;
+  v_score := (v_factor #>> '{}')::double precision;
 
   if p_snapshot ->> 'priority_band' not in ('high', 'medium', 'low') then
     raise exception 'score snapshot priority_band must be high, medium or low'

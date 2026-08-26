@@ -323,11 +323,15 @@ export type DiscardDraftResult =
  * UI (compose-button.tsx), since the content is genuinely lost once this
  * runs — this action itself does exactly one thing once called.
  *
- * A plain row delete rather than a status flip: outreach_messages_delete_admin
- * and outreach_messages_delete_own_draft (create_outreach.sql) were written
- * for this ticket specifically, gated to send_status = 'draft' the same way
- * the update policies are, so RLS already refuses to remove anything sent.
- * ai_generations rows for this draft go with it via ON DELETE CASCADE.
+ * Goes through the discard_outreach_draft RPC rather than a plain row delete
+ * (PR #493 review): docs/audit-log-pattern.md §1 requires status-changing or
+ * destructive writes to land an audit_log entry in the same transaction, and a
+ * bare DELETE would leave nothing to answer "what happened to that draft?" —
+ * the ai_generations cascade goes with it. The RPC (20260902130000) re-checks
+ * active user + admin/ownership inside its SECURITY DEFINER body, writes the
+ * outreach_email_draft_discarded audit row, then deletes — mirroring F042's
+ * discard_manual_entry_draft precedent. The RLS delete policies stay enabled
+ * as defense-in-depth for direct SQL.
  */
 export async function discardEmailDraft(input: unknown): Promise<DiscardDraftResult> {
   const parsed = safeValidate(discardDraftSchema, input);
@@ -365,15 +369,15 @@ export async function discardEmailDraft(input: unknown): Promise<DiscardDraftRes
     return { ok: false, message: "You can only discard drafts you generated yourself." };
   }
 
-  const { data: deleted, error: deleteError } = await supabase
-    .from("outreach_messages")
-    .delete()
-    .eq("id", messageId)
-    .eq("organisation_id", organisationId)
-    .eq("send_status", "draft")
-    .select("id");
-  if (deleteError || !deleted || deleted.length === 0) {
-    if (deleteError) await reportError(deleteError, { operation: "outreach.discard_draft.write", messageId });
+  const { error: rpcError } = await supabase.rpc("discard_outreach_draft", { p_message_id: messageId });
+  if (rpcError) {
+    await reportError(rpcError, { operation: "outreach.discard_draft.write", messageId });
+    // A 42501 from the RPC means the authoritative re-check refused: raced send,
+    // removed elsewhere, or lost an ownership race. Say that, not "try again" —
+    // retrying can never succeed.
+    if ((rpcError as { code?: string }).code === "42501") {
+      return { ok: false, message: "This email is no longer an unsent draft." };
+    }
     return { ok: false, message: "The draft could not be discarded. Refresh and try again." };
   }
 

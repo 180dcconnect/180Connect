@@ -26,7 +26,7 @@
 // AC3: the size parameter's weight must be reviewable independently of the
 // other scoring parameters (F096). This function only ever produces its own
 // standalone 0-1 score; F088's calculatePriorityScore on dev combines the
-// four per-factor scores with the confirmed EQUAL_WEIGHTS, and its `size`
+// four per-factor scores with the configurable weights (F096), and its `size`
 // factor is exactly where this result plugs in — wiring it up is future
 // integration work, deliberately not attempted here.
 //

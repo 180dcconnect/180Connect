@@ -56,6 +56,12 @@ export default async function AdminPage() {
               View outreach preferences and queue configuration for team members.
             </p>
           </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/score-settings">
+            <h2 className="font-bold">Score settings</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Tune how much each parameter counts towards client priority scores.
+            </p>
+          </Link>
           <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/audit-log">
             <h2 className="font-bold">Audit log</h2>
             <p className="mt-1 text-sm text-foreground/65">Every recorded action, most recent first.</p>

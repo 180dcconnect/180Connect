@@ -44,6 +44,7 @@ import { buildAdminClient } from "../supabase/admin-client-factory.ts";
 import { checkClientCriteria, type ClientCriteriaResult } from "../client-criteria.ts";
 import { reportError } from "../error-logging.ts";
 import { persistLatestScore } from "../scoring/persist-latest-score.ts";
+import { getActiveScoutConfig } from "../scoring/configured-weights.ts";
 import { checkWebsiteReachability } from "../website-reachability.ts";
 import type { WebsiteStatus } from "../website-validation.ts";
 import {
@@ -316,10 +317,14 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
       // neutrals, and the rescore hooks elsewhere refresh the row when real data
       // arrives later. Best-effort: a scoring failure must not fail the promote —
       // an unscored client is F058 AC3's explicit state, not an error.
+      // F096: scored under the active SCOUT generation's weights, so a new client
+      // joins the same tuning the existing book was last swept with.
+      const scoutConfig = await getActiveScoutConfig();
       const scored = await persistLatestScore(
         supabase as unknown as Parameters<typeof persistLatestScore>[0],
         data.id,
         org,
+        scoutConfig.weights,
       );
       if (!scored.ok) {
         await reportError(new Error(scored.error), {

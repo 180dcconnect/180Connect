@@ -9,10 +9,9 @@
 // callers should hand in createAdminClient()'s client — see rescoreOrganisation
 // below for the ready-made wrapper.
 
-import {
-  computePriorityScore,
-  type ScoreableOrganisation,
-} from "./score-client.ts";
+import { DEFAULT_WEIGHTS, type ScoutWeights } from "./calculate-priority-score.ts";
+import { computePriorityScore } from "./score-client.ts";
+import type { ScoreableOrganisation } from "./score-client.ts";
 
 /** Structural slice of a PostgREST client — just the upsert this module needs. */
 type UpsertDb = {
@@ -37,8 +36,12 @@ export async function persistLatestScore(
   db: UpsertDb,
   organisationId: string,
   org: ScoreableOrganisation,
+  // F096: callers load the active SCOUT config once per sweep and pass it down
+  // so every row in a rescore is scored under the same generation. Defaults to
+  // the MVP equal weights for callers that predate configurable scoring.
+  weights: ScoutWeights = DEFAULT_WEIGHTS,
 ): Promise<PersistedScoreResult> {
-  const { score, band } = computePriorityScore(org);
+  const { score, band } = computePriorityScore(org, [], weights);
   const { error } = await db
     .from("latest_scores")
     .upsert(

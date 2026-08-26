@@ -20,6 +20,7 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { reportError } from "@/lib/error-logging";
+import { getActiveScoutConfig } from "./configured-weights.ts";
 import { persistLatestScore, type PersistedScoreResult } from "./persist-latest-score.ts";
 import type { ScoreableOrganisation } from "./score-client.ts";
 
@@ -29,6 +30,7 @@ type OrgRow = {
   outreach_status: string;
   total_income: number | null;
   financial_periods: { total_income: number | null; period_end: string | null }[] | null;
+  grants: { count: number }[] | null;
 };
 
 /**
@@ -47,7 +49,9 @@ export async function rescoreOrganisation(
 
   const { data: org, error } = await admin
     .from("organisations")
-    .select("city, sector, outreach_status, total_income, financial_periods(total_income, period_end)")
+    .select(
+      "city, sector, outreach_status, total_income, financial_periods(total_income, period_end), grants(count)",
+    )
     .eq("id", organisationId)
     .maybeSingle<OrgRow>();
 
@@ -60,8 +64,13 @@ export async function rescoreOrganisation(
     outreach_status: org.outreach_status,
     total_income: org.total_income,
     financial_periods: org.financial_periods ?? [],
+    matched_grant_count: org.grants?.[0]?.count ?? null,
   };
-  return persistLatestScore(admin, organisationId, scoreable);
+
+  // F096: score under the weights of the currently active SCOUT generation, so
+  // a weight change is reflected by the very next rescore without code changes.
+  const config = await getActiveScoutConfig();
+  return persistLatestScore(admin, organisationId, scoreable, config.weights);
 }
 
 /** Reports a best-effort rescore failure to the error log, uniformly. */

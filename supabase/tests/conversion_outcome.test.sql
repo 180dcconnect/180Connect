@@ -7,7 +7,8 @@
 -- status change itself (the status-change behaviour proper is bulk_status_rpc's
 -- and rls_policies' territory): landing on 'converted' records exactly one
 -- OUTCOMES row per client, attributed to the most recent SENT email; leaving
--- 'converted' deletes it again; and CAMs cannot hand-write 'converted' rows —
+-- 'converted' deletes it again; and no outcome type can be hand-written any
+-- more (F144 made all five system-managed) —
 -- the RPCs are the only ordinary path.
 --
 -- Like every suite here these run as real end-user roles through the RPCs, never
@@ -156,7 +157,8 @@ declare
   v_bulk        uuid := '00000000-0000-4000-c000-000000000104';
 begin
   -- Lets the file merge ahead of its migration, same convention as the other suites.
-  if to_regclass('public.outcomes_one_conversion_per_client') is null then
+  if to_regclass('public.outcomes_one_outcome_per_type') is null
+     and to_regclass('public.outcomes_one_conversion_per_client') is null then
     return next skip(1, 'conversion tracking not yet migrated');
     return;
   end if;
@@ -219,7 +221,7 @@ begin
 
   return next is(
     (select count(*)::int from public.audit_log
-      where action = 'conversion_outcome_deleted' and target_table = 'outcomes'
+      where action = 'outcome_deleted' and target_table = 'outcomes'
         and detail->>'organisation_id' = v_emailed::text),
     1,
     'the withdrawal is itself audited, with the client named in the detail'
@@ -298,7 +300,7 @@ begin
 
   return next is(
     (select count(*)::int from public.audit_log
-      where action = 'conversion_outcome_deleted' and target_table = 'outcomes'
+      where action = 'outcome_deleted' and target_table = 'outcomes'
         and detail->>'organisation_id' in (v_bulk::text, v_never_sent::text)),
     2,
     'each bulk withdrawal is audited against its client'
@@ -314,12 +316,14 @@ begin
     'a CAM cannot hand-insert a converted outcome'
   );
 
+  -- F144 made every taxonomy value system-managed, not just conversions: the
+  -- insert is refused, so no hand-written row exists to rename later.
   return next is(
     tests.sqlstate_of(v_cam_a, format(
       'insert into public.outcomes (organisation_id, outcome_type, recorded_by_user_id) values (%L, ''no_response'', %L)',
       v_never_sent, v_cam_a)),
-    null,
-    'a CAM still hand-records every other outcome type untouched'
+    '42501',
+    'a CAM cannot hand-write any outcome type — all five mirror the pipeline'
   );
 
   -- An UPDATE filtered out by the policy's USING clause touches zero rows rather
@@ -335,12 +339,26 @@ begin
     'a CAM cannot edit a converted outcome row, even their own'
   );
 
+  -- The rename attempt needs a row to aim at — seeded as admin (the only
+  -- ordinary writer left besides the RPCs), then attacked as a CAM. An UPDATE
+  -- filtered out by RLS touches zero rows and succeeds silently, so assert on
+  -- the effect: the row must survive untouched.
+  perform tests.sqlstate_of(v_admin, format(
+    'insert into public.outcomes (organisation_id, outcome_type, recorded_by_user_id) values (%L, ''no_response'', %L)',
+    v_bulk, v_admin));
+
   return next is(
     tests.sqlstate_of(v_cam_a, format(
       'update public.outcomes set outcome_type = ''converted'' where organisation_id = %L and outcome_type = ''no_response''',
-      v_never_sent)),
-    '42501',
-    'a CAM cannot rename another outcome type into converted'
+      v_bulk)),
+    null,
+    'the rename attempt raises nothing — RLS filters it to zero rows'
+  );
+
+  return next is(
+    (select outcome_type::text from public.outcomes where organisation_id = v_bulk),
+    'no_response',
+    'a CAM cannot rename another outcome type into converted — the row survived'
   );
 
   return next is(

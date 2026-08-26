@@ -77,7 +77,7 @@
 | id | uuid | Primary key |
 | organisation_id | uuid | Links to the ORGANISATIONS record associated with the outcome |
 | outreach_message_id | uuid | Links to the OUTREACH_MESSAGES record that led to this outcome |
-| outcome_type | enum | converted / no_response / rejected / follow_up / referral |
+| outcome_type | enum | reply / converted / no_response / soft_no / hard_no |
 | notes | text | CAM notes describing what happened and any relevant context |
 | recorded_by_user_id | uuid | Links to the USERS record for the CAM who logged the outcome |
 | created_at | timestamp | Row creation timestamp |

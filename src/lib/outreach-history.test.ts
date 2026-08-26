@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   describeSendStatus,
+  describeStatusFilter,
+  filterOutreachHistory,
   splitOutreachHistory,
+  STATUS_FILTERS,
   type OutreachMessageRow,
 } from "./outreach-history.ts";
 
@@ -103,5 +106,58 @@ describe("describeSendStatus", () => {
 
   it("labels a delivered message as Sent", () => {
     assert.equal(describeSendStatus("sent"), "Sent");
+  });
+});
+
+describe("filterOutreachHistory (F130 AC3)", () => {
+  const rows = [
+    message({ id: "sent-1", send_status: "sent" }),
+    message({ id: "sent-2", send_status: "sent", sent_at: "2026-07-01T09:00:00Z" }),
+    message({ id: "draft-1", send_status: "draft", sent_at: null }),
+    message({ id: "scheduled-1", send_status: "scheduled", sent_at: null }),
+    message({ id: "failed-1", send_status: "failed", sent_at: null }),
+  ];
+  const history = splitOutreachHistory(rows);
+
+  it("returns the full history unchanged for the all filter", () => {
+    const filtered = filterOutreachHistory(history, "all");
+    assert.deepEqual(filtered, history);
+  });
+
+  it("narrows both halves to exactly one status", () => {
+    for (const status of ["draft", "scheduled", "failed"] as const) {
+      const filtered = filterOutreachHistory(history, status);
+      assert.deepEqual(
+        filtered.sent.map((m) => m.id),
+        [],
+        `${status} must never surface a sent row`,
+      );
+      assert.deepEqual(filtered.notSent.map((m) => m.id), [`${status}-1`]);
+    }
+
+    const sent = filterOutreachHistory(history, "sent");
+    assert.deepEqual(sent.sent.map((m) => m.id).sort(), ["sent-1", "sent-2"]);
+    assert.deepEqual(sent.notSent, []);
+  });
+
+  it("never lets a filter re-mix a draft into the sent list", () => {
+    // Guards the same AC3 bug splitOutreachHistory guards, but through the
+    // filter: a wrong implementation could filter raw rows instead of the
+    // already-split halves.
+    const filtered = filterOutreachHistory(history, "failed");
+    assert.ok(filtered.sent.every((m) => m.send_status === "sent"));
+    assert.ok(filtered.notSent.every((m) => m.send_status === "failed"));
+  });
+
+  it("offers every status plus the unfiltered view in the UI's filter list", () => {
+    assert.deepEqual(STATUS_FILTERS, ["all", "draft", "scheduled", "sent", "failed"]);
+    assert.equal(describeStatusFilter("all"), "All");
+    assert.equal(describeStatusFilter("failed"), "Failed to send");
+  });
+
+  it("keeps the original history untouched (view state, not data state)", () => {
+    filterOutreachHistory(history, "draft");
+    assert.equal(history.sent.length, 2);
+    assert.equal(history.notSent.length, 3);
   });
 });

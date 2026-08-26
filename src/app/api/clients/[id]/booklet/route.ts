@@ -19,6 +19,8 @@ import {
 } from "@/lib/booklet/scrape-website";
 import { validateWebsiteFormat } from "@/lib/website-validation";
 import { deriveBookletSources } from "@/lib/booklet/sources";
+import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // F084 — Use Website URL in Booklet: an optional URL the CAM pastes in, separate
 // from the stored organisation.website (which is always sent as a plain field
@@ -156,6 +158,24 @@ export async function POST(
     } else {
       websiteContextResult = { status: "skipped", reason: scraped.reason };
     }
+  }
+
+  const admin = createAdminClient();
+  if (!admin) {
+    return NextResponse.json(
+      { error: "AI generation is temporarily unavailable. Contact an administrator." },
+      { status: 503 },
+    );
+  }
+  const allowance = await consumeAiGenerationAllowance(admin, authorization.actor.id);
+  if (!allowance.allowed) {
+    if ("unavailable" in allowance) {
+      return NextResponse.json({ error: allowance.message }, { status: 503 });
+    }
+    return NextResponse.json(
+      { error: allowance.message, retryAt: allowance.retryAt.toISOString() },
+      { status: 429, headers: { "Retry-After": String(allowance.retryAfterSeconds) } },
+    );
   }
 
   const result = await generateBooklet(

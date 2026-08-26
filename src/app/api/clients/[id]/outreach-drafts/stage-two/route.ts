@@ -20,6 +20,7 @@ import {
 } from "@/lib/outreach/suppression-check";
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import { computeCostUsd } from "@/lib/outreach/generation-cost";
+import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
 
 export const maxDuration = 60;
 
@@ -195,6 +196,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   } catch (error) {
     await reportError(error, { operation: "outreach.stage_two.configure", organisationId });
     return NextResponse.json({ error: "Email generation is not configured. Contact an administrator." }, { status: 503 });
+  }
+
+  const allowance = await consumeAiGenerationAllowance(admin, authorization.actor.id);
+  if (!allowance.allowed) {
+    if ("unavailable" in allowance) {
+      return NextResponse.json({ error: allowance.message }, { status: 503 });
+    }
+    return NextResponse.json(
+      { error: allowance.message, retryAt: allowance.retryAt.toISOString() },
+      { status: 429, headers: { "Retry-After": String(allowance.retryAfterSeconds) } },
+    );
   }
 
   const result = await generateStageTwoDraft(

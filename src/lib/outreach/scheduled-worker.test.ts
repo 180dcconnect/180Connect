@@ -18,6 +18,7 @@ function message(overrides: Partial<DueScheduledMessage> = {}): DueScheduledMess
   return {
     id: "00000000-0000-4000-d000-000000000001",
     organisationId: "00000000-0000-4000-c000-000000000001",
+    sentByUserId: "00000000-0000-4000-a000-000000000001",
     subject: "Hello",
     html: "<p>Body</p>",
     text: "Body",
@@ -33,6 +34,7 @@ function harness(options: {
   claimWon?: boolean;
   delivery?: "ok" | "failed";
   flipSucceeds?: boolean;
+  underLimit?: boolean;
 }) {
   const calls: string[] = [];
   const deps: ScheduledOutreachDeps = {
@@ -43,6 +45,10 @@ function harness(options: {
     async isSuppressed() {
       calls.push("isSuppressed");
       return options.suppressed ?? false;
+    },
+    async underSendLimit(sentByUserId) {
+      calls.push(`underSendLimit:${sentByUserId}`);
+      return options.underLimit ?? true;
     },
     async claim(id) {
       calls.push(`claim:${id}`);
@@ -67,10 +73,27 @@ test("a due message is claimed, delivered and marked sent", async () => {
   assert.deepEqual(calls, [
     "loadDue:2026-09-01T10:00:00.000Z",
     "isSuppressed",
+    `underSendLimit:00000000-0000-4000-a000-000000000001`,
     `claim:00000000-0000-4000-d000-000000000001`,
     "deliver:client@example.org",
     "markSent:00000000-0000-4000-d000-000000000001",
   ]);
+});
+
+test("an exhausted send limit blocks the delivery before any claim or Gmail call", async () => {
+  const { deps, calls } = harness({ due: [message()], underLimit: false });
+  const summary = await deliverDueScheduledEmails(deps);
+  assert.deepEqual(summary, { sent: 0, blocked: 1, failed: 0 });
+  assert.ok(!calls.some((c) => c.startsWith("claim:") || c.startsWith("deliver:")), "no claim or delivery when over the F227 limit");
+});
+
+test("an unattributable scheduled email is counted failed, never delivered", async () => {
+  // No sent_by_user_id = no one to bill the send against; F227's rule is that
+  // nothing leaves without a known sender.
+  const { deps, calls } = harness({ due: [message({ sentByUserId: null })] });
+  const summary = await deliverDueScheduledEmails(deps);
+  assert.deepEqual(summary, { sent: 0, blocked: 0, failed: 1 });
+  assert.ok(!calls.some((c) => c.startsWith("deliver:") || c.startsWith("underSendLimit:")));
 });
 
 test("a suppressed client's scheduled email is skipped, never handed to Gmail", async () => {
@@ -117,6 +140,9 @@ test("mixed outcomes across a batch are counted independently", async () => {
     },
     async isSuppressed(organisationId) {
       return organisationId.endsWith("2"); // second message's client was suppressed after scheduling
+    },
+    async underSendLimit() {
+      return true;
     },
     async claim(id) {
       return !id.endsWith("3"); // third message lost to a concurrent runner

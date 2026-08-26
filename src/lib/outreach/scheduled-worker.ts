@@ -1,5 +1,7 @@
 import { reportError } from "../error-logging.ts";
+import { logSecurityEvent } from "../log-security-event.ts";
 import { emailHtmlToPlainText } from "./email-html.ts";
+import { resolveEmailSendLimit } from "./send-rate-limit.ts";
 
 /**
  * The Supabase/Gmail adapters are imported lazily inside sendDueReviewedEmails,
@@ -37,6 +39,8 @@ const BATCH_LIMIT = 50;
 export type DueScheduledMessage = {
   id: string;
   organisationId: string;
+  /** The CAM who scheduled this email (F227 attribution for the send limit). */
+  sentByUserId: string | null;
   subject: string;
   /** Sanitised HTML body, exactly what schedule_outreach_send stored. */
   html: string;
@@ -53,6 +57,9 @@ export type ScheduledOutreachDeps = {
   loadDue(nowIso: string): Promise<DueScheduledMessage[]>;
   /** True iff an ACTIVE suppression exists for this organisation. */
   isSuppressed(organisationId: string): Promise<boolean>;
+  /** F227: false when the scheduler's fixed-window email quota is exhausted,
+   * or the count cannot be verified (fail-closed). */
+  underSendLimit(sentByUserId: string): Promise<boolean>;
   /** Atomically claims a message for delivery. False = cancelled elsewhere,
    * claimed by another worker, or raced away — never call Gmail on false. */
   claim(messageId: string, nowIso: string): Promise<boolean>;
@@ -76,6 +83,18 @@ export async function deliverDueScheduledEmails(
     // DNC re-checked at point-of-send, not just at schedule time: a client can
     // be suppressed after the CAM queued the email, and the suppression wins.
     if (await deps.isSuppressed(message.organisationId)) {
+      summary.blocked += 1;
+      continue;
+    }
+
+    // F227: a scheduled delivery counts against its scheduler's send limit.
+    // An unattributable message is counted failed — nothing may leave without
+    // a known sender.
+    if (!message.sentByUserId) {
+      summary.failed += 1;
+      continue;
+    }
+    if (!(await deps.underSendLimit(message.sentByUserId))) {
       summary.blocked += 1;
       continue;
     }
@@ -106,6 +125,7 @@ export async function deliverDueScheduledEmails(
 type ScheduledRow = {
   id: string;
   organisation_id: string;
+  sent_by_user_id: string | null;
   subject: string;
   body: string;
   contacts: { email: string | null } | null;
@@ -126,7 +146,7 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
       async loadDue(nowIso) {
         const { data, error } = await admin
           .from("outreach_messages")
-          .select("id, organisation_id, subject, body, contacts(email), organisations(contact_email)")
+          .select("id, organisation_id, sent_by_user_id, subject, body, contacts(email), organisations(contact_email)")
           .eq("send_status", "scheduled")
           .lte("scheduled_at", nowIso)
           .order("scheduled_at", { ascending: true })
@@ -139,6 +159,7 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
           return [{
             id: row.id,
             organisationId: row.organisation_id,
+            sentByUserId: row.sent_by_user_id,
             subject: row.subject,
             html: row.body,
             // The stored body is sanitised HTML (F117) — the plain-text MIME
@@ -160,6 +181,39 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
           .maybeSingle();
         if (error || data) return true;
         return false;
+      },
+
+      // F227: same fixed-window count the manual send path enforces — a
+      // scheduled delivery is an email the scheduler sent, just later. An
+      // unresolvable count fails closed (over limit).
+      async underSendLimit(sentByUserId) {
+        const limit = resolveEmailSendLimit();
+        const windowStart = new Date(now.getTime() - limit.windowSeconds * 1000).toISOString();
+        const { count, error } = await admin
+          .from("outreach_messages")
+          .select("id", { count: "exact", head: true })
+          .eq("sent_by_user_id", sentByUserId)
+          .eq("send_status", "sent")
+          .gte("sent_at", windowStart);
+        if (error || count === null) {
+          await reportError(error ?? new Error("Send-limit count returned no total."), {
+            operation: "outreach.scheduler.rate_limit",
+          });
+          logSecurityEvent("outreach.send_rate_limit_unavailable", {
+            userId: sentByUserId,
+            cause: error?.message ?? "no count returned",
+          });
+          return false;
+        }
+        if (count >= limit.maximum) {
+          logSecurityEvent("outreach.send_rate_limited", {
+            userId: sentByUserId,
+            windowSeconds: limit.windowSeconds,
+            sentInWindow: count,
+          });
+          return false;
+        }
+        return true;
       },
 
       async claim(messageId, nowIso) {

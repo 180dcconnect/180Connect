@@ -7,8 +7,10 @@ import { reportError } from "@/lib/error-logging";
 import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
 import { discardDraftSchema } from "@/lib/outreach/discard-draft";
 import { emailHtmlToPlainText, sanitizeEmailHtml } from "@/lib/outreach/email-html";
+import { logSecurityEvent } from "@/lib/log-security-event";
 import { saveDraftSchema } from "@/lib/outreach/save-draft";
 import { reviewedEmailSchema } from "@/lib/outreach/send-reviewed";
+import { emailLimitMessage, resolveEmailSendLimit } from "@/lib/outreach/send-rate-limit";
 import { checkSuppressionBeforeSend, suppressionBlockedMessage } from "@/lib/outreach/suppression-check";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -223,6 +225,33 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   // format rule F045 uses regardless of what the client-side check already did.
   const decision = canSendClientOutreach(recipient, explicitlyApproved);
   if (!decision.allowed) return { ok: false, message: decision.warning };
+
+  // F227: fixed-window per-CAM send limit, counted from the audited sent_at.
+  // Fail-closed — if the count cannot be verified, nothing is sent.
+  const sendLimit = resolveEmailSendLimit();
+  const windowStart = new Date(Date.now() - sendLimit.windowSeconds * 1000).toISOString();
+  const { count: recentSendCount, error: limitError } = await supabase
+    .from("outreach_messages")
+    .select("id", { count: "exact", head: true })
+    .eq("sent_by_user_id", authorization.actor.id)
+    .eq("send_status", "sent")
+    .gte("sent_at", windowStart);
+  if (limitError || recentSendCount === null) {
+    if (limitError) await reportError(limitError, { operation: "outreach.send.rate_limit", messageId });
+    logSecurityEvent("outreach.send_rate_limit_unavailable", {
+      userId: authorization.actor.id,
+      cause: limitError?.message ?? "no count returned",
+    });
+    return { ok: false, message: "The sending limit could not be checked. Nothing was sent." };
+  }
+  if (recentSendCount >= sendLimit.maximum) {
+    logSecurityEvent("outreach.send_rate_limited", {
+      userId: authorization.actor.id,
+      windowSeconds: sendLimit.windowSeconds,
+      sentInWindow: recentSendCount,
+    });
+    return { ok: false, message: emailLimitMessage(sendLimit.windowSeconds) };
+  }
 
   // Save the exact reviewed content first, and REQUIRE the write to have matched:
   // `.eq(send_status)` + `.single()` turns a raced or already-sent draft into an

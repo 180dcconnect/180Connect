@@ -238,6 +238,10 @@ NEXT_PUBLIC_SENTRY_DSN=<redacted>
 | `OPENAI_API_KEY` | test-key | prod-key | Only server-side | **SENSITIVE:** Never expose |
 | `GEMINI_API_KEY` | free-tier key from [aistudio.google.com](https://aistudio.google.com) | prod key | Only server-side | **SENSITIVE:** Never expose. Gemini key for LLM calls — F082 Client Booklet generation today, F100 email drafts later. Declared in `SCHEMA` (`src/lib/env.ts`) and passed explicitly to the AI SDK rather than read under its default `GOOGLE_GENERATIVE_AI_API_KEY` name. Unset ⇒ booklet generation returns a clear error |
 | `GEMINI_MODEL` | Flash-tier model id copied from the AI Studio model picker | same | Only server-side | Exact model id booklet generation calls (F082). No hardcoded default in code — Google retires model ids often enough that one would go stale. Unset ⇒ booklet generation cannot run |
+| `AI_GENERATION_RATE_LIMIT` | `20` | `20` | Only server-side | Maximum Gemini requests per authenticated user in each fixed window; optional, defaults to 20 |
+| `AI_GENERATION_RATE_WINDOW_SECONDS` | `3600` | `3600` | Only server-side | AI fixed-window duration in seconds; optional, defaults to one hour |
+| `EMAIL_SEND_RATE_LIMIT` | `100` | `100` | Only server-side | Maximum outreach emails per CAM in each fixed window, manual sends and scheduled deliveries combined (F227); optional, defaults to 100 |
+| `EMAIL_SEND_RATE_WINDOW_SECONDS` | `3600` | `3600` | Only server-side | Email send fixed-window duration in seconds; optional, defaults to one hour |
 | `CRON_SECRET` | shared-secret | shared-secret | Only server-side | **SENSITIVE:** Auth for `/api/cron/*` routes |
 | `SESSION_ACTIVITY_SECRET` | random 32+ chars | random 32+ chars | Only server-side | **SENSITIVE:** Signs the inactivity record behind session expiry (F007). Optional — unset means sessions still expire after 30 idle minutes but the record is unsigned and forgeable, so set it everywhere hosted. `openssl rand -base64 32`. Rotating it signs every open session out once |
 | `NEXT_PUBLIC_POSTHOG_KEY` | dev-key | prod-key | Always | Public analytics key |

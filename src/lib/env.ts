@@ -236,6 +236,42 @@ export const SCHEMA: readonly EnvVarSpec[] = [
       "Gemini model id for booklet generation (F082), e.g. a Flash-tier model — copy the exact id from the Google AI Studio model picker rather than guessing, since Google retires model ids frequently. No hardcoded default in code for that reason; unset means booklet generation cannot run.",
   },
   {
+    name: "AI_GENERATION_RATE_LIMIT",
+    required: false,
+    secret: false,
+    description:
+      "Maximum Gemini generation requests each authenticated user may start per fixed window across booklet, Stage 1, and Stage 2 generation. Optional; defaults to 20.",
+    validate: (value) =>
+      /^\d+$/.test(value) && Number(value) > 0
+        ? null
+        : "must be a positive whole number of requests",
+  },
+  {
+    name: "AI_GENERATION_RATE_WINDOW_SECONDS",
+    required: false,
+    secret: false,
+    description:
+      "Fixed-window duration in seconds for AI_GENERATION_RATE_LIMIT. Optional; defaults to 3600 (one hour).",
+    validate: (value) =>
+      /^\d+$/.test(value) && Number(value) > 0
+        ? null
+        : "must be a positive whole number of seconds",
+  },
+  {
+    name: "EMAIL_SEND_RATE_LIMIT",
+    required: false,
+    secret: false,
+    description: "Maximum outreach emails each CAM may send per fixed window. Optional; defaults to 100.",
+    validate: (value) => /^\d+$/.test(value) && Number(value) > 0 ? null : "must be a positive whole number of emails",
+  },
+  {
+    name: "EMAIL_SEND_RATE_WINDOW_SECONDS",
+    required: false,
+    secret: false,
+    description: "Fixed-window duration for EMAIL_SEND_RATE_LIMIT. Optional; defaults to 3600 seconds.",
+    validate: (value) => /^\d+$/.test(value) && Number(value) > 0 ? null : "must be a positive whole number of seconds",
+  },
+  {
     name: "GMAIL_CLIENT_ID",
     required: false,
     secret: false,

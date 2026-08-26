@@ -544,6 +544,19 @@ The throttle reads no user table, so an unknown address is counted, blocked and 
 exactly like a real one — it cannot be used to enumerate accounts. See §4 on why the
 user-facing message stays uniform.
 
+### 3.10a AI generation throttle
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `AI_GENERATION_RATE_LIMIT` | admin | — (`SECURITY DEFINER` RPC only) | — (RPC only) | **none** |
+
+This is the per-user fixed-window counter shared by booklet, Stage 1, and Stage 2
+Gemini generation. The application derives the user id only after the normal
+permission gate, then calls `consume_ai_generation_allowance` with `service_role`.
+The RPC is not executable by `anon` or `authenticated`, so an end user cannot reset,
+forge, or consume another user's allowance through PostgREST. Admin SELECT supports
+abuse investigation; no request payload, prompt, generated content, or API key is stored.
+
 ### 3.11 Actions — shared read, assignee write, admin assignment
 
 Backs F168–F172 (`supabase/migrations/20260801100000_create_actions.sql`). Read is

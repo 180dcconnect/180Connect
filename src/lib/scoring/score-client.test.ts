@@ -1,0 +1,153 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import {
+  bandForScore,
+  computePriorityScore,
+  latestTotalIncome,
+  PRIORITY_BAND_THRESHOLDS,
+  priorityFactorsFor,
+} from "./score-client.ts";
+import { EQUAL_WEIGHTS } from "./calculate-priority-score.ts";
+
+describe("bandForScore — thresholds pending team confirmation", () => {
+  it("bands 0.70 and above high (boundary inclusive)", () => {
+    assert.equal(bandForScore(PRIORITY_BAND_THRESHOLDS.high), "high");
+    assert.equal(bandForScore(1), "high");
+  });
+
+  it("bands 0.40–0.70 medium, boundaries inclusive to medium", () => {
+    assert.equal(bandForScore(PRIORITY_BAND_THRESHOLDS.medium), "medium");
+    assert.equal(bandForScore(0.6999), "medium");
+  });
+
+  it("bands below 0.40 low", () => {
+    assert.equal(bandForScore(0.39), "low");
+    assert.equal(bandForScore(0), "low");
+  });
+});
+
+describe("latestTotalIncome", () => {
+  const fp = (total_income: number | null, period_end: string) => ({
+    total_income,
+    period_end,
+  });
+
+  it("takes the most recent period's income, not the first in the array", () => {
+    const org = {
+      financial_periods: [fp(50_000, "2024-03-31"), fp(90_000, "2025-03-31")],
+    };
+    assert.equal(latestTotalIncome(org), 90_000);
+  });
+
+  it("falls back to an older period when the newest has no income", () => {
+    const org = {
+      financial_periods: [fp(null, "2025-03-31"), fp(20_000, "2023-03-31")],
+    };
+    assert.equal(latestTotalIncome(org), 20_000);
+  });
+
+  it("falls back to the org-level total_income when there are no periods", () => {
+    assert.equal(latestTotalIncome({ total_income: 12_000 }), 12_000);
+  });
+
+  it("returns null when nothing anywhere carries an income", () => {
+    assert.equal(latestTotalIncome({}), null);
+    assert.equal(
+      latestTotalIncome({ financial_periods: [fp(null, "2024-01-01")] }),
+      null,
+    );
+  });
+});
+
+describe("priorityFactorsFor — factor coverage matches the header's honesty table", () => {
+  it("keeps sector neutral while F089 is unbuilt, with or without a value", () => {
+    assert.equal(priorityFactorsFor({ outreach_status: "not_contacted" }).sector, 0.5);
+    assert.equal(
+      priorityFactorsFor({ sector: "Arts & Culture", outreach_status: "not_contacted" })
+        .sector,
+      0.5,
+    );
+  });
+
+  it("keeps geography neutral while no branch priority regions exist", () => {
+    assert.equal(
+      priorityFactorsFor({ city: "Leeds", outreach_status: "not_contacted" }).geography,
+      0.5,
+    );
+  });
+
+  it("sharpens geography the day a caller passes priority regions", () => {
+    const factors = priorityFactorsFor(
+      { city: "Leeds", outreach_status: "not_contacted" },
+      ["leeds"],
+    );
+    assert.ok(factors.geography > 0.5);
+    assert.equal(
+      priorityFactorsFor({ city: "Hull", outreach_status: "not_contacted" }, ["leeds"])
+        .geography < 0.5,
+      true,
+    );
+  });
+
+  it("maps warmer pipeline statuses to a higher previous-contact factor", () => {
+    const warm = priorityFactorsFor({ outreach_status: "responded" }).previousContact;
+    const cold = priorityFactorsFor({ outreach_status: "hard_no" }).previousContact;
+    assert.ok(warm > cold);
+    // Never contacted is unknown, not bad: neutral.
+    assert.equal(
+      priorityFactorsFor({ outreach_status: "not_contacted" }).previousContact,
+      0.5,
+    );
+    // A status the mapping has never heard of degrades to neutral rather than
+    // throwing or silently scoring as fully-engaged.
+    assert.equal(priorityFactorsFor({ outreach_status: "mystery" }).previousContact, 0.5);
+  });
+});
+
+describe("computePriorityScore", () => {
+  it("agrees with calculatePriorityScore over EQUAL_WEIGHTS", () => {
+    const org = {
+      city: null,
+      outreach_status: "initial_outreach_sent",
+      financial_periods: [{ total_income: 250_000, period_end: "2025-03-31" }],
+    };
+    const factors = priorityFactorsFor(org);
+    const manual =
+      factors.sector * EQUAL_WEIGHTS.sector +
+      factors.geography * EQUAL_WEIGHTS.geography +
+      factors.size * EQUAL_WEIGHTS.size +
+      factors.previousContact * EQUAL_WEIGHTS.previousContact;
+    assert.equal(computePriorityScore(org).score, manual);
+  });
+
+  it("produces the documented band alongside the score", () => {
+    const engaged = computePriorityScore({
+      outreach_status: "converted",
+      financial_periods: [{ total_income: 2_000_000, period_end: "2025-03-31" }],
+    });
+    assert.equal(engaged.band, bandForScore(engaged.score));
+
+    const untouched = computePriorityScore({
+      outreach_status: "hard_no",
+    });
+    assert.equal(untouched.band, bandForScore(untouched.score));
+  });
+
+  it("never throws on an organisation with no scoring data at all", () => {
+    const result = computePriorityScore({ outreach_status: "not_contacted" });
+    assert.ok(result.score >= 0 && result.score <= 1);
+  });
+
+  it("scores a fully engaged large organisation above a cold small one", () => {
+    const strong = computePriorityScore({
+      outreach_status: "converted",
+      financial_periods: [{ total_income: 5_000_000, period_end: "2025-03-31" }],
+    });
+    const weak = computePriorityScore({
+      outreach_status: "hard_no",
+      financial_periods: [{ total_income: 5_000, period_end: "2025-03-31" }],
+    });
+    assert.ok(strong.score > weak.score);
+  });
+});

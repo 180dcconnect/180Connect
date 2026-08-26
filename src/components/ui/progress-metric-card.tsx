@@ -47,6 +47,8 @@ export interface ProgressMetricCardProps {
   showDelta?: boolean;
   /** Show the bottom footer bar. If false, hides the line and all footer stats. */
   showFooter?: boolean;
+  /** Offer a "Custom range" step in the period dropdown for exact dates. */
+  allowCustomRange?: boolean;
   /** Value formatting. Default: compact in the headline, exact in the tooltip. */
   valueFormatter?: (value: number) => string;
   dateFormatter?: (date: string) => string;
@@ -92,8 +94,18 @@ const SIZES: Record<
   },
 };
 
-const sliceWindow = (points: SeriesPoint[], n?: number) =>
-  n && n < points.length ? points.slice(-n) : points;
+/**
+ * Trim a series down to the selected window. A preset (`points`) keeps the
+ * trailing N points; an explicit `from`/`to` (ISO days) filters inclusively
+ * by each point's date and wins over `points`.
+ */
+const sliceWindow = (points: SeriesPoint[], n?: number, from?: string, to?: string) => {
+  let out = points;
+  if (from) out = out.filter((p) => p.date >= from);
+  if (to) out = out.filter((p) => p.date <= to);
+  if (!from && !to && n && n < out.length) out = out.slice(-n);
+  return out;
+};
 
 export default function ProgressMetricCard({
   title,
@@ -115,6 +127,7 @@ export default function ProgressMetricCard({
   showStats = true,
   showDelta = true,
   showFooter = true,
+  allowCustomRange = false,
   valueFormatter,
   dateFormatter,
   loading = false,
@@ -126,7 +139,11 @@ export default function ProgressMetricCard({
   const shell = `relative flex ${sz.minH} w-full flex-col overflow-hidden rounded-[28px] border border-border bg-card shadow-[0_2px_10px_rgba(0,0,0,0.04)] ${className}`;
 
   const periods = periodOptions ?? DEFAULT_PERIODS;
-  const [selectedLabel, setSelectedLabel] = useState(period);
+  // The whole selected option is kept (not just its label) because an applied
+  // custom range is not one of the preset `periods` and carries from/to dates.
+  const defaultPeriod =
+    periods.find((p) => p.label === period) ?? periods[periods.length - 1];
+  const [selected, setSelected] = useState<PeriodOption>(() => defaultPeriod);
   const [view, setView] = useState<ChartView>(defaultView);
 
   // Normalise the input to a list of series (a plain `data` prop → one series).
@@ -135,13 +152,14 @@ export default function ProgressMetricCard({
     [series, data, title, accent],
   );
 
-  const selectedOption =
-    periods.find((p) => p.label === selectedLabel) ?? periods[periods.length - 1];
-
   // Cut every series down to the selected period.
   const visibleSeries = useMemo(
-    () => baseSeries.map((s) => ({ ...s, data: sliceWindow(s.data, selectedOption?.points) })),
-    [baseSeries, selectedOption],
+    () =>
+      baseSeries.map((s) => ({
+        ...s,
+        data: sliceWindow(s.data, selected.points, selected.from, selected.to),
+      })),
+    [baseSeries, selected],
   );
 
   const primary = visibleSeries[0];
@@ -216,7 +234,7 @@ export default function ProgressMetricCard({
   const fallback = Math.min(defaultIndex ?? lastIndex, lastIndex);
 
   const handlePeriodChange = (option: PeriodOption) => {
-    setSelectedLabel(option.label);
+    setSelected(option);
     onPeriodChange?.(option);
   };
 
@@ -302,7 +320,7 @@ export default function ProgressMetricCard({
           </div>
           <div className="flex items-center gap-3.5 text-[14px]">
             <motion.span
-              key={`trend-${selectedLabel}`}
+              key={`trend-${selected.label}`}
               initial={{ opacity: 0, y: -3 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.25 }}
@@ -312,12 +330,14 @@ export default function ProgressMetricCard({
               <TrendIcon size={16} strokeWidth={2.5} />
               {displayPercent}
             </motion.span>
-            <PeriodSelect
-              value={selectedLabel}
-              options={periods}
-              onChange={handlePeriodChange}
-              accentText={color.text}
-            />
+          <PeriodSelect
+            value={selected.label}
+            options={periods}
+            onChange={handlePeriodChange}
+            accentText={color.text}
+            allowCustomRange={allowCustomRange}
+            defaultOption={defaultPeriod}
+          />
           </div>
         </div>
 
@@ -338,7 +358,7 @@ export default function ProgressMetricCard({
 
         {/* Headline metric */}
         <motion.div
-          key={`headline-${selectedLabel}`}
+          key={`headline-${selected.label}`}
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, ease: [0.2, 0.7, 0.2, 1] }}
@@ -356,7 +376,7 @@ export default function ProgressMetricCard({
           {showDelta && (
             <div>
               <motion.span
-                key={`delta-${selectedLabel}`}
+                key={`delta-${selected.label}`}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.25 }}

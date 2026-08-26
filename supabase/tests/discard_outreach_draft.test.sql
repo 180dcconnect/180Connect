@@ -57,6 +57,22 @@ begin
 end;
 $$;
 
+-- Row counts are the signal for DELETE policies: unlike INSERT/UPDATE WITH
+-- CHECK, a FOR DELETE USING policy never raises — it makes forbidden rows
+-- invisible, so the statement succeeds having affected zero rows.
+create or replace function tests.rows_affected(p_user_id uuid, p_sql text)
+returns int language plpgsql as $$
+declare v_count int;
+begin
+  perform tests.login_as(p_user_id);
+  execute p_sql;
+  get diagnostics v_count = row_count;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return v_count;
+end;
+$$;
+
 -- ---------------------------------------------------------------------------
 -- Fixtures: two CAMs, one admin, one org each, drafts in the states the suite needs.
 -- ---------------------------------------------------------------------------
@@ -127,21 +143,12 @@ begin
   -- --- RLS DELETE policies (never previously exercised by any suite) --------
 
   return next is(
-    tests.sqlstate_of(
-      v_cam_a,
-      format('delete from public.outreach_messages where id = %L', v_missing)
-    ),
-    null,
-    'policy: a zero-row delete is permitted by RLS (app detects it via returning)'
-  );
-
-  return next is(
-    tests.sqlstate_of(
+    tests.rows_affected(
       v_cam_b,
       format('delete from public.outreach_messages where id = %L', v_draft_a)
     ),
-    '42501',
-    'policy: a CAM cannot delete another CAM''s draft'
+    0,
+    'policy: a CAM''s DELETE against another CAM''s draft matches zero rows'
   );
 
   return next ok(
@@ -150,12 +157,17 @@ begin
   );
 
   return next is(
-    tests.sqlstate_of(
+    tests.rows_affected(
       v_cam_a,
       format('delete from public.outreach_messages where id = %L', v_already_out)
     ),
-    '42501',
+    0,
     'policy: nothing may delete an already-sent message'
+  );
+
+  return next ok(
+    (select count(*) = 1 from public.outreach_messages where id = v_already_out),
+    'policy: the sent message survived the attempted delete'
   );
 
   -- --- RPC behaviour ---------------------------------------------------------

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { History, Sparkles } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
 import { RichTextEmailEditor } from "@/components/rich-text-email-editor";
-import { saveEmailDraft, sendReviewedEmail } from "./outreach-actions";
+import { saveEmailDraft, scheduleReviewedEmail, sendReviewedEmail } from "./outreach-actions";
 import { validateClientEmail } from "@/lib/client-email-validation";
 import { emailHtmlToPlainText, isRichEmailHtml, plainTextToEditorHtml } from "@/lib/outreach/email-html";
 import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
@@ -44,6 +44,17 @@ const STATUS_MESSAGES = [
   "Drafting the email…",
   "Polishing the subject line…",
 ];
+
+/**
+ * F126: `datetime-local` inputs speak wall-clock time in the viewer's timezone,
+ * but `toISOString()` speaks UTC — using it for the picker's `min` offset the
+ * earliest choosable time by the viewer's UTC offset. This renders a Date in
+ * the input's own local format instead.
+ */
+function localDatetimeLocal(date: Date): string {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
 
 const EMAIL_LENGTH_LABELS: Record<EmailLength, string> = {
   short: "Short",
@@ -158,6 +169,8 @@ export function ComposeButton({
   const [sending, setSending] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  // F126: when set, the reviewed email is queued for this time instead of sent now.
+  const [scheduledAt, setScheduledAt] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [warning, setWarning] = useState<Warning | null>(
@@ -293,6 +306,28 @@ export function ComposeButton({
       setBodyEdited(false);
     }
     setSavingDraft(false);
+  }
+
+  // F126: same review gate as send() — the approval checkbox is required either
+  // way, since scheduling is a commitment to deliver this exact content later.
+  async function schedule() {
+    if (!draft || !scheduledAt) return;
+    setSending(true);
+    setSendMessage(null);
+    const result = await scheduleReviewedEmail({
+      organisationId,
+      messageId: draft.id,
+      subject,
+      body,
+      explicitlyApproved: approved,
+      scheduledAt: new Date(scheduledAt).toISOString(),
+    });
+    setSendMessage(result.message);
+    if (result.ok) {
+      setDraft(null);
+      setScheduledAt("");
+    }
+    setSending(false);
   }
 
   const historyLink = historyHref && (
@@ -595,6 +630,29 @@ export function ComposeButton({
               {saveMessage}
             </p>
           )}
+          {/* F126: schedule the reviewed email for later instead of sending now.
+              Same approval gate as Send — a scheduled email is a commitment to
+              deliver this exact content, so it cannot bypass human review. */}
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="text-xs font-bold text-foreground/65">
+              Or schedule for later
+              <input
+                className="mt-1 block rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                min={localDatetimeLocal(new Date())}
+                onChange={(event) => setScheduledAt(event.target.value)}
+                type="datetime-local"
+                value={scheduledAt}
+              />
+            </label>
+            <OriginButton
+              disabled={!approved || sending || recipientValidation.status !== "valid" || !scheduledAt || !subject.trim() || emailHtmlToPlainText(body).length === 0}
+              onClick={schedule}
+              type="button"
+              variant="outline"
+            >
+              Schedule reviewed email
+            </OriginButton>
+          </div>
           <p className="text-xs font-bold text-amber-800" role="status">
             {sendMessage ?? "Not sent — explicit human review and send are required."}
           </p>

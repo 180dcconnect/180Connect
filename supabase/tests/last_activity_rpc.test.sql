@@ -71,14 +71,16 @@ begin
   values
     (v_admin, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'admin@180dc.org'),
     (v_cam_a, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'cam-a@180dc.org'),
-    (v_cam_b, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'cam-b@180dc.org')
+    (v_cam_b, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'cam-b@180dc.org'),
+    ('00000000-0000-4000-a000-000000000004', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'offboarded@180dc.org')
   on conflict (id) do nothing;
 
   insert into public.users (id, email, full_name, role, is_active)
   values
     (v_admin, 'admin@180dc.org', 'Test Admin', 'admin', true),
     (v_cam_a, 'cam-a@180dc.org', 'Test CAM A', 'cam',   true),
-    (v_cam_b, 'cam-b@180dc.org', 'Test CAM B', 'cam',   true)
+    (v_cam_b, 'cam-b@180dc.org', 'Test CAM B', 'cam',   true),
+    ('00000000-0000-4000-a000-000000000004', 'offboarded@180dc.org', 'Offboarded CAM', 'cam', false)
   on conflict (id) do update
     set role = excluded.role, is_active = excluded.is_active;
 
@@ -168,10 +170,20 @@ begin
     'an admin gets every requested client'
   );
 
-  -- Inactive accounts are refused before any data leaves.
+  -- An offboarded (is_active = false) account is refused before any data
+  -- leaves — the definer body's own app.is_active_user() re-check, not just
+  -- the grant.
+  return next is(
+    tests.sqlstate_as('00000000-0000-4000-a000-000000000004'::uuid, format(
+      'select * from public.get_clients_last_activity(array[%L]::uuid[])', v_busy)),
+    '42501',
+    'an inactive account is refused outright'
+  );
+
+  -- ...while an active account succeeds through the ordinary path.
   return next is(
     tests.sqlstate_as(v_cam_b, format(
-      'select * from public.get_clients_last_activity(array[%L]::uuid[])', v_busy)),
+      'select * from public.get_clients_last_activity(array[%L]::uuid[])', v_other)),
     null,
     'an active user can execute the RPC through the ordinary path'
   );

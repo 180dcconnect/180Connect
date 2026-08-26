@@ -289,10 +289,10 @@ export default async function DashboardPage({
   let attentionItems = needsAttention(rows, actor.id);
   if (!loadFailed && attentionItems.length > 0) {
     const supabase = await createClient();
-    const myClientIds = rows
+    const myClients = rows
       .filter((row) => row.owner_id === actor.id)
-      .map((row) => row.id);
-    if (myClientIds.length > 0) {
+      .map((row) => ({ id: row.id, legal_name: row.legal_name, outreach_status: row.outreach_status }));
+    if (myClients.length > 0) {
       const [preferences, activity] = await Promise.all([
         supabase
           .from("outreach_preferences")
@@ -300,7 +300,7 @@ export default async function DashboardPage({
           .eq("user_id", actor.id)
           .maybeSingle(),
         supabase.rpc("get_clients_last_activity", {
-          p_organisation_ids: myClientIds,
+          p_organisation_ids: myClients.map((row) => row.id),
         }),
       ]);
       if (activity.error) {
@@ -311,9 +311,7 @@ export default async function DashboardPage({
       }
 
       const recommendations: FollowUpRecommendation[] = followUpRecommendations(
-        rows
-          .filter((row) => row.owner_id === actor.id)
-          .map((row) => ({ id: row.id, legal_name: row.legal_name, outreach_status: row.outreach_status })),
+        myClients,
         new Map(
           (activity.data ?? []).map(
             (row: {

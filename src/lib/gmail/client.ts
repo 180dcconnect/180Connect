@@ -58,7 +58,10 @@ function isCredentialRejection(status: number | null): boolean {
   return status === 400 || status === 401 || status === 403;
 }
 
-async function accessToken(config: GmailConfig, fetchImpl: typeof fetch = fetch): Promise<string> {
+export async function getGmailAccessToken(
+  config: GmailConfig,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
   const startedAt = Date.now();
   const response = await fetchImpl(TOKEN_ENDPOINT, {
     method: "POST",
@@ -114,7 +117,7 @@ export async function sendGmailMessage(
   }
 
   const fetchImpl = options.fetchImpl ?? fetch;
-  const tokenProvider = options.tokenProvider ?? (() => accessToken(config, fetchImpl));
+  const tokenProvider = options.tokenProvider ?? (() => getGmailAccessToken(config, fetchImpl));
 
   // Auth runs in its own phase: a rejected refresh token is a credential problem
   // ("re-authorise", never retry), not a send outage — and accessToken already

@@ -9,6 +9,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
+import { reportError } from "@/lib/error-logging";
 
 export type HandoverUser = {
   id: string;
@@ -61,8 +64,9 @@ export function OffboardPanel({ users }: { users: HandoverUser[] }) {
         return;
       }
       setPreview(body as Preview);
-    } catch {
-      setMessage("Could not load their work. Check your connection and try again.");
+    } catch (err) {
+      void reportError(err, { operation: "admin.offboard.load_preview_client" });
+      setMessage(NETWORK_ERROR_MESSAGE);
     } finally {
       setBusy(false);
     }
@@ -88,8 +92,9 @@ export function OffboardPanel({ users }: { users: HandoverUser[] }) {
       setReason("");
       // The preview described a state that no longer exists.
       await loadPreview(fromUserId);
-    } catch {
-      setMessage("The handover could not be saved. Check your connection and try again.");
+    } catch (err) {
+      void reportError(err, { operation: "admin.offboard.submit_client" });
+      setMessage(NETWORK_ERROR_MESSAGE);
     } finally {
       setBusy(false);
     }
@@ -215,18 +220,19 @@ export function OffboardPanel({ users }: { users: HandoverUser[] }) {
         </>
       )}
 
-      <p aria-live="polite" className="mt-5 min-h-6 text-sm font-bold">
-        {message}
+      <div className="mt-5 min-h-6">
+        {message && <InlineAlert message={message} />}
         {result && (
-          <span>
-            {`Moved ${result.organisationsMoved} client(s) and ${result.actionsMoved} action(s).`}
-            {/* A skip is not a failure — a client whose owner changed since the preview
-                is left alone on purpose. Saying so stops it reading as data loss. */}
-            {result.skipped > 0
-              && ` ${result.skipped} were left alone because they had already moved.`}
-          </span>
+          <InlineAlert
+            tone="success"
+            message={`Moved ${result.organisationsMoved} client(s) and ${result.actionsMoved} action(s).${
+              result.skipped > 0
+                ? ` ${result.skipped} were left alone because they had already moved.`
+                : ""
+            }`}
+          />
         )}
-      </p>
+      </div>
     </form>
   );
 }

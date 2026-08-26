@@ -236,38 +236,6 @@ export const SCHEMA: readonly EnvVarSpec[] = [
       "Gemini model id for booklet generation (F082), e.g. a Flash-tier model — copy the exact id from the Google AI Studio model picker rather than guessing, since Google retires model ids frequently. No hardcoded default in code for that reason; unset means booklet generation cannot run.",
   },
   {
-    name: "GMAIL_CLIENT_ID",
-    required: false,
-    secret: false,
-    description:
-      "OAuth client ID for the Google Cloud project used by the Gmail outreach integration (F241). Server-side only even though the identifier is not itself a secret.",
-  },
-  {
-    name: "GMAIL_CLIENT_SECRET",
-    required: false,
-    secret: true,
-    description:
-      "OAuth client secret for the Gmail outreach integration (F241). Store only in the deployment secret manager and .env.local.",
-  },
-  {
-    name: "GMAIL_REFRESH_TOKEN",
-    required: false,
-    secret: true,
-    description:
-      "Long-lived OAuth refresh token authorised by the clients.sheffield outreach mailbox. Never expose it to the browser or commit it.",
-  },
-  {
-    name: "GMAIL_SENDER_EMAIL",
-    required: false,
-    secret: false,
-    description:
-      "Exact Google Workspace mailbox used for client outreach (F124). No fallback is permitted when it is absent.",
-    validate: (value) =>
-      /^[^@<>\s]+@[^@<>\s]+\.[^@<>\s]+$/.test(value)
-        ? null
-        : "must be a valid email address",
-  },
-  {
     name: "AI_GENERATION_RATE_LIMIT",
     required: false,
     secret: false,
@@ -302,6 +270,38 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     secret: false,
     description: "Fixed-window duration for EMAIL_SEND_RATE_LIMIT. Optional; defaults to 3600 seconds.",
     validate: (value) => /^\d+$/.test(value) && Number(value) > 0 ? null : "must be a positive whole number of seconds",
+  },
+  {
+    name: "GMAIL_CLIENT_ID",
+    required: false,
+    secret: false,
+    description:
+      "OAuth client ID for the Google Cloud project used by the Gmail outreach integration (F241). Server-side only even though the identifier is not itself a secret.",
+  },
+  {
+    name: "GMAIL_CLIENT_SECRET",
+    required: false,
+    secret: true,
+    description:
+      "OAuth client secret for the Gmail outreach integration (F241). Store only in the deployment secret manager and .env.local.",
+  },
+  {
+    name: "GMAIL_REFRESH_TOKEN",
+    required: false,
+    secret: true,
+    description:
+      "Long-lived OAuth refresh token authorised by the clients.sheffield outreach mailbox. Never expose it to the browser or commit it.",
+  },
+  {
+    name: "GMAIL_SENDER_EMAIL",
+    required: false,
+    secret: false,
+    description:
+      "Exact Google Workspace mailbox used for client outreach (F124). No fallback is permitted when it is absent.",
+    validate: (value) =>
+      /^[^@<>\s]+@[^@<>\s]+\.[^@<>\s]+$/.test(value)
+        ? null
+        : "must be a valid email address",
   },
   {
     name: "CHARITY_COMMISSION_BACKFILL_START",

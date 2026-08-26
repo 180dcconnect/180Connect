@@ -20,6 +20,8 @@ export type SecurityEvent =
   | "authentication.password_update_failed"
   | "ai.generation_rate_limited"
   | "ai.generation_rate_limit_unavailable"
+  | "outreach.send_rate_limited"
+  | "outreach.send_rate_limit_unavailable"
   | "session.expired"
   | "session.recovery_confined"
   | "outreach.suppression_blocked"
@@ -30,6 +32,7 @@ export type SecurityEvent =
   | "user.invite_rejected"
   | "user.invite_failed"
   | "user.invite_role_failed"
+  | "user.invite_client_assignment_failed"
   | "user.invite_cancel_audit_failed"
   | "user.invite_accept_failed"
   | "user.full_name_update_failed";

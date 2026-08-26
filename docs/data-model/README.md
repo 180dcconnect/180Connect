@@ -21,14 +21,14 @@ version the repository and its tooling read.
 | Tab | Rows |
 | :--- | ---: |
 | [01 Data Lifecycle](01-data-lifecycle.md) | 16 |
-| [02 Data Dictionary](02-data-dictionary.md) | 453 |
+| [02 Data Dictionary](02-data-dictionary.md) | 510 |
 | [03 Raw Data](03-raw-data.md) | 145 |
-| [04 Entities](04-entities.md) | 188 |
+| [04 Entities](04-entities.md) | 270 |
 | [05 - Feature Store](05-feature-store.md) | 50 |
 | [06 - Predictions](06-predictions.md) | 44 |
-| [07 Outreach & Outcomes](07-outreach-outcomes.md) | 52 |
+| [07 Outreach & Outcomes](07-outreach-outcomes.md) | 61 |
 | [08 System Analytics](08-system-analytics.md) | 51 |
 | [09 CAM Analytics](09-cam-analytics.md) | 45 |
-| [11 Supasbase Migration Sequence](11-supasbase-migration-sequence.md) | 34 |
+| [11 Supasbase Migration Sequence](11-supasbase-migration-sequence.md) | 46 |
 
 Source spreadsheet: `~/Downloads/Data Model.xlsx`

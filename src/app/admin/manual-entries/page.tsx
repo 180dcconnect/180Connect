@@ -11,7 +11,7 @@ type Entry = {
   id: string;
   legal_name: string;
   mission_statement: string;
-  organisation_type: "charity" | "company" | "both" | "other";
+  organisation_type: "charity" | "cio" | "cic" | "social_enterprise" | "ngo" | "company" | "both" | "other";
   address_line_1: string;
   city: string;
   postcode: string;

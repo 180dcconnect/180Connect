@@ -84,6 +84,31 @@ describe("planRegistryLookups", () => {
     );
   });
 
+  it("withholds the name search from a site with positive non-UK evidence", () => {
+    const plan = planRegistryLookups(extraction({
+      legalName: "WakaMate",
+      countryCode: "NG",
+    }));
+
+    assert.equal(plan.company, null);
+    assert.equal(plan.withheldNameSearch, "WakaMate");
+  });
+
+  it("still name-searches when no country is known — most UK sites never state one", () => {
+    const plan = planRegistryLookups(extraction({ legalName: "Green Futures CIC" }));
+    assert.deepEqual(plan.company, { registeredName: "Green Futures CIC" });
+    assert.equal(plan.withheldNameSearch, null);
+  });
+
+  it("still name-searches a site with positive UK evidence", () => {
+    const plan = planRegistryLookups(extraction({
+      legalName: "Green Futures CIC",
+      countryCode: "GB",
+    }));
+    assert.deepEqual(plan.company, { registeredName: "Green Futures CIC" });
+    assert.equal(plan.withheldNameSearch, null);
+  });
+
   it("does not name-search a charity, whose own register is the better question", () => {
     const plan = planRegistryLookups(extraction({
       legalName: "Sheffield Wildlife Trust",
@@ -162,6 +187,24 @@ describe("resolveRegistry", () => {
 
     assert.deepEqual(resolution.matches, []);
     assert.match(resolution.notes[0], /NIC101234/);
+  });
+
+  it("tells the CAM why a non-UK site was not checked against the UK registers", async () => {
+    const askedCompany: CompanyLookup[] = [];
+    const resolution = await resolveRegistry(
+      extraction({ legalName: "WakaMate", countryCode: "NG" }),
+      dependencies({
+        lookupCompany: async (lookup) => {
+          askedCompany.push(lookup);
+          return COMPANY_RECORD;
+        },
+      }),
+    );
+
+    // No lookup was made, and the silence is explained rather than unremarked.
+    assert.deepEqual(askedCompany, []);
+    assert.deepEqual(resolution.matches, []);
+    assert.match(resolution.notes[0], /outside the United Kingdom \(NG\)/);
   });
 
   it("records the failure for engineers while the CAM sees only the note", async () => {

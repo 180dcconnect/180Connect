@@ -13,6 +13,7 @@ import {
   filterByStatus,
   filterByTags,
   filterByPriorityScore,
+  hasActiveQueuePreferences,
   prioritiseQueue,
   filterByType,
   filterBySector,
@@ -411,7 +412,10 @@ export default async function ClientsPage({
   matchingClients = filterByPriorityScore(matchingClients, scoreBands);
 
   // F196 / F197 / F199 / F094: Prioritise matching clients based on the CAM's
-  // geographic, sector, size and grant-history preferences
+  // geographic, sector, size and grant-history preferences, layered on top of
+  // the persisted base scores (F088) — preference total first, base score
+  // breaks ties. This order is only a *default*: an explicit ?listSort= below
+  // can still override it, but it is no longer clobbered by one.
   matchingClients = prioritiseQueue(matchingClients, outreachPrefs.data);
   const teamMembers = team.data ?? [];
   // The owner dropdown lists CAMs only (F163), but `?owner=` can name anyone who
@@ -489,9 +493,25 @@ export default async function ClientsPage({
   // pagination is what makes it a sort of the list rather than of this page.
   // The funnel and breakdown above keep reading `matchingClients`: they count,
   // and a count doesn't care what order it was counted in.
+  //
+  // F094 AC1 — the default view *is* the personal queue. prioritiseQueue has
+  // already put the CAM's preferred clients on top (ties broken by base score),
+  // so re-sorting alphabetically here — what sortClients does when no params are
+  // present — would silently throw that away before it ever reached the screen.
+  // The override therefore applies only when the CAM actually asked for one via
+  // ?listSort=/?listDir=; with no preferences set, the incoming order is the
+  // query's legal_name order, so the default view still reads A–Z as before.
   const listSortField = parseListSort(listSortParam);
   const listSortDirection = parseListDirection(listDirParam);
-  const sortedClients = sortClients(matchingClients, listSortField, listSortDirection);
+  const explicitListSort = listSortParam !== undefined || listDirParam !== undefined;
+  const sortedClients = explicitListSort
+    ? sortClients(matchingClients, listSortField, listSortDirection)
+    : matchingClients;
+  // Drives the sentence above the list and which links carry the sort params:
+  // the queue is genuinely personalised only when preferences exist AND no
+  // explicit sort has been chosen over them.
+  const personalQueueDefault =
+    !explicitListSort && hasActiveQueuePreferences(outreachPrefs.data);
 
   const totalPages = Math.max(1, Math.ceil(matchingClients.length / PAGE_SIZE));
   const requestedPage = Number.parseInt(pageParam ?? "1", 10);
@@ -543,8 +563,15 @@ export default async function ClientsPage({
       // renders as name/ascending, and every link this page generates then
       // carries the canonical value, so the junk leaves the URL on the next
       // click instead of propagating forever.
-      listSort: listSortField,
-      listDir: listSortDirection,
+      //
+      // F094 — but only when the CAM actually chose a sort: writing these
+      // unconditionally used to stamp ?listSort=name&listDir=ascending onto
+      // every filter/pagination link, which would have ended the personalised
+      // default order after one click. Absent stays absent, so navigating
+      // around the page keeps the personal queue until an explicit sort (or
+      // the menu's own links) opt into one.
+      listSort: listSortParam !== undefined ? listSortField : undefined,
+      listDir: listDirParam !== undefined ? listSortDirection : undefined,
       // Not carried over: a link that changes what the list holds has to start at
       // page one. Pagination opts back in explicitly.
       page: undefined,
@@ -763,9 +790,14 @@ export default async function ClientsPage({
               {/* F060/F061 — the list's own sort. Same sentence control the
                   breakdown card uses, on its own pair of params, sitting on
                   the line that already introduces the list. Shown at every
-                  width: the column headers below it are lg-only. */}
+                  width: the column headers below it are lg-only.
+                  F094 — when the CAM's preferences are driving the default
+                  order and no explicit sort has been chosen over them, the
+                  sentence says so rather than quietly claiming "name,
+                  ascending" for an order it isn't. Choosing either word in
+                  the sentence applies that sort explicitly. */}
               <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                Sorted by{" "}
+                {personalQueueDefault ? "Ordered for you — override:" : "Sorted by"}{" "}
                 <ListSortMenu
                   param="listSort"
                   value={listSortField}

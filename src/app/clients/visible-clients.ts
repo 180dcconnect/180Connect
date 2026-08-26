@@ -634,23 +634,18 @@ function getGeographicPriorityScore(
  *
  * Re-orders clients so that organisations matching the CAM's preferred sectors
  * are prioritised higher in the CAM's personal queue.
+ *
+ * A single-dimension view over `prioritiseQueue`: only the sector preference is
+ * passed through, so the ordering (and the F094 base-score tie-break) is exactly
+ * what the unified queue produces for a CAM whose only active preference is
+ * sector. Kept as a named entry point for readability at call sites.
  */
 export function prioritiseBySector(
   clients: VisibleClient[],
   preferences?: OutreachQueuePreferences | null,
 ): VisibleClient[] {
-  if (!preferences) return clients;
-
-  const preferredSectors = (preferences.preferred_sectors ?? []).map((s) => s.toLowerCase().trim());
-  if (preferredSectors.length === 0) return clients;
-
-  return [...clients].sort((a, b) => {
-    const scoreA = getSectorPriorityScore(a, preferredSectors);
-    const scoreB = getSectorPriorityScore(b, preferredSectors);
-    if (scoreB !== scoreA) {
-      return scoreB - scoreA;
-    }
-    return a.legal_name.localeCompare(b.legal_name);
+  return prioritiseQueue(clients, {
+    preferred_sectors: preferences?.preferred_sectors ?? null,
   });
 }
 
@@ -677,23 +672,17 @@ export function getSizePriorityScore(
  *
  * Re-orders clients so that organisations matching the CAM's preferred size tiers
  * are prioritised higher in the CAM's personal queue.
+ *
+ * A single-dimension view over `prioritiseQueue` (see prioritiseBySector): only
+ * the income-band preference is passed through, so ties break on the F094 base
+ * score rather than the alphabet.
  */
 export function prioritiseBySize(
   clients: VisibleClient[],
   preferences?: OutreachQueuePreferences | null,
 ): VisibleClient[] {
-  if (!preferences) return clients;
-
-  const preferredBands = (preferences.preferred_income_bands ?? []).map((b) => b.toLowerCase().trim());
-  if (preferredBands.length === 0) return clients;
-
-  return [...clients].sort((a, b) => {
-    const scoreA = getSizePriorityScore(a, preferredBands);
-    const scoreB = getSizePriorityScore(b, preferredBands);
-    if (scoreB !== scoreA) {
-      return scoreB - scoreA;
-    }
-    return a.legal_name.localeCompare(b.legal_name);
+  return prioritiseQueue(clients, {
+    preferred_income_bands: preferences?.preferred_income_bands ?? null,
   });
 }
 
@@ -713,20 +702,17 @@ export function getGrantPriorityScore(
  *
  * Re-orders clients so that organisations with documented grant awards (360Giving)
  * are prioritised higher in the CAM's personal queue.
+ *
+ * A single-dimension view over `prioritiseQueue` (see prioritiseBySector): only
+ * the grant toggle is passed through, so ties break on the F094 base score
+ * rather than the alphabet.
  */
 export function prioritiseByGrants(
   clients: VisibleClient[],
   preferences?: OutreachQueuePreferences | null,
 ): VisibleClient[] {
-  if (!preferences?.prioritise_grant_recipients) return clients;
-
-  return [...clients].sort((a, b) => {
-    const scoreA = getGrantPriorityScore(a, preferences.prioritise_grant_recipients);
-    const scoreB = getGrantPriorityScore(b, preferences.prioritise_grant_recipients);
-    if (scoreB !== scoreA) {
-      return scoreB - scoreA;
-    }
-    return a.legal_name.localeCompare(b.legal_name);
+  return prioritiseQueue(clients, {
+    prioritise_grant_recipients: preferences?.prioritise_grant_recipients ?? false,
   });
 }
 
@@ -735,6 +721,17 @@ export function prioritiseByGrants(
  *
  * Combines geographic, sector, size, and grant preference weighting to rank matching clients
  * at the top of the CAM's queue without altering underlying base scores (F088).
+ *
+ * F094 AC1 asks for preferences "layered on top of the base score rather than replacing
+ * it" — that is also issue #93's open question ("how personal preferences override base
+ * score"), decided as: preference total is the primary key; clients tied on it are ranked
+ * by their persisted base score (F088) descending; name breaks remaining ties. Unscored
+ * clients are pinned below scored ones within a tie group, in both senses, the same way
+ * sortClients treats them for ?listSort=priority — never floating to the top as if
+ * unscored meant perfect, nor hiding at the bottom of a tie group as if it meant zero.
+ *
+ * The persisted scores themselves are only ever read here, never written — changing a
+ * preference re-orders the queue on the next view without any re-score (F094 AC3).
  *
  * If no preferences are active (or when cleared), returns the unmodified list in
  * its default unweighted order.
@@ -761,6 +758,9 @@ export function prioritiseQueue(
     return clients;
   }
 
+  const byName = (a: VisibleClient, b: VisibleClient) =>
+    a.legal_name.localeCompare(b.legal_name);
+
   return [...clients].sort((a, b) => {
     const geoScoreA = getGeographicPriorityScore(a, preferredReach, preferredCities);
     const geoScoreB = getGeographicPriorityScore(b, preferredReach, preferredCities);
@@ -777,7 +777,15 @@ export function prioritiseQueue(
     if (totalB !== totalA) {
       return totalB - totalA;
     }
-    return a.legal_name.localeCompare(b.legal_name);
+    // Tie on preferences: the base score decides. Unscored sits visibly apart,
+    // below every scored peer in the tie group, whichever side it is compared from.
+    if ((a.priorityScore === null) !== (b.priorityScore === null)) {
+      return a.priorityScore === null ? 1 : -1;
+    }
+    if (a.priorityScore !== null && b.priorityScore !== null && b.priorityScore !== a.priorityScore) {
+      return b.priorityScore - a.priorityScore;
+    }
+    return byName(a, b);
   });
 }
 
@@ -791,6 +799,28 @@ export function prioritiseByGeography(
   preferences?: GeographicPreference | null,
 ): VisibleClient[] {
   return prioritiseQueue(clients, preferences);
+}
+
+/**
+ * F094 — whether a preferences row would actually reorder anything. Same
+ * trimming/normalisation `prioritiseQueue` applies internally, so this cannot
+ * disagree with it: a row of only whitespace values counts as inactive here
+ * and reorders nothing there. The clients page uses it to know when the
+ * default view is genuinely a personal queue rather than just unsorted data.
+ */
+export function hasActiveQueuePreferences(
+  preferences?: OutreachQueuePreferences | null,
+): boolean {
+  if (!preferences) return false;
+  const active = (values?: string[] | null) =>
+    (values ?? []).some((value) => value.trim().length > 0);
+  return (
+    active(preferences.preferred_geographic_reach) ||
+    active(preferences.preferred_cities) ||
+    active(preferences.preferred_sectors) ||
+    active(preferences.preferred_income_bands) ||
+    Boolean(preferences.prioritise_grant_recipients)
+  );
 }
 
 /* ─── List sorting (F060 #62, F061 #63) ────────────────────────────────── */

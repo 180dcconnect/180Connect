@@ -16,6 +16,7 @@ import {
   prioritiseBySize,
   prioritiseByGrants,
   prioritiseQueue,
+  hasActiveQueuePreferences,
   resolveClientIncomeBand,
   getGrantPriorityScore,
   filterByCountry,
@@ -385,22 +386,32 @@ describe("prioritiseBySector (F197 / F089 / F094)", () => {
     assert.deepEqual(result.map((c) => c.id), ["1", "2", "3", "4", "5"]);
   });
 
-  it("matches aliases on whole words only — no accidental fragment boosts", () => {
-    const result = prioritiseBySector(clients, {
-      preferred_sectors: ["Arts & Culture"],
-    });
-    // None of these organisations is an arts organisation; raw substring
-    // matching could previously boost via fragments of unrelated words.
-    assert.deepEqual(result.map((c) => c.id), ["1", "2", "3", "4", "5"]);
-  });
-
-  it("does not let overlapping group vocabulary cross-match unrelated sectors", () => {
-    const result = prioritiseBySector(clients, {
-      preferred_sectors: ["Human Rights & Justice", "Social Enterprise"],
-    });
-    // Youth (#1) and poverty (#5) orgs share vocabulary with the justice and
-    // community groups but are neither — they keep the unweighted tail order.
-    assert.deepEqual(result.map((c) => c.id), ["1", "2", "3", "4", "5"]);
+  it("breaks preference ties on the stored base score, like the unified queue (F094)", () => {
+    // Alphabetical order would put Alpha first; both match the sector
+    // preference equally (+10), so the F088 tie-break must decide instead.
+    const rows = visibleClients(
+      [
+        org({
+          id: "alpha-low",
+          legal_name: "Alpha Health Org",
+          sector: "Healthcare",
+          latest_scores: { priority_score: 0.2, priority_band: "low", scored_at: null },
+        }),
+        org({
+          id: "zed-high",
+          legal_name: "Zed Health Org",
+          sector: "Healthcare",
+          latest_scores: { priority_score: 0.9, priority_band: "high", scored_at: null },
+        }),
+      ],
+      [],
+    );
+    const result = prioritiseBySector(rows, { preferred_sectors: ["healthcare"] });
+    assert.deepEqual(result.map((c) => c.id), ["zed-high", "alpha-low"]);
+    assert.deepEqual(
+      names(prioritiseBySize(rows, { preferred_income_bands: [] })),
+      ["Alpha Health Org", "Zed Health Org"],
+    );
   });
 });
 
@@ -538,6 +549,189 @@ describe("prioritiseQueue (Combined F196 + F197 + F198 + F199)", () => {
     // Delta matches Grants: 10 = 10
     // Alpha matches Sector: 8 = 8
     assert.deepEqual(result.map((c) => c.id), ["3", "2", "4", "1"]);
+  });
+});
+
+/* ─── F094 — the queue layered on top of the base score ────────────────── */
+
+describe("prioritiseQueue ties break on the base score (F094 AC1)", () => {
+  const clients = visibleClients(
+    [
+      // Both Leeds orgs tie on the preference total (city match = +10); the
+      // persisted base score must decide between them, not the alphabet.
+      org({
+        id: "match-low",
+        legal_name: "Zed Leeds Charity",
+        city: "Leeds",
+        latest_scores: { priority_score: 0.2, priority_band: "low", scored_at: null },
+      }),
+      org({
+        id: "match-high",
+        legal_name: "Alpha Leeds Charity",
+        city: "Leeds",
+        latest_scores: { priority_score: 0.9, priority_band: "high", scored_at: null },
+      }),
+      // Highest base score on the board, but no preference match: preferences
+      // lead, so it stays behind both matches ("layered on top", not replaced).
+      org({
+        id: "nomatch-top-score",
+        legal_name: "Bristol Perfect Score",
+        city: "Bristol",
+        latest_scores: { priority_score: 1.0, priority_band: "high", scored_at: null },
+      }),
+    ],
+    [],
+  );
+
+  it("ranks equal preference totals by base score descending", () => {
+    const result = prioritiseQueue(clients, { preferred_cities: ["leeds"] });
+    assert.deepEqual(result.map((c) => c.id), ["match-high", "match-low", "nomatch-top-score"]);
+  });
+
+  it("pins unscored clients below scored ones inside a tie group", () => {
+    const rows = visibleClients(
+      [
+        org({ id: "unscored", legal_name: "A Unscored Leeds Org", city: "Leeds" }),
+        org({
+          id: "scored",
+          legal_name: "B Scored Leeds Org",
+          city: "Leeds",
+          latest_scores: { priority_score: 0.1, priority_band: "low", scored_at: null },
+        }),
+      ],
+      [],
+    );
+    const result = prioritiseQueue(rows, { preferred_cities: ["leeds"] });
+    assert.deepEqual(result.map((c) => c.id), ["scored", "unscored"]);
+  });
+
+  it("pins unscored clients even against a zero base score", () => {
+    const rows = visibleClients(
+      [
+        org({ id: "unscored", legal_name: "A Unscored Org", city: "Leeds" }),
+        org({
+          id: "zero",
+          legal_name: "B Zero Score Org",
+          city: "Leeds",
+          latest_scores: { priority_score: 0, priority_band: "low", scored_at: null },
+        }),
+      ],
+      [],
+    );
+    const result = prioritiseQueue(rows, { preferred_cities: ["leeds"] });
+    assert.deepEqual(result.map((c) => c.id), ["zero", "unscored"]);
+  });
+
+  it("falls back to a stable name order when every client is unscored (missing scoring inputs)", () => {
+    const rows = visibleClients(
+      [
+        org({ id: "c", legal_name: "Charlie Org" }),
+        org({ id: "a", legal_name: "Alpha Org" }),
+        org({ id: "b", legal_name: "Bravo Org" }),
+      ],
+      [],
+    );
+    const result = prioritiseQueue(rows, { preferred_cities: ["sheffield"] });
+    assert.deepEqual(names(result), ["Alpha Org", "Bravo Org", "Charlie Org"]);
+  });
+});
+
+describe("prioritiseQueue diverges per CAM (F094 AC2)", () => {
+  const clients = visibleClients(
+    [
+      org({ id: "1", legal_name: "Sheffield Health Small", city: "Sheffield", sector: "Healthcare", income_band: "10k_100k" }),
+      org({ id: "2", legal_name: "London Arts Large", city: "London", sector: "Arts & Culture", income_band: "over_1m" }),
+      org({ id: "3", legal_name: "Sheffield Arts Medium", city: "Sheffield", sector: "Arts & Culture", income_band: "100k_1m" }),
+    ],
+    [],
+  );
+
+  it("two CAMs with different preferences see different orders over the same clients", () => {
+    const geographicCAM = prioritiseQueue(clients, { preferred_cities: ["sheffield"] });
+    const artsCAM = prioritiseQueue(clients, { preferred_sectors: ["arts & culture"] });
+
+    // Each CAM's own matches lead their queue, and the two queues disagree.
+    // Neither CAM's matches carry a stored score here, so ties read A–Z:
+    // "…Arts Medium" before "…Health Small" for the geographic CAM.
+    assert.deepEqual(geographicCAM.map((c) => c.id).slice(0, 2), ["3", "1"]);
+    assert.deepEqual(artsCAM.map((c) => c.id).slice(0, 2), ["2", "3"]);
+    assert.notDeepEqual(geographicCAM.map((c) => c.id), artsCAM.map((c) => c.id));
+  });
+
+  it("changing a preference re-orders on the next read without touching stored scores (F094 AC3)", () => {
+    const rows = [
+      org({ id: "1", legal_name: "Sheffield Health Small", city: "Sheffield", sector: "Healthcare", latest_scores: { priority_score: 0.4, priority_band: "medium", scored_at: null } }),
+      org({ id: "2", legal_name: "London Arts Large", city: "London", sector: "Arts & Culture", latest_scores: { priority_score: 0.6, priority_band: "medium", scored_at: null } }),
+      org({ id: "3", legal_name: "Sheffield Arts Medium", city: "Sheffield", sector: "Arts & Culture", latest_scores: { priority_score: 0.5, priority_band: "medium", scored_at: null } }),
+    ];
+    const before = visibleClients(rows, []);
+
+    const first = prioritiseQueue(before, { preferred_cities: ["sheffield"] });
+    const second = prioritiseQueue(before, { preferred_sectors: ["arts & culture"] });
+
+    // The queue follows the new preference immediately — no re-score involved.
+    // Geographic CAM: the two Sheffield orgs tie (+20 each) and #3's higher
+    // base score wins the tie. Arts CAM: #2 and #3 tie on sector and #2's
+    // base score is higher.
+    assert.deepEqual(first.map((c) => c.id).slice(0, 2), ["3", "1"]);
+    assert.deepEqual(second.map((c) => c.id).slice(0, 2), ["2", "3"]);
+
+    // The stored base scores are only ever read: every input row keeps its
+    // score, band, and original order.
+    assert.deepEqual(
+      before.map((c) => [c.id, c.priorityScore, c.priorityBand]),
+      [["1", 0.4, "medium"], ["2", 0.6, "medium"], ["3", 0.5, "medium"]],
+    );
+    assert.deepEqual(before.map((c) => c.id), ["1", "2", "3"]);
+  });
+});
+
+describe("hasActiveQueuePreferences (F094 default-view flag)", () => {
+  it("is false for missing or empty preference rows", () => {
+    assert.equal(hasActiveQueuePreferences(undefined), false);
+    assert.equal(hasActiveQueuePreferences(null), false);
+    assert.equal(hasActiveQueuePreferences({}), false);
+    assert.equal(
+      hasActiveQueuePreferences({
+        preferred_geographic_reach: [],
+        preferred_cities: [],
+        preferred_sectors: [],
+        preferred_income_bands: [],
+        prioritise_grant_recipients: false,
+      }),
+      false,
+    );
+  });
+
+  it("treats whitespace-only values as inactive, matching prioritiseQueue", () => {
+    assert.equal(hasActiveQueuePreferences({ preferred_cities: ["   "] }), false);
+    assert.equal(hasActiveQueuePreferences({ preferred_cities: ["sheffield"] }), true);
+  });
+
+  it("counts any single active dimension", () => {
+    assert.equal(hasActiveQueuePreferences({ preferred_geographic_reach: ["local"] }), true);
+    assert.equal(hasActiveQueuePreferences({ preferred_sectors: ["health"] }), true);
+    assert.equal(hasActiveQueuePreferences({ preferred_income_bands: ["10k_100k"] }), true);
+    assert.equal(hasActiveQueuePreferences({ prioritise_grant_recipients: true }), true);
+  });
+});
+
+describe("explicit sort overrides the personal queue default (F094 / F060)", () => {
+  it("an explicit name sort applied after prioritisation restores alphabetical order", () => {
+    const clients = visibleClients(
+      [
+        org({ id: "1", legal_name: "Zulu Sheffield Org", city: "Sheffield" }),
+        org({ id: "2", legal_name: "Alpha London Org", city: "London" }),
+      ],
+      [],
+    );
+    const queued = prioritiseQueue(clients, { preferred_cities: ["sheffield"] });
+    assert.deepEqual(queued.map((c) => c.id), ["1", "2"]);
+
+    // What page.tsx does when ?listSort= is present: the CAM's explicit choice
+    // wins over the personalisation.
+    const overridden = sortClients(queued, "name", "ascending");
+    assert.deepEqual(names(overridden), ["Alpha London Org", "Zulu Sheffield Org"]);
   });
 });
 

@@ -6,6 +6,11 @@
 // breakdowns. Every filtered count links into team-pipeline with prefilled
 // search params so the dashboard stays navigational, not duplicative.
 //
+// Navigation (AC3): links out to Team Pipeline (/admin/team-pipeline, F182),
+// Review Queue (/admin/review, pending F181 dedicated approvals tab), and
+// Team Ownership (/admin/users + ?owner= drill-downs, F167) so the dashboard
+// stays high-level and navigational.
+//
 // Freshness: dynamically rendered through the Supabase server client (request
 // cookies), same as team-pipeline. No cached snapshot in between — an admin who
 // reloads sees every CAM's latest change.
@@ -221,12 +226,20 @@ export default async function AdminDashboardPage() {
               pipeline for the full list.
             </p>
           </div>
-          <Link
-            href="/admin/team-pipeline"
-            className="inline-flex shrink-0 items-center rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-bold hover:border-brand hover:text-brand"
-          >
-            Open team pipeline →
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link
+              href="/admin/review"
+              className="inline-flex shrink-0 items-center rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-bold hover:border-brand hover:text-brand"
+            >
+              Review queue →
+            </Link>
+            <Link
+              href="/admin/team-pipeline"
+              className="inline-flex shrink-0 items-center rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-bold hover:border-brand hover:text-brand"
+            >
+              Open team pipeline →
+            </Link>
+          </div>
         </Rise>
 
         {listError ? (
@@ -346,10 +359,16 @@ export default async function AdminDashboardPage() {
             {/* Ownership load + band distribution side by side */}
             <div className="grid gap-6 lg:grid-cols-2">
               <Group className="space-y-3">
-                <Rise>
+                <Rise className="flex items-baseline justify-between">
                   <h2 className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
                     Ownership
                   </h2>
+                  <Link
+                    href="/admin/users"
+                    className="text-xs font-semibold text-foreground/50 hover:text-brand"
+                  >
+                    Manage team →
+                  </Link>
                 </Rise>
                 <Rise>
                   <div className="rounded-2xl border border-black/[0.06] bg-white shadow-sm">

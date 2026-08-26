@@ -1,11 +1,14 @@
 -- Conversion tracking tests — F143 (#138)
--- Spec: issue #138 AC1/AC2 + testing notes. Run by `supabase test db` (pg_prove).
+-- Spec: issue #138 AC1/AC2/AC3 + testing notes, incl. the PM ruling of
+-- 26 Aug 2026 that OUTCOMES tracks *currently*-converted clients (a revert
+-- deletes the row, audited). Run by `supabase test db` (pg_prove).
 --
 -- Covers what set_outreach_status / set_outreach_status_bulk do ON TOP of the
 -- status change itself (the status-change behaviour proper is bulk_status_rpc's
 -- and rls_policies' territory): landing on 'converted' records exactly one
--- OUTCOMES row per client, attributed to the most recent SENT email, once per
--- client ever.
+-- OUTCOMES row per client, attributed to the most recent SENT email; leaving
+-- 'converted' deletes it again; and CAMs cannot hand-write 'converted' rows —
+-- the RPCs are the only ordinary path.
 --
 -- Like every suite here these run as real end-user roles through the RPCs, never
 -- as service_role or the owning role — the RPC is SECURITY DEFINER, so testing it
@@ -202,14 +205,32 @@ begin
     'draft-only history converts with a null attribution — drafts are not attempts'
   );
 
-  -- "duplicate event": revert to fix a genuine mistake, convert again — still one.
+  -- "duplicate event": revert to fix a genuine mistake, convert again. The PM
+  -- ruling on #138 (26 Aug 2026) makes OUTCOMES track *currently*-converted
+  -- clients, so the revert deletes the row — audited — and the re-conversion
+  -- inserts a fresh one.
   perform tests.status_as(v_cam_a, v_emailed, 'responded');
-  perform tests.status_as(v_cam_a, v_emailed, 'converted');
 
   return next is(
     (select n from tests.conversions_of(v_emailed)),
-    1::bigint,
-    'reverting and converting again does not double-count — one conversion per client ever'
+    0::bigint,
+    'reverting a converted client withdraws its tracked conversion'
+  );
+
+  return next is(
+    (select count(*)::int from public.audit_log
+      where action = 'conversion_outcome_deleted' and target_table = 'outcomes'
+        and detail->>'organisation_id' = v_emailed::text),
+    1,
+    'the withdrawal is itself audited, with the client named in the detail'
+  );
+
+  perform tests.status_as(v_cam_a, v_emailed, 'converted');
+
+  return next is(
+    (select message_ids from tests.conversions_of(v_emailed)),
+    array[v_new_message],
+    'converting again after a revert records one fresh, correctly attributed conversion'
   );
 
   -- Setting the status a client is already on stays a clean no-op end to end.
@@ -255,6 +276,79 @@ begin
     (select count(*)::int from public.audit_log
       where action = 'status_changed' and target_id = v_bulk) = 1,
     'exactly one audit row stands behind the conversion — no new audit action was invented'
+  );
+
+  -- AC3 under the PM ruling: OUTCOMES tracks *currently*-converted clients, so a
+  -- bulk revert withdraws every batch member's tracked conversion, audited.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.set_outreach_status_bulk(array[%L, %L]::uuid[], ''not_contacted''::public.outreach_status)',
+      v_bulk, v_never_sent)),
+    null,
+    'a bulk revert off converted succeeds'
+  );
+
+  return next is(
+    (select count(*)::int from public.outcomes
+      where organisation_id in (v_bulk, v_never_sent)
+        and outcome_type = 'converted'),
+    0,
+    'the bulk revert withdrew the tracked conversion of every batch member'
+  );
+
+  return next is(
+    (select count(*)::int from public.audit_log
+      where action = 'conversion_outcome_deleted' and target_table = 'outcomes'
+        and detail->>'organisation_id' in (v_bulk::text, v_never_sent::text)),
+    2,
+    'each bulk withdrawal is audited against its client'
+  );
+
+  -- Conversions are system-managed: the RPCs are the only ordinary write path,
+  -- so a CAM's hand-written rows can never disagree with the pipeline.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.outcomes (organisation_id, outcome_type, recorded_by_user_id) values (%L, ''converted'', %L)',
+      v_draft_only, v_cam_a)),
+    '42501',
+    'a CAM cannot hand-insert a converted outcome'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.outcomes (organisation_id, outcome_type, recorded_by_user_id) values (%L, ''no_response'', %L)',
+      v_never_sent, v_cam_a)),
+    null,
+    'a CAM still hand-records every other outcome type untouched'
+  );
+
+  -- An UPDATE filtered out by the policy's USING clause touches zero rows rather
+  -- than raising, so assert on the effect instead of an error code.
+  perform tests.sqlstate_of(v_cam_a, format(
+    'update public.outcomes set notes = ''tampered'' where organisation_id = %L and outcome_type = ''converted''',
+    v_emailed));
+
+  return next is(
+    (select notes from public.outcomes
+      where organisation_id = v_emailed and outcome_type = 'converted'),
+    null,
+    'a CAM cannot edit a converted outcome row, even their own'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.outcomes set outcome_type = ''converted'' where organisation_id = %L and outcome_type = ''no_response''',
+      v_never_sent)),
+    '42501',
+    'a CAM cannot rename another outcome type into converted'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'insert into public.outcomes (organisation_id, outcome_type, recorded_by_user_id) values (%L, ''converted'', %L)',
+      v_bulk, v_admin)),
+    null,
+    'the deliberate admin override to hand-record a conversion survives'
   );
 end;
 $$;

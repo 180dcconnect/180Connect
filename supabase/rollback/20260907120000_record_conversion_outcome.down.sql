@@ -1,17 +1,21 @@
 -- Rollback: record_conversion_outcome
 -- Reverses supabase/migrations/20260907120000_record_conversion_outcome.sql (F143 #138).
 --
--- Restores both status RPCs to their pre-migration bodies and drops the
--- one-conversion-per-client index.
+-- Restores both status RPCs to their pre-migration bodies, restores the pre-F143
+-- outcomes_insert_cam / outcomes_update_own policies (CAMs can hand-write
+-- 'converted' rows again), and drops the one-conversion-per-client index.
 --
--- DELIBERATELY RETAINED: the OUTCOMES rows the migration recorded. They are
--- ground truth about real-world outcomes, indistinguishable from rows a CAM
+-- DELIBERATELY RETAINED: the OUTCOMES rows present at rollback time — one per
+-- currently-converted client (reverts under this migration delete the row). They
+-- are ground truth about real-world outcomes, indistinguishable from rows a CAM
 -- recorded by hand through the outcomes policies, so deleting every
 -- outcome_type = 'converted' row would destroy user data to reverse a schema
 -- change. If a true undo is required, remove them explicitly and knowingly:
 --
 --   delete from public.outcomes where outcome_type = 'converted';
 --
+-- Note that reverts which happened while this migration was live left no
+-- OUTCOMES trace — only 'conversion_outcome_deleted' entries in audit_log.
 -- The backfill's rows are equally retained; re-running the forward migration is
 -- idempotent (the index + ON CONFLICT DO NOTHING), so rollback/apply cycles do
 -- not duplicate anything.
@@ -201,7 +205,31 @@ comment on function public.set_outreach_status_bulk(uuid[], public.outreach_stat
   'admin), applied to a whole batch of up to 500 in one atomic statement.';
 
 -- ---------------------------------------------------------------------------
--- Index
+-- Index and policies
 -- ---------------------------------------------------------------------------
 
 drop index if exists public.outcomes_one_conversion_per_client;
+
+drop policy if exists outcomes_insert_cam on public.outcomes;
+
+create policy outcomes_insert_cam on public.outcomes
+  for insert to authenticated
+  with check (app.is_active_user()
+              and app.is_cam()
+              and recorded_by_user_id = auth.uid());
+
+-- F157's policies carried no comment; drop F143's rather than leave it stale.
+comment on policy outcomes_insert_cam on public.outcomes is null;
+
+drop policy if exists outcomes_update_own on public.outcomes;
+
+create policy outcomes_update_own on public.outcomes
+  for update to authenticated
+  using (app.is_active_user()
+         and app.is_cam()
+         and coalesce(recorded_by_user_id = auth.uid(), false))
+  with check (app.is_active_user()
+              and app.is_cam()
+              and coalesce(recorded_by_user_id = auth.uid(), false));
+
+comment on policy outcomes_update_own on public.outcomes is null;

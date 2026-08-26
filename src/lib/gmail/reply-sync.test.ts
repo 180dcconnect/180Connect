@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { syncGmailReplies } from "./reply-sync.ts";
+import { resolveGmailReplyLookbackDays, syncGmailReplies } from "./reply-sync.ts";
 import type { GmailInboundMessage } from "./reply-message.ts";
 
 const config = { clientId: "client", clientSecret: "secret", refreshToken: "refresh" };
@@ -93,6 +93,13 @@ function fakeAdmin(options: {
 }
 
 describe("syncGmailReplies", () => {
+  it("uses a configurable positive reply lookback with a two-day default", () => {
+    assert.equal(resolveGmailReplyLookbackDays({}), 2);
+    assert.equal(resolveGmailReplyLookbackDays({ GMAIL_REPLY_LOOKBACK_DAYS: "30" }), 30);
+    assert.equal(resolveGmailReplyLookbackDays({ GMAIL_REPLY_LOOKBACK_DAYS: "0" }), 2);
+    assert.equal(resolveGmailReplyLookbackDays({ GMAIL_REPLY_LOOKBACK_DAYS: "not-a-number" }), 2);
+  });
+
   it("captures a reply that matches a sent thread and sender", async () => {
     const { admin, rpcCalls } = fakeAdmin({
       sentRows: [{ target_id: "outreach-1", detail: { organisation_id: "org-1", provider_thread_id: "thread-1", sent_to: "contact@charity.org" } }],

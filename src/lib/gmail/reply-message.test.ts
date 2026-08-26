@@ -65,6 +65,23 @@ test("matches only the sent thread, branch recipient, and client sender", () => 
   assert.equal(matchInboundReply({ ...reply, to: "personal@180dc.org" }, [row], "branch@180dc.org"), null);
 });
 
+test("normalises case, whitespace, and display names in audit-log recipient matching", () => {
+  const reply: ParsedInboundReply = {
+    providerMessageId: "reply-case", providerThreadId: "thread-case",
+    from: "contact@charity.org", to: "branch@180dc.org", subject: "Re: Hello",
+    body: "Hello", receivedAt: "2026-08-25T16:00:00.000Z", hasReplyHeaders: true,
+  };
+  const row = {
+    target_id: "outreach-case",
+    detail: {
+      organisation_id: "org-case", provider_thread_id: "thread-case",
+      sent_to: " Charity Contact <CONTACT@CHARITY.ORG> ",
+    },
+  };
+
+  assert.equal(matchInboundReply(reply, [row], " Branch Mailbox <BRANCH@180DC.ORG> "), row);
+});
+
 test("falls back to a unique client email match but flags ambiguous senders", () => {
   const reply: ParsedInboundReply = {
     providerMessageId: "reply-2", providerThreadId: "provider-thread-drifted",

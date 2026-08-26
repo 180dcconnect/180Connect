@@ -10,6 +10,14 @@ import { matchInboundReply, parseInboundReply, type GmailInboundMessage, type Se
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
 const TIMEOUT_MS = 15_000;
 const MAX_MESSAGES = 100;
+const DEFAULT_LOOKBACK_DAYS = 2;
+
+export function resolveGmailReplyLookbackDays(
+  source: Record<string, string | undefined> = process.env,
+): number {
+  const configured = Number(source.GMAIL_REPLY_LOOKBACK_DAYS?.trim());
+  return Number.isInteger(configured) && configured > 0 ? configured : DEFAULT_LOOKBACK_DAYS;
+}
 
 export type ReplySyncResult = {
   scanned: number;
@@ -26,6 +34,7 @@ type Dependencies = {
   sender: string;
   fetchImpl?: typeof fetch;
   tokenProvider?: () => Promise<string>;
+  lookbackDays?: number;
 };
 
 async function gmailJson<T>(url: string, token: string, fetchImpl: typeof fetch, operation: string): Promise<T> {
@@ -57,7 +66,8 @@ export async function syncGmailReplies(deps?: Dependencies): Promise<ReplySyncRe
   try {
     const token = await (deps?.tokenProvider ? deps.tokenProvider() : getGmailAccessToken(config, fetchImpl));
     const listUrl = new URL(`${GMAIL_API}/messages`);
-    listUrl.searchParams.set("q", "in:inbox newer_than:2d");
+    const lookbackDays = deps?.lookbackDays ?? resolveGmailReplyLookbackDays();
+    listUrl.searchParams.set("q", `in:inbox newer_than:${lookbackDays}d`);
     listUrl.searchParams.set("maxResults", String(MAX_MESSAGES));
     const listed = await gmailJson<{ messages?: { id: string }[] }>(listUrl.toString(), token, fetchImpl, "users.messages.list.replies");
 

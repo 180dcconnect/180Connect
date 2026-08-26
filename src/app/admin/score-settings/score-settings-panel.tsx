@@ -21,8 +21,7 @@ type Props = {
 export function ScoreSettingsPanel({ activeVersion, activeWeights, degraded }: Props) {
   const [state, formAction, pending] = useActionState(saveScoutWeightsAction, initialState);
 
-  const displayed = state.status === "success" && !state.fieldErrors ? null : activeWeights;
-  const percentages = toPercentages(displayed ?? activeWeights);
+  const percentages = toPercentages(activeWeights);
   const total = Math.round(
     SCOUT_WEIGHT_PARAMETERS.reduce(
       (sum, parameter) => sum + (percentages[parameter.key] || 0),

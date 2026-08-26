@@ -212,6 +212,15 @@ begin
     'a non-object payload is refused'
   );
 
+  return next is(
+    tests.sqlstate_of(
+      v_admin,
+      'select public.set_scout_weights(''{"sector": 0.2, "geography": 0.2, "size": 0.2, "partnershipHistory": 0.2, "previousContact": 0.2, "junk": 1}''::jsonb)'
+    ),
+    '22023',
+    'unknown keys are refused rather than stored into the history'
+  );
+
   -- The happy path: the write happens, versions rather than edits.
   v_new_id := tests.set_weights_as(v_admin, tests.equal_five());
   return next isnt(v_new_id, null, 'an admin saves new weights successfully');
@@ -242,9 +251,9 @@ begin
   );
 
   return next is(
-    (select config -> 'bands' from public.model_versions where id = v_new_id),
-    '{"high": 0.70, "medium": 0.40}'::jsonb,
-    'band cut-offs carry over unchanged (F096 tunes weights, not bands)'
+    (select config - 'weights' from public.model_versions where id = v_new_id),
+    '{}'::jsonb,
+    'the new generation stores weights only — no decorative bands key'
   );
 
   -- AC3: who changed what, and when — in the same transaction as the write.

@@ -12,9 +12,15 @@
 // (ERROR_LOG DoD line) and in the returned summary for the UI banner; none of
 // it throws.
 //
-// Batching mirrors scripts/backfill-priority-scores.mts's shape (paged reads,
-// bounded batches) but goes through PostgREST + the service role instead of pg:
-// this runs inside a Server Action, where only the Supabase clients exist.
+// Serverless reality check (review of PR #496): one sequential round-trip per
+// organisation can outlive a serverless function timeout on a real book, which
+// would kill the failure reporting mid-flight. Two mitigations, both inside the
+// same best-effort contract rather than around it:
+//   1. rows are persisted in small parallel chunks, cutting wall time ~8x;
+//   2. the sweep keeps an eye on elapsed time and STOPS cleanly at a page
+//      boundary when the budget runs out, returning incomplete: true so the
+//      admin is told exactly what happened and how to finish the job — instead
+//      of the platform killing us into silence.
 
 import "server-only";
 
@@ -38,10 +44,23 @@ export type RescoreAllResult = {
   ok: boolean;
   scored: number;
   failed: number;
+  /** True when the sweep stopped early on its own terms (budget), not on error. */
+  incomplete?: boolean;
   error?: string;
 };
 
 const PAGE_SIZE = 200;
+
+/** Rows persisted concurrently within a page. Bounded so we never open more
+ * PostgREST connections than Supabase pooler is comfortable with. */
+const CHUNK = 8;
+
+/**
+ * Wall-time budget for the whole sweep. Deliberately under typical serverless
+ * limits (~60s on Vercel hobby/Pro defaults for server actions) so the stop is
+ * OURS — clean, logged, reported — rather than the platform's.
+ */
+const BUDGET_MS = 40_000;
 
 export async function rescoreAllOrganisations(): Promise<RescoreAllResult> {
   const admin = createAdminClient();
@@ -58,11 +77,21 @@ export async function rescoreAllOrganisations(): Promise<RescoreAllResult> {
 
   let scored = 0;
   let failed = 0;
+  let incomplete = false;
   const firstFailure: { id: string; message: string }[] = [];
+  const startedAt = Date.now();
 
   // Paged scan so memory stays flat regardless of book size. The filter is on
   // the primary key and the order is stable, so pages cannot skip or repeat rows.
   for (let from = 0; ; from += PAGE_SIZE) {
+    if (Date.now() - startedAt > BUDGET_MS) {
+      // Stop at our own hand, not the platform's: whatever was written stays
+      // written (per-row upserts commit independently), and what remains is
+      // reported so the backfill job can finish it.
+      incomplete = true;
+      break;
+    }
+
     const { data, error } = await admin
       .from("organisations")
       .select(
@@ -82,40 +111,65 @@ export async function rescoreAllOrganisations(): Promise<RescoreAllResult> {
     }
     if (!data || data.length === 0) break;
 
-    for (const row of data) {
-      const scoreable: ScoreableOrganisation = {
-        city: row.city,
-        sector: row.sector,
-        outreach_status: row.outreach_status,
-        total_income: row.total_income,
-        financial_periods: row.financial_periods ?? [],
-        matched_grant_count: row.grants?.[0]?.count ?? null,
-      };
-      const result = await persistLatestScore(admin, row.id, scoreable, config.weights);
-      if (result.ok) {
-        scored += 1;
-      } else {
-        failed += 1;
-        if (firstFailure.length < 5) firstFailure.push({ id: row.id, message: result.error });
-      }
+    for (let i = 0; i < data.length; i += CHUNK) {
+      await Promise.all(
+        data.slice(i, i + CHUNK).map(async (row) => {
+          const scoreable: ScoreableOrganisation = {
+            city: row.city,
+            sector: row.sector,
+            outreach_status: row.outreach_status,
+            total_income: row.total_income,
+            financial_periods: row.financial_periods ?? [],
+            matched_grant_count: row.grants?.[0]?.count ?? null,
+          };
+          const result = await persistLatestScore(admin, row.id, scoreable, config.weights);
+          if (result.ok) {
+            scored += 1;
+          } else {
+            failed += 1;
+            if (firstFailure.length < 5) firstFailure.push({ id: row.id, message: result.error });
+          }
+        }),
+      );
     }
 
     if (data.length < PAGE_SIZE) break;
   }
 
-  if (failed > 0) {
+  if (failed > 0 || incomplete) {
+    const detail =
+      failed > 0
+        ? `examples: ${firstFailure.map((f) => `${f.id}: ${f.message}`).join("; ")}`
+        : "time budget reached";
     await reportError(
       new Error(
-        `Rescore-after-reweight finished with ${failed} failure(s); ` +
-          `examples: ${firstFailure.map((f) => `${f.id}: ${f.message}`).join("; ")}`,
+        `Rescore-after-reweight finished incomplete (${failed} failure(s); ${detail}).`,
       ),
       { operation: "scout_weights.rescore_all", weightsVersion: config.version ?? "unknown" },
     );
+  }
+
+  if (failed > 0) {
     return {
       ok: false,
       scored,
       failed,
-      error: `Weights were saved, but ${failed} client score(s) could not be recalculated. They have been logged for a backfill run.`,
+      incomplete,
+      error:
+        `Weights were saved, but ${failed} client score(s) could not be recalculated. ` +
+        "They have been logged for a backfill run.",
+    };
+  }
+
+  if (incomplete) {
+    return {
+      ok: true,
+      scored,
+      failed: 0,
+      incomplete,
+      error:
+        `Recalculation paused after ${scored} clients to stay within request time limits. ` +
+        `Remaining scores will catch up with the next backfill run (npm run backfill:scores).`,
     };
   }
 

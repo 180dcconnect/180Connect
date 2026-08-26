@@ -54,7 +54,6 @@ declare
   v_next_number  int;
   v_new_version  text;
   v_new_id       public.model_versions.id%type;
-  v_bands        jsonb;
   v_key          text;
   v_value        jsonb;
 begin
@@ -82,6 +81,18 @@ begin
     end if;
   end loop;
 
+  -- Exactly the five named keys: an extra key would be stored verbatim into
+  -- config.weights, where it would defeat the no-op equality check below and
+  -- pollute the version history with junk that reads as meaningful.
+  if exists (
+    select 1
+      from jsonb_object_keys(p_weights) as k(key)
+     where k.key not in ('sector', 'geography', 'size', 'partnershipHistory', 'previousContact')
+  ) then
+    raise exception 'weights must contain only sector, geography, size, partnershipHistory and previousContact'
+      using errcode = '22023';
+  end if;
+
   if ((p_weights ->> 'sector')::double precision
     + (p_weights ->> 'geography')::double precision
     + (p_weights ->> 'size')::double precision
@@ -107,9 +118,14 @@ begin
     return v_active.id;
   end if;
 
-  -- History, not an edit: retire the old version row and add a new one, keeping
-  -- the band cut-offs the old config carried (F096 changes weights, not bands).
-  v_bands := coalesce(v_active.config -> 'bands', '{"high": 0.70, "medium": 0.40}'::jsonb);
+  -- History, not an edit: retire the old version row and add a new one.
+  --
+  -- The new config records ONLY the weights. Band cut-offs are deliberately not
+  -- carried over: F096 tunes weights, and the engine reads thresholds from code
+  -- (PRIORITY_BAND_THRESHOLDS in score-client.ts) — copying them here would
+  -- store a decorative value that looks configurable but is never read. v1's
+  -- bands stay untouched as historical record; if band tuning ever becomes a
+  -- product surface it should be its own audited RPC.
 
   select coalesce(max(nullif(regexp_replace(version, '\D', '', 'g'), '')::int), 0) + 1
     into v_next_number
@@ -129,7 +145,7 @@ begin
     ('SCOUT',
      v_new_version,
      'rules',
-     jsonb_build_object('weights', p_weights, 'bands', v_bands),
+     jsonb_build_object('weights', p_weights),
      true,
      'F096: weights adjusted from the admin score settings screen',
      v_actor)

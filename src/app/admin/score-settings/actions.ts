@@ -82,14 +82,20 @@ export async function saveScoutWeightsAction(
   if (error) {
     // Every failure visible and recorded (DoD). The user-facing message never
     // carries raw Postgres text except for the RPC's own deliberate validation
-    // sentences, which are written to be readable.
+    // sentences, which are written to be readable. Each code gets the message
+    // its situation actually calls for — "try again" is a lie when retrying
+    // can never succeed.
     await reportError(error, { operation: "scout_weights.save", code: error.code ?? null });
     const message =
       error.code === "42501"
         ? "Only an administrator can change scoring weights."
         : error.code === "22023"
           ? error.message
-          : "Could not save the new weights. Try again.";
+          : error.code === "P0002"
+            ? "No active scoring configuration was found, so the new weights could not be saved. Ask the team lead to check the model version setup — this will not fix itself on retry."
+            : error.code === "23505"
+              ? "Another admin just saved different weights a moment ago. Refresh the page to see them, then re-apply yours if still needed."
+              : "Could not save the new weights. Try again.";
     return { status: "error", message };
   }
 
@@ -103,6 +109,15 @@ export async function saveScoutWeightsAction(
     return {
       status: "success",
       message: `New weights saved (version recorded in the audit log). ${sweep.error}`,
+    };
+  }
+
+  if (sweep.incomplete) {
+    return {
+      status: "success",
+      message:
+        `New weights saved and ${sweep.scored} client score${sweep.scored === 1 ? "" : "s"} recalculated so far. ` +
+        "The sweep paused to stay within request time limits; remaining scores will catch up with the next backfill run.",
     };
   }
 

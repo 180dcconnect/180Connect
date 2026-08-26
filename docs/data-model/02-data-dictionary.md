@@ -342,6 +342,24 @@
 | 06 - Predictions | SCORE_SNAPSHOTS | priority_band | enum |  | high/medium/low |
 | 06 - Predictions | SCORE_SNAPSHOTS | scored_at | timestamp |  |  |
 | 06 - Predictions | SCORE_SNAPSHOTS | created_at | timestamp |  |  |
+| 06 - Predictions | TRAINING_EXAMPLES | outreach_message_id | uuid | OUTREACH_MESSAGES | The scored outreach attempt this training row describes |
+| 06 - Predictions | TRAINING_EXAMPLES | organisation_id | uuid | ORGANISATIONS | Client the attempt was made on |
+| 06 - Predictions | TRAINING_EXAMPLES | sector | numeric |  | Sector-fit factor 0–1 at send time |
+| 06 - Predictions | TRAINING_EXAMPLES | geography | numeric |  | Geography factor 0–1 at send time |
+| 06 - Predictions | TRAINING_EXAMPLES | size | numeric |  | Organisation-size factor 0–1 at send time |
+| 06 - Predictions | TRAINING_EXAMPLES | partnership_history | numeric |  | Partnership-history factor 0–1 at send time |
+| 06 - Predictions | TRAINING_EXAMPLES | previous_contact | numeric |  | Previous-contact factor 0–1 at send time |
+| 06 - Predictions | TRAINING_EXAMPLES | priority_score | numeric |  | Priority score produced from those factors under the active weights |
+| 06 - Predictions | TRAINING_EXAMPLES | priority_band | enum |  | high / medium / low |
+| 06 - Predictions | TRAINING_EXAMPLES | model_version_id | uuid | MODEL_VERSIONS | Weights generation that produced the score; nullable when config could not be resolved at send time |
+| 06 - Predictions | TRAINING_EXAMPLES | snapshot_scored_at | timestamp |  | When the inputs were read (send moment) |
+| 06 - Predictions | TRAINING_EXAMPLES | sent_at | timestamp |  | When the email actually went out |
+| 06 - Predictions | TRAINING_EXAMPLES | organisation_sector | text |  | Client's sector — CURRENT state, not point-in-time; use with care in training |
+| 06 - Predictions | TRAINING_EXAMPLES | cam_edited | boolean |  | Whether the CAM edited the latest AI-generated draft before sending |
+| 06 - Predictions | TRAINING_EXAMPLES | edit_distance | integer |  | Characters changed between generated draft and final email |
+| 06 - Predictions | TRAINING_EXAMPLES | generation_model | text |  | AI model id that generated the latest draft |
+| 06 - Predictions | TRAINING_EXAMPLES | outcome_label | enum |  | reply / converted / no_response / soft_no / hard_no — the message's latest outcome; null until an outcome exists |
+| 06 - Predictions | TRAINING_EXAMPLES | outcome_recorded_at | timestamp |  | When that outcome was written |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | id | uuid |  | Primary key |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | organisation_id | uuid |  | Organisation that received the outreach message |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | contact_id | uuid |  | Specific contact the message was sent to |

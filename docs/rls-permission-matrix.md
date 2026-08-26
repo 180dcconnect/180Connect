@@ -600,6 +600,18 @@ unless created `with (security_invoker = on)`. Every view over an RLS-protected
 table must be created `with (security_invoker = on)`, or it silently launders data
 around the policies. This is a required check in the schema change approval record.
 
+**`training_examples` (F098, #97, 20260912120000)** — the ML-ready training
+dataset: one row per scored outreach attempt (SCORE_SNAPSHOTS), its latest
+OUTCOMES label joined by message id, AI_GENERATIONS-derived metadata and timing.
+Created `with (security_invoker = on)` per the rule above — and that is the whole
+access story: SCORE_SNAPSHOTS grants SELECT to admins only, so an admin querying
+the view sees rows and any other active user sees empty, with no new policy to
+maintain or forget. Its column set is a tested ALLOWLIST (`training_examples.test.sql`)
+of ids, 0–1 factors, enum tokens, derived facts and timestamps — no email content,
+recipient addresses, reply text or CAM notes can appear without a test edit. Bulk
+export goes through `npm run export:training-dataset`, which reads only this view
+and refuses production via the seed config guard.
+
 ### 3.10 Login throttle
 
 | Table | SELECT | INSERT | UPDATE | DELETE |

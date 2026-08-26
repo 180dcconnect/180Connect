@@ -2,9 +2,11 @@
 
 How the charity list at `/clients` is ordered, and why the outreach-status order
 is what it is. Covers **F060** (sort by location, #62), **F061** (sort by
-outreach status, #63), and **F059** (sort by priority score, #61).
+outreach status, #63), **F059** (sort by priority score, #61), and the
+personalised default order of **F094** (#93).
 
-The code is `sortClients()` in [`src/app/clients/visible-clients.ts`](../src/app/clients/visible-clients.ts);
+The code is `sortClients()` and `prioritiseQueue()` in
+[`src/app/clients/visible-clients.ts`](../src/app/clients/visible-clients.ts);
 the control is the "Sorted by …" sentence above the list.
 
 ## The two sort controls on this page are different things
@@ -45,6 +47,28 @@ Sorting is applied **after** the filters and **before** pagination. That is what
 makes "sort combines with the active filters" (F060 AC3, F061 AC2, F059 AC3)
 true, and it means page 2 is genuinely the second page of the sorted set rather
 than page 2 re-shuffled on its own.
+
+## The default order is the personal queue (F094)
+
+When the URL carries no `listSort`/`listDir` at all, the list is not implicitly
+sorted by name — it keeps the order `prioritiseQueue()` produced: clients
+weighted by the viewing CAM's outreach preferences (geography, sector, size,
+grant history) first, ties broken by the persisted base score (F088)
+descending, then by name. Unscored clients sit below scored ones inside a tie
+group. This answers issue #93's open question ("how personal preferences
+override base score"): preferences are the primary key; base scores are never
+replaced or rewritten, only read as the tie-break.
+
+- With no preferences set the queue is untouched and reads A–Z anyway — the
+  underlying query already orders by `legal_name`.
+- An explicit `?listSort=`/`?listDir=` overrides the personalisation until the
+  params leave the URL again.
+- Links generated on the page only carry the sort params when the CAM actually
+  chose them, so navigating between filters does not silently end the
+  personalised order after one click.
+- The sentence above the list says "Ordered for you — override:" instead of
+  "Sorted by" while the personalisation is driving, so the control never claims
+  an order the list isn't in.
 
 ## Ties, and why clients with the same location sit together
 

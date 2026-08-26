@@ -136,6 +136,12 @@ export default async function AdminPage() {
               Every generated email draft, by model — compare performance and cost.
             </p>
           </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/ml-readiness">
+            <h2 className="font-bold">ML readiness</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              How many labelled outcomes exist in the ML dataset and how close that is to the training threshold.
+            </p>
+          </Link>
         </div>
       </section>
     </main>

@@ -358,7 +358,7 @@
 | 07 Outreach & Outcomes | AI_GENERATIONS | created_at | timestamp |  | Row creation timestamp |
 | 07 Outreach & Outcomes | SEND_EVENTS | id | uuid |  | Primary key |
 | 07 Outreach & Outcomes | SEND_EVENTS | outreach_message_id | uuid |  | Links to the OUTREACH_MESSAGES record associated with the email |
-| 07 Outreach & Outcomes | SEND_EVENTS | event_type | enum |  | sent / delivered / bounced / opened |
+| 07 Outreach & Outcomes | SEND_EVENTS | event_type | enum |  | sent / delivered / bounced / opened / failed |
 | 07 Outreach & Outcomes | SEND_EVENTS | occurred_at | timestamp |  | Date and time Gmail reported the delivery event |
 | 07 Outreach & Outcomes | SEND_EVENTS | metadata | jsonb |  | Additional event information returned by the Gmail API |
 | 07 Outreach & Outcomes | SEND_EVENTS | created_at | timestamp |  | Row creation timestamp |

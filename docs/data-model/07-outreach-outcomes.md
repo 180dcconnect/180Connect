@@ -50,7 +50,7 @@
 | :--- | :--- | :--- |
 | id | uuid | Primary key |
 | outreach_message_id | uuid | Links to the OUTREACH_MESSAGES record associated with the email |
-| event_type | enum | sent / delivered / bounced / opened |
+| event_type | enum | sent / delivered / bounced / opened / failed |
 | occurred_at | timestamp | Date and time Gmail reported the delivery event |
 | metadata | jsonb | Additional event information returned by the Gmail API |
 | created_at | timestamp | Row creation timestamp |

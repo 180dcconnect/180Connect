@@ -227,12 +227,14 @@ export default async function AdminDashboardPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            {/* AC3 Approvals: links to unified review queue (/admin/review) pending F181 dedicated approvals tab */}
             <Link
               href="/admin/review"
               className="inline-flex shrink-0 items-center rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-bold hover:border-brand hover:text-brand"
             >
               Review queue →
             </Link>
+            {/* AC3 Team Pipeline: links to F182 full drill-down view */}
             <Link
               href="/admin/team-pipeline"
               className="inline-flex shrink-0 items-center rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-bold hover:border-brand hover:text-brand"
@@ -363,6 +365,7 @@ export default async function AdminDashboardPage() {
                   <h2 className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
                     Ownership
                   </h2>
+                  {/* AC3 Team Ownership: links directly to /admin/users directory (F167) */}
                   <Link
                     href="/admin/users"
                     className="text-xs font-semibold text-foreground/50 hover:text-brand"

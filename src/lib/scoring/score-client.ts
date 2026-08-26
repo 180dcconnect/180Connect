@@ -9,12 +9,19 @@
 // scripts/backfill-priority-scores.mts) and any future recomputation agree
 // without coordination.
 //
-// FACTOR COVERAGE — what feeds each of the four factors today:
+// FACTOR COVERAGE — what feeds each of the five factors today:
 //
 //   sector          NEUTRAL (F089_UNBUILT_SECTOR_FACTOR below). There is no
 //                   sector scorer yet — ORGANISATIONS.sector only gained a
 //                   column in 20260824100000, and no ticket defines how a raw
 //                   sector becomes a 0-1 signal. Neutral until F089 lands.
+//
+//   partnershipHistory scoreByPartnershipHistory(matched grant count) — F096
+//                   wired this fifth parameter into the base score: the scorer
+//                   itself has existed since F092, and the grants table it
+//                   counts is populated by ingestion. Callers that cannot count
+//                   grants cheaply may omit the count; the scorer's documented
+//                   no-history neutral applies.
 //
 //   geography       scoreByGeography(city, priorityRegions), with priority
 //                   regions passed in by the caller. Today no caller has a
@@ -45,10 +52,13 @@
 
 import {
   calculatePriorityScore,
+  sanitizeWeights,
   type PriorityFactors,
+  type ScoutWeights,
 } from "./calculate-priority-score.ts";
 import { scoreByGeography } from "./score-by-geography.ts";
 import { scoreByOrganisationSize } from "./score-by-organisation-size.ts";
+import { scoreByPartnershipHistory } from "./score-by-partnership-history.ts";
 
 /** The vocabulary LATEST_SCORES.priority_band stores (check-constrained). */
 export type PriorityBand = "high" | "medium" | "low";
@@ -81,6 +91,8 @@ export type ScoreableOrganisation = {
     | { total_income?: number | null; period_end?: string | null }[]
     | null;
   outreach_status: string;
+  /** Matched 360Giving grant count (F092). Omitted/null = no-history neutral. */
+  matched_grant_count?: number | null;
 };
 
 /** Same resolution order as visible-clients.ts's resolveClientIncomeBand. */
@@ -125,7 +137,7 @@ function previousContactFactor(outreachStatus: string): number {
 }
 
 /**
- * The four normalised factors for one organisation. Exported because the
+ * The five normalised factors for one organisation. Exported because the
  * backfill reports which factors were carrying real signal versus standing at
  * neutral — the honest way to show a stakeholder why two clients score alike.
  */
@@ -137,6 +149,7 @@ export function priorityFactorsFor(
     sector: UNBUILT_FACTOR_NEUTRAL,
     geography: scoreByGeography(org.city, priorityRegions).score,
     size: scoreByOrganisationSize(latestTotalIncome(org)).score,
+    partnershipHistory: scoreByPartnershipHistory(org.matched_grant_count).score,
     previousContact: previousContactFactor(org.outreach_status),
   };
 }
@@ -146,11 +159,21 @@ export function priorityFactorsFor(
  * it. Never throws on missing data — every factor degrades to its documented
  * default instead, matching the scorers' own AC2-style "explicit default, not
  * exclusion" behaviour.
+ *
+ * F096: weights come from the caller — the active SCOUT config the score will
+ * be persisted under — not from a hard-coded table, so an interactive rescore
+ * and a backfill run under the same weights simply by loading them once each.
  */
 export function computePriorityScore(
   org: ScoreableOrganisation,
   priorityRegions: readonly string[] = [],
+  weights?: unknown,
 ): { score: number; band: PriorityBand } {
-  const score = calculatePriorityScore(priorityFactorsFor(org, priorityRegions));
+  const effectiveWeights: ScoutWeights | undefined =
+    weights === undefined ? undefined : sanitizeWeights(weights);
+  const score = calculatePriorityScore(
+    priorityFactorsFor(org, priorityRegions),
+    effectiveWeights,
+  );
   return { score, band: bandForScore(score) };
 }

@@ -8,7 +8,7 @@ import {
   PRIORITY_BAND_THRESHOLDS,
   priorityFactorsFor,
 } from "./score-client.ts";
-import { EQUAL_WEIGHTS } from "./calculate-priority-score.ts";
+import { DEFAULT_WEIGHTS } from "./calculate-priority-score.ts";
 
 describe("bandForScore — thresholds pending team confirmation", () => {
   it("bands 0.70 and above high (boundary inclusive)", () => {
@@ -106,19 +106,42 @@ describe("priorityFactorsFor — factor coverage matches the header's honesty ta
 });
 
 describe("computePriorityScore", () => {
-  it("agrees with calculatePriorityScore over EQUAL_WEIGHTS", () => {
+  it("agrees with calculatePriorityScore over DEFAULT_WEIGHTS", () => {
     const org = {
       city: null,
       outreach_status: "initial_outreach_sent",
       financial_periods: [{ total_income: 250_000, period_end: "2025-03-31" }],
+      matched_grant_count: null,
     };
     const factors = priorityFactorsFor(org);
     const manual =
-      factors.sector * EQUAL_WEIGHTS.sector +
-      factors.geography * EQUAL_WEIGHTS.geography +
-      factors.size * EQUAL_WEIGHTS.size +
-      factors.previousContact * EQUAL_WEIGHTS.previousContact;
+      factors.sector * DEFAULT_WEIGHTS.sector +
+      factors.geography * DEFAULT_WEIGHTS.geography +
+      factors.size * DEFAULT_WEIGHTS.size +
+      factors.partnershipHistory * DEFAULT_WEIGHTS.partnershipHistory +
+      factors.previousContact * DEFAULT_WEIGHTS.previousContact;
     assert.equal(computePriorityScore(org).score, manual);
+  });
+
+  it("scores under caller-supplied weights (the F096 reweight path)", () => {
+    const org = {
+      outreach_status: "converted",
+      financial_periods: [{ total_income: 2_000_000, period_end: "2025-03-31" }],
+    };
+    // All weight on previous contact must collapse the score onto that factor.
+    const allPrevious = { sector: 0, geography: 0, size: 0, partnershipHistory: 0, previousContact: 1 };
+    assert.equal(
+      computePriorityScore(org, [], allPrevious).score,
+      priorityFactorsFor(org).previousContact,
+    );
+  });
+
+  it("feeds matched grant history into the partnership-history factor", () => {
+    const withHistory = priorityFactorsFor({ outreach_status: "not_contacted", matched_grant_count: 4 });
+    const without = priorityFactorsFor({ outreach_status: "not_contacted", matched_grant_count: null });
+    assert.ok(withHistory.partnershipHistory > without.partnershipHistory);
+    // No history is the scorer's neutral, not a penalty.
+    assert.equal(without.partnershipHistory, 0.5);
   });
 
   it("produces the documented band alongside the score", () => {

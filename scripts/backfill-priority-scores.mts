@@ -28,7 +28,11 @@ import {
   SeedRefusedError,
   resolveSeedConfig,
 } from "../src/lib/seed/config.ts";
-import { computePriorityScore, PRIORITY_BAND_THRESHOLDS } from "../src/lib/scoring/score-client.ts";
+import { sanitizeWeights } from "../src/lib/scoring/calculate-priority-score.ts";
+import {
+  PRIORITY_BAND_THRESHOLDS,
+  computePriorityScore,
+} from "../src/lib/scoring/score-client.ts";
 
 type OrgRow = {
   id: string;
@@ -36,7 +40,26 @@ type OrgRow = {
   sector: string | null;
   outreach_status: string;
   total_income: number | null;
+  matched_grant_count: number | null;
 };
+
+/**
+ * F096: scores must be replayed under the weights of the currently active SCOUT
+ * generation, not a hard-coded set — otherwise a sweep after an admin reweight
+ * would silently undo their change. Read once up front (pg, same reason as the
+ * writes); falls back to the engine defaults if the row is missing/unreadable.
+ */
+async function loadActiveWeights(client: Client) {
+  const { rows } = await client.query<{ weights: unknown }>(
+    `
+    select config -> 'weights' as weights
+    from public.model_versions
+    where model_name = 'SCOUT' and is_active
+    limit 1
+    `,
+  );
+  return sanitizeWeights(rows[0]?.weights);
+}
 
 async function main(): Promise<void> {
   // Throws SeedRefusedError against production, SeedConfigError when unconfigured
@@ -51,6 +74,8 @@ async function main(): Promise<void> {
   try {
     await client.query("begin");
 
+    const weights = await loadActiveWeights(client);
+
     const { rows } = await client.query<OrgRow>(
       `
       select
@@ -64,7 +89,12 @@ async function main(): Promise<void> {
           where fp.organisation_id = o.id
           order by fp.period_end desc nulls last
           limit 1
-        ) as total_income
+        ) as total_income,
+        (
+          select count(*)::int
+          from public.grants g
+          where g.organisation_id = o.id
+        ) as matched_grant_count
       from public.organisations o
       `,
     );
@@ -83,7 +113,7 @@ async function main(): Promise<void> {
       const batch = rows.slice(offset, offset + BATCH_SIZE);
       const values: unknown[] = [];
       const placeholders = batch.map((row) => {
-        const { score, band } = computePriorityScore(row);
+        const { score, band } = computePriorityScore(row, [], weights);
         scoredCount += 1;
         [
           row.id,
@@ -112,7 +142,7 @@ async function main(): Promise<void> {
     await client.query("commit");
 
     const byBand = { high: 0, medium: 0, low: 0 } as Record<string, number>;
-    for (const row of rows) byBand[computePriorityScore(row).band] += 1;
+    for (const row of rows) byBand[computePriorityScore(row, [], weights).band] += 1;
 
     console.log(`[backfill:scores] scored ${scoredCount} organisations`);
     console.log(
@@ -121,8 +151,8 @@ async function main(): Promise<void> {
         `    low              ${byBand.low}`,
     );
     console.log(
-      "\n[backfill:scores] sector and geography factors stand at their documented" +
-        "\nneutrals until F089/F093 land — see src/lib/scoring/score-client.ts's header.",
+      "\n[backfill:scores] sector factor stands at its documented neutral until F089" +
+        "\nlands — see src/lib/scoring/score-client.ts's header.",
     );
   } catch (error) {
     await client.query("rollback").catch(() => {});

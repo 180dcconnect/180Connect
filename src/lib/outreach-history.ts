@@ -70,3 +70,40 @@ const NOT_SENT_LABEL: Record<Exclude<SendStatus, "sent">, string> = {
 export function describeSendStatus(status: SendStatus): string {
   return status === "sent" ? "Sent" : NOT_SENT_LABEL[status];
 }
+
+/**
+ * F130 AC3 — what the history can be narrowed to: one concrete delivery
+ * status, or everything. `"all"` is its own value rather than null so call
+ * sites never branch on absence.
+ */
+export type StatusFilter = SendStatus | "all";
+
+export const STATUS_FILTERS: readonly StatusFilter[] = [
+  "all",
+  "draft",
+  "scheduled",
+  "sent",
+  "failed",
+];
+
+export function describeStatusFilter(filter: StatusFilter): string {
+  return filter === "all" ? "All" : describeSendStatus(filter);
+}
+
+/**
+ * F130 AC3: narrows both halves of an already-split history to one status.
+ * Filtering the split structure (rather than pre-filtering the raw rows)
+ * keeps AC1/AC3's guarantee intact whatever the selection — a filtered view
+ * is always a subset of the same sent/not-sent grouping, never a re-sorting
+ * that could smuggle a draft into "sent".
+ */
+export function filterOutreachHistory(
+  history: OutreachHistory,
+  filter: StatusFilter,
+): OutreachHistory {
+  if (filter === "all") return history;
+  return {
+    sent: history.sent.filter((message) => message.send_status === filter),
+    notSent: history.notSent.filter((message) => message.send_status === filter),
+  };
+}

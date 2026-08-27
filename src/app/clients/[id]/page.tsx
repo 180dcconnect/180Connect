@@ -1100,6 +1100,19 @@ export default async function ClientDetailPage({
                   error={Boolean(outreachError)}
                   thread={emailThread}
                   threadError={Boolean(outreachError || replyError)}
+                  replyDraftControls={
+                    hasPermission(authorization.actor.role, "client:contact")
+                      ? {
+                          organisationId: client.id,
+                          blocked: suppressed,
+                          ownershipBlocked: !suppressed && ownershipConflict.hasConflict,
+                          suppressionReason: suppressed ? latest?.reason : undefined,
+                          ownershipWarning: ownershipConflict.hasConflict
+                            ? ownershipConflict.warning
+                            : undefined,
+                        }
+                      : undefined
+                  }
                 />
 
                 {hasPermission(authorization.actor.role, "client:contact") && (

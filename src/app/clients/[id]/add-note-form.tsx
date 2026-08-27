@@ -16,12 +16,20 @@ import { useRouter } from "next/navigation";
  * which flushed the queue). `saving` combines both flags so the button reads
  * "Saving…" for the whole round trip plus repaint.
  */
-export function AddNoteForm({ organisationId }: { organisationId: string }) {
+export function AddNoteForm({
+  organisationId,
+  replyEventId,
+}: {
+  organisationId: string;
+  replyEventId?: string;
+}) {
   const router = useRouter();
+  const [open, setOpen] = useState(!replyEventId);
   const [content, setContent] = useState("");
   const [busy, setBusy] = useState(false);
   const [isRefreshing, startRefresh] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
   const saving = busy || isRefreshing;
 
@@ -38,14 +46,16 @@ export function AddNoteForm({ organisationId }: { organisationId: string }) {
 
     setBusy(true);
     setError(null);
+    setSaved(false);
     try {
       const response = await fetch(`/api/clients/${organisationId}/notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, replyEventId }),
       });
       if (response.ok) {
         setContent("");
+        setSaved(true);
         startRefresh(() => router.refresh());
         return;
       }
@@ -58,17 +68,33 @@ export function AddNoteForm({ organisationId }: { organisationId: string }) {
     }
   }
 
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="rounded-full border border-brand/30 px-3.5 py-1.5 text-xs font-bold text-brand hover:bg-brand/5"
+        onClick={() => setOpen(true)}
+      >
+        Add note about this reply
+      </button>
+    );
+  }
+
+  const fieldId = replyEventId
+    ? `add-note-${organisationId}-${replyEventId}`
+    : `add-note-${organisationId}`;
+
   return (
     <div className="mt-4">
-      <label className="sr-only" htmlFor={`add-note-${organisationId}`}>
-        Add a note
+      <label className="sr-only" htmlFor={fieldId}>
+        {replyEventId ? "Add a note about this reply" : "Add a note"}
       </label>
       <textarea
-        id={`add-note-${organisationId}`}
+        id={fieldId}
         className="w-full rounded-lg border border-black/15 p-2.5 text-sm outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/20"
         disabled={saving}
         onChange={(event) => setContent(event.target.value)}
-        placeholder="Add a note for the rest of the team…"
+        placeholder={replyEventId ? "What should the team remember about this reply?" : "Add a note for the rest of the team…"}
         rows={3}
         value={content}
       />
@@ -84,6 +110,11 @@ export function AddNoteForm({ organisationId }: { organisationId: string }) {
         {error && (
           <p aria-live="polite" role="alert" className="text-xs font-bold text-destructive">
             {error}
+          </p>
+        )}
+        {saved && (
+          <p aria-live="polite" role="status" className="text-xs font-bold text-emerald-700">
+            Note saved in the client Notes list.
           </p>
         )}
       </div>

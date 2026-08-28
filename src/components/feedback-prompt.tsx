@@ -28,7 +28,11 @@ export function FeedbackPrompt({ pageContext }: { pageContext?: string }) {
   const [submitted, setSubmitted] = useState(false);
   const [isPending, startTransition] = useTransition();
   const reduceMotion = useReducedMotion();
-  const dismissTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // `setTimeout` returns a number in the browser (and under react-native's
+  // global types, which the vendored CherryBlossomQRCode component pulls in),
+  // but NodeJS.Timeout when only node types are loaded. Derive the handle type
+  // instead of pinning either, so both resolve.
+  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSubmit = () => {
     if (rating === 0) return;

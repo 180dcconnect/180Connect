@@ -190,16 +190,27 @@ export function ClientSelectCheckbox({
   statusNote: string | null;
 }) {
   const { selected, toggle } = useBulkSelection();
+  const checked = selected.has(clientId);
 
   return (
-    <input
-      type="checkbox"
-      className={BOX}
-      checked={selected.has(clientId)}
-      title={statusNote ?? undefined}
-      aria-label={statusNote ? `Select ${clientName} — ${statusNote}` : `Select ${clientName}`}
-      onChange={() => toggle({ id: clientId, canStatus })}
-    />
+    <span
+      className={`transition-opacity duration-150 ${
+        checked
+          ? "opacity-100"
+          : selected.size > 0
+            ? "opacity-40 group-hover/row:opacity-100 hover:opacity-100 focus-within:opacity-100"
+            : "opacity-0 group-hover/row:opacity-100 hover:opacity-100 focus-within:opacity-100"
+      }`}
+    >
+      <input
+        type="checkbox"
+        className={BOX}
+        checked={checked}
+        title={statusNote ?? undefined}
+        aria-label={statusNote ? `Select ${clientName} — ${statusNote}` : `Select ${clientName}`}
+        onChange={() => toggle({ id: clientId, canStatus })}
+      />
+    </span>
   );
 }
 
@@ -222,9 +233,16 @@ export function SelectPageCheckbox({ clients }: { clients: readonly SelectableCl
   const someSelected = selectedHere > 0 && !allSelected;
 
   return (
-    <input
-      type="checkbox"
-      className={BOX}
+    <span
+      className={`transition-opacity duration-150 ${
+        allSelected || someSelected
+          ? "opacity-100"
+          : "opacity-0 group-hover/header:opacity-100 hover:opacity-100 focus-within:opacity-100"
+      }`}
+    >
+      <input
+        type="checkbox"
+        className={BOX}
       checked={allSelected}
       disabled={clients.length === 0}
       ref={(node) => {
@@ -237,9 +255,10 @@ export function SelectPageCheckbox({ clients }: { clients: readonly SelectableCl
       aria-label={
         allSelected ? "Deselect the clients on this page" : "Select the clients on this page"
       }
-      onChange={() =>
-        allSelected ? deselect(clients.map((client) => client.id)) : select(clients)
-      }
-    />
+        onChange={() =>
+          allSelected ? deselect(clients.map((client) => client.id)) : select(clients)
+        }
+      />
+    </span>
   );
 }

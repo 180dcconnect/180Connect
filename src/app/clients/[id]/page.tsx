@@ -14,8 +14,24 @@ import {
 } from "@/lib/source-tracking";
 import { checkWebsiteReachabilityCached } from "@/lib/website-reachability-cache";
 import { websiteHref } from "@/lib/website-validation";
-import { formatLocation, formatOutreachStatus } from "@/lib/organisation-format";
-import { ExternalLink } from "lucide-react";
+import {
+  formatLocation,
+  formatOrganisationType,
+  formatOutreachStatus,
+} from "@/lib/organisation-format";
+import {
+  BookOpen,
+  Clock,
+  ExternalLink,
+  Globe,
+  History,
+  Mail,
+  Paperclip,
+  ShieldAlert,
+  StickyNote,
+  Tag,
+  UserRound,
+} from "lucide-react";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
 import { SuppressButton } from "./suppress-button";
@@ -52,7 +68,6 @@ import {
 } from "@/lib/timeline";
 import { TimelineSection } from "./timeline-section";
 import { TimelineRealtimeRefresher } from "./timeline-realtime";
-import { RequestOwnershipForm } from "./request-ownership-form";
 import { ScheduledEmailList } from "./scheduled-email-list";
 import { FailedEmailList } from "./failed-email-list";
 import { emailSendWindowStart, isNearSendLimit, resolveEmailSendLimit } from "@/lib/outreach/send-rate-limit";
@@ -81,15 +96,78 @@ type OwnerRow = {
   owner_id: string | null;
   owner: { full_name: string | null } | null;
 };
-type SentEmailRow = {
-  id: string;
-  subject: string;
-  body: string;
-  sent_at: string;
-  sent_by_user: { full_name: string | null } | null;
-};
 type ScheduledEmailRow = { id: string; subject: string; scheduled_at: string };
 type FailedEmailRow = { id: string; subject: string; updated_at: string };
+
+/**
+ * Redesign (Aug 2026) — presentation helpers for the new shell. The data flow,
+ * permission gates and every child component are untouched: these only shape
+ * what the page already had in scope.
+ */
+
+/** First letters of the first two words — the hero monogram and owner chip. */
+function initialsOf(name: string | null | undefined): string {
+  return (name ?? "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word.charAt(0).toUpperCase())
+    .join("");
+}
+
+/**
+ * The hero band's anchor rail. Every target is a section that renders for
+ * every role, so the rail never links somewhere this viewer cannot see — the
+ * role-gated cards (booklet, compose, suggest-edit, DNC) are deliberately
+ * absent rather than conditionally listed.
+ */
+const SECTION_ANCHORS = [
+  { href: "#basic-info-heading", label: "Overview" },
+  { href: "#score-breakdown-heading", label: "Score" },
+  { href: "#contactability-heading", label: "Contactability" },
+  { href: "#attachments-heading", label: "Attachments" },
+  { href: "#notes-heading", label: "Notes" },
+  { href: "#ownership-heading", label: "Ownership" },
+  { href: "#outreach-heading", label: "Outreach" },
+  { href: "#timeline-heading", label: "Timeline" },
+] as const;
+
+/**
+ * One tile in the hero's at-a-glance band. Glass on charcoal so the record's
+ * five headline numbers read as part of the profile card itself, not as a
+ * second row of white cards below it. `accent` (the priority score — the one
+ * number that drives queue order) tints lime, echoing the page's single
+ * accent.
+ */
+function HeroStat({
+  label,
+  value,
+  sub,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  sub?: string | null;
+  accent?: boolean;
+}) {
+  return (
+    <div className={`px-5 py-4 ${accent ? "bg-[#e6f5c0]/[0.09]" : "bg-[#1c1a18]"}`}>
+      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#f4f4ef]/40">
+        {label}
+      </p>
+      <p
+        className={`mt-1 truncate text-xl font-black tabular-nums ${
+          accent ? "text-[#e6f5c0]" : "text-[#f4f4ef]"
+        }`}
+      >
+        {value}
+      </p>
+      {sub && (
+        <p className="mt-0.5 truncate text-[11px] leading-[1.4] text-[#f4f4ef]/35">{sub}</p>
+      )}
+    </div>
+  );
+}
 
 /**
  * F067 (#69) Client Detail Page / F068 (#70) View Client Basic Info: opens from the
@@ -661,44 +739,214 @@ export default async function ClientDetailPage({
     timelineNames,
   );
 
+  // Redesign shell data — everything here already exists in scope; these are
+  // presentation shorthands, not new queries. `lastActivity` needs the built
+  // timeline, which is why it sits here and not with the other label consts.
+  const clientInitials = initialsOf(client.legal_name) || "?";
+  const ownerInitials = initialsOf(ownerName);
+  const lastActivity = timeline[0]
+    ? new Date(timeline[0].timestamp).toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })
+    : null;
+
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
-      <Stage className="mx-auto w-full max-w-5xl space-y-6">
+      <Stage className="mx-auto w-full max-w-6xl space-y-6">
         <Rise>
-          <Link
-            className="group inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40 transition-colors hover:text-foreground/70"
-            href="/clients"
-          >
-            <span aria-hidden="true" className="transition-transform group-hover:-translate-x-0.5">
-              ←
-            </span>
-            Clients
-          </Link>
+          {/* The record opens on the charcoal band — OriginButton's resting
+              surface (ink glass, lime fill) promoted from the buttons to the
+              page itself, so the profile leads with the product's signature
+              look instead of another white card. The monogram watermark and
+              the glass stat band along the foot make the band one profile
+              statement, not a hero over a second row of white cards. Pure
+              CSS: this is a server component; Rise owns the only motion on
+              it. */}
+          <div className="relative overflow-hidden rounded-3xl bg-[#1c1a18] text-[#f4f4ef] shadow-[0_24px_60px_-28px_rgba(28,26,24,0.65)] ring-1 ring-black/30">
+            <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+              <div className="absolute -right-24 -top-36 size-96 rounded-full bg-[#e6f5c0]/[0.14] blur-3xl" />
+              <div className="absolute -bottom-24 -left-16 size-72 rounded-full bg-brand/25 blur-3xl" />
+              {/* The monogram writ large — editorial texture behind the
+                  record, clipped by the band's rounded corner. 5% lime over
+                  charcoal is a watermark, not a second accent. */}
+              <span className="absolute -bottom-10 -right-2 select-none text-[4.5rem] font-black leading-none tracking-[-0.06em] text-[#e6f5c0]/[0.05] sm:right-4 sm:text-[9rem] lg:text-[11rem]">
+                {clientInitials}
+              </span>
+            </div>
 
-          <div className="mt-4 flex flex-wrap items-end justify-between gap-x-8 gap-y-5">
-            <div className="min-w-0">
-              <h1 className="text-[clamp(1.75rem,3.5vw,2.5rem)] font-semibold font-body leading-[1.05] tracking-[-0.03em]">
-                {client.legal_name}
-              </h1>
-              {/* The record's identity in one line of markers rather than four
-                  rows of a table: what it is, where it is, and the two states
-                  that change what anyone is allowed to do with it. */}
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Pill>{client.organisation_type}</Pill>
-                <Pill>{formatLocation(client)}</Pill>
-                <Pill tone={suppressed ? "neutral" : "brand"}>{statusLabel}</Pill>
-                {suppressed && <Pill tone="danger">Do not contact</Pill>}
-                {suppressionPending && <Pill tone="warn">DNC requested</Pill>}
+            {/* Back to the working list, kept inside the band as a glass chip
+                so the hero is the whole top of the page, not two stacked
+                surfaces. */}
+            <div className="relative px-6 pt-5 sm:px-8">
+              <Link
+                className="group inline-flex items-center gap-2 rounded-full bg-white/[0.06] px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[#f4f4ef]/65 ring-1 ring-white/10 transition-colors hover:bg-white/[0.12] hover:text-[#f4f4ef] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e6f5c0]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1c1a18]"
+                href="/clients"
+              >
+                <span aria-hidden="true" className="transition-transform group-hover:-translate-x-0.5">
+                  ←
+                </span>
+                Clients
+              </Link>
+            </div>
+
+            <div className="relative flex flex-wrap items-start justify-between gap-x-8 gap-y-6 px-6 py-7 sm:px-8">
+              <div className="flex min-w-0 items-start gap-4 sm:gap-5">
+                <span
+                  aria-hidden="true"
+                  className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-[#e6f5c0] text-xl font-black tracking-tight text-[#10130c] shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_0_0_1px_rgba(230,245,192,0.25)] sm:size-16 sm:text-2xl"
+                >
+                  {clientInitials}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#f4f4ef]/40">
+                    Client record
+                  </p>
+                  <h1 className="mt-1.5 text-[clamp(2rem,4.5vw,3.25rem)] font-black font-body leading-[1.02] tracking-[-0.04em]">
+                    {client.legal_name}
+                  </h1>
+                  {/* The record's identity in one line of glass markers: what
+                      it is, where it is, and the two states that change what
+                      anyone is allowed to do with it. */}
+                  <div className="mt-3.5 flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center rounded-full bg-white/[0.08] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-[#f4f4ef]/70 ring-1 ring-white/10">
+                      {formatOrganisationType(client.organisation_type)}
+                    </span>
+                    <span className="inline-flex items-center rounded-full bg-white/[0.08] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-[#f4f4ef]/70 ring-1 ring-white/10">
+                      {formatLocation(client)}
+                    </span>
+                    {suppressed ? (
+                      <span className="inline-flex items-center rounded-full bg-red-500/20 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-red-100 ring-1 ring-red-400/30">
+                        {statusLabel}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full bg-[#e6f5c0] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-[#10130c] shadow-[inset_0_1px_0_rgba(255,255,255,0.35)]">
+                        {statusLabel}
+                      </span>
+                    )}
+                    {suppressed && (
+                      <span className="inline-flex items-center rounded-full bg-red-500/20 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-red-100 ring-1 ring-red-400/30">
+                        Do not contact
+                      </span>
+                    )}
+                    {suppressionPending && (
+                      <span className="inline-flex items-center rounded-full bg-amber-400/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-amber-200 ring-1 ring-amber-300/30">
+                        DNC requested
+                      </span>
+                    )}
+                  </div>
+                  {/* Reach-me chips: only the channels that actually work — an
+                      invalid email or dead website gets no shortcut here; the
+                      Contactability card below explains why. */}
+                  {(email.status === "valid" ||
+                    (websiteLink && website.status === "reachable")) && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {email.status === "valid" && (
+                        <a
+                          className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-white/[0.06] px-3 py-1.5 text-[12px] font-bold text-[#f4f4ef]/75 ring-1 ring-white/10 transition-colors hover:bg-white/[0.12] hover:text-[#f4f4ef] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e6f5c0]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1c1a18]"
+                          href={`mailto:${email.value ?? ""}`}
+                        >
+                          <Mail aria-hidden="true" className="size-3.5 shrink-0 opacity-70" />
+                          <span className="truncate">{email.value}</span>
+                        </a>
+                      )}
+                      {websiteLink && website.status === "reachable" && (
+                        <a
+                          className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-white/[0.06] px-3 py-1.5 text-[12px] font-bold text-[#f4f4ef]/75 ring-1 ring-white/10 transition-colors hover:bg-white/[0.12] hover:text-[#f4f4ef] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e6f5c0]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1c1a18]"
+                          href={websiteLink}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          <Globe aria-hidden="true" className="size-3.5 shrink-0 opacity-70" />
+                          <span className="max-w-[16rem] truncate">{websiteLink}</span>
+                          <ExternalLink aria-hidden="true" className="size-3 shrink-0 opacity-60" />
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Ownership rides the hero: the first thing a CAM scans for is
+                  whose hand this record is in. The claim action itself stays in
+                  the Ownership card — one place to act, no duplicated state. */}
+              <div className="min-w-[13rem] rounded-2xl bg-white/[0.06] p-4 ring-1 ring-white/10">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#f4f4ef]/40">
+                  Owner
+                </p>
+                {ownerId ? (
+                  <div className="mt-2.5 flex items-center gap-3">
+                    <span
+                      aria-hidden="true"
+                      className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-[13px] font-bold text-[#f4f4ef]/85 ring-1 ring-white/15"
+                    >
+                      {ownerInitials || "?"}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-[#f4f4ef]/90">{ownerName}</p>
+                      {ownerId === authorization.actor.id && (
+                        <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#e6f5c0]/80">
+                          That&apos;s you
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-2.5">
+                    <p className="text-sm font-bold text-[#f4f4ef]/70">Unassigned</p>
+                    {canEdit && (
+                      <p className="mt-0.5 text-[12px] leading-[1.5] text-[#f4f4ef]/45">
+                        Claim it from the Ownership card below.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
-            {ownerId && (
-              <p className="text-sm leading-[1.7] text-foreground/50">
-                Owned by{" "}
-                <span className="font-bold text-foreground/75">{ownerName}</span>
-                {ownerId === authorization.actor.id ? " (you)" : ""}
-              </p>
-            )}
+            {/* At-a-glance band: the five numbers a CAM asks for before
+                reading anything else, drawn from data the page already
+                fetched — no new queries. Glass tiles along the band's foot,
+                hairline-separated, so the record's headline stats read as
+                part of the profile card itself. Score leads because it drives
+                the queue order. */}
+            <div className="relative grid grid-cols-2 gap-px border-t border-white/[0.08] bg-white/[0.08] sm:grid-cols-3 lg:grid-cols-5">
+              <HeroStat
+                accent={latestScore?.priority_score != null}
+                label="Priority score"
+                sub={
+                  latestScore?.priority_band
+                    ? `${latestScore.priority_band} band`
+                    : "Not scored yet"
+                }
+                value={
+                  latestScore?.priority_score != null
+                    ? latestScore.priority_score.toFixed(2)
+                    : "—"
+                }
+              />
+              <HeroStat
+                label="Emails sent"
+                sub="received by the client"
+                value={String(outreachHistory.sent.length)}
+              />
+              <HeroStat
+                label="Replies"
+                sub="back from the client"
+                value={String(replyRows?.length ?? 0)}
+              />
+              <HeroStat
+                label="Notes"
+                sub="on the record"
+                value={String(noteList.length)}
+              />
+              <HeroStat
+                label="Last activity"
+                sub={timeline[0] ? "most recent event" : "nothing yet"}
+                value={lastActivity ?? "—"}
+              />
+            </div>
           </div>
         </Rise>
 
@@ -738,14 +986,40 @@ export default async function ClientDetailPage({
           </Rise>
         )}
 
+        {/* Sticky anchor rail: on a record this long the section map earns its
+            own bar — it rides below the hero in flow and pins to the top of
+            the viewport on scroll, so a CAM never loses their bearings while
+            working down the page. Plain <nav>, not Rise: an ancestor
+            transform would break position:sticky. Every target renders for
+            every role, so the rail never links somewhere this viewer cannot
+            see. */}
+        <nav
+          aria-label="Jump to a section of this record"
+          className="sticky top-0 z-40 hidden lg:block"
+        >
+          <div className="rounded-full bg-[#1c1a18]/90 px-2 py-1.5 shadow-[0_16px_40px_-20px_rgba(28,26,24,0.55)] ring-1 ring-white/10 backdrop-blur-md">
+            <div className="flex flex-wrap items-center justify-center gap-1">
+              {SECTION_ANCHORS.map((anchor) => (
+                <a
+                  key={anchor.href}
+                  className="rounded-full px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-[#f4f4ef]/55 transition-colors hover:bg-white/10 hover:text-[#f4f4ef] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e6f5c0]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1c1a18]"
+                  href={anchor.href}
+                >
+                  {anchor.label}
+                </a>
+              ))}
+            </div>
+          </div>
+        </nav>
+
         {/* Two columns from `lg`: the record itself on the left, the things you
             do to it on the right. F067 AC2 asks for every section to be
             reachable without excessive scrolling, and one narrow column of
             eight stacked cards stopped being that once ownership, status and
             sources landed. Below `lg` it folds back to one column in the same
             order. */}
-        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
-          <Group className="space-y-4">
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+          <Group className="space-y-6">
             <Rise>
               <BasicInfoPanel
                 organisation={client}
@@ -861,88 +1135,108 @@ export default async function ClientDetailPage({
                 read as one "can we actually reach them?" card instead. */}
             <Rise>
               <SectionCard headingId="contactability-heading" title="Contactability">
-                <dl className="mt-4 divide-y divide-black/[0.05]">
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1.5 pb-3.5">
-                    <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                      Email
-                    </dt>
-                    <Pill tone={email.status === "valid" ? "brand" : "danger"}>
-                      {email.status === "valid"
-                        ? "Valid format"
-                        : email.status === "invalid"
-                          ? "Invalid format"
-                          : "Missing"}
-                    </Pill>
-                    <dd
-                      className={`w-full break-all text-sm leading-[1.6] ${
-                        email.status === "invalid"
-                          ? "font-bold text-destructive"
-                          : email.value
-                            ? "text-foreground/80"
-                            : "text-foreground/35"
-                      }`}
+                <dl className="mt-4 space-y-3">
+                  <div className="flex flex-wrap items-start gap-x-4 gap-y-2 rounded-xl border border-black/[0.05] bg-black/[0.015] px-4 py-3.5">
+                    <span
+                      aria-hidden="true"
+                      className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-white ring-1 ring-black/[0.06]"
                     >
-                      {email.value ?? "Not provided"}
-                    </dd>
-                    {email.message && (
-                      <p className="w-full text-[13px] leading-[1.6] text-destructive/80" role="alert">
-                        {email.message} The rest of this client record is still available.
-                      </p>
-                    )}
+                      <Mail className="size-4 text-foreground/50" />
+                    </span>
+                    <div className="min-w-[12rem] flex-1">
+                      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                        <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
+                          Email
+                        </dt>
+                        <Pill tone={email.status === "valid" ? "brand" : "danger"}>
+                          {email.status === "valid"
+                            ? "Valid format"
+                            : email.status === "invalid"
+                              ? "Invalid format"
+                              : "Missing"}
+                        </Pill>
+                      </div>
+                      <dd
+                        className={`mt-1.5 break-all text-sm leading-[1.6] ${
+                          email.status === "invalid"
+                            ? "font-bold text-destructive"
+                            : email.value
+                              ? "text-foreground/80"
+                              : "text-foreground/35"
+                        }`}
+                      >
+                        {email.value ?? "Not provided"}
+                      </dd>
+                      {email.message && (
+                        <p className="mt-1.5 text-[13px] leading-[1.6] text-destructive/80" role="alert">
+                          {email.message} The rest of this client record is still available.
+                        </p>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1.5 pt-3.5">
-                    <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                      Website
-                    </dt>
-                    <Pill tone={website.status === "reachable" ? "brand" : "danger"}>
-                      {website.status === "reachable"
-                        ? "Reachable"
-                        : website.status === "invalid"
-                          ? "Invalid URL"
-                          : website.status === "missing"
-                            ? "Missing"
-                            : "Unreachable"}
-                    </Pill>
-                    <dd className="w-full text-sm leading-[1.6]">
-                      {websiteLink ? (
-                        <a
-                          aria-label={`Tap to open website ${websiteLink} in new tab`}
-                          className={`group inline-flex items-center gap-1.5 break-all underline decoration-1 underline-offset-2 transition-colors ${
-                            website.status === "reachable"
-                              ? "text-brand-hover hover:text-brand"
-                              : "font-bold text-destructive"
-                          }`}
-                          href={websiteLink}
-                          rel="noreferrer"
-                          target="_blank"
-                          title="Tap to open website in new tab"
-                        >
-                          <span className="break-all">{websiteLink}</span>
-                          <ExternalLink
-                            aria-hidden="true"
-                            className="h-3.5 w-3.5 shrink-0 opacity-60 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-                          />
-                        </a>
-                      ) : website.url ? (
-                        // Malformed: show what is stored, as text. There is
-                        // nowhere safe to send anyone.
-                        <span className="break-all font-bold text-destructive">{website.url}</span>
-                      ) : (
-                        <span className="text-foreground/35">Not provided</span>
+                  <div className="flex flex-wrap items-start gap-x-4 gap-y-2 rounded-xl border border-black/[0.05] bg-black/[0.015] px-4 py-3.5">
+                    <span
+                      aria-hidden="true"
+                      className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-white ring-1 ring-black/[0.06]"
+                    >
+                      <Globe className="size-4 text-foreground/50" />
+                    </span>
+                    <div className="min-w-[12rem] flex-1">
+                      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                        <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
+                          Website
+                        </dt>
+                        <Pill tone={website.status === "reachable" ? "brand" : "danger"}>
+                          {website.status === "reachable"
+                            ? "Reachable"
+                            : website.status === "invalid"
+                              ? "Invalid URL"
+                              : website.status === "missing"
+                                ? "Missing"
+                                : "Unreachable"}
+                        </Pill>
+                      </div>
+                      <dd className="mt-1.5 text-sm leading-[1.6]">
+                        {websiteLink ? (
+                          <a
+                            aria-label={`Tap to open website ${websiteLink} in new tab`}
+                            className={`group inline-flex items-center gap-1.5 break-all underline decoration-1 underline-offset-2 transition-colors ${
+                              website.status === "reachable"
+                                ? "text-brand-hover hover:text-brand"
+                                : "font-bold text-destructive"
+                            }`}
+                            href={websiteLink}
+                            rel="noreferrer"
+                            target="_blank"
+                            title="Tap to open website in new tab"
+                          >
+                            <span className="break-all">{websiteLink}</span>
+                            <ExternalLink
+                              aria-hidden="true"
+                              className="h-3.5 w-3.5 shrink-0 opacity-60 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                            />
+                          </a>
+                        ) : website.url ? (
+                          // Malformed: show what is stored, as text. There is
+                          // nowhere safe to send anyone.
+                          <span className="break-all font-bold text-destructive">{website.url}</span>
+                        ) : (
+                          <span className="text-foreground/35">Not provided</span>
+                        )}
+                      </dd>
+                      {websiteLink && (
+                        <p className="mt-1 text-[11px] font-medium tracking-wide text-foreground/40">
+                          Tap to open in new tab
+                        </p>
                       )}
-                    </dd>
-                    {websiteLink && (
-                      <p className="w-full text-[11px] font-medium tracking-wide text-foreground/40">
-                        Tap to open in new tab
-                      </p>
-                    )}
-                    {website.message && (
-                      <p className="w-full text-[13px] leading-[1.6] text-destructive/80" role="alert">
-                        {website.message} Booklet generation may use unreliable or missing
-                        website context.
-                      </p>
-                    )}
+                      {website.message && (
+                        <p className="mt-1.5 text-[13px] leading-[1.6] text-destructive/80" role="alert">
+                          {website.message} Booklet generation may use unreliable or missing
+                          website context.
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </dl>
               </SectionCard>
@@ -953,6 +1247,7 @@ export default async function ClientDetailPage({
                 headingId="source-heading"
                 title="Record sources"
                 hint="Where the information in this client record came from."
+                icon={<BookOpen />}
               >
                 {sourcesError ? (
                   <p className="mt-4 text-sm font-bold text-destructive" role="alert">
@@ -984,6 +1279,7 @@ export default async function ClientDetailPage({
                 headingId="attachments-heading"
                 title="Attachments"
                 hint="Files attached to this client."
+                icon={<Paperclip />}
               >
                 <AttachmentsSection
                   organisationId={client.id}
@@ -1001,6 +1297,7 @@ export default async function ClientDetailPage({
                 headingId="notes-heading"
                 title="Notes"
                 hint="Left by any team member — relationship history everyone can see."
+                icon={<StickyNote />}
               >
                 <NotesSection
                   notes={noteList}
@@ -1012,9 +1309,9 @@ export default async function ClientDetailPage({
             </Rise>
           </Group>
 
-          <Group className="space-y-4">
+          <Group className="space-y-6">
             <Rise>
-              <SectionCard headingId="ownership-heading" title="Ownership">
+              <SectionCard headingId="ownership-heading" title="Ownership" icon={<UserRound />}>
                 {ownerId ? (
                   <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
                     Owned by <span className="font-bold text-foreground/85">{ownerName}</span>
@@ -1043,7 +1340,7 @@ export default async function ClientDetailPage({
               </SectionCard>
             </Rise>
             <Rise>
-              <SectionCard headingId="tags-heading" title="Tags">
+              <SectionCard headingId="tags-heading" title="Tags" icon={<Tag />}>
                 <TagsSection
                   organisationId={client.id}
                   initialClientTags={clientTags}
@@ -1058,6 +1355,7 @@ export default async function ClientDetailPage({
                   headingId="status-heading"
                   title="Pipeline status"
                   hint="Where this client sits in the outreach pipeline. Shown on the client list too."
+                  icon={<Clock />}
                 >
                   <StatusSelect
                     organisationId={client.id}
@@ -1075,7 +1373,7 @@ export default async function ClientDetailPage({
                 the block on click — the preflight behind it remains the
                 enforcement either way. */}
             <Rise>
-              <SectionCard headingId="outreach-heading" title="Outreach">
+              <SectionCard headingId="outreach-heading" title="Outreach" icon={<Mail />}>
                 {sendingVolume && (
                   <p className={`mt-3 rounded-lg p-3 text-sm font-bold ${sendingVolume.warning ? "bg-amber-50 text-amber-900" : "bg-black/[0.03] text-foreground/60"}`} role={sendingVolume.warning ? "alert" : "status"}>
                     Your sending volume: {sendingVolume.count} of your {sendingVolume.limit} emails in the current {sendingVolume.windowMinutes}-minute window.{sendingVolume.warning ? " You are close to the configured threshold; sends are refused once it is reached." : ""}
@@ -1116,6 +1414,7 @@ export default async function ClientDetailPage({
                   title="Do not contact"
                   tone="danger"
                   hint="Flagging this client hides it from the active working list and blocks outreach."
+                  icon={<ShieldAlert />}
                 >
                   <div className="mt-4">
                     <SuppressButton
@@ -1138,6 +1437,7 @@ export default async function ClientDetailPage({
             headingId="timeline-heading"
             title="Timeline"
             hint="Every email, reply, note and change for this client, in one place."
+            icon={<History />}
           >
             <TimelineSection entries={timeline} degraded={timelineDegraded} />
           </SectionCard>

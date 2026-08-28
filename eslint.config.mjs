@@ -20,6 +20,12 @@ const eslintConfig = defineConfig([
     // authored here — re-running the CLI would overwrite any local fixes, so it
     // is exempt from the react-compiler rules rather than patched.
     "src/components/animate-ui/**",
+    // Vendored verbatim from enzomanuelmangano/demos
+    // (src/animations/cherry-blossom-qrcode). Upstream React Native source,
+    // not authored here — it is kept word-for-word so upstream fixes can be
+    // re-copied, so it is exempt from lint (and bridged to the web via the
+    // shims in src/lib/web-shims/).
+    "src/components/cherry-blossom-qrcode/**",
     "src/hooks/use-is-in-view.tsx",
     "src/hooks/use-controlled-state.tsx",
     "src/hooks/use-data-state.tsx",

@@ -44,6 +44,8 @@ import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
 import { Pill, SectionCard } from "./section-card";
 import { ScoreBreakdownCard, type LatestScoreDetailRow } from "./score-breakdown";
+import { GrantHistorySection } from "./grant-history-section";
+import { GRANT_HISTORY_PAGE_SIZE, type GrantRow } from "./grant-list-item";
 import { TagsSection } from "./tags-section";
 import { BookletPanel } from "./booklet-panel";
 import { deriveSourcesFromSavedRow } from "@/lib/booklet/sources";
@@ -96,6 +98,7 @@ type OwnerRow = {
   owner_id: string | null;
   owner: { full_name: string | null } | null;
 };
+type GrantRowQuery = Pick<GrantRow, "id" | "funder_name" | "amount_awarded" | "currency" | "award_date" | "grant_programme" | "description">;
 type ScheduledEmailRow = { id: string; subject: string; scheduled_at: string };
 type FailedEmailRow = { id: string; subject: string; updated_at: string };
 
@@ -124,6 +127,7 @@ function initialsOf(name: string | null | undefined): string {
 const SECTION_ANCHORS = [
   { href: "#basic-info-heading", label: "Overview" },
   { href: "#score-breakdown-heading", label: "Score" },
+  { href: "#grant-history-heading", label: "Grants" },
   { href: "#contactability-heading", label: "Contactability" },
   { href: "#attachments-heading", label: "Attachments" },
   { href: "#notes-heading", label: "Notes" },
@@ -267,6 +271,34 @@ export default async function ClientDetailPage({
   if (latestScoreError) {
     await reportError(latestScoreError, {
       operation: "clients.detail_score_breakdown",
+      organisationId: id,
+    });
+  }
+
+  // F035 grant history — awards promoted from 360Giving into the GRANTS table.
+  // Readable by every active role via grants_select_active (same reasoning as
+  // Notes), ordered newest first by the table's grants_organisation_idx. A
+  // failed read is reported, never fatal, and the section degrades to its
+  // error state exactly like every other independent query on this page.
+  // Only the first page is fetched here; GrantHistoryLoadMore asks for later
+  // pages via the colocated loadMoreGrants action. { count: "exact" } gives
+  // the total on record for the header pill, and the id tiebreaker makes the
+  // offset pagination deterministic when grants share an award date — the
+  // action uses the identical ordering.
+  const { data: grantRows, count: grantTotal, error: grantsError } = await supabase
+    .from("grants")
+    .select(
+      "id, funder_name, amount_awarded, currency, award_date, grant_programme, description",
+      { count: "exact" },
+    )
+    .eq("organisation_id", id)
+    .order("award_date", { ascending: false })
+    .order("id", { ascending: true })
+    .range(0, GRANT_HISTORY_PAGE_SIZE - 1)
+    .returns<GrantRowQuery[]>();
+  if (grantsError) {
+    await reportError(grantsError, {
+      operation: "clients.detail_grant_history",
       organisationId: id,
     });
   }
@@ -1038,6 +1070,20 @@ export default async function ClientDetailPage({
                 band={latestScore?.priority_band ?? null}
                 factors={latestScore?.score_factors ?? null}
                 error={Boolean(latestScoreError)}
+              />
+            </Rise>
+
+            {/* F035 — Grant history sits straight under the score it feeds:
+                the "Partnership history" factor is summed from these awards
+                (matched_grant_count), so a CAM reads "why it ranks this way"
+                and immediately sees the grants behind that judgement. Visible
+                to every role — grant read shares the same RLS as Notes. */}
+            <Rise>
+              <GrantHistorySection
+                organisationId={id}
+                grants={grantRows ?? []}
+                totalCount={grantTotal ?? grantRows?.length ?? 0}
+                error={Boolean(grantsError)}
               />
             </Rise>
 

@@ -5,6 +5,7 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { reportError } from "@/lib/error-logging";
 import { manualDraftLoadErrorMessage } from "@/lib/manual-entry";
 import { createClient } from "@/lib/supabase/server";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import { ManualEntryForm, type ManualEntryDraft } from "./manual-entry-form";
 import { UrlImportForm } from "./url-import-form";
 
@@ -17,13 +18,16 @@ export default async function NewManualClientPage({
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
   const selectedValue = (await searchParams).draft;
-  const selectedId = typeof selectedValue === "string" && /^[0-9a-f-]{36}$/i.test(selectedValue)
-    ? selectedValue
-    : null;
+  const selectedId =
+    typeof selectedValue === "string" && /^[0-9a-f-]{36}$/i.test(selectedValue)
+      ? selectedValue
+      : null;
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("manual_entry_records")
-    .select("id, legal_name, mission_statement, organisation_type, address_line_1, city, postcode, country_code, website, contact_email, registry_name, registry_number, reason_for_manual_entry, updated_at, source_url, imported_field_paths, import_notes")
+    .select(
+      "id, legal_name, mission_statement, organisation_type, address_line_1, city, postcode, country_code, website, contact_email, registry_name, registry_number, reason_for_manual_entry, updated_at, source_url, imported_field_paths, import_notes",
+    )
     .eq("submitted_by_user_id", authorization.actor.id)
     .eq("review_status", "draft")
     .order("updated_at", { ascending: false });
@@ -37,37 +41,56 @@ export default async function NewManualClientPage({
   const draftLoadMessage = error
     ? manualDraftLoadErrorMessage(error, process.env.NODE_ENV === "development")
     : null;
-  const initialEntry = selectedId
-    ? drafts.find((draft) => draft.id === selectedId) ?? null
-    : null;
+  const initialEntry = selectedId ? drafts.find((draft) => draft.id === selectedId) ?? null : null;
 
   return (
-    <main className="min-h-screen bg-[#f1f2f4] p-6">
-      <section className="mx-auto max-w-2xl rounded-2xl bg-white p-8 shadow-sm">
-        <Link className="text-sm font-medium text-brand hover:underline" href="/clients">← Clients</Link>
-        <h1 className="mt-4 text-2xl font-bold">Add a client</h1>
-        <p className="mt-2 text-sm text-foreground/65">
-          Use this when an organisation is not available from an API. Start from their
-          website, or fill the form in yourself. You can save an
-          incomplete draft. {authorization.actor.role === "admin"
-            ? "Your completed submission can activate immediately after the shared checks pass."
-            : "A completed submission must be approved by an admin before it becomes active."}
-        </p>
-        {draftLoadMessage && (
-          <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-900" role="alert">
-            {draftLoadMessage}
+    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+      <div className="mx-auto max-w-2xl">
+        <header className="mb-8">
+          <Link
+            className="group inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40 transition-colors hover:text-foreground/70"
+            href="/clients"
+          >
+            <span aria-hidden="true">←</span> Clients
+          </Link>
+          <p className="mt-6 text-[11px] font-bold uppercase tracking-[0.12em] text-brand">
+            Client database
           </p>
+          <h1 className="mt-2 text-[clamp(2rem,4vw,2.75rem)] font-bold font-body leading-[1] tracking-[-0.03em]">
+            Add a client
+          </h1>
+          <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
+            Use this when an organisation is not available from an API. Start from their website,
+            or fill the form in yourself. You can save an incomplete draft.{" "}
+            {authorization.actor.role === "admin"
+              ? "Your completed submission can activate immediately after the shared checks pass."
+              : "A completed submission must be approved by an admin before it becomes active."}
+          </p>
+        </header>
+
+        {draftLoadMessage && (
+          <div className="mb-6">
+            <InlineAlert variant="page" tone="error" message={draftLoadMessage} />
+          </div>
         )}
+
         {/* Hidden while reviewing an import: the CAM is finishing one, not starting
             another, and a second URL field beside a half-checked draft invites
             replacing it by accident. */}
-        {!initialEntry?.source_url && <UrlImportForm />}
-        <ManualEntryForm
-          drafts={drafts}
-          initialEntry={initialEntry}
-          isAdmin={authorization.actor.role === "admin"}
-        />
-      </section>
-    </main>
+        {!initialEntry?.source_url && (
+          <section className="rounded-2xl border border-black/[0.06] bg-white p-6 shadow-sm sm:p-8">
+            <UrlImportForm />
+          </section>
+        )}
+
+        <section className="mt-6 rounded-2xl border border-black/[0.06] bg-white p-6 shadow-sm sm:p-8">
+          <ManualEntryForm
+            drafts={drafts}
+            initialEntry={initialEntry}
+            isAdmin={authorization.actor.role === "admin"}
+          />
+        </section>
+      </div>
+    </div>
   );
 }

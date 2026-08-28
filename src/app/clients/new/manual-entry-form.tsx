@@ -10,6 +10,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import { discardImportDraft, type UrlImportState } from "./import-actions";
 import { saveManualEntry, type ManualEntryState } from "./actions";
 
@@ -17,7 +20,16 @@ export type ManualEntryDraft = {
   id: string;
   legal_name: string | null;
   mission_statement: string | null;
-  organisation_type: "charity" | "cio" | "cic" | "social_enterprise" | "ngo" | "company" | "both" | "other" | null;
+  organisation_type:
+    | "charity"
+    | "cio"
+    | "cic"
+    | "social_enterprise"
+    | "ngo"
+    | "company"
+    | "both"
+    | "other"
+    | null;
   address_line_1: string | null;
   city: string | null;
   postcode: string | null;
@@ -36,7 +48,6 @@ export type ManualEntryDraft = {
 
 const initialState: ManualEntryState = { kind: "idle", message: "" };
 const initialImportState: UrlImportState = { kind: "idle", message: "" };
-const inputClass = "mt-1 w-full rounded-lg border border-black/20 px-3 py-2";
 
 /**
  * Form field name to MANUAL_ENTRY_RECORDS column.
@@ -60,14 +71,43 @@ const FIELD_COLUMNS: Readonly<Record<string, string>> = {
   registryNumber: "registry_number",
 };
 
+
 /** F037 AC8: says, on the field itself, that this value is not the CAM's own. */
 function ImportedBadge() {
   return (
-    <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-900">
+    <span className="ml-2 rounded-full bg-brand/[0.08] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-brand">
       Imported
     </span>
   );
 }
+
+function FieldLabel({
+  htmlFor,
+  children,
+  imported,
+}: {
+  htmlFor: string;
+  children: React.ReactNode;
+  imported?: boolean;
+}) {
+  return (
+    <label
+      htmlFor={htmlFor}
+      className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/70"
+    >
+      {children}
+      {imported && <ImportedBadge />}
+    </label>
+  );
+}
+
+// The app's text field styling, tuned to match the existing pages: a taller
+// control than the shadcn default with the hairline border and brand focus ring
+// used across /clients and /admin.
+const textClass =
+  "mt-1.5 h-10 w-full rounded-lg border border-black/15 bg-white px-3 text-sm outline-none transition-[border-color,box-shadow] focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/20";
+const textareaClass =
+  "mt-1.5 w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm outline-none transition-[border-color,box-shadow] focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/20";
 
 export function ManualEntryForm({
   initialEntry,
@@ -111,9 +151,9 @@ export function ManualEntryForm({
   function handleFieldChange(event: FormEvent<HTMLFormElement>) {
     const target = event.target;
     if (
-      !(target instanceof HTMLInputElement)
-      && !(target instanceof HTMLTextAreaElement)
-      && !(target instanceof HTMLSelectElement)
+      !(target instanceof HTMLInputElement) &&
+      !(target instanceof HTMLTextAreaElement) &&
+      !(target instanceof HTMLSelectElement)
     ) {
       return;
     }
@@ -130,12 +170,17 @@ export function ManualEntryForm({
   return (
     <>
       {drafts.length > 0 && (
-        <aside className="mt-6 rounded-xl border border-black/10 bg-gray-50 p-4">
-          <h2 className="text-sm font-bold">Your saved drafts</h2>
-          <ul className="mt-2 space-y-1 text-sm">
+        <aside className="rounded-xl border border-black/[0.06] bg-black/[0.015] p-4">
+          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+            Your saved drafts
+          </p>
+          <ul className="mt-3 space-y-1.5 text-sm">
             {drafts.map((draft) => (
               <li key={draft.id}>
-                <Link className="font-medium text-brand hover:underline" href={`/clients/new?draft=${draft.id}`}>
+                <Link
+                  className="font-bold text-brand hover:underline"
+                  href={`/clients/new?draft=${draft.id}`}
+                >
                   {draft.legal_name || "Untitled manual entry"}
                 </Link>{" "}
                 <span className="text-foreground/55">
@@ -149,69 +194,100 @@ export function ManualEntryForm({
       )}
 
       {initialEntry?.source_url && (
-        <section className="mt-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
-          <h2 className="font-bold">Imported client information</h2>
-          <p className="mt-1">
-            The fields marked <span className="font-medium">Imported</span> were filled
-            from{" "}
+        <section className="rounded-xl border border-brand/15 bg-brand/[0.04] p-4 text-sm text-foreground">
+          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-brand">
+            Imported client information
+          </p>
+          <p className="mt-1 leading-[1.7]">
+            The fields marked <span className="font-bold">Imported</span> were filled from{" "}
             <a
-              className="font-medium underline"
+              className="font-bold underline underline-offset-2"
               href={initialEntry.source_url}
               rel="noreferrer nofollow noopener"
               target="_blank"
             >
               {initialEntry.source_url}
             </a>{" "}
-            and confirmed against public registers. Check every one of them before you submit — nothing here is saved as a
-            client until you do.
+            and confirmed against public registers. Check every one of them before you submit —
+            nothing here is saved as a client until you do.
           </p>
           {initialEntry.import_notes.length > 0 && (
             <ul className="mt-3 list-disc space-y-1 pl-5">
-              {initialEntry.import_notes.map((note) => <li key={note}>{note}</li>)}
+              {initialEntry.import_notes.map((note) => (
+                <li key={note}>{note}</li>
+              ))}
             </ul>
           )}
           <form action={discardAction} className="mt-3">
             <input name="entryId" type="hidden" value={initialEntry.id} />
-            <button
-              className="rounded-lg border border-blue-300 px-3 py-1.5 font-bold text-blue-900 disabled:opacity-50"
+            <OriginButton
+              variant="outline"
+              size="sm"
               disabled={discarding}
+              loading={discarding}
               type="submit"
             >
               {discarding ? "Discarding…" : "Discard this import"}
-            </button>
+            </OriginButton>
           </form>
           {discardState.message && (
-            <p className="mt-2 text-red-900" role="alert">{discardState.message}</p>
+            <div className="mt-2">
+              <InlineAlert
+                variant="inline"
+                tone={discardState.kind === "error" ? "error" : "neutral"}
+                message={discardState.message}
+              />
+            </div>
           )}
         </section>
       )}
 
-      <form action={action} className="mt-6 space-y-5" onChange={handleFieldChange}>
+      <form action={action} className="mt-6 space-y-6" onChange={handleFieldChange}>
         <input name="entryId" type="hidden" value={entryId} />
         {initialEntry?.source_url && (
-          <input
-            name="importedFieldPaths"
-            type="hidden"
-            value={JSON.stringify(importedColumns)}
-          />
+          <input name="importedFieldPaths" type="hidden" value={JSON.stringify(importedColumns)} />
         )}
 
-        <label className="block text-sm font-bold">Organisation name
-          {isImported("legal_name") && <ImportedBadge />}
-          <input className={inputClass} defaultValue={initialEntry?.legal_name ?? ""} maxLength={200} name="legalName" required />
-        </label>
+        <div className="flex flex-col gap-1.5">
+          <FieldLabel htmlFor="legal-name" imported={isImported("legal_name")}>
+            Organisation name
+          </FieldLabel>
+          <Input
+            id="legal-name"
+            className={textClass}
+            defaultValue={initialEntry?.legal_name ?? ""}
+            maxLength={200}
+            name="legalName"
+            required
+          />
+        </div>
 
-        <label className="block text-sm font-bold">Mission
-          {isImported("mission_statement") && <ImportedBadge />}
-          <textarea className={inputClass} defaultValue={initialEntry?.mission_statement ?? ""} maxLength={5000} name="missionStatement" required rows={4} />
-        </label>
+        <div className="flex flex-col gap-1.5">
+          <FieldLabel htmlFor="mission" imported={isImported("mission_statement")}>
+            Mission
+          </FieldLabel>
+          <Textarea
+            id="mission"
+            className={textareaClass}
+            defaultValue={initialEntry?.mission_statement ?? ""}
+            maxLength={5000}
+            name="missionStatement"
+            required
+            rows={4}
+          />
+        </div>
 
-        <div className="grid gap-5 sm:grid-cols-2">
-          <label className="block text-sm font-bold">Organisation type
-            {isImported("organisation_type") && <ImportedBadge />}
+        <div className="grid gap-6 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <FieldLabel htmlFor="type" imported={isImported("organisation_type")}>
+              Organisation type
+            </FieldLabel>
             <input name="organisationType" type="hidden" value={organisationType} />
             <Select value={organisationType} onValueChange={handleOrganisationTypeChange}>
-              <SelectTrigger className={`${inputClass} w-full`}>
+              <SelectTrigger
+                id="type"
+                className="mt-1.5 h-10 w-full rounded-lg border border-black/15 bg-white"
+              >
                 <SelectValue placeholder="Choose a type" />
               </SelectTrigger>
               <SelectContent>
@@ -225,56 +301,137 @@ export function ManualEntryForm({
                 <SelectItem value="other">Other organisation</SelectItem>
               </SelectContent>
             </Select>
-          </label>
-          <label className="block text-sm font-bold">Country code
-            {isImported("country_code") && <ImportedBadge />}
-            <input className={inputClass} defaultValue={initialEntry?.country_code ?? "GB"} maxLength={2} name="countryCode" pattern="[A-Za-z]{2}" required />
-          </label>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <FieldLabel htmlFor="country" imported={isImported("country_code")}>
+              Country code
+            </FieldLabel>
+            <Input
+              id="country"
+              className={textClass}
+              defaultValue={initialEntry?.country_code ?? "GB"}
+              maxLength={2}
+              name="countryCode"
+              pattern="[A-Za-z]{2}"
+              required
+            />
+          </div>
         </div>
 
-        <fieldset className="rounded-xl border border-black/10 p-4">
-          <legend className="px-1 text-sm font-bold">Full address</legend>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block text-sm font-bold sm:col-span-2">Address line 1
-              {isImported("address_line_1") && <ImportedBadge />}
-              <input className={inputClass} defaultValue={initialEntry?.address_line_1 ?? ""} maxLength={300} name="addressLine1" required />
-            </label>
-            <label className="block text-sm font-bold">Town or city
-              {isImported("city") && <ImportedBadge />}
-              <input className={inputClass} defaultValue={initialEntry?.city ?? ""} maxLength={200} name="city" required />
-            </label>
-            <label className="block text-sm font-bold">Postcode or postal code
-              {isImported("postcode") && <ImportedBadge />}
-              <input className={inputClass} defaultValue={initialEntry?.postcode ?? ""} maxLength={32} name="postcode" required />
-            </label>
+        <fieldset className="rounded-xl border border-black/[0.06] bg-black/[0.015] p-4 sm:p-5">
+          <legend className="px-1 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/45">
+            Full address
+          </legend>
+          <div className="grid gap-6 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
+              <FieldLabel htmlFor="addr" imported={isImported("address_line_1")}>
+                Address line 1
+              </FieldLabel>
+              <Input
+                id="addr"
+                className={textClass}
+                defaultValue={initialEntry?.address_line_1 ?? ""}
+                maxLength={300}
+                name="addressLine1"
+                required
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <FieldLabel htmlFor="city" imported={isImported("city")}>
+                Town or city
+              </FieldLabel>
+              <Input
+                id="city"
+                className={textClass}
+                defaultValue={initialEntry?.city ?? ""}
+                maxLength={200}
+                name="city"
+                required
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <FieldLabel htmlFor="postcode" imported={isImported("postcode")}>
+                Postcode or postal code
+              </FieldLabel>
+              <Input
+                id="postcode"
+                className={textClass}
+                defaultValue={initialEntry?.postcode ?? ""}
+                maxLength={32}
+                name="postcode"
+                required
+              />
+            </div>
           </div>
         </fieldset>
 
-        <div className="grid gap-5 sm:grid-cols-2">
-          <label className="block text-sm font-bold">Website
-            {isImported("website") && <ImportedBadge />}
-            <input className={inputClass} defaultValue={initialEntry?.website ?? ""} maxLength={500} name="website" placeholder="https://example.org" required />
-          </label>
-          <label className="block text-sm font-bold">Contact email
-            {isImported("contact_email") && <ImportedBadge />}
-            <input className={inputClass} defaultValue={initialEntry?.contact_email ?? ""} maxLength={320} name="contactEmail" type="text" required />
-          </label>
-          <label className="block text-sm font-bold">Registry name
-            {isImported("registry_name") && <ImportedBadge />}
-            <input className={inputClass} defaultValue={initialEntry?.registry_name ?? ""} maxLength={200} name="registryName" required />
-          </label>
-          <label className="block text-sm font-bold">Registry number
-            {isImported("registry_number") && <ImportedBadge />}
-            <input className={inputClass} defaultValue={initialEntry?.registry_number ?? ""} maxLength={200} name="registryNumber" required />
-          </label>
+        <div className="grid gap-6 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <FieldLabel htmlFor="website" imported={isImported("website")}>
+              Website
+            </FieldLabel>
+            <Input
+              id="website"
+              className={textClass}
+              defaultValue={initialEntry?.website ?? ""}
+              maxLength={500}
+              name="website"
+              placeholder="https://example.org"
+              required
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <FieldLabel htmlFor="email" imported={isImported("contact_email")}>
+              Contact email
+            </FieldLabel>
+            <Input
+              id="email"
+              className={textClass}
+              defaultValue={initialEntry?.contact_email ?? ""}
+              maxLength={320}
+              name="contactEmail"
+              type="text"
+              required
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <FieldLabel htmlFor="registry-name" imported={isImported("registry_name")}>
+              Registry name
+            </FieldLabel>
+            <Input
+              id="registry-name"
+              className={textClass}
+              defaultValue={initialEntry?.registry_name ?? ""}
+              maxLength={200}
+              name="registryName"
+              required
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <FieldLabel htmlFor="registry-number" imported={isImported("registry_number")}>
+              Registry number
+            </FieldLabel>
+            <Input
+              id="registry-number"
+              className={textClass}
+              defaultValue={initialEntry?.registry_number ?? ""}
+              maxLength={200}
+              name="registryNumber"
+              required
+            />
+          </div>
         </div>
 
-        <label className="block text-sm font-bold">Why is manual entry needed?
-          <textarea
-            className={inputClass}
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="reason" className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/70">
+            Why is manual entry needed?
+          </label>
+          <Textarea
+            id="reason"
+            className={textareaClass}
             defaultValue={
-              initialEntry?.reason_for_manual_entry
-              ?? (initialEntry?.source_url
+              initialEntry?.reason_for_manual_entry ??
+              (initialEntry?.source_url
                 ? `Imported from ${initialEntry.source_url} and reviewed by hand.`
                 : "")
             }
@@ -284,31 +441,34 @@ export function ManualEntryForm({
             required
             rows={4}
           />
-        </label>
+        </div>
 
         {isAdmin && (
-          <label className="flex items-start gap-2 rounded-lg bg-blue-50 p-3 text-sm text-blue-950">
-            <input className="mt-1" name="adminConfirmedEligible" type="checkbox" />
+          <label className="flex items-start gap-3 rounded-xl border border-brand/15 bg-brand/[0.04] p-4 text-sm leading-[1.7]">
+            <input className="mt-1 size-4 accent-brand" name="adminConfirmedEligible" type="checkbox" />
             <span>
-              For a company or other organisation, I confirm it is an eligible non-profit,
-              social enterprise, NGO or socially focused startup.
+              For a company or other organisation, I confirm it is an eligible non-profit, social
+              enterprise, NGO or socially focused startup.
             </span>
           </label>
         )}
 
         {state.message && (
-          <p
-            className={`rounded-lg p-3 text-sm ${state.kind === "success" ? "bg-green-50 text-green-800" : state.kind === "warning" ? "bg-amber-50 text-amber-900" : "bg-red-50 text-red-800"}`}
-            role={state.kind === "error" ? "alert" : "status"}
-          >
-            {state.message}
-          </p>
+          <InlineAlert
+            variant="page"
+            tone={
+              state.kind === "success" ? "success" : state.kind === "warning" ? "warning" : "error"
+            }
+            message={state.message}
+          />
         )}
         {state.warnings && state.warnings.length > 0 && (
-          <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900" role="alert">
-            <p className="font-bold">Saved with field warnings</p>
-            <ul className="mt-2 list-disc space-y-1 pl-5">
-              {state.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.06] px-5 py-4">
+            <p className="text-sm font-bold text-amber-700">Saved with field warnings</p>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-700">
+              {state.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
             </ul>
           </div>
         )}
@@ -318,7 +478,7 @@ export function ManualEntryForm({
           </Link>
         )}
 
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-3 pt-2">
           <OriginButton
             variant="outline"
             size="md"

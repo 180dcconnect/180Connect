@@ -182,7 +182,7 @@ async function runOneSource(
   }
 
   try {
-    const { records, truncated } = await source.fetch();
+    const { records, truncated, walkedOrganisations } = await source.fetch();
     counts.fetched = records.length;
 
     const existing = await store.loadChecksums(
@@ -228,7 +228,14 @@ async function runOneSource(
         `${truncated ? " — hit the source's result ceiling" : ""}`,
     );
 
-    return { source: source.name, status, counts, written, runId: run.id };
+    return {
+      source: source.name,
+      status,
+      counts,
+      written,
+      runId: run.id,
+      walkedOrganisations,
+    };
   } catch (err) {
     // Anything not yet written failed with the batch.
     counts.failed = counts.fetched - counts.inserted - counts.skipped;

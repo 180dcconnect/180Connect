@@ -153,7 +153,9 @@ export function createThreeSixtyGivingLookupAdapter(
     async fetch(): Promise<SourceFetchResult> {
       const orgId = lookupToOrgId(lookup);
       const records = await fetchGrantsForOrgId(orgId);
-      return { records, truncated: false };
+      // A single-organisation lookup always walks exactly one org — even when
+      // it has no grants, that is a real result, not an empty walk.
+      return { records, truncated: false, walkedOrganisations: 1 };
     },
 
     onError(err: Error) {
@@ -165,17 +167,30 @@ export function createThreeSixtyGivingLookupAdapter(
 export type OrganisationIdentifier = { identifier_type: string; identifier_value: string };
 export type IdentifierLoader = () => Promise<OrganisationIdentifier[]>;
 
+const IDENTIFIERS_PAGE_SIZE = 1000;
+
 async function defaultLoadIdentifiers(): Promise<OrganisationIdentifier[]> {
   const supabase = buildAdminClient();
   if (!supabase) throw new Error("Supabase admin client is not configured.");
 
-  const { data, error } = await supabase
-    .from("organisation_identifiers")
-    .select("identifier_type, identifier_value")
-    .in("identifier_type", ["uk_charity", "uk_company"]);
+  // Paged, same reason write-organisations.ts's fetchAllPages exists: PostgREST
+  // caps an unbounded .select() at 1000 rows by default, so a plain query here
+  // would silently stop walking past row 1000 — 125 of 1125 identifiers were
+  // missed that way on the first live smoke-test run (2026-08-28).
+  const all: OrganisationIdentifier[] = [];
+  for (let from = 0; ; from += IDENTIFIERS_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("organisation_identifiers")
+      .select("identifier_type, identifier_value")
+      .in("identifier_type", ["uk_charity", "uk_company"])
+      .range(from, from + IDENTIFIERS_PAGE_SIZE - 1);
 
-  if (error) throw new Error(`Could not load organisation identifiers: ${error.message}`);
-  return (data ?? []) as OrganisationIdentifier[];
+    if (error) throw new Error(`Could not load organisation identifiers: ${error.message}`);
+    const page = (data ?? []) as OrganisationIdentifier[];
+    all.push(...page);
+    if (page.length < IDENTIFIERS_PAGE_SIZE) break;
+  }
+  return all;
 }
 
 /**
@@ -198,13 +213,14 @@ export function createThreeSixtyGivingAdapter(
 
     async fetch(): Promise<SourceFetchResult> {
       const identifiers = await loadIdentifiers();
+      const walkable = identifiers.filter(
+        (identifier) => ORG_ID_PREFIX[identifier.identifier_type],
+      );
       const records: CommonRecord[] = [];
       const seenSourceRecordIds = new Set<string>();
 
-      for (const identifier of identifiers) {
+      for (const identifier of walkable) {
         const prefix = ORG_ID_PREFIX[identifier.identifier_type];
-        if (!prefix) continue;
-
         const orgRecords = await fetchGrantsForOrgId(`${prefix}${identifier.identifier_value}`);
         for (const record of orgRecords) {
           // The same grant can surface twice if an organisation has both a
@@ -220,7 +236,15 @@ export function createThreeSixtyGivingAdapter(
         await sleep(REQUEST_INTERVAL_MS);
       }
 
-      return { records, truncated: false };
+      return {
+        records,
+        truncated: false,
+        // How many identifiers the walk actually asked about (types without a
+        // registry-number prefix, e.g. website, are excluded) — lets callers
+        // tell "walked nothing because there are no registry numbers on
+        // record" apart from "walked N and 360Giving had no grants for any".
+        walkedOrganisations: walkable.length,
+      };
     },
 
     onError(err: Error) {

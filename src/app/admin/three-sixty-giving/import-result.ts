@@ -27,6 +27,24 @@ export function importStateFromSummary(summary: RunSummary): ThreeSixtyGivingImp
     };
   }
 
+  // The bulk walk reported zero organisations to ask about — the pipeline has
+  // no uk_charity/uk_company identifiers on record, so the run had literally
+  // nothing to walk. That is a no-op, not a success, and the green "imported
+  // successfully" line with four zeros hid it. Flag it instead, so the admin
+  // knows the fix is upstream (registry identifiers), not a retry.
+  if (summary.walkedOrganisations === 0) {
+    return {
+      kind: "warning",
+      message:
+        "Nothing to import — the pipeline has no UK charity or company registry " +
+        "numbers on record, so there were no organisations to ask about. " +
+        "360Giving only attaches grants to charities already known by a registry " +
+        "number; run the Companies House / Charity Commission imports first, or " +
+        "use the single-org lookup below.",
+      counts,
+    };
+  }
+
   return {
     kind: summary.status === "partial" ? "warning" : "success",
     message:

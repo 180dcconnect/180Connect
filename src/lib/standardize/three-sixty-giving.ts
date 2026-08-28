@@ -6,29 +6,17 @@
 // sources... does not silently create a duplicate client"): there is no
 // insertOrganisation call anywhere in this module.
 //
-// MATCHING IS A STOPGAP, FLAGGED RATHER THAN HIDDEN: the "correct" match
-// target is organisation_identifiers (built for exactly this — see its
-// comment in 20260804180000_create_org_children.sql, "Deduplication keys on
-// the primary one"), but nothing in this codebase writes to that table yet.
-// F041/F260's promote functions (write-organisations.ts) only ever insert
-// into ORGANISATIONS. F042's own matcher hit the identical gap and punted on
-// it (src/lib/dedup/match-organisations.ts: "registrationNumbers is optional
-// ... because nothing in this codebase writes organisation_identifiers yet
-// ... it is here so matching is correct the day it is [fixed]") — writing
-// this module against the same empty table would match nothing in staging
-// today, so instead this queries raw_source_records directly for an
-// already-promoted charity_commission/companies_house record carrying the
-// same registration number:
-//   - companies_house: source_record_id IS the normalised company number
-//     (confirmed in companieshouse.ts's shape functions), so an exact
-//     source_record_id match is enough.
-//   - charity_commission: source_record_id is organisation_number, not the
-//     charity number, so this reads raw_payload->>reg_charity_number instead
-//     (same ->> json-path filter pattern companieshouse.ts's
-//     defaultResolveIncorporationWatermark already uses).
-// Once organisation_identifiers gets a real write path (closing the same gap
-// F042 flagged), this should move to querying that table instead — matching
-// logic would then live in one place rather than two.
+// Matching goes through organisation_identifiers — the table F041 built for
+// exactly this ("Deduplication keys on the primary one", 20260804180000).
+// The write path (write-organisations.ts's upsertIdentifier) and its backfill
+// finally populate it, so the 360Giving standardize layer reads registry
+// numbers from one place, same as F042's matcher now does:
+//   - uk_charity  ↔ a grant's recipientOrganization.charityNumber
+//   - uk_company  ↔ a grant's recipientOrganization.companyNumber, normalised
+//     the same way companieshouse.ts normalises its own numbers, so the two
+//     sides compare equal.
+// The GB-CHC-/GB-COH- prefixing 360Giving's API needs is the adapter's job
+// (threesixtygiving.ts's ORG_ID_PREFIX), not this module's.
 
 import { buildAdminClient } from "../supabase/admin-client-factory.ts";
 import { reportError } from "../error-logging.ts";
@@ -161,34 +149,39 @@ export function createDefaultGrantWriteStore(): GrantWriteStore | null {
     },
 
     async findOrganisationByCharityNumber(charityNumber) {
+      // uk_charity values are stored bare (the write path stores String(reg_
+      // charity_number)), so a trim is all the normalisation needed. limit(1)
+      // because identifier_value is a lookup index, not a unique constraint.
       const { data, error } = await supabase
-        .from("raw_source_records")
-        .select("matched_organisation_id")
-        .eq("record_source", "charity_commission")
-        .eq("raw_payload->>reg_charity_number", charityNumber)
-        .not("matched_organisation_id", "is", null)
-        .order("received_at", { ascending: false })
+        .from("organisation_identifiers")
+        .select("organisation_id")
+        .eq("identifier_type", "uk_charity")
+        .eq("identifier_value", charityNumber.trim())
+        .order("verified", { ascending: false })
+        .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
       if (error) throw error;
-      const id = (data as { matched_organisation_id: string | null } | null)?.matched_organisation_id;
+      const id = (data as { organisation_id: string | null } | null)?.organisation_id;
       return id ? { id } : null;
     },
 
     async findOrganisationByCompanyNumber(companyNumber) {
+      // uk_company values are the normalised company number (source_record_id),
+      // so the grant's number is normalised the same way before comparing.
       const { data, error } = await supabase
-        .from("raw_source_records")
-        .select("matched_organisation_id")
-        .eq("record_source", "companies_house")
-        .eq("source_record_id", normalizeCompanyNumber(companyNumber))
-        .not("matched_organisation_id", "is", null)
-        .order("received_at", { ascending: false })
+        .from("organisation_identifiers")
+        .select("organisation_id")
+        .eq("identifier_type", "uk_company")
+        .eq("identifier_value", normalizeCompanyNumber(companyNumber))
+        .order("verified", { ascending: false })
+        .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
       if (error) throw error;
-      const id = (data as { matched_organisation_id: string | null } | null)?.matched_organisation_id;
+      const id = (data as { organisation_id: string | null } | null)?.organisation_id;
       return id ? { id } : null;
     },
 

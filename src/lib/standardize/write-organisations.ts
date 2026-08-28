@@ -86,6 +86,12 @@ const TRACKED_FIELD_SOURCES = [
 
 export type PendingRecord = {
   id: string; // raw_source_records.id
+  // raw_source_records.source_record_id — the source's own identifier for the
+  // record. companies_house stores the normalised company number here, which
+  // is exactly the uk_company identifier value; charity_commission's charity
+  // number lives in the payload instead (reg_charity_number). Optional so
+  // legacy fixtures and sources without a source-level id stay valid.
+  source_record_id?: string | null;
   // Left as unknown, not a specific Raw*Record type: this same loader serves
   // every source (charity_commission, companies_house, ...), and each one's
   // raw_payload shape only means anything in the context of that source's own
@@ -135,10 +141,11 @@ async function flagIfDuplicate(
   org: StandardOrganisation,
   existingOrganisations: ExistingOrganisationForMatch[],
   source: string,
+  registrationNumbers: string[] | undefined,
 ): Promise<boolean> {
   const dismissedOrganisationIds = await store.loadDismissedMatches(record.id);
   const match = findDuplicateMatch(
-    { legal_name: org.legal_name, postcode: org.postcode },
+    { legal_name: org.legal_name, postcode: org.postcode, registrationNumbers },
     existingOrganisations,
     new Set(dismissedOrganisationIds),
   );
@@ -149,10 +156,17 @@ async function flagIfDuplicate(
     matchedOrganisationId: match.organisationId,
     matchedOn: match.matchedOn,
     source,
-    // The only fields this matcher actually compares — see match-organisations.ts.
-    // StandardOrganisation carries no registration-number field, so this is the same
-    // for both matchedOn branches; a real gap, not a shortcut (see migration header).
-    matchFields: { legal_name: org.legal_name, postcode: org.postcode },
+    // The fields this matcher actually compared. Registration numbers come from
+    // the raw record, not StandardOrganisation (which deliberately carries no
+    // registry field — see the mapper headers) — they only appear in the record
+    // when the source supplied one.
+    matchFields: {
+      legal_name: org.legal_name,
+      postcode: org.postcode,
+      ...(registrationNumbers && registrationNumbers.length > 0
+        ? { registrationNumbers: registrationNumbers.join(", ") }
+        : {}),
+    },
   });
   if ("error" in flagResult) {
     await reportError(new Error(flagResult.error), {
@@ -263,6 +277,21 @@ export interface OrganisationWriteStore {
     source: string,
     rawSourceRecordId: string,
   ): Promise<void>;
+  /**
+   * Writes one registry identifier against an organisation
+   * (ORGANISATION_IDENTIFIERS) — closes the "F041 built the table, not the
+   * write path" gap every matcher in the codebase flags (match-organisations.ts,
+   * three-sixty-giving.ts). The first identifier an organisation receives
+   * becomes its primary one. Idempotent: a value already present (this
+   * organisation on a re-run, or any other row — the schema makes the value
+   * pair a lookup index, not a uniqueness guarantee) is left as-is rather
+   * than duplicated.
+   */
+  upsertIdentifier(input: {
+    organisationId: string;
+    identifierType: "uk_charity" | "uk_company";
+    identifierValue: string;
+  }): Promise<{ ok: true } | { error: string }>;
 }
 
 export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | null {
@@ -273,7 +302,7 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
     async loadPendingRecords(source) {
       const { data, error } = await supabase
         .from("raw_source_records")
-        .select("id, raw_payload")
+        .select("id, raw_payload, source_record_id")
         .eq("record_source", source)
         .eq("processing_status", "pending");
 
@@ -282,13 +311,36 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
     },
 
     async loadExistingOrganisationsForMatching() {
-      // registrationNumbers is left undefined: nothing in this codebase writes
-      // organisation_identifiers yet (see match-organisations.ts's header), so there is
-      // nothing to select. findDuplicateMatch falls back to name + postcode, which is
-      // the data this pipeline actually populates.
-      return fetchAllPages(async (from, to) =>
+      const organisations = await fetchAllPages(async (from, to) =>
         supabase.from("organisations").select("id, legal_name, postcode").range(from, to),
       );
+
+      // Registration numbers finally have a write path (upsertIdentifier) and a
+      // backfill, so F042's strongest key has data to match against — until now
+      // findDuplicateMatch could only ever see the name+postcode branch (see
+      // match-organisations.ts's header for the gap this closes). One pass over
+      // organisation_identifiers, grouped by organisation, so an org with several
+      // identifiers (a dual-registered charity's uk_charity + uk_company) matches
+      // on any of them.
+      const identifiers = await fetchAllPages(async (from, to) =>
+        supabase
+          .from("organisation_identifiers")
+          .select("organisation_id, identifier_value")
+          .range(from, to),
+      );
+      const numbersByOrganisation = new Map<string, string[]>();
+      for (const row of identifiers) {
+        const numbers = numbersByOrganisation.get(row.organisation_id) ?? [];
+        numbers.push(row.identifier_value);
+        numbersByOrganisation.set(row.organisation_id, numbers);
+      }
+
+      return organisations.map((organisation) => ({
+        id: organisation.id,
+        legal_name: organisation.legal_name,
+        postcode: organisation.postcode,
+        registrationNumbers: numbersByOrganisation.get(organisation.id),
+      }));
     },
 
     async loadDismissedMatches(rawRecordId) {
@@ -394,6 +446,48 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
       });
       if (error) throw error;
     },
+
+    async upsertIdentifier({ organisationId, identifierType, identifierValue }) {
+      // (identifier_type, identifier_value) is a lookup INDEX, not a unique
+      // constraint — the Data Model deliberately allows the same registry
+      // number to surface under two organisations (see
+      // 20260804180000_create_org_children.sql's organisation_identifiers
+      // _value_idx). So idempotency is check-then-insert here, not ON CONFLICT:
+      // a value already taken is left alone rather than duplicated.
+      const { data: existingRows, error: existingError } = await supabase
+        .from("organisation_identifiers")
+        .select("id")
+        .eq("identifier_type", identifierType)
+        .eq("identifier_value", identifierValue)
+        .limit(1);
+      if (existingError) return { error: existingError.message };
+      if (existingRows && existingRows.length > 0) return { ok: true };
+
+      // is_primary: the first identifier an organisation receives is its
+      // primary one (partial unique index — one primary per organisation, see
+      // 20260804180000_create_org_children.sql). Checked rather than assumed,
+      // so this method is also correct for a caller adding a second identifier
+      // to an organisation later.
+      const { count, error: countError } = await supabase
+        .from("organisation_identifiers")
+        .select("id", { count: "exact", head: true })
+        .eq("organisation_id", organisationId);
+      if (countError) return { error: countError.message };
+
+      const { error } = await supabase
+        .from("organisation_identifiers")
+        .insert({
+          organisation_id: organisationId,
+          identifier_type: identifierType,
+          identifier_value: identifierValue,
+          registry_country: "GB",
+          is_primary: (count ?? 0) === 0,
+          verified: false, // pipeline-written numbers await human verification
+        });
+
+      if (error) return { error: error.message };
+      return { ok: true };
+    },
   };
 }
 
@@ -425,6 +519,85 @@ async function recordFieldSourcesOrReport(
 /** A record is usable if it at least has a non-empty legal_name. */
 function isUsable(org: StandardOrganisation): boolean {
   return org.legal_name.trim() !== "";
+}
+
+/**
+ * The registry identifier a source's raw record carries, in the
+ * ORGANISATION_IDENTIFIERS shape. Null when the record has none usable.
+ * Written against the organisation a promote pass just created — this is what
+ * finally gives the 360Giving bulk walk (and F042's registration-number dedup
+ * branch, once loadExistingOrganisationsForMatching selects them) something to
+ * read. find_that_charity is deliberately not covered: its raw id is an
+ * org-id.guide value (GB-CHC-/GB-NIC-/GB-SC-…), and identifier_type has no
+ * way to say which UK charity register a number belongs to, so wiring it here
+ * would risk misfiling NI/Scotland numbers as GB-CHC.
+ */
+export type SourceIdentifier = {
+  identifierType: "uk_charity" | "uk_company";
+  identifierValue: string;
+};
+
+/** Charity Commission: the charity number, not organisation_number. */
+function charityCommissionIdentifier(raw: RawCharityCommissionRecord): SourceIdentifier | null {
+  const value = raw.reg_charity_number;
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) return null;
+  return { identifierType: "uk_charity", identifierValue: String(value) };
+}
+
+/** Companies House: source_record_id IS the normalised company number. */
+function companiesHouseIdentifier(
+  sourceRecordId: string | null | undefined,
+): SourceIdentifier | null {
+  const value = sourceRecordId?.trim();
+  if (!value) return null;
+  return { identifierType: "uk_company", identifierValue: value };
+}
+
+/**
+ * Find That Charity's registry id (org-id.guide format, e.g. "GB-CHC-202918")
+ * as a bare number, for F042 matching — same bare format organisation_identifiers
+ * stores, so the two sides compare equal. GB-CHC only: GB-NIC/GB-SC numbers come
+ * from different registers and a bare NI/Scotland number could collide with a
+ * GB-CHC one (same reason the identifier write path excludes this source). A
+ * registration-number match only ever raises an admin-review flag — never an
+ * auto-merge — so a false positive here is caught, not silent.
+ */
+function findThatCharityRegistrationNumbers(
+  raw: RawFindThatCharityRecord,
+): string[] | undefined {
+  const match = /^GB-CHC-(.+)$/.exec(raw.id ?? "");
+  return match ? [match[1]] : undefined;
+}
+
+/**
+ * Best-effort, same as recordFieldSourcesOrReport: the organisation insert is
+ * already committed, so a failed identifier write is logged (reportError), not
+ * a reason to mark an otherwise-successful promote as failed. The 360Giving
+ * admin page reports "nothing to walk" when identifiers are missing, so the
+ * gap stays visible instead of being silently swallowed.
+ */
+async function recordIdentifierOrReport(
+  store: OrganisationWriteStore,
+  organisationId: string,
+  source: string,
+  identifier: SourceIdentifier | null,
+  record: PendingRecord,
+): Promise<void> {
+  if (!identifier) return;
+  try {
+    const result = await store.upsertIdentifier({
+      organisationId,
+      identifierType: identifier.identifierType,
+      identifierValue: identifier.identifierValue,
+    });
+    if ("error" in result) throw new Error(result.error);
+  } catch (error) {
+    await reportError(error instanceof Error ? error : new Error(String(error)), {
+      operation: `standardize.${source}.record_identifier`,
+      rawRecordId: record.id,
+      organisationId,
+    });
+  }
 }
 
 function buildCriteriaInput(
@@ -556,8 +729,19 @@ export async function promotePendingCharityCommissionRecords(
       continue;
     }
 
+    const charityNumber = charityCommissionIdentifier(
+      record.raw_payload as RawCharityCommissionRecord,
+    );
     if (
-      await flagIfDuplicate(store, counts, record, org, existingOrganisations, "charity_commission")
+      await flagIfDuplicate(
+        store,
+        counts,
+        record,
+        org,
+        existingOrganisations,
+        "charity_commission",
+        charityNumber ? [charityNumber.identifierValue] : undefined,
+      )
     ) {
       continue;
     }
@@ -575,15 +759,24 @@ export async function promotePendingCharityCommissionRecords(
 
     await store.markRecordStatus(record.id, "validated", result.id);
     await recordFieldSourcesOrReport(store, result.id, org, "charity_commission", record);
+    await recordIdentifierOrReport(
+      store,
+      result.id,
+      "charity_commission",
+      charityNumber,
+      record,
+    );
     counts.inserted++;
     // Intra-batch dedup: make this newly inserted organisation visible to
     // subsequent records in the same run. Without this, two raws with the
     // same name+postcode in one batch both insert (756 duplicate groups in
-    // staging, 2026-08-11). findDuplicateMatch compares legal_name+postcode.
+    // staging, 2026-08-11). Carries the registry number so a later record
+    // with the same number matches on F042's strongest key, not just name.
     existingOrganisations.push({
       id: result.id,
       legal_name: org.legal_name,
       postcode: org.postcode ?? "",
+      registrationNumbers: charityNumber ? [charityNumber.identifierValue] : undefined,
     });
   }
 
@@ -638,8 +831,17 @@ export async function promotePendingCompaniesHouseRecords(
       continue;
     }
 
+    const companyNumber = companiesHouseIdentifier(record.source_record_id);
     if (
-      await flagIfDuplicate(store, counts, record, org, existingOrganisations, "companies_house")
+      await flagIfDuplicate(
+        store,
+        counts,
+        record,
+        org,
+        existingOrganisations,
+        "companies_house",
+        companyNumber ? [companyNumber.identifierValue] : undefined,
+      )
     ) {
       continue;
     }
@@ -657,11 +859,19 @@ export async function promotePendingCompaniesHouseRecords(
 
     await store.markRecordStatus(record.id, "validated", result.id);
     await recordFieldSourcesOrReport(store, result.id, org, "companies_house", record);
+    await recordIdentifierOrReport(
+      store,
+      result.id,
+      "companies_house",
+      companyNumber,
+      record,
+    );
     counts.inserted++;
     existingOrganisations.push({
       id: result.id,
       legal_name: org.legal_name,
       postcode: org.postcode ?? "",
+      registrationNumbers: companyNumber ? [companyNumber.identifierValue] : undefined,
     });
   }
 
@@ -717,7 +927,15 @@ export async function promotePendingFindThatCharityRecords(
     }
 
     if (
-      await flagIfDuplicate(store, counts, record, org, existingOrganisations, "find_that_charity")
+      await flagIfDuplicate(
+        store,
+        counts,
+        record,
+        org,
+        existingOrganisations,
+        "find_that_charity",
+        findThatCharityRegistrationNumbers(record.raw_payload as RawFindThatCharityRecord),
+      )
     ) {
       continue;
     }
@@ -740,6 +958,7 @@ export async function promotePendingFindThatCharityRecords(
       id: result.id,
       legal_name: org.legal_name,
       postcode: org.postcode ?? "",
+      registrationNumbers: findThatCharityRegistrationNumbers(raw),
     });
   }
 

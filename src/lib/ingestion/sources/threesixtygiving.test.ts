@@ -41,6 +41,7 @@ describe("createThreeSixtyGivingLookupAdapter", () => {
     assert.equal(result.records[0].source_record_id, "360G-funder-1");
     assert.deepEqual(result.records[0].raw_payload, { id: "360G-funder-1", title: "Grant one" });
     assert.equal(result.truncated, false);
+    assert.equal(result.walkedOrganisations, 1);
   });
 
   it("builds a GB-COH- org_id from a company number", async () => {
@@ -129,7 +130,7 @@ describe("createThreeSixtyGivingAdapter", () => {
       return grantsPage([]);
     };
 
-    await createThreeSixtyGivingAdapter({
+    const result = await createThreeSixtyGivingAdapter({
       loadIdentifiers: async () => [
         { identifier_type: "uk_charity", identifier_value: "1164883" },
         { identifier_type: "uk_company", identifier_value: "09668396" },
@@ -140,6 +141,22 @@ describe("createThreeSixtyGivingAdapter", () => {
     assert.equal(requestedUrls.length, 2);
     assert.equal(requestedUrls[0].includes("GB-CHC-1164883"), true);
     assert.equal(requestedUrls[1].includes("GB-COH-09668396"), true);
+    assert.equal(result.walkedOrganisations, 2);
+  });
+
+  it("reports zero walked when only non-walkable identifiers exist", async () => {
+    globalThis.fetch = async () => {
+      throw new Error("should not be called");
+    };
+
+    const result = await createThreeSixtyGivingAdapter({
+      loadIdentifiers: async () => [
+        { identifier_type: "manual", identifier_value: "1201213" },
+      ],
+    }).fetch();
+
+    assert.deepEqual(result.records, []);
+    assert.equal(result.walkedOrganisations, 0);
   });
 
   it("collapses the same grant found under two identifiers for the same organisation", async () => {

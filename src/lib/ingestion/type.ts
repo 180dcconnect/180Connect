@@ -53,6 +53,14 @@ export interface CommonRecord {
 export interface SourceFetchResult {
   records: CommonRecord[];
   truncated: boolean;
+  /**
+   * How many organisation-level lookups this source's walk actually performed.
+   * Optional and source-specific: bulk adapters that iterate known identifiers
+   * (360giving, …) report the identifier count, single-org lookups report 1.
+   * Zero means "there was nothing to walk", which is a different outcome from
+   * "everything was walked and nothing was found" — callers use it to say so.
+   */
+  walkedOrganisations?: number;
 }
 
 /** Implemented once per external source. The runner knows nothing else about them. */
@@ -137,6 +145,14 @@ export type RunSummary = {
   counts: RunCounts;
   /** New rows vs rows rewritten because their payload changed. Logged, not stored. */
   written: { new: number; changed: number };
+  /**
+   * How many organisation-level lookups the source's fetch performed (see
+   * SourceFetchResult.walkedOrganisations). Undefined for sources that don't
+   * report it. A completed run with walkedOrganisations === 0 imported nothing
+   * because there was nothing to walk — distinct from a run that walked N and
+   * found no new data.
+   */
+  walkedOrganisations?: number;
   /**
    * The ingestion_runs row this summary corresponds to. Null only when startRun
    * itself failed — no row exists to reference. Callers that discover something

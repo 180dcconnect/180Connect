@@ -39,6 +39,11 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
     source: string;
     rawSourceRecordId: string;
   }[] = [];
+  const identifiers: {
+    organisationId: string;
+    identifierType: "uk_charity" | "uk_company";
+    identifierValue: string;
+  }[] = [];
 
   const store: OrganisationWriteStore = {
     async loadPendingRecords() {
@@ -68,18 +73,30 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
     async recordFieldSources(organisationId, org, source, rawSourceRecordId) {
       fieldSources.push({ organisationId, org, source, rawSourceRecordId });
     },
+    async upsertIdentifier(input) {
+      identifiers.push(input);
+      return { ok: true };
+    },
     ...overrides,
   };
 
-  return { store, inserted, flagged, statusUpdates, criteriaOutcomes, fieldSources };
+  return { store, inserted, flagged, statusUpdates, criteriaOutcomes, fieldSources, identifiers };
 }
 
-function pendingRecord(id: string, charityName: string): PendingRecord {
+function pendingRecord(
+  id: string,
+  charityName: string,
+  regCharityNumber = 1,
+): PendingRecord {
   return {
     id,
+    // The organisation_number, not the charity number — the latter lives in
+    // raw_payload.reg_charity_number and is what gets written as the uk_charity
+    // identifier (same split as the live loader's select).
+    source_record_id: String(regCharityNumber),
     raw_payload: {
-      organisation_number: 1,
-      reg_charity_number: 1,
+      organisation_number: regCharityNumber,
+      reg_charity_number: regCharityNumber,
       charity_name: charityName,
       reg_status: "R",
       date_of_registration: "2026-01-01T00:00:00",
@@ -88,11 +105,18 @@ function pendingRecord(id: string, charityName: string): PendingRecord {
   };
 }
 
-function companiesHousePendingRecord(id: string, companyName: string): PendingRecord {
+function companiesHousePendingRecord(
+  id: string,
+  companyName: string,
+  companyNumber = "01234567",
+): PendingRecord {
   return {
     id,
+    // The normalised company number — the uk_company identifier value, same
+    // as the live loader's source_record_id.
+    source_record_id: companyNumber,
     raw_payload: {
-      company_number: "01234567",
+      company_number: companyNumber,
       company_name: companyName,
     },
   };
@@ -126,7 +150,10 @@ describe("promotePendingCharityCommissionRecords — valid records", () => {
   it("maps and inserts every pending record, marking each validated", async () => {
     const { store, inserted, statusUpdates } = fakeStore({
       async loadPendingRecords() {
-        return [pendingRecord("raw-1", "Oxfam"), pendingRecord("raw-2", "Shelter")];
+        return [
+          pendingRecord("raw-1", "Oxfam", 5254841),
+          pendingRecord("raw-2", "Shelter", 234567),
+        ];
       },
     });
 
@@ -229,7 +256,13 @@ describe("promotePendingCharityCommissionRecords — duplicate candidate (F042)"
     assert.equal(flagged[0].matchedOrganisationId, "org-existing");
     assert.equal(flagged[0].matchedOn, "name_and_postcode");
     assert.equal(flagged[0].source, "charity_commission");
-    assert.deepEqual(flagged[0].matchFields, { legal_name: "Test Charity", postcode: "" });
+    // The candidate's registry number is now part of the compared fields (F042's
+    // registration-number branch is live), even when the name is what matched.
+    assert.deepEqual(flagged[0].matchFields, {
+      legal_name: "Test Charity",
+      postcode: "",
+      registrationNumbers: "1",
+    });
     assert.equal(statusUpdates[0].status, "matched");
     assert.equal(statusUpdates[0].matchedOrganisationId, "org-existing");
   });
@@ -347,7 +380,10 @@ describe("promotePendingCharityCommissionRecords — field-level source tracking
   it("does not fail the insert or the batch when recording field sources errors", async () => {
     const { store, inserted, statusUpdates } = fakeStore({
       async loadPendingRecords() {
-        return [pendingRecord("raw-1", "Oxfam"), pendingRecord("raw-2", "Shelter")];
+        return [
+          pendingRecord("raw-1", "Oxfam", 5254841),
+          pendingRecord("raw-2", "Shelter", 234567),
+        ];
       },
       async recordFieldSources() {
         throw new Error("rpc unavailable");
@@ -359,6 +395,164 @@ describe("promotePendingCharityCommissionRecords — field-level source tracking
     // The organisation itself is already committed by this point — a
     // provenance-recording failure is logged (reportError), not a reason to mark
     // an otherwise-successful insert as failed.
+    assert.equal(counts.inserted, 2);
+    assert.equal(counts.failed, 0);
+    assert.equal(inserted.length, 2);
+    assert.equal(statusUpdates[0].status, "validated");
+  });
+});
+
+describe("promotePending*Records — registration-number dedup (F042 strongest key)", () => {
+  it("charity commission: flags a match on registry number even when the name differs", async () => {
+    const { store, inserted, flagged } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Totally Different Name", 5254841)];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [
+          {
+            id: "org-existing",
+            legal_name: "Oxfam",
+            postcode: "",
+            registrationNumbers: ["5254841"],
+          },
+        ];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionRecords(store);
+
+    assert.equal(counts.flagged, 1);
+    assert.equal(counts.inserted, 0);
+    assert.equal(inserted.length, 0);
+    assert.equal(flagged[0].matchedOrganisationId, "org-existing");
+    assert.equal(flagged[0].matchedOn, "registration_number");
+    assert.equal(flagged[0].source, "charity_commission");
+  });
+
+  it("companies house: flags a match on registry number even when the name differs", async () => {
+    const { store, inserted, flagged } = fakeStore({
+      async loadPendingRecords() {
+        return [companiesHousePendingRecord("raw-1", "Some Other Ltd", "01234567")];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [
+          {
+            id: "org-existing",
+            legal_name: "Acme Ltd",
+            postcode: "",
+            registrationNumbers: ["01234567"],
+          },
+        ];
+      },
+    });
+
+    const counts = await promotePendingCompaniesHouseRecords(store, criteriaPass);
+
+    assert.equal(counts.flagged, 1);
+    assert.equal(counts.inserted, 0);
+    assert.equal(inserted.length, 0);
+    assert.equal(flagged[0].matchedOn, "registration_number");
+    assert.equal(flagged[0].source, "companies_house");
+  });
+
+  it("flags a later record in the same batch whose registry number matches an earlier insert", async () => {
+    const { store, inserted, flagged } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          pendingRecord("raw-1", "Oxfam", 5254841),
+          pendingRecord("raw-2", "Different Name Ltd", 5254841),
+        ];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionRecords(store);
+
+    assert.equal(counts.inserted, 1);
+    assert.equal(counts.flagged, 1);
+    assert.equal(inserted.length, 1);
+    assert.equal(flagged[0].matchedOn, "registration_number");
+    assert.equal(flagged[0].matchedOrganisationId, "org-1");
+  });
+
+  it("find that charity: flags on a GB-CHC registry number, matching the bare stored value", async () => {
+    const { store, flagged } = fakeStore({
+      async loadPendingRecords() {
+        return [findThatCharityPendingRecord("raw-1", "Different Name", { ftcId: "GB-CHC-202918" })];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [
+          {
+            id: "org-existing",
+            legal_name: "Oxfam",
+            postcode: "",
+            registrationNumbers: ["202918"],
+          },
+        ];
+      },
+    });
+
+    const counts = await promotePendingFindThatCharityRecords(store, criteriaPass);
+
+    assert.equal(counts.flagged, 1);
+    assert.equal(counts.inserted, 0);
+    assert.equal(flagged[0].matchedOn, "registration_number");
+    assert.equal(flagged[0].source, "find_that_charity");
+  });
+});
+
+describe("promotePendingCharityCommissionRecords — registry identifiers", () => {
+  it("writes the uk_charity identifier from reg_charity_number for every inserted record", async () => {
+    const { store, identifiers } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          pendingRecord("raw-1", "Oxfam", 5254841),
+          pendingRecord("raw-2", "Shelter", 234567),
+        ];
+      },
+    });
+
+    await promotePendingCharityCommissionRecords(store);
+
+    assert.deepEqual(identifiers, [
+      { organisationId: "org-1", identifierType: "uk_charity", identifierValue: "5254841" },
+      { organisationId: "org-2", identifierType: "uk_charity", identifierValue: "234567" },
+    ]);
+  });
+
+  it("writes no identifier for a record flagged as a duplicate candidate", async () => {
+    const { store, identifiers } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Test Charity")];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [{ id: "org-existing", legal_name: "Test Charity", postcode: "" }];
+      },
+    });
+
+    await promotePendingCharityCommissionRecords(store);
+
+    assert.equal(identifiers.length, 0);
+  });
+
+  it("does not fail the insert or the batch when writing the identifier errors", async () => {
+    const { store, inserted, statusUpdates } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          pendingRecord("raw-1", "Oxfam", 5254841),
+          pendingRecord("raw-2", "Shelter", 234567),
+        ];
+      },
+      async upsertIdentifier() {
+        return { error: "insert failed" };
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionRecords(store);
+
+    // The organisation itself is already committed by this point — an
+    // identifier-write failure is logged (reportError), not a reason to mark
+    // an otherwise-successful insert as failed, same as field provenance.
     assert.equal(counts.inserted, 2);
     assert.equal(counts.failed, 0);
     assert.equal(inserted.length, 2);
@@ -505,8 +699,8 @@ describe("promotePendingCompaniesHouseRecords — valid records", () => {
     const { store, inserted, statusUpdates } = fakeStore({
       async loadPendingRecords() {
         return [
-          companiesHousePendingRecord("raw-1", "Acme Ltd"),
-          companiesHousePendingRecord("raw-2", "Beta Ltd"),
+          companiesHousePendingRecord("raw-1", "Acme Ltd", "01234567"),
+          companiesHousePendingRecord("raw-2", "Beta Ltd", "09668396"),
         ];
       },
     });
@@ -662,6 +856,40 @@ describe("promotePendingCompaniesHouseRecords — field-level source tracking (F
     assert.equal(fieldSources.length, 1);
     assert.equal(fieldSources[0].source, "companies_house");
     assert.equal(fieldSources[0].organisationId, "org-1");
+  });
+});
+
+describe("promotePendingCompaniesHouseRecords — registry identifiers", () => {
+  it("writes the uk_company identifier from source_record_id for every inserted record", async () => {
+    const { store, identifiers } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          companiesHousePendingRecord("raw-1", "Acme Ltd", "01234567"),
+          companiesHousePendingRecord("raw-2", "Beta Ltd", "09668396"),
+        ];
+      },
+    });
+
+    await promotePendingCompaniesHouseRecords(store, criteriaPass);
+
+    assert.deepEqual(identifiers, [
+      { organisationId: "org-1", identifierType: "uk_company", identifierValue: "01234567" },
+      { organisationId: "org-2", identifierType: "uk_company", identifierValue: "09668396" },
+    ]);
+  });
+
+  it("writes no identifier when the record has no source_record_id", async () => {
+    const record = companiesHousePendingRecord("raw-1", "Acme Ltd");
+    record.source_record_id = null;
+    const { store, identifiers } = fakeStore({
+      async loadPendingRecords() {
+        return [record];
+      },
+    });
+
+    await promotePendingCompaniesHouseRecords(store, criteriaPass);
+
+    assert.equal(identifiers.length, 0);
   });
 });
 

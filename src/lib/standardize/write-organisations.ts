@@ -45,6 +45,7 @@ import { checkClientCriteria, type ClientCriteriaResult } from "../client-criter
 import { reportError } from "../error-logging.ts";
 import { persistLatestScore } from "../scoring/persist-latest-score.ts";
 import { getActiveScoutConfig } from "../scoring/configured-weights.ts";
+import { deriveIncomeBand, type IncomeBand } from "../income-band.ts";
 import { checkWebsiteReachability } from "../website-reachability.ts";
 import type { WebsiteStatus } from "../website-validation.ts";
 import {
@@ -292,6 +293,23 @@ export interface OrganisationWriteStore {
     identifierType: "uk_charity" | "uk_company";
     identifierValue: string;
   }): Promise<{ ok: true } | { error: string }>;
+  /**
+   * Writes one filed financial period (FINANCIAL_PERIODS) against an
+   * organisation — the promotion step that turns the latest_income /
+   * latest_expenditure fields already arriving in Charity Commission raw
+   * payloads into scoring input and (eventually) a client-visible filing
+   * history. Idempotent via the (organisation_id, period_start, period_end,
+   * financial_source) unique index: re-running an ingestion must not double a
+   * filing.
+   */
+  upsertFinancialPeriod(input: {
+    organisationId: string;
+    periodStart: string;
+    periodEnd: string;
+    totalIncome: number | null;
+    totalExpenditure: number | null;
+    incomeBand: IncomeBand | null;
+  }): Promise<{ ok: true } | { error: string }>;
 }
 
 export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | null {
@@ -488,6 +506,37 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
       if (error) return { error: error.message };
       return { ok: true };
     },
+
+    async upsertFinancialPeriod({ organisationId, periodStart, periodEnd, totalIncome, totalExpenditure, incomeBand }) {
+      // ON CONFLICT works here where it can't for identifiers: the schema
+      // makes (organisation_id, period_start, period_end, financial_source) a
+      // unique index (financial_periods_unique_period_idx — "re-running an
+      // ingestion must not double a filing"), so the same filing re-arriving
+      // on a later run is ignored rather than duplicated (ignoreDuplicates
+      // generates ON CONFLICT ... DO NOTHING). income_band is computed from
+      // total_income at ingestion (migration comment), which the extractor
+      // already did — this method stores what it's given.
+      const { error } = await supabase
+        .from("financial_periods")
+        .upsert(
+          {
+            organisation_id: organisationId,
+            period_start: periodStart,
+            period_end: periodEnd,
+            total_income: totalIncome,
+            total_expenditure: totalExpenditure,
+            income_band: incomeBand,
+            financial_source: "charity_commission",
+          },
+          {
+            onConflict: "organisation_id,period_start,period_end,financial_source",
+            ignoreDuplicates: true,
+          },
+        );
+
+      if (error) return { error: error.message };
+      return { ok: true };
+    },
   };
 }
 
@@ -594,6 +643,102 @@ async function recordIdentifierOrReport(
   } catch (error) {
     await reportError(error instanceof Error ? error : new Error(String(error)), {
       operation: `standardize.${source}.record_identifier`,
+      rawRecordId: record.id,
+      organisationId,
+    });
+  }
+}
+
+/**
+ * A filed financial period extracted from a raw source payload, in the
+ * FINANCIAL_PERIODS shape. Only Charity Commission carries figures today
+ * (latest_income/latest_expenditure + the financial-year dates); Companies
+ * House search payloads hold only filing-schedule metadata, and Find That
+ * Charity's data is the same Charity Commission register but has no
+ * financial_source enum value of its own — so this extractor is
+ * charity-commission-specific and deliberately not shared.
+ */
+export type SourceFinancialPeriod = {
+  periodStart: string;
+  periodEnd: string;
+  totalIncome: number | null;
+  totalExpenditure: number | null;
+  incomeBand: IncomeBand | null;
+};
+
+/** A payload value as a number, or null when absent/unparseable. */
+function toNumber(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isNaN(n) ? null : n;
+}
+
+/**
+ * The API returns financial-year dates as ISO datetimes ("2024-04-01T00:00:00");
+ * FINANCIAL_PERIODS stores a plain date. Returns the first ten characters only
+ * when they form a plausible YYYY-MM-DD, else null — never passes a malformed
+ * string to a date column.
+ */
+function toDate(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const day = value.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null;
+}
+
+/**
+ * The latest filed year from a Charity Commission payload, or null when the
+ * record carries no usable filing (no period dates, or no figures at all). A
+ * filing with dates but only one figure (income without expenditure, or vice
+ * versa) is still a filing — the missing half stays null. income_band is
+ * computed here from total_income (deriveIncomeBand), matching the migration's
+ * "computed from total_income on ingestion, not entered".
+ */
+function charityCommissionFinancialPeriod(
+  raw: RawCharityCommissionRecord,
+): SourceFinancialPeriod | null {
+  const periodStart = toDate(raw.latest_acc_fin_year_start_date);
+  const periodEnd = toDate(raw.latest_acc_fin_year_end_date);
+  const totalIncome = toNumber(raw.latest_income);
+  const totalExpenditure = toNumber(raw.latest_expenditure);
+  if (!periodStart || !periodEnd) return null;
+  if (totalIncome === null && totalExpenditure === null) return null;
+  return {
+    periodStart,
+    periodEnd,
+    totalIncome,
+    totalExpenditure,
+    incomeBand: deriveIncomeBand(totalIncome),
+  };
+}
+
+/**
+ * Best-effort, same as recordIdentifierOrReport: the organisation insert is
+ * already committed, so a failed financial-period write is logged
+ * (reportError), never a reason to mark an otherwise-successful promote as
+ * failed. An empty extractor result (record carries no figures) is a no-op,
+ * not an error — most bulk-search payloads legitimately have no financials.
+ */
+async function recordFinancialPeriodOrReport(
+  store: OrganisationWriteStore,
+  organisationId: string,
+  source: string,
+  period: SourceFinancialPeriod | null,
+  record: PendingRecord,
+): Promise<void> {
+  if (!period) return;
+  try {
+    const result = await store.upsertFinancialPeriod({
+      organisationId,
+      periodStart: period.periodStart,
+      periodEnd: period.periodEnd,
+      totalIncome: period.totalIncome,
+      totalExpenditure: period.totalExpenditure,
+      incomeBand: period.incomeBand,
+    });
+    if ("error" in result) throw new Error(result.error);
+  } catch (error) {
+    await reportError(error instanceof Error ? error : new Error(String(error)), {
+      operation: `standardize.${source}.record_financial_period`,
       rawRecordId: record.id,
       organisationId,
     });
@@ -764,6 +909,17 @@ export async function promotePendingCharityCommissionRecords(
       result.id,
       "charity_commission",
       charityNumber,
+      record,
+    );
+    // Financial filing (latest_income/expenditure + financial-year dates from
+    // the same payload, into FINANCIAL_PERIODS) — closes the "F041 built the
+    // table, no one writes it" gap. Most bulk-search payloads carry no figures
+    // (only detail responses do), so this is a no-op for them.
+    await recordFinancialPeriodOrReport(
+      store,
+      result.id,
+      "charity_commission",
+      charityCommissionFinancialPeriod(record.raw_payload as RawCharityCommissionRecord),
       record,
     );
     counts.inserted++;

@@ -16,6 +16,7 @@
     "seed:clear": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/seed-clear.mts",
     "backfill:scores": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-priority-scores.mts",
     "backfill:identifiers": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-identifiers.mts",
+    "backfill:financial-periods": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-financial-periods.mts",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --conditions=react-server --test \"src/**/*.test.ts\" \"scripts/**/*.test.mts\"",
     "export:data-model": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/export-data-model.mts",
     "export:training-dataset": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/export-training-dataset.mts",

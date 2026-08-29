@@ -67,6 +67,17 @@ export type RawCharityCommissionRecord = {
   phone?: string;
   email?: string;
   web?: string;
+  // The latest filed financial year, as returned by the Charity Commission
+  // API. Present on detail responses (GetCharityDetailsMulti) but not on the
+  // bulk search items; typed optional so the mapper handles both. Read by
+  // write-organisations.ts's financial-period promotion — this mapper itself
+  // does not map them (they land in FINANCIAL_PERIODS, not ORGANISATIONS),
+  // but the shared raw type is where the payload shape is declared. Values
+  // are strings in the JSON (a number like 4314025 arrives quoted).
+  latest_income?: string | null;
+  latest_expenditure?: string | null;
+  latest_acc_fin_year_start_date?: string | null;
+  latest_acc_fin_year_end_date?: string | null;
 };
 
 /** Same normalisation F042's matcher uses, so a care-of name matches its charity. */

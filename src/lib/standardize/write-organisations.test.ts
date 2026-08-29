@@ -44,6 +44,14 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
     identifierType: "uk_charity" | "uk_company";
     identifierValue: string;
   }[] = [];
+  const financialPeriods: {
+    organisationId: string;
+    periodStart: string;
+    periodEnd: string;
+    totalIncome: number | null;
+    totalExpenditure: number | null;
+    incomeBand: string | null;
+  }[] = [];
 
   const store: OrganisationWriteStore = {
     async loadPendingRecords() {
@@ -77,16 +85,30 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
       identifiers.push(input);
       return { ok: true };
     },
+    async upsertFinancialPeriod(input) {
+      financialPeriods.push(input);
+      return { ok: true };
+    },
     ...overrides,
   };
 
-  return { store, inserted, flagged, statusUpdates, criteriaOutcomes, fieldSources, identifiers };
+  return {
+    store,
+    inserted,
+    flagged,
+    statusUpdates,
+    criteriaOutcomes,
+    fieldSources,
+    identifiers,
+    financialPeriods,
+  };
 }
 
 function pendingRecord(
   id: string,
   charityName: string,
   regCharityNumber = 1,
+  extraPayload: Record<string, unknown> = {},
 ): PendingRecord {
   return {
     id,
@@ -101,6 +123,7 @@ function pendingRecord(
       reg_status: "R",
       date_of_registration: "2026-01-01T00:00:00",
       date_of_removal: null,
+      ...extraPayload,
     },
   };
 }
@@ -553,6 +576,108 @@ describe("promotePendingCharityCommissionRecords — registry identifiers", () =
     // The organisation itself is already committed by this point — an
     // identifier-write failure is logged (reportError), not a reason to mark
     // an otherwise-successful insert as failed, same as field provenance.
+    assert.equal(counts.inserted, 2);
+    assert.equal(counts.failed, 0);
+    assert.equal(inserted.length, 2);
+    assert.equal(statusUpdates[0].status, "validated");
+  });
+});
+
+describe("promotePendingCharityCommissionRecords — financial periods", () => {
+  it("writes a financial_periods row from latest_income/expenditure with the computed band", async () => {
+    const { store, financialPeriods } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          pendingRecord("raw-1", "Oxfam", 5254841, {
+            latest_income: "4314025",
+            latest_expenditure: "4191442",
+            latest_acc_fin_year_start_date: "2024-04-01T00:00:00",
+            latest_acc_fin_year_end_date: "2025-03-31T00:00:00",
+          }),
+          // Below the £10k boundary — lands in a different band.
+          pendingRecord("raw-2", "Shelter", 234567, {
+            latest_income: "8000",
+            latest_expenditure: "7900",
+            latest_acc_fin_year_start_date: "2024-04-01T00:00:00",
+            latest_acc_fin_year_end_date: "2025-03-31T00:00:00",
+          }),
+        ];
+      },
+    });
+
+    await promotePendingCharityCommissionRecords(store);
+
+    assert.deepEqual(financialPeriods, [
+      {
+        organisationId: "org-1",
+        periodStart: "2024-04-01",
+        periodEnd: "2025-03-31",
+        totalIncome: 4314025,
+        totalExpenditure: 4191442,
+        incomeBand: "over_1m",
+      },
+      {
+        organisationId: "org-2",
+        periodStart: "2024-04-01",
+        periodEnd: "2025-03-31",
+        totalIncome: 8000,
+        totalExpenditure: 7900,
+        incomeBand: "under_10k",
+      },
+    ]);
+  });
+
+  it("writes no financial period for a record whose payload carries no figures", async () => {
+    const { store, financialPeriods } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Oxfam", 5254841)];
+      },
+    });
+
+    await promotePendingCharityCommissionRecords(store);
+
+    assert.equal(financialPeriods.length, 0);
+  });
+
+  it("treats dates without figures as no filing (needs at least one figure)", async () => {
+    const { store, financialPeriods } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          pendingRecord("raw-1", "Oxfam", 5254841, {
+            latest_acc_fin_year_start_date: "2024-04-01T00:00:00",
+            latest_acc_fin_year_end_date: "2025-03-31T00:00:00",
+          }),
+        ];
+      },
+    });
+
+    await promotePendingCharityCommissionRecords(store);
+
+    assert.equal(financialPeriods.length, 0);
+  });
+
+  it("does not fail the insert or the batch when writing the financial period errors", async () => {
+    const { store, inserted, statusUpdates } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          pendingRecord("raw-1", "Oxfam", 5254841, {
+            latest_income: "4314025",
+            latest_acc_fin_year_start_date: "2024-04-01T00:00:00",
+            latest_acc_fin_year_end_date: "2025-03-31T00:00:00",
+          }),
+          pendingRecord("raw-2", "Shelter", 234567),
+        ];
+      },
+      async upsertFinancialPeriod() {
+        return { error: "insert failed" };
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionRecords(store);
+
+    // Same as an identifier-write failure: the organisation is already
+    // committed, so a failed financial-period write is logged, not a reason
+    // to mark an otherwise-successful insert as failed.
     assert.equal(counts.inserted, 2);
     assert.equal(counts.failed, 0);
     assert.equal(inserted.length, 2);

@@ -44,6 +44,8 @@ import { AssignOwnerForm } from "./assign-owner-form";
 import { StatusSelect } from "./status-select";
 import { Pill, SectionCard } from "./section-card";
 import { ScoreBreakdownCard, type LatestScoreDetailRow } from "./score-breakdown";
+import { FINANCIAL_FILINGS_PAGE_SIZE, type FinancialFilingRow } from "./financial-filing-item";
+import { FinancialFilingsSection } from "./financial-filings-section";
 import { GrantHistorySection } from "./grant-history-section";
 import { GRANT_HISTORY_PAGE_SIZE, type GrantRow } from "./grant-list-item";
 import { TagsSection } from "./tags-section";
@@ -128,6 +130,7 @@ const SECTION_ANCHORS = [
   { href: "#basic-info-heading", label: "Overview" },
   { href: "#score-breakdown-heading", label: "Score" },
   { href: "#grant-history-heading", label: "Grants" },
+  { href: "#financial-filings-heading", label: "Filings" },
   { href: "#contactability-heading", label: "Contactability" },
   { href: "#attachments-heading", label: "Attachments" },
   { href: "#notes-heading", label: "Notes" },
@@ -299,6 +302,31 @@ export default async function ClientDetailPage({
   if (grantsError) {
     await reportError(grantsError, {
       operation: "clients.detail_grant_history",
+      organisationId: id,
+    });
+  }
+
+  // F041 financial filings — the client's filed Charity Commission accounts,
+  // newest period first (financial_periods_organisation_idx is
+  // `(organisation_id, period_end desc)` for exactly this ordering). Same
+  // pagination shape as grants: first page here, later pages via the colocated
+  // loadMoreFinancialFilings action, { count: "exact" } for the header pill,
+  // and the id tiebreaker keeps the offset pagination deterministic when two
+  // periods share an end date.
+  const { data: filingRows, count: filingTotal, error: filingsError } = await supabase
+    .from("financial_periods")
+    .select(
+      "id, period_start, period_end, total_income, total_expenditure, income_band, filing_date, financial_source",
+      { count: "exact" },
+    )
+    .eq("organisation_id", id)
+    .order("period_end", { ascending: false })
+    .order("id", { ascending: true })
+    .range(0, FINANCIAL_FILINGS_PAGE_SIZE - 1)
+    .returns<FinancialFilingRow[]>();
+  if (filingsError) {
+    await reportError(filingsError, {
+      operation: "clients.detail_financial_filings",
       organisationId: id,
     });
   }
@@ -1084,6 +1112,20 @@ export default async function ClientDetailPage({
                 grants={grantRows ?? []}
                 totalCount={grantTotal ?? grantRows?.length ?? 0}
                 error={Boolean(grantsError)}
+              />
+            </Rise>
+
+            {/* F041 — Financial filings sit straight after the grants they
+                complement: grants are funding this client has received, filings
+                are its own accounts — "what came in, and what it reports" read
+                as one pass. Readable by every role (financial_periods_select_active,
+                same RLS shape as Notes and Grants). */}
+            <Rise>
+              <FinancialFilingsSection
+                organisationId={id}
+                filings={filingRows ?? []}
+                totalCount={filingTotal ?? filingRows?.length ?? 0}
+                error={Boolean(filingsError)}
               />
             </Rise>
 

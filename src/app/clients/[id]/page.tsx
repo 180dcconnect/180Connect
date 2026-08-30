@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentActor } from "@/lib/auth/actor";
@@ -33,6 +32,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
+import { BackButton } from "@/components/ui/back-button";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
 import { SuppressButton } from "./suppress-button";
 import { ComposeButton } from "./compose-button";
@@ -840,15 +840,12 @@ export default async function ClientDetailPage({
                 so the hero is the whole top of the page, not two stacked
                 surfaces. */}
             <div className="relative px-6 pt-5 sm:px-8">
-              <Link
-                className="group inline-flex items-center gap-2 rounded-full bg-white/[0.06] px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[#f4f4ef]/65 ring-1 ring-white/10 transition-colors hover:bg-white/[0.12] hover:text-[#f4f4ef] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e6f5c0]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1c1a18]"
+              <BackButton
+                variant="sliding-door"
+                tone="dark"
+                size="sm"
                 href="/clients"
-              >
-                <span aria-hidden="true" className="transition-transform group-hover:-translate-x-0.5">
-                  ←
-                </span>
-                Clients
-              </Link>
+              />
             </div>
 
             <div className="relative flex flex-wrap items-start justify-between gap-x-8 gap-y-6 px-6 py-7 sm:px-8">

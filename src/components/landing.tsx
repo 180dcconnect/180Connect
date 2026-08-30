@@ -209,7 +209,7 @@ function Crop({ crop, delay, index }: { crop: CropSpec; delay: number; index: nu
 const INLINE_MARK =
   "inline-block h-[0.78em] w-[0.78em] -translate-y-[0.06em] align-middle";
 
-function SheetsMark() {
+export function SheetsMark() {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -223,7 +223,7 @@ function SheetsMark() {
   );
 }
 
-function GmailMark() {
+export function GmailMark() {
   return (
     <Image
       src="/gmail.svg"
@@ -241,7 +241,7 @@ function GmailMark() {
  * other two (their 24-unit box carries some padding), so all three sit at the
  * same optical size on the line.
  */
-function MondayMark() {
+export function MondayMark() {
   return (
     <svg
       viewBox="0 0 256 156"

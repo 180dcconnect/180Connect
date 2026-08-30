@@ -1,8 +1,8 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { OriginButton } from "@/components/ui/origin-button";
+import { BackButton } from "@/components/ui/back-button";
 import { Stage, Rise } from "@/components/dashboard-stage";
 import { ArrowRight, Sparkles, Check, Download, Trash2, Settings, User } from "lucide-react";
 
@@ -30,12 +30,12 @@ export default function PreviewButtonsPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <Link
+            <BackButton
+              variant="sliding-door"
+              size="sm"
+              tone="bone"
               href="/dashboard"
-              className="rounded-full bg-black/5 px-4 py-2 text-xs font-bold text-foreground transition-colors hover:bg-black/10"
-            >
-              ← Back to Dashboard
-            </Link>
+            />
           </div>
         </Rise>
 

@@ -1,10 +1,10 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { Stage, Rise } from "@/components/dashboard-stage";
+import { BackButton } from "@/components/ui/back-button";
 import { CamSettingsPanel } from "./cam-settings-panel";
 import {
   sanitizeQueuePreferences,
@@ -80,13 +80,11 @@ export default async function AdminCamSettingsPage(props: PageProps) {
               Outreach preferences filter and weight prospects by geography, organization size, and sector.
             </p>
           </div>
-          <div className="flex items-center gap-4 text-sm font-bold">
-            <Link
-              className="text-brand hover:underline"
+          <div className="flex items-center gap-4">
+            <BackButton
+              variant="editorial-minimal"
               href="/admin/users"
-            >
-              ← Team members
-            </Link>
+            />
           </div>
         </Rise>
 

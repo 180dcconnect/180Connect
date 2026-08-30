@@ -38,6 +38,9 @@ export type DashboardMetrics = {
   contacted: number;
   responsesReceived: number;
   converted: number;
+  contactRate: number;
+  replyRate: number;
+  conversionRate: number;
 };
 
 const RESPONSE_STATUSES = new Set([
@@ -76,11 +79,16 @@ export function computeDashboardMetrics(rows: DashboardOrgRow[]): DashboardMetri
     if (isConverted(row.outreach_status)) converted += 1;
   }
 
+  const totalCharities = rows.length;
+
   return {
-    totalCharities: rows.length,
+    totalCharities,
     contacted,
     responsesReceived,
     converted,
+    contactRate: totalCharities > 0 ? contacted / totalCharities : 0,
+    replyRate: contacted > 0 ? responsesReceived / contacted : 0,
+    conversionRate: responsesReceived > 0 ? converted / responsesReceived : 0,
   };
 }
 

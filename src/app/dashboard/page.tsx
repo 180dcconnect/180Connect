@@ -33,6 +33,8 @@ import { RecentUpdatesFeed } from "@/components/recent-updates-feed";
 import { FirstRunGuide } from "@/components/first-run-guide";
 import { OriginButton } from "@/components/ui/origin-button";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
+import { FunnelMetrics } from "@/components/dashboard/funnel-metrics";
+import { AdminActionCenter, type AdminQueueCounts } from "@/components/dashboard/admin-action-center";
 import {
   REVIEW_CLIENTS_EMPTY_STATE,
   guideProgress,
@@ -97,6 +99,7 @@ export default async function DashboardPage({
   let rows: DashboardOrgRow[] = [];
   let teamActivities: FormattedTeamActivity[] = [];
   let recentUpdates: FormattedRecentUpdate[] = [];
+  let adminCounts: AdminQueueCounts | null = null;
   let loadFailed = false;
 
   if (canViewClients) {
@@ -277,6 +280,25 @@ export default async function DashboardPage({
         orgNames,
         updateNames,
       );
+
+      if (actor.role === "admin") {
+        const [ownershipReqs, suppressions, edits, discrepancies] = await Promise.all([
+          supabase.from("ownership_requests").select("id", { count: "exact", head: true }).eq("status", "pending"),
+          supabase.from("suppressions").select("id", { count: "exact", head: true }).eq("status", "pending"),
+          supabase.from("edit_suggestions").select("id", { count: "exact", head: true }).eq("status", "pending"),
+          supabase.from("field_discrepancies").select("id", { count: "exact", head: true }).eq("status", "pending"),
+        ]);
+        
+        const unassignedOrgs = rows.filter(r => r.owner_id === null).length;
+
+        adminCounts = {
+          ownershipRequests: ownershipReqs.count ?? 0,
+          pendingSuppressions: suppressions.count ?? 0,
+          suggestedEdits: edits.count ?? 0,
+          discrepancies: discrepancies.count ?? 0,
+          unassignedOrgs,
+        };
+      }
     }
   }
 
@@ -538,47 +560,62 @@ export default async function DashboardPage({
                 />
               </Rise>
 
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <Rise>
-                  <StatCard
-                    label="Contacted"
-                    value={metrics.contacted}
-                    share={share(metrics.contacted)}
-                    caption={shareCaption(metrics.contacted)}
-                  />
+                  <FunnelMetrics metrics={metrics} />
                 </Rise>
-                <Rise>
-                  <StatCard
-                    label="Responses received"
-                    value={metrics.responsesReceived}
-                    share={share(metrics.responsesReceived)}
-                    caption={shareCaption(metrics.responsesReceived)}
-                  />
-                </Rise>
-                <Rise>
-                  <StatCard
-                    label="Converted"
-                    value={metrics.converted}
-                    share={share(metrics.converted)}
-                    caption={shareCaption(metrics.converted)}
-                    emphasis
-                  />
-                </Rise>
+                <div className="flex flex-col gap-4">
+                  <Rise>
+                    <StatCard
+                      label="Contacted"
+                      value={metrics.contacted}
+                      share={share(metrics.contacted)}
+                      caption={shareCaption(metrics.contacted)}
+                    />
+                  </Rise>
+                  <Rise>
+                    <StatCard
+                      label="Responses received"
+                      value={metrics.responsesReceived}
+                      share={share(metrics.responsesReceived)}
+                      caption={shareCaption(metrics.responsesReceived)}
+                    />
+                  </Rise>
+                  <Rise>
+                    <StatCard
+                      label="Converted"
+                      value={metrics.converted}
+                      share={share(metrics.converted)}
+                      caption={shareCaption(metrics.converted)}
+                      emphasis
+                    />
+                  </Rise>
+                </div>
               </div>
             </Group>
 
-            <Group className="space-y-4">
-              <Rise className="flex items-baseline justify-between gap-4">
-                <h2 className="text-xl font-semibold font-body tracking-[-0.02em]">Needs attention</h2>
-                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                  Yours · longest waiting first
-                </p>
-              </Rise>
+            {attentionItems.length > 0 && (
+              <Group className="space-y-4">
+                <Rise className="flex items-baseline justify-between gap-4">
+                  <h2 className="text-xl font-semibold font-body tracking-[-0.02em]">Needs attention</h2>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
+                    Yours · longest waiting first
+                  </p>
+                </Rise>
 
-              <Rise>
-                <AttentionList items={attentionItems} />
-              </Rise>
-            </Group>
+                <Rise>
+                  <AttentionList items={attentionItems} />
+                </Rise>
+              </Group>
+            )}
+
+            {actor.role === "admin" && adminCounts && (
+              <Group className="space-y-4">
+                <Rise>
+                  <AdminActionCenter counts={adminCounts} />
+                </Rise>
+              </Group>
+            )}
 
             {/* F028 — what changed across the platform, above who did it. */}
             <Group className="space-y-4">

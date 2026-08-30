@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { getCurrentActor } from "@/lib/auth/actor";
@@ -6,6 +5,7 @@ import { reportError } from "@/lib/error-logging";
 import { manualDraftLoadErrorMessage } from "@/lib/manual-entry";
 import { createClient } from "@/lib/supabase/server";
 import { InlineAlert } from "@/components/ui/inline-alert";
+import { BackButton } from "@/components/ui/back-button";
 import { ManualEntryForm, type ManualEntryDraft } from "./manual-entry-form";
 import { UrlImportForm } from "./url-import-form";
 
@@ -47,12 +47,10 @@ export default async function NewManualClientPage({
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <div className="mx-auto max-w-2xl">
         <header className="mb-8">
-          <Link
-            className="group inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40 transition-colors hover:text-foreground/70"
+          <BackButton
+            variant="editorial-minimal"
             href="/clients"
-          >
-            <span aria-hidden="true">←</span> Clients
-          </Link>
+          />
           <p className="mt-6 text-[11px] font-bold uppercase tracking-[0.12em] text-brand">
             Client database
           </p>

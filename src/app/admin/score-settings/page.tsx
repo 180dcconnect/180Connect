@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
@@ -10,6 +9,7 @@ import {
 } from "@/lib/scoring/calculate-priority-score";
 import { toPercentages, type ScoutWeightsInput } from "@/lib/scoring/scout-weight-inputs";
 import { Stage, Rise } from "@/components/dashboard-stage";
+import { BackButton } from "@/components/ui/back-button";
 import { ScoreSettingsPanel } from "./score-settings-panel";
 
 type VersionRow = {
@@ -69,10 +69,11 @@ export default async function AdminScoreSettingsPage() {
               the change in the audit log.
             </p>
           </div>
-          <div className="flex items-center gap-4 text-sm font-bold">
-            <Link className="text-brand hover:underline" href="/admin">
-              ← Platform management
-            </Link>
+          <div className="flex items-center gap-4">
+            <BackButton
+              variant="editorial-minimal"
+              href="/admin"
+            />
           </div>
         </Rise>
 

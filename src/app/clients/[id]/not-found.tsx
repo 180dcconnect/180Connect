@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { BackButton } from "@/components/ui/back-button";
 import { OriginButton } from "@/components/ui/origin-button";
 
 /**
@@ -11,15 +11,10 @@ export default function ClientNotFound() {
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <div className="mx-auto w-full max-w-5xl">
-        <Link
-          className="group inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40 transition-colors hover:text-foreground/70"
+        <BackButton
+          variant="editorial-minimal"
           href="/clients"
-        >
-          <span aria-hidden="true" className="transition-transform group-hover:-translate-x-0.5">
-            ←
-          </span>
-          Clients
-        </Link>
+        />
 
         <div className="mt-6 rounded-2xl border border-black/[0.06] bg-white px-6 py-10 shadow-sm sm:px-8">
           <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">

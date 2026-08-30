@@ -1,9 +1,9 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { useSyncExternalStore } from "react";
 import { CherryBlossomQRCode } from "@/components/cherry-blossom-qrcode";
+import { BackButton } from "@/components/ui/back-button";
 
 const SOURCE_URL =
   "https://github.com/enzomanuelmangano/demos/tree/main/src/animations/cherry-blossom-qrcode";
@@ -63,12 +63,12 @@ export default function PreviewCherryBlossomQRPage() {
                 WebGPU unavailable
               </span>
             )}
-            <Link
+            <BackButton
+              variant="sliding-door"
+              size="sm"
+              tone="bone"
               href="/dashboard"
-              className="rounded-full bg-black/5 px-4 py-2 text-xs font-bold text-foreground transition-colors hover:bg-black/10"
-            >
-              ← Back to Dashboard
-            </Link>
+            />
           </div>
         </div>
 

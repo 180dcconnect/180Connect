@@ -268,20 +268,24 @@ export function MetricChart({
   const activeDate = series[0].data[active]?.date ?? "";
   const cursorX = toX(active, length);
 
+  const handlePointer = (event: React.PointerEvent<HTMLDivElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    if (!box.width || length <= 1) {
+      setHovered(0);
+      return;
+    }
+    const rawX = ((event.clientX - box.left) / box.width) * 100;
+    const fractionalIndex = ((rawX - X_INSET) / (100 - X_INSET * 2)) * (length - 1);
+    const closestIndex = Math.min(length - 1, Math.max(0, Math.round(fractionalIndex)));
+    setHovered(closestIndex);
+  };
+
   return (
     <div
       className="relative h-full w-full select-none touch-none"
       onPointerLeave={() => setHovered(null)}
-      onPointerDown={(event) => {
-        const box = event.currentTarget.getBoundingClientRect();
-        const ratio = (event.clientX - box.left) / box.width;
-        setHovered(Math.min(length - 1, Math.max(0, Math.round(ratio * (length - 1)))));
-      }}
-      onPointerMove={(event) => {
-        const box = event.currentTarget.getBoundingClientRect();
-        const ratio = (event.clientX - box.left) / box.width;
-        setHovered(Math.min(length - 1, Math.max(0, Math.round(ratio * (length - 1)))));
-      }}
+      onPointerDown={handlePointer}
+      onPointerMove={handlePointer}
     >
       <svg
         className="h-full w-full"
@@ -305,12 +309,12 @@ export function MetricChart({
           animate={{
             x1: cursorX,
             x2: cursorX,
-            opacity: hovered !== null ? 0.45 : 0.22,
+            opacity: hovered !== null ? 0.45 : 0,
           }}
           transition={{
             x1: { type: "spring", stiffness: 450, damping: 32 },
             x2: { type: "spring", stiffness: 450, damping: 32 },
-            opacity: { duration: 0.2 },
+            opacity: { duration: 0.15 },
           }}
           y1={bandTop - 6}
           y2={bandBottom}
@@ -344,7 +348,7 @@ export function MetricChart({
                       animate={{
                         y: barY,
                         height: barHeight,
-                        opacity: i === active ? 1 : 0.42,
+                        opacity: hovered !== null ? (i === active ? 1 : 0.42) : 0.85,
                       }}
                       transition={{
                         type: "spring",
@@ -401,12 +405,14 @@ export function MetricChart({
               animate={{
                 left: `${targetX}%`,
                 top: `${targetY}%`,
-                scale: hovered !== null ? 1.15 : 1,
+                scale: hovered !== null ? 1.15 : 0.7,
+                opacity: hovered !== null ? 1 : 0,
               }}
               transition={{
-                type: "spring",
-                stiffness: 450,
-                damping: 30,
+                left: { type: "spring", stiffness: 450, damping: 30 },
+                top: { type: "spring", stiffness: 450, damping: 30 },
+                scale: { duration: 0.15 },
+                opacity: { duration: 0.15 },
               }}
             >
               {/* Glow ring */}
@@ -430,13 +436,17 @@ export function MetricChart({
         animate={{
           left: `${cursorX}%`,
           top: `${BAND_TOP}%`,
+          opacity: hovered !== null ? 1 : 0,
+          scale: hovered !== null ? 1 : 0.95,
         }}
         transition={{
           left: { type: "spring", stiffness: 450, damping: 32 },
           top: { type: "spring", stiffness: 450, damping: 32 },
+          opacity: { duration: 0.15 },
+          scale: { duration: 0.15 },
         }}
         style={{
-          transform: `translate(${active > length / 2 ? "-100%" : "0%"}, -50%)`,
+          transform: cursorX > 50 ? "translate(calc(-100% - 12px), -50%)" : "translate(12px, -50%)",
         }}
       >
         <div className="relative min-w-[130px] rounded-xl border border-black/[0.08] dark:border-white/[0.12] bg-popover/95 px-3.5 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.12),0_2px_6px_rgba(0,0,0,0.06)] backdrop-blur-md transition-shadow">

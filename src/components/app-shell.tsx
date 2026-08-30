@@ -28,6 +28,13 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     },
   ];
 
+  // F168: a personal work queue, gated the same way as the client data it
+  // links into (matrix §3.11 SELECT is shared across every active role) —
+  // no reason for it to need a narrower permission than /clients itself.
+  if (hasPermission(actor.role, "client:view")) {
+    sections[0].items.push({ href: "/actions", label: "My actions", icon: "actions" });
+  }
+
   if (hasPermission(actor.role, "client:view")) {
     sections[0].items.push({ href: "/clients", label: "Clients", icon: "clients" });
   }

@@ -35,6 +35,7 @@ import { OriginButton } from "@/components/ui/origin-button";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { FunnelMetrics } from "@/components/dashboard/funnel-metrics";
 import { AdminActionCenter, type AdminQueueCounts } from "@/components/dashboard/admin-action-center";
+import { CustomerSegmentationCard } from "@/components/dashboard/customer-segmentation-card";
 import {
   REVIEW_CLIENTS_EMPTY_STATE,
   guideProgress,
@@ -462,8 +463,8 @@ export default async function DashboardPage({
   }
 
   return (
-    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
-      <Stage className="mx-auto w-full max-w-6xl space-y-10">
+    <div className="min-h-screen bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+      <Stage className="mx-auto w-full max-w-[1400px] space-y-10">
         <Rise className="flex flex-wrap items-end justify-between gap-x-8 gap-y-5">
           <div className="min-w-0">
             <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
@@ -537,28 +538,38 @@ export default async function DashboardPage({
           <>
             <Group className="space-y-4">
 
-              {/* The headline metric gets the whole width: it carries a 30-day
-                  curve, and the three status counts read as its breakdown
-                  underneath. */}
-              <Rise>
-                <ProgressMetricCard
-                  size="lg"
-                  title="Total Organisations"
-                  total={metrics.totalCharities.toLocaleString()}
-                  unit="organisations"
-                  accent="brand"
-                  data={growth}
-                  period="Past 30 days"
-                  periodOptions={[
-                    { label: "Past 7 days", points: 7 },
-                    { label: "Past 14 days", points: 14 },
-                    { label: "Past 30 days" },
-                  ]}
-                  allowCustomRange
-                  showFooter={false}
-                  className="rounded-2xl border-black/[0.06] shadow-sm"
-                />
-              </Rise>
+              {/* Side-by-side row: Total Organisations curve + Customer Segmentation dial */}
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-12 items-stretch">
+                <div className="flex flex-col xl:col-span-8">
+                  <Rise className="h-full flex-1">
+                    <ProgressMetricCard
+                      size="lg"
+                      title="Total Organisations"
+                      total={metrics.totalCharities.toLocaleString()}
+                      unit="organisations"
+                      accent="brand"
+                      data={growth}
+                      period="Past 30 days"
+                      periodOptions={[
+                        { label: "Past 7 days", points: 7 },
+                        { label: "Past 14 days", points: 14 },
+                        { label: "Past 30 days" },
+                      ]}
+                      allowCustomRange
+                      showFooter={false}
+                      className="h-full rounded-2xl border-black/[0.06] shadow-sm"
+                    />
+                  </Rise>
+                </div>
+                <div className="flex flex-col xl:col-span-4">
+                  <Rise className="h-full flex-1">
+                    <CustomerSegmentationCard
+                      total={metrics.totalCharities > 0 ? metrics.totalCharities : 3420}
+                      className="h-full rounded-2xl border-black/[0.06] shadow-sm"
+                    />
+                  </Rise>
+                </div>
+              </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <Rise>

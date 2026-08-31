@@ -28,6 +28,9 @@ describe("computeDashboardMetrics", () => {
       contacted: 0,
       responsesReceived: 0,
       converted: 0,
+      contactRate: 0,
+      replyRate: 0,
+      conversionRate: 0,
     });
   });
 

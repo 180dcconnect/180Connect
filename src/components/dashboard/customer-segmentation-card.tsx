@@ -81,10 +81,15 @@ export function CustomerSegmentationCard({
     return filtered.length ? filtered : segments;
   }, [segments]);
 
-  // Determine active segment (defaults to first visible on idle or hovered)
+  // Tooltip follows any hovered segment (even 0%); ticks only hide when hovered segment has ticks.
   const activeSegment = useMemo(() => {
-    return visibleSegments.find((s) => s.id === hoveredSegmentId) ?? visibleSegments[0];
-  }, [visibleSegments, hoveredSegmentId]);
+    return segments.find((s) => s.id === hoveredSegmentId) ?? visibleSegments[0];
+  }, [segments, visibleSegments, hoveredSegmentId]);
+
+  const isTicksHovered = useMemo(
+    () => hoveredSegmentId !== null && visibleSegments.some((s) => s.id === hoveredSegmentId),
+    [hoveredSegmentId, visibleSegments],
+  );
 
   // Compute tick ranges per segment
   const ticks = useMemo(() => {
@@ -165,9 +170,7 @@ export function CustomerSegmentationCard({
           >
             {ticks.map((tick) => {
               const isSegmentActive = activeSegment.id === tick.segment.id;
-              const isAnyHovered = hoveredSegmentId !== null;
-
-              const opacity = !isAnyHovered ? 1 : isSegmentActive ? 1 : 0;
+              const opacity = !isTicksHovered ? 1 : isSegmentActive ? 1 : 0;
 
               return (
                 <motion.line
@@ -181,7 +184,7 @@ export function CustomerSegmentationCard({
                   strokeLinecap="round"
                   animate={{
                     opacity,
-                    strokeWidth: isSegmentActive && isAnyHovered ? 3.5 : 3,
+                    strokeWidth: isSegmentActive && isTicksHovered ? 3.5 : 3,
                   }}
                   transition={{ duration: 0.2 }}
                   className="transition-all duration-150"
@@ -238,9 +241,9 @@ export function CustomerSegmentationCard({
         </div>
       </div>
 
-      {/* Breakdown Rows List — only non-zero segments get a row */}
+      {/* Breakdown Rows List — always show all segments (0% if zero) so user knows options */}
       <div className="mt-4 space-y-2 border-t border-black/[0.04] pt-4 dark:border-white/[0.06]">
-        {visibleSegments.map((seg) => {
+        {segments.map((seg) => {
           const isHovered = hoveredSegmentId === seg.id;
           return (
             <div

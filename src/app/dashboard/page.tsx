@@ -363,11 +363,13 @@ export default async function DashboardPage({
       }
 
       if (!perfFailed) {
+        const visibleOrgIds = new Set(rows.map((row) => row.id));
+
         const perfInput = {
-          messages: perfMessages.data ?? [],
-          replies: perfReplies.data ?? [],
-          conversions: perfConversions.data ?? [],
-          scores: perfScores.data ?? [],
+          messages: (perfMessages.data ?? []).filter((m) => visibleOrgIds.has(m.organisation_id)),
+          replies: (perfReplies.data ?? []).filter((r) => visibleOrgIds.has(r.organisation_id)),
+          conversions: (perfConversions.data ?? []).filter((c) => visibleOrgIds.has(c.organisation_id)),
+          scores: (perfScores.data ?? []).filter((s) => visibleOrgIds.has(s.organisation_id)),
           users: perfUsers.data ?? [],
         };
         performance = {

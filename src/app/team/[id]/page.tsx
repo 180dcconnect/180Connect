@@ -81,7 +81,7 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
     .eq("status", "active");
 
   const suppressedSet = new Set((suppressions ?? []).map((s) => s.organisation_id));
-  const clients = ownedClients ?? [];
+  const clients = (ownedClients ?? []).filter((c) => !suppressedSet.has(c.id));
 
   // Fetch outreach preferences
   const { data: preferences } = await supabase

@@ -41,28 +41,35 @@ export function QueueQualityCard({ bands, scored, totalOrgs, className = "" }: Q
   const cardId = useId().replace(/:/g, "");
   const [hoveredSegmentId, setHoveredSegmentId] = useState<string | null>(null);
 
+  const unscored = Math.max(totalOrgs - scored, 0);
+
   const segments = useMemo<Segment[]>(() => {
+    // Centre figure is now totalOrgs so Queue Quality matches Total Organisations.
+    // Every org should have a score (future ingestion guarantees it), so unscored
+    // will be 0 and the dial is just high/medium/low. While any remain, show
+    // them as 0% rows and — if present — as a dial segment so the dial sums to total.
+    const denom = totalOrgs > 0 ? totalOrgs : 1;
     const build = (id: string, name: string, value: number, color: string): Segment => ({
       id,
       name,
       value,
       color,
-      meta: scored > 0 ? `${Math.round((value / scored) * 100)}% of scored` : "—",
+      meta: totalOrgs > 0 ? `${Math.round((value / denom) * 100)}%` : "—",
     });
-    return [
+    const base: Segment[] = [
       build("high", "High priority", bands.high, "#0f172a"),
       build("medium", "Medium priority", bands.medium, "#64748b"),
       build("low", "Low priority", bands.low, "#cbd5e1"),
+      build("unscored", "Unscored clients", unscored, "#e2e8f0"),
     ];
-  }, [bands, scored]);
+    return base;
+  }, [bands, totalOrgs, unscored]);
 
   // Only bands with a value get ticks/bars — single-band 100% shows only that bar.
   const visibleSegments = useMemo(() => {
     const filtered = segments.filter((s) => s.value > 0);
     return filtered.length ? filtered : segments;
   }, [segments]);
-
-  const unscored = Math.max(totalOrgs - scored, 0);
 
   // Compute tick ranges per segment
   const ticks = useMemo(() => {
@@ -122,8 +129,14 @@ export function QueueQualityCard({ bands, scored, totalOrgs, className = "" }: Q
   }, [visibleSegments]);
 
   const activeSegment = useMemo(() => {
-    return visibleSegments.find((s) => s.id === hoveredSegmentId) ?? visibleSegments[0];
-  }, [visibleSegments, hoveredSegmentId]);
+    return segments.find((s) => s.id === hoveredSegmentId) ?? visibleSegments[0];
+  }, [segments, visibleSegments, hoveredSegmentId]);
+
+  // Only hide other ticks when the hovered segment actually has ticks (i.e. value > 0).
+  const isTicksHovered = useMemo(
+    () => hoveredSegmentId !== null && visibleSegments.some((s) => s.id === hoveredSegmentId),
+    [hoveredSegmentId, visibleSegments],
+  );
 
   return (
     <div
@@ -138,12 +151,10 @@ export function QueueQualityCard({ bands, scored, totalOrgs, className = "" }: Q
           <h3 className="text-[15px] font-semibold tracking-tight text-foreground">Queue quality</h3>
         </div>
 
-        {scored === 0 ? (
+        {totalOrgs === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-1 py-12 text-center">
-            <p className="text-sm font-medium text-foreground">No scored clients yet</p>
-            <p className="text-xs text-muted-foreground">
-              Bands appear once the scoring run has classified clients.
-            </p>
+            <p className="text-sm font-medium text-foreground">No clients yet</p>
+            <p className="text-xs text-muted-foreground">Organisations will appear here once ingested.</p>
           </div>
         ) : (
           <>
@@ -156,9 +167,7 @@ export function QueueQualityCard({ bands, scored, totalOrgs, className = "" }: Q
               >
                 {ticks.map((tick) => {
                   const isSegmentActive = activeSegment.id === tick.segment.id;
-                  const isAnyHovered = hoveredSegmentId !== null;
-
-                  const opacity = !isAnyHovered ? 1 : isSegmentActive ? 1 : 0;
+                  const opacity = !isTicksHovered ? 1 : isSegmentActive ? 1 : 0;
 
                   return (
                     <motion.line
@@ -172,7 +181,7 @@ export function QueueQualityCard({ bands, scored, totalOrgs, className = "" }: Q
                       strokeLinecap="round"
                       animate={{
                         opacity,
-                        strokeWidth: isSegmentActive && isAnyHovered ? 3.5 : 3,
+                        strokeWidth: isSegmentActive && isTicksHovered ? 3.5 : 3,
                       }}
                       transition={{ duration: 0.2 }}
                       className="transition-all duration-150"
@@ -183,16 +192,16 @@ export function QueueQualityCard({ bands, scored, totalOrgs, className = "" }: Q
                 })}
               </svg>
 
-              {/* Center Info Ring / Pill */}
+              {/* Center Info Ring / Pill — now totalOrgs so it matches Total Organisations; unscored will be 0 once ingestion finishes */}
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
                 <div className="flex h-9 w-9 items-center justify-center rounded-full bg-black/[0.04] text-foreground/75 dark:bg-white/[0.08]">
                   <Target size={16} strokeWidth={2.2} />
                 </div>
                 <span className="mt-1.5 text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
-                  Scored
+                  Total
                 </span>
                 <span className="text-[26px] font-bold leading-none tracking-tight text-foreground">
-                  {scored.toLocaleString()}
+                  {totalOrgs.toLocaleString()}
                 </span>
               </div>
 
@@ -218,9 +227,9 @@ export function QueueQualityCard({ bands, scored, totalOrgs, className = "" }: Q
               </AnimatePresence>
             </div>
 
-            {/* Breakdown Rows List — only non-zero bands get a row */}
+            {/* Breakdown Rows List — always show all four groupings (0% if zero) so the user knows the options */}
             <div className="mt-4 space-y-2 border-t border-black/[0.04] pt-4 dark:border-white/[0.06]">
-              {visibleSegments.map((seg) => {
+              {segments.map((seg) => {
                 const isHovered = hoveredSegmentId === seg.id;
                 return (
                   <div
@@ -237,7 +246,7 @@ export function QueueQualityCard({ bands, scored, totalOrgs, className = "" }: Q
                       <span className="text-[13px] font-medium text-foreground">{seg.name}</span>
                     </div>
 
-                    {/* Right: count + share of the scored queue */}
+                    {/* Right: count + share of total */}
                     <div className="flex items-center gap-3 text-[13px] font-semibold tabular-nums">
                       <span className="text-foreground font-bold">{seg.value.toLocaleString()}</span>
                       <span className="text-[12px] font-medium text-muted-foreground">{seg.meta}</span>
@@ -245,15 +254,6 @@ export function QueueQualityCard({ bands, scored, totalOrgs, className = "" }: Q
                   </div>
                 );
               })}
-
-              {unscored > 0 && (
-                <div className="flex items-center justify-between px-2.5 pt-1">
-                  <span className="text-[12px] text-muted-foreground">Not yet scored</span>
-                  <span className="text-[12px] font-semibold tabular-nums text-muted-foreground">
-                    {unscored.toLocaleString()} of {totalOrgs.toLocaleString()}
-                  </span>
-                </div>
-              )}
             </div>
           </>
         )}

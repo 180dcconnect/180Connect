@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Check, ChevronDown, Search } from "lucide-react";
+import { Check, ChevronDown, Search } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
 import type { GrowthPoint } from "@/lib/dashboard-metrics";
@@ -12,6 +12,7 @@ import type {
   WeeklyCount,
 } from "@/lib/performance-metrics";
 import ProgressMetricCard from "@/components/ui/progress-metric-card";
+import { StackedStickColumns } from "@/components/ui/stacked-stick-columns";
 
 /**
  * The Performance section (F-added): the whole team's week, filterable down to
@@ -35,6 +36,10 @@ export interface PerformanceSectionProps {
   /** Daily cumulative conversion-rate points over the trailing 90 days. */
   trend: GrowthPoint[];
   sectors: SectorPerformanceRow[];
+  /** Per-user sector performance breakdowns, keyed by user ID. */
+  sectorsByUser?: Record<string, SectorPerformanceRow[]>;
+  /** Per-user conversion rate trends, keyed by user ID. */
+  trendByUser?: Record<string, GrowthPoint[]>;
   className?: string;
 }
 
@@ -42,59 +47,96 @@ function pct(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
-function Delta({ count }: { count: WeeklyCount }) {
-  const delta = count.thisWeek - count.lastWeek;
-  if (delta === 0) {
-    return <span className="text-[12px] font-semibold text-muted-foreground">no change</span>;
+function getPercentageChange(thisWeek: number, lastWeek: number) {
+  if (lastWeek === 0) {
+    if (thisWeek === 0) return { value: 0, text: "0.0%" };
+    return { value: 100, text: "+100%" };
   }
-  const up = delta > 0;
-  const Icon = up ? ArrowUp : ArrowDown;
-  return (
-    <span
-      className={`inline-flex items-center gap-0.5 text-[12px] font-semibold ${
-        up ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
-      }`}
-    >
-      <Icon size={13} strokeWidth={2.5} />
-      {Math.abs(delta)}
-    </span>
-  );
+  const delta = thisWeek - lastWeek;
+  const pct = (delta / lastWeek) * 100;
+  const sign = pct > 0 ? "+" : "";
+  return {
+    value: pct,
+    text: `${sign}${pct.toFixed(1)}%`,
+  };
 }
 
 function PerformanceTile({
   label,
   count,
-  caption,
-  emphasis = false,
+  unit = "",
+  placeholderTotal,
+  activeColorClass,
 }: {
   label: string;
   count: WeeklyCount;
-  caption: string;
-  emphasis?: boolean;
+  unit?: string;
+  placeholderTotal?: number;
+  activeColorClass?: string;
 }) {
+  const displayTotal = count.thisWeek > 0 ? count.thisWeek : (placeholderTotal ?? 0);
+  const { value: pctValue, text: pctText } = getPercentageChange(count.thisWeek, count.lastWeek);
+
   return (
-    <div className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm">
-      <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">{label}</p>
-      <div className="mt-3 flex items-baseline gap-2.5">
-        <AnimatePresence mode="popLayout" initial={false}>
-          <motion.p
-            key={count.thisWeek}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.22 }}
-            className={`text-[2.25rem] font-black leading-none tracking-[-0.03em] tabular-nums ${
-              emphasis ? "text-brand" : ""
-            }`}
-          >
-            {count.thisWeek.toLocaleString()}
-          </motion.p>
-        </AnimatePresence>
-        <Delta count={count} />
+    <div className="flex flex-col justify-between rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm dark:border-white/[0.08] dark:bg-card">
+      {/* Top Title */}
+      <h4 className="text-[16px] font-semibold tracking-tight text-foreground">
+        {label}
+      </h4>
+
+      {/* Main content row with increased vertical gap, aligning figure and chart on the exact same baseline level */}
+      <div className="mt-8 flex items-end justify-between gap-3">
+        {/* Left metric numbers */}
+        <div className="flex flex-col">
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.p
+              key={count.thisWeek}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.22 }}
+              className="text-[2.25rem] font-black leading-none tracking-[-0.03em] tabular-nums text-foreground"
+            >
+              {count.thisWeek.toLocaleString()}
+            </motion.p>
+          </AnimatePresence>
+
+          <div className="mt-3 flex items-center gap-1.5 text-xs">
+            <span
+              className={`inline-flex items-center font-bold ${
+                pctValue > 0
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : pctValue < 0
+                    ? "text-rose-600 dark:text-rose-400"
+                    : "text-muted-foreground"
+              }`}
+            >
+              {pctText}
+            </span>
+            <span className="text-[12px] font-normal text-muted-foreground">
+              vs last week
+            </span>
+          </div>
+        </div>
+
+        {/* Right 7-column stacked squarish sticks, aligned on the same bottom level */}
+        <div className="shrink-0">
+          <StackedStickColumns
+            total={displayTotal}
+            unit={unit}
+            activeColorClass={
+              activeColorClass ??
+              (label.toLowerCase().includes("conversion")
+                ? "bg-emerald-600 dark:bg-emerald-400"
+                : label.toLowerCase().includes("repl")
+                  ? "bg-sky-500 dark:bg-sky-400"
+                  : label.toLowerCase().includes("scored")
+                    ? "bg-violet-600 dark:bg-violet-400"
+                    : "bg-indigo-600 dark:bg-indigo-400")
+            }
+          />
+        </div>
       </div>
-      <p className="mt-3 text-[11px] text-foreground/40">
-        {caption} · last week {count.lastWeek.toLocaleString()}
-      </p>
     </div>
   );
 }
@@ -266,6 +308,8 @@ export function PerformanceSection({
   actorRole,
   trend,
   sectors,
+  sectorsByUser,
+  trendByUser,
   className = "",
 }: PerformanceSectionProps) {
   const canPickCam = actorRole === "admin" || actorRole === "viewer";
@@ -295,21 +339,38 @@ export function PerformanceSection({
   const replies = person ? person.replies : summary.team.replies;
   const conversions = person ? person.conversions : summary.team.conversions;
 
+  const currentSectors = useMemo(() => {
+    if (scope.kind === "me" && sectorsByUser) {
+      return sectorsByUser[actorId] ?? [];
+    }
+    if (scope.kind === "cam" && sectorsByUser) {
+      return sectorsByUser[scope.userId] ?? [];
+    }
+    return sectors;
+  }, [scope, actorId, sectors, sectorsByUser]);
+
+  const currentTrend = useMemo(() => {
+    if (scope.kind === "me" && trendByUser) {
+      return trendByUser[actorId] ?? [];
+    }
+    if (scope.kind === "cam" && trendByUser) {
+      return trendByUser[scope.userId] ?? [];
+    }
+    return trend;
+  }, [scope, actorId, trend, trendByUser]);
+
   // The trend card's headline is the *current* cumulative rate — the series'
   // last point — not a sum of daily rates.
-  const currentRate = trend.length > 0 ? trend[trend.length - 1].value : 0;
+  const currentRate = currentTrend.length > 0 ? currentTrend[currentTrend.length - 1].value : 0;
   const formatRate = (value: number) => `${(value * 100).toFixed(1)}%`;
 
-  const visibleSectors = sectors.slice(0, 8);
-  const hiddenSectors = sectors.length - visibleSectors.length;
+  const visibleSectors = currentSectors.slice(0, 8);
+  const hiddenSectors = currentSectors.length - visibleSectors.length;
 
   return (
     <div className={className}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-8 gap-y-2">
         <h2 className="text-xl font-semibold font-body tracking-[-0.02em]">Performance</h2>
-        <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-          {scopeLabel} · this week vs last
-        </p>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -325,18 +386,34 @@ export function PerformanceSection({
           />
         )}
         <span className="text-[11px] text-foreground/35">
-          Trend and sector views are team-wide.
+          {scope.kind === "team" ? "Viewing whole team performance." : `Filtered to ${scopeLabel.toLowerCase()}.`}
         </span>
       </div>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <PerformanceTile label="Emails sent" count={emailsSent} caption="This week" />
-        <PerformanceTile label="Replies received" count={replies} caption="This week" />
-        <PerformanceTile label="Conversions" count={conversions} caption="This week" />
         <PerformanceTile
-          label="Orgs scored"
+          label="Emails Sent"
+          count={emailsSent}
+          unit="emails"
+          placeholderTotal={70}
+        />
+        <PerformanceTile
+          label="Replies Received"
+          count={replies}
+          unit="replies"
+          placeholderTotal={24}
+        />
+        <PerformanceTile
+          label="Conversions"
+          count={conversions}
+          unit="conversions"
+          placeholderTotal={8}
+        />
+        <PerformanceTile
+          label="Orgs Scored"
           count={summary.orgsScored}
-          caption="Team-wide · scoring runs system-wide"
+          unit="orgs"
+          placeholderTotal={48}
         />
       </div>
 
@@ -345,7 +422,7 @@ export function PerformanceSection({
           title="Conversion rate trend"
           total={formatRate(currentRate)}
           deltaLabel=""
-          data={trend}
+          data={currentTrend}
           valueFormatter={formatRate}
           periodOptions={[
             { label: "Past 30 days", points: 30 },
@@ -368,8 +445,7 @@ export function PerformanceSection({
           {visibleSectors.length === 0 ? (
             <div className="flex flex-1 items-center justify-center">
               <p className="max-w-xs text-center text-sm text-muted-foreground">
-                No outreach in the trailing 90 days yet — sector rows appear with the first
-                sent email.
+                No outreach in the trailing 90 days yet for this selection — sector rows appear with the first sent email.
               </p>
             </div>
           ) : (
@@ -409,3 +485,4 @@ export function PerformanceSection({
 }
 
 export default PerformanceSection;
+

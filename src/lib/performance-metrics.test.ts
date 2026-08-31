@@ -311,6 +311,25 @@ describe("sectorPerformance", () => {
       ["Environment", "Education"],
     );
   });
+
+  it("filters sectors down to a single user when filterUserId is provided", () => {
+    const rows = sectorPerformance(
+      input({
+        messages: [
+          message({ organisation_id: "org-1", sent_by_user_id: "cam-1" }),
+          message({ id: "msg-2", sent_at: "2026-08-11T11:00:00Z", organisation_id: "org-2", sent_by_user_id: "cam-2" }),
+        ],
+        conversions: [conversion({ organisation_id: "org-1", recorded_by_user_id: "cam-1" })],
+      }),
+      sectorByOrg,
+      90,
+      NOW,
+      "cam-1",
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].sector, "Environment");
+    assert.equal(rows[0].emailsSent, 1);
+  });
 });
 
 describe("queueBands", () => {

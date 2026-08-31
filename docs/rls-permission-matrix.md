@@ -660,7 +660,7 @@ outgoing one's open actions *before* the handover, not only after.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `ACTIONS` | all roles | admin: any. cam: `created_by_user_id = auth.uid()` **and** `assignee_user_id = auth.uid()` **and** org is unowned or owned by self | admin any row; cam where `assignee_user_id = auth.uid()` — **work columns only** | admin any row; cam own-created **and** own-assigned **and** `status = 'open'` |
+| `ACTIONS` | all roles | admin: any. cam: `created_by_user_id = auth.uid()` **and** `assignee_user_id = auth.uid()` **and** org is unowned or owned by self | admin any row; cam where `assignee_user_id = auth.uid()` — **`title`/`description`/`due_date`/`remind_at` only** (`status`/`completed_at` RPC-only, F171 below) | admin any row; cam own-created **and** own-assigned **and** `status = 'open'` |
 
 `assignee_user_id` carries **no UPDATE grant for any role, admins included**, and neither
 do `organisation_id` or `is_seed`. `authenticated` is one shared Postgres role, so column
@@ -701,6 +701,30 @@ admin to work out which of fifty clients was the problem.
 A CAM assigning work to *another* CAM is F169 and stays admin-only — that is what the
 `assignee_user_id = auth.uid()` predicate on INSERT enforces. Viewers create nothing
 (§4.3), enforced by `app.is_cam()`.
+
+**Completion RPC** (F171 Mark Action Complete, #173,
+`supabase/migrations/20260913090000_create_complete_action_rpc.sql`):
+`status`/`completed_at` carried a plain `authenticated` UPDATE grant until this
+migration — completing an action was an ordinary, un-audited write, same as
+editing its title. F171 AC2 ("keeps a record of it for audit purposes, F221")
+and AC3 ("shows who completed it") cannot be met by a policy: a policy cannot
+also insert into `AUDIT_LOG` (no INSERT grant to `authenticated` at all, §3.8),
+and cannot capture "the person who ran this UPDATE" as a stored column. So this
+migration revokes direct UPDATE on `status`/`completed_at` and reopens
+completion only through `complete_action(action_id)` — `SECURITY DEFINER`,
+self-checks the caller is the action's own assignee **or** an admin (the same
+combined reach `actions_update_admin`/`actions_update_assignee` already had
+directly, so nothing regresses), requires the action be `open`, sets
+`completed_at`/`completed_by_user_id` and writes `audit_log`
+(`action_completed`) in the same transaction. `completed_by_user_id` is a new
+column rather than an assumption that the assignee always did it — since an
+admin can complete someone else's action too, "who" genuinely isn't always
+`assignee_user_id`.
+
+This closes `status` for every transition, not just completion: nothing in
+F171 or elsewhere builds a "cancel" flow, so that exit stays theoretically
+reachable only by a future audited RPC of its own, the same way this one now
+owns completion.
 
 Deletion requires the CAM to have **raised** the action and to **still hold** it, and it
 must still be open. A completed or cancelled action is handover history and only an admin

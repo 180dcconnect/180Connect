@@ -74,10 +74,13 @@ export function formatCompact(value: number): string {
  */
 const BAND_TOP = 34;
 const BAND_BOTTOM = 99.5;
-const X_INSET = 3;
+const X_INSET_LEFT = 3;
+const X_INSET_RIGHT = 0;
 
 const toX = (i: number, len: number) =>
-  len <= 1 ? 50 : X_INSET + (i / (len - 1)) * (100 - X_INSET * 2);
+  len <= 1
+    ? 50
+    : X_INSET_LEFT + (i / (len - 1)) * (100 - X_INSET_LEFT - X_INSET_RIGHT);
 
 const NUM_SPLINE_SAMPLES = 32;
 
@@ -99,8 +102,8 @@ function sampleMonotoneSplinePath(
     return { line: "", fill: "" };
   }
   if (n === 1) {
-    const x0 = X_INSET;
-    const x1 = 100 - X_INSET;
+    const x0 = X_INSET_LEFT;
+    const x1 = 100 - X_INSET_RIGHT;
     const y0 = pts[0].y;
     const step = (x1 - x0) / (numSamples - 1);
     let line = `M ${x0.toFixed(3)} ${y0.toFixed(3)}`;
@@ -275,24 +278,26 @@ export function MetricChart({
       return;
     }
     const rawX = ((event.clientX - box.left) / box.width) * 100;
-    const fractionalIndex = ((rawX - X_INSET) / (100 - X_INSET * 2)) * (length - 1);
+    const fractionalIndex =
+      ((rawX - X_INSET_LEFT) / (100 - X_INSET_LEFT - X_INSET_RIGHT)) * (length - 1);
     const closestIndex = Math.min(length - 1, Math.max(0, Math.round(fractionalIndex)));
     setHovered(closestIndex);
   };
 
   return (
     <div
-      className="relative h-full w-full select-none touch-none"
+      className="relative h-full w-full select-none touch-none overflow-visible"
       onPointerLeave={() => setHovered(null)}
       onPointerDown={handlePointer}
       onPointerMove={handlePointer}
     >
-      <svg
-        className="h-full w-full"
-        viewBox="0 0 100 100"
-        preserveAspectRatio="none"
-        aria-hidden="true"
-      >
+      <div className="absolute inset-0 overflow-hidden rounded-r-[28px]">
+        <svg
+          className="h-full w-full"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
         <defs>
           {series.map((s, i) => (
             <linearGradient key={s.name} id={`${rawId}-fill-${i}`} x1="0" y1="0" x2="0" y2="1">
@@ -329,7 +334,7 @@ export function MetricChart({
           const pts = s.data.map((d, i) => ({ x: toX(i, s.data.length), y: toY(d.value) }));
 
           if (view === "bars") {
-            const slot = (100 - X_INSET * 2) / Math.max(s.data.length, 1);
+            const slot = (100 - X_INSET_LEFT - X_INSET_RIGHT) / Math.max(s.data.length, 1);
             const width = Math.max(slot * (series.length > 1 ? 0.34 : 0.5), 0.6);
             const offset = (seriesIndex - (series.length - 1) / 2) * width;
             return (
@@ -389,8 +394,10 @@ export function MetricChart({
           );
         })}
       </svg>
+      </div>
 
-      {/* Point markers outside the SVG with spring physics tracking */}
+      {/* Point markers outside the SVG with spring physics tracking — kept outside the clipped wrapper so the end dot can sit on the border */}
+
       {view === "curve" &&
         series.map((s) => {
           const point = s.data[Math.min(active, s.data.length - 1)];
@@ -429,9 +436,9 @@ export function MetricChart({
           );
         })}
 
-      {/* Tooltip: Glassmorphic card floating with smooth spring tracking */}
+      {/* Tooltip: Glassmorphic card floating with smooth spring tracking — z-50 so it renders above the adjacent Customer Segmentation card */}
       <motion.div
-        className="pointer-events-none absolute z-30"
+        className="pointer-events-none absolute z-50"
         initial={false}
         animate={{
           left: `${cursorX}%`,

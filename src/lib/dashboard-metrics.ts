@@ -16,6 +16,8 @@ export type DashboardOrgRow = {
   owner_id: string | null;
   updated_at: string;
   created_at: string;
+  /** Read only by the dashboard's Performance section (SECTOR_PERFORMANCE rollup). */
+  sector?: string | null;
 };
 
 export type OpenSuppression = { organisation_id: string; status: "pending" | "active" };

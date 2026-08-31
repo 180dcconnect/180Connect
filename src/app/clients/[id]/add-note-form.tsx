@@ -1,34 +1,36 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useId, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import {
+  MorphingPopover,
+  MorphingPopoverTrigger,
+  MorphingPopoverContent,
+} from "@/components/core/morphing-popover";
+import { motion } from "motion/react";
+import { ArrowLeftIcon } from "lucide-react";
 
 /**
- * F072 — posts to /api/clients/[id]/notes. Same fetch/busy/error shape as
- * StatusSelect: on success, `router.refresh()` re-runs the Server Component
- * fetch that feeds NotesSection, so the new note appears in the list
- * immediately without hand-rolling an optimistic insert.
- *
- * The refresh runs inside `useTransition`, and `saving` stays true until the
- * transition settles: `router.refresh()` is low-priority work that React can
- * defer, so a plain `setBusy(false)` after it would flip the UI back before
- * the new note is actually on screen (it reappeared only on the next click,
- * which flushed the queue). `saving` combines both flags so the button reads
- * "Saving…" for the whole round trip plus repaint.
+ * F072 — posts to /api/clients/[id]/notes. Uses MorphingPopover so the trigger
+ * seamlessly transforms into the note composer textarea.
  */
 export function AddNoteForm({ organisationId }: { organisationId: string }) {
+  const uniqueId = useId();
   const router = useRouter();
   const [content, setContent] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [isRefreshing, startRefresh] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   const saving = busy || isRefreshing;
-
-  // Mirrors the server's own check so the button is disabled before a round
-  // trip is even attempted — the request is still validated server-side
-  // regardless, since that is what actually enforces it.
   const isBlank = content.trim().length === 0;
+
+  const closeMenu = () => {
+    setContent("");
+    setError(null);
+    setIsOpen(false);
+  };
 
   async function save() {
     if (isBlank) {
@@ -46,6 +48,7 @@ export function AddNoteForm({ organisationId }: { organisationId: string }) {
       });
       if (response.ok) {
         setContent("");
+        setIsOpen(false);
         startRefresh(() => router.refresh());
         return;
       }
@@ -60,33 +63,89 @@ export function AddNoteForm({ organisationId }: { organisationId: string }) {
 
   return (
     <div className="mt-4">
-      <label className="sr-only" htmlFor={`add-note-${organisationId}`}>
-        Add a note
-      </label>
-      <textarea
-        id={`add-note-${organisationId}`}
-        className="w-full rounded-lg border border-black/15 p-2.5 text-sm outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/20"
-        disabled={saving}
-        onChange={(event) => setContent(event.target.value)}
-        placeholder="Add a note for the rest of the team…"
-        rows={3}
-        value={content}
-      />
-      <div className="mt-2 flex items-center gap-3">
-        <button
-          type="button"
-          className="rounded-full border border-brand/30 px-3.5 py-1.5 text-xs font-bold text-brand hover:bg-brand/5 disabled:opacity-50"
-          disabled={saving || isBlank}
-          onClick={save}
-        >
-          {saving ? "Saving…" : "Save note"}
-        </button>
-        {error && (
-          <p aria-live="polite" role="alert" className="text-xs font-bold text-destructive">
-            {error}
-          </p>
-        )}
-      </div>
+      <MorphingPopover
+        transition={{
+          type: "spring",
+          bounce: 0.05,
+          duration: 0.3,
+        }}
+        open={isOpen}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && !saving) {
+            closeMenu();
+          } else {
+            setIsOpen(nextOpen);
+          }
+        }}
+      >
+        <MorphingPopoverTrigger className="flex h-9 items-center rounded-lg border border-black/15 bg-white px-3 text-sm font-medium text-foreground shadow-sm hover:bg-black/[0.02] cursor-pointer dark:border-white/15 dark:bg-zinc-800 dark:hover:bg-zinc-700 transition-colors">
+          <motion.span layoutId={`popover-label-${uniqueId}`} className="text-sm font-medium">
+            Add Note
+          </motion.span>
+        </MorphingPopoverTrigger>
+
+        <MorphingPopoverContent className="rounded-xl border border-black/15 bg-white p-0 shadow-[0_9px_9px_0px_rgba(0,0,0,0.01),_0_2px_5px_0px_rgba(0,0,0,0.06)] dark:border-white/15 dark:bg-zinc-800">
+          <div className="h-[200px] w-full max-w-[364px] min-w-[300px]">
+            <form
+              className="relative flex h-full flex-col"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void save();
+              }}
+            >
+              <label className="sr-only" htmlFor={`add-note-${organisationId}`}>
+                Add a note
+              </label>
+              <motion.span
+                layoutId={`popover-label-${uniqueId}`}
+                aria-hidden="true"
+                style={{
+                  opacity: content ? 0 : 1,
+                }}
+                className="pointer-events-none absolute top-3 left-4 text-sm font-medium text-muted-foreground select-none"
+              >
+                Add Note
+              </motion.span>
+              <textarea
+                id={`add-note-${organisationId}`}
+                className="h-full w-full resize-none rounded-md bg-transparent px-4 py-3 text-sm outline-none text-foreground"
+                autoFocus
+                disabled={saving}
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+              />
+              <div key="close" className="flex items-center justify-between border-t border-black/[0.06] py-3 pr-4 pl-2 dark:border-white/[0.08]">
+                <button
+                  type="button"
+                  className="flex items-center rounded-lg bg-transparent px-2 py-1 text-sm text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.08] cursor-pointer transition-colors"
+                  onClick={closeMenu}
+                  disabled={saving}
+                  aria-label="Close popover"
+                >
+                  <ArrowLeftIcon size={16} className="text-foreground" />
+                </button>
+                <div className="flex items-center gap-2">
+                  {error && (
+                    <p aria-live="polite" role="alert" className="text-xs font-bold text-destructive">
+                      {error}
+                    </p>
+                  )}
+                  <button
+                    className="relative flex h-8 shrink-0 scale-100 appearance-none items-center justify-center rounded-lg border border-black/15 bg-transparent px-3 text-sm font-medium text-foreground transition-colors select-none hover:bg-black/[0.05] focus-visible:ring-2 active:scale-[0.98] disabled:opacity-50 dark:border-white/15 dark:hover:bg-white/[0.08] cursor-pointer"
+                    type="submit"
+                    disabled={saving || isBlank}
+                    aria-label="Save note"
+                  >
+                    {saving ? "Saving…" : "Submit"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </MorphingPopoverContent>
+      </MorphingPopover>
     </div>
   );
 }
+
+export default AddNoteForm;

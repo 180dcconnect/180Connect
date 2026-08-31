@@ -11,8 +11,24 @@ import {
   needsAttention,
   organisationGrowthSeries,
   type DashboardOrgRow,
+  type GrowthPoint,
   type OpenSuppression,
 } from "@/lib/dashboard-metrics";
+import {
+  computePerformance,
+  pipelineTrendSeries,
+  queueBands,
+  sectorPerformance,
+  trendWindowStart,
+  type ConvertedOutcomeRow,
+  type LatestScoreRow,
+  type PerformanceSummary,
+  type QueueBands,
+  type ReplyEventRow,
+  type SectorPerformanceRow,
+  type SentMessageRow,
+  type TeamUserRow,
+} from "@/lib/performance-metrics";
 import { formatTeamActivities, type FormattedTeamActivity, type RawTeamActivityRow } from "@/lib/team-activity";
 import { followUpRecommendations, DEFAULT_FOLLOW_UP_THRESHOLDS, type FollowUpRecommendation } from "@/lib/outreach/follow-up-recommendations";
 import {
@@ -35,7 +51,8 @@ import { OriginButton } from "@/components/ui/origin-button";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { FunnelMetrics } from "@/components/dashboard/funnel-metrics";
 import { AdminActionCenter, type AdminQueueCounts } from "@/components/dashboard/admin-action-center";
-import { CustomerSegmentationCard } from "@/components/dashboard/customer-segmentation-card";
+import { QueueQualityCard } from "@/components/dashboard/queue-quality-card";
+import { PerformanceSection } from "@/components/dashboard/performance-section";
 import {
   REVIEW_CLIENTS_EMPTY_STATE,
   guideProgress,
@@ -103,6 +120,16 @@ export default async function DashboardPage({
   let adminCounts: AdminQueueCounts | null = null;
   let loadFailed = false;
 
+  // Performance section state — null when its reads fail, so the rest of the
+  // dashboard still renders (every section here fails independently).
+  let performance: {
+    summary: PerformanceSummary;
+    trend: GrowthPoint[];
+    sectors: SectorPerformanceRow[];
+    queue: { bands: QueueBands; scored: number };
+    cams: TeamUserRow[];
+  } | null = null;
+
   if (canViewClients) {
     const supabase = await createClient();
     // F028: each recent-updates source is windowed and capped at the query
@@ -128,9 +155,9 @@ export default async function DashboardPage({
       let from = 0;
       const step = 1000;
       while (true) {
-        const { data, error } = await supabase
+        const { data, error } = await        supabase
           .from("organisations")
-          .select("id, legal_name, outreach_status, owner_id, updated_at, created_at")
+          .select("id, legal_name, outreach_status, owner_id, updated_at, created_at, sector")
           .order("created_at", { ascending: true })
           .order("id", { ascending: true })
           .range(from, from + step - 1)
@@ -159,6 +186,29 @@ export default async function DashboardPage({
           .order("organisation_id", { ascending: true })
           .range(from, from + step - 1)
           .overrideTypes<OpenSuppression[], { merge: false }>();
+        if (error) return { data: null, error };
+        if (!data || data.length === 0) break;
+        all.push(...data);
+        if (data.length < step) break;
+        from += step;
+      }
+      return { data: all, error: null };
+    }
+
+    // The Performance section reads four event/score tables over a window; the
+    // same PostgREST 1000-row cap applies to each, so every one paginates the
+    // same way the organisations fetch above does.
+    async function fetchAllRows<T>(
+      buildPage: (
+        from: number,
+        to: number,
+      ) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+    ): Promise<{ data: T[] | null; error: { message: string } | null }> {
+      const all: T[] = [];
+      let from = 0;
+      const step = 1000;
+      while (true) {
+        const { data, error } = await buildPage(from, from + step - 1);
         if (error) return { data: null, error };
         if (!data || data.length === 0) break;
         all.push(...data);
@@ -239,6 +289,100 @@ export default async function DashboardPage({
 
     if (!loadFailed) {
       rows = filterActiveSuppressed(organisations.data ?? [], openSuppressions.data ?? []);
+
+      // Performance section — one 90-day window, five reads. Every table here
+      // is readable by every role (matrix §3.1, §3.4, §3.6), so this is not an
+      // admin-only view; the section itself decides who may pick which CAM.
+      // Same ISO-string discipline as updateCutoff above: postgrest-js
+      // interpolates filter values raw, so a Date would 400 every query.
+      const perfCutoff = trendWindowStart(new Date()).toISOString();
+
+      const [perfMessages, perfReplies, perfConversions, perfScores, perfUsers] = await Promise.all([
+        fetchAllRows<SentMessageRow>((from, to) =>
+          supabase
+            .from("outreach_messages")
+            .select("id, sent_at, sent_by_user_id, organisation_id")
+            .eq("send_status", "sent")
+            .gte("sent_at", perfCutoff)
+            .order("sent_at", { ascending: true })
+            .range(from, to)
+            .overrideTypes<SentMessageRow[], { merge: false }>(),
+        ),
+        fetchAllRows<ReplyEventRow>((from, to) =>
+          supabase
+            .from("reply_events")
+            .select("id, received_at, outreach_message_id, organisation_id")
+            .gte("received_at", perfCutoff)
+            .order("received_at", { ascending: true })
+            .range(from, to)
+            .overrideTypes<ReplyEventRow[], { merge: false }>(),
+        ),
+        fetchAllRows<ConvertedOutcomeRow>((from, to) =>
+          supabase
+            .from("outcomes")
+            .select("id, created_at, recorded_by_user_id, organisation_id")
+            .eq("outcome_type", "converted")
+            .gte("created_at", perfCutoff)
+            .order("created_at", { ascending: true })
+            .range(from, to)
+            .overrideTypes<ConvertedOutcomeRow[], { merge: false }>(),
+        ),
+        // The queue band distribution reads the whole table — a band added
+        // before the window still belongs to the queue.
+        fetchAllRows<LatestScoreRow>((from, to) =>
+          supabase
+            .from("latest_scores")
+            .select("organisation_id, priority_band, priority_score, scored_at")
+            .order("organisation_id", { ascending: true })
+            .range(from, to)
+            .overrideTypes<LatestScoreRow[], { merge: false }>(),
+        ),
+        fetchAllRows<TeamUserRow>((from, to) =>
+          supabase
+            .from("users")
+            .select("id, full_name, role")
+            .order("full_name", { ascending: true })
+            .range(from, to)
+            .overrideTypes<TeamUserRow[], { merge: false }>(),
+        ),
+      ]);
+
+      const perfErrors = [
+        ["performance.messages", perfMessages.error],
+        ["performance.replies", perfReplies.error],
+        ["performance.conversions", perfConversions.error],
+        ["performance.scores", perfScores.error],
+        ["performance.users", perfUsers.error],
+      ] as const;
+      let perfFailed = false;
+      for (const [source, err] of perfErrors) {
+        if (err) {
+          await reportError(err, { operation: `dashboard.${source}` });
+          perfFailed = true;
+        }
+      }
+
+      if (!perfFailed) {
+        const perfInput = {
+          messages: perfMessages.data ?? [],
+          replies: perfReplies.data ?? [],
+          conversions: perfConversions.data ?? [],
+          scores: perfScores.data ?? [],
+          users: perfUsers.data ?? [],
+        };
+        performance = {
+          summary: computePerformance(perfInput),
+          trend: pipelineTrendSeries(perfInput),
+          sectors: sectorPerformance(
+            perfInput,
+            new Map(rows.map((row) => [row.id, row.sector ?? null])),
+          ),
+          queue: queueBands(perfInput.scores),
+          cams: perfUsers.data
+            ?.filter((user) => user.role === "cam")
+            .sort((a, b) => (a.full_name ?? "").localeCompare(b.full_name ?? "")) ?? [],
+        };
+      }
 
       // The org-name map is built from the visible rows only, which is also
       // how suppressed clients fall out of the feed: buildRecentUpdates drops
@@ -540,7 +684,7 @@ export default async function DashboardPage({
 
               {/* Side-by-side row: Total Organisations curve + Customer Segmentation dial */}
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-12 items-stretch">
-                <div className="flex flex-col xl:col-span-8">
+                <div className="relative z-20 flex flex-col xl:col-span-8">
                   <Rise className="h-full flex-1">
                     <ProgressMetricCard
                       size="lg"
@@ -557,16 +701,27 @@ export default async function DashboardPage({
                       ]}
                       allowCustomRange
                       showFooter={false}
-                      className="h-full rounded-2xl border-black/[0.06] shadow-sm"
+                      className="relative z-20 h-full rounded-2xl border-black/[0.06] shadow-sm"
                     />
                   </Rise>
                 </div>
-                <div className="flex flex-col xl:col-span-4">
+                <div className="relative z-10 flex flex-col xl:col-span-4">
                   <Rise className="h-full flex-1">
-                    <CustomerSegmentationCard
-                      total={metrics.totalCharities > 0 ? metrics.totalCharities : 3420}
-                      className="h-full rounded-2xl border-black/[0.06] shadow-sm"
-                    />
+                    {performance ? (
+                      <QueueQualityCard
+                        bands={performance.queue.bands}
+                        scored={performance.queue.scored}
+                        totalOrgs={metrics.totalCharities}
+                        className="h-full rounded-2xl border-black/[0.06] shadow-sm"
+                      />
+                    ) : (
+                      <div className="flex h-full min-h-[320px] flex-col items-center justify-center gap-1 rounded-[28px] border border-border bg-card p-6 text-center shadow-sm">
+                        <p className="text-sm font-medium text-foreground">Queue data unavailable</p>
+                        <p className="text-xs text-muted-foreground">
+                          The scoring bands could not be loaded. Refresh and try again.
+                        </p>
+                      </div>
+                    )}
                   </Rise>
                 </div>
               </div>
@@ -604,6 +759,21 @@ export default async function DashboardPage({
                 </div>
               </div>
             </Group>
+
+            {performance && (
+              <Group className="space-y-4">
+                <Rise>
+                  <PerformanceSection
+                    summary={performance.summary}
+                    cams={performance.cams}
+                    actorId={actor.id}
+                    actorRole={actor.role}
+                    trend={performance.trend}
+                    sectors={performance.sectors}
+                  />
+                </Rise>
+              </Group>
+            )}
 
             {attentionItems.length > 0 && (
               <Group className="space-y-4">

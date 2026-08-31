@@ -74,17 +74,24 @@ export function CustomerSegmentationCard({
 
   const displayTotal = total !== undefined ? total.toLocaleString() : totalCalculated.toLocaleString();
 
-  // Determine active segment (defaults to first segment on idle or hovered)
+  // Only segments with a value get ticks/bars — if you only have medium
+  // 100%, no other bar appears; mix → all appear. Keeps colours as-is.
+  const visibleSegments = useMemo(() => {
+    const filtered = segments.filter((s) => s.value > 0);
+    return filtered.length ? filtered : segments;
+  }, [segments]);
+
+  // Determine active segment (defaults to first visible on idle or hovered)
   const activeSegment = useMemo(() => {
-    return segments.find((s) => s.id === hoveredSegmentId) ?? segments[0];
-  }, [segments, hoveredSegmentId]);
+    return visibleSegments.find((s) => s.id === hoveredSegmentId) ?? visibleSegments[0];
+  }, [visibleSegments, hoveredSegmentId]);
 
   // Compute tick ranges per segment
   const ticks = useMemo(() => {
-    const totalVal = totalCalculated || 1;
+    const totalVal = visibleSegments.reduce((sum, s) => sum + s.value, 0) || 1;
     const segmentRanges: { segment: SegmentItem; startTick: number; endTick: number }[] = [];
     let currentAcc = 0;
-    for (const seg of segments) {
+    for (const seg of visibleSegments) {
       const startPct = currentAcc / totalVal;
       const nextAcc = currentAcc + seg.value;
       const endPct = nextAcc / totalVal;
@@ -134,7 +141,7 @@ export function CustomerSegmentationCard({
       });
     }
     return result;
-  }, [segments, totalCalculated]);
+  }, [visibleSegments]);
 
   return (
     <div
@@ -159,12 +166,8 @@ export function CustomerSegmentationCard({
             {ticks.map((tick) => {
               const isSegmentActive = activeSegment.id === tick.segment.id;
               const isAnyHovered = hoveredSegmentId !== null;
-              
-              const opacity = !isAnyHovered
-                ? 1
-                : isSegmentActive
-                  ? 1
-                  : 0.25;
+
+              const opacity = !isAnyHovered ? 1 : isSegmentActive ? 1 : 0;
 
               return (
                 <motion.line
@@ -235,9 +238,9 @@ export function CustomerSegmentationCard({
         </div>
       </div>
 
-      {/* Breakdown Rows List */}
+      {/* Breakdown Rows List — only non-zero segments get a row */}
       <div className="mt-4 space-y-2 border-t border-black/[0.04] pt-4 dark:border-white/[0.06]">
-        {segments.map((seg) => {
+        {visibleSegments.map((seg) => {
           const isHovered = hoveredSegmentId === seg.id;
           return (
             <div

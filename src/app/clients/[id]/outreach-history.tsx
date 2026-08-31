@@ -11,6 +11,7 @@ import {
   type StatusFilter,
 } from "@/lib/outreach-history";
 import { isRichEmailHtml, sanitizeEmailHtml } from "@/lib/outreach/email-html";
+import { AddNoteForm } from "./add-note-form";
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleDateString("en-GB", {
@@ -56,9 +57,11 @@ function StatusBadge({ status }: { status: OutreachHistoryData["sent"][number]["
 function FullEmailThread({
   entries,
   error,
+  noteOrganisationId,
 }: {
   entries: readonly EmailThreadEntry[];
   error: boolean;
+  noteOrganisationId?: string;
 }) {
   return (
     <section id="email-thread" aria-labelledby="email-thread-heading" className="mt-5 scroll-mt-24 rounded-xl border border-black/10 bg-black/[0.02] p-4">
@@ -109,6 +112,14 @@ function FullEmailThread({
                   </time>
                 </div>
                 <EmailBodyPreview body={entry.body} />
+                {incoming && noteOrganisationId && (
+                  <div className="mt-3 border-t border-brand/10 pt-3">
+                    <AddNoteForm
+                      organisationId={noteOrganisationId}
+                      replyEventId={entry.id}
+                    />
+                  </div>
+                )}
                 {!incoming && (
                   <p className="mt-2 text-xs text-foreground/55">
                     Sent by {entry.senderName || "a former team member"}
@@ -137,11 +148,13 @@ export function OutreachHistorySection({
   error,
   thread,
   threadError,
+  noteOrganisationId,
 }: {
   history: OutreachHistoryData;
   error: boolean;
   thread: readonly EmailThreadEntry[];
   threadError: boolean;
+  noteOrganisationId?: string;
 }) {
   // F130 AC3: filter selection is view state, not data state — it lives here,
   // never in the query, so the sent/not-sent grouping above it cannot drift.
@@ -163,7 +176,11 @@ export function OutreachHistorySection({
       <a className="text-sm font-semibold text-brand underline underline-offset-2" href="#email-thread">
         View full email thread
       </a>
-      <FullEmailThread entries={thread} error={threadError} />
+      <FullEmailThread
+        entries={thread}
+        error={threadError}
+        noteOrganisationId={noteOrganisationId}
+      />
 
       {/* AC3's filter: one control, five states, no page reload. Buttons with
           aria-pressed rather than a <select> — four options fit in a row and

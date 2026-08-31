@@ -1100,6 +1100,7 @@ export default async function ClientDetailPage({
                   error={Boolean(outreachError)}
                   thread={emailThread}
                   threadError={Boolean(outreachError || replyError)}
+                  noteOrganisationId={canEdit ? client.id : undefined}
                 />
 
                 {hasPermission(authorization.actor.role, "client:contact") && (

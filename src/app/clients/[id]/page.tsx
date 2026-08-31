@@ -45,6 +45,7 @@ import { NotesSection } from "./notes-section";
 import { AddNoteForm } from "./add-note-form";
 import {
   buildTimeline,
+  collectReferencedUserIds,
   type AuditRow,
   type NoteRow as TimelineNoteRow,
   type OutreachMessageRow as TimelineOutreachRow,
@@ -620,22 +621,9 @@ export default async function ClientDetailPage({
     timelineNotesError || timelineMessagesError || replyError || auditError,
   );
 
-  // actor_user_id and detail.from/detail.to are bare uuids (detail is jsonb,
-  // not a foreign key PostgREST can embed), so they're resolved by hand in one
-  // batch rather than per-row. A name missing from this map — a deleted
-  // account, or a uuid audit_log carries no FK constraint to validate — reads
-  // as "A former team member" in @/lib/timeline.ts, never as a raw id or blank.
-  const referencedUserIds = new Set<string>();
-  for (const row of auditRows ?? []) {
-    if (row.actor_user_id) referencedUserIds.add(row.actor_user_id);
-    const from = row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).from : null;
-    const to = row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).to : null;
-    if (typeof from === "string") referencedUserIds.add(from);
-    if (typeof to === "string") referencedUserIds.add(to);
-    const requestedBy =
-      row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).requested_by : null;
-    if (typeof requestedBy === "string") referencedUserIds.add(requestedBy);
-  }
+  // See collectReferencedUserIds (src/lib/timeline.ts) for why this can't
+  // treat every detail.from/detail.to as a user id.
+  const referencedUserIds = collectReferencedUserIds((auditRows ?? []) as AuditRow[]);
 
   const timelineNames = new Map<string, string | null>();
   if (referencedUserIds.size > 0) {

@@ -27,6 +27,7 @@ describe("computeDashboardMetrics", () => {
       totalCharities: 0,
       contacted: 0,
       responsesReceived: 0,
+      respondingClients: 0,
       converted: 0,
     });
   });
@@ -45,16 +46,11 @@ describe("computeDashboardMetrics", () => {
     assert.equal(computeDashboardMetrics(rows).contacted, 2);
   });
 
-  it("counts responses received only for statuses past 'sent, waiting'", () => {
-    const rows = [
-      org({ id: "a", outreach_status: "initial_outreach_sent" }),
-      org({ id: "b", outreach_status: "follow_up_sent" }),
-      org({ id: "c", outreach_status: "no_response" }),
-      org({ id: "d", outreach_status: "responded" }),
-      org({ id: "e", outreach_status: "converted" }),
-      org({ id: "f", outreach_status: "soft_no" }),
-    ];
-    assert.equal(computeDashboardMetrics(rows).responsesReceived, 3);
+  it("counts actual linked reply events rather than inferring replies from status", () => {
+    const rows = [org({ id: "a", outreach_status: "responded" })];
+    const metrics = computeDashboardMetrics(rows, { totalReplies: 3, respondingClients: 1 });
+    assert.equal(metrics.responsesReceived, 3);
+    assert.equal(metrics.respondingClients, 1);
   });
 
   it("counts converted only", () => {
@@ -211,7 +207,10 @@ describe("filterActiveSuppressed (F022 AC3)", () => {
     const activeRows = filterActiveSuppressed(rows, suppressions);
     assert.deepEqual(activeRows.map((r) => r.id), ["a", "b"]);
 
-    const metrics = computeDashboardMetrics(activeRows);
+    const metrics = computeDashboardMetrics(activeRows, {
+      totalReplies: 1,
+      respondingClients: 1,
+    });
     assert.equal(metrics.totalCharities, 2);
     assert.equal(metrics.responsesReceived, 1);
   });

@@ -589,9 +589,9 @@ export default async function ClientDetailPage({
     });
   }
 
-  const { data: replyRows, error: replyError } = await supabase
+  const { data: replyRows, error: replyError, count: replyCount } = await supabase
     .from("reply_events")
-    .select("id, reply_body, received_at")
+    .select("id, reply_body, received_at", { count: "exact" })
     .eq("organisation_id", id);
   if (replyError) {
     await reportError(replyError, { operation: "clients.timeline_replies", organisationId: id });
@@ -1076,6 +1076,18 @@ export default async function ClientDetailPage({
                 enforcement either way. */}
             <Rise>
               <SectionCard headingId="outreach-heading" title="Outreach">
+                {replyError ? (
+                  <p className="mt-3 text-sm font-medium text-red-800" role="alert">
+                    Reply count could not be loaded. Refresh and try again.
+                  </p>
+                ) : (
+                  <p className="mt-3 text-sm text-foreground/65">
+                    <span className="font-bold text-foreground">
+                      {(replyCount ?? 0).toLocaleString()}
+                    </span>{" "}
+                    {replyCount === 1 ? "reply" : "replies"} received
+                  </p>
+                )}
                 {sendingVolume && (
                   <p className={`mt-3 rounded-lg p-3 text-sm font-bold ${sendingVolume.warning ? "bg-amber-50 text-amber-900" : "bg-black/[0.03] text-foreground/60"}`} role={sendingVolume.warning ? "alert" : "status"}>
                     Your sending volume: {sendingVolume.count} of your {sendingVolume.limit} emails in the current {sendingVolume.windowMinutes}-minute window.{sendingVolume.warning ? " You are close to the configured threshold; sends are refused once it is reached." : ""}

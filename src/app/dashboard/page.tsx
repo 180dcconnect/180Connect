@@ -41,6 +41,10 @@ import {
 } from "@/lib/onboarding";
 import { FeedbackPrompt } from "@/components/feedback-prompt";
 import { shouldPromptFeedback } from "@/lib/feedback";
+import {
+  summariseTrackedReplies,
+  type ReplyTrackingRow,
+} from "@/lib/reply-analytics";
 
 /**
  * F021 — first screen after login. The sidebar (AppShell/F030) already wraps this
@@ -97,6 +101,7 @@ export default async function DashboardPage({
   let rows: DashboardOrgRow[] = [];
   let teamActivities: FormattedTeamActivity[] = [];
   let recentUpdates: FormattedRecentUpdate[] = [];
+  let trackedReplies: ReplyTrackingRow[] = [];
   let loadFailed = false;
 
   if (canViewClients) {
@@ -164,10 +169,35 @@ export default async function DashboardPage({
       return { data: all, error: null };
     }
 
-    const [organisations, openSuppressions, rawActivity, rawUpdateNotes, rawUpdateMessages, rawUpdateReplies, rawUpdateAudit] =
+    async function fetchAllTrackedReplies(): Promise<{
+      data: ReplyTrackingRow[] | null;
+      error: { message: string } | null;
+    }> {
+      const all: ReplyTrackingRow[] = [];
+      let from = 0;
+      const step = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("reply_events")
+          .select("id, organisation_id")
+          .order("received_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, from + step - 1)
+          .overrideTypes<ReplyTrackingRow[], { merge: false }>();
+        if (error) return { data: null, error };
+        if (!data || data.length === 0) break;
+        all.push(...data);
+        if (data.length < step) break;
+        from += step;
+      }
+      return { data: all, error: null };
+    }
+
+    const [organisations, openSuppressions, replyTracking, rawActivity, rawUpdateNotes, rawUpdateMessages, rawUpdateReplies, rawUpdateAudit] =
       await Promise.all([
         fetchAllOrganisations(),
         fetchAllOpenSuppressions(),
+        fetchAllTrackedReplies(),
         supabase.rpc("get_recent_team_activity", { p_limit: 10 }),
         supabase
           .from("notes")
@@ -209,6 +239,12 @@ export default async function DashboardPage({
     if (openSuppressions.error) {
       await reportError(openSuppressions.error, { operation: "dashboard.page_suppressions" });
       loadFailed = true;
+    }
+    if (replyTracking.error) {
+      await reportError(replyTracking.error, { operation: "dashboard.reply_tracking" });
+      loadFailed = true;
+    } else {
+      trackedReplies = replyTracking.data ?? [];
     }
     if (rawActivity.error) {
       await reportError(rawActivity.error, { operation: "dashboard.team_activity" });
@@ -280,7 +316,8 @@ export default async function DashboardPage({
     }
   }
 
-  const metrics = computeDashboardMetrics(rows);
+  const replyTracking = summariseTrackedReplies(trackedReplies, rows);
+  const metrics = computeDashboardMetrics(rows, replyTracking);
   // F160 — silence is measured from the client's last real activity (latest of
   // sent email, received reply, audited status change), aggregated per client by
   // get_clients_last_activity; the thresholds are this CAM's own preferences
@@ -551,8 +588,8 @@ export default async function DashboardPage({
                   <StatCard
                     label="Responses received"
                     value={metrics.responsesReceived}
-                    share={share(metrics.responsesReceived)}
-                    caption={shareCaption(metrics.responsesReceived)}
+                    share={share(metrics.respondingClients)}
+                    caption={`${metrics.respondingClients.toLocaleString()} responding ${metrics.respondingClients === 1 ? "client" : "clients"}`}
                   />
                 </Rise>
                 <Rise>

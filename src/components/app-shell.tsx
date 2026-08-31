@@ -30,6 +30,9 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
 
   if (hasPermission(actor.role, "client:view")) {
     sections[0].items.push({ href: "/clients", label: "Clients", icon: "clients" });
+    // Outreach Inbox — same visibility as Clients: RLS grants every active
+    // user SELECT on outreach_messages/reply_events (matrix §3.4).
+    sections[0].items.push({ href: "/inbox", label: "Inbox", icon: "inbox" });
   }
 
   if (hasPermission(actor.role, "client:edit")) {

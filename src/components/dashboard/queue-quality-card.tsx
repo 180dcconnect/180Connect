@@ -148,7 +148,7 @@ export function QueueQualityCard({ bands, scored, totalOrgs, className = "" }: Q
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-black/[0.04] text-foreground dark:bg-white/[0.08]">
             <Target size={16} strokeWidth={2.2} className="opacity-80" />
           </div>
-          <h3 className="text-[15px] font-semibold tracking-tight text-foreground">Queue quality</h3>
+          <h3 className="text-[15px] font-semibold tracking-tight text-foreground capitalize">Queue quality</h3>
         </div>
 
         {totalOrgs === 0 ? (

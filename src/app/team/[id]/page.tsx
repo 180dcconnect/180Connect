@@ -5,8 +5,9 @@ import { createClient } from "@/lib/supabase/server";
 import { formatLocation, formatOutreachStatus } from "@/lib/organisation-format";
 import { Stage, Group, Rise } from "@/components/dashboard-stage";
 import { formatTeamActivity, type RawTeamActivityRow } from "@/lib/team-activity";
-import { Mail, Shield, User, ExternalLink, Building2, Compass, Briefcase, Calendar, CheckCircle2, Clock, AlertCircle } from "lucide-react";
+import { Mail, User, ExternalLink, Building2, Compass, Briefcase, Calendar, CheckCircle2, Clock, AlertCircle } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
+import { TeamRoleEditor } from "./role-editor";
 
 type Params = Promise<{ id: string }>;
 
@@ -109,12 +110,6 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
   const activeOutreach = clients.filter((c) => c.outreach_status !== "not_contacted").length;
   const convertedCount = clients.filter((c) => c.outreach_status === "converted").length;
 
-  const roleStyles = {
-    admin: "bg-purple-100/70 text-purple-900 border-purple-200",
-    cam: "bg-brand/10 text-brand-hover border-brand/20",
-    viewer: "bg-blue-100/70 text-blue-900 border-blue-200",
-  }[user.role as "admin" | "cam" | "viewer"] ?? "bg-black/5 text-foreground/75 border-black/10";
-
   const statusLabel = user.is_active
     ? "Active"
     : user.deactivated_at
@@ -179,10 +174,13 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
                 </div>
 
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                  <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-bold uppercase tracking-wide ${roleStyles}`}>
-                    <Shield className="h-3 w-3" />
-                    {user.role}
-                  </span>
+                  <TeamRoleEditor
+                    userId={user.id}
+                    userEmail={user.email}
+                    initialRole={user.role as "cam" | "admin" | "viewer"}
+                    isSelf={isSelf}
+                    isAdmin={isAdmin}
+                  />
 
                   <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-bold ${statusStyles}`}>
                     <span className={`h-1.5 w-1.5 rounded-full ${user.is_active ? "bg-emerald-600" : "bg-amber-600"}`} />

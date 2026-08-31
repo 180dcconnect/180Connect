@@ -22,6 +22,7 @@ import {
   trendWindowStart,
   type ConvertedOutcomeRow,
   type LatestScoreRow,
+  type PerformanceInput,
   type PerformanceSummary,
   type QueueBands,
   type ReplyEventRow,
@@ -41,7 +42,6 @@ import {
   type RecentOutreachMessageRow,
   type RecentReplyEventRow,
 } from "@/lib/recent-updates";
-import { StatCard } from "@/components/stat-card";
 import ProgressMetricCard from "@/components/ui/progress-metric-card";
 import { AttentionList } from "@/components/attention-list";
 import { TeamActivityFeed } from "@/components/team-activity-feed";
@@ -49,7 +49,6 @@ import { RecentUpdatesFeed } from "@/components/recent-updates-feed";
 import { FirstRunGuide } from "@/components/first-run-guide";
 import { OriginButton } from "@/components/ui/origin-button";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
-import { FunnelMetrics } from "@/components/dashboard/funnel-metrics";
 import { AdminActionCenter, type AdminQueueCounts } from "@/components/dashboard/admin-action-center";
 import { QueueQualityCard } from "@/components/dashboard/queue-quality-card";
 import { PerformanceSection } from "@/components/dashboard/performance-section";
@@ -128,6 +127,8 @@ export default async function DashboardPage({
     sectors: SectorPerformanceRow[];
     queue: { bands: QueueBands; scored: number };
     cams: TeamUserRow[];
+    raw: PerformanceInput;
+    sectorByOrg: Map<string, string | null>;
   } | null = null;
 
   if (canViewClients) {
@@ -372,17 +373,17 @@ export default async function DashboardPage({
           scores: (perfScores.data ?? []).filter((s) => visibleOrgIds.has(s.organisation_id)),
           users: perfUsers.data ?? [],
         };
+        const sectorByOrg = new Map(rows.map((row) => [row.id, row.sector ?? null]));
         performance = {
           summary: computePerformance(perfInput),
           trend: pipelineTrendSeries(perfInput),
-          sectors: sectorPerformance(
-            perfInput,
-            new Map(rows.map((row) => [row.id, row.sector ?? null])),
-          ),
+          sectors: sectorPerformance(perfInput, sectorByOrg),
           queue: queueBands(perfInput.scores),
           cams: perfUsers.data
             ?.filter((user) => user.role === "cam")
             .sort((a, b) => (a.full_name ?? "").localeCompare(b.full_name ?? "")) ?? [],
+          raw: perfInput,
+          sectorByOrg,
         };
       }
 
@@ -515,15 +516,6 @@ export default async function DashboardPage({
   // F022 — the total is now shown as a curve rather than a single number, so the
   // dashboard says how the pipeline got here, not only where it is.
   const growth = organisationGrowthSeries(rows);
-
-  // The meters read as a share of the whole pipeline, so an empty pipeline has to
-  // draw an empty bar rather than divide by zero.
-  const share = (value: number) =>
-    metrics.totalCharities === 0 ? 0 : value / metrics.totalCharities;
-  const shareCaption = (value: number) =>
-    metrics.totalCharities === 0
-      ? "No records yet"
-      : `${Math.round(share(value) * 100)}% of the pipeline`;
 
   // F255 — the first-run guide. Read both halves of its state together: whether this
   // CAM is still eligible for it (users) and how far through they are
@@ -727,39 +719,6 @@ export default async function DashboardPage({
                   </Rise>
                 </div>
               </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Rise>
-                  <FunnelMetrics metrics={metrics} />
-                </Rise>
-                <div className="flex flex-col gap-4">
-                  <Rise>
-                    <StatCard
-                      label="Contacted"
-                      value={metrics.contacted}
-                      share={share(metrics.contacted)}
-                      caption={shareCaption(metrics.contacted)}
-                    />
-                  </Rise>
-                  <Rise>
-                    <StatCard
-                      label="Responses received"
-                      value={metrics.responsesReceived}
-                      share={share(metrics.responsesReceived)}
-                      caption={shareCaption(metrics.responsesReceived)}
-                    />
-                  </Rise>
-                  <Rise>
-                    <StatCard
-                      label="Converted"
-                      value={metrics.converted}
-                      share={share(metrics.converted)}
-                      caption={shareCaption(metrics.converted)}
-                      emphasis
-                    />
-                  </Rise>
-                </div>
-              </div>
             </Group>
 
             {performance && (
@@ -772,6 +731,8 @@ export default async function DashboardPage({
                     actorRole={actor.role}
                     trend={performance.trend}
                     sectors={performance.sectors}
+                    raw={performance.raw}
+                    sectorByOrg={performance.sectorByOrg}
                   />
                 </Rise>
               </Group>

@@ -62,6 +62,31 @@ export function weekWindows(now: Date): { thisWeek: DayWindow; lastWeek: DayWind
   };
 }
 
+/** YYYY-MM-DD in UTC — the same string the `from`/`to` period picker emits. */
+export function isoDayUTC(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Totally arbitrary period `from` → `to` (both inclusive ISO days, UTC) and its
+ * immediately preceding period of identical length, for “this period vs prior
+ * period” tiles. Both windows are `[start, end)` half-open on midnight UTC.
+ */
+export function periodWindows(fromISO: string, toISO: string): {
+  thisPeriod: DayWindow;
+  priorPeriod: DayWindow;
+} {
+  const fromMs = Date.parse(`${fromISO}T00:00:00Z`);
+  const toMs = Date.parse(`${toISO}T00:00:00Z`);
+  const thisStart = fromMs;
+  const thisEnd = toMs + DAY_MS; // exclusive next midnight
+  const duration = thisEnd - thisStart;
+  return {
+    thisPeriod: { start: thisStart, end: thisEnd },
+    priorPeriod: { start: thisStart - duration, end: thisStart },
+  };
+}
+
 const inWindow = (iso: string | null | undefined, window: DayWindow): boolean => {
   if (!iso) return false;
   const t = Date.parse(iso);
@@ -197,6 +222,76 @@ export function computePerformance(
     else if (inWindow(score.scored_at, windows.lastWeek)) orgsScored.lastWeek += 1;
   }
 
+  return { team, people, orgsScored };
+}
+
+/**
+ * Totally arbitrary period (from→to inclusive ISO days, UTC) — same shape as
+ * `computePerformance` but “this week vs last week” becomes “this period vs
+ * prior period” of identical length. Used when the dashboard’s Performance
+ * tiles are driven by a user-picked range (7/30/90/custom) instead of the
+ * fixed ISO week.
+ */
+export function performanceForPeriod(
+  input: PerformanceInput,
+  fromISO: string,
+  toISO: string,
+): PerformanceSummary {
+  const { thisPeriod, priorPeriod } = periodWindows(fromISO, toISO);
+
+  const senderByMessage = new Map<string, string>();
+  for (const message of input.messages) {
+    if (message.sent_by_user_id) senderByMessage.set(message.id, message.sent_by_user_id);
+  }
+  const nameByUser = new Map(input.users.map((user) => [user.id, user.full_name]));
+  const team = {
+    emailsSent: { thisWeek: 0, lastWeek: 0 },
+    replies: { thisWeek: 0, lastWeek: 0 },
+    conversions: { thisWeek: 0, lastWeek: 0 },
+  };
+  const people = new Map<string, PersonWeekly>();
+  const bump = (
+    userId: string,
+    key: "emailsSent" | "replies" | "conversions",
+    week: "thisWeek" | "lastWeek",
+  ) => {
+    team[key][week] += 1;
+    let person = people.get(userId);
+    if (!person) {
+      person = {
+        userId,
+        name: nameByUser.get(userId) ?? "Unknown",
+        emailsSent: { thisWeek: 0, lastWeek: 0 },
+        replies: { thisWeek: 0, lastWeek: 0 },
+        conversions: { thisWeek: 0, lastWeek: 0 },
+      };
+      people.set(userId, person);
+    }
+    person[key][week] += 1;
+  };
+
+  for (const message of input.messages) {
+    if (!message.sent_by_user_id) continue;
+    if (inWindow(message.sent_at, thisPeriod)) bump(message.sent_by_user_id, "emailsSent", "thisWeek");
+    else if (inWindow(message.sent_at, priorPeriod)) bump(message.sent_by_user_id, "emailsSent", "lastWeek");
+  }
+  for (const reply of input.replies) {
+    if (!reply.outreach_message_id) continue;
+    const sender = senderByMessage.get(reply.outreach_message_id);
+    if (!sender) continue;
+    if (inWindow(reply.received_at, thisPeriod)) bump(sender, "replies", "thisWeek");
+    else if (inWindow(reply.received_at, priorPeriod)) bump(sender, "replies", "lastWeek");
+  }
+  for (const conversion of input.conversions) {
+    if (!conversion.recorded_by_user_id) continue;
+    if (inWindow(conversion.created_at, thisPeriod)) bump(conversion.recorded_by_user_id, "conversions", "thisWeek");
+    else if (inWindow(conversion.created_at, priorPeriod)) bump(conversion.recorded_by_user_id, "conversions", "lastWeek");
+  }
+  const orgsScored = { thisWeek: 0, lastWeek: 0 };
+  for (const score of input.scores) {
+    if (inWindow(score.scored_at, thisPeriod)) orgsScored.thisWeek += 1;
+    else if (inWindow(score.scored_at, priorPeriod)) orgsScored.lastWeek += 1;
+  }
   return { team, people, orgsScored };
 }
 

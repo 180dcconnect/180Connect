@@ -145,20 +145,84 @@ export type NeedsAttentionItem = {
    * second threshold, which AC2 requires to read as more pressing than `due`.
    */
   followUp?: { daysWaiting: number; urgency: FollowUpUrgency };
+  /**
+   * F172 — set when the actor has at least one open, overdue ACTION on this
+   * client. Independent of outreach_status: a client can carry an overdue
+   * action while sitting in a status this panel would otherwise never
+   * surface (e.g. already `converted`), so this is what actually widens the
+   * candidate set below, not just a label on rows already there.
+   */
+  overdueAction?: { title: string; dueDate: string };
+};
+
+/** Minimal shape `needsAttention` needs from an overdue ACTIONS row — see @/lib/actions's isActionOverdue for how "overdue" is decided. */
+export type OverdueActionCandidate = {
+  organisationId: string;
+  title: string;
+  dueDate: string;
 };
 
 /**
  * F027 — the logged-in CAM's own clients sent an outreach that hasn't come back
- * yet. Personal, not platform-wide: unlike computeDashboardMetrics, this filters
- * to `owner_id === actorId` first. Longest-waiting first (oldest updated_at).
+ * yet, now unioned with F172's overdue-action candidates (AC3: "also surface in
+ * the CAM's Needs Attention panel", not only the Actions tab). Personal, not
+ * platform-wide: the outreach half still filters to `owner_id === actorId`; the
+ * overdue-action half doesn't need to, since `overdueActions` is already scoped
+ * to this actor's own assigned actions by the caller's query — an action stays
+ * with its assignee even if the client's ownership moves on (F257), and it is
+ * still this CAM's work to chase.
+ *
+ * Longest-waiting first for the outreach-only rows (oldest updated_at, existing
+ * behaviour); a row that owes its place to an overdue action instead sorts by
+ * how overdue that action is (earliest due date first) when there is no
+ * outreach signal to sort by.
  */
-export function needsAttention(rows: DashboardOrgRow[], actorId: string): NeedsAttentionItem[] {
-  return rows
-    .filter((row) => row.owner_id === actorId && NEEDS_ATTENTION_STATUSES.has(row.outreach_status))
-    .sort((a, b) => a.updated_at.localeCompare(b.updated_at))
-    .map((row) => ({
-      id: row.id,
-      legalName: row.legal_name,
-      outreachStatusLabel: formatOutreachStatus(row.outreach_status),
-    }));
+export function needsAttention(
+  rows: DashboardOrgRow[],
+  actorId: string,
+  overdueActions: readonly OverdueActionCandidate[] = [],
+): NeedsAttentionItem[] {
+  // Earliest (most overdue) action per client, when a CAM has more than one
+  // overdue action on the same client — one badge per row, not a list.
+  const overdueByOrg = new Map<string, OverdueActionCandidate>();
+  for (const candidate of overdueActions) {
+    const existing = overdueByOrg.get(candidate.organisationId);
+    if (!existing || candidate.dueDate < existing.dueDate) {
+      overdueByOrg.set(candidate.organisationId, candidate);
+    }
+  }
+
+  const rowsById = new Map(rows.map((row) => [row.id, row]));
+  const candidateIds = new Set<string>();
+  for (const row of rows) {
+    if (row.owner_id === actorId && NEEDS_ATTENTION_STATUSES.has(row.outreach_status)) {
+      candidateIds.add(row.id);
+    }
+  }
+  for (const organisationId of overdueByOrg.keys()) {
+    // A candidate action can reference a client this actor no longer owns, or
+    // one this fetch's `rows` doesn't include (e.g. now suppressed) — skip
+    // rather than render a row with no client data behind it.
+    if (rowsById.has(organisationId)) candidateIds.add(organisationId);
+  }
+
+  return [...candidateIds]
+    .map((id) => rowsById.get(id)!)
+    .sort((a, b) => {
+      const overdueA = overdueByOrg.get(a.id)?.dueDate;
+      const overdueB = overdueByOrg.get(b.id)?.dueDate;
+      if (overdueA && overdueB) return overdueA < overdueB ? -1 : overdueA > overdueB ? 1 : 0;
+      if (overdueA) return -1;
+      if (overdueB) return 1;
+      return a.updated_at.localeCompare(b.updated_at);
+    })
+    .map((row) => {
+      const overdue = overdueByOrg.get(row.id);
+      return {
+        id: row.id,
+        legalName: row.legal_name,
+        outreachStatusLabel: formatOutreachStatus(row.outreach_status),
+        ...(overdue ? { overdueAction: { title: overdue.title, dueDate: overdue.dueDate } } : {}),
+      };
+    });
 }

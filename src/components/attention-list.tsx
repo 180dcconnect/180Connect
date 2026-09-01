@@ -36,6 +36,23 @@ export function AttentionList({ items }: { items: NeedsAttentionItem[] }) {
                   {item.legalName}
                 </span>
                 {/*
+                  F172 AC1/AC2 — an overdue ACTION, distinct from F160's
+                  outreach-silence follow-up badge below: this is about a
+                  specific piece of work with a due date that has passed, not
+                  the client's outreach status. Always destructive-toned
+                  (unlike followUp's due/urgent split) — there is no "mild"
+                  reading of a due date already in the past. The action's own
+                  title rides the tooltip so the badge itself stays compact.
+                */}
+                {item.overdueAction ? (
+                  <span
+                    title={item.overdueAction.title}
+                    className="shrink-0 rounded-full bg-destructive/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-destructive"
+                  >
+                    Overdue action
+                  </span>
+                ) : null}
+                {/*
                   F160 — the recommendation itself, distinct from the status:
                   "due" is the first threshold crossed (7 days by default),
                   "urgent" the second (14), which AC2 requires to read as more

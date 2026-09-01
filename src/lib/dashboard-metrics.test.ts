@@ -7,6 +7,7 @@ import {
   organisationGrowthSeries,
   type DashboardOrgRow,
   type OpenSuppression,
+  type OverdueActionCandidate,
 } from "./dashboard-metrics.ts";
 
 function org(overrides: Partial<DashboardOrgRow> = {}): DashboardOrgRow {
@@ -128,6 +129,66 @@ describe("needsAttention", () => {
   it("treats no_response as needing attention", () => {
     const rows = [org({ id: "a", owner_id: "cam-1", outreach_status: "no_response" })];
     assert.equal(needsAttention(rows, "cam-1").length, 1);
+  });
+});
+
+describe("needsAttention overdue actions (F172 AC3)", () => {
+  function overdue(overrides: Partial<OverdueActionCandidate> = {}): OverdueActionCandidate {
+    return {
+      organisationId: "org-1",
+      title: "Send updated proposal",
+      dueDate: "2026-08-01",
+      ...overrides,
+    };
+  }
+
+  it("surfaces a client with an overdue action even outside the stale-status set", () => {
+    const rows = [org({ id: "org-1", owner_id: "cam-1", outreach_status: "converted" })];
+    const result = needsAttention(rows, "cam-1", [overdue({ organisationId: "org-1" })]);
+    assert.equal(result.length, 1);
+    assert.equal(result[0]?.overdueAction?.title, "Send updated proposal");
+  });
+
+  it("surfaces an overdue action's client even when this actor doesn't own it", () => {
+    const rows = [org({ id: "org-1", owner_id: "someone-else", outreach_status: "not_contacted" })];
+    const result = needsAttention(rows, "cam-1", [overdue({ organisationId: "org-1" })]);
+    assert.equal(result.length, 1);
+  });
+
+  it("does not surface an overdue action for a client not in the fetched rows", () => {
+    const result = needsAttention([], "cam-1", [overdue({ organisationId: "org-missing" })]);
+    assert.deepEqual(result, []);
+  });
+
+  it("attaches the overdue-action badge onto a row that also qualifies by status", () => {
+    const rows = [org({ id: "org-1", owner_id: "cam-1", outreach_status: "follow_up_sent" })];
+    const result = needsAttention(rows, "cam-1", [overdue({ organisationId: "org-1" })]);
+    assert.equal(result.length, 1);
+    assert.ok(result[0]?.overdueAction);
+  });
+
+  it("leaves overdueAction unset for a row with no overdue action", () => {
+    const rows = [org({ id: "org-1", owner_id: "cam-1", outreach_status: "follow_up_sent" })];
+    const result = needsAttention(rows, "cam-1", []);
+    assert.equal(result[0]?.overdueAction, undefined);
+  });
+
+  it("keeps only the earliest (most overdue) action when a client has more than one", () => {
+    const rows = [org({ id: "org-1", owner_id: "cam-1", outreach_status: "converted" })];
+    const result = needsAttention(rows, "cam-1", [
+      overdue({ organisationId: "org-1", title: "Later one", dueDate: "2026-08-20" }),
+      overdue({ organisationId: "org-1", title: "Earliest one", dueDate: "2026-08-01" }),
+    ]);
+    assert.equal(result[0]?.overdueAction?.title, "Earliest one");
+  });
+
+  it("sorts overdue-action-only rows before status-only rows", () => {
+    const rows = [
+      org({ id: "status-only", owner_id: "cam-1", outreach_status: "follow_up_sent", updated_at: "2026-01-01T00:00:00Z" }),
+      org({ id: "overdue-only", owner_id: "cam-1", outreach_status: "converted" }),
+    ];
+    const result = needsAttention(rows, "cam-1", [overdue({ organisationId: "overdue-only" })]);
+    assert.deepEqual(result.map((item) => item.id), ["overdue-only", "status-only"]);
   });
 });
 

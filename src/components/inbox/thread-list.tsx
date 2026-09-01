@@ -1,32 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { intentLabel, statusClass, statusLabel } from "@/lib/inbox-labels";
 import type { InboxThread } from "@/lib/outreach-inbox";
 
 /**
  * Gmail-style thread list — one row per organisation, newest activity first.
- * Read-only: clicking a row navigates to the client page (existing outreach
- * flow lives there). No compose/reply/forward.
+ * Clicking a row opens that thread's conversation (/inbox/[orgId]), where the
+ * client context and the reply drawer live.
+ *
+ * The status/intent vocabulary comes from @/lib/inbox-labels, shared with the
+ * thread view's context rail so the two can never drift into two names for the
+ * same state.
  */
-
-const STATUS_LABEL: Record<string, string> = {
-  replied: "Replied",
-  awaiting: "Awaiting follow-up",
-  sent: "Sent",
-};
-
-const STATUS_CLASS: Record<string, string> = {
-  replied: "bg-emerald-100 text-emerald-700 border-emerald-200",
-  awaiting: "bg-amber-100 text-amber-700 border-amber-200",
-  sent: "bg-gray-100 text-gray-500 border-gray-200",
-};
-
-const INTENT_LABEL: Record<string, string> = {
-  interested: "Interested",
-  not_interested: "Not interested",
-  more_info: "More info requested",
-  referral: "Referral",
-};
 
 export function ThreadList({ threads }: { threads: InboxThread[] }) {
   if (threads.length === 0) {
@@ -39,27 +25,34 @@ export function ThreadList({ threads }: { threads: InboxThread[] }) {
 
   return (
     <div className="divide-y divide-gray-100 rounded-lg border border-gray-100">
-      {threads.map((thread) => (
+      {threads.map((thread) => {
+        // Computed server-side against one clock (buildInboxThreads' `now`)
+        // rather than here, where the browser's clock could disagree with the
+        // server's render near the 48-hour boundary.
+        const fresh = thread.isRecent;
+        return (
         <Link
           key={thread.orgId}
           href={thread.href}
-          className="block px-4 py-3 transition-colors hover:bg-gray-50"
+          className={`block px-4 py-3 transition-colors hover:bg-gray-50 ${fresh ? "bg-emerald-50/40" : ""}`}
         >
           <div className="flex items-start justify-between gap-3">
             {/* Left: org name + status */}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="truncate text-sm font-medium text-foreground">
+                <span
+                  className={`truncate text-sm text-foreground ${fresh ? "font-bold" : "font-medium"}`}
+                >
                   {thread.orgName}
                 </span>
                 <span
-                  className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] leading-none ${STATUS_CLASS[thread.status] ?? STATUS_CLASS.sent}`}
+                  className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] leading-none ${statusClass(thread.status)}`}
                 >
-                  {STATUS_LABEL[thread.status] ?? thread.status}
+                  {statusLabel(thread.status)}
                 </span>
                 {thread.replyIntent && (
                   <span className="shrink-0 text-[11px] text-muted-foreground">
-                    {INTENT_LABEL[thread.replyIntent] ?? thread.replyIntent}
+                    {intentLabel(thread.replyIntent)}
                   </span>
                 )}
               </div>
@@ -87,7 +80,8 @@ export function ThreadList({ threads }: { threads: InboxThread[] }) {
             </div>
           </div>
         </Link>
-      ))}
+        );
+      })}
     </div>
   );
 }

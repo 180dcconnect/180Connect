@@ -1,6 +1,13 @@
 "use client";
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export interface FeedPaginationProps {
   totalItems: number;
@@ -60,25 +67,31 @@ export function FeedPagination({
 
         <span className="hidden h-3 w-px bg-black/[0.08] dark:bg-white/[0.1] sm:inline-block" />
 
-        <div className="flex items-center gap-1.5">
-          <span className="text-[11px] text-foreground/45">Show:</span>
-          {pageSizeOptions.map((size) => (
-            <button
-              key={size}
-              type="button"
-              onClick={() => {
-                onPageSizeChange(size);
-                onPageChange(1);
-              }}
-              className={`rounded px-2 py-0.5 text-[11px] font-semibold transition-all ${
-                pageSize === size
-                  ? "bg-foreground text-background shadow-xs dark:bg-white dark:text-slate-900"
-                  : "text-foreground/50 hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10"
-              }`}
+        <div className="flex items-center gap-1.5 text-[11px] text-foreground/45">
+          <span>Show</span>
+          <Select
+            value={String(pageSize)}
+            onValueChange={(val) => {
+              onPageSizeChange(Number(val));
+              onPageChange(1);
+            }}
+          >
+            <SelectTrigger
+              size="sm"
+              className="h-6 w-auto min-w-[44px] gap-1 rounded-md border border-black/10 bg-white px-2 py-0 text-[11px] font-semibold text-foreground shadow-2xs hover:bg-black/5 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
+              aria-label="Items per page"
             >
-              {size}
-            </button>
-          ))}
+              <SelectValue placeholder={String(pageSize)} />
+            </SelectTrigger>
+            <SelectContent align="start" className="min-w-[4.5rem]">
+              {pageSizeOptions.map((size) => (
+                <SelectItem key={size} value={String(size)} className="text-xs">
+                  {size}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <span>per page</span>
         </div>
       </div>
 

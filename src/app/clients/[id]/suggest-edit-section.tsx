@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { useRouter } from "next/navigation";
 import { OriginButton } from "@/components/ui/origin-button";
 import { Input } from "@/components/ui/input";
+import { PencilLine } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -11,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SectionCard } from "./section-card";
 import type { AppRole } from "@/lib/auth/permissions.ts";
 import {
   describePendingSuggestion,
@@ -121,18 +123,16 @@ export function SuggestEditSection({
   }
 
   return (
-    <section aria-labelledby="suggest-edit-heading" className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm">
-      <h2
-        id="suggest-edit-heading"
-        className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40"
-      >
-        {isAdmin ? "Suggested edits" : "Suggest a correction"}
-      </h2>
-      <p className="mt-1.5 max-w-prose text-[13px] leading-[1.6] text-foreground/50">
-        {isAdmin
+    <SectionCard
+      headingId="suggest-edit-heading"
+      icon={<PencilLine />}
+      title={isAdmin ? "Suggested edits" : "Suggest a correction"}
+      hint={
+        isAdmin
           ? "CAM-proposed corrections to this client's sensitive fields. Approving applies the value; rejecting changes nothing. Either way it is audited."
-          : "Spotted something wrong? Propose a fix and an admin will review it. The values below stay unchanged until an admin approves."}
-      </p>
+          : "Spotted something wrong? Propose a fix and an admin will review it. The values below stay unchanged until an admin approves."
+      }
+    >
 
       {isAdmin && (
         <div className="mt-4 space-y-4">
@@ -314,6 +314,6 @@ export function SuggestEditSection({
           </form>
         </>
       )}
-    </section>
+    </SectionCard>
   );
 }

@@ -23,14 +23,20 @@ export function RequestOwnershipForm({
   ownerName,
   existingStatus,
   decisionNote,
+  defaultOpen = false,
 }: {
   organisationId: string;
   ownerName: string | null;
   existingStatus: OwnershipRequestStatus | null;
   decisionNote: string | null;
+  /**
+   * Open straight into the form. Set from the record header's overflow menu,
+   * where the menu item is already the "I want to ask for this" step.
+   */
+  defaultOpen?: boolean;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

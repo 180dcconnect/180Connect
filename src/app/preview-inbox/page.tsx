@@ -22,6 +22,7 @@ const SAMPLE_THREADS: InboxThread[] = [
     replyIntent: "interested",
     messageCount: 3,
     relativeTime: "3 hours ago",
+    isRecent: true,
   },
   {
     orgId: "org-2",
@@ -36,6 +37,7 @@ const SAMPLE_THREADS: InboxThread[] = [
     replyIntent: null,
     messageCount: 2,
     relativeTime: "2 hours ago",
+    isRecent: false,
   },
   {
     orgId: "org-3",
@@ -50,6 +52,7 @@ const SAMPLE_THREADS: InboxThread[] = [
     replyIntent: "more_info",
     messageCount: 2,
     relativeTime: "2 days ago",
+    isRecent: false,
   },
   {
     orgId: "org-4",
@@ -64,6 +67,7 @@ const SAMPLE_THREADS: InboxThread[] = [
     replyIntent: null,
     messageCount: 1,
     relativeTime: "3 days ago",
+    isRecent: false,
   },
   {
     orgId: "org-5",
@@ -78,6 +82,7 @@ const SAMPLE_THREADS: InboxThread[] = [
     replyIntent: "not_interested",
     messageCount: 2,
     relativeTime: "27 August 2026",
+    isRecent: false,
   },
   {
     orgId: "org-6",
@@ -92,6 +97,7 @@ const SAMPLE_THREADS: InboxThread[] = [
     replyIntent: "referral",
     messageCount: 2,
     relativeTime: "22 August 2026",
+    isRecent: false,
   },
 ];
 

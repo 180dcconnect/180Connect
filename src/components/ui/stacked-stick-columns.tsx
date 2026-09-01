@@ -99,24 +99,19 @@ export function StackedStickColumns({
                 )}
               </AnimatePresence>
 
-              {/* Vertical Stack of 10 Squarish Sticks (stacked bottom-to-top) */}
-              <div className="flex flex-col-reverse gap-[2px] p-0.5">
-                {Array.from({ length: MAX_STICKS }, (_, stickIdx) => {
-                  const isActive = stickIdx < stickCount;
+              {/* Vertical Stack of up to 10 Squarish Sticks (stacked bottom-to-top) — only reached bars show, the rest stay empty for the aesthetic */}
+              <div className="flex h-[68px] flex-col-reverse justify-start gap-[2px] p-0.5 sm:h-[78px]">
+                {Array.from({ length: stickCount }, (_, stickIdx) => {
                   return (
                     <motion.div
                       key={`stick-${stickIdx}`}
                       initial={false}
                       animate={{
-                        opacity: isActive ? (isHovered ? 1 : 0.85) : 0.12,
-                        scale: isHovered && isActive ? 1.1 : 1,
+                        opacity: isHovered ? 1 : 0.85,
+                        scale: isHovered ? 1.1 : 1,
                       }}
                       transition={{ duration: 0.18, delay: stickIdx * 0.01 }}
-                      className={`h-[5px] w-[9px] sm:h-[6px] sm:w-[10px] rounded-[1.5px] transition-all ${
-                        isActive
-                          ? activeColorClass
-                          : "bg-black/20 dark:bg-white/20"
-                      }`}
+                      className={`h-[5px] w-[9px] sm:h-[6px] sm:w-[10px] rounded-[1.5px] transition-all ${activeColorClass}`}
                     />
                   );
                 })}

@@ -144,11 +144,11 @@ export function QueueQualityCard({ bands, scored, totalOrgs, className = "" }: Q
     >
       {/* Top Header */}
       <div>
-        <div className="flex items-center gap-2.5 pb-4 border-b border-black/[0.06] dark:border-white/[0.08]">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-black/[0.04] text-foreground dark:bg-white/[0.08]">
-            <Target size={16} strokeWidth={2.2} className="opacity-80" />
+        <div className="flex items-center gap-2.5 pb-4">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-transparent text-foreground">
+            <Target size={18} strokeWidth={2.2} className="opacity-80" />
           </div>
-          <h3 className="text-[15px] font-semibold tracking-tight text-foreground capitalize">Queue quality</h3>
+          <h3 className="text-[20px] font-medium tracking-tighter text-foreground capitalize">Queue quality</h3>
         </div>
 
         {totalOrgs === 0 ? (

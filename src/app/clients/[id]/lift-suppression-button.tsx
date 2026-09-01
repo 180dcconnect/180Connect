@@ -7,12 +7,19 @@ import { OriginButton } from "@/components/ui/origin-button";
 export function LiftSuppressionButton({
   organisationId,
   suppressionId,
+  defaultExpanded = false,
 }: {
   organisationId: string;
   suppressionId?: string;
+  /**
+   * Open straight into the reason form, and drop the standalone card chrome —
+   * used from the record header's overflow menu, where a dialog already
+   * supplies both the trigger and the surface.
+   */
+  defaultExpanded?: boolean;
 }) {
   const router = useRouter();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [reason, setReason] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -62,7 +69,12 @@ export function LiftSuppressionButton({
   }
 
   return (
-    <form onSubmit={submit} className="mt-3 rounded-xl border border-black/10 bg-white p-4 shadow-xs">
+    <form
+      onSubmit={submit}
+      className={
+        defaultExpanded ? "" : "mt-3 rounded-xl border border-black/10 bg-white p-4 shadow-xs"
+      }
+    >
       <label
         className="block text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/70"
         htmlFor="lift-reason"

@@ -1,7 +1,9 @@
 "use client";
 
-import type { Dispatch, SetStateAction } from "react";
+import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import Link from "next/link";
+import { ArrowDown, ArrowUp, ArrowUpDown, X } from "lucide-react";
+import { sortTeamUsers, type SortOrder, type TeamSortField } from "@/lib/admin/team-filter";
 
 export type TeamUser = {
   id: string;
@@ -69,13 +71,15 @@ const ROLE_LABEL: Record<TeamUser["role"], string> = {
 };
 
 const ROLE_STYLES: Record<TeamUser["role"], string> = {
-  admin: "bg-purple-100/70 text-purple-900 border-purple-200",
-  cam: "bg-brand/10 text-brand-hover border-brand/20",
-  viewer: "bg-blue-100/70 text-blue-900 border-blue-200",
+  admin: "bg-[#f5efc6]/50 text-[#000000]/85 border-[#f5efc6]/20",
+  cam: "bg-brand/10 text-brand-hover border-brand/10",
+  viewer: "bg-[#f0f9ff] text-[#000000]/85 border-[#f0f9ff]",
 };
 
 export function UserManagementTable({
   users,
+  totalCount,
+  hasActiveFilters = false,
   // Kept for compatibility with TeamPanel's lifted state (F011). This view is now
   // read-only for roles — changes happen on /team/[id] instead — so setUsers and
   // currentUserId are no longer used here but remain in the prop contract.
@@ -83,6 +87,8 @@ export function UserManagementTable({
   currentUserId: _currentUserId,
 }: {
   users: TeamUser[];
+  totalCount?: number;
+  hasActiveFilters?: boolean;
   setUsers: Dispatch<SetStateAction<TeamUser[]>>;
   currentUserId: string;
 }) {
@@ -90,71 +96,216 @@ export function UserManagementTable({
   void _setUsers;
   void _currentUserId;
 
+  const [sortBy, setSortBy] = useState<TeamSortField>("name");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
+
+  function handleSort(field: TeamSortField) {
+    if (sortBy === field) {
+      setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(field);
+      setSortOrder(field === "clients" || field === "last_active" ? "desc" : "asc");
+    }
+  }
+
+  const sortedUsers = useMemo(() => {
+    return sortTeamUsers(users, sortBy, sortOrder);
+  }, [users, sortBy, sortOrder]);
+
+  const total = totalCount ?? users.length;
+  const isFiltered = hasActiveFilters && total !== sortedUsers.length;
+
   return (
-    <div className="mt-3 overflow-x-auto">
-      <table className="w-full border-collapse text-left text-sm">
-        <thead>
-          <tr className="border-b border-black/10">
-            <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Member</th>
-            <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Role</th>
-            <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Clients</th>
-            <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Last active</th>
-            <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map((user) => {
-            const roleLabel = ROLE_LABEL[user.role] ?? user.role;
-            const roleStyle = ROLE_STYLES[user.role] ?? "bg-black/5 text-foreground/75 border-black/10";
-            return (
-              <tr className="border-b border-black/5" key={user.id}>
-                <td className="p-3">
-                  <Link
-                    href={`/team/${user.id}`}
-                    className="block font-bold hover:text-brand hover:underline"
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/[0.06] px-1 pb-4">
+        <div className="text-xs font-semibold uppercase tracking-[0.12em] text-foreground/50">
+          {isFiltered ? (
+            <span>
+              Showing <strong className="text-foreground">{sortedUsers.length}</strong> of{" "}
+              <strong className="text-foreground">{total}</strong> members
+            </span>
+          ) : (
+            <span>
+              <strong className="text-foreground">{sortedUsers.length}</strong> team member
+              {sortedUsers.length === 1 ? "" : "s"}
+            </span>
+          )}
+        </div>
+
+        {hasActiveFilters && (
+          <Link
+            href="/admin/users"
+            className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-black/[0.03] px-2.5 py-1 text-xs font-medium text-foreground/70 transition-colors hover:bg-black/8 hover:text-foreground"
+          >
+            <X className="h-3 w-3" />
+            Reset all filters
+          </Link>
+        )}
+      </div>
+
+      {sortedUsers.length === 0 ? (
+        <div className="py-12 text-center">
+          <p className="text-sm text-foreground/60">
+            {hasActiveFilters
+              ? "No team members match the current search or filter criteria."
+              : "No team members found."}
+          </p>
+          {hasActiveFilters && (
+            <div className="mt-4">
+              <Link
+                href="/admin/users"
+                className="inline-flex items-center justify-center rounded-xl bg-black/5 px-4 py-2 text-xs font-bold text-foreground transition-colors hover:bg-black/10"
+              >
+                Clear all filters
+              </Link>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full border-collapse text-left text-sm">
+            <thead>
+              <tr className="border-b border-black/10">
+                <th className="p-3 pb-4">
+                  <button
+                    type="button"
+                    onClick={() => handleSort("name")}
+                    className="group inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/50 hover:text-foreground"
                   >
-                    {user.full_name ?? "Unnamed user"}
-                  </Link>
-                  <span className="text-foreground/60">{user.email}</span>
-                </td>
-                <td className="p-3">
-                  <span
-                    aria-label={`Role for ${user.email}: ${roleLabel}`}
-                    title="Change role on the member's profile page"
-                    className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-bold uppercase tracking-wide ${roleStyle}`}
+                    <span>Member</span>
+                    {sortBy === "name" ? (
+                      sortOrder === "asc" ? (
+                        <ArrowUp className="h-3.5 w-3.5 text-foreground" />
+                      ) : (
+                        <ArrowDown className="h-3.5 w-3.5 text-foreground" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="h-3.5 w-3.5 opacity-0 transition-opacity group-hover:opacity-60" />
+                    )}
+                  </button>
+                </th>
+                <th className="p-3 pb-4">
+                  <button
+                    type="button"
+                    onClick={() => handleSort("role")}
+                    className="group inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/50 hover:text-foreground"
                   >
-                    {roleLabel}
-                  </span>
-                </td>
-                <td className="p-3">
-                  {user.listed_client_count > 0 ? (
-                    <Link
-                      href={`/clients?owner=${user.id}`}
-                      className="font-bold text-brand hover:underline"
-                      title={clientsLinkTitle(user)}
-                    >
-                      {user.listed_client_count}
-                    </Link>
-                  ) : (
-                    <span className="text-foreground/40" title={clientsLinkTitle(user)}>
-                      {user.listed_client_count}
-                    </span>
-                  )}
-                </td>
-                <td className="p-3 text-foreground/60">{lastActiveLabel(user.last_seen_at)}</td>
-                <td className="p-3">
-                  <Link
-                    href={`/team/${user.id}`}
-                    className="inline-flex items-center justify-center rounded-lg border border-black/15 bg-white px-3 py-2 text-xs font-bold text-foreground hover:border-black/25 hover:bg-black/[0.02]"
+                    <span>Role</span>
+                    {sortBy === "role" ? (
+                      sortOrder === "asc" ? (
+                        <ArrowUp className="h-3.5 w-3.5 text-foreground" />
+                      ) : (
+                        <ArrowDown className="h-3.5 w-3.5 text-foreground" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="h-3.5 w-3.5 opacity-0 transition-opacity group-hover:opacity-60" />
+                    )}
+                  </button>
+                </th>
+                <th className="p-3 pb-4">
+                  <button
+                    type="button"
+                    onClick={() => handleSort("clients")}
+                    className="group inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/50 hover:text-foreground"
                   >
-                    View
-                  </Link>
-                </td>
+                    <span>Clients</span>
+                    {sortBy === "clients" ? (
+                      sortOrder === "asc" ? (
+                        <ArrowUp className="h-3.5 w-3.5 text-foreground" />
+                      ) : (
+                        <ArrowDown className="h-3.5 w-3.5 text-foreground" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="h-3.5 w-3.5 opacity-0 transition-opacity group-hover:opacity-60" />
+                    )}
+                  </button>
+                </th>
+                <th className="p-3 pb-4">
+                  <button
+                    type="button"
+                    onClick={() => handleSort("last_active")}
+                    className="group inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/50 hover:text-foreground"
+                  >
+                    <span>Last active</span>
+                    {sortBy === "last_active" ? (
+                      sortOrder === "asc" ? (
+                        <ArrowUp className="h-3.5 w-3.5 text-foreground" />
+                      ) : (
+                        <ArrowDown className="h-3.5 w-3.5 text-foreground" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="h-3.5 w-3.5 opacity-0 transition-opacity group-hover:opacity-60" />
+                    )}
+                  </button>
+                </th>
+                <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40"></th>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            </thead>
+            <tbody>
+              {sortedUsers.map((user) => {
+                const roleLabel = ROLE_LABEL[user.role] ?? user.role;
+                const roleStyle =
+                  ROLE_STYLES[user.role] ?? "bg-black/5 text-foreground/75 border-black/10";
+                return (
+                  <tr className="border-b border-black/5 transition-colors hover:bg-black/[0.015]" key={user.id}>
+                    <td className="p-3">
+                      <div className="flex items-center gap-2">
+                        <div>
+                          <Link
+                            href={`/team/${user.id}`}
+                            className="block font-bold hover:text-brand hover:underline"
+                          >
+                            {user.full_name ?? "Unnamed user"}
+                          </Link>
+                          <span className="text-foreground/60">{user.email}</span>
+                        </div>
+                        {!user.is_active && (
+                          <span className="ml-2 rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-700">
+                            Inactive
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-3">
+                      <span
+                        aria-label={`Role for ${user.email}: ${roleLabel}`}
+                        title="Change role on the member's profile page"
+                        className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-bold capitalize tracking-wide ${roleStyle}`}
+                      >
+                        {roleLabel}
+                      </span>
+                    </td>
+                    <td className="p-3">
+                      {user.listed_client_count > 0 ? (
+                        <Link
+                          href={`/clients?owner=${user.id}`}
+                          className="font-bold text-brand hover:underline"
+                          title={clientsLinkTitle(user)}
+                        >
+                          {user.listed_client_count}
+                        </Link>
+                      ) : (
+                        <span className="text-foreground/40" title={clientsLinkTitle(user)}>
+                          {user.listed_client_count}
+                        </span>
+                      )}
+                    </td>
+                    <td className="p-3 text-foreground/60">{lastActiveLabel(user.last_seen_at)}</td>
+                    <td className="p-3">
+                      <Link
+                        href={`/team/${user.id}`}
+                        className="inline-flex items-center justify-center rounded-lg border border-black/15 bg-white px-3 py-2 text-xs font-bold text-foreground hover:border-black/25 hover:bg-black/[0.02]"
+                      >
+                        View
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

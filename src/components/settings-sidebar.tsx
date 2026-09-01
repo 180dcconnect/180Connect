@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
+import { Accessibility } from "@/components/animate-ui/icons/accessibility";
+import { User } from "@/components/animate-ui/icons/user";
+import { AnimateIcon } from "@/components/animate-ui/icons/icon";
 import { SidebarAccountMenu } from "@/components/sidebar-account-menu";
 
 export type SettingsNavItem = {
@@ -79,16 +82,40 @@ export function SettingsSidebar({
             <ul className="space-y-1">
               {section.items.map((item) => {
                 const active = pathname === item.href;
+                const isAccessibility = item.href === "/settings/accessibility";
+                const isProfile = item.href === "/settings/profile";
+                const isAnimated = isAccessibility || isProfile;
+                const linkClasses = `flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm transition-all hover:bg-black/10 ${
+                  active
+                    ? "bg-black/12 font-bold text-black"
+                    : "font-semibold text-black/85 hover:text-black"
+                }`;
+                if (isAnimated) {
+                  return (
+                    <li key={item.href}>
+                      <AnimateIcon animateOnHover asChild>
+                        <Link
+                          href={item.href}
+                          aria-current={active ? "page" : undefined}
+                          className={linkClasses}
+                        >
+                          {isProfile ? (
+                            <User className="h-4 w-4 shrink-0" aria-hidden="true" />
+                          ) : (
+                            <Accessibility className="h-4 w-4 shrink-0" aria-hidden="true" />
+                          )}
+                          <span className="truncate">{item.label}</span>
+                        </Link>
+                      </AnimateIcon>
+                    </li>
+                  );
+                }
                 return (
                   <li key={item.href}>
                     <Link
                       href={item.href}
                       aria-current={active ? "page" : undefined}
-                      className={`flex items-center rounded-xl px-3.5 py-2.5 text-sm transition-all hover:bg-black/10 ${
-                        active
-                          ? "bg-black/12 font-bold text-black"
-                          : "font-semibold text-black/85 hover:text-black"
-                      }`}
+                      className={linkClasses}
                     >
                       <span className="truncate">{item.label}</span>
                     </Link>

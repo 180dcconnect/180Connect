@@ -72,7 +72,7 @@ export async function suggestEditAction(
     return { kind: "error", message: failure.error };
   }
 
-  revalidatePath(`/clients/${parsed.data.organisationId}`);
+  revalidatePath(`/clients/${parsed.data.organisationId}`, "layout");
 
   return {
     kind: "success",

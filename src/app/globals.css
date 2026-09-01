@@ -1,6 +1,26 @@
 @import "tailwindcss";
 
+/**
+ * The app is light-only. There is no `.dark` class applied anywhere, no theme
+ * toggle, and no dark palette — `docs/design-system.md` describes one ground
+ * (bone `#f4f4ef`) with white cards on it.
+ *
+ * Tailwind v4's stock `dark` variant is `@media (prefers-color-scheme: dark)`,
+ * so every stray `dark:` class left behind by a pasted component fired off the
+ * viewer's OS setting and rendered a dark control on a light page — the Add
+ * Note trigger came out near-black (`dark:bg-zinc-800`) on a bone card. Binding
+ * the variant to an explicit `.dark` ancestor that nothing ever sets neutralises
+ * all of them at once; light rendering is unchanged. `color-scheme: light` stops
+ * the browser dark-theming form controls and scrollbars for the same reason.
+ *
+ * If this app ever grows a real dark mode, this is the hook: put `.dark` on
+ * <html> and define the token overrides under it.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
+  color-scheme: light;
+
   --background: #ffffff;
   --foreground: #414042;
   --brand: #72b744;
@@ -202,6 +222,64 @@ a:hover .mail-sprite {
 @media (prefers-reduced-motion: reduce) {
   .animate-popover-in {
     animation: none;
+  }
+}
+
+/* The send button's paper plane.
+   Lifted out of a styled-components demo: this app has no styled-components SSR
+   registry, so the keyframes had to live in a real stylesheet or the button
+   would flash unstyled on first paint.
+
+   The whole hover choreography lives here rather than in Tailwind
+   `group-hover:` utilities, because the reduced-motion and mid-send cases both
+   need to *cancel* a transform. Expressing that as competing utilities
+   (`group-hover:translate-x-…` vs `motion-reduce:group-hover:transform-none`)
+   leaves the outcome to Tailwind's variant sort order; a plain cascade here is
+   decidable by reading it. `[data-pending]` is set while a send is in flight,
+   so the plane holds still under the "Sending…" label. */
+@keyframes send-plane-bob {
+  from {
+    transform: translateY(0.1em);
+  }
+  to {
+    transform: translateY(-0.1em);
+  }
+}
+
+.send-flight,
+.send-label {
+  transition: transform 300ms ease;
+}
+
+.send-flight {
+  transform-origin: center;
+}
+
+.group\/send:hover:not([data-pending]) .send-plane {
+  animation: send-plane-bob 0.6s ease-in-out infinite alternate;
+}
+
+.group\/send:hover:not([data-pending]) .send-flight {
+  transform: translateX(1.2em) rotate(45deg) scale(1.1);
+}
+
+.group\/send:hover:not([data-pending]) .send-label {
+  transform: translateX(5em);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .send-flight,
+  .send-label {
+    transition: none;
+  }
+
+  .group\/send:hover .send-plane {
+    animation: none;
+  }
+
+  .group\/send:hover .send-flight,
+  .group\/send:hover .send-label {
+    transform: none;
   }
 }
 

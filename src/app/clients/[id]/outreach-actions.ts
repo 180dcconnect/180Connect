@@ -1,6 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+/**
+ * Every action here revalidates three paths, not one: the client page that owns
+ * the outreach section, the inbox thread for the same organisation, and the
+ * inbox list whose row summarises it. The thread view writes as well as reads
+ * now (its reply drawer calls these actions), so a reply sent from it would
+ * otherwise not appear in the thread it was sent from.
+ */
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { canSendClientOutreach } from "@/lib/client-email-validation";
 import { reportError } from "@/lib/error-logging";
@@ -134,7 +141,9 @@ export async function scheduleReviewedEmail(input: unknown): Promise<ReviewedSen
     return { ok: false, message: "The email could not be scheduled. Try again." };
   }
 
-  revalidatePath(`/clients/${organisationId}`);
+  revalidatePath(`/clients/${organisationId}`, "layout");
+  revalidatePath(`/inbox/${organisationId}`);
+  revalidatePath("/inbox");
   return { ok: true, message: `Email scheduled for ${scheduledAtIso.toLocaleString("en-GB")}.` };
 }
 
@@ -165,7 +174,9 @@ export async function cancelScheduledEmail(input: unknown): Promise<ReviewedSend
     return { ok: false, message: "The scheduled email could not be cancelled." };
   }
 
-  revalidatePath(`/clients/${parsed.data.organisationId}`);
+  revalidatePath(`/clients/${parsed.data.organisationId}`, "layout");
+  revalidatePath(`/inbox/${parsed.data.organisationId}`);
+  revalidatePath("/inbox");
   return { ok: true, message: "Scheduled send cancelled. The email is a draft again." };
 }
 
@@ -437,7 +448,9 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
     if (eventError) await reportError(eventError, { operation: "outreach.send.record_event", messageId });
   }
 
-  revalidatePath(`/clients/${organisationId}`);
+  revalidatePath(`/clients/${organisationId}`, "layout");
+  revalidatePath(`/inbox/${organisationId}`);
+  revalidatePath("/inbox");
   return { ok: true, message: "Email sent from the Sheffield outreach mailbox." };
 }
 
@@ -504,7 +517,9 @@ export async function retryFailedEmail(input: unknown): Promise<RetryFailedResul
     return { ok: false, message: "This email is no longer waiting to be retried." };
   }
   // The row just changed state regardless of how the resend below goes.
-  revalidatePath(`/clients/${organisationId}`);
+  revalidatePath(`/clients/${organisationId}`, "layout");
+  revalidatePath(`/inbox/${organisationId}`);
+  revalidatePath("/inbox");
 
   // The reviewed recipient wins; fall back to the on-file record only for rows
   // that predate recipient review (F116). With neither, the draft is reopened
@@ -610,7 +625,9 @@ export async function saveEmailDraft(input: unknown): Promise<SaveDraftResult> {
     return { ok: false, message: "The draft could not be saved. Try again." };
   }
 
-  revalidatePath(`/clients/${organisationId}`);
+  revalidatePath(`/clients/${organisationId}`, "layout");
+  revalidatePath(`/inbox/${organisationId}`);
+  revalidatePath("/inbox");
   return { ok: true, message: "Draft saved." };
 }
 
@@ -681,6 +698,8 @@ export async function discardEmailDraft(input: unknown): Promise<DiscardDraftRes
     return { ok: false, message: "The draft could not be discarded. Refresh and try again." };
   }
 
-  revalidatePath(`/clients/${organisationId}`);
+  revalidatePath(`/clients/${organisationId}`, "layout");
+  revalidatePath(`/inbox/${organisationId}`);
+  revalidatePath("/inbox");
   return { ok: true, message: "Draft discarded." };
 }

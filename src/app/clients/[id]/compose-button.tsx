@@ -1,15 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { History, Sparkles } from "lucide-react";
-import { OriginButton } from "@/components/ui/origin-button";
-import { RichTextEmailEditor } from "@/components/rich-text-email-editor";
-import { discardEmailDraft, saveEmailDraft, scheduleReviewedEmail, sendReviewedEmail } from "./outreach-actions";
-import { validateClientEmail } from "@/lib/client-email-validation";
-import { emailHtmlToPlainText, isRichEmailHtml, plainTextToEditorHtml } from "@/lib/outreach/email-html";
+import {
+  EmailReviewPanel,
+  type EmailReviewDirtyState,
+} from "@/components/outreach/email-review-panel";
 import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
+import { SectionCard } from "./section-card";
 
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
@@ -26,17 +26,6 @@ type Draft = {
   savedRecipient?: string | null;
 };
 type ExistingDraft = Draft & { savedRecipient: string | null };
-
-/**
- * F119: a saved draft's body may already be sanitized editor HTML (if it was
- * saved after this feature shipped) or still the model's plain text (an AI
- * draft that was never saved, or one saved before this feature existed) —
- * `isRichEmailHtml` tells them apart the same way outreach-history.tsx does,
- * so either shape opens correctly in the rich editor.
- */
-function hydrateBody(raw: string): string {
-  return isRichEmailHtml(raw) ? raw : plainTextToEditorHtml(raw);
-}
 
 const STATUS_MESSAGES = [
   "Checking outreach permissions…",
@@ -145,36 +134,18 @@ export function ComposeButton({
   const [draft, setDraft] = useState<Draft | null>(
     existingDraft ? { ...existingDraft, sizeTemplate: undefined } : null,
   );
-  // F123: the reviewed content is what actually gets sent, and any edit resets
-  // approval. These also drive F111's regenerate-confirm (edits vs draft).
-  const [recipient, setRecipient] = useState(
-    existingDraft?.savedRecipient ?? existingDraft?.recipientOnFile ?? "",
-  );
-  const [subject, setSubject] = useState(existingDraft?.subject ?? "");
-  // F117: HTML from the rich-text editor, not plain text.
-  const [body, setBody] = useState(existingDraft ? hydrateBody(existingDraft.body) : "");
-  // Tracks whether the editor has actually fired an update since the current
-  // draft loaded. The regenerate-confirm uses this instead of comparing live
-  // editor HTML against `hydrateBody(draft.body)`, because Tiptap's serializer
-  // can differ cosmetically from that hydration output — a string comparison
-  // could prompt "discard your edits?" even when nothing changed.
-  const [bodyEdited, setBodyEdited] = useState(false);
   // Regeneration updates the same outreach_messages row in place (F111 AC2),
-  // so `draft.id` does not change and cannot key the editor's remount. This
-  // does, incremented on every successful (re)generate, forcing the
-  // uncontrolled editor to reinitialize with the new content.
+  // so `draft.id` does not change and cannot key the review panel's remount.
+  // This does, incremented on every successful (re)generate, so the panel
+  // reinitializes with the new content instead of keeping edits to the old.
   const [generation, setGeneration] = useState(0);
-  const [approved, setApproved] = useState(false);
-  const [sendMessage, setSendMessage] = useState<string | null>(null);
-  // F129: distinguishes a failed send attempt (red alert) from the standing
-  // "not sent yet" notice (amber).
-  const [sendFailed, setSendFailed] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [savingDraft, setSavingDraft] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [discarding, setDiscarding] = useState(false);
-  // F126: when set, the reviewed email is queued for this time instead of sent now.
-  const [scheduledAt, setScheduledAt] = useState("");
+  // F123's reviewed content lives inside EmailReviewPanel, which owns it along
+  // with the approval gate and the send/save/schedule/discard actions. All this
+  // side needs back is whether regenerating would throw work away — reported
+  // through onDirtyChange into this ref, read only inside `generate`. A ref
+  // rather than state: nothing here re-renders on an edit, and making it state
+  // would re-render the whole card on every keystroke in the editor.
+  const dirty = useRef<EmailReviewDirtyState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [warning, setWarning] = useState<Warning | null>(
@@ -203,9 +174,10 @@ export function ComposeButton({
     // baseline once persisted (F119), falling back to the on-file address.
     if (
       draft &&
-      (recipient !== (draft.savedRecipient ?? draft.recipientOnFile ?? "") ||
-        subject !== draft.subject ||
-        bodyEdited)
+      dirty.current &&
+      (dirty.current.recipient !== (draft.savedRecipient ?? draft.recipientOnFile ?? "") ||
+        dirty.current.subject !== draft.subject ||
+        dirty.current.bodyEdited)
     ) {
       if (!window.confirm("Regenerating will replace this draft and discard your edits. Continue?")) {
         return;
@@ -249,120 +221,17 @@ export function ComposeButton({
         if (response.status === 409) setDraft(null);
         return;
       }
-      const nextDraft = payload as Draft;
-      setDraft(nextDraft);
-      setRecipient(nextDraft.savedRecipient ?? nextDraft.recipientOnFile ?? "");
-      setSubject(nextDraft.subject);
-      setBody(plainTextToEditorHtml(nextDraft.body));
-      setBodyEdited(false);
+      // Bumping `generation` remounts EmailReviewPanel, which is what resets
+      // the reviewed content, the approval checkbox and any send message —
+      // the panel initialises all of them from the draft it is handed.
+      setDraft(payload as Draft);
       setGeneration((current) => current + 1);
-      setApproved(false);
-      setSendMessage(null);
-      setSendFailed(false);
+      dirty.current = null;
     } catch {
       setError("Could not reach the server. Check your connection and try again.");
     } finally {
       setBusy(false);
     }
-  }
-
-  async function send() {
-    if (!draft) return;
-    setSending(true);
-    setSendMessage(null);
-    const result = await sendReviewedEmail({
-      organisationId,
-      messageId: draft.id,
-      recipient,
-      subject,
-      body,
-      explicitlyApproved: approved,
-    });
-    // F129 AC1: a failed send is a red alert, not the amber "not sent yet"
-    // default — and the draft stays open, so retrying is one click away.
-    setSendFailed(!result.ok);
-    setSendMessage(result.message);
-    if (result.ok) setDraft(null);
-    setSending(false);
-  }
-
-  /**
-   * F119: saves the reviewed content without sending. Unlike `send`, this
-   * keeps the draft open for further editing — it updates `draft` to the
-   * just-saved subject/body so the regenerate-confirm dirty check treats
-   * a saved-and-unchanged draft as clean, not as edits about to be lost.
-   */
-  async function saveDraft() {
-    if (!draft) return;
-    setSavingDraft(true);
-    setSaveMessage(null);
-    const result = await saveEmailDraft({
-      organisationId,
-      messageId: draft.id,
-      recipient,
-      subject,
-      body,
-    });
-    setSaveMessage(result.message);
-    if (result.ok) {
-      // Sync the whole saved state — including the recipient (F119 AC1) — so
-      // the regenerate-confirm baselines treat this draft as clean, exactly
-      // like the bodyEdited reset below.
-      setDraft((current) => (current ? { ...current, subject, body, savedRecipient: recipient } : current));
-      // The saved content is now durable — the regenerate-confirm must treat
-      // this draft as clean, exactly like the subject/body sync above does.
-      setBodyEdited(false);
-    }
-    setSavingDraft(false);
-  }
-
-  /**
-   * F120: removes the draft outright, so a confirmation step comes first
-   * (AC2) — the content is genuinely gone once the action below runs, unlike
-   * `saveDraft`. Clears local state back to the empty "generate" view on
-   * success, matching what a reopened client profile would show once the
-   * row is gone from page.tsx's existingDraft query.
-   */
-  async function discardDraft() {
-    if (!draft) return;
-    if (!window.confirm("Discard this draft? Its content will be lost.")) return;
-    setDiscarding(true);
-    setSaveMessage(null);
-    const result = await discardEmailDraft({ organisationId, messageId: draft.id });
-    if (result.ok) {
-      setDraft(null);
-      setRecipient("");
-      setSubject("");
-      setBody("");
-      setApproved(false);
-      setSendMessage(null);
-      setSendFailed(false);
-    } else {
-      setSaveMessage(result.message);
-    }
-    setDiscarding(false);
-  }
-
-  // F126: same review gate as send() — the approval checkbox is required either
-  // way, since scheduling is a commitment to deliver this exact content later.
-  async function schedule() {
-    if (!draft || !scheduledAt) return;
-    setSending(true);
-    setSendMessage(null);
-    const result = await scheduleReviewedEmail({
-      organisationId,
-      messageId: draft.id,
-      subject,
-      body,
-      explicitlyApproved: approved,
-      scheduledAt: new Date(scheduledAt).toISOString(),
-    });
-    setSendMessage(result.message);
-    if (result.ok) {
-      setDraft(null);
-      setScheduledAt("");
-    }
-    setSending(false);
   }
 
   const historyLink = historyHref && (
@@ -377,48 +246,27 @@ export function ComposeButton({
 
   if (blocked || ownershipBlocked) {
     return (
-      <section
-        aria-labelledby="outreach-heading"
-        className="overflow-hidden rounded-2xl border border-red-500/20 bg-gradient-to-br from-red-500/[0.05] via-white to-white p-6 shadow-sm"
+      <SectionCard
+        action={historyLink}
+        headingId="stage-one-heading"
+        hint="AI-generated outreach draft, for CAM review before sending"
+        icon={<Sparkles />}
+        title="Stage 1 email"
+        tone="danger"
       >
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-center gap-2.5">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-red-500/10 text-red-800">
-              <Sparkles aria-hidden="true" className="h-4 w-4" />
-            </span>
-            <div>
-              <h2 className="text-lg font-bold" id="outreach-heading">Stage 1 email</h2>
-              <p className="text-xs text-foreground/55">AI-generated outreach draft, for CAM review before sending</p>
-            </div>
-          </div>
-          {historyLink}
-        </div>
         <p
           className={`mt-4 text-[13px] font-bold leading-[1.6] ${warning?.tone === "conflict" ? "text-amber-800" : "text-red-800"}`}
           role="alert"
         >
           {warning?.text}
         </p>
-      </section>
+      </SectionCard>
     );
   }
 
   return (
-    <section
-      aria-labelledby="outreach-heading"
-      className="overflow-hidden rounded-2xl border border-brand/20 bg-gradient-to-br from-brand/[0.07] via-white to-white p-6 shadow-sm"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-center gap-2.5">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-brand/15 text-brand-hover">
-            <Sparkles aria-hidden="true" className="h-4 w-4" />
-          </span>
-          <div>
-            <h2 className="text-lg font-bold" id="outreach-heading">Stage 1 email</h2>
-            <p className="text-xs text-foreground/55">AI-generated outreach draft, for CAM review before sending</p>
-          </div>
-        </div>
-
+    <SectionCard
+      action={
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {(draft || error) && !busy && (
             <button
@@ -431,7 +279,12 @@ export function ComposeButton({
           )}
           {historyLink}
         </div>
-      </div>
+      }
+      headingId="stage-one-heading"
+      hint="AI-generated outreach draft, for CAM review before sending"
+      icon={<Sparkles />}
+      title="Stage 1 email"
+    >
 
       <div className="mt-4 space-y-3">
         <p className="text-xs text-foreground/55" aria-live="polite">
@@ -551,162 +404,35 @@ export function ComposeButton({
         </div>
       )}
 
-      {draft && !busy && (() => {
-        const recipientValidation = validateClientEmail(recipient);
-        // An emptied input is not the same fact as a client with no email on
-        // file: say what the CAM should do, not what the record lacks.
-        const recipientError =
-          recipientValidation.status === "missing"
-            ? "Add a recipient email address."
-            : recipientValidation.status === "invalid"
-              ? recipientValidation.message
-              : null;
-        const recipientMismatch =
-          recipientValidation.status === "valid" &&
-          Boolean(draft.recipientOnFile) &&
-          recipientValidation.value !== draft.recipientOnFile!.trim().toLowerCase();
-        return (
-        <div className="mt-5 space-y-3">
-          <div>
-            <h3 className="text-sm font-bold" id="email-review-heading">Review generated draft</h3>
-            <p className="mt-1 text-xs text-foreground/55">
-              Saved as a draft. Review and edit it, then approve below to send it from the branch mailbox.
-            </p>
-            <p className="mt-1 text-xs text-foreground/65">
-              Size tone template: {sizeTemplateLabel(draft.sizeTemplate)}
-            </p>
-          </div>
-          <label className="block text-xs font-bold text-foreground/65">
-            Recipient
-            <input
-              aria-describedby={recipientValidation.status !== "valid" ? "recipient-error" : recipientMismatch ? "recipient-mismatch-warning" : undefined}
-              aria-invalid={recipientValidation.status !== "valid"}
-              className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-              onChange={(event) => { setRecipient(event.target.value); setApproved(false); }}
-              value={recipient}
-            />
-          </label>
-          {/* F116 AC2: same format rule F045 uses (validateClientEmail), reused
-              client-side so the CAM sees this before ever attempting to send —
-              send-reviewed.ts enforces the identical rule server-side regardless. */}
-          {recipientError && (
-            <p className="text-xs font-bold text-red-800" id="recipient-error" role="alert">
-              {recipientError}
-            </p>
-          )}
-          {/* F116 AC3: advisory only, not a block — a CAM may deliberately send to
-              an address other than the one on file (e.g. a different contact). */}
-          {recipientMismatch && (
-            <p className="text-xs font-bold text-amber-800" id="recipient-mismatch-warning" role="alert">
-              This doesn&rsquo;t match the client&rsquo;s email on file ({draft.recipientOnFile}). Double-check before sending.
-            </p>
-          )}
-          <label className="block text-xs font-bold text-foreground/65">
-            Subject
-            <input
-              aria-describedby={subject.trim() ? undefined : "subject-error"}
-              aria-invalid={!subject.trim()}
-              className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-              onChange={(event) => { setSubject(event.target.value); setApproved(false); }}
-              value={subject}
-            />
-          </label>
-          {/* F115 AC2: the Send button already stays disabled with an empty subject
-              (see below) — this makes *why* visible instead of a silently inert
-              button, using the same wording send-reviewed.ts's server-side check
-              would give if this were ever bypassed. */}
-          {!subject.trim() && (
-            <p className="text-xs font-bold text-red-800" id="subject-error" role="alert">
-              Add a subject before sending.
-            </p>
-          )}
-          <div>
-            <p className="text-xs font-bold text-foreground/65" id="email-body-heading">
-              Body
-            </p>
-            {/* key={generation}: forces the uncontrolled editor to reinitialize
-                with the new draft's content — draft.id cannot be used here, since
-                a regeneration updates the same row in place (F111 AC2). */}
-            <div className="mt-1">
-              <RichTextEmailEditor
-                ariaLabelledBy="email-body-heading"
-                disabled={busy}
-                initialContent={body}
-                key={generation}
-                onChange={(html) => {
-                  setBody(html);
-                  setBodyEdited(true);
-                  setApproved(false);
-                }}
-              />
-            </div>
-          </div>
-          <label className="flex items-start gap-2 text-xs font-bold text-foreground/70">
-            <input checked={approved} className="mt-0.5" onChange={(event) => setApproved(event.target.checked)} type="checkbox" />
-            I have reviewed the recipient, subject and body and approve this email for sending.
-          </label>
-          <div className="flex flex-wrap items-center gap-2">
-            {/* F119: saving has none of sending's requirements — no approval
-                checkbox, no valid recipient, not even a non-empty subject or
-                body — a work-in-progress draft is exactly what this is for. */}
-            <OriginButton disabled={savingDraft || sending || discarding} onClick={saveDraft} type="button" variant="outline">
-              {savingDraft ? "Saving…" : "Save draft"}
-            </OriginButton>
-            <OriginButton
-              disabled={!approved || sending || recipientValidation.status !== "valid" || !subject.trim() || emailHtmlToPlainText(body).length === 0}
-              onClick={send}
-              type="button"
-            >
-              {sending ? "Sending…" : "Send reviewed email"}
-            </OriginButton>
-            {/* F120: same drafts-only reach as Save — a sent email is never
-                reachable here, so there is no "discard a sent email" case to guard. */}
-            <button
-              className="shrink-0 rounded-full border border-red-800/25 px-4 py-2 text-xs font-bold text-red-800 transition-colors hover:bg-red-50 disabled:opacity-60"
-              disabled={savingDraft || sending || discarding}
-              onClick={discardDraft}
-              type="button"
-            >
-              {discarding ? "Discarding…" : "Discard draft"}
-            </button>
-          </div>
-          {saveMessage && (
-            <p className="text-xs font-bold text-foreground/65" role="status">
-              {saveMessage}
-            </p>
-          )}
-          {/* F126: schedule the reviewed email for later instead of sending now.
-              Same approval gate as Send — a scheduled email is a commitment to
-              deliver this exact content, so it cannot bypass human review. */}
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="text-xs font-bold text-foreground/65">
-              Or schedule for later
-              <input
-                className="mt-1 block rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-                min={localDatetimeLocal(new Date())}
-                onChange={(event) => setScheduledAt(event.target.value)}
-                type="datetime-local"
-                value={scheduledAt}
-              />
-            </label>
-            <OriginButton
-              disabled={!approved || sending || recipientValidation.status !== "valid" || !scheduledAt || !subject.trim() || emailHtmlToPlainText(body).length === 0}
-              onClick={schedule}
-              type="button"
-              variant="outline"
-            >
-              Schedule reviewed email
-            </OriginButton>
-          </div>
-          <p
-            className={`text-xs font-bold ${sendFailed ? "text-red-800" : "text-amber-800"}`}
-            role={sendFailed ? "alert" : "status"}
-          >
-            {sendMessage ?? "Not sent — explicit human review and send are required."}
-          </p>
-        </div>
-        );
-      })()}
-    </section>
+      {draft && !busy && (
+        /* key={generation}: a regeneration updates the same outreach_messages
+           row in place (F111 AC2), so draft.id cannot key this — the counter
+           can, and remounting is what clears the previous draft's edits and
+           un-ticks the approval box. */
+        <EmailReviewPanel
+          className="mt-5"
+          description="Saved as a draft. Review and edit it, then approve below to send it from the branch mailbox."
+          draft={draft}
+          heading="Review generated draft"
+          key={generation}
+          meta={`Size tone template: ${sizeTemplateLabel(draft.sizeTemplate)}`}
+          onDirtyChange={(state) => {
+            dirty.current = state;
+          }}
+          onDraftCleared={() => {
+            setDraft(null);
+            dirty.current = null;
+          }}
+          onDraftSaved={({ recipient, subject, body }) => {
+            // Sync the whole saved state — including the recipient (F119 AC1) —
+            // so the regenerate-confirm baselines treat this draft as clean.
+            setDraft((current) =>
+              current ? { ...current, subject, body, savedRecipient: recipient } : current,
+            );
+          }}
+          organisationId={organisationId}
+        />
+      )}
+    </SectionCard>
   );
 }

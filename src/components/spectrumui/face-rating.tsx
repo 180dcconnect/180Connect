@@ -91,7 +91,7 @@ const SIZES = {
 } as const
 
 /** All five mouths share one command structure (M x y Q x y x y) so
- *  framer-motion interpolates them smoothly */
+ *  motion interpolates them smoothly */
 function mouthPath(level: number) {
   const corner = MOUTH_CORNER_Y[level - 1]
   return `M 22 ${corner} Q 36 ${MOUTH_CONTROL_Y[level - 1]} 50 ${corner}`

@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import {
+  buildConversation,
   buildInboxThreads,
   isRecentReply,
   REPLY_INTENTS,
@@ -178,5 +179,93 @@ describe("buildInboxThreads", () => {
     );
     assert.equal(threads[0].orgId, "org-1");
     assert.equal(threads[1].orgId, "org-2");
+  });
+});
+
+describe("buildConversation", () => {
+  // The shared `message` factory builds an InboxMessageRow, which has no body —
+  // only the conversation view reads one, so it travels as a widening here.
+  function withBody(
+    body: string | null,
+    overrides: Partial<InboxMessageRow> = {},
+  ): InboxMessageRow & { body: string | null } {
+    return { ...message(overrides), body };
+  }
+
+  it("interleaves sends and replies oldest first", () => {
+    const entries = buildConversation(
+      [
+        withBody("Opening email", { id: "m1", sent_at: "2026-08-24T10:00:00Z" }),
+        withBody("Follow-up", { id: "m2", sent_at: "2026-08-27T14:00:00Z" }),
+      ],
+      [reply({ id: "r1", reply_body: "Tell me more", received_at: "2026-08-26T09:00:00Z" })],
+      "org-1",
+      ORG_NAMES,
+    );
+
+    assert.deepEqual(
+      entries.map((entry) => [entry.type, entry.body]),
+      [
+        ["email_sent", "Opening email"],
+        ["reply_received", "Tell me more"],
+        ["email_sent", "Follow-up"],
+      ],
+    );
+  });
+
+  it("carries the subject on sends and leaves it null on replies", () => {
+    const entries = buildConversation(
+      [withBody("Hello", { id: "m1", subject: "Introduction" })],
+      [reply({ id: "r1" })],
+      "org-1",
+      ORG_NAMES,
+    );
+    const bySubject = new Map(entries.map((entry) => [entry.type, entry.subject]));
+    assert.equal(bySubject.get("email_sent"), "Introduction");
+    assert.equal(bySubject.get("reply_received"), null);
+  });
+
+  it("ignores rows belonging to another organisation", () => {
+    const entries = buildConversation(
+      [
+        withBody("Ours", { id: "m1", organisation_id: "org-1" }),
+        withBody("Someone else's", { id: "m2", organisation_id: "org-2" }),
+      ],
+      [reply({ id: "r1", organisation_id: "org-2" })],
+      "org-1",
+      ORG_NAMES,
+    );
+    assert.deepEqual(entries.map((entry) => entry.body), ["Ours"]);
+  });
+
+  it("drops drafts and scheduled messages, which are not events yet", () => {
+    const entries = buildConversation(
+      [
+        withBody("A draft", { id: "m1", send_status: "draft", sent_at: null }),
+        withBody("Queued", { id: "m2", send_status: "scheduled", sent_at: null }),
+        withBody("Actually sent", { id: "m3", send_status: "sent" }),
+      ],
+      [],
+      "org-1",
+      ORG_NAMES,
+    );
+    assert.deepEqual(entries.map((entry) => entry.body), ["Actually sent"]);
+  });
+
+  it("returns nothing when the organisation is not in the visible set", () => {
+    assert.deepEqual(
+      buildConversation([message({ organisation_id: "org-9" })], [], "org-9", ORG_NAMES),
+      [],
+    );
+  });
+
+  it("renders a missing body as an empty string rather than undefined", () => {
+    const entries = buildConversation(
+      [withBody(null, { id: "m1" })],
+      [],
+      "org-1",
+      ORG_NAMES,
+    );
+    assert.equal(entries[0].body, "");
   });
 });

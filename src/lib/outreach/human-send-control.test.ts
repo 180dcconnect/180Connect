@@ -59,9 +59,39 @@ describe("F250 human-send architecture", () => {
   });
 
   it("makes the deliberate control unambiguous to the CAM", async () => {
-    const editor = await source("../../app/clients/[id]/compose-button.tsx");
-    assert.match(editor, /Send reviewed email/);
-    assert.match(editor, /I have reviewed the recipient, subject and body/);
+    // The review-and-send controls moved out of compose-button.tsx into
+    // EmailReviewPanel when the inbox thread gained a reply drawer — one
+    // approval gate, two surfaces. This asserts against the panel that now
+    // owns them.
+    const panel = await source("../../components/outreach/email-review-panel.tsx");
+    assert.match(panel, /Send reviewed email/);
+    assert.match(panel, /I have reviewed the recipient, subject and body/);
+  });
+
+  it("keeps the approval gate in exactly one component", async () => {
+    // A second copy of this UI is how one of the two gets an approval-gate fix
+    // and the other doesn't. Every send surface must mount the shared panel
+    // rather than restate its controls.
+    const sources = await allSources();
+    const offenders: string[] = [];
+    for (const [path, text] of sources) {
+      if (path === "components/outreach/email-review-panel.tsx") continue;
+      if (/I have reviewed the recipient, subject and body/.test(text)) offenders.push(path);
+    }
+    assert.deepEqual(offenders, [], "only EmailReviewPanel may render the approval control");
+  });
+
+  it("routes every send surface through the shared review panel", async () => {
+    for (const relative of [
+      "../../app/clients/[id]/compose-button.tsx",
+      "../../components/inbox/reply-drawer.tsx",
+    ]) {
+      assert.match(
+        await source(relative),
+        /EmailReviewPanel/,
+        `${relative} must send through the shared review panel`,
+      );
+    }
   });
 
   it("cron delivery only ever picks up rows whose status proves prior human approval", async () => {

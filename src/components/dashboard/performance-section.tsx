@@ -16,9 +16,11 @@ import {
   type TeamUserRow,
   type WeeklyCount,
 } from "@/lib/performance-metrics";
+import { camLeaderboard } from "@/lib/dashboard/cam-leaderboard";
 import ProgressMetricCard from "@/components/ui/progress-metric-card";
 import { StackedStickColumns } from "@/components/ui/stacked-stick-columns";
 import { PeriodSelect, type PeriodOption } from "@/components/ui/metric-controls";
+import { CamLeaderboardTable } from "@/components/dashboard/cam-leaderboard-table";
 
 /**
  * The Performance section (F-added): the whole team's week, filterable down to
@@ -413,6 +415,16 @@ export function PerformanceSection({
   const visibleSectors = currentSectors.slice(0, 8);
   const hiddenSectors = currentSectors.length - visibleSectors.length;
 
+  // F212 — the whole team at once, for the roles that may already drill into any
+  // one CAM. Built off `effectiveSummary` so it moves with the period picker
+  // above it rather than becoming a second, quietly disagreeing window. The
+  // table is never scope-filtered: comparing the team to itself is the point,
+  // and filtering it to one person would leave a one-row leaderboard.
+  const leaderboard = useMemo(
+    () => (canPickCam ? camLeaderboard(effectiveSummary, cams) : null),
+    [canPickCam, effectiveSummary, cams],
+  );
+
   const periodCaption = useMemo(() => {
     if (!selected.from || !selected.to) return "this period vs prior period";
     const fmt = (iso: string) =>
@@ -537,6 +549,8 @@ export function PerformanceSection({
           )}
         </div>
       </div>
+
+      {leaderboard && <CamLeaderboardTable board={leaderboard} />}
     </div>
   );
 }

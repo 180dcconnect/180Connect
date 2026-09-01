@@ -100,7 +100,7 @@ export default async function InboxPage() {
     <div className="mx-auto max-w-4xl px-4 py-6">
       <h1 className="text-2xl font-bold mb-1">Outreach Inbox</h1>
       <p className="text-sm text-muted-foreground mb-6">
-        All outreach threads, newest activity first. Click a thread to open the client page.
+        All outreach threads, newest activity first. Open a thread to read it and reply.
       </p>
       <ThreadList threads={threads} />
     </div>

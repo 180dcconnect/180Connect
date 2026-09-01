@@ -8,14 +8,75 @@ import { InlineAlert } from "@/components/ui/inline-alert";
 import type { PendingInvite } from "@/lib/admin/team-realtime";
 import { TeamPanel } from "./team-panel";
 import type { TeamUser } from "./user-management-table";
-import { Stage, Rise } from "@/components/dashboard-stage";
+import { Rise } from "@/components/dashboard-stage";
+import { SearchRail } from "@/components/search-rail";
+import { BrandSearchBar } from "@/components/brand/search-bar";
 import { InviteDialog } from "./invite-dialog";
+import {
+  CLIENT_COUNT_FILTER_OPTIONS,
+  LAST_ACTIVE_FILTER_OPTIONS,
+  parseArrayParam,
+  ROLE_FILTER_OPTIONS,
+  STATUS_FILTER_OPTIONS,
+  TEAM_SEARCH_CATEGORIES,
+  TEAM_SEARCH_PARAMS,
+  type TeamFilterCriteria,
+} from "@/lib/admin/team-filter";
 
-export default async function AdminUsersPage() {
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+export default async function AdminUsersPage({
+  searchParams,
+}: {
+  searchParams?: SearchParams;
+}) {
   const authorization = await getCurrentActor("user:manage", {
     route: "/admin/users",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
+
+  const resolvedParams = searchParams ? await searchParams : {};
+  const query = typeof resolvedParams.q === "string" ? resolvedParams.q : "";
+  const roleValues = parseArrayParam(resolvedParams.role);
+  const clientValues = parseArrayParam(resolvedParams.clients);
+  const lastActiveValues = parseArrayParam(resolvedParams.last_active);
+  const statusValues = parseArrayParam(resolvedParams.status);
+
+  const roleLabelMap = new Map(ROLE_FILTER_OPTIONS.map((o) => [o.value, o.label]));
+  const clientLabelMap = new Map(CLIENT_COUNT_FILTER_OPTIONS.map((o) => [o.value, o.label]));
+  const lastActiveLabelMap = new Map(LAST_ACTIVE_FILTER_OPTIONS.map((o) => [o.value, o.label]));
+  const statusLabelMap = new Map(STATUS_FILTER_OPTIONS.map((o) => [o.value, o.label]));
+
+  const defaultFilters = [
+    ...roleValues.map((value) => ({
+      category: "Filter by role",
+      label: roleLabelMap.get(value) ?? value,
+      value,
+    })),
+    ...clientValues.map((value) => ({
+      category: "Filter by client load",
+      label: clientLabelMap.get(value) ?? value,
+      value,
+    })),
+    ...lastActiveValues.map((value) => ({
+      category: "Filter by last active",
+      label: lastActiveLabelMap.get(value) ?? value,
+      value,
+    })),
+    ...statusValues.map((value) => ({
+      category: "Filter by status",
+      label: statusLabelMap.get(value) ?? value,
+      value,
+    })),
+  ];
+
+  const filterCriteria: TeamFilterCriteria = {
+    query,
+    roles: roleValues,
+    clientRanges: clientValues,
+    lastActiveRanges: lastActiveValues,
+    statuses: statusValues,
+  };
 
   const supabase = await createClient();
 
@@ -98,21 +159,39 @@ export default async function AdminUsersPage() {
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
-      <Stage className="mx-auto w-full max-w-6xl space-y-10">
-        <Rise className="flex flex-wrap items-end justify-between gap-x-8 gap-y-5">
-          <div className="min-w-0">
-            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">Team members</h1>
-            <p className="mt-3 text-sm text-foreground/65">
-              Role changes apply on the user&apos;s next request.{" "}
-              <Link className="font-bold text-brand underline" href="/admin/offboard">
-                Reassign a leaver&apos;s clients
-              </Link>
-              .
-            </p>
+      <SearchRail
+        className="max-w-6xl"
+        stageClassName="space-y-10"
+        heading={
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
+                Team members
+              </h1>
+              <p className="mt-3 max-w-xl text-sm leading-[1.7] text-foreground/65">
+                Role changes apply on the user&apos;s next request.{" "}
+                <Link className="font-bold text-brand underline" href="/admin/offboard">
+                  Reassign a leaver&apos;s clients
+                </Link>
+                .
+              </p>
+            </div>
+            <div className="shrink-0 pt-1">
+              <InviteDialog />
+            </div>
           </div>
-          <InviteDialog />
-        </Rise>
-
+        }
+        bar={
+          <BrandSearchBar
+            placeholder="Search team members for"
+            subjects={["team members", "roles", "CAMs", "admins"]}
+            defaultQuery={query}
+            params={TEAM_SEARCH_PARAMS}
+            categories={TEAM_SEARCH_CATEGORIES}
+            defaultFilters={defaultFilters}
+          />
+        }
+      >
         {error && (
           <Rise>
             <InlineAlert
@@ -125,12 +204,13 @@ export default async function AdminUsersPage() {
         {!error && (
           <TeamPanel
             currentUserId={authorization.actor.id}
+            filterCriteria={filterCriteria}
             initialPendingInvites={(pendingInvites as PendingInvite[] | null) ?? []}
             initialTeamUsers={teamUsers}
             pendingInvitesError={Boolean(pendingError)}
           />
         )}
-      </Stage>
+      </SearchRail>
     </div>
   );
 }

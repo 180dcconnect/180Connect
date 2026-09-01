@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Clock, ExternalLink, Globe, ShieldCheck, Sparkles } from "lucide-react";
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
+import { SectionCard } from "./section-card";
 import { parseBookletSections } from "@/lib/booklet/parse-sections";
 import type { BookletSource } from "@/lib/booklet/sources";
 
@@ -245,7 +246,7 @@ export function BookletPanel({
   // historical one, falls back to the boolean-only derivation instead.
   const [freshWebsiteContext, setFreshWebsiteContext] = useState<WebsiteContextResult | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
-  const sectionRef = useRef<HTMLElement>(null);
+  const sectionRef = useRef<HTMLDivElement>(null);
   const autoTriggered = useRef(false);
   // Ref, not the busy state: two clicks inside one render window both read
   // stale state, and each fires a paid Gemini call. The ref is checked before
@@ -361,34 +362,27 @@ export function BookletPanel({
   }, []);
 
   return (
-    <section
-      aria-labelledby="booklet-heading"
-      className="mt-6 overflow-hidden rounded-2xl border border-brand/20 bg-gradient-to-br from-brand/[0.07] via-white to-white p-6 shadow-sm"
-      ref={sectionRef}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-center gap-2.5">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-brand/15 text-brand-hover">
-            <Sparkles aria-hidden="true" className="h-4 w-4" />
-          </span>
-          <div>
-            <h2 className="text-lg font-bold" id="booklet-heading">Client booklet</h2>
-            <p className="text-xs text-foreground/55">
-              AI-generated research summary, for outreach preparation
-            </p>
-          </div>
-        </div>
-
-        {(currentVersion || error) && !busy && !viewingVersion && (
-          <button
-            className="shrink-0 rounded-full border border-brand/30 px-4 py-2 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
-            onClick={generate}
-            type="button"
-          >
-            Regenerate
-          </button>
-        )}
-      </div>
+    /* The wrapper exists only to hold the scroll target: arriving with
+       ?booklet scrolls this card into view, and SectionCard does not forward a
+       ref. */
+    <div ref={sectionRef}>
+      <SectionCard
+        action={
+          (currentVersion || error) && !busy && !viewingVersion ? (
+            <button
+              className="shrink-0 rounded-full border border-brand/30 px-4 py-2 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
+              onClick={generate}
+              type="button"
+            >
+              Regenerate
+            </button>
+          ) : undefined
+        }
+        headingId="booklet-heading"
+        hint="AI-generated research summary, for outreach preparation"
+        icon={<Sparkles />}
+        title="Client booklet"
+      >
 
       {!busy && !viewingVersion && (
         <div className="mt-4">
@@ -539,6 +533,7 @@ export function BookletPanel({
           )}
         </div>
       )}
-    </section>
+      </SectionCard>
+    </div>
   );
 }

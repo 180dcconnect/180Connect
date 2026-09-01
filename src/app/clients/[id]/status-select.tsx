@@ -21,9 +21,16 @@ import { OriginButton } from "@/components/ui/origin-button";
 export function StatusSelect({
   organisationId,
   currentStatus,
+  onDark = false,
 }: {
   organisationId: string;
   currentStatus: string;
+  /**
+   * Rendered on the record header's charcoal band. The default save button is
+   * charcoal glass, which vanishes against it, and the error red is unreadable
+   * on ink — both swap for light-on-dark equivalents.
+   */
+  onDark?: boolean;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<PipelineStatus>(
@@ -59,7 +66,7 @@ export function StatusSelect({
   }
 
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-2.5">
+    <div className={`flex flex-wrap items-center gap-2.5 ${onDark ? "mt-2.5" : "mt-4"}`}>
       <label className="sr-only" htmlFor={`status-${organisationId}`}>
         Pipeline status
       </label>
@@ -85,11 +92,12 @@ export function StatusSelect({
         loading={busy}
         disabled={busy || !dirty}
         onClick={save}
+        variant={onDark ? "card" : "default"}
       >
         {busy ? "Saving…" : "Save status"}
       </OriginButton>
       {error && (
-        <p aria-live="polite" role="alert" className="w-full text-[13px] font-bold text-destructive">
+        <p aria-live="polite" role="alert" className={`w-full text-[13px] font-bold ${onDark ? "text-red-200" : "text-destructive"}`}>
           {error}
         </p>
       )}

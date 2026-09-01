@@ -7,13 +7,21 @@ import { OriginButton } from "@/components/ui/origin-button";
 export function SuppressButton({
   organisationId,
   selfApproves,
+  defaultExpanded = false,
 }: {
   organisationId: string;
   /** True for an admin caller — request_suppression self-approves, no pending step. */
   selfApproves: boolean;
+  /**
+   * Skip the collapsed trigger and open straight into the reason form. Set by
+   * the record header's overflow menu, where the menu item *is* the trigger and
+   * a second "Flag as Do Not Contact" button inside the dialog would be a step
+   * that asks the same question twice.
+   */
+  defaultExpanded?: boolean;
 }) {
   const router = useRouter();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [reason, setReason] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);

@@ -38,7 +38,12 @@ import {
  * simply never reach this builder.
  */
 export type InboxMessageRow = OutreachMessageRow & { organisation_id: string };
-export type InboxReplyRow = ReplyEventRow & { organisation_id: string; intent?: string | null };
+export type InboxReplyRow = ReplyEventRow & {
+  organisation_id: string;
+  intent?: string | null;
+  /** REPLY_EVENTS.contact_id — lets the view name the person who replied. */
+  contact_id?: string | null;
+};
 
 /** How a thread row summarises its state at a glance. */
 export type InboxThreadStatus = "replied" | "awaiting" | "sent";
@@ -67,6 +72,13 @@ export type InboxThread = {
   /** How many sent messages + replies make up this thread. */
   messageCount: number;
   relativeTime: string;
+  /**
+   * A reply from the last 48 hours — what a CAM opened the list to find, so the
+   * row reads as unread. Computed here against the caller's `now` rather than
+   * in the component, which would re-evaluate it against the browser clock and
+   * could disagree with the server's render near the boundary.
+   */
+  isRecent: boolean;
 };
 
 /** Snippets longer than this are truncated (with an ellipsis) in the list. */
@@ -95,19 +107,17 @@ export type ConversationEntry = {
   id: string;
   type: "email_sent" | "reply_received";
   timestamp: string;
-  /** "Ada Lovelace" or "The client" — same actor vocabulary as the timeline. */
+  /** "Ada Lovelace" for a send; the contact's name, or "The client", for a reply. */
   actorName: string;
-  /** Email subject; replies answer the thread and carry none. */
+  /** Replies carry no subject of their own. */
   subject: string | null;
-  /** Full body text. */
   body: string;
+  /**
+   * Classified intent of a reply (REPLY_EVENTS.intent). Only ever set on
+   * `reply_received`; null on sends and on replies never classified.
+   */
+  intent: string | null;
 };
-
-/**
- * Sent-message rows for the conversation view: unlike the thread list (which
- * only needs the subject), the conversation renders the full body.
- */
-export type ConversationMessageRow = InboxMessageRow & { body: string | null };
 
 /**
  * One organisation's conversation in reading order (oldest first): every sent
@@ -120,6 +130,12 @@ export function buildConversation(
   replies: readonly InboxReplyRow[],
   orgId: string,
   orgNames: ReadonlyMap<string, string>,
+  /**
+   * contacts.id → display name. A reply whose contact resolves is attributed to
+   * that person; anything else keeps @/lib/timeline's "The client", so the two
+   * views never disagree about how an unknown sender is named.
+   */
+  contactNames: ReadonlyMap<string, string> = new Map(),
 ): ConversationEntry[] {
   if (!orgNames.get(orgId)) return [];
 
@@ -136,19 +152,22 @@ export function buildConversation(
       actorName: entry.actorName,
       subject: row.subject,
       body: row.body ?? "",
+      intent: null,
     });
   }
 
   for (const row of replies) {
     if (row.organisation_id !== orgId) continue;
     const entry = buildReplyReceivedEntry(row);
+    const contactName = row.contact_id ? contactNames.get(row.contact_id) : null;
     entries.push({
       id: entry.id,
       type: "reply_received",
       timestamp: entry.timestamp,
-      actorName: entry.actorName,
+      actorName: contactName?.trim() || entry.actorName,
       subject: null,
       body: row.reply_body,
+      intent: row.intent?.trim() || null,
     });
   }
 
@@ -262,6 +281,7 @@ export function buildInboxThreads(
     if (!newest) continue;
     const orgName = orgNames.get(orgId) ?? "";
     const latestReply = bucket.events.find((e) => e.type === "reply_received");
+    const status = threadStatus(bucket.events);
     built.push({
       orgId,
       orgName,
@@ -271,10 +291,11 @@ export function buildInboxThreads(
       lastEventLabel: newest.eventLabel,
       subject: newest.subject,
       snippet: newest.snippet,
-      status: threadStatus(bucket.events),
+      status,
       replyIntent: latestReply?.replyIntent ?? null,
       messageCount: bucket.messageCount,
       relativeTime: formatRelativeTime(new Date(newest.timestamp), now),
+      isRecent: status === "replied" && isRecentReply(newest.timestamp, now),
     });
   }
 

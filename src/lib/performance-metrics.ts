@@ -125,7 +125,20 @@ export type LatestScoreRow = {
   scored_at: string;
 };
 
-export type TeamUserRow = { id: string; full_name: string | null; role: string };
+export type TeamUserRow = {
+  id: string;
+  full_name: string | null;
+  role: string;
+  /**
+   * Optional because nothing in this module reads them — they are here so the
+   * dashboard's one `users` read can also feed the user hover card, rather than
+   * the card being handed placeholder values (which is how it came to display
+   * an empty email and "last active: Never" for the whole team).
+   */
+  email?: string | null;
+  last_seen_at?: string | null;
+  is_active?: boolean | null;
+};
 
 export type PerformanceInput = {
   messages: SentMessageRow[];

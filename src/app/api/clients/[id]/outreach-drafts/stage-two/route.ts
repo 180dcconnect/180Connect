@@ -296,6 +296,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         outreachMessageId: message.id,
         draft: result.draft,
         model,
+        activity: "follow_up_email",
         usage: result.usage,
         costUsd,
         prompt: result.prompt,

@@ -324,6 +324,7 @@ export async function POST(
     // F113: the model in force at generation time, not a live lookup of the current
     // default — see the migration for why a later env change must never rewrite history.
     model,
+    activity: isRegeneration ? "email_regeneration" : "initial_email",
     // F112: the exact prompt this generation actually sent — every attempt (create
     // or regenerate) gets its own row here, never overwritten, so this is also the
     // audit trail AC3 asks for.

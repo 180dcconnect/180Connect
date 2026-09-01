@@ -6,8 +6,11 @@ import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import {
   ArrowLeft,
+  ArrowRight,
   ChevronLeft,
+  ChevronRight,
   MoveLeft,
+  MoveRight,
   CornerUpLeft,
   Undo2,
 } from "lucide-react";
@@ -16,7 +19,8 @@ import { LIP } from "@/components/brand/tokens";
 import { LIFT } from "@/components/brand/motion";
 
 export type BackButtonVariant =
-  | "sliding-door"       // Sliding icon chamber (expanding 1/4 to 100% on hover)
+  | "sliding-door"       // Sliding icon chamber (expanding 1/4 to 100% on hover) — icon left
+  | "sliding-door-right" // Mirrored: icon right, arrow →, chamber expands from right
   | "signature-dual"     // 180Connect signature tangent disc + label capsule
   | "glass-capsule"      // Specular frosted glass capsule with top lip highlight
   | "editorial-minimal"  // High-fashion editorial type with sliding underline sweep
@@ -221,6 +225,75 @@ export const BackButton = React.forwardRef<HTMLElement, BackButtonProps>(
                 "transition-transform duration-300 group-hover:-translate-x-0.5",
                 size === "sm" ? 14 : size === "lg" ? 18 : 16
               )}
+            </i>
+          </div>
+        </Wrapper>
+      );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // VARIANT 0b: Sliding Door Chamber — mirrored (icon on right →)
+    // ──────────────────────────────────────────────────────────────────────────
+    if (variant === "sliding-door-right") {
+      const isDark = tone === "dark" || tone === "glass";
+      const isBrand = tone === "brand";
+
+      // For the feed (white card) we want the mirrored variant to be visible before hover
+      // but keep the dark hover lime (#e6f5c0) the user likes. isDark now uses a
+      // frosted glass (blur view) idle state — like React Native BlurView / Next
+      // `backdrop-blur-xl` — so it reads as glass before hover, lime on hover.
+      const baseCapsuleClass = isDark
+        ? "bg-white/60 backdrop-blur-xl backdrop-saturate-150 text-[#0c1014] border border-black/[0.08] shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:bg-white/80 hover:border-black/20 hover:shadow-md"
+        : isBrand
+        ? "bg-brand/10 text-brand border border-brand/25 hover:border-brand/40"
+        : "bg-white text-[#0c1014] border border-black/[0.08] shadow-xs hover:border-black/20 hover:shadow-md";
+
+      const chamberClass = isDark
+        ? "bg-black/[0.05] text-[#0c1014]/75 group-hover:bg-[#e6f5c0] group-hover:text-[#0c1014] group-hover:shadow-md"
+        : isBrand
+        ? "bg-brand/15 text-brand group-hover:bg-brand group-hover:text-white group-hover:shadow-md"
+        : "bg-black/[0.05] text-[#0c1014]/75 group-hover:bg-[#0c1014] group-hover:text-white group-hover:shadow-md";
+
+      const heightClass = size === "sm" ? "h-8 min-w-[90px]" : size === "lg" ? "h-11 min-w-[110px]" : "h-9 min-w-[95px]";
+
+      // Map left-pointing icon prop to its right-pointing counterpart
+      const rightIcon = ((): React.ReactNode => {
+        const cls = "transition-transform duration-300 group-hover:translate-x-0.5";
+        const sz = size === "sm" ? 14 : size === "lg" ? 18 : 16;
+        switch (icon) {
+          case "chevron":
+            return <ChevronRight className={cn("shrink-0", cls)} size={sz} strokeWidth={2.2} aria-hidden="true" />;
+          case "long-arrow":
+            return <MoveRight className={cn("shrink-0", cls)} size={sz} strokeWidth={2} aria-hidden="true" />;
+          case "corner":
+          case "undo":
+            // No natural right variant — fall back to ArrowRight
+            return <ArrowRight className={cn("shrink-0", cls)} size={sz} strokeWidth={2.2} aria-hidden="true" />;
+          case "arrow":
+          default:
+            return <ArrowRight className={cn("shrink-0", cls)} size={sz} strokeWidth={2.2} aria-hidden="true" />;
+        }
+      })();
+
+      return (
+        <Wrapper href={href} {...commonProps}>
+          <div
+            className={cn(
+              "group relative overflow-hidden rounded-md font-bold transition-all duration-300 flex items-center justify-center cursor-pointer",
+              heightClass,
+              sizeConfig.text,
+              baseCapsuleClass,
+              className
+            )}
+            style={{
+              boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.9)",
+            }}
+          >
+            <span className="w-full text-center pl-2 pr-6 -translate-x-2 transition-all duration-300 group-hover:opacity-0 group-hover:scale-95 flex items-center justify-center">
+              {children || label}
+            </span>
+            <i className={cn("absolute inset-y-0 right-0 z-10 grid w-1/4 place-items-center transition-all duration-300 ease-out group-hover:w-full", chamberClass)}>
+              {rightIcon}
             </i>
           </div>
         </Wrapper>

@@ -162,6 +162,27 @@ export default function ProgressMetricCard({
     [baseSeries, selected],
   );
 
+  /**
+   * The first and last day the card actually holds data for, taken from the
+   * UNWINDOWED series — `visibleSeries` is already cut to the selected period,
+   * and bounding the calendar by the current selection would make it impossible
+   * to widen the window again.
+   *
+   * Handed to the custom-range calendar so days with nothing behind them are
+   * greyed out rather than selectable-then-empty.
+   */
+  const seriesBounds = useMemo(() => {
+    let min: string | null = null;
+    let max: string | null = null;
+    for (const entry of baseSeries) {
+      for (const point of entry.data) {
+        if (min === null || point.date < min) min = point.date;
+        if (max === null || point.date > max) max = point.date;
+      }
+    }
+    return { min, max };
+  }, [baseSeries]);
+
   const primary = visibleSeries[0];
   const isMulti = visibleSeries.length > 1;
   const hasData = (primary?.data.length ?? 0) >= 2;
@@ -341,6 +362,8 @@ export default function ProgressMetricCard({
             accentText={color.text}
             allowCustomRange={allowCustomRange}
             defaultOption={defaultPeriod}
+            rangeMin={seriesBounds.min}
+            rangeMax={seriesBounds.max}
           />
           </div>
         </div>

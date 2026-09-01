@@ -60,14 +60,7 @@ export function FeedPagination({
     >
       {/* Left: Summary & Per Page Toggle */}
       <div className="flex flex-wrap items-center gap-3">
-        <span className="text-[11px] font-medium text-foreground/45">
-          Showing <span className="font-semibold text-foreground/75">{from}–{to}</span> of{" "}
-          <span className="font-semibold text-foreground/75">{totalItems}</span>
-        </span>
-
-        <span className="hidden h-3 w-px bg-black/[0.08] dark:bg-white/[0.1] sm:inline-block" />
-
-        <div className="flex items-center gap-1.5 text-[11px] text-foreground/45">
+        <div className="flex items-center gap-1.5 text-[12px] text-foreground">
           <span>Show</span>
           <Select
             value={String(pageSize)}
@@ -78,7 +71,7 @@ export function FeedPagination({
           >
             <SelectTrigger
               size="sm"
-              className="h-6 w-auto min-w-[44px] gap-1 rounded-md border border-black/10 bg-white px-2 py-0 text-[11px] font-semibold text-foreground shadow-2xs hover:bg-black/5 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
+              className="h-6 w-auto min-w-[44px] gap-1 rounded-md border border-black/[0.08] bg-white px-2 py-0 text-[12px] font-semibold text-foreground shadow-2xs hover:bg-black/5 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
               aria-label="Items per page"
             >
               <SelectValue placeholder={String(pageSize)} />
@@ -91,8 +84,15 @@ export function FeedPagination({
               ))}
             </SelectContent>
           </Select>
-          <span>per page</span>
+          <span className="text-[12px] font-medium text-foreground">per page</span>
         </div>
+
+        <span className="hidden h-3 w-px bg-black/[0.08] dark:bg-white/[0.1] sm:inline-block" />
+        <span className="text-[12px] font-medium text-foreground">
+          Showing <span className="font-semibold text-foreground">{from}–{to}</span> of{" "}
+          <span className="font-semibold text-foreground">{totalItems}</span>
+        </span>
+
       </div>
 
       {/* Right: Page Navigation */}

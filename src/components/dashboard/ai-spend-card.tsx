@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { aiSpendChange, formatUsd, type AiSpendSummary } from "@/lib/dashboard/ai-spend";
+import { aiSpendChange, formatUsd, AI_GENERATION_ACTIVITIES, AI_GENERATION_ACTIVITY_LABELS, type AiSpendSummary } from "@/lib/dashboard/ai-spend";
 
 /**
  * F213 — month-to-date AI spend, admin only.
@@ -73,6 +73,30 @@ export function AiSpendCard({ summary }: { summary: AiSpendSummary }) {
           </div>
         )}
       </dl>
+
+      {summary.spendByWeek.length > 0 && (
+        <div className="border-t border-black/[0.06] px-5 py-4">
+          <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Spend by day</p>
+          <div className="space-y-2.5">
+            {summary.spendByWeek.map((bucket) => (
+              <div key={bucket.key} className="flex items-center gap-3">
+                <span className="w-12 shrink-0 text-[11px] text-foreground/45">{bucket.label}</span>
+                <div className="flex h-3 flex-1 overflow-hidden rounded-full bg-black/[0.05]" title={formatUsd(bucket.totalCostUsd)}>
+                  {AI_GENERATION_ACTIVITIES.map((activity) => {
+                    const amount = bucket.byActivity[activity];
+                    if (!amount) return null;
+                    return <span key={activity} style={{ width: `${(amount / bucket.totalCostUsd) * 100}%` }} className={`first:bg-brand ${activity === "follow_up_email" ? "bg-sky-500" : activity === "client_booklet" ? "bg-violet-500" : activity === "other" ? "bg-slate-400" : "bg-indigo-500"}`} title={`${AI_GENERATION_ACTIVITY_LABELS[activity]}: ${formatUsd(amount)}`} />;
+                  })}
+                </div>
+                <span className="w-14 shrink-0 text-right text-[11px] font-semibold tabular-nums text-foreground/60">{formatUsd(bucket.totalCostUsd)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-foreground/45">
+            {AI_GENERATION_ACTIVITIES.map((activity) => <span key={activity}><i className={`mr-1 inline-block h-2 w-2 rounded-full ${activity === "follow_up_email" ? "bg-sky-500" : activity === "client_booklet" ? "bg-violet-500" : activity === "other" ? "bg-slate-400" : "bg-indigo-500"}`} />{AI_GENERATION_ACTIVITY_LABELS[activity]}</span>)}
+          </div>
+        </div>
+      )}
 
       {summary.unpriced > 0 && (
         <p className="border-t border-black/[0.06] bg-black/[0.02] px-5 py-3 text-[12px] leading-[1.6] text-foreground/55">

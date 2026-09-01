@@ -66,6 +66,41 @@ export type RecentUpdatesSources = {
   auditRows: readonly RecentAuditRow[];
 };
 
+/** Preview data for an actor (user) in the feed. */
+export type ActorPreview = {
+  id: string;
+  fullName: string | null;
+  email: string;
+  role: 'cam' | 'admin' | 'viewer' | 'leadership';
+  ownedClientCount: number;
+  lastSeenAt: string | null;
+  isActive: boolean;
+};
+
+/** Preview data for an organisation in the feed. */
+export type OrganisationPreview = {
+  id: string;
+  legalName: string;
+  organisationType: string | null;
+  sector: string | null;
+  city: string | null;
+  countryCode: string | null;
+  outreachStatus: string;
+  website: string | null;
+  ownerId: string | null;
+  ownerName: string | null;
+  ownerEmail: string | null;
+  /**
+   * F058 scoring band and score, from `latest_scores`. On the hover card because
+   * it is the one fact that answers "is this worth my time right now", and the
+   * dashboard already reads the whole table for the queue-quality card — so it
+   * costs nothing to carry here. Null for an organisation that has not been
+   * scored yet, which is a real state, not missing data.
+   */
+  priorityBand?: string | null;
+  priorityScore?: number | null;
+};
+
 /** One feed row: what changed, on which client, when, and by whom. */
 export type FormattedRecentUpdate = {
   id: string;
@@ -91,6 +126,10 @@ export type FormattedRecentUpdate = {
   summary: string;
   relativeTime: string;
   timestamp: string;
+  /** Optional preview data for the actor who performed the action. */
+  actorPreview?: ActorPreview;
+  /** Optional preview data for the organisation the action relates to. */
+  orgPreview?: OrganisationPreview;
 };
 
 /**
@@ -146,6 +185,8 @@ export function buildRecentUpdates(
   orgNames: ReadonlyMap<string, string>,
   names: ReadonlyMap<string, string | null>,
   now: Date = new Date(),
+  actorPreviewMap?: ReadonlyMap<string, ActorPreview>,
+  orgPreviewMap?: ReadonlyMap<string, OrganisationPreview>,
 ): FormattedRecentUpdate[] {
   const cutoff = recentUpdatesCutoff(now);
   const scoped: ScopedEntry[] = [];
@@ -194,5 +235,7 @@ export function buildRecentUpdates(
       summary: entry.summary,
       relativeTime: formatRelativeTime(new Date(entry.timestamp), now),
       timestamp: entry.timestamp,
+      actorPreview: actorPreviewMap?.get(entry.actorName ?? ''),
+      orgPreview: orgPreviewMap?.get(entry.orgId),
     }));
 }

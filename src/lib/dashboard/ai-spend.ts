@@ -22,11 +22,41 @@
  * "£12.40 across 300 generations, 8 unpriced" is honest; "£12.40" alone is not.
  */
 
+export type AiGenerationActivity = "initial_email" | "follow_up_email" | "email_regeneration" | "client_booklet" | "other";
+
 export type AiGenerationCostRow = {
   created_at: string;
   cost_usd: number | string | null;
   total_tokens: number | null;
   model: string | null;
+  /** The linked activity classification; unknown records remain visible as Other. */
+  activity?: AiGenerationActivity;
+};
+
+export type AiActivityCostRow = AiGenerationCostRow & {
+  activity: AiGenerationActivity;
+};
+
+export type AiSpendBucket = {
+  key: string;
+  label: string;
+  totalCostUsd: number;
+  byActivity: Record<AiGenerationActivity, number>;
+};
+
+export const AI_GENERATION_ACTIVITIES: readonly AiGenerationActivity[] = [
+  "initial_email",
+  "follow_up_email",
+  "client_booklet",
+  "other",
+];
+
+export const AI_GENERATION_ACTIVITY_LABELS: Record<AiGenerationActivity, string> = {
+  initial_email: "Initial email",
+  follow_up_email: "Follow-up email",
+  email_regeneration: "Email regeneration",
+  client_booklet: "Client booklet",
+  other: "Other",
 };
 
 export type AiSpendSummary = {
@@ -43,6 +73,9 @@ export type AiSpendSummary = {
   models: string[];
   /** ISO day the current period starts (the 1st of the month). */
   periodFrom: string;
+  spendByWeek: AiSpendBucket[];
+  /** Cost-bearing and unpriced generations grouped by activity. */
+  activityTotals: Record<AiGenerationActivity, { costUsd: number; generations: number; unpriced: number; totalTokens: number }>;
 };
 
 /**
@@ -78,6 +111,21 @@ export function aiSpendSummary(
   let unpriced = 0;
   let totalTokens = 0;
   const models = new Set<string>();
+  const spendByWeek = new Map<string, AiSpendBucket>();
+  const activityTotals: AiSpendSummary["activityTotals"] = {
+    initial_email: { costUsd: 0, generations: 0, unpriced: 0, totalTokens: 0 },
+    follow_up_email: { costUsd: 0, generations: 0, unpriced: 0, totalTokens: 0 },
+    email_regeneration: { costUsd: 0, generations: 0, unpriced: 0, totalTokens: 0 },
+    client_booklet: { costUsd: 0, generations: 0, unpriced: 0, totalTokens: 0 },
+    other: { costUsd: 0, generations: 0, unpriced: 0, totalTokens: 0 },
+  };
+  const emptyActivity = (): Record<AiGenerationActivity, number> => ({
+    initial_email: 0,
+    follow_up_email: 0,
+    email_regeneration: 0,
+    client_booklet: 0,
+    other: 0,
+  });
 
   for (const row of rows) {
     const at = Date.parse(row.created_at);
@@ -86,9 +134,31 @@ export function aiSpendSummary(
 
     if (at >= monthStartMs && at <= nowMs) {
       generations += 1;
-      if (cost === null) unpriced += 1;
-      else costUsd += cost;
-      if (row.total_tokens && row.total_tokens > 0) totalTokens += row.total_tokens;
+      const activity = row.activity ?? "other";
+      const activityTotal = activityTotals[activity];
+      activityTotal.generations += 1;
+      if (cost === null) {
+        unpriced += 1;
+        activityTotal.unpriced += 1;
+      } else {
+        costUsd += cost;
+        activityTotal.costUsd += cost;
+        const date = new Date(at);
+        const key = date.toISOString().slice(0, 10);
+        const bucket = spendByWeek.get(key) ?? {
+          key,
+          label: date.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }),
+          totalCostUsd: 0,
+          byActivity: emptyActivity(),
+        };
+        bucket.totalCostUsd += cost;
+        bucket.byActivity[activity] += cost;
+        spendByWeek.set(key, bucket);
+      }
+      if (row.total_tokens && row.total_tokens > 0) {
+        totalTokens += row.total_tokens;
+        activityTotal.totalTokens += row.total_tokens;
+      }
       if (row.model) models.add(row.model);
       continue;
     }
@@ -106,6 +176,8 @@ export function aiSpendSummary(
     totalTokens,
     models: Array.from(models).sort((a, b) => a.localeCompare(b)),
     periodFrom: new Date(monthStartMs).toISOString().slice(0, 10),
+    spendByWeek: Array.from(spendByWeek.values()).sort((a, b) => a.key.localeCompare(b.key)),
+    activityTotals,
   };
 }
 

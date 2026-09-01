@@ -41,6 +41,8 @@ import {
   type RecentNoteRow,
   type RecentOutreachMessageRow,
   type RecentReplyEventRow,
+  type ActorPreview,
+  type OrganisationPreview,
 } from "@/lib/recent-updates";
 import { myWorkSummary, type MyWorkSummary } from "@/lib/dashboard/my-work";
 import { replyQueueSummary, type ReplyQueueSummary } from "@/lib/dashboard/reply-queue";
@@ -179,7 +181,9 @@ export default async function DashboardPage({
       while (true) {
         const { data, error } = await        supabase
           .from("organisations")
-          .select("id, legal_name, outreach_status, owner_id, updated_at, created_at, sector")
+          .select(
+            "id, legal_name, outreach_status, owner_id, updated_at, created_at, sector, organisation_type, city, country_code, website",
+          )
           .order("created_at", { ascending: true })
           .order("id", { ascending: true })
           .range(from, from + step - 1)
@@ -288,11 +292,6 @@ export default async function DashboardPage({
     }
     if (rawActivity.error) {
       await reportError(rawActivity.error, { operation: "dashboard.team_activity" });
-    } else {
-      teamActivities = formatTeamActivities(
-        (rawActivity.data ?? []) as RawTeamActivityRow[],
-        actor.id,
-      );
     }
 
     // F028 sources fail independently, like every other section on this page:
@@ -371,7 +370,7 @@ export default async function DashboardPage({
         fetchAllRows<TeamUserRow>((from, to) =>
           supabase
             .from("users")
-            .select("id, full_name, role")
+            .select("id, full_name, role, email, last_seen_at, is_active")
             .order("full_name", { ascending: true })
             .range(from, to)
             .overrideTypes<TeamUserRow[], { merge: false }>(),
@@ -478,6 +477,96 @@ export default async function DashboardPage({
         }
       }
 
+      // Hover-card preview maps.
+      //
+      // Both are built from reads this page already does — the `users` and
+      // `organisations` queries above now select the handful of extra columns the
+      // cards need, rather than the maps being filled with placeholder nulls.
+      const usersById = new Map((perfUsers.data ?? []).map((row) => [row.id, row]));
+
+      // F058 band/score per organisation, off the `latest_scores` read the
+      // queue-quality card already needs. `latest_scores` holds one row per org,
+      // so no newest-wins reduction is required here.
+      const scoreByOrg = new Map<string, { band: string | null; score: number | null }>(
+        (perfScores.data ?? []).map((row) => [
+          row.organisation_id,
+          { band: row.priority_band, score: row.priority_score },
+        ]),
+      );
+
+      // How many clients each CAM owns, counted once here rather than with a
+      // `rows.find` per organisation (which was also looking up the wrong table).
+      const ownedCountByUser = new Map<string, number>();
+      for (const row of rows) {
+        if (!row.owner_id) continue;
+        ownedCountByUser.set(row.owner_id, (ownedCountByUser.get(row.owner_id) ?? 0) + 1);
+      }
+
+      const actorPreviewMap = new Map<string, ActorPreview>();
+      for (const user of perfUsers.data ?? []) {
+        const role =
+          user.role === "leadership"
+            ? "leadership"
+            : user.role === "admin"
+              ? "admin"
+              : user.role === "viewer"
+                ? "viewer"
+                : "cam";
+
+        const preview: ActorPreview = {
+          id: user.id,
+          fullName: user.full_name,
+          email: user.email ?? "",
+          role,
+          ownedClientCount: ownedCountByUser.get(user.id) ?? 0,
+          lastSeenAt: user.last_seen_at ?? null,
+          isActive: user.is_active ?? true,
+        };
+
+        // Keyed by BOTH id and name: recent-updates and team-activity look actors
+        // up by whichever they hold. Name-only keying also silently merged two
+        // people who happen to share a name.
+        actorPreviewMap.set(user.id, preview);
+        if (user.full_name) actorPreviewMap.set(user.full_name, preview);
+      }
+
+      const orgPreviewMap = new Map<string, OrganisationPreview>();
+      for (const row of rows) {
+        // `owner_id` is a USER id. The previous lookup searched `rows` — the
+        // organisations — for it and took that row's `legal_name`, so the owner
+        // was always null, and would have shown a charity's name as the owner if
+        // an id had ever matched.
+        const owner = row.owner_id ? usersById.get(row.owner_id) : undefined;
+
+        orgPreviewMap.set(row.id, {
+          id: row.id,
+          legalName: row.legal_name,
+          organisationType: row.organisation_type ?? null,
+          sector: row.sector ?? null,
+          city: row.city ?? null,
+          countryCode: row.country_code ?? null,
+          outreachStatus: row.outreach_status,
+          website: row.website ?? null,
+          ownerId: row.owner_id,
+          ownerName: owner?.full_name ?? null,
+          ownerEmail: owner?.email ?? null,
+          priorityBand: scoreByOrg.get(row.id)?.band ?? null,
+          priorityScore: scoreByOrg.get(row.id)?.score ?? null,
+        });
+      }
+
+      // Format team activities with preview data
+      teamActivities = formatTeamActivities(
+        (rawActivity.data ?? []) as RawTeamActivityRow[],
+        actor.id,
+        new Date(),
+        // ownedCounts — not read on this page; the previews are the 5th and 6th
+        // parameters, and passing two placeholders here pushed them to 6th/7th.
+        undefined,
+        actorPreviewMap,
+        orgPreviewMap,
+      );
+
       recentUpdates = buildRecentUpdates(
         {
           notes: (rawUpdateNotes.data ?? []) as unknown as RecentNoteRow[],
@@ -487,6 +576,9 @@ export default async function DashboardPage({
         },
         orgNames,
         updateNames,
+        new Date(),
+        actorPreviewMap,
+        orgPreviewMap,
       );
 
       if (actor.role === "admin") {
@@ -505,21 +597,40 @@ export default async function DashboardPage({
           supabase.from("suppressions").select("id", { count: "exact", head: true }).eq("status", "pending"),
           supabase.from("edit_suggestions").select("id", { count: "exact", head: true }).eq("status", "pending"),
           supabase.from("field_discrepancies").select("id", { count: "exact", head: true }).eq("status", "pending"),
-          fetchAllRows<AiGenerationCostRow>((from, to) =>
-            supabase
-              .from("ai_generations")
-              .select("created_at, cost_usd, total_tokens, model")
+          fetchAllRows<AiGenerationCostRow & { outreach_message_id: string | null }>((from, to) =>
+          supabase
+            .from("ai_generations")
+            .select("created_at, cost_usd, total_tokens, model, outreach_message_id")
               .gte("created_at", aiWindowStart)
               .order("created_at", { ascending: true })
               .range(from, to)
-              .overrideTypes<AiGenerationCostRow[], { merge: false }>(),
+              .overrideTypes<(AiGenerationCostRow & { outreach_message_id: string | null })[], { merge: false }>(),
           ),
         ]);
 
         if (aiCosts.error) {
           await reportError(aiCosts.error, { operation: "dashboard.ai_spend" });
         } else {
-          aiSpend = aiSpendSummary(aiCosts.data ?? []);
+          const messageIds = (aiCosts.data ?? [])
+            .map((row) => row.outreach_message_id)
+            .filter((id): id is string => Boolean(id));
+          const { data: linkedMessages } = messageIds.length
+            ? await supabase.from("outreach_messages").select("id, created_at, organisation_id").in("id", messageIds)
+            : { data: [] as { id: string; created_at: string; organisation_id: string }[] };
+          const messageDates = new Map((linkedMessages ?? []).map((row) => [row.id, row.created_at]));
+          const { data: booklets } = await supabase
+            .from("booklet_generations")
+            .select("created_at, cost_usd, total_tokens, model, input_tokens, output_tokens")
+            .gte("created_at", aiWindowStart);
+          aiSpend = aiSpendSummary([
+            ...(aiCosts.data ?? []).map((row) => ({
+              ...row,
+              // `as const` or this widens to `string` and stops matching
+              // AiGenerationActivity — the booklet branch below already has it.
+              activity: "initial_email" as const,
+            })),
+            ...(booklets ?? []).map((row) => ({ ...row, activity: "client_booklet" as const, total_tokens: row.total_tokens ?? ((row.input_tokens ?? 0) + (row.output_tokens ?? 0)) })),
+          ]);
         }
 
         const unassignedOrgs = rows.filter(r => r.owner_id === null).length;

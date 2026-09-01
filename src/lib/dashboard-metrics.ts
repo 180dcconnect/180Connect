@@ -18,6 +18,16 @@ export type DashboardOrgRow = {
   created_at: string;
   /** Read only by the dashboard's Performance section (SECTOR_PERFORMANCE rollup). */
   sector?: string | null;
+  /**
+   * Read only by the organisation hover card, for the same reason the extra
+   * `users` columns exist on TeamUserRow: the dashboard already paginates every
+   * organisation row, so the preview can come off that read instead of being
+   * filled with nulls. Nothing in this module's metrics touches them.
+   */
+  organisation_type?: string | null;
+  city?: string | null;
+  country_code?: string | null;
+  website?: string | null;
 };
 
 export type OpenSuppression = { organisation_id: string; status: "pending" | "active" };

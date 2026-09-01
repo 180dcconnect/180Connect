@@ -2,7 +2,7 @@ import { Suspense, type ReactNode } from "react";
 
 import { Rise, Stage } from "@/components/dashboard-stage";
 
-import { loadClient, loadSuppression } from "./load-record";
+import { loadClient, loadRecordStats, loadSuppression } from "./load-record";
 import { RecordHeader } from "./record-header";
 import { RecordTabs } from "./record-tabs";
 import { TimelineRealtimeRefresher } from "./timeline-realtime";
@@ -46,13 +46,11 @@ async function SuppressionBanner({ organisationId }: { organisationId: string })
     return (
       <div
         role="alert"
-        className="rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4"
+        className="rounded-panel border border-stop/25 bg-stop-wash px-5 py-4"
       >
-        <p className="text-[11px] font-bold tracking-[0.12em] text-destructive uppercase">
-          Do not contact
-        </p>
-        <p className="mt-2 text-sm leading-[1.7] text-destructive/90">{latest?.reason}</p>
-        <p className="mt-1.5 text-[13px] leading-[1.6] text-destructive/60">
+        <p className="text-[15px] font-semibold text-stop">Do not contact</p>
+        <p className="mt-1.5 text-sm leading-[1.65] text-stop/90">{latest?.reason}</p>
+        <p className="mt-1 text-[13px] leading-[1.55] text-stop/70">
           Hidden from the active working list. Outreach is blocked. Only an admin can lift
           this.
         </p>
@@ -61,14 +59,10 @@ async function SuppressionBanner({ organisationId }: { organisationId: string })
   }
 
   return (
-    <div className="rounded-2xl border border-amber-500/25 bg-amber-500/[0.07] px-5 py-4">
-      <p className="text-[11px] font-bold tracking-[0.12em] text-amber-800 uppercase">
-        Do not contact requested
-      </p>
-      <p className="mt-2 text-sm leading-[1.7] text-amber-900/85">{latest?.reason}</p>
-      <p className="mt-1.5 text-[13px] leading-[1.6] text-amber-800/60">
-        Awaiting admin review.
-      </p>
+    <div className="rounded-panel border border-hold/25 bg-hold-wash px-5 py-4">
+      <p className="text-[15px] font-semibold text-hold">Do-not-contact requested</p>
+      <p className="mt-1.5 text-sm leading-[1.65] text-hold/90">{latest?.reason}</p>
+      <p className="mt-1 text-[13px] leading-[1.55] text-hold/70">Awaiting admin review.</p>
     </div>
   );
 }
@@ -76,7 +70,7 @@ async function SuppressionBanner({ organisationId }: { organisationId: string })
 /** Holds the header's height while it streams, so the tab bar does not jump. */
 function RecordHeaderSkeleton() {
   return (
-    <div className="h-[22rem] animate-pulse rounded-3xl bg-[#1c1a18]/90 sm:h-[19rem]" />
+    <div className="h-[21rem] animate-pulse rounded-panel border border-rule bg-white sm:h-[17rem]" />
   );
 }
 
@@ -96,11 +90,11 @@ export default async function ClientRecordLayout({
    * arrive. It costs nothing — `loadClient` is `cache()`d and `generateMetadata`
    * has already awaited it for this request.
    */
-  await loadClient(id);
+  const [, stats] = await Promise.all([loadClient(id), loadRecordStats(id)]);
 
   return (
-    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
-      <div className="mx-auto w-full max-w-6xl space-y-6">
+    <div className="min-h-screen bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+      <div className="mx-auto w-full max-w-[1400px] space-y-6">
         <Stage className="space-y-6">
           <Rise>
             <Suspense fallback={<RecordHeaderSkeleton />}>
@@ -116,7 +110,14 @@ export default async function ClientRecordLayout({
             `filter: blur(0px)`, and a filtered ancestor opens a containing
             block that breaks `position: sticky` on everything inside it — the
             same trap the old anchor rail carried a comment about. */}
-        <RecordTabs organisationId={id} />
+        <RecordTabs
+          counts={{
+            outreach: stats.outreach,
+            financials: stats.financials,
+            activity: stats.activity,
+          }}
+          organisationId={id}
+        />
 
         {children}
       </div>

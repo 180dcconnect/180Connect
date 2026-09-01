@@ -40,6 +40,7 @@ const SWEEP_ANGLE_DEG = 270; // 270 degree arc leaving open bottom-left/bottom
 export function QueueQualityCard({ bands, scored, totalOrgs, className = "" }: QueueQualityCardProps) {
   const cardId = useId().replace(/:/g, "");
   const [hoveredSegmentId, setHoveredSegmentId] = useState<string | null>(null);
+  const [hasEnteredView, setHasEnteredView] = useState(false);
 
   const unscored = Math.max(totalOrgs - scored, 0);
 
@@ -140,6 +141,16 @@ export function QueueQualityCard({ bands, scored, totalOrgs, className = "" }: Q
 
   return (
     <div
+      ref={(node) => {
+        if (!node || hasEnteredView) return;
+        const observer = new IntersectionObserver(([entry]) => {
+          if (entry.isIntersecting) {
+            setHasEnteredView(true);
+            observer.disconnect();
+          }
+        }, { threshold: 0.2 });
+        observer.observe(node);
+      }}
       className={`relative flex w-full flex-col justify-between overflow-hidden rounded-[28px] border border-border bg-card p-6 shadow-[0_2px_10px_rgba(0,0,0,0.04)] transition-all ${className}`}
     >
       {/* Top Header */}
@@ -179,11 +190,17 @@ export function QueueQualityCard({ bands, scored, totalOrgs, className = "" }: Q
                       stroke={tick.segment.color}
                       strokeWidth={3}
                       strokeLinecap="round"
+                      initial={{ opacity: 0, pathLength: 0 }}
                       animate={{
-                        opacity,
+                        opacity: hasEnteredView ? opacity : 0,
+                        pathLength: hasEnteredView ? 1 : 0,
                         strokeWidth: isSegmentActive && isTicksHovered ? 3.5 : 3,
                       }}
-                      transition={{ duration: 0.2 }}
+                      transition={{
+                        opacity: { duration: 0.25 },
+                        pathLength: { duration: 0.55, ease: "easeOut" },
+                        strokeWidth: { duration: 0.2 },
+                      }}
                       className="transition-all duration-150"
                       onPointerEnter={() => setHoveredSegmentId(tick.segment.id)}
                       onPointerLeave={() => setHoveredSegmentId(null)}

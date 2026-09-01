@@ -1,107 +1,134 @@
-import { ExternalLink, Globe, Mail } from "lucide-react";
+import Link from "next/link";
 
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { hasPermission } from "@/lib/auth/permissions";
-import { validateClientEmail } from "@/lib/client-email-validation";
-import { websiteHref } from "@/lib/website-validation";
-import { formatLocation, formatOrganisationType, formatOutreachStatus } from "@/lib/organisation-format";
+import { formatLocation, formatOrganisationType } from "@/lib/organisation-format";
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import type { OwnershipRequestStatus } from "@/lib/ownership-requests";
 import { BackButton } from "@/components/ui/back-button";
+import { VerifiedCheck } from "@/components/verified-check";
+
+const ACRONYMS = new Set(["CIC", "CIO", "LTD", "PLC", "LLP", "LBG", "IPS", "NHS", "GB", "UK", "USA"]);
+
+function toTitleCase(value: string): string {
+  return value
+    .split(/(\s+)/)
+    .map((token) => {
+      if (/^\s+$/.test(token)) return token;
+      return token
+        .split("-")
+        .map((segment) => {
+          const parts = segment.split("'");
+          return parts
+            .map((part, idx) => {
+              if (!part) return part;
+              const upper = part.toUpperCase();
+              if (ACRONYMS.has(upper)) return upper;
+              if (idx > 0) return part.toLowerCase();
+              return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+            })
+            .join("'");
+        })
+        .join("-");
+    })
+    .join("");
+}
 
 import {
   loadClient,
+  loadIdentifiers,
   loadOwner,
   loadRecordStats,
   loadScore,
+  loadSources,
   loadSuppression,
-  loadWebsite,
   requireActor,
+  type IdentifierRow,
 } from "./load-record";
-import { OwnerControl, HeaderControlShell } from "./owner-control";
+import { Key, Pill } from "./section-card";
+import { OwnerControl } from "./owner-control";
+import { PriorityDial } from "./priority-dial";
 import { RecordMenu } from "./record-menu";
 import { StatusSelect } from "./status-select";
 
 /**
- * The record's persistent header: who this client is, who owns it, where it sits
- * in the pipeline, and the five numbers worth knowing before reading anything
- * else. It renders once in `layout.tsx` and stays put while the tabs change
- * underneath it.
+ * The record's persistent header. Renders once in `layout.tsx` and stays put
+ * while the tabs change underneath it.
  *
- * The charcoal band is kept from the previous design — it is the product's
- * signature surface, shared with the client list's bulk-actions bar and search
- * bar. What changed is that it now *does* things. Ownership, pipeline status and
- * the do-not-contact flag were three cards in a right-hand column, which meant a
- * CAM scrolled past the record to change the record. They are controls up here
- * now, and the three cards are gone.
+ * Redesign (Sept 2026) — this used to be a charcoal band carrying blurred
+ * colour blobs, a 5%-opacity monogram watermark, and five glass stat tiles
+ * across its foot. It was the heaviest thing on the page and said very little:
+ * ownership was shown read-only with a line telling you to scroll down to a card
+ * to change it, and the stat strip restated counts that belong to the tabs.
  *
- * Still a server component: everything interactive is a client child
- * (`OwnerControl`, `StatusSelect`, `RecordMenu`), so the band's markup — the
- * blurs, the monogram, the stat tiles — never reaches the browser bundle.
+ * What replaces it is the thesis of the whole redesign. Every fact on this
+ * record comes from a register a charity is legally required to file with, so
+ * the header answers three questions in order:
+ *
+ *   1. **What is this?**   Legal name, type, location.
+ *   2. **Says who?**       Verified registration numbers, and the registers the
+ *                          record was assembled from. This is the part that has
+ *                          never been on screen before.
+ *   3. **So what?**        The priority score, and a plain-language call on it.
+ *
+ * Then the two things a CAM changes most — owner and pipeline stage — as
+ * controls, on every tab, instead of cards further down the page.
+ *
+ * Still a server component: everything interactive is a client child, so the
+ * header's markup never reaches the browser bundle.
  */
 
-/** First letters of the first two words — the hero monogram and owner chip. */
-function initialsOf(name: string | null | undefined): string {
-  return (name ?? "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((word) => word.charAt(0).toUpperCase())
-    .join("");
-}
+/** Registry vocabulary, from ORGANISATION_IDENTIFIERS.identifier_type. */
+const IDENTIFIER_LABELS: Record<string, string> = {
+  uk_charity: "UK charity",
+  uk_company: "UK company",
+  eu_company: "EU company",
+  international_registry: "Registry",
+  website: "Website",
+  manual: "Manual",
+};
 
-/**
- * One tile in the at-a-glance band. Glass on charcoal so the record's five
- * headline numbers read as part of the profile card itself, not as a second row
- * of white cards below it. `accent` (the priority score — the one number that
- * drives queue order) tints lime, echoing the page's single accent.
- */
-function HeroStat({
-  label,
-  value,
-  sub,
-  accent = false,
-}: {
-  label: string;
-  value: string;
-  sub?: string | null;
-  accent?: boolean;
-}) {
+function DocketChip({ row }: { row: IdentifierRow }) {
+  const label = IDENTIFIER_LABELS[row.identifier_type] ?? row.identifier_type;
+  const checked = row.verified_at
+    ? new Date(row.verified_at).toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })
+    : null;
+
   return (
-    <div className={`px-5 py-4 ${accent ? "bg-[#e6f5c0]/[0.09]" : "bg-[#1c1a18]"}`}>
-      <p className="text-[10px] font-bold tracking-[0.14em] text-[#f4f4ef]/40 uppercase">
+    <span
+      className="inline-flex items-center gap-2 rounded-inset border border-rule bg-white py-1 pr-2.5 pl-1.5 text-[12.5px] text-ink"
+      title={
+        row.registry_name
+          ? `${row.registry_name}${checked ? ` · checked ${checked}` : ""}`
+          : undefined
+      }
+    >
+      <span className="rounded-[3px] bg-lead-wash px-1.5 py-0.5 font-mono text-[10px] tracking-[0.07em] text-lead uppercase">
         {label}
-      </p>
-      <p
-        className={`mt-1 truncate text-xl font-black tabular-nums ${
-          accent ? "text-[#e6f5c0]" : "text-[#f4f4ef]"
-        }`}
-      >
-        {value}
-      </p>
-      {sub && (
-        <p className="mt-0.5 truncate text-[11px] leading-[1.4] text-[#f4f4ef]/35">{sub}</p>
-      )}
-    </div>
+      </span>
+      <span className="font-mono tabular-nums">{row.identifier_value}</span>
+      <VerifiedCheck />
+    </span>
   );
 }
 
 export async function RecordHeader({ organisationId }: { organisationId: string }) {
   const actor = await requireActor();
-  const [client, owner, suppression, { score }, stats] = await Promise.all([
-    loadClient(organisationId),
-    loadOwner(organisationId),
-    loadSuppression(organisationId),
-    loadScore(organisationId),
-    loadRecordStats(organisationId),
-  ]);
-
-  const website = await loadWebsite(client.website);
-  // Never `href={website.url}`: on the invalid branch that field is the raw
-  // stored text, and a browser resolves a scheme-less string as a path.
-  const websiteLink = websiteHref(website);
-  const email = validateClientEmail(client.contact_email);
+  const [client, owner, suppression, { score }, stats, identifiers, { sources }] =
+    await Promise.all([
+      loadClient(organisationId),
+      loadOwner(organisationId),
+      loadSuppression(organisationId),
+      loadScore(organisationId),
+      loadRecordStats(organisationId),
+      loadIdentifiers(organisationId),
+      loadSources(organisationId),
+    ]);
 
   const canEdit = hasPermission(actor.role, "client:edit");
   const isAdmin = actor.role === "admin";
@@ -119,7 +146,7 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
 
   const supabase = await createClient();
 
-  // F163: admin's CAM picker, only fetched for an admin — nobody else can reach
+  // F163: admin's CAM picker. Only fetched for an admin — nobody else can reach
   // the assign form, so the query would be wasted on every other page view.
   let team: { id: string; full_name: string | null }[] = [];
   if (isAdmin) {
@@ -157,8 +184,6 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
     ownershipDecisionNote = data?.decision_note ?? null;
   }
 
-  const clientInitials = initialsOf(client.legal_name) || "?";
-  const statusLabel = formatOutreachStatus(client.outreach_status);
   const lastActivity = stats.lastActivity
     ? new Date(stats.lastActivity).toLocaleDateString("en-GB", {
         day: "numeric",
@@ -168,20 +193,9 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
     : null;
 
   return (
-    <div className="relative overflow-hidden rounded-3xl bg-[#1c1a18] text-[#f4f4ef] shadow-[0_24px_60px_-28px_rgba(28,26,24,0.65)] ring-1 ring-black/30">
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-        <div className="absolute -top-36 -right-24 size-96 rounded-full bg-[#e6f5c0]/[0.14] blur-3xl" />
-        <div className="absolute -bottom-24 -left-16 size-72 rounded-full bg-brand/25 blur-3xl" />
-        {/* The monogram writ large — editorial texture behind the record,
-            clipped by the band's rounded corner. 5% lime over charcoal is a
-            watermark, not a second accent. */}
-        <span className="absolute -right-2 -bottom-10 text-[4.5rem] leading-none font-black tracking-[-0.06em] text-[#e6f5c0]/[0.05] select-none sm:right-4 sm:text-[9rem] lg:text-[11rem]">
-          {clientInitials}
-        </span>
-      </div>
-
-      <div className="relative flex items-center justify-between gap-3 px-6 pt-5 sm:px-8">
-        <BackButton variant="sliding-door" tone="dark" size="sm" href="/clients" />
+    <div className="rounded-panel border border-rule bg-white">
+      <div className="flex items-center justify-between gap-3 border-b border-rule-soft px-5 py-2.5">
+        <BackButton href="/clients" />
         <RecordMenu
           canRequestOwnership={ownershipConflict.hasConflict}
           canSuppress={canEdit}
@@ -196,130 +210,124 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
         />
       </div>
 
-      <div className="relative flex flex-wrap items-start justify-between gap-x-8 gap-y-6 px-6 py-7 sm:px-8">
-        <div className="flex min-w-0 items-start gap-4 sm:gap-5">
-          <span
-            aria-hidden="true"
-            className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-[#e6f5c0] text-xl font-black tracking-tight text-[#10130c] shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_0_0_1px_rgba(230,245,192,0.25)] sm:size-16 sm:text-2xl"
-          >
-            {clientInitials}
-          </span>
-          <div className="min-w-0">
-            <p className="text-[10px] font-bold tracking-[0.16em] text-[#f4f4ef]/40 uppercase">
-              Client record
-            </p>
-            <h1 className="mt-1.5 font-body text-[clamp(2rem,4.5vw,3.25rem)] leading-[1.02] font-black tracking-[-0.04em]">
-              {client.legal_name}
-            </h1>
-            {/* The record's identity in one line of glass markers: what it is,
-                where it is, and the two states that change what anyone is
-                allowed to do with it. */}
-            <div className="mt-3.5 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center rounded-full bg-white/[0.08] px-3 py-1 text-[10px] font-bold tracking-[0.1em] text-[#f4f4ef]/70 uppercase ring-1 ring-white/10">
-                {formatOrganisationType(client.organisation_type)}
-              </span>
-              <span className="inline-flex items-center rounded-full bg-white/[0.08] px-3 py-1 text-[10px] font-bold tracking-[0.1em] text-[#f4f4ef]/70 uppercase ring-1 ring-white/10">
-                {formatLocation(client)}
-              </span>
-              {suppression.suppressed ? (
-                <span className="inline-flex items-center rounded-full bg-red-500/20 px-3 py-1 text-[10px] font-bold tracking-[0.1em] text-red-100 uppercase ring-1 ring-red-400/30">
-                  {statusLabel}
+      <div className="grid items-start gap-x-8 gap-y-6 px-5 py-6 lg:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="flex min-w-0 flex-col gap-3.5">
+          <h1 className="font-body text-[clamp(2rem,4vw,2.75rem)] font-semibold leading-[1] tracking-[-0.03em] text-balance text-ink">
+            {toTitleCase(client.legal_name)}
+          </h1>
+
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13.5px] text-dim">
+            <span>{formatOrganisationType(client.organisation_type)}</span>
+            <span aria-hidden="true" className="text-rule">
+              ·
+            </span>
+            <span>{formatLocation(client)}</span>
+            {suppression.suppressed && (
+              <>
+                <span aria-hidden="true" className="text-rule">
+                  ·
                 </span>
-              ) : (
-                <span className="inline-flex items-center rounded-full bg-[#e6f5c0] px-3 py-1 text-[10px] font-bold tracking-[0.1em] text-[#10130c] uppercase shadow-[inset_0_1px_0_rgba(255,255,255,0.35)]">
-                  {statusLabel}
+                <Pill tone="stop">Do not contact</Pill>
+              </>
+            )}
+            {suppression.suppressionPending && (
+              <>
+                <span aria-hidden="true" className="text-rule">
+                  ·
                 </span>
-              )}
-              {suppression.suppressed && (
-                <span className="inline-flex items-center rounded-full bg-red-500/20 px-3 py-1 text-[10px] font-bold tracking-[0.1em] text-red-100 uppercase ring-1 ring-red-400/30">
-                  Do not contact
-                </span>
-              )}
-              {suppression.suppressionPending && (
-                <span className="inline-flex items-center rounded-full bg-amber-400/15 px-3 py-1 text-[10px] font-bold tracking-[0.1em] text-amber-200 uppercase ring-1 ring-amber-300/30">
-                  DNC requested
-                </span>
-              )}
-            </div>
-            {/* Reach-me chips: only the channels that actually work — an invalid
-                email or dead website gets no shortcut here; the Overview tab's
-                Contactability card explains why. */}
-            {(email.status === "valid" ||
-              (websiteLink && website.status === "reachable")) && (
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                {email.status === "valid" && (
-                  <a
-                    className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-white/[0.06] px-3 py-1.5 text-[12px] font-bold text-[#f4f4ef]/75 ring-1 ring-white/10 transition-colors hover:bg-white/[0.12] hover:text-[#f4f4ef] focus-visible:ring-2 focus-visible:ring-[#e6f5c0]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1c1a18] focus-visible:outline-none"
-                    href={`mailto:${email.value ?? ""}`}
-                  >
-                    <Mail aria-hidden="true" className="size-3.5 shrink-0 opacity-70" />
-                    <span className="truncate">{email.value}</span>
-                  </a>
-                )}
-                {websiteLink && website.status === "reachable" && (
-                  <a
-                    className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-white/[0.06] px-3 py-1.5 text-[12px] font-bold text-[#f4f4ef]/75 ring-1 ring-white/10 transition-colors hover:bg-white/[0.12] hover:text-[#f4f4ef] focus-visible:ring-2 focus-visible:ring-[#e6f5c0]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1c1a18] focus-visible:outline-none"
-                    href={websiteLink}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    <Globe aria-hidden="true" className="size-3.5 shrink-0 opacity-70" />
-                    <span className="max-w-[16rem] truncate">{websiteLink}</span>
-                    <ExternalLink aria-hidden="true" className="size-3 shrink-0 opacity-60" />
-                  </a>
-                )}
-              </div>
+                <Pill tone="hold">Do-not-contact requested</Pill>
+              </>
             )}
           </div>
+
+          {/* The docket. ORGANISATION_IDENTIFIERS has been in the schema since
+              the start and has never been rendered — a charity number with the
+              registry behind it is what makes this record citable. */}
+          {identifiers.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {identifiers.map((row) => (
+                <DocketChip key={`${row.identifier_type}-${row.identifier_value}`} row={row} />
+              ))}
+            </div>
+          )}
+
+          {/* Provenance, before anything else claims to be true. */}
+          {sources.length > 0 &&
+            (() => {
+              const labels = sources.map((s) => s.label);
+              const labelText =
+                labels.length === 1
+                  ? labels[0]
+                  : labels.length === 2
+                    ? `${labels[0]} and ${labels[1]}`
+                    : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+              const lastMs = Math.max(...sources.map((s) => new Date(s.first_seen_at).getTime()));
+              const lastChecked = Number.isFinite(lastMs)
+                ? new Date(lastMs).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+                : null;
+              return (
+                <p className="flex max-w-[58ch] gap-2.5 rounded-inset bg-paper px-3.5 py-3 text-[13.5px] leading-[1.55] text-dim">
+                  <svg
+                    aria-hidden="true"
+                    className="mt-0.5 size-[15px] shrink-0 text-faint"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a2.5 2.5 0 0 1 0-5H20" />
+                  </svg>
+                  <span>
+                    Assembled from{" "}
+                    <strong className="font-semibold text-ink">
+                      {sources.length === 1 ? "one register" : `${sources.length} registers`}
+                    </strong>{" "}
+                    — {labelText}.{lastChecked ? ` Last checked ${lastChecked}.` : ""}{" "}
+                    <Link
+                      className="border-b border-lead-wash whitespace-nowrap text-lead transition-colors hover:border-lead focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none"
+                      href={`/clients/${organisationId}#source-heading`}
+                    >
+                      See what came from where
+                    </Link>
+                  </span>
+                </p>
+              );
+            })()}
         </div>
 
-        {/* The two things a CAM changes about a record most often, side by side
-            and reachable from every tab. */}
-        <div className="flex flex-wrap items-start gap-3">
-          <OwnerControl
-            canEdit={canEdit}
-            isAdmin={isAdmin}
-            isSelf={isSelf}
-            organisationId={organisationId}
-            ownerId={owner.ownerId}
-            ownerInitials={initialsOf(owner.ownerName)}
-            ownerName={owner.ownerName}
-            team={team}
+        {/* The call. The number, the scale it sits on, and what earned it —
+            unframed: the ring is already a container, and a panel around it was
+            a box around a circle. */}
+        <div className="flex shrink-0 items-center justify-center py-1">
+          <PriorityDial
+            band={score?.priority_band ?? null}
+            factors={score?.score_factors ?? null}
+            score={score?.priority_score ?? null}
           />
-          {canSetStatus && (
-            <HeaderControlShell label="Pipeline status">
-              <StatusSelect
-                onDark
-                currentStatus={client.outreach_status}
-                organisationId={organisationId}
-              />
-            </HeaderControlShell>
-          )}
         </div>
       </div>
 
-      {/* At-a-glance band: the five numbers a CAM asks for before reading
-          anything else. Glass tiles along the band's foot, hairline-separated.
-          Score leads because it drives the queue order. */}
-      <div className="relative grid grid-cols-2 gap-px border-t border-white/[0.08] bg-white/[0.08] sm:grid-cols-3 lg:grid-cols-5">
-        <HeroStat
-          accent={score?.priority_score != null}
-          label="Priority score"
-          sub={score?.priority_band ? `${score.priority_band} band` : "Not scored yet"}
-          value={score?.priority_score != null ? score.priority_score.toFixed(2) : "—"}
+      <div className="flex flex-wrap items-center gap-x-7 gap-y-3 px-5 py-3.5">
+        <OwnerControl
+          canEdit={canEdit}
+          isAdmin={isAdmin}
+          isSelf={isSelf}
+          organisationId={organisationId}
+          ownerId={owner.ownerId}
+          ownerName={owner.ownerName}
+          team={team}
         />
-        <HeroStat
-          label="Emails sent"
-          sub="received by the client"
-          value={String(stats.emailsSent)}
-        />
-        <HeroStat label="Replies" sub="back from the client" value={String(stats.replies)} />
-        <HeroStat label="Notes" sub="on the record" value={String(stats.notes)} />
-        <HeroStat
-          label="Last activity"
-          sub={lastActivity ? "most recent event" : "nothing yet"}
-          value={lastActivity ?? "—"}
-        />
+        {canSetStatus && (
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="font-body text-[12px] uppercase font-bold tracking-[-0.01em] text-ink">Stage</span>
+            <StatusSelect
+              currentStatus={client.outreach_status}
+              organisationId={organisationId}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

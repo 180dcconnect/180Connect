@@ -92,7 +92,7 @@ function LinkifiedText({ text }: { text: string }) {
       <a
         key={`${start}-${trimmed}`}
         aria-label={`Tap to open ${trimmed} in new tab`}
-        className="group inline-flex items-center gap-1 break-all text-brand-hover underline decoration-1 underline-offset-2 hover:text-brand"
+        className="group inline-flex items-center gap-1 break-all text-lead underline decoration-1 underline-offset-2 hover:text-lead-mid"
         href={trimmed}
         rel="noreferrer"
         target="_blank"
@@ -121,14 +121,14 @@ function LinkifiedText({ text }: { text: string }) {
 function SourceBadge({ source }: { source: BookletSource }) {
   if (source.type === "profile") {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-brand/10 px-3 py-1 text-sm font-semibold text-brand-hover">
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-lead-wash px-3 py-1 text-sm font-semibold text-lead">
         <ShieldCheck aria-hidden="true" className="h-3.5 w-3.5" />
         Client profile — verified
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-800">
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-hold-wash px-3 py-1 text-sm font-semibold text-hold">
       <Globe aria-hidden="true" className="h-3.5 w-3.5" />
       Website: {source.hostname} — unverified
     </span>
@@ -144,7 +144,7 @@ function BookletContent({ booklet }: { booklet: string }) {
         if (block.type === "heading") {
           return (
             <h3
-              className={`text-xs font-bold uppercase tracking-[0.08em] text-brand-hover ${index === 0 ? "" : "pt-2"}`}
+              className={`text-xs font-semibold uppercase tracking-[0.08em] text-lead ${index === 0 ? "" : "pt-2"}`}
               key={index}
             >
               {block.text}
@@ -153,7 +153,7 @@ function BookletContent({ booklet }: { booklet: string }) {
         }
         if (block.type === "list") {
           return (
-            <ul className="list-disc space-y-1 pl-5 text-[15px] leading-relaxed text-foreground/85" key={index}>
+            <ul className="list-disc space-y-1 pl-5 text-[15px] leading-relaxed text-ink" key={index}>
               {block.items.map((item, itemIndex) => (
                 <li key={itemIndex}>
                   <LinkifiedText text={item} />
@@ -163,7 +163,7 @@ function BookletContent({ booklet }: { booklet: string }) {
           );
         }
         return (
-          <p className="text-[15px] leading-relaxed text-foreground/85" key={index}>
+          <p className="text-[15px] leading-relaxed text-ink" key={index}>
             <LinkifiedText text={block.text} />
           </p>
         );
@@ -370,7 +370,7 @@ export function BookletPanel({
         action={
           (currentVersion || error) && !busy && !viewingVersion ? (
             <button
-              className="shrink-0 rounded-full border border-brand/30 px-4 py-2 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
+              className="shrink-0 rounded-full border border-rule px-4 py-2 text-xs font-semibold text-lead transition-colors hover:bg-lead-wash"
               onClick={generate}
               type="button"
             >
@@ -387,14 +387,14 @@ export function BookletPanel({
       {!busy && !viewingVersion && (
         <div className="mt-4">
           <label
-            className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-foreground/55"
+            className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-dim"
             htmlFor="booklet-website-url"
           >
             <Globe aria-hidden="true" className="h-3.5 w-3.5" />
             Website URL for extra context (optional)
           </label>
           <input
-            className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm text-foreground placeholder:text-foreground/40 focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            className="w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm text-ink placeholder:text-faint focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
             id="booklet-website-url"
             onChange={(event) => setWebsiteUrl(event.target.value)}
             onKeyDown={(event) => {
@@ -410,13 +410,13 @@ export function BookletPanel({
       )}
 
       {!currentVersion && !busy && !error && (
-        <div className="mt-6 flex flex-col items-center gap-3 rounded-xl border border-dashed border-brand/25 bg-white/60 px-6 py-8 text-center">
-          <p className="max-w-sm text-sm text-foreground/65">
+        <div className="mt-6 flex flex-col items-center gap-3 rounded-inset border border-dashed border-brand/25 bg-white/60 px-6 py-8 text-center">
+          <p className="max-w-sm text-sm text-dim">
             Generate a quick summary of this charity&rsquo;s mission and profile
             data, with suggested angles for outreach.
           </p>
           <button
-            className="flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-bold text-white shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98]"
+            className="flex items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-ink/90"
             onClick={generate}
             type="button"
           >
@@ -434,10 +434,10 @@ export function BookletPanel({
       )}
 
       {error && !busy && (
-        <div className="mt-5 rounded-lg bg-red-50 p-3" role="alert">
-          <p className="text-sm font-bold text-red-800">{error}</p>
+        <div className="mt-5 rounded-inset bg-stop-wash p-3" role="alert">
+          <p className="text-sm font-semibold text-stop">{error}</p>
           <button
-            className="mt-2 rounded-lg border border-red-800/20 px-3 py-1 text-xs font-bold text-red-800"
+            className="mt-2 rounded-inset border border-stop/25 px-3 py-1 text-xs font-semibold text-stop"
             onClick={generate}
             type="button"
           >
@@ -450,13 +450,13 @@ export function BookletPanel({
           is "Back to current", never Regenerate (hidden above), so there is no
           path where clicking something here looks like it edits an old version. */}
       {viewingVersion && !busy && (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2.5">
-          <p className="flex items-center gap-1.5 text-xs font-medium text-amber-800">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-inset bg-hold-wash px-3 py-2.5">
+          <p className="flex items-center gap-1.5 text-xs font-medium text-hold">
             <Clock aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
             Viewing an older version — generated {formatGeneratedAt(viewingVersion.generatedAt)}
           </p>
           <button
-            className="shrink-0 text-xs font-bold text-amber-800 underline underline-offset-2 hover:text-amber-900"
+            className="shrink-0 text-xs font-semibold text-hold underline underline-offset-2 hover:text-hold"
             onClick={() => setViewingVersionId(null)}
             type="button"
           >
@@ -472,7 +472,7 @@ export function BookletPanel({
           The error box above makes clear that what's shown below is the previous
           version, not a fresh generation. */}
       {displayed && !busy && (
-        <p className="mt-1 text-xs text-foreground/45">
+        <p className="mt-1 text-xs text-dim">
           Generated {formatGeneratedAt(displayed.generatedAt)}
           {!viewingVersion && saveFailed
             ? " — could not be saved, will re-generate next time this client is opened."
@@ -491,7 +491,7 @@ export function BookletPanel({
         </div>
       )}
       {displayed && !busy && displayedWebsiteContext?.status === "skipped" && (
-        <p className="mt-1.5 flex items-start gap-1.5 text-xs font-medium text-amber-700">
+        <p className="mt-1.5 flex items-start gap-1.5 text-xs font-medium text-hold">
           <Globe aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           {`Website content not used — ${displayedWebsiteContext.reason}`}
         </p>
@@ -502,10 +502,10 @@ export function BookletPanel({
           timestamped. Collapsed by default so it doesn't compete with the
           booklet itself; only rendered once there's something to browse. */}
       {history.length > 0 && !busy && !viewingVersion && (
-        <div className="mt-6 border-t border-black/[0.06] pt-4">
+        <div className="mt-6 border-t border-rule pt-4">
           <button
             aria-expanded={historyOpen}
-            className="flex items-center gap-1.5 text-xs font-bold text-foreground/60 hover:text-foreground/80"
+            className="flex items-center gap-1.5 text-xs font-semibold text-dim hover:text-ink"
             onClick={() => setHistoryOpen((open) => !open)}
             type="button"
           >
@@ -517,10 +517,10 @@ export function BookletPanel({
               {history.map((version) => (
                 <li key={version.id}>
                   <button
-                    className={`w-full rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                    className={`w-full rounded-inset px-3 py-2 text-left text-sm transition-colors ${
                       viewingVersionId === version.id
-                        ? "bg-brand/10 font-bold text-brand-hover"
-                        : "text-foreground/65 hover:bg-black/[0.03]"
+                        ? "bg-lead-wash font-semibold text-lead"
+                        : "text-dim hover:bg-paper"
                     }`}
                     onClick={() => setViewingVersionId(version.id)}
                     type="button"

@@ -51,30 +51,30 @@ function formatDate(value: string): string {
 export function FinancialFilingListItem({ filing }: { filing: FinancialFilingRow }) {
   const bandLabel = filing.income_band ? INCOME_BAND_LABELS[filing.income_band] : null;
   return (
-    <li className="rounded-xl border border-black/[0.06] p-3.5">
+    <li className="border-t border-rule-soft py-3 first:border-t-0 first:pt-0">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <p className="min-w-0 truncate text-sm font-bold text-foreground/80">
-          Financial year {formatDate(filing.period_end)}
+        <p className="min-w-0 truncate text-[13.5px] font-medium text-ink">
+          Year ending {formatDate(filing.period_end)}
         </p>
-        <p className="shrink-0 text-[12px] text-foreground/45">
+        <p className="shrink-0 font-mono text-[12px] text-faint tabular-nums">
           {formatDate(filing.period_start)} – {formatDate(filing.period_end)}
         </p>
       </div>
-      <div className="mt-2 flex flex-wrap items-baseline gap-x-6 gap-y-1">
-        <p className="text-[13px] text-foreground/60">
-          Income{" "}
-          <span className="font-black tabular-nums text-foreground/85">
+      <div className="mt-1.5 grid gap-x-8 gap-y-1 sm:grid-cols-2">
+        <p className="flex items-baseline justify-between gap-3 text-[13px] text-dim">
+          Income
+          <span className="font-mono font-medium tabular-nums text-ink">
             {formatAmount(filing.total_income)}
           </span>
         </p>
-        <p className="text-[13px] text-foreground/60">
-          Expenditure{" "}
-          <span className="font-black tabular-nums text-foreground/85">
+        <p className="flex items-baseline justify-between gap-3 text-[13px] text-dim">
+          Expenditure
+          <span className="font-mono font-medium tabular-nums text-ink">
             {formatAmount(filing.total_expenditure)}
           </span>
         </p>
       </div>
-      <p className="mt-1 text-[12px] text-foreground/40">
+      <p className="mt-1.5 text-[12px] text-faint">
         {formatSource(filing.financial_source)}
         {bandLabel ? ` · ${bandLabel} income band` : ""}
         {filing.filing_date ? ` · filed ${formatDate(filing.filing_date)}` : ""}

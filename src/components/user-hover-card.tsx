@@ -5,6 +5,7 @@ import { Clock, Mail, Shield } from 'lucide-react';
 import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/animate-ui/components/radix/hover-card';
 import { cn } from '@/lib/utils';
 import { formatRelativeTime } from '@/lib/display-format';
+import type { ActorPreview } from '@/lib/recent-updates';
 
 /**
  * The hover preview for a person's name in the dashboard feeds.
@@ -23,15 +24,13 @@ import { formatRelativeTime } from '@/lib/display-format';
  * them, and the way through to the full profile.
  */
 
-export type UserPreview = {
-  id: string;
-  fullName: string | null;
-  email: string;
-  role: 'cam' | 'admin' | 'viewer' | 'leadership';
-  ownedClientCount: number;
-  lastSeenAt: string | null;
-  isActive: boolean;
-};
+/*
+ * Same single-definition rule as the organisation card: this is `ActorPreview`
+ * from @/lib/recent-updates, aliased to the name the component has always used
+ * rather than re-declared and left to drift out of sync with it.
+ */
+export type UserPreview = ActorPreview;
+export type { ActorPreview };
 
 const ROLE_LABEL: Record<UserPreview['role'], string> = {
   cam: 'CAM',
@@ -54,11 +53,11 @@ export function UserHoverCard({
   user: UserPreview;
   className?: string;
 }) {
-  const initials = getInitials(user.fullName, user.email);
   const roleLabel = ROLE_LABEL[user.role] ?? user.role;
   const roleStyle = ROLE_STYLES[user.role] ?? 'bg-black/5 text-foreground/75 border-black/10';
-  const now = new Date();
-  const lastActive = user.lastSeenAt ? formatRelativeTime(new Date(user.lastSeenAt), now) : 'Never';
+  const lastActive = user.lastSeenAt
+    ? formatRelativeTime(new Date(user.lastSeenAt), new Date())
+    : 'Never signed in';
 
   return (
     <HoverCard>
@@ -68,48 +67,57 @@ export function UserHoverCard({
         </span>
       </HoverCardTrigger>
       <HoverCardContent side="right" sideOffset={8} align="start">
-        <div className="flex flex-col gap-4">
-          <div className="flex items-start gap-4">
-            <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand/20 via-brand/10 to-transparent text-lg font-black text-brand-hover shadow-xs ring-1 ring-black/[0.08]">
-              {initials}
+        <div className="flex flex-col gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="min-w-0 flex-1 truncate text-base font-bold text-foreground">
+                {user.fullName ?? 'Unnamed user'}
+              </p>
               <span
-                className={`absolute -bottom-1 -right-1 h-3 w-3 rounded-full border-2 border-white ${
-                  user.isActive ? 'bg-emerald-500' : 'bg-amber-500'
-                }`}
-                title={user.isActive ? 'Active' : 'Inactive'}
-              />
+                className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${roleStyle}`}
+              >
+                <Shield className="h-2.5 w-2.5" />
+                {roleLabel}
+              </span>
+              {/*
+                The active/inactive state was previously only a coloured dot on
+                the avatar, which went with it. It reads as a word instead — and
+                only when it is the exceptional case, since "this account still
+                works" is not news. A deactivated colleague still appears in the
+                feed for work they did, and a reader chasing that work needs to
+                know nobody is behind the name any more.
+              */}
+              {!user.isActive && (
+                <span className="inline-flex shrink-0 items-center rounded-full border border-amber-200 bg-amber-100/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-900 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-100">
+                  Deactivated
+                </span>
+              )}
             </div>
 
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <p className="text-base font-bold text-foreground truncate">
-                  {user.fullName ?? 'Unnamed user'}
-                </p>
-                <span
-                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${roleStyle}`}
-                >
-                  <Shield className="h-2.5 w-2.5" />
-                  {roleLabel}
-                </span>
-              </div>
-              <p className="mt-0.5 text-sm text-foreground/60 truncate">{user.email}</p>
-            </div>
+            {/* A mailto rather than plain text: the email is on the card so it
+                can be used, and copying it out by hand was the only option. */}
+            {user.email ? (
+              <a
+                href={`mailto:${user.email}`}
+                className="mt-1 flex items-center gap-2 text-sm text-foreground/60 transition-colors hover:text-brand"
+              >
+                <Mail className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{user.email}</span>
+              </a>
+            ) : null}
           </div>
 
-          <div className="border-t border-black/[0.06] pt-3 dark:border-white/[0.08]">
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div className="flex items-center gap-2 text-foreground/60">
-                <Users className="h-3.5 w-3.5 shrink-0" />
-                <span>
-                  <span className="font-medium text-foreground">{user.ownedClientCount}</span>{' '}
-                  client{user.ownedClientCount === 1 ? '' : 's'}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-foreground/60">
-                <Clock className="h-3.5 w-3.5 shrink-0" />
-                <span className="font-medium">{lastActive}</span>
-              </div>
-            </div>
+          <div className="flex items-center gap-2 border-t border-black/[0.06] pt-3 text-sm text-foreground/60 dark:border-white/[0.08]">
+            <Clock className="h-3.5 w-3.5 shrink-0" />
+            {/* The never-signed-in case is its own sentence — "Last signed in
+                never signed in" is what prefixing it unconditionally produces. */}
+            {user.lastSeenAt ? (
+              <span>
+                Last signed in <span className="font-medium text-foreground">{lastActive}</span>
+              </span>
+            ) : (
+              <span className="font-medium text-foreground">Never signed in</span>
+            )}
           </div>
 
           <Link

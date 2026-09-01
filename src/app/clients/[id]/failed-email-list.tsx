@@ -21,16 +21,16 @@ export function FailedEmailList({
   if (messages.length === 0) return null;
   return (
     <div className="mt-4 space-y-2">
-      <h4 className="text-xs font-bold uppercase tracking-wide text-foreground/55">Failed sends</h4>
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-dim">Failed sends</h4>
       {messages.map((message) => (
         <div
-          className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 p-3"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-inset border border-stop/25 bg-stop-wash p-3"
           key={message.id}
         >
           <p className="text-sm">
             <strong>{message.subject}</strong>
             <br />
-            <span className="text-xs text-red-800">{message.reason}</span>
+            <span className="text-xs text-stop">{message.reason}</span>
           </p>
           <OriginButton
             disabled={busy === message.id}
@@ -50,7 +50,7 @@ export function FailedEmailList({
         </div>
       ))}
       {notice && (
-        <p className="text-xs font-bold text-red-800" role="status">
+        <p className="text-xs font-semibold text-stop" role="status">
           {notice}
         </p>
       )}

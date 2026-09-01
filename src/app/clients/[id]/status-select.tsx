@@ -21,16 +21,9 @@ import { OriginButton } from "@/components/ui/origin-button";
 export function StatusSelect({
   organisationId,
   currentStatus,
-  onDark = false,
 }: {
   organisationId: string;
   currentStatus: string;
-  /**
-   * Rendered on the record header's charcoal band. The default save button is
-   * charcoal glass, which vanishes against it, and the error red is unreadable
-   * on ink — both swap for light-on-dark equivalents.
-   */
-  onDark?: boolean;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<PipelineStatus>(
@@ -66,7 +59,7 @@ export function StatusSelect({
   }
 
   return (
-    <div className={`flex flex-wrap items-center gap-2.5 ${onDark ? "mt-2.5" : "mt-4"}`}>
+    <div className="flex flex-wrap items-center gap-2">
       <label className="sr-only" htmlFor={`status-${organisationId}`}>
         Pipeline status
       </label>
@@ -75,7 +68,7 @@ export function StatusSelect({
         disabled={busy}
         onValueChange={(value) => setSelected(value as PipelineStatus)}
       >
-        <SelectTrigger id={`status-${organisationId}`} className="w-fit rounded-full bg-white text-sm">
+        <SelectTrigger id={`status-${organisationId}`} className="h-8 w-fit rounded-full border-rule bg-white text-[13.5px]">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -86,18 +79,22 @@ export function StatusSelect({
           ))}
         </SelectContent>
       </Select>
-      <OriginButton
-        type="button"
-        size="sm"
-        loading={busy}
-        disabled={busy || !dirty}
-        onClick={save}
-        variant={onDark ? "card" : "default"}
-      >
-        {busy ? "Saving…" : "Save status"}
-      </OriginButton>
+      {/* Hidden until the value actually changes — a permanently disabled
+          button beside a select is noise in a header strip. */}
+      {(dirty || busy) && (
+        <OriginButton
+          type="button"
+          size="xs"
+          loading={busy}
+          disabled={busy}
+          onClick={save}
+          variant="ink"
+        >
+          {busy ? "Saving…" : "Save"}
+        </OriginButton>
+      )}
       {error && (
-        <p aria-live="polite" role="alert" className={`w-full text-[13px] font-bold ${onDark ? "text-red-200" : "text-destructive"}`}>
+        <p aria-live="polite" role="alert" className="w-full text-[13px] font-semibold text-stop">
           {error}
         </p>
       )}

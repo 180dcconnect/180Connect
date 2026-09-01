@@ -283,7 +283,12 @@
 | prompt_system | text |  | No | System prompt used | System | Set when generated |  |
 | prompt_user | text |  | No | User prompt used | System | Set when generated |  |
 | output | text |  | No | Generated output | System | Set when generated |  |
-| model | text |  | No | Model used for generation | System | Set when generated |  |
+| model | text |  | No | Model used for generation | System | Set when generated | Snapshotted at generation time; used with MODEL_PRICING to compute cost |
+| activity | text |  | Yes | Activity identifier for observability | System | Set when generated |  |
+| input_tokens | integer |  | Yes | Prompt tokens the AI provider reported for this call | System | Taken from the provider's API response | Blank when the provider reports nothing — never filled with 0 |
+| output_tokens | integer |  | Yes | Response tokens the provider reported | System | Taken from the provider's API response | Same rule as above |
+| total_tokens | integer |  | Yes | Total tokens as the provider reported them | System | Taken from the provider's API response | Stored as reported, may differ slightly from input + output |
+| cost_usd | decimal(12,6) |  | Yes | Cost in US dollars, priced at generation time | System | Computed against MODEL_PRICING when the booklet is generated | Blank = unknown cost (no price configured yet); never 0 |
 | created_at | timestamptz |  | No | Row creation timestamp | System | Auto-generated | Default now(). Append-only. |
 
 ## EDIT_SUGGESTIONS
@@ -326,10 +331,11 @@
 | cam_edited | boolean |  | No | Whether the CAM edited the draft before use | System | Set when the CAM saves changes | Defaults to false |
 | edit_distance | integer |  | Yes | How far the CAM's final version moved from the raw draft | System | Computed when the CAM saves | Zero or more |
 | model | text |  | No | Which specific AI model produced this draft | System | Snapshotted from app configuration at generation time | Historical rows keep the model that actually ran, never the current default |
-| input_tokens | integer |  | Yes | Prompt tokens the AI provider reported for this call | System | Taken from the provider's API response | Blank when the provider reports nothing — never filled with 0 |
-| output_tokens | integer |  | Yes | Response tokens the provider reported | System | Taken from the provider's API response | Same rule as above |
-| total_tokens | integer |  | Yes | Total tokens as the provider reported them | System | Taken from the provider's API response | Stored as reported, may differ slightly from input + output |
-| cost_usd | decimal(12,6) |  | Yes | Cost in US dollars, priced at generation time | System | Computed against MODEL_PRICING when the draft is generated | Blank = unknown cost (no price configured yet); never 0 |
+| activity | text |  | Yes | Activity identifier for observability | System | Set when generated |  |
+| input_tokens | integer |  | Yes | Prompt tokens the AI provider reported for this AI generation | System | Taken from the provider's API response | Blank when the provider reports nothing — never filled with 0 |
+| output_tokens | integer |  | Yes | Response tokens the provider reported for this AI generation | System | Taken from the provider's API response | Same rule as above |
+| total_tokens | integer |  | Yes | Total tokens as the provider reported them for this AI generation | System | Taken from the provider's API response | Stored as reported, may differ slightly from input + output |
+| cost_usd | decimal(12,6) |  | Yes | Cost in US dollars for this AI generation, priced at generation time | System | Computed against MODEL_PRICING when the draft is generated | Blank = unknown cost (no price configured yet); never 0 |
 | prompt_system | text |  | No | Exact system instruction sent to the model | System | Captured verbatim when the draft is generated | Constant today, but stored per row so a future edit never rewrites what an older row says was sent |
 | prompt_user | text |  | No | Exact user-turn prompt sent to the model | System | Built from client context when the draft is generated |  |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |

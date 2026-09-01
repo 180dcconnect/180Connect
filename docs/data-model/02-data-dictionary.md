@@ -550,3 +550,9 @@
 | 04 Entities | RESTRICTED_EDIT_FIELDS | reason | text |  | Why the field is restricted |
 | 04 Entities | RESTRICTED_EDIT_FIELDS | added_by | uuid | USERS | Admin who added/re-added the restriction |
 | 04 Entities | RESTRICTED_EDIT_FIELDS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | BOOKLET_GENERATIONS | activity | text |  | Activity identifier for observability |
+| 04 Entities | BOOKLET_GENERATIONS | input_tokens | integer |  | Prompt tokens the AI provider reported for this call |
+| 04 Entities | BOOKLET_GENERATIONS | output_tokens | integer |  | Response tokens the provider reported |
+| 04 Entities | BOOKLET_GENERATIONS | total_tokens | integer |  | Total tokens as the provider reported them |
+| 04 Entities | BOOKLET_GENERATIONS | cost_usd | decimal(12,6) |  | Cost in US dollars, priced at generation time |
+| 04 Entities | AI_GENERATIONS | activity | text |  | Activity identifier for observability |

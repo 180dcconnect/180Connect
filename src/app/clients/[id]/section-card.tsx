@@ -1,26 +1,29 @@
 import type { ReactNode } from "react";
 
 /**
- * The client detail page's two repeated shapes, in one place so the page and the
- * client components it renders (BasicInfoPanel) can't drift into two slightly
- * different cards. Neither is marked "use client": they hold no state, so they
- * work as-is from a server page and get pulled into the client bundle by whoever
- * imports them from a client component.
+ * The client record's two repeated shapes, in one place so the tabs and the
+ * client components they render can't drift into two slightly different cards.
+ * Neither is marked "use client": they hold no state, so they work from a server
+ * page and get pulled into the client bundle by whoever imports them.
  *
- * Chrome matches the client list's rows and the dashboard's cards — bone ground,
- * white card, hairline border at ink /6, `shadow-sm`, `rounded-2xl`
- * (docs/design-system.md §Shape). The heading is the eyebrow spec (11px, bold,
- * uppercase, `tracking-[0.12em]`) rather than a bold body-size line, so a card's
- * label recedes and its content carries the page.
+ * Redesign (Sept 2026) — the "filed record" language. Three things changed and
+ * each was fixing something specific:
  *
- * Redesign (Aug 2026): three additive upgrades, so every existing call site —
- * including the ones inside BasicInfoPanel and ScoreBreakdownCard — inherits the
- * new look without changing a line:
- * - an optional `icon` rendered in a quiet tile beside the eyebrow;
- * - the default tone lifts a touch on hover (border + shadow), matching the
- *   list rows' hover language;
- * - `scroll-mt` on the card and its heading so the hero band's anchor rail
- *   lands sections below the top edge instead of flush against it.
+ * - **A border you can see.** `border-black/[0.06]` is #f0f0f0 on white: 1.06:1,
+ *   effectively invisible, which is why white cards on bone dissolved into each
+ *   other and the page read as grey mush. `border-rule` is 1.35:1, and the card
+ *   no longer needs a shadow to look like a card. Shadows are for things that
+ *   float — popovers, dialogs — not for things that sit on the page.
+ * - **A title you can read.** The old heading was
+ *   `text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40` — in
+ *   44 files. Caps at 40% opacity is unreadable *and* shouting, and it made every
+ *   card read as a dashboard widget. Titles are sentence case at a real weight
+ *   and a real colour now. Uppercase + tracking survives in exactly one place on
+ *   this record: a register key, where it is a code rather than a label.
+ * - **No icon tile.** `size-8 rounded-xl bg-black/[0.04] ring-1 ring-black/[0.05]`
+ *   around a 16px glyph is the most templated component of the last three years.
+ *   Icons sit inline in muted ink, at the title's baseline, and only where they
+ *   disambiguate one row from another.
  */
 export function SectionCard({
   headingId,
@@ -39,29 +42,31 @@ export function SectionCard({
   hint?: ReactNode;
   /** Optional control pinned to the heading row's right edge. */
   action?: ReactNode;
-  /** Optional glyph, shown in a quiet tile beside the title. Sized to 16px. */
+  /** Optional glyph, inline beside the title. Sized to 15px. */
   icon?: ReactNode;
   children?: ReactNode;
   className?: string;
-  /** `danger` tints the card for the Do Not Contact zone. */
+  /** `danger` tints the card where outreach is blocked. */
   tone?: "default" | "danger";
 }) {
   const toneClasses =
     tone === "danger"
-      ? "border-destructive/15 bg-destructive/[0.04]"
-      : "border-black/[0.06] bg-white shadow-sm transition-[border-color,box-shadow] duration-300 hover:border-black/[0.1] hover:shadow-md";
+      ? "border-stop/25 bg-stop-wash/50"
+      : "border-rule bg-white";
 
   return (
     <section
       aria-labelledby={headingId}
-      className={`scroll-mt-6 rounded-2xl border p-6 ${toneClasses} ${className}`}
+      className={`scroll-mt-6 rounded-panel border px-5 py-4.5 ${toneClasses} ${className}`}
     >
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-        <div className="flex min-w-0 items-start gap-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
+        <div className="flex min-w-0 items-baseline gap-2.5">
           {icon && (
             <span
               aria-hidden="true"
-              className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl bg-black/[0.04] text-foreground/55 ring-1 ring-black/[0.05] [&_svg]:size-4"
+              className={`shrink-0 self-center [&_svg]:size-[15px] ${
+                tone === "danger" ? "text-stop/70" : "text-faint"
+              }`}
             >
               {icon}
             </span>
@@ -69,20 +74,20 @@ export function SectionCard({
           <div className="min-w-0">
             <h2
               id={headingId}
-              className={`scroll-mt-24 text-[11px] font-bold uppercase tracking-[0.12em] ${
-                tone === "danger" ? "text-destructive/70" : "text-foreground/40"
+              className={`scroll-mt-24 text-[18px] leading-[1.3] font-semibold tracking-[-0.01em] ${
+                tone === "danger" ? "text-stop" : "text-ink"
               }`}
             >
               {title}
             </h2>
             {hint && (
-              <p className="mt-1.5 max-w-prose text-[13px] leading-[1.6] text-foreground/50">
+              <p className="mt-1 max-w-[54ch] text-[13px] leading-[1.55] text-dim">
                 {hint}
               </p>
             )}
           </div>
         </div>
-        {action}
+        {action && <div className="shrink-0">{action}</div>}
       </div>
       {children}
     </section>
@@ -90,31 +95,59 @@ export function SectionCard({
 }
 
 /**
- * Status marker. Four tones only — the page has a lot of state to show (email
- * validity, reachability, pipeline stage, suppression) and letting each one pick
- * its own greens and reds is how the old version ended up with five different
- * hardcoded palettes. `brand` is the app green from globals.css, `danger` the
- * `--destructive` token; `warn` is the one colour with no token yet, and is the
- * same amber the assign-owner conflict notice uses.
+ * Status marker.
+ *
+ * The record has a lot of state to show — email validity, website reachability,
+ * pipeline stage, suppression, send outcome — and letting each pick its own
+ * greens and reds is how the old version ended up with five hardcoded palettes
+ * plus borrowed `amber-500` and `red-800` from Tailwind's ramp.
+ *
+ * Four tones, all from the token set, and the semantic ones are deliberately
+ * separate from `--lead`: the accent tells you where you are, the state tells
+ * you what is true. `go` is where 180DC's green now lives and the only place it
+ * appears — retuned from #72b744, which is 2.3:1 on white and unusable as text.
+ *
+ * The dot carries the meaning as shape as well as colour, so the state survives
+ * a greyscale print and a red-green colour deficiency.
  */
 const PILL_TONES = {
-  neutral: "bg-black/[0.04] text-foreground/55",
-  brand: "bg-brand/12 text-brand-hover",
-  warn: "bg-amber-500/12 text-amber-800",
-  danger: "bg-destructive/[0.08] text-destructive",
+  neutral: "bg-paper-sunk text-dim",
+  lead: "bg-lead-wash text-lead",
+  go: "bg-go-wash text-go",
+  hold: "bg-hold-wash text-hold",
+  stop: "bg-stop-wash text-stop",
 } as const;
 
 export function Pill({
   tone = "neutral",
+  dot = true,
   children,
 }: {
   tone?: keyof typeof PILL_TONES;
+  /** Set false for a pill that labels rather than reports a state. */
+  dot?: boolean;
   children: ReactNode;
 }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] ${PILL_TONES[tone]}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] leading-none font-semibold whitespace-nowrap ${PILL_TONES[tone]}`}
     >
+      {dot && (
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
+      )}
+      {children}
+    </span>
+  );
+}
+
+/**
+ * A register key: `UK CHARITY`, `PRIORITY`, `OWNER`. The one surviving use of
+ * uppercase + letter-spacing on this record, in mono, because these are codes
+ * and labels for codes — not section headings pretending to be codes.
+ */
+export function Key({ children }: { children: ReactNode }) {
+  return (
+    <span className="font-mono text-[10.5px] font-medium tracking-[0.09em] text-faint uppercase">
       {children}
     </span>
   );

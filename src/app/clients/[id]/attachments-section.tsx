@@ -17,7 +17,7 @@ export function AttachmentsSection({
 }) {
   if (error) {
     return (
-      <p className="mt-4 text-sm font-bold text-destructive" role="alert">
+      <p className="mt-3.5 text-sm font-semibold text-stop" role="alert">
         Attachments could not be loaded. Refresh and try again.
       </p>
     );
@@ -25,7 +25,7 @@ export function AttachmentsSection({
 
   if (attachments.length === 0) {
     return (
-      <p className="mt-4 text-sm leading-[1.7] text-foreground/45">
+      <p className="mt-3.5 text-sm leading-[1.6] text-faint">
         No files have been attached to this client yet.
       </p>
     );
@@ -43,14 +43,14 @@ export function AttachmentsSection({
                 behind it exchanges the row for a short-lived signed URL, since
                 the bucket is private. */}
             <a
-              className="break-all text-sm font-bold text-brand-hover underline underline-offset-2 hover:text-brand"
+              className="break-all text-sm font-semibold text-lead underline underline-offset-2 hover:text-lead-mid"
               href={`/api/clients/${organisationId}/attachments/${attachment.id}/download`}
               rel="noreferrer"
               target="_blank"
             >
               {attachment.filename}
             </a>
-            <p className="mt-0.5 text-[12px] text-foreground/40">
+            <p className="mt-0.5 text-[12px] text-faint">
               Added by {attachment.uploadedByName} on{" "}
               {new Date(attachment.createdAt).toLocaleDateString("en-GB")}
               {attachment.sizeLabel ? ` · ${attachment.sizeLabel}` : ""}

@@ -57,14 +57,14 @@ export function FinancialFilingsLoadMore({
 
   return (
     <>
-      <ul className="mt-4 space-y-3">
+      <ul className="mt-3.5 flex flex-col">
         {rows.map((filing) => (
           <FinancialFilingListItem key={filing.id} filing={filing} />
         ))}
       </ul>
 
       <div className="mt-4 flex flex-col items-start gap-2">
-        <p className="text-[12px] text-foreground/40">
+        <p className="font-mono text-[11.5px] text-faint tabular-nums">
           Showing {rows.length} of {totalCount}{" "}
           {totalCount === 1 ? "filing" : "filings"}
         </p>
@@ -73,7 +73,7 @@ export function FinancialFilingsLoadMore({
             type="button"
             onClick={handleLoadMore}
             disabled={pending}
-            className="rounded-full bg-brand/12 px-3 py-1.5 text-xs font-bold text-brand-hover hover:bg-brand/20 disabled:cursor-not-allowed disabled:opacity-50"
+            className="cursor-pointer rounded-full border border-rule px-3.5 py-1.5 text-[12.5px] font-semibold text-lead transition-colors hover:bg-lead-wash disabled:cursor-not-allowed disabled:opacity-50"
           >
             {pending
               ? "Loading…"
@@ -81,7 +81,7 @@ export function FinancialFilingsLoadMore({
           </button>
         )}
         {error && (
-          <p className="text-xs font-medium text-destructive" role="alert">
+          <p className="text-xs font-semibold text-stop" role="alert">
             {error}
           </p>
         )}

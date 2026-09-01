@@ -256,14 +256,14 @@ export function EmailReviewPanel({
   return (
     <div className={`space-y-3 ${className}`}>
       <div>
-        <h3 className="text-sm font-bold" id={headingId}>
+        <h3 className="text-sm font-semibold" id={headingId}>
           {heading}
         </h3>
-        <p className="mt-1 text-xs text-foreground/55">{description}</p>
-        {meta && <p className="mt-1 text-xs text-foreground/65">{meta}</p>}
+        <p className="mt-1 text-xs text-dim">{description}</p>
+        {meta && <p className="mt-1 text-xs text-dim">{meta}</p>}
       </div>
 
-      <label className="block text-xs font-bold text-foreground/65">
+      <label className="block text-xs font-semibold text-dim">
         Recipient
         <input
           aria-describedby={
@@ -274,7 +274,7 @@ export function EmailReviewPanel({
                 : undefined
           }
           aria-invalid={recipientValidation.status !== "valid"}
-          className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+          className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm"
           onChange={(event) => {
             setRecipient(event.target.value);
             setApproved(false);
@@ -286,25 +286,25 @@ export function EmailReviewPanel({
           client-side so the CAM sees this before ever attempting to send —
           send-reviewed.ts enforces the identical rule server-side regardless. */}
       {recipientError && (
-        <p className="text-xs font-bold text-red-800" id={recipientErrorId} role="alert">
+        <p className="text-xs font-semibold text-stop" id={recipientErrorId} role="alert">
           {recipientError}
         </p>
       )}
       {/* F116 AC3: advisory only, not a block — a CAM may deliberately send to
           an address other than the one on file (e.g. a different contact). */}
       {recipientMismatch && (
-        <p className="text-xs font-bold text-amber-800" id={recipientMismatchId} role="alert">
+        <p className="text-xs font-semibold text-hold" id={recipientMismatchId} role="alert">
           This doesn&rsquo;t match the client&rsquo;s email on file ({draft.recipientOnFile}). Double-check
           before sending.
         </p>
       )}
 
-      <label className="block text-xs font-bold text-foreground/65">
+      <label className="block text-xs font-semibold text-dim">
         Subject
         <input
           aria-describedby={subject.trim() ? undefined : subjectErrorId}
           aria-invalid={!subject.trim()}
-          className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+          className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm"
           onChange={(event) => {
             setSubject(event.target.value);
             setApproved(false);
@@ -316,13 +316,13 @@ export function EmailReviewPanel({
           — this makes *why* visible instead of a silently inert button, using
           the same wording send-reviewed.ts's server-side check would give. */}
       {!subject.trim() && (
-        <p className="text-xs font-bold text-red-800" id={subjectErrorId} role="alert">
+        <p className="text-xs font-semibold text-stop" id={subjectErrorId} role="alert">
           Add a subject before sending.
         </p>
       )}
 
       <div>
-        <p className="text-xs font-bold text-foreground/65" id={bodyHeadingId}>
+        <p className="text-xs font-semibold text-dim" id={bodyHeadingId}>
           Body
         </p>
         <div className="mt-1">
@@ -338,7 +338,7 @@ export function EmailReviewPanel({
         </div>
       </div>
 
-      <label className="flex items-start gap-2 text-xs font-bold text-foreground/70">
+      <label className="flex items-start gap-2 text-xs font-semibold text-dim">
         <input
           checked={approved}
           className="mt-0.5"
@@ -373,7 +373,7 @@ export function EmailReviewPanel({
         {/* F120: same drafts-only reach as Save — a sent email is never
             reachable here, so there is no "discard a sent email" case to guard. */}
         <button
-          className="shrink-0 rounded-full border border-red-800/25 px-4 py-2 text-xs font-bold text-red-800 transition-colors hover:bg-red-50 disabled:opacity-60"
+          className="shrink-0 rounded-full border border-stop/25 px-4 py-2 text-xs font-semibold text-stop transition-colors hover:bg-stop-wash disabled:opacity-60"
           disabled={savingDraft || sending || discarding}
           onClick={discardDraft}
           type="button"
@@ -383,7 +383,7 @@ export function EmailReviewPanel({
       </div>
 
       {saveMessage && (
-        <p className="text-xs font-bold text-foreground/65" role="status">
+        <p className="text-xs font-semibold text-dim" role="status">
           {saveMessage}
         </p>
       )}
@@ -392,10 +392,10 @@ export function EmailReviewPanel({
           Same approval gate as Send — a scheduled email is a commitment to
           deliver this exact content, so it cannot bypass human review. */}
       <div className="flex flex-wrap items-end gap-2">
-        <label className="text-xs font-bold text-foreground/65">
+        <label className="text-xs font-semibold text-dim">
           Or schedule for later
           <input
-            className="mt-1 block rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+            className="mt-1 block rounded-inset border border-rule bg-white px-3 py-2 text-sm"
             min={localDatetimeLocal(new Date())}
             onChange={(event) => setScheduledAt(event.target.value)}
             type="datetime-local"
@@ -413,7 +413,7 @@ export function EmailReviewPanel({
       </div>
 
       <p
-        className={`text-xs font-bold ${sendFailed ? "text-red-800" : "text-amber-800"}`}
+        className={`text-xs font-semibold ${sendFailed ? "text-stop" : "text-hold"}`}
         role={sendFailed ? "alert" : "status"}
       >
         {sendMessage ?? "Not sent — explicit human review and send are required."}

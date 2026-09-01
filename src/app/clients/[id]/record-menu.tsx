@@ -79,9 +79,9 @@ export function RecordMenu({
       <DropdownMenu>
         <DropdownMenuTrigger
           aria-label="More actions for this client"
-          className="flex size-9 cursor-pointer items-center justify-center rounded-full bg-white/[0.08] text-[#f4f4ef]/70 ring-1 ring-white/10 transition-colors hover:bg-white/[0.16] hover:text-[#f4f4ef] focus-visible:ring-2 focus-visible:ring-[#e6f5c0]/70 focus-visible:outline-none"
+          className="flex size-[30px] cursor-pointer items-center justify-center rounded-inset border border-rule bg-white text-dim transition-colors hover:bg-paper hover:text-ink focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none"
         >
-          <MoreHorizontal aria-hidden="true" className="size-4" />
+          <MoreHorizontal aria-hidden="true" className="size-[15px]" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-[13rem]">
           {showSuppress && (

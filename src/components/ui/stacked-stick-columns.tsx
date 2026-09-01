@@ -25,6 +25,7 @@ export function StackedStickColumns({
   className = "",
 }: StackedStickColumnsProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [hasEnteredView, setHasEnteredView] = useState(false);
   const compId = useId();
 
   // Generate date labels for the trailing 7 days
@@ -66,7 +67,19 @@ export function StackedStickColumns({
   const maxCount = Math.max(...counts, 1);
 
   return (
-    <div className={`relative flex flex-col items-center select-none ${className}`}>
+    <div
+      className={`relative flex flex-col items-center select-none ${className}`}
+      ref={(node) => {
+        if (!node || hasEnteredView) return;
+        const observer = new IntersectionObserver(([entry]) => {
+          if (entry.isIntersecting) {
+            setHasEnteredView(true);
+            observer.disconnect();
+          }
+        }, { threshold: 0.2 });
+        observer.observe(node);
+      }}
+    >
       {/* 7 Columns Container */}
       <div className="flex items-end gap-1.5 sm:gap-2">
         {counts.map((val, colIdx) => {
@@ -105,10 +118,10 @@ export function StackedStickColumns({
                   return (
                     <motion.div
                       key={`stick-${stickIdx}`}
-                      initial={false}
+                      initial={{ opacity: 0, scaleY: 0, originY: 1 }}
                       animate={{
-                        opacity: isHovered ? 1 : 0.85,
-                        scale: isHovered ? 1.1 : 1,
+                        opacity: hasEnteredView ? (isHovered ? 1 : 0.85) : 0,
+                        scaleY: hasEnteredView ? (isHovered ? 1.1 : 1) : 0,
                       }}
                       transition={{ duration: 0.18, delay: stickIdx * 0.01 }}
                       className={`h-[5px] w-[9px] sm:h-[6px] sm:w-[10px] rounded-[1.5px] transition-all ${activeColorClass}`}

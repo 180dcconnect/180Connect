@@ -24,7 +24,7 @@ import { OriginButton } from "@/components/ui/origin-button";
  *   on the bone page while everything around it stayed light. `globals.css` now
  *   binds `dark:` to an explicit `.dark` ancestor, and the variants are gone
  *   from here as well.
- * - It was a bare `<button>` in `rounded-lg`, in an app where every other button
+ * - It was a bare `<button>` in `rounded-inset`, in an app where every other button
  *   is an `OriginButton` pill. The trigger now matches `OriginButton`'s
  *   `outline` variant at `sm`, and the save action *is* an `OriginButton`.
  *
@@ -94,13 +94,13 @@ export function AddNoteForm({ organisationId }: { organisationId: string }) {
         }
       }}
     >
-      <MorphingPopoverTrigger className="inline-flex h-8.5 cursor-pointer items-center rounded-full border border-black/15 bg-transparent px-4 text-xs font-semibold tracking-[-0.02em] text-foreground transition-colors hover:border-black/30 hover:bg-black/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-background">
+      <MorphingPopoverTrigger className="inline-flex h-8.5 cursor-pointer items-center rounded-full border border-rule bg-transparent px-4 text-xs font-semibold tracking-[-0.02em] text-ink transition-colors hover:border-faint hover:bg-paper focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:ring-offset-2 focus-visible:ring-offset-background">
         <motion.span layoutId={`popover-label-${uniqueId}`}>Add note</motion.span>
       </MorphingPopoverTrigger>
 
       <MorphingPopoverContent
         align="end"
-        className="rounded-2xl border border-black/[0.08] bg-white shadow-[0_18px_40px_-24px_rgba(12,16,20,0.45)]"
+        className="rounded-panel border border-rule bg-white shadow-[0_18px_40px_-24px_rgba(12,16,20,0.45)]"
       >
         <div className="flex w-[min(24rem,calc(100vw-3rem))] min-w-[17rem] flex-col">
           <form
@@ -117,22 +117,22 @@ export function AddNoteForm({ organisationId }: { organisationId: string }) {
               layoutId={`popover-label-${uniqueId}`}
               aria-hidden="true"
               style={{ opacity: content ? 0 : 1 }}
-              className="pointer-events-none absolute top-3 left-4 text-xs font-semibold tracking-[-0.02em] text-foreground/40 select-none"
+              className="pointer-events-none absolute top-3 left-4 text-xs font-semibold tracking-[-0.02em] text-faint select-none"
             >
               Add note
             </motion.span>
             <textarea
               id={`add-note-${organisationId}`}
-              className="min-h-[7.5rem] w-full flex-1 resize-none rounded-t-2xl bg-transparent px-4 py-3 text-sm leading-[1.7] text-foreground outline-none"
+              className="min-h-[7.5rem] w-full flex-1 resize-none rounded-t-2xl bg-transparent px-4 py-3 text-sm leading-[1.7] text-ink outline-none"
               autoFocus
               disabled={saving}
               value={content}
               onChange={(e) => setContent(e.target.value)}
             />
-            <div className="flex items-center justify-between gap-3 border-t border-black/[0.06] py-2.5 pr-3 pl-2">
+            <div className="flex items-center justify-between gap-3 border-t border-rule py-2.5 pr-3 pl-2">
               <button
                 type="button"
-                className="flex cursor-pointer items-center rounded-full p-1.5 text-foreground/60 transition-colors hover:bg-black/[0.05] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"
+                className="flex cursor-pointer items-center rounded-full p-1.5 text-dim transition-colors hover:bg-paper-sunk hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead-mid disabled:opacity-50"
                 onClick={closeMenu}
                 disabled={saving}
                 aria-label="Discard this note"
@@ -144,7 +144,7 @@ export function AddNoteForm({ organisationId }: { organisationId: string }) {
                   <p
                     aria-live="polite"
                     role="alert"
-                    className="truncate text-[11px] font-bold text-destructive"
+                    className="truncate text-[11px] font-semibold text-stop"
                   >
                     {error}
                   </p>

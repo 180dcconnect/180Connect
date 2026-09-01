@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/browser";
 import {
   applyEnrichmentChange,
@@ -13,23 +13,23 @@ import {
 import { SectionCard } from "./section-card";
 
 /**
- * Field order is reading order, not schema order. `wide` fields span both
- * columns: mission is a sentence or two and looked broken wrapping inside a
- * half-width cell beside a one-word Type.
+ * Field order is reading order, not schema order.
+ *
+ * `name` is deliberately absent: the record's header sets the legal name as the
+ * page's h1, and repeating it as the first row of the first card was the card
+ * telling you something you had just read.
  */
 const FIELDS: {
   key: keyof ReturnType<typeof buildBasicInfo>;
   label: string;
-  wide?: boolean;
 }[] = [
-  { key: "name", label: "Name", wide: true },
-  { key: "mission", label: "Mission", wide: true },
+  { key: "mission", label: "Mission" },
   { key: "type", label: "Type" },
-  { key: "status", label: "Status" },
+  { key: "status", label: "Pipeline stage" },
   { key: "email", label: "Email" },
   { key: "location", label: "Location" },
-  { key: "address", label: "Address", wide: true },
-  { key: "website", label: "Website", wide: true },
+  { key: "address", label: "Address" },
+  { key: "website", label: "Website" },
 ];
 
 /**
@@ -47,10 +47,13 @@ export function BasicInfoPanel({
   organisation,
   missionStatement,
   missionEnrichedAt,
+  action,
 }: {
   organisation: OrganisationDetailRow;
   missionStatement: string | null;
   missionEnrichedAt: string | null;
+  /** Optional control pinned to the heading row — the "Suggest an edit" button. */
+  action?: ReactNode;
 }) {
   const [state, setState] = useState<BasicInfoState>({
     organisation,
@@ -128,25 +131,29 @@ export function BasicInfoPanel({
   const info = buildBasicInfo(state);
 
   return (
-    <SectionCard headingId="basic-info-heading" title="Basic info">
-      <dl className="mt-4 grid grid-cols-1 gap-x-8 sm:grid-cols-2">
-        {FIELDS.map(({ key, label, wide }) => {
+    <SectionCard
+      headingId="basic-info-heading"
+      title="General Information"
+      hint="Sourced from the registers above. A blank is a gap in the public record, not an error."
+      action={action}
+    >
+      {/* Label-beside-value rather than label-above-value: these are short
+          field names against short values, and stacking them doubled the card's
+          height for no gain. */}
+      <dl className="mt-3.5 flex flex-col">
+        {FIELDS.map(({ key, label }) => {
           // AC2: a field with no value still gets its row — greyed rather than
           // dropped, so "we don't know" reads differently from "it's blank".
           const missing = info[key] === NOT_PROVIDED;
           return (
             <div
               key={key}
-              className={`border-b border-black/[0.05] py-3 last:border-b-0 ${
-                wide ? "sm:col-span-2" : ""
-              }`}
+              className="grid gap-x-4 gap-y-0.5 border-t border-rule-soft py-2.5 first:border-t-0 first:pt-0 sm:grid-cols-[132px_minmax(0,1fr)]"
             >
-              <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                {label}
-              </dt>
+              <dt className="text-[13px] text-dim">{label}</dt>
               <dd
-                className={`mt-1 text-sm leading-[1.6] ${
-                  missing ? "text-foreground/35" : "text-foreground/80"
+                className={`min-w-0 text-sm leading-[1.55] ${
+                  missing ? "text-faint" : "text-ink"
                 }`}
               >
                 {info[key]}

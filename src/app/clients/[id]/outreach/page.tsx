@@ -362,10 +362,10 @@ export default async function ClientOutreachPage({
             <SectionCard headingId="outreach-history-heading" title="Outreach history" icon={<Mail />}>
               {sendingVolume && (
                 <p
-                  className={`mt-3 rounded-lg p-3 text-sm font-bold ${
+                  className={`mt-3 rounded-inset p-3 text-sm font-semibold ${
                     sendingVolume.warning
-                      ? "bg-amber-50 text-amber-900"
-                      : "bg-black/[0.03] text-foreground/60"
+                      ? "bg-hold-wash text-hold"
+                      : "bg-paper text-dim"
                   }`}
                   role={sendingVolume.warning ? "alert" : "status"}
                 >

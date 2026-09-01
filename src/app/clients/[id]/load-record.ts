@@ -6,6 +6,10 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
 import { checkWebsiteReachabilityCached } from "@/lib/website-reachability-cache";
+import {
+  formatOrganisationSources,
+  type OrganisationSourceRow,
+} from "@/lib/source-tracking";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
 import type { LatestScoreDetailRow } from "./score-breakdown";
 
@@ -40,10 +44,24 @@ export type OwnerRow = {
   owner: { full_name: string | null } | null;
 };
 
+export type IdentifierRow = {
+  identifier_type: string;
+  identifier_value: string;
+  registry_name: string | null;
+  registry_country: string | null;
+  is_primary: boolean | null;
+  verified: boolean | null;
+  verified_at: string | null;
+};
+
 export type RecordStats = {
   emailsSent: number;
   replies: number;
   notes: number;
+  /** Rows behind the Outreach, Financials and Activity tabs, for their counts. */
+  outreach: number;
+  financials: number;
+  activity: number;
   /** ISO timestamp of the most recent thing that happened to this record. */
   lastActivity: string | null;
 };
@@ -152,6 +170,57 @@ export const loadScore = cache(async (id: string) => {
   return { score: data ?? null, error: Boolean(error) };
 });
 
+/**
+ * The record's registration numbers — ORGANISATION_IDENTIFIERS.
+ *
+ * This table has existed since the schema was written and the client record has
+ * never rendered a row of it. It is the whole basis of the redesign: a charity
+ * number with the registry that issued it and the date it was last checked is
+ * what makes this record a citable document rather than CRM data entry.
+ * Primary identifiers first, then verified ones, so the strongest evidence leads.
+ */
+export const loadIdentifiers = cache(async (id: string) => {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("organisation_identifiers")
+    .select(
+      "identifier_type, identifier_value, registry_name, registry_country, is_primary, verified, verified_at",
+    )
+    .eq("organisation_id", id)
+    .order("is_primary", { ascending: false })
+    .order("verified", { ascending: false })
+    .returns<IdentifierRow[]>();
+
+  if (error) {
+    await reportError(error, {
+      operation: "clients.detail_identifiers",
+      organisationId: id,
+    });
+  }
+  return data ?? [];
+});
+
+/**
+ * Where each part of this record came from. Read by the header's provenance
+ * line and by the Overview tab's sources card — one query for both.
+ */
+export const loadSources = cache(async (id: string) => {
+  const supabase = await createClient();
+  // The generated Supabase types do not know about this branch's RPC until the
+  // remote schema is regenerated, so narrow its table-shaped result here.
+  const { data, error } = await supabase.rpc("get_organisation_sources_with_actor", {
+    p_organisation_id: id,
+  });
+
+  if (error) {
+    await reportError(error, { operation: "clients.detail_sources", organisationId: id });
+  }
+  return {
+    sources: formatOrganisationSources((data ?? []) as OrganisationSourceRow[]),
+    error: Boolean(error),
+  };
+});
+
 /** Website reachability, memoised so the header chip and the Contactability card agree. */
 export const loadWebsite = cache(async (website: string | null) =>
   checkWebsiteReachabilityCached(website),
@@ -172,7 +241,8 @@ export const loadWebsite = cache(async (website: string | null) =>
 export const loadRecordStats = cache(async (id: string): Promise<RecordStats> => {
   const supabase = await createClient();
 
-  const [sent, replies, notes, audit] = await Promise.all([
+  const [sent, replies, notes, audit, messages, grants, filings, attachments] =
+    await Promise.all([
     supabase
       .from("outreach_messages")
       .select("sent_at", { count: "exact" })
@@ -205,6 +275,25 @@ export const loadRecordStats = cache(async (id: string): Promise<RecordStats> =>
       ])
       .order("created_at", { ascending: false })
       .limit(1),
+    // Tab counts. `head: true` fetches no rows at all — the number arrives in
+    // the Content-Range header — so a badge on every tab costs four cheap
+    // round trips, not four page-loads of data.
+    supabase
+      .from("outreach_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("organisation_id", id),
+    supabase
+      .from("grants")
+      .select("id", { count: "exact", head: true })
+      .eq("organisation_id", id),
+    supabase
+      .from("financial_periods")
+      .select("id", { count: "exact", head: true })
+      .eq("organisation_id", id),
+    supabase
+      .from("attachments")
+      .select("id", { count: "exact", head: true })
+      .eq("organisation_id", id),
   ]);
 
   for (const [operation, result] of [
@@ -212,6 +301,10 @@ export const loadRecordStats = cache(async (id: string): Promise<RecordStats> =>
     ["clients.stats_replies", replies],
     ["clients.stats_notes", notes],
     ["clients.stats_audit", audit],
+    ["clients.stats_messages", messages],
+    ["clients.stats_grants", grants],
+    ["clients.stats_filings", filings],
+    ["clients.stats_attachments", attachments],
   ] as const) {
     if (result.error) await reportError(result.error, { operation, organisationId: id });
   }
@@ -227,6 +320,14 @@ export const loadRecordStats = cache(async (id: string): Promise<RecordStats> =>
     emailsSent: sent.count ?? 0,
     replies: replies.count ?? 0,
     notes: notes.count ?? 0,
+    outreach: messages.count ?? 0,
+    financials: (grants.count ?? 0) + (filings.count ?? 0),
+    // What the Activity tab actually lists: the timeline plus the files.
+    activity:
+      (notes.count ?? 0) +
+      (messages.count ?? 0) +
+      (replies.count ?? 0) +
+      (attachments.count ?? 0),
     lastActivity:
       timestamps.length > 0
         ? timestamps.reduce((latest, value) => (value > latest ? value : latest))

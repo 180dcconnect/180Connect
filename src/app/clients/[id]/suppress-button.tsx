@@ -67,19 +67,19 @@ export function SuppressButton({
   return (
     <form onSubmit={submit}>
       <label
-        className="block text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40"
+        className="block text-[13px] font-medium text-dim"
         htmlFor="suppress-reason"
       >
         Reason
       </label>
-      <p className="mt-1.5 text-[13px] leading-[1.6] text-foreground/50">
+      <p className="mt-1.5 text-[13px] leading-[1.6] text-dim">
         e.g. hard no, legal request, unsubscribe.{" "}
         {selfApproves
           ? "Required, and kept on file. Takes effect immediately."
           : "Required, and kept on file. An admin reviews this before it takes effect."}
       </p>
       <textarea
-        className="mt-2.5 w-full rounded-xl border border-input bg-white px-3 py-2 text-sm leading-[1.6] outline-none transition-[box-shadow,border-color] placeholder:text-foreground/35 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:opacity-50"
+        className="mt-2.5 w-full rounded-inset border border-input bg-white px-3 py-2 text-sm leading-[1.6] outline-none transition-[box-shadow,border-color] placeholder:text-faint focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:opacity-50"
         placeholder="Why this client must not be contacted"
         disabled={busy}
         id="suppress-reason"
@@ -114,7 +114,7 @@ export function SuppressButton({
         </OriginButton>
       </div>
       {message && (
-        <p aria-live="polite" role="alert" className="mt-3 text-[13px] font-bold text-destructive">
+        <p aria-live="polite" role="alert" className="mt-3 text-[13px] font-semibold text-stop">
           {message}
         </p>
       )}

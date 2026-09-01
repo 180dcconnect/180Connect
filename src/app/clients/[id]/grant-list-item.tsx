@@ -65,23 +65,25 @@ function formatDate(value: string): string {
 
 export function GrantListItem({ grant }: { grant: GrantRow }) {
   return (
-    <li className="rounded-xl border border-black/[0.06] p-3.5">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <p className="min-w-0 truncate text-sm font-bold text-foreground/80">
-          {grant.funder_name}
-        </p>
-        <p className="shrink-0 text-sm font-black tabular-nums text-foreground/85">
-          {grant.amount_awarded != null
-            ? formatAmount(grant.amount_awarded, grant.currency)
-            : "Amount not disclosed"}
-        </p>
-      </div>
-      <p className="mt-1 text-[12px] text-foreground/40">
-        {grant.award_date ? formatDate(grant.award_date) : "Date not recorded"}
-        {grant.grant_programme ? ` · ${grant.grant_programme}` : ""}
+    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 gap-y-1 border-t border-rule-soft py-3 first:border-t-0 first:pt-0">
+      <p className="min-w-0 truncate text-[13.5px] font-medium text-ink">
+        {grant.funder_name}
+      </p>
+      {/* Mono and tabular so a column of awards lines up on the decimal —
+          the reason the old proportional figures read as sloppy. */}
+      <p className="shrink-0 font-mono text-[13.5px] font-medium tabular-nums text-ink">
+        {grant.amount_awarded != null
+          ? formatAmount(grant.amount_awarded, grant.currency)
+          : "Not disclosed"}
+      </p>
+      <p className="min-w-0 truncate text-[12.5px] text-dim">
+        {grant.grant_programme ?? "Programme not recorded"}
+      </p>
+      <p className="shrink-0 font-mono text-[12px] text-faint tabular-nums">
+        {grant.award_date ? formatDate(grant.award_date) : "—"}
       </p>
       {grant.description && (
-        <p className="mt-2 text-[13px] leading-[1.6] text-foreground/60">
+        <p className="col-span-2 mt-0.5 text-[13px] leading-[1.55] text-dim">
           {grant.description}
         </p>
       )}

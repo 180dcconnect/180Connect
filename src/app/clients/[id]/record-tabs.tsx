@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { Liquid } from "liquid-gooey";
+
 /**
  * The record's primary navigation.
  *
@@ -16,50 +18,110 @@ import { usePathname } from "next/navigation";
  *
  * Every tab renders for every role. The role-gated things live *inside* the
  * tabs (compose, suggest-edit), never as a tab that opens onto an empty shell.
+ *
+ * A segmented pill with one liquid indicator (`liquid-gooey`, `effect="move"`,
+ * the tuning from /preview-gooey): the marker trails the tab you picked with a
+ * droplet tail instead of cutting to it. The indicator is a single element that
+ * translates, not a highlight on each tab — that is what gives `move` something
+ * to chase. Every tab is the same width so the offset is `index * TAB_WIDTH`
+ * and nothing has to be measured at runtime.
+ *
+ * `--lead` carries it. The accent is the record's one structural colour, and the
+ * tab bar is the most structural thing on the page.
+ *
+ * The counts come from four `head: true` queries in the shell, so you can tell
+ * whether a tab is worth opening before you open it.
  */
 
 const TABS = [
-  { segment: "", label: "Overview" },
-  { segment: "outreach", label: "Outreach" },
-  { segment: "financials", label: "Financials" },
-  { segment: "activity", label: "Activity" },
+  { segment: "", label: "Overview", count: null },
+  { segment: "outreach", label: "Outreach", count: "outreach" },
+  { segment: "financials", label: "Financials", count: "financials" },
+  { segment: "activity", label: "Activity", count: "activity" },
 ] as const;
 
-export function RecordTabs({ organisationId }: { organisationId: string }) {
+export type TabCounts = { outreach: number; financials: number; activity: number };
+
+/**
+ * One width for every tab, so the indicator's position is arithmetic rather than
+ * a measurement pass. Wide enough for "Financials" plus a three-digit count.
+ */
+const TAB_WIDTH = 112;
+
+export function RecordTabs({
+  organisationId,
+  counts,
+}: {
+  organisationId: string;
+  counts: TabCounts;
+}) {
   const pathname = usePathname();
   const base = `/clients/${organisationId}`;
 
+  const hrefFor = (segment: string) => (segment ? `${base}/${segment}` : base);
+  const isActive = (segment: string) => {
+    const href = hrefFor(segment);
+    return segment ? pathname === href || pathname.startsWith(`${href}/`) : pathname === base;
+  };
+
+  // -1 while the route is one the tab bar doesn't own; the indicator hides
+  // rather than parking under a tab that isn't open.
+  const activeIndex = TABS.findIndex((tab) => isActive(tab.segment));
+
   return (
-    /* The bone wash and negative gutters matter: the bar pins to the top of the
-       viewport, and without a ground of its own the page's cards would scroll
-       visibly through the gap above and below the pill. */
     <nav
       aria-label="Sections of this client record"
-      className="sticky top-0 z-40 -mx-6 bg-[#f4f4ef]/85 px-6 py-2 backdrop-blur-sm sm:-mx-10 sm:px-10"
+      className="sticky top-0 z-40 -mx-6 border-b border-rule bg-paper/90 px-6 py-2 backdrop-blur-sm sm:-mx-10 sm:px-10"
     >
-      <div className="flex overflow-x-auto rounded-full bg-white/80 p-1 shadow-sm ring-1 ring-black/[0.06] backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {TABS.map((tab) => {
-          const href = tab.segment ? `${base}/${tab.segment}` : base;
-          const active = tab.segment
-            ? pathname === href || pathname.startsWith(`${href}/`)
-            : pathname === base;
+      <Liquid
+        blur={5}
+        contrast={18}
+        fill="var(--lead)"
+        shadow="0 2px 8px rgba(35, 64, 122, 0.25)"
+        className="relative inline-flex max-w-full items-center overflow-x-auto rounded-full border border-lead/10 bg-lead-wash/50 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        <Liquid.Item effect="move" move={{ springiness: 0.6, trail: 0.5, stretch: 0.25 }}>
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1 bottom-1 left-1 rounded-full bg-lead transition-[transform,opacity] duration-300"
+            style={{
+              width: `${TAB_WIDTH}px`,
+              transform: `translateX(${Math.max(activeIndex, 0) * TAB_WIDTH}px)`,
+              opacity: activeIndex === -1 ? 0 : 1,
+            }}
+          />
+        </Liquid.Item>
 
-          return (
-            <Link
-              key={tab.segment || "overview"}
-              aria-current={active ? "page" : undefined}
-              className={`grow shrink-0 rounded-full px-4 py-2 text-center text-[11px] font-bold tracking-[0.08em] whitespace-nowrap uppercase transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand ${
-                active
-                  ? "bg-[#1c1a18] text-[#f4f4ef] shadow-sm"
-                  : "text-foreground/50 hover:bg-black/[0.04] hover:text-foreground/80"
-              }`}
-              href={href}
-            >
-              {tab.label}
-            </Link>
-          );
-        })}
-      </div>
+        <div className="relative z-10 flex items-center">
+          {TABS.map((tab, index) => {
+            const active = index === activeIndex;
+            const count = tab.count ? counts[tab.count] : null;
+
+            return (
+              <Link
+                key={tab.segment || "overview"}
+                aria-current={active ? "page" : undefined}
+                href={hrefFor(tab.segment)}
+                style={{ width: `${TAB_WIDTH}px` }}
+                className={`flex h-8 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold whitespace-nowrap transition-colors duration-200 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-lead-mid ${
+                  active ? "text-white" : "text-dim hover:text-ink"
+                }`}
+              >
+                {tab.label}
+                {count !== null && count > 0 && (
+                  <span
+                    className={`ml-1.5 font-mono text-[10.5px] tabular-nums ${
+                      active ? "text-white/65" : "text-faint"
+                    }`}
+                  >
+                    {count}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </div>
+      </Liquid>
     </nav>
   );
 }

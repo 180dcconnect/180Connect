@@ -42,18 +42,18 @@ export function FinancialFilingsSection({
       icon={<Landmark aria-hidden="true" />}
       action={
         totalCount > 0 ? (
-          <span className="rounded-full bg-brand/10 px-3 py-1.5 text-[12px] font-bold tabular-nums text-brand-hover">
+          <span className="rounded-full bg-paper-sunk px-2.5 py-1 font-mono text-[11.5px] font-medium tabular-nums text-dim">
             {totalCount} {totalCount === 1 ? "filing" : "filings"}
           </span>
         ) : undefined
       }
     >
       {error ? (
-        <p className="mt-4 text-sm font-bold text-destructive" role="alert">
+        <p className="mt-3.5 text-sm font-semibold text-stop" role="alert">
           Financial filings could not be loaded. Refresh and try again.
         </p>
       ) : filings.length === 0 ? (
-        <p className="mt-4 text-sm leading-[1.7] text-foreground/45">
+        <p className="mt-3.5 text-sm leading-[1.6] text-faint">
           No financial filings recorded.
         </p>
       ) : (

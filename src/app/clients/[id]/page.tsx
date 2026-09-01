@@ -1,14 +1,10 @@
-import { BookOpen, ExternalLink, Globe, Mail, Tag } from "lucide-react";
+import { BookOpen, ExternalLink, Globe, Mail } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { hasPermission } from "@/lib/auth/permissions";
 import { validateClientEmail } from "@/lib/client-email-validation";
 import { websiteHref } from "@/lib/website-validation";
-import {
-  formatOrganisationSources,
-  type OrganisationSourceRow,
-} from "@/lib/source-tracking";
 import {
   EDIT_SUGGESTION_SELECT,
   type EditSuggestionRow,
@@ -19,9 +15,11 @@ import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { BasicInfoPanel } from "./basic-info-panel";
 import { ScoreBreakdownCard } from "./score-breakdown";
 import { Pill, SectionCard } from "./section-card";
+import { SuggestEditButton } from "./suggest-edit-button";
+import { AdminEditButton } from "./admin-edit-button";
 import { SuggestEditSection } from "./suggest-edit-section";
-import { TagsSection } from "./tags-section";
-import { loadClient, loadScore, loadWebsite, requireActor } from "./load-record";
+import { TagsCard } from "./tags-card";
+import { loadClient, loadScore, loadSources, loadWebsite, requireActor } from "./load-record";
 
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
 
@@ -56,10 +54,17 @@ export default async function ClientOverviewPage({
   const canEdit = hasPermission(actor.role, "client:edit");
   const isViewer = actor.role === "viewer";
 
-  const [{ score, error: scoreError }, website, enrichmentResult, sourcesResult, clientTagsResult, allTagsResult] =
-    await Promise.all([
+  const [
+    { score, error: scoreError },
+    website,
+    { sources, error: sourcesError },
+    enrichmentResult,
+    clientTagsResult,
+    allTagsResult,
+  ] = await Promise.all([
       loadScore(id),
       loadWebsite(client.website),
+      loadSources(id),
       // ENRICHMENT_RESULTS is append-only, so the most recently enriched row is
       // "the" mission statement, not the only one.
       supabase
@@ -69,9 +74,6 @@ export default async function ClientOverviewPage({
         .order("enriched_at", { ascending: false })
         .limit(1)
         .maybeSingle<EnrichmentRow>(),
-      // The generated Supabase types do not know about this branch's new RPC
-      // until the remote schema is regenerated, so narrow it at this boundary.
-      supabase.rpc("get_organisation_sources_with_actor", { p_organisation_id: id }),
       // F191/F192/F193: this client's assigned tags, and the full list for the
       // assign dropdown.
       supabase.from("org_tags").select("tag_id, tags(name, colour)").eq("organisation_id", id),
@@ -80,7 +82,6 @@ export default async function ClientOverviewPage({
 
   for (const [operation, error] of [
     ["clients.detail_enrichment", enrichmentResult.error],
-    ["clients.detail_sources", sourcesResult.error],
     ["clients.detail_tags", clientTagsResult.error],
     ["clients.detail_all_tags", allTagsResult.error],
   ] as const) {
@@ -88,9 +89,6 @@ export default async function ClientOverviewPage({
   }
 
   const enrichment = enrichmentResult.data;
-  const sources = formatOrganisationSources(
-    (sourcesResult.data ?? []) as OrganisationSourceRow[],
-  );
   const clientTags = (clientTagsResult.data ?? [])
     .filter((row) => row.tags)
     .map((row) => ({
@@ -129,7 +127,7 @@ export default async function ClientOverviewPage({
   // active. Current values come off the client row already in scope, so
   // "current vs proposed" reads in one glance.
   let restrictedFields: { field_name: string; label: string }[] = [];
-  if (actor.role === "cam") {
+  if (actor.role === "cam" || actor.role === "admin") {
     const { data, error } = await supabase
       .from("restricted_edit_fields")
       .select("field_name")
@@ -163,193 +161,186 @@ export default async function ClientOverviewPage({
               organisation={client}
               missionStatement={enrichment?.mission_statement ?? null}
               missionEnrichedAt={enrichment?.enriched_at ?? null}
+              action={
+                actor.role === "cam" ? (
+                  <SuggestEditButton
+                    organisationId={client.id}
+                    actorId={actor.id}
+                    restrictedFields={restrictedFields}
+                    currentValues={sensitiveCurrentValues}
+                    suggestions={suggestions}
+                  />
+                ) : actor.role === "admin" ? (
+                  <AdminEditButton
+                    organisationId={client.id}
+                    restrictedFields={restrictedFields}
+                    currentValues={sensitiveCurrentValues}
+                  />
+                ) : null
+              }
             />
           </Rise>
 
-          {/* Directly under the values it governs, so "current vs proposed"
-              reads in one glance. CAMs propose; admins decide inline. */}
+          {/* Proposing is a control on the card above ("Suggest an edit");
+              this is only the state — pending and decided corrections. Renders
+              nothing when there are none. CAMs see their own; admins decide. */}
           {!isViewer && (
-            <Rise>
-              <SuggestEditSection
-                organisationId={client.id}
-                actorId={actor.id}
-                actorRole={actor.role}
-                restrictedFields={restrictedFields}
-                currentValues={sensitiveCurrentValues}
-                suggestions={suggestions}
-              />
-            </Rise>
-          )}
-
-          {/* F095 — why this client ranks where it does. The header shows the
-              number; this is the working behind it. */}
-          <Rise>
-            <ScoreBreakdownCard
-              score={score?.priority_score ?? null}
-              band={score?.priority_band ?? null}
-              factors={score?.score_factors ?? null}
-              error={scoreError}
+            <SuggestEditSection
+              actorId={actor.id}
+              actorRole={actor.role}
+              suggestions={suggestions}
             />
-          </Rise>
+          )}
 
           {/* Email and website were two near-identical cards — same
               heading-plus-validity-pill shape, same failure copy — so they read
               as one "can we actually reach them?" card instead. */}
           <Rise>
-            <SectionCard headingId="contactability-heading" title="Contactability">
-              <dl className="mt-4 space-y-3">
-                <div className="flex flex-wrap items-start gap-x-4 gap-y-2 rounded-xl border border-black/[0.05] bg-black/[0.015] px-4 py-3.5">
-                  <span
-                    aria-hidden="true"
-                    className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-white ring-1 ring-black/[0.06]"
-                  >
-                    <Mail className="size-4 text-foreground/50" />
-                  </span>
-                  <div className="min-w-[12rem] flex-1">
-                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-                      <dt className="text-[11px] font-bold tracking-[0.12em] text-foreground/35 uppercase">
-                        Email
-                      </dt>
-                      <Pill tone={email.status === "valid" ? "brand" : "danger"}>
-                        {email.status === "valid"
-                          ? "Valid format"
-                          : email.status === "invalid"
-                            ? "Invalid format"
-                            : "Missing"}
-                      </Pill>
-                    </div>
-                    <dd
-                      className={`mt-1.5 text-sm leading-[1.6] break-all ${
+            <SectionCard
+              headingId="contactability-heading"
+              title="Can we reach them?"
+              hint="Only channels that actually work get a shortcut in the header."
+            >
+              <div className="mt-3.5 flex flex-col">
+                <div className="grid grid-cols-[18px_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 py-3">
+                  <Mail aria-hidden="true" className="mt-0.5 size-4 text-faint" />
+                  <div className="min-w-0">
+                    <p className="text-[12.5px] text-dim">Email</p>
+                    <p
+                      className={`mt-0.5 text-sm leading-[1.55] break-words ${
                         email.status === "invalid"
-                          ? "font-bold text-destructive"
+                          ? "font-semibold text-stop"
                           : email.value
-                            ? "text-foreground/80"
-                            : "text-foreground/35"
+                            ? "text-ink"
+                            : "text-faint"
                       }`}
                     >
-                      {email.value ?? "Not provided"}
-                    </dd>
+                      {email.value ?? "Not on file"}
+                    </p>
                     {email.message && (
-                      <p
-                        className="mt-1.5 text-[13px] leading-[1.6] text-destructive/80"
-                        role="alert"
-                      >
-                        {email.message} The rest of this client record is still available.
+                      <p className="mt-1 text-[12.5px] leading-[1.5] text-stop" role="alert">
+                        {email.message} 
                       </p>
                     )}
                   </div>
+                  <Pill tone={email.status === "valid" ? "go" : "stop"}>
+                    {email.status === "valid"
+                      ? "Valid"
+                      : email.status === "invalid"
+                        ? "Invalid"
+                        : "Missing"}
+                  </Pill>
                 </div>
 
-                <div className="flex flex-wrap items-start gap-x-4 gap-y-2 rounded-xl border border-black/[0.05] bg-black/[0.015] px-4 py-3.5">
-                  <span
-                    aria-hidden="true"
-                    className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-white ring-1 ring-black/[0.06]"
-                  >
-                    <Globe className="size-4 text-foreground/50" />
-                  </span>
-                  <div className="min-w-[12rem] flex-1">
-                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-                      <dt className="text-[11px] font-bold tracking-[0.12em] text-foreground/35 uppercase">
-                        Website
-                      </dt>
-                      <Pill tone={website.status === "reachable" ? "brand" : "danger"}>
-                        {website.status === "reachable"
-                          ? "Reachable"
-                          : website.status === "invalid"
-                            ? "Invalid URL"
-                            : website.status === "missing"
-                              ? "Missing"
-                              : "Unreachable"}
-                      </Pill>
-                    </div>
-                    <dd className="mt-1.5 text-sm leading-[1.6]">
+                <div className="grid grid-cols-[18px_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 border-t border-rule-soft py-3">
+                  <Globe aria-hidden="true" className="mt-0.5 size-4 text-faint" />
+                  <div className="min-w-0">
+                    <p className="text-[12.5px] text-dim">Website</p>
+                    <p className="mt-0.5 text-sm leading-[1.55]">
                       {websiteLink ? (
                         <a
-                          aria-label={`Tap to open website ${websiteLink} in new tab`}
-                          className={`group inline-flex items-center gap-1.5 break-all underline decoration-1 underline-offset-2 transition-colors ${
+                          className={`group inline-flex items-center gap-1.5 break-all border-b transition-colors ${
                             website.status === "reachable"
-                              ? "text-brand-hover hover:text-brand"
-                              : "font-bold text-destructive"
+                              ? "border-lead-wash text-lead hover:border-lead"
+                              : "border-stop/30 font-semibold text-stop"
                           }`}
                           href={websiteLink}
                           rel="noreferrer"
                           target="_blank"
-                          title="Tap to open website in new tab"
+                          title="Opens in a new tab"
                         >
                           <span className="break-all">{websiteLink}</span>
                           <ExternalLink
                             aria-hidden="true"
-                            className="h-3.5 w-3.5 shrink-0 opacity-60 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                            className="size-3 shrink-0 opacity-60 transition-opacity group-hover:opacity-100"
                           />
                         </a>
                       ) : website.url ? (
                         // Malformed: show what is stored, as text. There is
                         // nowhere safe to send anyone.
-                        <span className="font-bold break-all text-destructive">
-                          {website.url}
-                        </span>
+                        <span className="font-semibold break-all text-stop">{website.url}</span>
                       ) : (
-                        <span className="text-foreground/35">Not provided</span>
+                        <span className="text-faint">Not on file</span>
                       )}
-                    </dd>
-                    {websiteLink && (
-                      <p className="mt-1 text-[11px] font-medium tracking-wide text-foreground/40">
-                        Tap to open in new tab
-                      </p>
-                    )}
+                    </p>
                     {website.message && (
-                      <p
-                        className="mt-1.5 text-[13px] leading-[1.6] text-destructive/80"
-                        role="alert"
-                      >
-                        {website.message} Booklet generation may use unreliable or missing
-                        website context.
+                      <p className="mt-1 text-[12.5px] leading-[1.5] text-stop" role="alert">
+                        {website.message} Booklet generation will run without website context.
                       </p>
                     )}
                   </div>
+                  <Pill tone={website.status === "reachable" ? "go" : "stop"}>
+                    {website.status === "reachable"
+                      ? "Reachable"
+                      : website.status === "invalid"
+                        ? "Invalid URL"
+                        : website.status === "missing"
+                          ? "Missing"
+                          : "Unreachable"}
+                  </Pill>
                 </div>
-              </dl>
+              </div>
             </SectionCard>
           </Rise>
         </Group>
 
         <Group className="space-y-6">
           <Rise>
-            <SectionCard headingId="tags-heading" title="Tags" icon={<Tag />}>
-              <TagsSection
-                organisationId={client.id}
-                initialClientTags={clientTags}
-                availableTags={allTagsResult.data ?? []}
-                canEdit={canEdit}
-              />
-            </SectionCard>
+            <ScoreBreakdownCard
+              score={score?.priority_score ?? null}
+              factors={score?.score_factors ?? null}
+              error={scoreError}
+            />
+          </Rise>
+
+          {/* The Tags card's picker has to paint over the cards after it, and
+              each Rise is a `filter` animation — its own stacking context — so
+              a z-index inside the card cannot reach past its Rise. It goes
+              here, on the wrapper, where it can. */}
+          <Rise className="relative z-10">
+            <TagsCard
+              organisationId={client.id}
+              initialClientTags={clientTags}
+              availableTags={allTagsResult.data ?? []}
+              canEdit={canEdit}
+            />
           </Rise>
 
           <Rise>
             <SectionCard
               headingId="source-heading"
-              title="Record sources"
-              hint="Where the information in this client record came from."
+              title="Where this came from"
+              hint="Each register that contributed part of this record."
               icon={<BookOpen />}
             >
-              {sourcesResult.error ? (
-                <p className="mt-4 text-sm font-bold text-destructive" role="alert">
+              {sourcesError ? (
+                <p className="mt-3.5 text-sm font-semibold text-stop" role="alert">
                   Source information could not be loaded. Refresh and try again.
                 </p>
               ) : sources.length === 0 ? (
-                <p className="mt-4 text-sm leading-[1.7] text-foreground/45">
+                <p className="mt-3.5 text-sm leading-[1.6] text-faint">
                   No source information recorded.
                 </p>
               ) : (
-                <ul className="mt-4 flex flex-wrap gap-2">
+                <ul className="mt-3.5 flex flex-col">
                   {sources.map((source) => (
                     <li
                       key={source.source}
-                      className="rounded-full bg-brand/10 px-3 py-1.5 text-[13px] font-bold text-brand-hover"
-                      title={`First recorded ${new Date(source.first_seen_at).toLocaleDateString("en-GB")}`}
+                      className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 border-t border-rule-soft py-2.5 first:border-t-0 first:pt-0"
                     >
-                      {source.label}
-                      {source.source_actor_name ? ` · ${source.source_actor_name}` : ""}
+                      <span className="text-[13.5px] text-ink">
+                        {source.label}
+                        {source.source_actor_name ? (
+                          <span className="text-dim"> · {source.source_actor_name}</span>
+                        ) : null}
+                      </span>
+                      <span className="font-mono text-[11.5px] text-faint tabular-nums">
+                        {new Date(source.first_seen_at).toLocaleDateString("en-GB", {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })}
+                      </span>
                     </li>
                   ))}
                 </ul>

@@ -250,6 +250,7 @@ export function MetricChart({
 }) {
   const rawId = useId().replace(/:/g, "");
   const [hovered, setHovered] = useState<number | null>(null);
+  const [hasEnteredView, setHasEnteredView] = useState(false);
 
   const length = series[0]?.data.length ?? 0;
   const active = Math.min(Math.max(hovered ?? defaultIndex, 0), Math.max(length - 1, 0));
@@ -288,6 +289,19 @@ export function MetricChart({
     <div
       className="relative h-full w-full select-none touch-none overflow-visible"
       onPointerLeave={() => setHovered(null)}
+      ref={(node) => {
+        if (!node || hasEnteredView) return;
+        const observer = new IntersectionObserver(
+          ([entry]) => {
+            if (entry.isIntersecting) {
+              setHasEnteredView(true);
+              observer.disconnect();
+            }
+          },
+          { threshold: 0.2 },
+        );
+        observer.observe(node);
+      }}
       onPointerDown={handlePointer}
       onPointerMove={handlePointer}
     >
@@ -349,11 +363,11 @@ export function MetricChart({
                       x={barX}
                       width={width}
                       rx={0.5}
-                      initial={false}
+                      initial={{ y: bandBottom, height: 0, opacity: 0 }}
                       animate={{
                         y: barY,
                         height: barHeight,
-                        opacity: hovered !== null ? (i === active ? 1 : 0.42) : 0.85,
+                        opacity: hasEnteredView ? (hovered !== null ? (i === active ? 1 : 0.42) : 0.85) : 0,
                       }}
                       transition={{
                         type: "spring",

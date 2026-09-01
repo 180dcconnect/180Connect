@@ -25,7 +25,7 @@ export function TabSkeleton({
     return (
       <div className="space-y-6">
         {Array.from({ length: mainCards }).map((_, index) => (
-          <Skeleton key={index} className="h-64 w-full rounded-2xl" />
+          <Skeleton key={index} className="h-64 w-full rounded-panel" />
         ))}
       </div>
     );
@@ -35,12 +35,12 @@ export function TabSkeleton({
     <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
       <div className="space-y-6">
         {Array.from({ length: mainCards }).map((_, index) => (
-          <Skeleton key={index} className="h-44 w-full rounded-2xl" />
+          <Skeleton key={index} className="h-44 w-full rounded-panel" />
         ))}
       </div>
       <div className="space-y-6">
         {Array.from({ length: sideCards }).map((_, index) => (
-          <Skeleton key={index} className="h-36 w-full rounded-2xl" />
+          <Skeleton key={index} className="h-36 w-full rounded-panel" />
         ))}
       </div>
     </div>

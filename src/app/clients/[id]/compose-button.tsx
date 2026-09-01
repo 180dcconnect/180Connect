@@ -236,7 +236,7 @@ export function ComposeButton({
 
   const historyLink = historyHref && (
     <Link
-      className="flex shrink-0 items-center gap-1.5 rounded-full border border-brand/30 px-4 py-2 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
+      className="flex shrink-0 items-center gap-1.5 rounded-full border border-rule px-4 py-2 text-xs font-semibold text-lead transition-colors hover:bg-lead-wash"
       href={historyHref}
     >
       <History aria-hidden="true" className="h-3.5 w-3.5" />
@@ -255,7 +255,7 @@ export function ComposeButton({
         tone="danger"
       >
         <p
-          className={`mt-4 text-[13px] font-bold leading-[1.6] ${warning?.tone === "conflict" ? "text-amber-800" : "text-red-800"}`}
+          className={`mt-4 text-[13px] font-semibold leading-[1.6] ${warning?.tone === "conflict" ? "text-hold" : "text-stop"}`}
           role="alert"
         >
           {warning?.text}
@@ -270,7 +270,7 @@ export function ComposeButton({
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {(draft || error) && !busy && (
             <button
-              className="shrink-0 rounded-full border border-brand/30 px-4 py-2 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
+              className="shrink-0 rounded-full border border-rule px-4 py-2 text-xs font-semibold text-lead transition-colors hover:bg-lead-wash"
               onClick={generate}
               type="button"
             >
@@ -287,15 +287,15 @@ export function ComposeButton({
     >
 
       <div className="mt-4 space-y-3">
-        <p className="text-xs text-foreground/55" aria-live="polite">
+        <p className="text-xs text-dim" aria-live="polite">
           {hasSavedBooklet
             ? "The client's saved booklet is included as additional context."
             : "Generate the client booklet first to include its insights in this email."}
         </p>
-        <label className="block max-w-xs text-xs font-bold text-foreground/65">
+        <label className="block max-w-xs text-xs font-semibold text-dim">
           Email length
           <select
-            className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60"
+            className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm disabled:opacity-60"
             disabled={busy}
             onChange={(event) => setLength(event.target.value as EmailLength)}
             value={length}
@@ -306,11 +306,11 @@ export function ComposeButton({
               </option>
             ))}
           </select>
-          <span className="mt-1 block font-normal text-foreground/55">How long the email body should be.</span>
+          <span className="mt-1 block font-normal text-dim">How long the email body should be.</span>
         </label>
-        <label className="block max-w-xs text-xs font-bold text-foreground/65">
+        <label className="block max-w-xs text-xs font-semibold text-dim">
           Closing approach
-          <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60" disabled={busy} onChange={(event) => setClosing(event.target.value as ClosingApproach)} value={closing}>
+          <select className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm disabled:opacity-60" disabled={busy} onChange={(event) => setClosing(event.target.value as ClosingApproach)} value={closing}>
             {CLOSING_APPROACHES.map((value) => (
               <option key={value} value={value}>
                 {CLOSING_APPROACH_LABELS[value]}
@@ -318,9 +318,9 @@ export function ComposeButton({
             ))}
           </select>
         </label>
-        <label className="block max-w-xs text-xs font-bold text-foreground/65">
+        <label className="block max-w-xs text-xs font-semibold text-dim">
           Opening approach
-          <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60" disabled={busy} onChange={(event) => setOpening(event.target.value as OpeningApproach)} value={opening}>
+          <select className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm disabled:opacity-60" disabled={busy} onChange={(event) => setOpening(event.target.value as OpeningApproach)} value={opening}>
             {OPENING_APPROACHES.map((value) => (
               <option key={value} value={value}>
                 {OPENING_APPROACH_LABELS[value]}
@@ -328,23 +328,23 @@ export function ComposeButton({
             ))}
           </select>
         </label>
-        <label className="block max-w-xs text-xs font-bold text-foreground/65">
+        <label className="block max-w-xs text-xs font-semibold text-dim">
           Email tone
-          <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60" disabled={busy} onChange={(event) => setTone(event.target.value as EmailTone)} value={tone}>
+          <select className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm disabled:opacity-60" disabled={busy} onChange={(event) => setTone(event.target.value as EmailTone)} value={tone}>
             {EMAIL_TONES.map((value) => (
               <option key={value} value={value}>
                 {EMAIL_TONE_LABELS[value]}
               </option>
             ))}
           </select>
-          <span className="mt-1 block font-normal text-foreground/55">
+          <span className="mt-1 block font-normal text-dim">
             How friendly or formal the email reads — separate from its length and voice.
           </span>
         </label>
-        <label className="block max-w-xs text-xs font-bold text-foreground/65">
+        <label className="block max-w-xs text-xs font-semibold text-dim">
           Email voice
           <select
-            className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60"
+            className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm disabled:opacity-60"
             disabled={busy}
             onChange={(event) => setVoice(event.target.value as EmailVoice)}
             value={voice}
@@ -355,13 +355,13 @@ export function ComposeButton({
               </option>
             ))}
           </select>
-          <span className="mt-1 block font-normal text-foreground/55">Who the email is written as — our collective style or plainer wording.</span>
+          <span className="mt-1 block font-normal text-dim">Who the email is written as — our collective style or plainer wording.</span>
         </label>
       </div>
 
       {warning && (
         <p
-          className={`mt-4 text-[13px] font-bold leading-[1.6] ${warning.tone === "conflict" ? "text-amber-800" : "text-red-800"}`}
+          className={`mt-4 text-[13px] font-semibold leading-[1.6] ${warning.tone === "conflict" ? "text-hold" : "text-stop"}`}
           role="alert"
         >
           {warning.text}
@@ -369,12 +369,12 @@ export function ComposeButton({
       )}
 
       {!draft && !busy && !error && (
-        <div className="mt-6 flex flex-col items-center gap-3 rounded-xl border border-dashed border-brand/25 bg-white/60 px-6 py-8 text-center">
-          <p className="max-w-sm text-sm text-foreground/65">
+        <div className="mt-6 flex flex-col items-center gap-3 rounded-inset border border-dashed border-brand/25 bg-white/60 px-6 py-8 text-center">
+          <p className="max-w-sm text-sm text-dim">
             Generate a personalised Stage 1 outreach email from this client&rsquo;s profile.
           </p>
           <button
-            className="flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-bold text-white shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98]"
+            className="flex items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-ink/90"
             onClick={generate}
             type="button"
           >
@@ -392,10 +392,10 @@ export function ComposeButton({
       )}
 
       {error && !busy && (
-        <div className="mt-5 rounded-lg bg-red-50 p-3" role="alert">
-          <p className="text-sm font-bold text-red-800">{error}</p>
+        <div className="mt-5 rounded-inset bg-stop-wash p-3" role="alert">
+          <p className="text-sm font-semibold text-stop">{error}</p>
           <button
-            className="mt-2 rounded-lg border border-red-800/20 px-3 py-1 text-xs font-bold text-red-800"
+            className="mt-2 rounded-inset border border-stop/25 px-3 py-1 text-xs font-semibold text-stop"
             onClick={generate}
             type="button"
           >

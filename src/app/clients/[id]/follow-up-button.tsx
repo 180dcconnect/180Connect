@@ -120,7 +120,7 @@ export function FollowUpButton({
           Generate follow-up email
         </OriginButton>
         <p
-          className={`mt-2.5 text-[13px] font-bold leading-[1.6] ${warning?.tone === "conflict" ? "text-amber-800" : "text-red-800"}`}
+          className={`mt-2.5 text-[13px] font-semibold leading-[1.6] ${warning?.tone === "conflict" ? "text-hold" : "text-stop"}`}
           role="alert"
         >
           {warning?.text}
@@ -130,12 +130,12 @@ export function FollowUpButton({
   }
 
   return (
-    <div className="space-y-4 border-t border-black/[0.06] pt-4">
-      <p className="text-xs font-bold text-foreground/65">Follow up on the sent email</p>
-      <label className="block max-w-xs text-xs font-bold text-foreground/65">
+    <div className="space-y-4 border-t border-rule pt-4">
+      <p className="text-xs font-semibold text-dim">Follow up on the sent email</p>
+      <label className="block max-w-xs text-xs font-semibold text-dim">
         Email length
         <select
-          className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+          className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm"
           disabled={busy}
           onChange={(event) => setLength(event.target.value as EmailLength)}
           value={length}
@@ -147,9 +147,9 @@ export function FollowUpButton({
           ))}
         </select>
       </label>
-      <label className="block max-w-xs text-xs font-bold text-foreground/65">
+      <label className="block max-w-xs text-xs font-semibold text-dim">
         Closing approach
-        <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setClosing(event.target.value as ClosingApproach)} value={closing}>
+        <select className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setClosing(event.target.value as ClosingApproach)} value={closing}>
           {CLOSING_APPROACHES.map((value) => (
             <option key={value} value={value}>
               {CLOSING_APPROACH_LABELS[value]}
@@ -157,9 +157,9 @@ export function FollowUpButton({
           ))}
         </select>
       </label>
-      <label className="block max-w-xs text-xs font-bold text-foreground/65">
+      <label className="block max-w-xs text-xs font-semibold text-dim">
         Email tone
-        <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setTone(event.target.value as EmailTone)} value={tone}>
+        <select className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setTone(event.target.value as EmailTone)} value={tone}>
           {EMAIL_TONES.map((value) => (
             <option key={value} value={value}>
               {EMAIL_TONE_LABELS[value]}
@@ -167,9 +167,9 @@ export function FollowUpButton({
           ))}
         </select>
       </label>
-      <label className="block max-w-xs text-xs font-bold text-foreground/65">
+      <label className="block max-w-xs text-xs font-semibold text-dim">
         Email voice
-        <select className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setVoice(event.target.value as EmailVoice)} value={voice}>
+        <select className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setVoice(event.target.value as EmailVoice)} value={voice}>
           {EMAIL_VOICES.map((value) => (
             <option key={value} value={value}>
               {EMAIL_VOICE_LABELS[value]}
@@ -184,7 +184,7 @@ export function FollowUpButton({
 
       {warning && (
         <p
-          className={`text-[13px] font-bold leading-[1.6] ${warning.tone === "conflict" ? "text-amber-800" : "text-red-800"}`}
+          className={`text-[13px] font-semibold leading-[1.6] ${warning.tone === "conflict" ? "text-hold" : "text-stop"}`}
           role="alert"
         >
           {warning.text}
@@ -192,9 +192,9 @@ export function FollowUpButton({
       )}
 
       {error && (
-        <div className="rounded-lg bg-red-50 p-3" role="alert">
-          <p className="text-sm font-bold text-red-800">{error}</p>
-          <button className="mt-2 text-xs font-bold text-red-800 underline" onClick={generate} type="button">
+        <div className="rounded-inset bg-stop-wash p-3" role="alert">
+          <p className="text-sm font-semibold text-stop">{error}</p>
+          <button className="mt-2 text-xs font-semibold text-stop underline" onClick={generate} type="button">
             Try again
           </button>
         </div>
@@ -204,19 +204,19 @@ export function FollowUpButton({
           a new id remounts the editor with the latest result instead of leaving
           stale defaultValue text in the fields after a regenerate. */}
       {draft && !busy && (
-        <section key={draft.id} aria-labelledby="followup-review-heading" className="space-y-3 rounded-xl border border-brand/20 bg-brand/[0.04] p-4">
+        <section key={draft.id} aria-labelledby="followup-review-heading" className="space-y-3 rounded-inset border border-rule bg-paper p-4">
           <div>
-            <h3 className="text-sm font-bold" id="followup-review-heading">Review generated follow-up</h3>
-            <p className="mt-1 text-xs text-foreground/55">
+            <h3 className="text-sm font-semibold" id="followup-review-heading">Review generated follow-up</h3>
+            <p className="mt-1 text-xs text-dim">
               Saved as a draft. Review and edit it before a separate human send action is made available.
             </p>
           </div>
-          <label className="block text-xs font-bold text-foreground/65">
+          <label className="block text-xs font-semibold text-dim">
             Subject
-            <input className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" defaultValue={draft.subject} />
+            <input className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm" defaultValue={draft.subject} />
           </label>
           <div>
-            <p className="text-xs font-bold text-foreground/65" id="followup-body-heading">
+            <p className="text-xs font-semibold text-dim" id="followup-body-heading">
               Body
             </p>
             <div className="mt-1">
@@ -226,7 +226,7 @@ export function FollowUpButton({
               />
             </div>
           </div>
-          <p className="text-xs font-bold text-amber-800" role="status">
+          <p className="text-xs font-semibold text-hold" role="status">
             Not sent — explicit human review and send are required.
           </p>
         </section>

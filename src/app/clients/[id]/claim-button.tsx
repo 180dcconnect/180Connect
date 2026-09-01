@@ -20,17 +20,9 @@ import { OriginButton } from "@/components/ui/origin-button";
 export function ClaimButton({
   organisationId,
   compact = false,
-  onDark = false,
 }: {
   organisationId: string;
   compact?: boolean;
-  /**
-   * Rendered on the record header's charcoal band rather than a white card.
-   * The default button variant is charcoal glass, which disappears against it,
-   * and the amber/red message colours are unreadable on ink — both swap for
-   * light-on-dark equivalents.
-   */
-  onDark?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -75,7 +67,7 @@ export function ClaimButton({
         disabled={busy}
         onClick={claim}
         type="button"
-        variant={onDark ? "card" : "default"}
+        variant="ink"
       >
         {busy ? "Claiming…" : "Claim this client"}
       </OriginButton>
@@ -85,14 +77,8 @@ export function ClaimButton({
           role={conflict ? "alert" : undefined}
           className={
             (compact ? "mt-1 text-xs " : "mt-2.5 text-[13px] leading-[1.6] ") +
-            "font-bold " +
-            (onDark
-              ? conflict
-                ? "text-amber-200"
-                : "text-red-200"
-              : conflict
-                ? "text-amber-800"
-                : "text-destructive")
+            "font-semibold " +
+            (conflict ? "text-hold" : "text-stop")
           }
         >
           {message}

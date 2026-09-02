@@ -182,7 +182,7 @@ async function runOneSource(
   }
 
   try {
-    const { records, truncated, walkedOrganisations } = await source.fetch();
+    const { records, truncated, walkedOrganisations, stats } = await source.fetch();
     counts.fetched = records.length;
 
     const existing = await store.loadChecksums(
@@ -219,7 +219,7 @@ async function runOneSource(
     const status: JobStatus =
       truncated || invalid.length > 0 ? "partial" : "completed";
 
-    await store.finishRun(run.id, status, counts);
+    await store.finishRun(run.id, status, counts, undefined, stats);
 
     console.log(
       `[${source.name}] fetched ${counts.fetched}, written ${rows.length} ` +
@@ -235,6 +235,7 @@ async function runOneSource(
       written,
       runId: run.id,
       walkedOrganisations,
+      stats,
     };
   } catch (err) {
     // Anything not yet written failed with the batch.

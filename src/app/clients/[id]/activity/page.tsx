@@ -5,13 +5,11 @@ import { reportError } from "@/lib/error-logging";
 import { hasPermission } from "@/lib/auth/permissions";
 import { formatAttachments, type AttachmentRow } from "@/lib/attachments";
 import { buildNoteList, type NoteRow } from "@/lib/note-history";
+import { buildTimeline, type AuditRow, type NoteRow as TimelineNoteRow, type OutreachMessageRow as TimelineOutreachRow, type ReplyEventRow } from "@/lib/timeline";
 import {
-  buildTimeline,
-  type AuditRow,
-  type NoteRow as TimelineNoteRow,
-  type OutreachMessageRow as TimelineOutreachRow,
-  type ReplyEventRow,
-} from "@/lib/timeline";
+  stageEventsFromAudit,
+  type MissionHistoryRow,
+} from "@/lib/field-sources";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 
 import { AddNoteForm } from "../add-note-form";
@@ -20,7 +18,8 @@ import { NotesSection } from "../notes-section";
 import { SectionCard } from "../section-card";
 import { TimelineSection } from "../timeline-section";
 import { UploadAttachmentForm } from "../upload-attachment-form";
-import { loadClient, requireActor } from "../load-record";
+import { loadClient, loadFieldHistory, requireActor } from "../load-record";
+import { WhatCameFromWhereCard } from "../what-came-from-where-card";
 
 /** The audit actions the client timeline surfaces. */
 const TIMELINE_AUDIT_ACTIONS = [
@@ -64,7 +63,7 @@ export default async function ClientActivityPage({
    * by a CAM or viewer at all — without it every row is invisible, not merely
    * filtered, to anyone but an admin.
    */
-  const [notesResult, attachmentsResult, timelineNotes, timelineMessages, replies, audit] =
+  const [notesResult, attachmentsResult, timelineNotes, timelineMessages, replies, audit, fieldHistory] =
     await Promise.all([
       supabase
         .from("notes")
@@ -101,6 +100,10 @@ export default async function ClientActivityPage({
         .eq("target_table", "organisations")
         .eq("target_id", id)
         .in("action", [...TIMELINE_AUDIT_ACTIONS]),
+      // cache()d: the Overview tab's Data Sources card shares the same
+      // provenance query, so a session that has already loaded it pays
+      // nothing again here.
+      loadFieldHistory(id),
     ]);
 
   for (const [operation, error] of [
@@ -149,6 +152,26 @@ export default async function ClientActivityPage({
     }
   }
 
+  /*
+   * Mission history for the what-came-from-where card: ENRICHMENT_RESULTS is
+   * append-only (latest row wins), so the mission's own table IS its history —
+   * no second tracking layer. RLS (enrichment_results_select_active) already
+   * shows these rows to every active role, so the card needs no widening.
+   */
+  const missionResult = await supabase
+    .from("enrichment_results")
+    .select("id, mission_statement, enriched_at, confidence_score")
+    .eq("organisation_id", id)
+    .order("enriched_at", { ascending: false })
+    .limit(24);
+  if (missionResult.error) {
+    await reportError(missionResult.error, {
+      operation: "clients.activity_mission_history",
+      organisationId: id,
+    });
+  }
+  const missionHistory = (missionResult.data ?? []) as MissionHistoryRow[];
+
   const timeline = buildTimeline(
     {
       notes: (timelineNotes.data ?? []) as unknown as TimelineNoteRow[],
@@ -167,6 +190,11 @@ export default async function ClientActivityPage({
     (attachmentsResult.data ?? []) as unknown as AttachmentRow[],
   );
 
+  // The stage column of the what-came-from-where card reads the same audit
+  // rows the timeline does — one query serves both, and the actor names are
+  // the map resolved above, so a person reads as a person in both places.
+  const stageEvents = stageEventsFromAudit(audit.data ?? [], timelineNames);
+
   return (
     <Stage>
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
@@ -184,6 +212,18 @@ export default async function ClientActivityPage({
         </Group>
 
         <Group className="space-y-6">
+          <Rise className="relative z-10">
+            {/* z-10 as on Overview's TagsCard: this card holds popovers that
+                must paint over the Rise below it, and each Rise is its own
+                stacking context. */}
+            <WhatCameFromWhereCard
+              provenance={fieldHistory.provenance}
+              missionRows={missionHistory}
+              stageEvents={stageEvents}
+              error={fieldHistory.error}
+            />
+          </Rise>
+
           <Rise>
             {/* Add note rides the heading row, so the composer opens downward
                 over the list rather than pushing it — see add-note-form.tsx. */}

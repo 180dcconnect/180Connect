@@ -74,8 +74,11 @@ export function formatCompact(value: number): string {
  */
 const BAND_TOP = 34;
 const BAND_BOTTOM = 99.5;
+// Left keeps a small inset so the start of the line isn't glued to the card
+// edge; right is 0 so the last data point reaches the edge itself — stopping it
+// short read as if the series ended a day early.
 const X_INSET_LEFT = 3;
-const X_INSET_RIGHT = 3;
+const X_INSET_RIGHT = 0;
 
 const toX = (i: number, len: number) =>
   len <= 1
@@ -354,7 +357,11 @@ export function MetricChart({
             return (
               <g key={s.name}>
                 {pts.map((p, i) => {
-                  const barX = p.x + offset - width / 2;
+                  // The last point sits on the right edge (X_INSET_RIGHT = 0);
+                  // pull its bar half-a-width inward so it doesn't spill past
+                  // the card border.
+                  const barXShift = i === s.data.length - 1 ? -width / 2 : 0;
+                  const barX = p.x + offset - width / 2 + barXShift;
                   const barY = p.y;
                   const barHeight = Math.max(bandBottom - p.y, 0.5);
                   return (
@@ -418,10 +425,16 @@ export function MetricChart({
           if (!point) return null;
           const targetX = toX(Math.min(active, s.data.length - 1), s.data.length);
           const targetY = toY(point.value);
+          // The last point sits on the right edge; nudge its dot inward so it
+          // isn't half-clipped by the card's rounded border. This must ride the
+          // standalone `translate` property (Tailwind's -translate-* utilities
+          // set the same property) because Motion's `transform` would clobber it.
+          const edgeDotNudge = targetX >= 100 ? "8px" : null;
           return (
             <motion.div
               key={s.name}
               className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2"
+              style={edgeDotNudge ? { translate: `calc(-50% + ${edgeDotNudge}) -50%` } : undefined}
               initial={false}
               animate={{
                 left: `${targetX}%`,
@@ -469,8 +482,16 @@ export function MetricChart({
               opacity: { duration: 0.15 },
               scale: { duration: 0.15 },
             }}
+            // Flip via the standalone CSS `translate` property, NOT `transform`:
+            // Motion animates `scale` on this element and rewrites `transform`
+            // every frame, which would wipe a transform-based flip mid-hover —
+            // exactly the bug that pushed the tooltip off the card's right
+            // edge. `translate` composes with Motion's `transform` instead.
             style={{
-              transform: cursorX > 50 ? "translate(calc(-100% - 12px), -50%)" : "translate(12px, -50%)",
+              translate:
+                cursorX > 50
+                  ? "calc(-100% - 12px) -50%"
+                  : "12px -50%",
             }}
           >
             <div className="relative min-w-[130px] rounded-xl border border-black/[0.08] dark:border-white/[0.12] bg-popover/95 px-3.5 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.12),0_2px_6px_rgba(0,0,0,0.06)] backdrop-blur-md transition-shadow">

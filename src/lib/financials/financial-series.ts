@@ -408,6 +408,16 @@ export function buildFinancialSeries(input: {
 
 /** One band entering or leaving the year. */
 export type FlowBand = {
+  /**
+   * Unique across *both* sides, hence the `in:` / `out:` prefix.
+   *
+   * The label alone is not unique: "Charitable activities" is a line the
+   * register publishes on the income side and on the expenditure side both, and
+   * they are different money. A consumer keying hover or selection off a bare
+   * label lights up two unrelated bands and reads the wrong amount back — so
+   * the side is part of the identity, not something the caller has to remember
+   * to add.
+   */
   id: string;
   label: string;
   amount: number;
@@ -503,14 +513,14 @@ export function buildFundFlow(year: FinancialYear): FundFlow | null {
   if (incomeDrift > FLOW_DRIFT_LIMIT || spendDrift > FLOW_DRIFT_LIMIT) return null;
 
   const inflows: FlowBand[] = year.mix.map((source) => ({
-    id: source.label,
+    id: `in:${source.label}`,
     label: source.label,
     amount: source.amount,
     kind: "filed" as const,
     government: source.government,
   }));
   const outflows: FlowBand[] = year.spend.map((use) => ({
-    id: use.label,
+    id: `out:${use.label}`,
     label: use.label,
     amount: use.amount,
     kind: "filed" as const,
@@ -523,14 +533,14 @@ export function buildFundFlow(year: FinancialYear): FundFlow | null {
   const gap = incomeAccounted - spendAccounted;
   if (gap > 0) {
     outflows.push({
-      id: "surplus",
+      id: "out:surplus",
       label: "Surplus for the year",
       amount: gap,
       kind: "surplus",
     });
   } else if (gap < 0) {
     inflows.push({
-      id: "reserves",
+      id: "in:reserves",
       label: "Drawn from reserves",
       amount: -gap,
       kind: "reserves",

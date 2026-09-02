@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   describeRun,
   formatSource,
+  humaniseErrorMessage,
   matchesRunQuery,
   summariseRun,
   toneForStatus,
@@ -137,23 +138,65 @@ describe("describeRun", () => {
     assert.equal(describeRun(run({ job_status: "partial" }), NOW).statusLabel, "Partially succeeded");
   });
 
-  it("keeps the error message for a failed run", () => {
+  it("keeps and humanises the error message for a failed run", () => {
     const view = describeRun(
-      run({ job_status: "failed", error_message: "429 rate limited by the source" }),
+      run({ job_status: "failed", error_message: "COMPANIES_HOUSE_API_KEY is not set." }),
       NOW,
     );
-    assert.equal(view.errorMessage, "429 rate limited by the source");
+    assert.equal(view.errorMessage, "COMPANIES_HOUSE_API_KEY is not set.");
+    assert.equal(view.humanError?.summary, "Companies House API access key is not set");
+    assert.ok(view.humanError?.actionHint?.includes("COMPANIES_HOUSE_API_KEY"));
     assert.equal(view.tone, "danger");
   });
 });
 
-describe("matchesRunQuery", () => {
-  const view = describeRun(run({ job_status: "failed", error_message: "429 rate limited" }), NOW);
+describe("humaniseErrorMessage", () => {
+  it("translates missing Companies House API key into clear instructions", () => {
+    const res = humaniseErrorMessage("COMPANIES_HOUSE_API_KEY is not set.");
+    assert.equal(res?.summary, "Companies House API access key is not set");
+    assert.ok(res?.actionHint?.includes("COMPANIES_HOUSE_API_KEY"));
+  });
 
-  it("matches the words the reader can see", () => {
+  it("translates missing Charity Commission API key into clear instructions", () => {
+    const res = humaniseErrorMessage("CHARITY_COMMISSION_API_KEY is not set.");
+    assert.equal(res?.summary, "Charity Commission API subscription key is not set");
+    assert.ok(res?.actionHint?.includes("CHARITY_COMMISSION_API_KEY"));
+  });
+
+  it("translates 401 unauthorized errors", () => {
+    const res = humaniseErrorMessage("401 Unauthorized: Invalid API key");
+    assert.equal(res?.summary, "Authentication rejected by the data provider");
+    assert.ok(res?.actionHint?.includes("Verify that your configured API key"));
+  });
+
+  it("translates 429 rate limit errors", () => {
+    const res = humaniseErrorMessage("429 Too Many Requests");
+    assert.equal(res?.summary, "Rate limit reached on external registry");
+  });
+
+  it("translates network timeouts", () => {
+    const res = humaniseErrorMessage("fetch failed: ETIMEDOUT connection timed out");
+    assert.equal(res?.summary, "Connection timed out with registry service");
+  });
+
+  it("returns null for empty error strings", () => {
+    assert.equal(humaniseErrorMessage(null), null);
+    assert.equal(humaniseErrorMessage(""), null);
+    assert.equal(humaniseErrorMessage("   "), null);
+  });
+});
+
+describe("matchesRunQuery", () => {
+  const view = describeRun(
+    run({ job_status: "failed", error_message: "COMPANIES_HOUSE_API_KEY is not set." }),
+    NOW,
+  );
+
+  it("matches the words the reader can see in the summary or human error", () => {
     assert.equal(matchesRunQuery(view, "companies house"), true);
     assert.equal(matchesRunQuery(view, "failed"), true);
-    assert.equal(matchesRunQuery(view, "rate limited"), true);
+    assert.equal(matchesRunQuery(view, "access key"), true);
+    assert.equal(matchesRunQuery(view, "not set"), true);
   });
 
   it("requires every word, not any", () => {

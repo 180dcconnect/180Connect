@@ -56,14 +56,24 @@ const ENUM_FIELD_VALUES: Record<string, readonly string[]> = {
 /**
  * The admin's side of the inline editor: several fields, applied directly.
  *
- * An admin's edit is not a proposal, so there is no RPC and no queue — but the
- * shape of the result is the CAM's, per-field, because the failures are just as
- * independent (one column rejects on length, the rest are fine) and the panel
- * renders both outcomes with the same code.
+ * An admin's edit is not a proposal, so there is no queue — but the write goes
+ * through `apply_admin_field_edits` (20260914100000), a SECURITY DEFINER RPC
+ * that applies the columns, records FIELD_SOURCES provenance (source='manual',
+ * recorded_by=this admin — what the "What came from where" card and the Data
+ * Sources card's Manual Input row read) and writes one audit_log row, all in
+ * the one transaction. The old direct UPDATE recorded nothing, which is why
+ * manual corrections never showed up as Manual Input anywhere. The RPC
+ * re-checks the admin role and its own field allowlist inside — this action's
+ * validation is presentation, never the only gate.
+ *
+ * The result is still per-field, because the failures are just as independent
+ * (one column rejects on length, the rest are fine) and the panel renders both
+ * outcomes with the same code.
  *
  * Mission is not a column on `organisations`; it is the newest
  * `enrichment_results` row, so an admin editing it appends a hand-written
- * enrichment at full confidence rather than updating a field.
+ * enrichment at full confidence rather than updating a field — and the field
+ * history card reads that row's confidence, so no second attribution exists.
  */
 export async function adminDirectEditsAction(input: {
   organisationId: string;
@@ -152,10 +162,18 @@ export async function adminDirectEditsAction(input: {
   }
 
   if (columnFields.length > 0) {
-    const { error } = await supabase
-      .from("organisations")
-      .update(columnUpdates)
-      .eq("id", organisationId);
+    // The RPC applies all-or-nothing (one transaction — the record is never
+    // briefly half-corrected) and returns one outcome per field, which is
+    // always all-ok on success: it raises on anything it cannot apply rather
+    // than writing a subset. The per-field check is a defensive boundary on
+    // the shape, not a second behaviour.
+    const { data, error } = await supabase.rpc("apply_admin_field_edits", {
+      p_organisation_id: organisationId,
+      p_changes: columnFields.map((fieldName) => ({
+        field_name: fieldName,
+        value: columnUpdates[fieldName],
+      })),
+    });
 
     if (error) {
       await reportError(error, {
@@ -171,12 +189,27 @@ export async function adminDirectEditsAction(input: {
         });
       }
     } else {
+      const applied = new Set(
+        (Array.isArray(data) ? data : [])
+          .filter(
+            (row): row is { field_name: string; ok: boolean } =>
+              typeof row === "object" &&
+              row !== null &&
+              typeof (row as { field_name?: unknown }).field_name === "string" &&
+              (row as { ok?: unknown }).ok === true,
+          )
+          .map((row) => row.field_name),
+      );
       for (const fieldName of columnFields) {
-        results.push({
-          fieldName,
-          ok: true,
-          message: `${restrictedFieldLabel(fieldName)} saved.`,
-        });
+        results.push(
+          applied.has(fieldName)
+            ? { fieldName, ok: true, message: `${restrictedFieldLabel(fieldName)} saved.` }
+            : {
+                fieldName,
+                ok: false,
+                message: "The change could not be saved. Refresh and try again.",
+              },
+        );
       }
     }
   }

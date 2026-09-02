@@ -7,7 +7,7 @@ import { cancelInviteAction, resendInviteAction } from "./invite-actions";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { DeleteButton } from "@/components/ui/delete-button";
 
-type ActionResult = { text: string; status: "success" | "warning" | "error" };
+type ActionResult = { text: string; status: "success" | "warning" | "error"; link?: string };
 
 const ROLE_LABEL: Record<PendingInvite["role"], string> = {
   cam: "CAM",
@@ -29,6 +29,7 @@ export function PendingInvitesList({
   const router = useRouter();
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, ActionResult>>({});
 
   async function handleResend(id: string) {
@@ -46,7 +47,11 @@ export function PendingInvitesList({
       }
       setResults((current) => ({
         ...current,
-        [id]: { text: result.message!, status: result.status === "idle" ? "success" : result.status },
+        [id]: {
+          text: result.message!,
+          status: result.status === "idle" ? "success" : result.status,
+          link: result.link,
+        },
       }));
     }
   }
@@ -126,12 +131,27 @@ export function PendingInvitesList({
               (result.status === "error" ? (
                 <InlineAlert message={result.text} />
               ) : (
-                <p
-                  aria-live="polite"
-                  className={result.status === "warning" ? "text-xs text-amber-700" : "text-xs text-brand"}
-                >
-                  {result.text}
-                </p>
+                <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                  <p
+                    aria-live="polite"
+                    className={result.status === "warning" ? "text-xs text-amber-700" : "text-xs text-brand"}
+                  >
+                    {result.text}
+                  </p>
+                  {result.link && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(result.link!);
+                        setCopiedId(invite.id);
+                        setTimeout(() => setCopiedId(null), 3000);
+                      }}
+                      className="cursor-pointer font-semibold text-xs text-brand underline underline-offset-2 hover:opacity-80"
+                    >
+                      {copiedId === invite.id ? "✓ Copied invite link" : "Copy invite link"}
+                    </button>
+                  )}
+                </div>
               ))}
           </li>
         );

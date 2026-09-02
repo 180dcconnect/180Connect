@@ -38,9 +38,12 @@ import { InlineAlert } from "@/components/ui/inline-alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import { BrandSearchBar } from "@/components/brand/search-bar";
 import { Group, Rise } from "@/components/dashboard-stage";
+import { GroupTabs } from "@/components/ui/group-tabs";
 import { SearchRail } from "@/components/search-rail";
 import { groupByDay } from "@/lib/display-format";
+import { DATA_IMPORTS_TABS } from "../import-group";
 import { ImportFeed } from "./import-feed";
+import { IngestionGuide } from "./ingestion-guide";
 import { describeRun, formatSource, matchesRunQuery, type IngestionRunRow } from "./run-format";
 import { labelForStatus } from "./status-helpers.ts";
 
@@ -130,6 +133,7 @@ export default async function AdminImportStatusPage({
             <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
               Import status
             </h1>
+            <GroupTabs className="mt-4" tabs={DATA_IMPORTS_TABS} current="/admin/import-status" />
             <p className="mt-3 max-w-xl text-sm leading-[1.7] text-foreground/65">
               Every data ingestion run, most recent first — what it fetched, what
               it added, and why it stopped if it did. Open a run for the full
@@ -183,7 +187,11 @@ export default async function AdminImportStatusPage({
             />
           </Rise>
         ) : (
-          <Group className="space-y-4">
+          <Group className="space-y-6">
+            <Rise>
+              <IngestionGuide />
+            </Rise>
+
             <Rise className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
               <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
                 <span className="tabular-nums">{views.length}</span> run

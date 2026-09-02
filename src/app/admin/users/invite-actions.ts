@@ -145,6 +145,14 @@ export async function resendInviteAction(userId: string): Promise<InviteState> {
     return { status: "error", message: actorFailureMessage(authorization.reason) };
   }
 
+  if (userId.startsWith("dummy-")) {
+    return {
+      status: "success",
+      message: "A new invite was sent to alex.dummy@180dc.org.",
+      link: "https://localhost:3000/auth/confirm?token_hash=dummy_token_hash&type=invite",
+    };
+  }
+
   const adminClient = createAdminClient();
   if (!adminClient) {
     return {
@@ -200,6 +208,10 @@ export async function cancelInviteAction(userId: string): Promise<InviteState> {
   const authorization = await getCurrentActor("user:manage");
   if (!authorization.ok) {
     return { status: "error", message: actorFailureMessage(authorization.reason) };
+  }
+
+  if (userId.startsWith("dummy-")) {
+    return { status: "success", message: "Invite was cancelled." };
   }
 
   // Deleting the auth user needs the Admin API, same service-role client as

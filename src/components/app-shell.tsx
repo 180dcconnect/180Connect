@@ -48,12 +48,25 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
       items: [
         { href: "/admin", label: "Overview", icon: "admin" },
         { href: "/admin/users", label: "Team management", icon: "users" },
+        { href: "/admin/review", label: "Review queue", icon: "review" },
+        { href: "/admin/team-pipeline", label: "Team pipeline", icon: "pipeline" },
         { href: "/admin/audit-log", label: "Audit log", icon: "audit" },
-        { href: "/admin/import-status", label: "Import status", icon: "import" },
-        // Not duplicated here: every admin already has tags:manage, so the
-        // main-nav entry above already covers them — a second entry in this
-        // section would just show "Tags" twice in the same sidebar.
+        // One entry for the four importer pages; each page carries a tab row
+        // (see src/app/admin/import-group.ts) so the group is navigable without
+        // spending four sidebar slots on pages that are cousins of each other.
+        { href: "/admin/import-status", label: "Data imports", icon: "database" },
         { href: "/admin/feedback", label: "Feedback", icon: "feedback" },
+      ],
+    });
+  }
+
+  // Score settings, data handling rules and restricted fields are rare,
+  // deliberate configuration — separate section at the bottom of the admin
+  // group so daily-ops links stay visually grouped above them.
+  if (hasPermission(actor.role, "platform-settings:manage")) {
+    sections.push({
+      items: [
+        { href: "/admin/score-settings", label: "Platform settings", icon: "settings" },
       ],
     });
   }

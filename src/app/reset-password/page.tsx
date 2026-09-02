@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { RESET_LINK_ERROR } from "@/lib/auth/password-reset";
+import { INVITE_LINK_ERROR } from "@/lib/auth/invite";
 import { GROUND, INK } from "@/components/brand/tokens";
 import { fieldVars } from "@/components/brand/fields";
 import { Wordmark } from "@/components/brand/wordmark";
@@ -60,7 +61,7 @@ export default async function ResetPasswordPage({
             : "Your reset link is single-use."}
         </p>
         <ResetPasswordForm
-          linkError={error ? RESET_LINK_ERROR : undefined}
+          linkError={error ? (isInvite ? INVITE_LINK_ERROR : RESET_LINK_ERROR) : undefined}
           isInvite={isInvite}
           email={email}
           existingFullName={existingFullName}

@@ -1,5 +1,5 @@
 // Shared Charity Commission discovery import (F049) — the one function both the
-// manual "Discover new charities" button (src/app/admin/charity-commission/actions.ts)
+// manual "Check for new registrations" button (src/app/admin/charity-commission/actions.ts)
 // and the weekly cron route (src/app/api/cron/charity-commission-import/route.ts)
 // call, so the two trigger paths cannot drift apart. Mirrors
 // companies-house-discovery.ts / runCompaniesHouseDiscoveryImport.

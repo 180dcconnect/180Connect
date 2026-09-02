@@ -59,22 +59,12 @@ export const PRIORITY_LOCAL_AUTHORITIES: readonly string[] =
 export const PRIORITY_POSTCODE_PREFIXES: readonly string[] =
   CLIENT_CRITERIA.priorityPostcodePrefixes;
 
-/**
- * Postcode areas are letters-then-digits: "S1 2HE" is Sheffield, "SA1" is
- * Swansea. A naive `startsWith("S")` swallows every SA/SE/SK/SL/SM/SN/SO/SP/SR/
- * SS/ST/SW/SY postcode in the country — about a tenth of the register. The area
- * is the leading letters only, so it has to be compared as a whole token.
- */
-export function postcodeArea(postcode: string | null | undefined): string {
-  const compact = (postcode ?? "").toUpperCase().replace(/\s+/g, "");
-  const match = /^([A-Z]{1,2})\d/.exec(compact);
-  return match ? match[1] : "";
-}
-
-export function isPriorityPostcode(postcode: string | null | undefined): boolean {
-  const area = postcodeArea(postcode);
-  return area !== "" && PRIORITY_POSTCODE_PREFIXES.includes(area);
-}
+// The area-matching itself lives in src/lib/postcode-area.ts: Charity Commission
+// *discovery* applies the same locality test to newly registered charities, and
+// two import paths that are meant to agree about what "local" means must not each
+// carry their own copy of the rule. Re-exported here so this file stays the one
+// place a reader has to look to see everything the bulk filter applies.
+export { postcodeArea, isPriorityPostcode } from "../../postcode-area.ts";
 
 /** The extract files this import reads, and the order it reads them in. */
 export const EXTRACT_BASE_URL =

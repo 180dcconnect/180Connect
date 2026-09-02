@@ -5,13 +5,14 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ComponentType } from "react";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
-import { MessageSquareHeart, Inbox, ShieldCheck, UserPlus } from "lucide-react";
+import { ClipboardCheck, Database, Inbox, MessageSquareHeart, ShieldCheck, SquareKanban, UserPlus } from "lucide-react";
 import { Cctv } from "@/components/animate-ui/icons/cctv";
 import { CloudDownload } from "@/components/animate-ui/icons/cloud-download";
 import { Compass } from "@/components/animate-ui/icons/compass";
 import { AnimateIcon } from "@/components/animate-ui/icons/icon";
 import { PanelLeftClose } from "@/components/animate-ui/icons/panel-left-close";
 import { PanelLeftOpen } from "@/components/animate-ui/icons/panel-left-open";
+import { Settings } from "@/components/animate-ui/icons/settings";
 import { Users } from "@/components/animate-ui/icons/users";
 import { ThumbsUp} from "@/components/animate-ui/icons/thumbs-up";
 import UsersGroupIcon from "@/components/ui/users-group-icon";
@@ -31,7 +32,20 @@ export type SidebarOnboarding = {
   show?: boolean;
 };
 
-export type SidebarIconName = "dashboard" | "admin" | "users" | "add" | "audit" | "import" | "clients" | "feedback" | "inbox";
+export type SidebarIconName =
+  | "dashboard"
+  | "admin"
+  | "users"
+  | "add"
+  | "audit"
+  | "import"
+  | "clients"
+  | "feedback"
+  | "inbox"
+  | "review"
+  | "pipeline"
+  | "database"
+  | "settings";
 
 export type SidebarNavItem = {
   href: string;
@@ -67,6 +81,10 @@ const ICONS: Record<SidebarIconName, RailIcon> = {
   import: CloudDownload,
   feedback: ThumbsUp,
   inbox: Inbox,
+  review: ClipboardCheck,
+  pipeline: SquareKanban,
+  database: Database,
+  settings: Settings,
 };
 
 const MotionLink = motion.create(Link);

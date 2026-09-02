@@ -3,10 +3,7 @@
 import { reportError } from "@/lib/error-logging";
 import { getCurrentActor, actorFailureMessage } from "@/lib/auth/actor";
 import { runIngestion } from "@/lib/ingestion/runner";
-import {
-  charityCommissionAdapter,
-  createCharityCommissionLookupAdapter,
-} from "@/lib/ingestion/sources/charity-commission";
+import { createCharityCommissionLookupAdapter } from "@/lib/ingestion/sources/charity-commission";
 import { runCharityCommissionDiscoveryImport } from "@/lib/ingestion/sources/charity-commission-discovery";
 import { promotePendingCharityCommissionRecords } from "@/lib/standardize/write-organisations";
 import { importStateFromSummary, describePromotion } from "./import-result";
@@ -30,9 +27,11 @@ export type CharityCommissionImportState = {
 };
 
 /**
- * F049: shared by both the bulk trigger and the single lookup below - each
- * only differs in which adapter it runs, both need the same "ingest, then
- * promote the whole pending backlog" chaining afterward.
+ * F049: ingest, then promote the whole pending backlog.
+ *
+ * Used by the single lookup below. The discovery trigger does its own promotion
+ * inside runCharityCommissionDiscoveryImport, so that the weekly cron job and
+ * the manual button cannot drift apart.
  */
 async function withPromotion(
   ingestState: CharityCommissionImportState,
@@ -61,67 +60,15 @@ async function withPromotion(
   }
 }
 
-export async function importCharityCommission(
-  previous: CharityCommissionImportState,
-  formData: FormData,
-): Promise<CharityCommissionImportState> {
-  void previous;
-  void formData; // no inputs — this is a bulk trigger, not a single lookup
-
-  const authorization = await getCurrentActor("user:manage");
-  if (!authorization.ok) {
-    return {
-      kind: "error",
-      message: actorFailureMessage(authorization.reason),
-    };
-  }
-
-  try {
-    const [summary] = await runIngestion(
-      [charityCommissionAdapter],
-      {
-        triggeredBy: "manual",
-        triggeredByUserId: authorization.actor.id,
-      },
-    );
-
-    if (summary.status === "failed") {
-      await reportError(new Error(summary.error ?? "Charity Commission import failed"), {
-        operation: "admin.charity_commission.import",
-        source: summary.source,
-        actorUserId: authorization.actor.id,
-      });
-      return importStateFromSummary(summary);
-    }
-
-    return withPromotion(
-      importStateFromSummary(summary),
-      authorization.actor.id,
-      "admin.charity_commission.promote",
-    );
-  } catch (error) {
-    await reportError(error, {
-      operation: "admin.charity_commission.import",
-      actorUserId: authorization.actor.id,
-    });
-    return {
-      kind: "error",
-      message:
-        "Charity Commission could not be imported. The failure was recorded; please try again later.",
-    };
-  }
-}
-
 /**
  * Zero-input discovery (F049): searches from the latest already-ingested
  * registration date to today, rather than a bulk backfill's fixed date range.
  * Runs the same function the weekly cron job runs
  * (charity-commission-discovery.ts's runCharityCommissionDiscoveryImport), so the
  * manual button and the scheduled job can never drift apart. Promotion happens
- * inside that shared function, not here — unlike importCharityCommission and
- * lookupCharity above, which call withPromotion separately because their bare
- * adapters (charityCommissionAdapter, createCharityCommissionLookupAdapter) don't
- * promote on their own. Mirrors companies-house/actions.ts's
+ * inside that shared function, not here — unlike lookupCharity below, which
+ * calls withPromotion separately because createCharityCommissionLookupAdapter
+ * does not promote on its own. Mirrors companies-house/actions.ts's
  * importCompaniesHouseAuto.
  */
 export async function importCharityCommissionAuto(

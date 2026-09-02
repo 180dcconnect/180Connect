@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, type ComponentType } from "react";
+import Link from "next/link";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
-import { ChevronDown, CircleCheck, CircleDot, CircleX, LoaderCircle, TriangleAlert } from "lucide-react";
+import { ArrowRight, ChevronDown, CircleCheck, CircleDot, CircleX, ExternalLink, LoaderCircle, TriangleAlert } from "lucide-react";
 
 import { EASE, entranceIndexed } from "@/components/brand/motion";
 import { StatusBadge } from "./status-badge";
@@ -68,6 +69,22 @@ const COUNT_CLASS: Record<RunTone, string> = {
   danger: "bg-red-50 text-red-800",
   info: "bg-blue-50 text-blue-800",
   neutral: "bg-black/[0.04] text-foreground/70",
+};
+
+const COUNT_DESCRIPTIONS: Record<string, string> = {
+  Fetched: "Total retrieved from registry API",
+  Added: "New or updated records saved",
+  Skipped: "Unchanged matching checksums",
+  Failed: "Malformed records or API errors",
+  Flagged: "Dissolved/status drift detected",
+};
+
+const COUNT_EXPLANATIONS: Record<string, string> = {
+  Fetched: "Total raw organisation records returned by the registry during this run.",
+  Added: "Brand-new organisations, or organisations whose details changed since last import.",
+  Skipped: "Records whose data was 100% identical to what we already store. Skipped to prevent redundant processing.",
+  Failed: "Records that failed validation, had empty IDs, or encountered network/database errors.",
+  Flagged: "Active client organisations where status recheck found the entity was dissolved, liquidated, or altered.",
 };
 
 export type RunDayGroup = { key: string; label: string; events: RunView[] };
@@ -136,11 +153,18 @@ function RunRow({
           target, and the gesture answers "what is this row" as the cursor
           crosses it. */}
       <motion.div initial="rest" animate="rest" whileHover="hover">
-        <button
-          type="button"
+        <div
+          role="button"
+          tabIndex={0}
           onClick={onToggle}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onToggle();
+            }
+          }}
           aria-expanded={open}
-          className="flex w-full items-start gap-3 px-4 py-4 text-left transition-colors hover:bg-black/[0.02] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand sm:gap-4 sm:px-5"
+          className="flex w-full items-start gap-3 px-4 py-4 text-left transition-colors hover:bg-black/[0.02] cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand sm:gap-4 sm:px-5"
         >
           <motion.span
             aria-hidden="true"
@@ -169,7 +193,7 @@ function RunRow({
               </span>
             </span>
 
-            <span className="mt-1.5 block text-[15px] font-bold leading-[1.45]">{run.summary}</span>
+            <span className="mt-1.5 block text-[15px] font-bold leading-[1.45] text-foreground">{run.summary}</span>
 
             {run.highlights.length > 0 && (
               <span className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -180,17 +204,24 @@ function RunRow({
             )}
 
             {/* F039 AC3 — a failure has to be legible without opening anything,
-                so the reason sits on the collapsed row. Once the row is open the
-                panel prints it in full, and two copies of the same sentence a
-                few pixels apart reads as a rendering fault. */}
+                so the reason sits on the collapsed row in friendly terms. */}
             {run.errorMessage && !open && (
-              <span className="mt-2 block max-w-prose text-sm leading-[1.7] text-red-800">
-                {run.errorMessage}
+              <span className="mt-2 flex items-center gap-1.5 text-sm leading-[1.7] text-red-800 font-medium">
+                <TriangleAlert className="h-4 w-4 shrink-0 text-red-700" aria-hidden={true} />
+                <span>{run.humanError?.summary ?? run.errorMessage}</span>
               </span>
             )}
           </span>
 
           <span className="flex shrink-0 items-center gap-3 pt-0.5">
+            <Link
+              href={`/admin/import-status/${run.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="hidden sm:inline-flex items-center gap-1 rounded-lg bg-black/[0.04] px-2.5 py-1 text-xs font-bold text-foreground/75 hover:bg-brand/10 hover:text-brand transition-colors"
+            >
+              <span>View records</span>
+              <ArrowRight className="h-3 w-3" />
+            </Link>
             <span
               className="hidden text-right text-[11px] font-bold uppercase tracking-[0.08em] tabular-nums text-foreground/35 sm:block"
               title={run.startedExact}
@@ -206,7 +237,7 @@ function RunRow({
               <ChevronDown className="h-4 w-4" strokeWidth={2} />
             </motion.span>
           </span>
-        </button>
+        </div>
 
         <AnimatePresence initial={false}>
           {open && (
@@ -230,20 +261,26 @@ function RunRow({
                     the collapsed row deliberately leaves out — it belongs where
                     someone has asked for the full picture. */}
                 <div className="mt-5">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                    Records
-                  </p>
+                  <div className="flex items-baseline justify-between gap-4">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
+                      Record Outcomes Breakdown
+                    </p>
+                    <span className="text-[11px] text-foreground/45 hidden sm:inline">
+                      Hover on any metric for detailed explanation
+                    </span>
+                  </div>
                   <dl className="mt-2 grid overflow-hidden rounded-xl bg-white ring-1 ring-black/[0.06] sm:grid-cols-5">
                     {run.counts.map((count) => (
                       <div
                         key={count.label}
-                        className="flex items-baseline justify-between gap-3 border-b border-black/[0.05] px-4 py-2.5 last:border-b-0 sm:flex-col sm:items-start sm:gap-1 sm:border-b-0 sm:border-r sm:last:border-r-0"
+                        title={COUNT_EXPLANATIONS[count.label]}
+                        className="group flex items-baseline justify-between gap-3 border-b border-black/[0.05] p-3.5 last:border-b-0 transition-colors hover:bg-black/[0.015] sm:flex-col sm:items-start sm:gap-1 sm:border-b-0 sm:border-r sm:last:border-r-0"
                       >
                         <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
                           {count.label}
                         </dt>
                         <dd
-                          className={`text-[17px] font-black tabular-nums ${
+                          className={`text-[19px] font-black tabular-nums ${
                             count.value > 0 && count.tone !== "neutral"
                               ? COUNT_TEXT[count.tone]
                               : "text-foreground/80"
@@ -251,22 +288,70 @@ function RunRow({
                         >
                           {count.value.toLocaleString()}
                         </dd>
+                        <p className="hidden text-[11px] leading-[1.3] text-foreground/50 sm:block">
+                          {COUNT_DESCRIPTIONS[count.label]}
+                        </p>
                       </div>
                     ))}
                   </dl>
                 </div>
 
+                {/* Direct Action Link to Inspect Records */}
+                <div className="mt-5 flex flex-col gap-3 rounded-xl border border-black/[0.06] bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h4 className="text-xs font-bold text-foreground">
+                      Inspect Ingestion Records
+                    </h4>
+                    <p className="text-xs text-foreground/60">
+                      View all organisation records retrieved during this run, click through to added clients, or inspect skipped and duplicate candidates.
+                    </p>
+                  </div>
+                  <Link
+                    href={`/admin/import-status/${run.id}`}
+                    className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-xs font-bold text-white hover:bg-brand-hover transition-colors shadow-2xs"
+                  >
+                    <span>View All Records in This Run</span>
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+
                 {run.errorMessage && (
                   <div className="mt-5">
                     <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                      Why it failed
+                      Why it stopped
                     </p>
-                    {/* AC3 of F039: a failure has to be understandable here,
-                        without going to the server logs. Monospace because the
-                        message is usually the source's own error string. */}
-                    <p className="mt-2 overflow-x-auto rounded-xl bg-red-50 px-4 py-3 font-mono text-xs leading-[1.6] text-red-800">
-                      {run.errorMessage}
-                    </p>
+                    <div className="mt-2 overflow-hidden rounded-xl border border-red-200/80 bg-red-50/70 p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-red-100 text-red-700">
+                          <CircleX className="h-4 w-4" strokeWidth={2.2} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <h4 className="text-sm font-bold text-red-950">
+                            {run.humanError?.summary ?? "Ingestion run failed"}
+                          </h4>
+                          <p className="mt-1 text-xs leading-[1.6] text-red-900/85">
+                            {run.humanError?.description ?? run.errorMessage}
+                          </p>
+                          {run.humanError?.actionHint && (
+                            <div className="mt-3 flex items-start gap-1.5 rounded-lg bg-white/90 px-3 py-2 text-xs text-red-950 shadow-2xs ring-1 ring-red-200/70">
+                              <span className="font-bold shrink-0">How to fix:</span>
+                              <span>{run.humanError.actionHint}</span>
+                            </div>
+                          )}
+                          {run.humanError?.rawMessage &&
+                            run.humanError.rawMessage !== run.humanError.summary && (
+                              <details className="mt-3 text-[11px] text-red-900/75">
+                                <summary className="cursor-pointer font-mono font-bold hover:underline">
+                                  Technical diagnostic details
+                                </summary>
+                                <pre className="mt-1.5 overflow-x-auto rounded bg-red-950/5 p-2 font-mono text-[11px] text-red-950">
+                                  {run.humanError.rawMessage}
+                                </pre>
+                              </details>
+                            )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -293,6 +378,7 @@ function CountChip({ count }: { count: RunCount }) {
   const tone: RunTone = count.value > 0 ? count.tone : "neutral";
   return (
     <span
+      title={COUNT_EXPLANATIONS[count.label] ?? count.label}
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold tracking-[0.02em] ${COUNT_CLASS[tone]}`}
     >
       <span className="tabular-nums">{count.value.toLocaleString()}</span>

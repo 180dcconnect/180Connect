@@ -989,10 +989,12 @@ which source "owns" a field's current value.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `FIELD_SOURCES` | admin only | — (`service_role` only) | — (`service_role` only, via same RPC) | — (no grant) |
+| `FIELD_SOURCES` | all active roles (widened 20260914100000, was admin only) | — (`service_role` only) | — (`service_role` only, via same RPC) | — (no grant) |
 
-SELECT is admin-only, same reasoning as §3.16 — which source produced a field's
-value is not CAM-visible data. There is one write path, `record_field_source`
+SELECT was admin-only until 20260914100000 — same reasoning as §3.16 originally
+— which source produced a field's value is not CAM-visible data. The widening
+above reverses that call with sign-off; §3.16 (FIELD_DISCREPANCIES) keeps its
+admin-only read — conflict review is still an admin queue. There is one write path, `record_field_source`
 (`p_organisation_id, p_field_name, p_value, p_source, p_raw_source_record_id`):
 flips any existing `is_current = true` row for that `organisation_id +
 field_name` to `false`, then inserts the new one as current. Granted to
@@ -1011,10 +1013,47 @@ outside those two), so there is nothing else to wire up today; a future hand-edi
 feature is responsible for calling `record_field_source` itself.
 
 `get_field_sources(organisation_id)` — the read path, `authenticated`, self-checks
-`app.is_admin()` and `app.is_active_user()` inside (same shape as
-`get_organisation_sources`, §3.2). Returns every row for the organisation, current
-and superseded, newest-first per field — satisfies AC1 (current source per field)
-and AC2 (conflicting values and their sources both visible) from a single query.
+`app.is_active_user()` and returns every row for the organisation, current and
+superseded, newest-first per field, with `recorded_by` resolved to a name —
+satisfies AC1 (current source per field) and AC2 (conflicting values and their
+sources both visible) from a single query.
+
+**20260914100000 — widened, and the admin-only read call reversed.** Three
+write paths still recorded no provenance after F044 landed: admin direct edits,
+approved edit suggestions, and approved manual entries (the last left
+hand-created records with an empty provenance story — the gap the provenance
+audit cron watches for). The migration closes all three and changes this
+table's visibility, signed off 2 Sep 2026:
+
+- **SELECT is now every active signed-in role** (`field_sources_select`,
+  `using (app.is_active_user())`). This deliberately reverses the original
+  "which source said what is not CAM-visible data" call: the point of the
+  feature is that a CAM sees which register supplied a value and who corrected
+  it. No INSERT/UPDATE/DELETE grant exists — writes remain RPC-only.
+- **`organisation_type` joined the tracked set** (check constraint,
+  `record_field_source`'s validation, and the UI's label map all widened
+  together). Mission and pipeline stage are surfaced on the profile but stay
+  out of this table: mission's history is ENRICHMENT_RESULTS itself
+  (append-only), stage's is audit_log's `status_changed` rows.
+- **New column `recorded_by`** (null-able FK to USERS): the person behind a
+  manual attribution. Null = the pipeline wrote it — honest, not unknown.
+- **New write path `apply_admin_field_edits(organisation_id, changes, reason)`**
+  — admin direct edits moved off their direct UPDATE. SECURITY DEFINER,
+  self-checks `app.is_admin()`, applies the columns, records provenance
+  (`source='manual'`, `recorded_by`=the admin) for tracked fields, and writes
+  one audit_log row (`fields_direct_edited`) in the same transaction. Grantee:
+  authenticated; the body decides.
+- **`decide_edit_suggestion` (fix-forward rewrite)** — approval additionally
+  records provenance (`source='manual'`, `recorded_by`=the deciding admin), so
+  an approved correction stops presenting as the old register's value.
+- **`approve_manual_entry` (fix-forward rewrite)** — on create_new, every
+  populated tracked field is attributed (`source='manual'`,
+  `recorded_by`=the submitting CAM, who typed the values). link_existing
+  writes none: the linked record keeps whichever source produced its fields.
+
+Data Model tab 03 governs this table's columns; the tab had not been updated
+with `organisation_type`/`recorded_by` at the time of writing — raised for the
+spreadsheet rather than edited here.
 
 **MVP field scope**: the same six fields as `FIELD_DISCREPANCIES` (`legal_name`,
 `website`, `contact_email`, `address_line_1`, `city`, `postcode`) — kept identical

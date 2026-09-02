@@ -445,6 +445,41 @@ describe("buildFundFlow", () => {
     assert.equal(surplus?.amount, 380_000_000 - 362_636_196);
   });
 
+  it("gives a line filed on both sides a different id on each", () => {
+    // "Charitable activities" is published as an income line and as an
+    // expenditure line, and they are different money. Keying off the bare label
+    // made hovering one light up the other and report its amount.
+    const flow = buildFundFlow(yearOf(filedYear));
+    assert.ok(flow);
+
+    const income = flow.inflows.find(
+      (band) => band.label === "Charitable activities",
+    );
+    const spend = flow.outflows.find(
+      (band) => band.label === "Charitable activities",
+    );
+    assert.ok(income);
+    assert.ok(spend);
+    assert.notEqual(income.id, spend.id);
+
+    const ids = [...flow.inflows, ...flow.outflows].map((band) => band.id);
+    assert.equal(new Set(ids).size, ids.length);
+  });
+
+  it("keeps ids unique when a drawdown band is the balancing one", () => {
+    const flow = buildFundFlow(
+      yearOf({
+        ...filedYear,
+        total_income: 300_000_000,
+        income_donations_legacies: 220_000_000,
+      }),
+    );
+    assert.ok(flow);
+
+    const ids = [...flow.inflows, ...flow.outflows].map((band) => band.id);
+    assert.equal(new Set(ids).size, ids.length);
+  });
+
   it("balances the other way with a drawdown when spending exceeded income", () => {
     const flow = buildFundFlow(
       yearOf({

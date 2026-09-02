@@ -67,30 +67,39 @@ const SNAP_TRANSITION = {
   ease: (time: number) => 1 - Math.pow(1 - time, 3),
 };
 
+/**
+ * Every part of the confirm/cancel morph (button width, label swap, icon swap,
+ * the X sliding in and out) runs on this one curve so the group reads as a
+ * single continuous movement instead of a sequence of separate steps.
+ */
+const MORPH_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+const MORPH_TRANSITION = { duration: 0.3, ease: MORPH_EASE };
+const SWAP_TRANSITION = { duration: 0.22, ease: MORPH_EASE };
+
 const sizeConfig = {
   xs: {
     button: "h-7 px-2.5 text-xs gap-1.5",
     iconSize: 13,
-    cancelBtn: "h-7 w-7",
-    gap: "gap-1.5",
+    cancelBtn: "h-7 min-w-[32px] px-2",
+    gapPx: 6,
   },
   sm: {
     button: "h-8 px-3 text-xs font-medium gap-1.5",
     iconSize: 14,
-    cancelBtn: "h-8 w-8",
-    gap: "gap-1.5",
+    cancelBtn: "h-8 min-w-[38px] px-2.5",
+    gapPx: 6,
   },
   md: {
     button: "h-9 px-3.5 text-sm font-medium gap-2",
     iconSize: 16,
-    cancelBtn: "h-9 w-9",
-    gap: "gap-2",
+    cancelBtn: "h-9 min-w-[42px] px-3",
+    gapPx: 8,
   },
   lg: {
     button: "h-10 px-4 text-sm font-semibold gap-2.5",
     iconSize: 18,
-    cancelBtn: "h-10 w-10",
-    gap: "gap-2.5",
+    cancelBtn: "h-10 min-w-[46px] px-3.5",
+    gapPx: 10,
   },
 };
 
@@ -351,15 +360,9 @@ export const DeleteButton = React.forwardRef<
         style={{ filter: `url(#${filterId})` }}
         className="will-change-transform"
       >
-        <motion.div
-          layout
-          transition={{
-            duration: 0.2,
-            ease: [0.16, 1, 0.3, 1],
-          }}
+        <div
           className={cn(
             "inline-flex items-center select-none",
-            currentSize.gap,
             className
           )}
         >
@@ -367,7 +370,6 @@ export const DeleteButton = React.forwardRef<
           <motion.button
             ref={ref}
             type="button"
-            layout
             onClick={handlePrimaryClick}
             disabled={disabled || isExecuting}
             aria-label={
@@ -381,12 +383,8 @@ export const DeleteButton = React.forwardRef<
             aria-expanded={isConfirming}
             aria-live="polite"
             whileTap={disabled || isExecuting ? undefined : { scale: 0.97 }}
-            transition={{
-              duration: 0.2,
-              ease: [0.16, 1, 0.3, 1],
-            }}
             className={cn(
-              "relative inline-flex items-center justify-center font-medium tracking-tight transition-colors duration-200 cursor-pointer overflow-hidden rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
+              "relative inline-flex items-center justify-center font-medium tracking-tight transition-colors duration-150 cursor-pointer overflow-hidden rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
               currentSize.button,
               buttonStyleClasses,
               buttonClassName
@@ -401,7 +399,7 @@ export const DeleteButton = React.forwardRef<
                     initial={{ opacity: 0, rotate: -45, scale: 0.7 }}
                     animate={{ opacity: 1, rotate: 0, scale: 1 }}
                     exit={{ opacity: 0, rotate: 45, scale: 0.7 }}
-                    transition={{ duration: 0.14, ease: "easeOut" }}
+                    transition={SWAP_TRANSITION}
                     className="flex items-center justify-center"
                   >
                     <Loader2
@@ -416,10 +414,7 @@ export const DeleteButton = React.forwardRef<
                     initial={{ opacity: 0, scale: 0.6, rotate: -20 }}
                     animate={{ opacity: 1, scale: 1, rotate: 0 }}
                     exit={{ opacity: 0, scale: 0.6, rotate: 20 }}
-                    transition={{
-                      duration: 0.14,
-                      ease: [0.16, 1, 0.3, 1],
-                    }}
+                    transition={SWAP_TRANSITION}
                     className="flex items-center justify-center"
                   >
                     <Check
@@ -434,10 +429,7 @@ export const DeleteButton = React.forwardRef<
                     initial={{ opacity: 0, scale: 0.6, rotate: 20 }}
                     animate={{ opacity: 1, scale: 1, rotate: 0 }}
                     exit={{ opacity: 0, scale: 0.6, rotate: -20 }}
-                    transition={{
-                      duration: 0.14,
-                      ease: [0.16, 1, 0.3, 1],
-                    }}
+                    transition={SWAP_TRANSITION}
                     className="flex items-center justify-center"
                   >
                     <Trash2
@@ -451,94 +443,87 @@ export const DeleteButton = React.forwardRef<
             </span>
 
             {/* Dynamic Text Transition: Delete -> Confirm -> Deleting */}
-            <motion.span
-              layout="size"
-              transition={{
-                duration: 0.2,
-                ease: [0.16, 1, 0.3, 1],
-              }}
-              className="relative flex items-center justify-center overflow-hidden"
-            >
-              <AnimatePresence mode="popLayout" initial={false}>
-                {isDeleting ? (
-                  <motion.span
-                    key="deleting-text"
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    transition={{ duration: 0.14, ease: "easeOut" }}
-                    className="whitespace-nowrap font-medium"
-                  >
-                    {deletingLabel}
-                  </motion.span>
-                ) : isConfirming || status === "snapping" ? (
-                  <motion.span
-                    key="confirming-text"
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    transition={{
-                      duration: 0.14,
-                      ease: [0.16, 1, 0.3, 1],
-                    }}
-                    className="whitespace-nowrap font-semibold"
-                  >
-                    {confirmLabel}
-                  </motion.span>
-                ) : (
-                  <motion.span
-                    key="idle-text"
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    transition={{
-                      duration: 0.14,
-                      ease: [0.16, 1, 0.3, 1],
-                    }}
-                    className="whitespace-nowrap"
-                  >
-                    {label}
-                  </motion.span>
-                )}
-              </AnimatePresence>
-            </motion.span>
+            <span className="relative inline-grid items-center justify-items-center overflow-hidden">
+              {/* Invisible sizers hold the column at the width of the wider of
+                  the two resting labels, so swapping between them never resizes
+                  the button and never nudges the surrounding row. The executing
+                  state deliberately shows no text (the spinner carries it), so
+                  it is left out here and cannot widen the idle button. */}
+              {[label, confirmLabel].map((sizerLabel, index) => (
+                <span
+                  key={`label-sizer-${index}`}
+                  aria-hidden="true"
+                  className="invisible col-start-1 row-start-1 whitespace-nowrap font-semibold"
+                >
+                  {sizerLabel}
+                </span>
+              ))}
+              <span className="col-start-1 row-start-1 flex items-center justify-center">
+                {isDeleting && <span className="sr-only">{deletingLabel}</span>}
+                <AnimatePresence mode="popLayout" initial={false}>
+                  {isDeleting ? null : isConfirming || status === "snapping" ? (
+                    <motion.span
+                      key="confirming-text"
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -5 }}
+                      transition={SWAP_TRANSITION}
+                      className="whitespace-nowrap font-semibold"
+                    >
+                      {confirmLabel}
+                    </motion.span>
+                  ) : (
+                    <motion.span
+                      key="idle-text"
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -5 }}
+                      transition={SWAP_TRANSITION}
+                      className="whitespace-nowrap"
+                    >
+                      {label}
+                    </motion.span>
+                  )}
+                </AnimatePresence>
+              </span>
+            </span>
           </motion.button>
 
           {/* Secondary Cancel "X" Button (Appears beside Confirm button, closes smoothly when cancelled) */}
-          <AnimatePresence>
+          <AnimatePresence initial={false}>
             {isConfirming && !isExecuting && (
-              <motion.button
+              <motion.div
                 key="cancel-x-button"
-                layout
-                type="button"
-                initial={{ opacity: 0, scale: 0.6, width: 0 }}
-                animate={{ opacity: 1, scale: 1, width: "auto" }}
-                exit={{ opacity: 0, scale: 0.6, width: 0 }}
-                transition={{
-                  duration: 0.18,
-                  ease: [0.16, 1, 0.3, 1],
-                }}
-                whileTap={{ scale: 0.92 }}
-                onClick={handleCancelClick}
-                disabled={disabled || isExecuting}
-                aria-label={cancelAriaLabel}
-                title="Cancel"
-                className={cn(
-                  "relative inline-flex items-center justify-center shrink-0 cursor-pointer overflow-hidden rounded-sm transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
-                  currentSize.cancelBtn,
-                  currentVariant.cancel,
-                  cancelButtonClassName
-                )}
+                initial={{ width: 0, marginLeft: 0, opacity: 0 }}
+                animate={{ width: "auto", marginLeft: currentSize.gapPx, opacity: 1 }}
+                exit={{ width: 0, marginLeft: 0, opacity: 0 }}
+                transition={MORPH_TRANSITION}
+                className="shrink-0 overflow-hidden"
               >
-                <X
-                  size={currentSize.iconSize}
-                  strokeWidth={2.2}
-                  aria-hidden="true"
-                />
-              </motion.button>
+                <motion.button
+                  type="button"
+                  whileTap={{ scale: 0.92 }}
+                  onClick={handleCancelClick}
+                  disabled={disabled || isExecuting}
+                  aria-label={cancelAriaLabel}
+                  title="Cancel"
+                  className={cn(
+                    "relative inline-flex items-center justify-center shrink-0 cursor-pointer overflow-hidden rounded-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
+                    currentSize.cancelBtn,
+                    currentVariant.cancel,
+                    cancelButtonClassName
+                  )}
+                >
+                  <X
+                    size={currentSize.iconSize}
+                    strokeWidth={2.2}
+                    aria-hidden="true"
+                  />
+                </motion.button>
+              </motion.div>
             )}
           </AnimatePresence>
-        </motion.div>
+        </div>
       </div>
 
       {/* SVG Dissolve Filter Definition */}

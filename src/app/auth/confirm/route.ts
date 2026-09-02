@@ -21,7 +21,46 @@ import { createClient } from "@/lib/supabase/server";
  * correctly either way ("choose a new password" also describes choosing the
  * first one).
  */
+const BOT_USER_AGENT_REGEX =
+  /whatsapp|facebookexternalhit|slackbot|twitterbot|telegrambot|discordbot|applebot|linkedinbot|skypeteamsbot|googlebot|bingbot|duckduckbot|bytespider|yandex|crawling|crawler|spider|preview|fetch/i;
+
 export async function GET(request: NextRequest) {
+  const userAgent = request.headers.get("user-agent") || "";
+  const purpose =
+    request.headers.get("purpose") ||
+    request.headers.get("sec-purpose") ||
+    request.headers.get("x-purpose") ||
+    request.headers.get("x-moz");
+
+  // If requested by a link-preview crawler (e.g. WhatsApp, Slack, Facebook) or prefetcher,
+  // return metadata without consuming the single-use token.
+  if (
+    purpose === "prefetch" ||
+    purpose === "preview" ||
+    BOT_USER_AGENT_REGEX.test(userAgent)
+  ) {
+    return new Response(
+      `<!DOCTYPE html>
+<html>
+  <head>
+    <title>Accept Invitation · 180Connect</title>
+    <meta property="og:title" content="Accept Invitation · 180Connect" />
+    <meta property="og:description" content="You've been invited to join 180Connect." />
+  </head>
+  <body>
+    <p>Open this link in your web browser to accept your invitation.</p>
+  </body>
+</html>`,
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
+      },
+    );
+  }
+
   const tokenHash = request.nextUrl.searchParams.get("token_hash");
   const type = request.nextUrl.searchParams.get("type");
 

@@ -33,20 +33,34 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
   {
     href: "/admin",
-    label: "Admin workspace",
-    description: "Manage users, audit activity and import Companies House data.",
+    label: "All admin tools",
+    description: "The full inventory of privileged workspaces, grouped by job.",
     permission: "user:manage",
   },
   {
-    href: "/admin/cam-settings",
-    label: "CAM queue settings",
-    description: "Inspect team members' outreach preferences and queue configuration.",
+    href: "/admin/review",
+    label: "Review queue",
+    description: "Records held for validation and status changes flagged during sync.",
+    permission: "user:manage",
+  },
+  {
+    href: "/admin/team-pipeline",
+    label: "Team pipeline",
+    description: "Every client's pipeline stage across the whole team.",
     permission: "user:manage",
   },
   {
     href: "/admin/import-status",
-    label: "Import status",
-    description: "See whether data ingestion runs succeeded, partially succeeded, or failed.",
+    label: "Data imports",
+    description:
+      "Ingestion runs, plus the Companies House, Charity Commission and 360Giving importers they report on.",
+    permission: "platform-settings:manage",
+  },
+  {
+    href: "/admin/score-settings",
+    label: "Platform settings",
+    description:
+      "Score weights, data handling rules and restricted client fields — rare, deliberate configuration.",
     permission: "platform-settings:manage",
   },
   {

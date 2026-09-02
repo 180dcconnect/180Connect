@@ -24,6 +24,13 @@ import {
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
+const DUMMY_PENDING_INVITE: PendingInvite = {
+  id: "dummy-invite-1",
+  email: "alex.dummy@180dc.org",
+  invited_at: "2026-09-02T12:00:00.000Z",
+  role: "cam",
+};
+
 export default async function AdminUsersPage({
   searchParams,
 }: {
@@ -197,7 +204,10 @@ export default async function AdminUsersPage({
           <TeamPanel
             currentUserId={authorization.actor.id}
             filterCriteria={filterCriteria}
-            initialPendingInvites={(pendingInvites as PendingInvite[] | null) ?? []}
+            initialPendingInvites={[
+              ...((pendingInvites as PendingInvite[] | null) ?? []),
+              DUMMY_PENDING_INVITE,
+            ]}
             initialTeamUsers={teamUsers}
             pendingInvitesError={Boolean(pendingError)}
           />

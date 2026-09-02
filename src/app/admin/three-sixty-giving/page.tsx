@@ -4,6 +4,8 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
+import { GroupTabs } from "@/components/ui/group-tabs";
+import { DATA_IMPORTS_TABS } from "../import-group";
 import { ThreeSixtyGivingImportForm } from "./import-form";
 import { ThreeSixtyGivingLookupForm } from "./lookup-form";
 
@@ -66,6 +68,8 @@ export default async function ThreeSixtyGivingPage() {
             Back to admin
           </Link>
         </div>
+        {/* Group navigation: the four importer pages read as one section. */}
+        <GroupTabs className="mt-6" tabs={DATA_IMPORTS_TABS} current="/admin/three-sixty-giving" />
 
         <ThreeSixtyGivingImportForm />
         <ThreeSixtyGivingLookupForm />

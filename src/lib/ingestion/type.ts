@@ -67,6 +67,20 @@ export interface SourceFetchResult {
    * "everything was walked and nothing was found" — callers use it to say so.
    */
   walkedOrganisations?: number;
+  /**
+   * Source-specific detail about how the fetch reached its record count, stored
+   * whole on `ingestion_runs.run_stats` and read whole by the admin pages.
+   *
+   * The Charity Commission bulk import reports its accept/reject funnel here —
+   * scanned, registered, passed income, passed sector, accepted — because that
+   * funnel is the only record of *why* a filter selected what it selected, and a
+   * filter accidentally widened from 4,704 to 40,000 is otherwise invisible
+   * until the client list is full of organisations nobody will contact.
+   *
+   * Flat numbers only, and never authoritative: `RunCounts` stays the record of
+   * what happened. Nothing in the database or the app computes from this.
+   */
+  stats?: Record<string, number>;
 }
 
 /** Implemented once per external source. The runner knows nothing else about them. */
@@ -131,6 +145,8 @@ export interface IngestionStore {
     status: JobStatus,
     counts: RunCounts,
     errorMessage?: string,
+    /** SourceFetchResult.stats, or undefined for a source that reports none. */
+    stats?: Record<string, number>,
   ): Promise<void>;
   /**
    * Loads everything needed to clear a payload for storage (F246 + F247): the
@@ -159,6 +175,8 @@ export type RunSummary = {
    * found no new data.
    */
   walkedOrganisations?: number;
+  /** Whatever the source reported as SourceFetchResult.stats, passed through. */
+  stats?: Record<string, number>;
   /**
    * The ingestion_runs row this summary corresponds to. Null only when startRun
    * itself failed — no row exists to reference. Callers that discover something

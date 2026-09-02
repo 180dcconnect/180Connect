@@ -24,6 +24,7 @@ import type {
   SourceFetchResult,
 } from "../type.ts";
 import { buildAdminClient } from "../../supabase/admin-client-factory.ts";
+import { isPriorityPostcode } from "../../postcode-area.ts";
 
 export const CHARITY_COMMISSION_URL =
   "https://api.charitycommission.gov.uk/register/api";
@@ -230,18 +231,16 @@ export function createCharityCommissionLookupAdapter(
 }
 
 /**
- * Shared by charityCommissionAdapter's fixed backfill range and
- * createCharityCommissionDiscoveryAdapter's watermark-derived range: search by
- * registration date, then batch-fetch full contact/address details for
- * everything found. No documented ceiling for either operation, unlike
- * Companies House's ~1000 search limit — truncated is always false until
- * evidence says otherwise.
+ * Search by registration date, then batch-fetch full contact/address details for
+ * everything found. No documented ceiling for either operation, unlike Companies
+ * House's ~1000 search limit — truncated is always false until evidence says
+ * otherwise.
  */
 async function fetchCharitiesRegisteredBetween(
   start: Date,
   end: Date,
   headers: Record<string, string>,
-): Promise<CommonRecord[]> {
+): Promise<CharityCommissionDetailItem[]> {
   const searchResults: CharityCommissionSearchItem[] = [];
   let chunkStart = new Date(start);
 
@@ -282,35 +281,39 @@ async function fetchCharitiesRegisteredBetween(
     detailRecords.push(...(await fetchCharityDetails(batch, headers)));
   }
 
-  return detailRecords.map(shape);
+  return detailRecords;
 }
 
-export const charityCommissionAdapter: DataSourceAdapter = {
-  name: "charity_commission",
-
-  async fetch(): Promise<SourceFetchResult> {
-    const apiKey = process.env.CHARITY_COMMISSION_API_KEY;
-    if (!apiKey) {
-      throw new Error("CHARITY_COMMISSION_API_KEY is not set.");
-    }
-
-    const headers = { "Ocp-Apim-Subscription-Key": apiKey };
-
-    const registerStart = process.env.CHARITY_COMMISSION_BACKFILL_START
-      ? new Date(process.env.CHARITY_COMMISSION_BACKFILL_START)
-      : new Date("2000-01-01");
-    const today = process.env.CHARITY_COMMISSION_BACKFILL_END
-      ? new Date(process.env.CHARITY_COMMISSION_BACKFILL_END)
-      : new Date();
-
-    const records = await fetchCharitiesRegisteredBetween(registerStart, today, headers);
-    return { records, truncated: false };
-  },
-
-  onError(err: Error) {
-    console.error(`[charity_commission] ingestion failed:`, err.message);
-  },
-};
+/**
+ * Whether a newly registered charity is close enough to be worth importing.
+ *
+ * Discovery used to import every charity registered in England and Wales in the
+ * window — 100 to 300 a week, nationally — on the reasoning that every Charity
+ * Commission record maps to organisation_type "charity", which
+ * CLIENT_CRITERIA.acceptedOrganisationTypes accepts unconditionally. But "is a
+ * charity" is not the question. "Is a charity this branch would ever approach"
+ * is, and the answer for a charity in Cornwall is no however valid its record.
+ *
+ * Postcode area only, deliberately — not the bulk import's fuller whitelist:
+ *
+ *   - **Income** cannot be tested here. These charities registered days ago;
+ *     latest_income does not exist for them yet, and rejecting on a missing
+ *     figure would reject the entire cohort discovery exists to find.
+ *   - **Sector** cannot be tested here. The classification extract is a bulk
+ *     file, and charitydetailsmulti does not carry "what the charity does".
+ *   - **Area of operation** is likewise bulk-only, so the register's own answer
+ *     to "where does this charity work" is not available on this path.
+ *
+ * That leaves the correspondence postcode, which the detail payload does carry.
+ * It is a narrower test than the bulk import's (a Sheffield-working charity
+ * registered to a London accountant is missed), and that is the right trade for
+ * a weekly delta: the next bulk run picks such a charity up once it has filed,
+ * whereas nothing ever removes the thousands of national records the unfiltered
+ * version imported.
+ */
+export function isBranchLocalCharity(detail: CharityCommissionDetailItem): boolean {
+  return isPriorityPostcode(detail.address_post_code);
+}
 
 /** How far back of the last known registration date to re-scan, to absorb any
  * registration that lands just before/after the boundary of a previous run's
@@ -326,11 +329,12 @@ const WATERMARK_OVERLAP_DAYS = 7;
  * unbounded range as one query, this adapter must chunk client-side into
  * CHUNK_DAYS windows to satisfy the search endpoint's date-range-per-call
  * contract — a true 26-year fallback would be well over a thousand chunk calls,
- * blowing past the 300s cron timeout by orders of magnitude. A true first-time
- * historical import is what charityCommissionAdapter (the manual bulk-backfill
- * button, with an admin-set BACKFILL_START/END range) is for; this job only
- * needs to catch anything recent if the watermark lookup itself ever comes back
- * empty.
+ * blowing past the 300s cron timeout by orders of magnitude. A first-time
+ * historical import is what the bulk register extract is for
+ * (charity-commission-bulk.ts, `npm run ingest:charity-commission-bulk`), which
+ * reads every registered charity from one download instead of paging the search
+ * endpoint through a quarter-century of weeks; this job only needs to catch
+ * anything recent if the watermark lookup itself ever comes back empty.
  */
 const NEVER_RUN_FALLBACK_DAYS = 30;
 
@@ -363,16 +367,18 @@ async function defaultResolveRegistrationWatermark(): Promise<string | null> {
 
 /**
  * Zero-input discovery: searches from (the latest already-ingested registration
- * date, minus a 7-day overlap buffer) to today, rather than the fixed
- * CHARITY_COMMISSION_BACKFILL_START/END range charityCommissionAdapter uses. This is
- * what both the weekly cron job and the manual "Discover new charities" button call,
- * so the two trigger paths cannot drift apart — same shape as
- * companies-house-discovery.ts / createCompaniesHouseDiscoveryAdapter.
+ * date, minus a 7-day overlap buffer) to today. This is what both the weekly cron
+ * job and the manual "Check for new registrations" button call, so the two trigger
+ * paths cannot drift apart — same shape as companies-house-discovery.ts /
+ * createCompaniesHouseDiscoveryAdapter.
  *
- * No tier/mission-fit filtering, unlike Companies House: every Charity Commission
- * record maps to organisation_type "charity", which F047's criteria config always
- * accepts (CLIENT_CRITERIA.acceptedOrganisationTypes) — there is no equivalent of
- * Companies House's legal-form ambiguity to filter for at discovery time.
+ * Results are filtered to the branch's postcode areas (isBranchLocalCharity).
+ * They were not, originally, on the reasoning that every Charity Commission
+ * record is organisation_type "charity" and so passes F047's criteria — which is
+ * true and beside the point: it imported every charity registered anywhere in
+ * England and Wales, 100–300 a week, and is why the client list holds thousands
+ * of organisations nobody will ever contact. See isBranchLocalCharity for why
+ * postcode is the only gate available on this path.
  */
 export function createCharityCommissionDiscoveryAdapter(
   options: { resolveWatermark?: RegistrationWatermarkResolver } = {},
@@ -389,13 +395,8 @@ export function createCharityCommissionDiscoveryAdapter(
       }
       const headers = { "Ocp-Apim-Subscription-Key": apiKey };
 
-      // Deliberately independent of CHARITY_COMMISSION_BACKFILL_START/END: those
-      // exist to bound the manual bulk-backfill button's fixed historical range,
-      // not this adapter's ongoing "since the watermark" range. Coupling them
-      // would mean an admin narrowing the backfill env vars for a one-off manual
-      // test silently reshapes the weekly discovery job's range too. End is
-      // always "now" — discovery means "catch up to today", not to some fixed
-      // historical cutoff.
+      // End is always "now" — discovery means "catch up to today", not to some
+      // fixed historical cutoff.
       const watermark = await resolveWatermark();
       const start = watermark
         ? (() => {
@@ -410,8 +411,18 @@ export function createCharityCommissionDiscoveryAdapter(
           })();
       const end = new Date();
 
-      const records = await fetchCharitiesRegisteredBetween(start, end, headers);
-      return { records, truncated: false };
+      const found = await fetchCharitiesRegisteredBetween(start, end, headers);
+      const local = found.filter(isBranchLocalCharity);
+
+      return {
+        records: local.map(shape),
+        truncated: false,
+        // Recorded on the run so the admin page can say "342 registered
+        // nationally, 11 of them local" rather than only "11". A week where
+        // those two numbers converge means the postcode filter stopped working,
+        // and nothing else we store would show it.
+        stats: { registeredNationally: found.length, local: local.length },
+      };
     },
 
     onError(err: Error) {

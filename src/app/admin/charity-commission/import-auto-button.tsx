@@ -22,13 +22,16 @@ export function CharityCommissionImportAutoButton({ configured }: { configured: 
   const [state, action, pending] = useActionState(importCharityCommissionAuto, initialState);
 
   return (
-    <div className="rounded-xl border border-black/10 p-5">
-      <h2 className="text-lg font-bold">Discover new charities</h2>
-      <p className="mt-2 text-sm text-foreground/65">
-        Searches the Charity Commission register for charities registered since the
-        last successful import and imports every new match. No details to enter.
-        The same search runs automatically every week, so new registrations keep
-        getting picked up without clicking this again.
+    <div className="rounded-2xl border border-black/[0.07] bg-white p-5 shadow-xs sm:p-6">
+      <h2 className="text-sm font-bold text-foreground">Check for new registrations</h2>
+      <p className="mt-1.5 max-w-2xl text-sm leading-[1.6] text-foreground/65">
+        Searches the register for charities registered since the last run, and
+        keeps the ones in the branch&rsquo;s postcode areas. This already runs
+        automatically every week — clicking it only brings the next run forward.
+      </p>
+      <p className="mt-2 max-w-2xl text-xs leading-[1.6] text-foreground/50">
+        These charities have not filed accounts yet, so their Financials tab will
+        be empty. That is the register being new, not an import failing.
       </p>
 
       {!configured && (
@@ -45,7 +48,7 @@ export function CharityCommissionImportAutoButton({ configured }: { configured: 
           size="md"
           type="submit"
         >
-          {pending ? "Importing…" : "Discover new charities"}
+          {pending ? "Checking…" : "Check for new registrations"}
         </OriginButton>
       </form>
 

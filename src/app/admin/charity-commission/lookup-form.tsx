@@ -19,11 +19,14 @@ export function CharityCommissionLookupForm({ configured }: { configured: boolea
   const [state, action, pending] = useActionState(lookupCharity, initialLookupState);
 
   return (
-    <div className="mt-8 rounded-xl border border-black/10 p-5">
-      <h2 className="text-lg font-bold">Look up a single charity</h2>
-      <p className="mt-2 text-sm text-foreground/65">
-        Enter a known Charity Commission registration number to fetch and
-        import just that charity, without running a date-range backfill.
+    <div className="rounded-2xl border border-black/[0.07] bg-white p-5 shadow-xs sm:p-6">
+      <h2 className="text-sm font-bold text-foreground">Look up one charity</h2>
+      <p className="mt-1.5 max-w-2xl text-sm leading-[1.6] text-foreground/65">
+        For a charity someone has named. Enter its registration number to fetch
+        that one record. The bulk import&rsquo;s criteria below are not applied,
+        so this reaches a charity outside the branch&rsquo;s usual patch — it
+        still goes through the standard client-criteria check on the way into
+        the list, and may land there flagged for review.
       </p>
 
       {!configured && (

@@ -10,6 +10,8 @@ import {
 import { toPercentages, type ScoutWeightsInput } from "@/lib/scoring/scout-weight-inputs";
 import { Stage, Rise } from "@/components/dashboard-stage";
 import { BackButton } from "@/components/ui/back-button";
+import { GroupTabs } from "@/components/ui/group-tabs";
+import { PLATFORM_SETTINGS_TABS } from "../import-group";
 import { ScoreSettingsPanel } from "./score-settings-panel";
 
 type VersionRow = {
@@ -75,6 +77,8 @@ export default async function AdminScoreSettingsPage() {
               href="/admin"
             />
           </div>
+          {/* Group navigation: the three platform-settings pages read as one section. */}
+          <GroupTabs className="mt-6 w-full" tabs={PLATFORM_SETTINGS_TABS} current="/admin/score-settings" />
         </Rise>
 
         {error && (

@@ -32,6 +32,8 @@
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last updated timestamp | System | Auto-updated on any change |  |
 | is_seed | boolean |  | No | Flag for seed data | System/Human | Set in the seed data script | False by default |
+| registered_on | date |  | Yes | Date the organisation entered its register | API | Charity Commission date_of_registration | Lets the app distinguish "no accounts due yet" from "overdue" — without it both render as an empty Financials tab |
+| charity_reporting_status | text |  | Yes | The register's own reporting status for a charity | API | Charity Commission reporting_status | Values are the regulator's: New / Submission Received / … Deliberately text, not an enum, so an unseen value can't fail an ingestion run |
 
 ## ORGANISATION_IDENTIFIERS
 
@@ -75,8 +77,28 @@
 | total_income | numeric |  | Yes | Total income for the period | API | Pulled from financial filing |  |
 | total_expenditure | numeric |  | Yes | Total expenditure for the period | API | Pulled from financial filing |  |
 | income_band | enum |  | Yes | Banded income category | System | Computed from total_income | under_10k / 10k_100k / 100k_1m / over_1m |
-| filing_date | date |  | Yes | Date the accounts were filed | API | Pulled from Charity Commission |  |
+| filing_date | date |  | Yes | Date the accounts were filed | API | Pulled from Charity Commission | Populated from the bulk register extract's ar_received_date. The Charity Commission API publishes no accounts-submission date at any endpoint, so API-sourced periods leave this null. |
 | financial_source | enum |  | No | Which API provided this data | System | Set on ingestion | charitybase / charity_commission |
+| income_donations_legacies | numeric |  | Yes | Income from donations and legacies for the period | API | Charity Commission | Annual-return breakdown. Parts are not guaranteed to sum to total_income — smaller charities file totals only. Null = not published, never zero |
+| income_charitable_activities | numeric |  | Yes | Income from charitable activities | API | Charity Commission | " |
+| income_other_trading | numeric |  | Yes | Income from other trading activities | API | Charity Commission | " |
+| income_investment | numeric |  | Yes | Investment income | API | Charity Commission | " |
+| income_endowments | numeric |  | Yes | Endowment income | API | Charity Commission | " |
+| income_other | numeric |  | Yes | Other income | API | Charity Commission | " |
+| income_govt_grants | numeric |  | Yes | Income from government grants | API | Charity Commission | Available from no other source we hold |
+| income_govt_contracts | numeric |  | Yes | Income from government contracts | API | Charity Commission | Available from no other source we hold |
+| expenditure_charitable_activities | numeric |  | Yes | Spend on charitable activities | API | Charity Commission | Annual-return breakdown; null = not published |
+| expenditure_raising_funds | numeric |  | Yes | Spend on raising funds | API | Charity Commission | " |
+| expenditure_governance | numeric |  | Yes | Governance costs | API | Charity Commission | " |
+| expenditure_grants_institutions | numeric |  | Yes | Grants made to institutions | API | Charity Commission | " |
+| expenditure_investment_management | numeric |  | Yes | Investment management costs | API | Charity Commission | " |
+| expenditure_other | numeric |  | Yes | Other expenditure | API | Charity Commission | " |
+| count_employees | integer |  | Yes | Employees reported on the annual return for this period | API | Charity Commission bulk annual return extract (Part A / Part B) | Part B. Null = not published (entry-level returns file totals only); 0 is a filed zero. Used with income to size an engagement — income alone cannot distinguish a charity run by 2 staff and 90 volunteers from one with 12 staff and none |
+| count_volunteers | integer |  | Yes | Volunteers reported on the annual return for this period | API | Charity Commission bulk annual return extract (Part A / Part B) | Part A. Null = not published, 0 is a filed zero |
+| receives_govt_grants | boolean |  | Yes | Whether the charity reported receiving government grant funding in this period | API | Charity Commission bulk annual return extract (Part A / Part B) | Part A. Read with income_govt_grants: the flag says whether the relationship exists, the amount how big, the count how many awards |
+| receives_govt_contracts | boolean |  | Yes | Whether the charity reported income from government contracts in this period | API | Charity Commission bulk annual return extract (Part A / Part B) | Part A |
+| count_govt_grants | integer |  | Yes | Number of government grants reported for this period | API | Charity Commission bulk annual return extract (Part A / Part B) | Part A |
+| count_govt_contracts | integer |  | Yes | Number of government contracts reported for this period | API | Charity Commission bulk annual return extract (Part A / Part B) | Part A. One large contract and fifteen small ones are different funding profiles at the same total |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 
 ## GRANTS

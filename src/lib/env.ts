@@ -304,15 +304,6 @@ export const SCHEMA: readonly EnvVarSpec[] = [
         : "must be a valid email address",
   },
   {
-    name: "CHARITY_COMMISSION_BACKFILL_START",
-    required: false,
-    secret: false,
-    description:
-      "Start date (YYYY-MM-DD) for Charity Commission imports via GetSearchCharityByRegDate (F033). Optional — defaults to 2000-01-01 if unset.",
-    validate: (value) =>
-      /^\d{4}-\d{2}-\d{2}$/.test(value) ? null : "must be in YYYY-MM-DD format",
-  },
-  {
     name: "NEXT_PUBLIC_ENV",
     required: false,
     secret: false,
@@ -322,15 +313,6 @@ export const SCHEMA: readonly EnvVarSpec[] = [
       ["local", "staging", "production"].includes(value)
         ? null
         : "must be one of: local, staging, production",
-  },
-  {
-    name: "CHARITY_COMMISSION_BACKFILL_END",
-    required: false,
-    secret: false,
-    description:
-      "End date (YYYY-MM-DD) for Charity Commission imports via GetSearchCharityByRegDate (F033). Optional — defaults to today if unset.",
-    validate: (value) =>
-      /^\d{4}-\d{2}-\d{2}$/.test(value) ? null : "must be in YYYY-MM-DD format",
   },
 ];
 

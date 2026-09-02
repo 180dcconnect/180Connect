@@ -82,6 +82,7 @@ export type InviteState = {
    */
   status: "idle" | "error" | "success" | "warning";
   message?: string;
+  link?: string;
   fieldErrors?: {
     email?: string[];
     role?: string[];
@@ -449,14 +450,14 @@ async function mintAndSendInvite(
   if (warnings.length > 0) {
     return {
       ok: true,
-      state: { status: "warning", message: `${outcome.successMessage} But ${warnings.join(" Also, ")}` },
+      state: { status: "warning", message: `${outcome.successMessage} But ${warnings.join(" Also, ")}`, link },
     };
   }
 
   logSecurityEvent(outcome.successEvent, {});
   return {
     ok: true,
-    state: { status: "success", message: outcome.successMessage },
+    state: { status: "success", message: outcome.successMessage, link },
   };
 }
 

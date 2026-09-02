@@ -92,14 +92,36 @@ export type BulkCharityPayload = {
   matched_areas: string[];
 };
 
+/**
+ * The accept/reject funnel, recorded on the run (`ingestion_runs.run_stats`) so
+ * the admin page can show how 185,574 charities became the number that was
+ * imported, and so a filter widened by accident is visible as a step change
+ * between two runs rather than as a client list nobody can explain.
+ *
+ * Cumulative: each stage counts the rows that passed every gate up to and
+ * including it, so consecutive stages read as "and then this many survived".
+ */
 export type BulkImportStats = {
+  /** Every row in publicextract.charity, whether or not it was a candidate. */
   charitiesScanned: number;
+  /** Registration status "Registered", and not a linked subsidiary row. */
   registered: number;
+  /** …and at or above MIN_INCOME. */
   passedIncome: number;
+  /** …and classified into one of the accepted sectors. */
   passedSector: number;
+  /** …and local to the branch. The imported set. */
   accepted: number;
+  /** Annual-return rows joined onto the accepted set, across Part A and Part B. */
   annualReturnRows: number;
 };
+
+/**
+ * The gates `acceptCharity` applies, in the order it applies them. The funnel
+ * is derived from this rather than from a second set of conditions, so a stage
+ * cannot drift out of step with the predicate it is supposed to describe.
+ */
+const GATE_ORDER = ["not_registered", "linked", "income", "sector", "area"] as const;
 
 export type BulkAdapterOptions = {
   /**
@@ -370,11 +392,18 @@ export function createCharityCommissionBulkAdapter(
         stats.charitiesScanned += 1;
 
         const verdict = acceptCharity(row, sectors, areas);
-        if (row.charity_registration_status === "Registered") stats.registered += 1;
-        if (verdict.reason !== "not_registered" && verdict.reason !== "linked" && verdict.reason !== "income") {
-          stats.passedIncome += 1;
-        }
-        if (verdict.accepted || verdict.reason === "area") stats.passedSector += 1;
+
+        // Which gate this row died at, as an index into GATE_ORDER — or past the
+        // end when it passed all of them. A stage counts the row when the row got
+        // further than that stage's gate, which is what makes the funnel
+        // cumulative and keeps it honest against acceptCharity's real order.
+        const failedAt = verdict.reason
+          ? GATE_ORDER.indexOf(verdict.reason)
+          : GATE_ORDER.length;
+        if (failedAt > 1) stats.registered += 1;
+        if (failedAt > 2) stats.passedIncome += 1;
+        if (failedAt > 3) stats.passedSector += 1;
+
         if (!verdict.accepted) continue;
 
         if (options.limit !== undefined && accepted.size >= options.limit) {
@@ -413,7 +442,15 @@ export function createCharityCommissionBulkAdapter(
         });
       }
 
-      return { records, truncated, walkedOrganisations: stats.charitiesScanned };
+      return {
+        records,
+        truncated,
+        walkedOrganisations: stats.charitiesScanned,
+        // Recorded on the run itself, not only handed to `onStats` for a
+        // terminal nobody is watching: the funnel is the answer to "why is
+        // charity X not in the list", and it is worth keeping run to run.
+        stats: { ...stats },
+      };
     },
 
     onError(err: Error) {

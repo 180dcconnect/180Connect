@@ -21,6 +21,7 @@ import { TagsCard } from "./tags-card";
 import { SourcesCard } from "./sources-card";
 import {
   loadClient,
+  loadFieldHistory,
   loadLatestFinancial,
   loadScore,
   loadSources,
@@ -66,6 +67,7 @@ export default async function ClientOverviewPage({
     website,
     latestFinancial,
     sourcesResult,
+    fieldHistory,
     enrichmentResult,
     clientTagsResult,
     allTagsResult,
@@ -76,6 +78,9 @@ export default async function ClientOverviewPage({
       // cache()d, so the header's provenance line and this card's list are one
       // round trip between them.
       loadSources(id),
+      // cache()d with loadFieldHistory: shared with the Activity tab if this
+      // session visits it. Here only the Manual Input answer is consumed.
+      loadFieldHistory(id),
       // ENRICHMENT_RESULTS is append-only, so the most recently enriched row is
       // "the" mission statement, not the only one.
       supabase
@@ -313,7 +318,11 @@ export default async function ClientOverviewPage({
           </Rise>
 
           <Rise>
-            <SourcesCard error={sourcesError} sources={sources} />
+            <SourcesCard
+              error={sourcesError}
+              sources={sources}
+              hasManualFields={fieldHistory.hasManual}
+            />
           </Rise>
         </Group>
       </div>

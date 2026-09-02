@@ -92,6 +92,7 @@ export function createSupabaseIngestionStore(
       status: JobStatus,
       counts: RunCounts,
       errorMessage?: string,
+      stats?: Record<string, number>,
     ) {
       const { error } = await supabase
         .from("ingestion_runs")
@@ -103,6 +104,10 @@ export function createSupabaseIngestionStore(
           records_skipped: counts.skipped,
           records_failed: counts.failed,
           error_message: errorMessage ?? null,
+          // Undefined stays null rather than writing `{}`: "this source reports
+          // no funnel" and "the funnel was all zeroes" are different facts, and
+          // the admin page renders them differently.
+          run_stats: stats ?? null,
         })
         .eq("id", runId);
 

@@ -138,6 +138,12 @@
 | 04 Entities | FINANCIAL_PERIODS | income_band | enum |  |  |
 | 04 Entities | FINANCIAL_PERIODS | filing_date | date |  |  |
 | 04 Entities | FINANCIAL_PERIODS | financial_source | enum |  |  |
+| 04 Entities | FINANCIAL_PERIODS | count_employees | integer |  |  |
+| 04 Entities | FINANCIAL_PERIODS | count_volunteers | integer |  |  |
+| 04 Entities | FINANCIAL_PERIODS | receives_govt_grants | boolean |  |  |
+| 04 Entities | FINANCIAL_PERIODS | receives_govt_contracts | boolean |  |  |
+| 04 Entities | FINANCIAL_PERIODS | count_govt_grants | integer |  |  |
+| 04 Entities | FINANCIAL_PERIODS | count_govt_contracts | integer |  |  |
 | 04 Entities | FINANCIAL_PERIODS | created_at | timestamp |  |  |
 | 04 Entities | GRANTS | id | uuid |  |  |
 | 04 Entities | GRANTS | organisation_id | uuid | ORGANISATIONS |  |
@@ -556,3 +562,19 @@
 | 04 Entities | BOOKLET_GENERATIONS | total_tokens | integer |  | Total tokens as the provider reported them |
 | 04 Entities | BOOKLET_GENERATIONS | cost_usd | decimal(12,6) |  | Cost in US dollars, priced at generation time |
 | 04 Entities | AI_GENERATIONS | activity | text |  | Activity identifier for observability |
+| 04 Entities | FINANCIAL_PERIODS | income_donations_legacies | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_charitable_activities | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_other_trading | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_investment | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_endowments | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_other | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_govt_grants | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_govt_contracts | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_charitable_activities | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_raising_funds | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_governance | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_grants_institutions | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_investment_management | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_other | numeric |  |  |
+| 04 Entities | ORGANISATIONS | registered_on | date |  |  |
+| 04 Entities | ORGANISATIONS | charity_reporting_status | text |  |  |

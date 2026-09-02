@@ -4,6 +4,7 @@ import Image from "next/image";
 import { BookOpen } from "lucide-react";
 
 import type { OrganisationSource } from "@/lib/source-tracking";
+import { SOURCE_LABELS } from "@/lib/source-tracking";
 import {
   Tooltip,
   TooltipContent,
@@ -127,13 +128,75 @@ function formatDate(value: string): string | null {
   });
 }
 
+/**
+ * Manual Input, rendered like any other register row — same geometry, same
+ * monogram treatment (there is no wordmark for a person), same detail
+ * tooltip. Unlike a register it has no single "added on": its contributions
+ * are per-field, so the sub-line names the two places its rows are visible
+ * instead of pretending to a date. Rendered only when FIELD_SOURCES actually
+ * carries a hand-entered value (hasManualFields) — never as a filler row.
+ */
+function ManualEntryRow() {
+  const details = SOURCE_DETAILS.manual;
+  const label = SOURCE_LABELS.manual;
+
+  return (
+    <li className="flex items-center gap-3.5 py-3 first:border-t-0 first:pt-0">
+      <Tooltip delayDuration={150}>
+        <TooltipTrigger asChild>
+          <span
+            aria-hidden="true"
+            className="flex size-14 shrink-0 cursor-help items-center justify-center font-mono text-[15px] font-semibold tracking-[0.02em] text-faint"
+          >
+            {monogram(label)}
+          </span>
+        </TooltipTrigger>
+        {details && (
+          <TooltipContent
+            side="top"
+            sideOffset={6}
+            className="max-w-[18rem] rounded-inset bg-ink px-3.5 py-2.5 text-left text-[12px] leading-[1.5] text-white shadow-lg"
+          >
+            <span className="block font-semibold text-white">{label}</span>
+            <span className="mt-1 block text-white/80">{details.summary}</span>
+            <span className="mt-2 block border-t border-white/10 pt-1.5 text-[11px] text-white/70">
+              <strong className="font-semibold text-white/90">Relevance:</strong>{" "}
+              {details.relevance}
+            </span>
+          </TooltipContent>
+        )}
+      </Tooltip>
+
+      <div className="min-w-0 flex-1">
+        <p className="text-[17.5px] font-semibold text-ink">{label}</p>
+        <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-[12px] text-dim">
+          <span>Hand-entered field values</span>
+          <span className="text-faint">
+            per field on the Activity tab&rsquo;s what-came-from-where card
+          </span>
+        </p>
+      </div>
+    </li>
+  );
+}
+
 export function SourcesCard({
   sources,
   error = false,
+  hasManualFields = false,
 }: {
   sources: OrganisationSource[];
   /** The sources query failed — say so rather than showing an empty card. */
   error?: boolean;
+  /**
+   * FIELD_SOURCES carries at least one hand-entered value on this record
+   * (a manual entry approval, an admin edit, an approved suggestion). The
+   * Manual Input row is only honest when that is true: registers contribute
+   * through RAW_SOURCE_RECORDS, a person contributes through field
+   * provenance, and inventing the person's row for a record built entirely
+   * from registers would be exactly the placeholder this card once removed.
+   */
+  hasManualFields?: boolean;
 }) {
   const rows = buildRows(sources);
 
@@ -155,6 +218,7 @@ export function SourcesCard({
         </p>
       ) : (
         <ul className="mt-3.5">
+          {hasManualFields && <ManualEntryRow />}
           {rows.map((source) => {
             const logo = SOURCE_LOGOS[source.source];
             const seen = source.seenAt ? formatDate(source.seenAt) : null;

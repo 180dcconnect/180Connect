@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
+import { GroupTabs } from "@/components/ui/group-tabs";
+import { PLATFORM_SETTINGS_TABS } from "../import-group";
 import { loadFilterActivity, loadRules } from "./actions";
 import { FilterActivityPanel } from "./filter-activity";
 import { RulesPanel } from "./rules-panel";
@@ -39,6 +41,9 @@ export default async function DataHandlingRulesPage() {
           the source API provides it. Changes here take effect on the next
           import run.
         </p>
+
+        {/* Group navigation: the three platform-settings pages read as one section. */}
+        <GroupTabs className="mt-6" tabs={PLATFORM_SETTINGS_TABS} current="/admin/data-handling-rules" />
 
         {error && (
           <p

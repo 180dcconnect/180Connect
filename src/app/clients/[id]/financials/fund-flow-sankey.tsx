@@ -42,18 +42,22 @@ import type { FlowBand, FundFlow } from "@/lib/financials/financial-series";
  *
  * ── Two families, not ten colours ───────────────────────────────────────────
  *
- * The figure is drawn after the ADEME energy-balance Sankey: a warm ramp on the
- * side money comes from, a cool ramp on the side it goes to, both ramped by
- * rank so the darkest band is the biggest. That is two hues and a lightness
- * scale, not ten categorical colours — the earlier all-grey version was right
- * that ten hues is past every palette's ceiling, and wrong that side is not
- * worth encoding. Side is the first question a reader asks of a Sankey, and hue
+ * The figure is drawn after the ADEME energy-balance Sankey: one ramp on the
+ * side money comes from, another on the side it goes to, both ramped by rank so
+ * the darkest band is the biggest. That is two hues and a lightness scale, not
+ * ten categorical colours — the earlier all-grey version was right that ten
+ * hues is past every palette's ceiling, and wrong that side is not worth
+ * encoding. Side is the first question a reader asks of a Sankey, and hue
  * answers it before the eye reaches a label.
  *
- * The balancing band sits outside both ramps on purpose. Surplus is sage and a
- * drawdown is ochre, neither of which appears in the filed ladder, because a
- * residual is not a line the charity filed and colour is the cheapest way to
- * say so. The dotted rule and the BALANCE rubric above it say it in words.
+ * Which hue goes where is not free choice. Green reads as money coming in and
+ * red-brick as money going out to anyone who has ever read a set of accounts,
+ * so the ramps follow that and the reader spends no attention learning them.
+ *
+ * The balancing band sits outside both ramps on purpose: a slate that is
+ * neither green nor brick, because a residual is not a line the charity filed
+ * and colour is the cheapest way to say so. The dotted rule and the BALANCE
+ * rubric above it say it in words.
  *
  * ── A warm plate inside a cool app ──────────────────────────────────────────
  *
@@ -92,12 +96,23 @@ const FF_RULE = "#DAD3C4";
  * The two ramps, dark to light. Assigned by rank across the whole ramp rather
  * than by loop index, so a year with three filed lines still spans the full
  * range and lightness stays readable as size at any band count.
+ *
+ * Green for money in and warm brick for money out, because that is the prior
+ * every reader of a set of accounts already has and fighting it costs a beat of
+ * comprehension on every glance for nothing in return.
  */
-const WARM = ["#8C3A2B", "#B05840", "#C67C5C", "#D8A07D", "#E6BE9E", "#F0D7BE"];
-const COOL = ["#1E3B3A", "#33605C", "#55807A", "#7D9D98", "#A7BFBA", "#CCDAD6"];
-/** Outside both ramps: a residual is not a filed line. */
-const SURPLUS_FILL = "#8FA97F";
-const DRAWDOWN_FILL = "#C9A66B";
+const IN_RAMP = ["#204A3E", "#356B58", "#557F70", "#83A597", "#ADC5B9", "#CFDED6"];
+const OUT_RAMP = ["#8C3A2B", "#B05840", "#C67C5C", "#D8A07D", "#E6BE9E", "#F0D7BE"];
+/**
+ * Outside both ramps: a residual is not a filed line.
+ *
+ * One slate serves the surplus and the drawdown both. They are the same
+ * quantity — `income − expenditure` — given a direction, they never appear in
+ * the same year, and the side it is drawn on already says which one it is. A
+ * second hue here would be two names for one idea, and would have to come out
+ * of the small stock of colours that still read as neither green nor brick.
+ */
+const RESIDUAL_FILL = "#8695A3";
 
 /* ── Geometry, in viewBox units ───────────────────────────────────────────── */
 const VIEW_W = 900;
@@ -231,12 +246,7 @@ function stack(bands: FlowBand[], total: number, gap: number, ramp: string[]): P
       hubY,
       hubHeight,
       share,
-      shade:
-        band.kind === "filed"
-          ? shadeAt(ramp, rank, filedCount)
-          : band.kind === "surplus"
-            ? SURPLUS_FILL
-            : DRAWDOWN_FILL,
+      shade: band.kind === "filed" ? shadeAt(ramp, rank, filedCount) : RESIDUAL_FILL,
       labelY: y + height / 2,
     };
     y += height;
@@ -324,11 +334,11 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
   const flow = flows.length > 0 ? flows[Math.min(yearIndex, flows.length - 1)] : null;
 
   const inflows = useMemo(
-    () => (flow ? stack(flow.inflows, flow.total, GAP_L, WARM) : []),
+    () => (flow ? stack(flow.inflows, flow.total, GAP_L, IN_RAMP) : []),
     [flow],
   );
   const outflows = useMemo(
-    () => (flow ? stack(flow.outflows, flow.total, GAP_R, COOL) : []),
+    () => (flow ? stack(flow.outflows, flow.total, GAP_R, OUT_RAMP) : []),
     [flow],
   );
 
@@ -370,8 +380,8 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
   const labelOpacity = (id: string) => (focus === null || focus === id ? 1 : 0.3);
 
   const sides = [
-    { key: "in" as const, placed: inflows, ramp: WARM, rubric: "Filed income lines" },
-    { key: "out" as const, placed: outflows, ramp: COOL, rubric: "Filed spending lines" },
+    { key: "in" as const, placed: inflows, ramp: IN_RAMP, rubric: "Filed income lines" },
+    { key: "out" as const, placed: outflows, ramp: OUT_RAMP, rubric: "Filed spending lines" },
   ];
 
   return (
@@ -414,7 +424,7 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
       </div>
 
       <p className="mt-1 text-[11.5px] text-dim">
-        Ribbon width = pounds through the year · warm in, cool out · shade =
+        Ribbon width = pounds through the year · green in, brick out · shade =
         rank by size · year ended{" "}
         {new Date(flow.periodEnd).toLocaleDateString("en-GB", {
           day: "numeric",

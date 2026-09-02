@@ -10,6 +10,11 @@ import {
   formatOrganisationSources,
   type OrganisationSourceRow,
 } from "@/lib/source-tracking";
+import {
+  groupFieldSources,
+  type FieldProvenance,
+  type FieldSourceRow,
+} from "@/lib/field-sources";
 import type { OrganisationDetailRow } from "@/lib/client-basic-info";
 import type { LatestScoreDetailRow } from "./score-breakdown";
 
@@ -229,6 +234,41 @@ export const loadSources = cache(async (id: string) => {
   return {
     sources: formatOrganisationSources((data ?? []) as OrganisationSourceRow[]),
     error: Boolean(error),
+  };
+});
+
+/**
+ * Per-field provenance (F044, read via get_field_sources) — feeds the Activity
+ * tab's "What came from where" card and the Overview tab's Manual Input row on
+ * the Data Sources card, which only needs to know whether any field was ever
+ * hand-entered. `hasManual` is the honest version of that question: a record
+ * can carry manual field corrections without being a manual_entry_records
+ * creation, and the reverse.
+ */
+export type FieldHistoryResult = {
+  provenance: FieldProvenance[];
+  hasManual: boolean;
+  error: boolean;
+};
+
+export const loadFieldHistory = cache(async (id: string): Promise<FieldHistoryResult> => {
+  const supabase = await createClient();
+  // Like loadSources above: not in the generated types until the remote schema
+  // is regenerated, so the row shape is narrowed here.
+  const { data, error } = await supabase.rpc("get_field_sources", {
+    p_organisation_id: id,
+  });
+
+  if (error) {
+    await reportError(error, { operation: "clients.detail_field_sources", organisationId: id });
+    return { provenance: [], hasManual: false, error: true };
+  }
+
+  const rows = (data ?? []) as FieldSourceRow[];
+  return {
+    provenance: groupFieldSources(rows),
+    hasManual: rows.some((row) => row.source?.trim().toLowerCase() === "manual"),
+    error: false,
   };
 });
 

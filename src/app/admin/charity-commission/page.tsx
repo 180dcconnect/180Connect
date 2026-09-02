@@ -1,35 +1,57 @@
-import Link from "next/link";
+// Charity Commission imports.
+//
+// Rebuilt onto the design system (docs/design-system.md §Inside the app), the
+// same language as /admin/import-status: bone ground, white cards floating on
+// it, a display heading against 11px labels, and a staged blur-up entrance from
+// the shared brand variants.
+//
+// Three things were wrong with the page this replaces, beyond its palette:
+//
+//   1. It showed the weakest pipeline and hid the strongest. The runs table
+//      filtered `api_source = 'charity_commission'`, so bulk register runs — the
+//      ones that delivered every charity with filed accounts — were invisible on
+//      the Charity Commission page. Both are shown now.
+//   2. It had no way to say what the import accepts. "Why isn't charity X in the
+//      list" could only be settled by reading charity-commission-bulk-config.ts.
+//      ImportCriteria renders that config, and the last run's funnel shows what
+//      it did to the register.
+//   3. Its "Run import" button ran the fixed date-range backfill, whose own TODO
+//      said a wide range could exceed the serverless timeout. The bulk register
+//      extract supersedes it and does the job properly, so both the button and
+//      the adapter behind it are gone.
+//
+// The "Back to admin" and "Review queue" links are gone too: GroupTabs is this
+// section's navigation, and the review queue is a different job on a different
+// day.
+//
+// The root element is a `div`, not a `main`: the admin layout's AppShell already
+// renders the `main` this is slotted into.
+
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
-import { CharityCommissionImportForm } from "./import-form";
+import { GroupTabs } from "@/components/ui/group-tabs";
+import { Group, Rise, Stage } from "@/components/dashboard-stage";
+import { DATA_IMPORTS_TABS } from "../import-group";
 import { CharityCommissionImportAutoButton } from "./import-auto-button";
 import { CharityCommissionLookupForm } from "./lookup-form";
+import { BulkImportCard, type LastBulkRun } from "./bulk-import-card";
+import { ImportCriteria } from "./import-criteria";
+import { PipelinesGuide } from "./pipelines-guide";
+import { RecentRuns } from "./recent-runs";
+import type { CharityCommissionRun } from "./bulk-funnel";
 
-// TODO: Companies House's admin trigger uses maxDuration = 60 (a single
-// company lookup finishes well within that). Charity Commission's fetch() is
-// a bulk date-range import — even the narrow one-month test range took
-// longer than a single lookup, and a wider range could exceed a 60s
-// serverless timeout entirely. This page inherits that same risk without
-// solving it: triggering a wide date range through this button may time out
-// mid-import. Worth deciding with the team whether the admin trigger should
-// only run a small/incremental range (e.g. "since last successful run"), or
-// whether this needs to become a background job instead of a synchronous
-// server action. Not resolved here.
+// The discovery trigger is a weekly delta — a handful of search calls and one
+// batched details call — which finishes well inside this. The bulk register
+// import is deliberately not reachable from here at all: 508MB of charities and
+// 1.26GB of annual returns is not work for a function with a 300s ceiling, so
+// BulkImportCard hands over the command instead of pretending to be a button.
 export const maxDuration = 60;
 
-type IngestionRun = {
-  id: string;
-  started_at: string;
-  completed_at: string | null;
-  job_status: "running" | "completed" | "failed" | "partial";
-  records_fetched: number;
-  records_inserted: number;
-  records_skipped: number;
-  records_failed: number;
-};
+/** Both Charity Commission pipelines, newest first. */
+const RUN_WINDOW = 8;
 
 export default async function CharityCommissionPage() {
   const authorization = await getCurrentActor("user:manage");
@@ -42,84 +64,93 @@ export default async function CharityCommissionPage() {
   const { data, error } = await supabase
     .from("ingestion_runs")
     .select(
-      "id, started_at, completed_at, job_status, records_fetched, records_inserted, records_skipped, records_failed",
+      "id, api_source, started_at, job_status, records_fetched, records_inserted, records_skipped, records_failed, run_stats",
     )
-    .eq("api_source", "charity_commission")
+    .in("api_source", ["charity_commission", "charity_commission_bulk"])
     .order("started_at", { ascending: false })
-    .limit(10);
+    .limit(RUN_WINDOW);
 
   if (error) {
     await reportError(error, { operation: "admin.charity_commission.list_runs" });
   }
 
-  const runs = (data ?? []) as IngestionRun[];
+  const runs = (data ?? []) as CharityCommissionRun[];
   const configured = Boolean(process.env.CHARITY_COMMISSION_API_KEY?.trim());
 
+  // The most recent bulk run within the window. A page where bulk has not run in
+  // the last eight runs shows no funnel rather than a stale one dressed as
+  // current — the full history is one link away.
+  const latestBulk = runs.find((run) => run.api_source === "charity_commission_bulk");
+  const lastBulkRun: LastBulkRun = latestBulk
+    ? {
+        startedAt: latestBulk.started_at,
+        status: latestBulk.job_status,
+        recordsInserted: latestBulk.records_inserted,
+        runStats: latestBulk.run_stats,
+      }
+    : null;
+
   return (
-    <main className="min-h-screen bg-[#f1f2f4] p-6">
-      <section className="mx-auto max-w-5xl rounded-2xl bg-white p-8 shadow-sm">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold">Charity Commission import</h1>
-            <p className="mt-3 max-w-2xl text-sm text-foreground/65">
-              Bring UK charity registration and contact data into the
-              validation and matching pipeline.
-            </p>
-          </div>
-          <div className="flex items-center gap-4">
-            <Link className="text-sm font-bold text-brand hover:underline" href="/admin/review">
-              Review queue
-            </Link>
-            <Link className="text-sm font-bold text-brand hover:underline" href="/admin">
-              Back to admin
-            </Link>
-          </div>
-        </div>
+    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+      <Stage className="mx-auto max-w-5xl space-y-10">
+        <Rise>
+          <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
+            Charity Commission
+          </h1>
+          <GroupTabs
+            className="mt-4"
+            tabs={DATA_IMPORTS_TABS}
+            current="/admin/charity-commission"
+          />
+          <p className="mt-3 max-w-xl text-sm leading-[1.7] text-foreground/65">
+            Two imports read the same register. One catches charities as they
+            register; the other brings in established charities with their filed
+            accounts.
+          </p>
+        </Rise>
 
-        <div className="mt-8">
-          <CharityCommissionImportAutoButton configured={configured} />
-        </div>
-        <CharityCommissionImportForm configured={configured} />
-        <CharityCommissionLookupForm configured={configured} />
+        {!configured && (
+          <Rise>
+            <InlineAlert
+              variant="page"
+              message="Charity Commission API access is not configured. Add the server-side API key before running an import."
+            />
+          </Rise>
+        )}
 
-        <div className="mt-8">
-          <h2 className="text-lg font-bold">Recent imports</h2>
-          {error ? (
-            <div className="mt-3">
+        <Group className="space-y-6">
+          <Rise>
+            <PipelinesGuide />
+          </Rise>
+
+          <Rise>
+            <BulkImportCard lastRun={lastBulkRun} />
+          </Rise>
+
+          <Rise>
+            <ImportCriteria />
+          </Rise>
+
+          <Rise>
+            <CharityCommissionImportAutoButton configured={configured} />
+          </Rise>
+
+          <Rise>
+            <CharityCommissionLookupForm configured={configured} />
+          </Rise>
+
+          <Rise>
+            {error ? (
               <InlineAlert
                 variant="page"
-                message="Import history could not be loaded. Please refresh and try again."
+                message="Import history could not be loaded. This has been recorded — refresh and try again."
               />
-            </div>
-          ) : runs.length === 0 ? (
-            <p className="mt-3 text-sm text-foreground/65">No Charity Commission imports have run yet.</p>
-          ) : (
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="border-b border-black/10 text-foreground/60">
-                  <tr>
-                    <th className="p-3">Started</th><th className="p-3">Status</th>
-                    <th className="p-3">Fetched</th><th className="p-3">Written</th>
-                    <th className="p-3">Skipped</th><th className="p-3">Failed</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {runs.map((run) => (
-                    <tr className="border-b border-black/5" key={run.id}>
-                      <td className="p-3">{new Date(run.started_at).toLocaleString("en-GB")}</td>
-                      <td className="p-3 capitalize">{run.job_status}</td>
-                      <td className="p-3">{run.records_fetched}</td>
-                      <td className="p-3">{run.records_inserted}</td>
-                      <td className="p-3">{run.records_skipped}</td>
-                      <td className="p-3">{run.records_failed}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </section>
-    </main>
+            ) : (
+              <RecentRuns runs={runs} />
+            )}
+          </Rise>
+        </Group>
+      </Stage>
+    </div>
   );
 }

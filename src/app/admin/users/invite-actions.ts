@@ -174,6 +174,13 @@ export async function resendInviteAction(userId: string): Promise<InviteState> {
     {
       inviterName:
         authorization.actor.fullName ?? authorization.actor.email ?? "An admin",
+      touchInvitedAt: async (id: string) => {
+        const { error } = await adminClient
+          .from("users")
+          .update({ invited_at: new Date().toISOString() })
+          .eq("id", id);
+        return { error: error ? { message: error.message } : null };
+      },
     },
   );
 

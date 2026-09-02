@@ -248,3 +248,144 @@ export function buildFinancialPeriods(input: {
     .filter((row) => row.periodEnd >= row.periodStart)
     .sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
 }
+
+// ---------------------------------------------------------------------------
+// The bulk register extract's annual returns
+// ---------------------------------------------------------------------------
+
+/**
+ * One merged Part A + Part B annual return, as the bulk extract publishes it.
+ *
+ * Deliberately `Record<string, unknown>`-shaped at the edge: the two extracts
+ * carry eighty-odd fields between them and this module reads eleven. Typing the
+ * rest would be documentation pretending to be a contract.
+ */
+export type BulkAnnualReturn = Record<string, unknown>;
+
+/**
+ * The register's field names differ between the API and the bulk extract for
+ * the same figures — `inc_donations_and_legacies` against
+ * `income_donations_and_legacies`, `exp_grants_institution` against
+ * `expenditure_grants_institution`. A table rather than inline reads, because
+ * the failure mode of a mistyped key here is a column that is silently always
+ * null, which no test of the happy path would catch.
+ */
+const BULK_BREAKDOWN_FIELDS: Record<keyof FinancialBreakdown, string> = {
+  incomeDonationsLegacies: "income_donations_and_legacies",
+  incomeCharitableActivities: "income_charitable_activities",
+  incomeOtherTrading: "income_other_trading_activities",
+  incomeInvestment: "income_investments",
+  incomeEndowments: "income_endowments",
+  incomeOther: "income_other",
+  incomeGovtGrants: "income_from_government_grants",
+  incomeGovtContracts: "income_from_government_contracts",
+  expenditureCharitableActivities: "expenditure_charitable_expenditure",
+  expenditureRaisingFunds: "expenditure_raising_funds",
+  expenditureGovernance: "expenditure_governance",
+  expenditureGrantsInstitutions: "expenditure_grants_institution",
+  expenditureInvestmentManagement: "expenditure_investment_management",
+  expenditureOther: "expenditure_other",
+};
+
+/** Scale and public-funding shape, the fields beyond the money itself. */
+export type BulkPeriodExtras = {
+  filingDate: string | null;
+  countEmployees: number | null;
+  countVolunteers: number | null;
+  receivesGovtGrants: boolean | null;
+  receivesGovtContracts: boolean | null;
+  countGovtGrants: number | null;
+  countGovtContracts: number | null;
+};
+
+export type BulkFinancialPeriodRow = FinancialPeriodRow & BulkPeriodExtras;
+
+function numberAt(row: BulkAnnualReturn, key: string): number | null {
+  const value = row[key];
+  if (value === null || value === undefined || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function booleanAt(row: BulkAnnualReturn, key: string): boolean | null {
+  const value = row[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+function dateAt(row: BulkAnnualReturn, key: string): string | null {
+  const value = row[key];
+  if (typeof value !== "string" || !value) return null;
+  const day = value.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null;
+}
+
+/**
+ * Filed periods from the bulk extract's annual returns.
+ *
+ * Simpler than the API path in one important way and richer in two others:
+ *
+ * - **No date derivation.** The extract publishes `fin_period_start_date` as
+ *   well as the end, so nothing has to tile consecutive years to invent a
+ *   start. Rows without both dates are dropped rather than guessed at.
+ * - **A real filing date.** `ar_received_date` is when the Commission received
+ *   the return. FINANCIAL_PERIODS.filing_date has been null since the table was
+ *   created because no API endpoint publishes it — this is the only source we
+ *   have for it, and it turns the staleness signal from inferred to exact.
+ * - **Scale and public funding.** Employees, volunteers, and whether the
+ *   government money is a standing relationship or a one-off.
+ *
+ * Same two rules as the API path: a period with no figures at all is dropped,
+ * and a null part stays null rather than becoming a zero the register never
+ * claimed.
+ */
+export function buildFinancialPeriodsFromBulk(
+  returns: readonly BulkAnnualReturn[],
+): BulkFinancialPeriodRow[] {
+  const byEnd = new Map<string, BulkFinancialPeriodRow>();
+
+  for (const row of returns) {
+    const periodStart = dateAt(row, "fin_period_start_date");
+    const periodEnd = dateAt(row, "fin_period_end_date");
+    if (!periodStart || !periodEnd || periodEnd < periodStart) continue;
+
+    // Part B's expenditure_total is the fuller figure where both are filed;
+    // Part A's totals are what a smaller charity files instead.
+    const totalIncome =
+      numberAt(row, "income_total_income_and_endowments") ??
+      numberAt(row, "total_gross_income");
+    const totalExpenditure =
+      numberAt(row, "expenditure_total") ?? numberAt(row, "total_gross_expenditure");
+    if (totalIncome === null && totalExpenditure === null) continue;
+
+    const breakdown = {} as FinancialBreakdown;
+    for (const [field, key] of Object.entries(BULK_BREAKDOWN_FIELDS) as [
+      keyof FinancialBreakdown,
+      string,
+    ][]) {
+      breakdown[field] = numberAt(row, key);
+    }
+
+    // A duplicated period end keeps the first: the extracts are keyed on
+    // (charity, period), so a second row for one year is a restatement, which
+    // the caller's upsert handles rather than a second row.
+    if (byEnd.has(periodEnd)) continue;
+
+    byEnd.set(periodEnd, {
+      periodStart,
+      periodEnd,
+      totalIncome,
+      totalExpenditure,
+      incomeBand: deriveIncomeBand(totalIncome),
+      ...breakdown,
+      filingDate: dateAt(row, "ar_received_date"),
+      countEmployees: numberAt(row, "count_employees"),
+      countVolunteers: numberAt(row, "count_volunteers"),
+      receivesGovtGrants: booleanAt(row, "charity_receives_govt_funding_grants"),
+      receivesGovtContracts: booleanAt(row, "charity_receives_govt_funding_contracts"),
+      countGovtGrants: numberAt(row, "count_govt_grants"),
+      countGovtContracts: numberAt(row, "count_govt_contracts"),
+    });
+  }
+
+  return [...byEnd.values()].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
+}

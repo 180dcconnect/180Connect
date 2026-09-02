@@ -190,7 +190,7 @@ export const BackButton = React.forwardRef<HTMLElement, BackButtonProps>(
         ? "bg-brand/15 text-brand group-hover:bg-brand group-hover:text-white group-hover:shadow-md"
         : "bg-black/[0.05] text-[#0c1014]/75 group-hover:bg-[#0c1014] group-hover:text-white group-hover:shadow-md";
 
-      const heightClass = size === "sm" ? "h-8 min-w-[80px]" : size === "lg" ? "h-11 min-w-[110px]" : "h-9 min-w-[95px]";
+      const heightClass = size === "sm" ? "h-8 min-w-[80px] px-3" : size === "lg" ? "h-11 min-w-[110px] px-5" : "h-9 min-w-[95px] px-4";
 
       return (
         <Wrapper href={href} {...commonProps}>
@@ -209,7 +209,7 @@ export const BackButton = React.forwardRef<HTMLElement, BackButtonProps>(
             }}
           >
             {/* Label text that fades smoothly on hover */}
-            <span className="w-full text-center pl-5 pr-2.5 translate-x-1.5 transition-all duration-300 group-hover:opacity-0 group-hover:scale-95 flex items-center justify-center">
+            <span className="w-full text-center whitespace-nowrap pl-6 pr-2 translate-x-1.5 transition-all duration-300 group-hover:opacity-0 group-hover:scale-95 flex items-center justify-center">
               {children || label}
             </span>
 

@@ -46,6 +46,15 @@ import { reportError } from "../error-logging.ts";
 import { persistLatestScore } from "../scoring/persist-latest-score.ts";
 import { getActiveScoutConfig } from "../scoring/configured-weights.ts";
 import { deriveIncomeBand, type IncomeBand } from "../income-band.ts";
+import {
+  bulkSector,
+  standardizeCharityCommissionBulkRecord,
+  type RawCharityCommissionBulkRecord,
+} from "./charity-commission-bulk.ts";
+import {
+  buildFinancialPeriodsFromBulk,
+  type BulkFinancialPeriodRow,
+} from "../financials/charity-financial-periods.ts";
 import { checkWebsiteReachability } from "../website-reachability.ts";
 import type { WebsiteStatus } from "../website-validation.ts";
 import {
@@ -321,6 +330,37 @@ export interface OrganisationWriteStore {
     totalExpenditure: number | null;
     incomeBand: IncomeBand | null;
   }): Promise<{ ok: true } | { error: string }>;
+  /**
+   * A filed period from the bulk register extract: the same row as above plus
+   * everything the extract publishes and the API does not — the SOFA breakdown,
+   * the filing date, and the scale and public-funding figures. A separate method
+   * rather than fifteen optional arguments on the one above, so the API path
+   * cannot accidentally start writing nulls into columns it has no data for.
+   */
+  upsertBulkFinancialPeriod(input: {
+    organisationId: string;
+    period: BulkFinancialPeriodRow;
+  }): Promise<{ ok: true } | { error: string }>;
+  /**
+   * Facts about the organisation that the insert RPC has no parameters for.
+   *
+   * `sector` is the one that matters: it is empty for every row in the database
+   * today, so the SCOUT sector factor is neutral for the whole book, and the
+   * bulk extract carries the regulator's own classification. `registered_on` and
+   * `charity_reporting_status` are what let the record explain an empty
+   * Financials tab instead of just showing one.
+   *
+   * Written after the insert rather than inside it because
+   * link_raw_record_to_organisation takes a fixed column list; widening that RPC
+   * is a migration and its own approval record, and this is an annotation, not
+   * part of the atomic promote.
+   */
+  annotateOrganisation(input: {
+    organisationId: string;
+    sector?: string | null;
+    registeredOn?: string | null;
+    charityReportingStatus?: string | null;
+  }): Promise<{ ok: true } | { error: string }>;
 }
 
 export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | null {
@@ -519,6 +559,68 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
           is_primary: (count ?? 0) === 0,
           verified: false, // pipeline-written numbers await human verification
         });
+
+      if (error) return { error: error.message };
+      return { ok: true };
+    },
+
+    async upsertBulkFinancialPeriod({ organisationId, period }) {
+      // Same unique index and the same "a re-run must not double a filing"
+      // rule as the API path, but upsert-with-merge rather than DO NOTHING: a
+      // charity whose latest year we already hold from the API should gain the
+      // breakdown, the filing date and the counts rather than keep the thinner
+      // row it already has.
+      const { error } = await supabase.from("financial_periods").upsert(
+        {
+          organisation_id: organisationId,
+          period_start: period.periodStart,
+          period_end: period.periodEnd,
+          total_income: period.totalIncome,
+          total_expenditure: period.totalExpenditure,
+          income_band: period.incomeBand,
+          financial_source: "charity_commission",
+          filing_date: period.filingDate,
+          income_donations_legacies: period.incomeDonationsLegacies,
+          income_charitable_activities: period.incomeCharitableActivities,
+          income_other_trading: period.incomeOtherTrading,
+          income_investment: period.incomeInvestment,
+          income_endowments: period.incomeEndowments,
+          income_other: period.incomeOther,
+          income_govt_grants: period.incomeGovtGrants,
+          income_govt_contracts: period.incomeGovtContracts,
+          expenditure_charitable_activities: period.expenditureCharitableActivities,
+          expenditure_raising_funds: period.expenditureRaisingFunds,
+          expenditure_governance: period.expenditureGovernance,
+          expenditure_grants_institutions: period.expenditureGrantsInstitutions,
+          expenditure_investment_management: period.expenditureInvestmentManagement,
+          expenditure_other: period.expenditureOther,
+          count_employees: period.countEmployees,
+          count_volunteers: period.countVolunteers,
+          receives_govt_grants: period.receivesGovtGrants,
+          receives_govt_contracts: period.receivesGovtContracts,
+          count_govt_grants: period.countGovtGrants,
+          count_govt_contracts: period.countGovtContracts,
+        },
+        { onConflict: "organisation_id,period_start,period_end,financial_source" },
+      );
+
+      if (error) return { error: error.message };
+      return { ok: true };
+    },
+
+    async annotateOrganisation({ organisationId, sector, registeredOn, charityReportingStatus }) {
+      const patch: Record<string, string> = {};
+      if (sector) patch.sector = sector;
+      if (registeredOn) patch.registered_on = registeredOn;
+      if (charityReportingStatus) patch.charity_reporting_status = charityReportingStatus;
+      // Nothing to say is not an error, and an empty update would be a wasted
+      // round trip per organisation across a whole import.
+      if (Object.keys(patch).length === 0) return { ok: true };
+
+      const { error } = await supabase
+        .from("organisations")
+        .update(patch)
+        .eq("id", organisationId);
 
       if (error) return { error: error.message };
       return { ok: true };
@@ -1138,4 +1240,161 @@ export async function promotePendingFindThatCharityRecords(
   }
 
   return counts;
+}
+
+
+/**
+ * The bulk register import's promote pass.
+ *
+ * Mirrors promotePendingCharityCommissionRecords, and deliberately does not try
+ * to share a body with it: the two read different payload shapes, and the
+ * shared parts (`flagIfDuplicate`, `passesClientCriteria`,
+ * `insertOrganisationAndLink`, `recordFieldSourcesOrReport`) are already
+ * functions rather than copied code.
+ *
+ * Three things it does that the API path cannot:
+ *
+ * - **Sector.** Every accepted record carries the regulator's own
+ *   classification, mapped to the taxonomy the scorer reads. `organisations.sector`
+ *   was empty for every row in the database, so this is what takes the SCOUT
+ *   sector factor off its neutral for an imported client.
+ * - **Five years of accounts at import time.** The extract publishes the annual
+ *   return history alongside the register row, so a charity arrives with its
+ *   filings rather than waiting for a later refresh pass to notice it.
+ * - **Register facts.** `registered_on` and `charity_reporting_status`, which
+ *   are what let the record explain an empty Financials tab rather than just
+ *   showing one.
+ *
+ * No website reachability check: the API path fires one HTTP request per
+ * imported client, which is fine for a handful of new registrations a week and
+ * is not fine for several hundred at once. F046's check belongs on a slower
+ * pass over the imported book, not inside this loop.
+ */
+export async function promotePendingCharityCommissionBulkRecords(
+  store: OrganisationWriteStore | null = createDefaultOrganisationWriteStore(),
+  criteriaCheck: (input: Parameters<typeof checkClientCriteria>[0]) => ClientCriteriaResult = checkClientCriteria,
+): Promise<PromoteCounts> {
+  requireStore(store);
+
+  const pending = await store.loadPendingRecords("charity_commission_bulk");
+  const counts = newCounts(pending.length);
+  const existingOrganisations = await store.loadExistingOrganisationsForMatching();
+
+  for (const record of pending) {
+    const raw = record.raw_payload as RawCharityCommissionBulkRecord;
+    const org = standardizeCharityCommissionBulkRecord(raw);
+
+    if (!isUsable(org)) {
+      await markInvalidRecord(store, counts, record);
+      continue;
+    }
+
+    const criteria = criteriaCheck(buildCriteriaInput(org));
+    if (!(await passesClientCriteria(store, counts, record, org, criteria))) continue;
+
+    // The charity number, not the organisation number: the same identifier the
+    // API path writes, so a charity imported by both routes matches on F042's
+    // strongest key instead of appearing twice.
+    const charityNumber = raw.charity?.registered_charity_number;
+    const identifier =
+      charityNumber === null || charityNumber === undefined
+        ? null
+        : { identifierType: "uk_charity" as const, identifierValue: String(charityNumber) };
+
+    if (
+      await flagIfDuplicate(
+        store,
+        counts,
+        record,
+        org,
+        existingOrganisations,
+        "charity_commission_bulk",
+        identifier ? [identifier.identifierValue] : undefined,
+      )
+    ) {
+      continue;
+    }
+
+    const result = await store.insertOrganisationAndLink(org, record.id);
+    if ("error" in result) {
+      await reportError(new Error(result.error), {
+        operation: "standardize.charity_commission_bulk.promote",
+        rawRecordId: record.id,
+      });
+      await store.markRecordStatus(record.id, "error");
+      counts.failed++;
+      continue;
+    }
+
+    // Everything past this point is a best-effort annotation on a record that
+    // is already committed and linked — the same rule the other promote paths
+    // follow. A failed annotation is reported and does not fail the import.
+    await recordFieldSourcesOrReport(store, result.id, org, "charity_commission_bulk", record);
+    await recordIdentifierOrReport(
+      store,
+      result.id,
+      "charity_commission_bulk",
+      identifier,
+      record,
+    );
+    await annotateOrganisationOrReport(store, result.id, raw, record);
+    await recordBulkFinancialPeriodsOrReport(store, result.id, raw, record);
+
+    counts.inserted++;
+    existingOrganisations.push({
+      id: result.id,
+      legal_name: org.legal_name,
+      postcode: org.postcode ?? "",
+      registrationNumbers: identifier ? [identifier.identifierValue] : [],
+    });
+  }
+
+  return counts;
+}
+
+/** Sector, registration date and reporting status — best-effort, never fatal. */
+async function annotateOrganisationOrReport(
+  store: OrganisationWriteStore,
+  organisationId: string,
+  raw: RawCharityCommissionBulkRecord,
+  record: PendingRecord,
+): Promise<void> {
+  try {
+    const result = await store.annotateOrganisation({
+      organisationId,
+      sector: bulkSector(raw.matched_classifications),
+      registeredOn: (raw.charity?.date_of_registration ?? "").slice(0, 10) || null,
+      charityReportingStatus: raw.charity?.charity_reporting_status ?? null,
+    });
+    if ("error" in result) throw new Error(result.error);
+  } catch (error) {
+    await reportError(error instanceof Error ? error : new Error(String(error)), {
+      operation: "standardize.charity_commission_bulk.annotate",
+      rawRecordId: record.id,
+      organisationId,
+    });
+  }
+}
+
+/** Up to five filed years per charity, from the annual returns in the payload. */
+async function recordBulkFinancialPeriodsOrReport(
+  store: OrganisationWriteStore,
+  organisationId: string,
+  raw: RawCharityCommissionBulkRecord,
+  record: PendingRecord,
+): Promise<void> {
+  const periods = buildFinancialPeriodsFromBulk(raw.annual_returns ?? []);
+  if (periods.length === 0) return;
+  try {
+    for (const period of periods) {
+      const result = await store.upsertBulkFinancialPeriod({ organisationId, period });
+      if ("error" in result) throw new Error(result.error);
+    }
+  } catch (error) {
+    await reportError(error instanceof Error ? error : new Error(String(error)), {
+      operation: "standardize.charity_commission_bulk.record_financial_periods",
+      rawRecordId: record.id,
+      organisationId,
+    });
+  }
 }

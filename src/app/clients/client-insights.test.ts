@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   breakdown,
   clientsInStage,
+  parseBreakdownLimit,
   parseDirection,
   parseField,
   parseStage,
@@ -191,5 +192,10 @@ describe("parsing url state", () => {
     assert.equal(parseField("owner"), "owner");
     assert.equal(parseDirection("ascending"), "ascending");
     assert.equal(parseDirection("sideways"), "descending");
+    assert.equal(parseBreakdownLimit(undefined), 3);
+    assert.equal(parseBreakdownLimit("5"), 5);
+    assert.equal(parseBreakdownLimit("10"), 10);
+    assert.equal(parseBreakdownLimit("20"), 20);
+    assert.equal(parseBreakdownLimit("99"), 3);
   });
 });

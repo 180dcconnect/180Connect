@@ -21,6 +21,7 @@ import { Stage, Group, Rise } from "@/components/dashboard-stage";
 import { Pill, SectionCard } from "@/app/clients/[id]/section-card";
 import { OriginButton } from "@/components/ui/origin-button";
 import { formatTeamActivity, type RawTeamActivityRow } from "@/lib/team-activity";
+import { BackButton } from "@/components/ui/back-button";
 
 import { TeamRoleEditor } from "./role-editor";
 import { CopyProfileButton } from "./copy-profile-button";
@@ -203,27 +204,12 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
   return (
     <div className="min-h-screen bg-bone px-4 py-8 sm:px-8 sm:py-10">
       <Stage className="mx-auto w-full max-w-5xl space-y-6">
-        {/* Navigation Breadcrumb */}
+        {/* Navigation Header */}
         <Rise className="flex items-center justify-between text-xs">
-          <div className="flex items-center gap-1.5 text-dim">
-            <Link href="/clients" className="font-semibold text-ink hover:text-lead">
-              Clients
-            </Link>
-            <span>/</span>
-            <span className="font-medium text-ink/70">{displayName}</span>
-          </div>
+          <BackButton href="/admin/users" label="Team management" size="sm" className="min-w-[170px]" />
 
           <div className="flex items-center gap-2">
             <CopyProfileButton name={displayName} />
-            {isAdmin && (
-              <Link
-                href="/admin/users"
-                className="inline-flex h-8.5 items-center gap-1 rounded-full border border-rule bg-white px-3 font-semibold text-ink transition-colors hover:border-faint hover:bg-paper"
-              >
-                <span>Manage in Admin</span>
-                <ArrowUpRight aria-hidden="true" className="size-3 text-faint" />
-              </Link>
-            )}
           </div>
         </Rise>
 
@@ -635,13 +621,9 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
                     <dt className="text-dim">Access State</dt>
                     <dd className="font-semibold text-ink">{statusLabel}</dd>
                   </div>
-                  <div className="flex justify-between py-1 border-b border-rule/30">
+                  <div className="flex justify-between py-1">
                     <dt className="text-dim">Email Address</dt>
                     <dd className="font-mono text-ink/80 text-[11px] truncate max-w-[180px]">{user.email}</dd>
-                  </div>
-                  <div className="flex justify-between py-1">
-                    <dt className="text-dim">User ID</dt>
-                    <dd className="font-mono text-[10.5px] text-faint">{user.id.slice(0, 8)}…</dd>
                   </div>
                 </dl>
               </SectionCard>

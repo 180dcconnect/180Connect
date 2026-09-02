@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ComponentType } from "react";
+import Link from "next/link";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
 import {
   Activity,
@@ -18,7 +19,14 @@ import {
 } from "lucide-react";
 
 import { EASE, entranceIndexed } from "@/components/brand/motion";
-import type { AuditEventView, AuditIconName, AuditTone } from "@/lib/audit-log-format";
+import { UserHoverCard, type UserPreview } from "@/components/user-hover-card";
+import { OrganisationHoverCard, type OrganisationPreview } from "@/components/organisation-hover-card";
+import type {
+  AuditEntityRef,
+  AuditEventView,
+  AuditIconName,
+  AuditTone,
+} from "@/lib/audit-log-format";
 
 /**
  * The audit trail as a feed rather than a table. A table forced five columns to
@@ -95,7 +103,15 @@ const BADGE_CLASS: Record<AuditTone, string> = {
 
 export type AuditDayGroup = { key: string; label: string; events: AuditEventView[] };
 
-export function AuditFeed({ groups }: { groups: AuditDayGroup[] }) {
+export function AuditFeed({
+  groups,
+  userPreviews = {},
+  orgPreviews = {},
+}: {
+  groups: AuditDayGroup[];
+  userPreviews?: Record<string, UserPreview>;
+  orgPreviews?: Record<string, OrganisationPreview>;
+}) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const reduceMotion = useReducedMotion();
 
@@ -125,6 +141,8 @@ export function AuditFeed({ groups }: { groups: AuditDayGroup[] }) {
                 open={expanded === event.id}
                 onToggle={() => setExpanded((current) => (current === event.id ? null : event.id))}
                 reduceMotion={Boolean(reduceMotion)}
+                userPreviews={userPreviews}
+                orgPreviews={orgPreviews}
               />
             ))}
           </ul>
@@ -134,18 +152,86 @@ export function AuditFeed({ groups }: { groups: AuditDayGroup[] }) {
   );
 }
 
+function EntityLink({
+  entity,
+  userPreviews,
+  orgPreviews,
+  className,
+}: {
+  entity: AuditEntityRef;
+  userPreviews: Record<string, UserPreview>;
+  orgPreviews: Record<string, OrganisationPreview>;
+  className?: string;
+}) {
+  if (entity.entityType === "user") {
+    const preview = userPreviews[entity.id];
+    if (preview) {
+      return (
+        <UserHoverCard
+          user={preview}
+          href={`/team/${entity.id}`}
+          className={`font-bold text-foreground underline decoration-black/20 hover:decoration-brand hover:text-brand transition-colors cursor-pointer ${className ?? ""}`}
+        >
+          {entity.name}
+        </UserHoverCard>
+      );
+    }
+    return (
+      <Link
+        href={`/team/${entity.id}`}
+        onClick={(e) => e.stopPropagation()}
+        className={`font-bold text-foreground underline decoration-black/20 hover:decoration-brand hover:text-brand transition-colors cursor-pointer ${className ?? ""}`}
+        title={`View profile for ${entity.name}`}
+      >
+        {entity.name}
+      </Link>
+    );
+  }
+
+  if (entity.entityType === "organisation") {
+    const preview = orgPreviews[entity.id];
+    if (preview) {
+      return (
+        <OrganisationHoverCard
+          org={preview}
+          href={`/clients/${entity.id}`}
+          className={`font-bold text-foreground underline decoration-black/20 hover:decoration-brand hover:text-brand transition-colors cursor-pointer ${className ?? ""}`}
+        >
+          {entity.name}
+        </OrganisationHoverCard>
+      );
+    }
+    return (
+      <Link
+        href={`/clients/${entity.id}`}
+        onClick={(e) => e.stopPropagation()}
+        className={`font-bold text-foreground underline decoration-black/20 hover:decoration-brand hover:text-brand transition-colors cursor-pointer ${className ?? ""}`}
+        title={`View organisation overview for ${entity.name}`}
+      >
+        {entity.name}
+      </Link>
+    );
+  }
+
+  return <span>{entity.name}</span>;
+}
+
 function AuditRow({
   event,
   index,
   open,
   onToggle,
   reduceMotion,
+  userPreviews,
+  orgPreviews,
 }: {
   event: AuditEventView;
   index: number;
   open: boolean;
   onToggle: () => void;
   reduceMotion: boolean;
+  userPreviews: Record<string, UserPreview>;
+  orgPreviews: Record<string, OrganisationPreview>;
 }) {
   const Icon = ICONS[event.icon];
   const chips = event.details.filter((detail) => detail.kind !== "note");
@@ -161,11 +247,18 @@ function AuditRow({
           target, and the gesture is meant to answer "what is this row" as the
           cursor crosses it. */}
       <motion.div initial="rest" animate="rest" whileHover="hover">
-        <button
-          type="button"
+        <div
+          role="button"
+          tabIndex={0}
           onClick={onToggle}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onToggle();
+            }
+          }}
           aria-expanded={open}
-          className="flex w-full items-start gap-3 px-4 py-4 text-left transition-colors hover:bg-black/[0.02] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand sm:gap-4 sm:px-5"
+          className="flex w-full items-start gap-3 px-4 py-4 text-left transition-colors hover:bg-black/[0.02] cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand sm:gap-4 sm:px-5"
         >
           <motion.span
             aria-hidden="true"
@@ -191,8 +284,24 @@ function AuditRow({
                 {event.relativeTime}
               </span>
             </span>
-            <span className="mt-1 block text-[15px] font-bold leading-[1.45]">
-              {event.sentence}
+            <span className="mt-1 block text-[15px] font-bold leading-[1.45] text-foreground">
+              {event.sentenceParts && event.sentenceParts.length > 0 ? (
+                event.sentenceParts.map((part, pIdx) => {
+                  if (part.type === "entity") {
+                    return (
+                      <EntityLink
+                        key={`${part.id}-${pIdx}`}
+                        entity={{ entityType: part.entityType, id: part.id, name: part.name }}
+                        userPreviews={userPreviews}
+                        orgPreviews={orgPreviews}
+                      />
+                    );
+                  }
+                  return <span key={pIdx}>{part.text}</span>;
+                })
+              ) : (
+                event.sentence
+              )}
             </span>
 
             {chips.length > 0 && (
@@ -205,7 +314,37 @@ function AuditRow({
                     <span className="uppercase tracking-[0.08em] text-foreground/35">
                       {detail.label}
                     </span>
-                    {detail.value}
+                    {detail.fromEntity || detail.toEntity ? (
+                      <span className="inline-flex items-center gap-1">
+                        {detail.fromEntity ? (
+                          <EntityLink
+                            entity={detail.fromEntity}
+                            userPreviews={userPreviews}
+                            orgPreviews={orgPreviews}
+                          />
+                        ) : (
+                          <span>{detail.value.split("→")[0]?.trim()}</span>
+                        )}
+                        <span>→</span>
+                        {detail.toEntity ? (
+                          <EntityLink
+                            entity={detail.toEntity}
+                            userPreviews={userPreviews}
+                            orgPreviews={orgPreviews}
+                          />
+                        ) : (
+                          <span>{detail.value.split("→")[1]?.trim()}</span>
+                        )}
+                      </span>
+                    ) : detail.entity ? (
+                      <EntityLink
+                        entity={detail.entity}
+                        userPreviews={userPreviews}
+                        orgPreviews={orgPreviews}
+                      />
+                    ) : (
+                      <span>{detail.value}</span>
+                    )}
                   </span>
                 ))}
               </span>
@@ -238,7 +377,7 @@ function AuditRow({
               <ChevronDown className="h-4 w-4" strokeWidth={2} />
             </motion.span>
           </span>
-        </button>
+        </div>
 
         {/* The machine's version of the row. Kept behind a click because reading
             a uuid is a support task, not the reason anyone opens this page. */}
@@ -275,7 +414,13 @@ function AuditRow({
                       <ActionBadge label={event.label} tone={event.tone} icon={event.icon} />
                     </dd>
                   </div>
-                  <Field label="Done by" value={event.actorName} />
+                  <Field
+                    label="Done by"
+                    value={event.actorName}
+                    entity={event.actorEntity ?? undefined}
+                    userPreviews={userPreviews}
+                    orgPreviews={orgPreviews}
+                  />
                   {/* The noun is only worth using as a label when there is a
                       name to put under it. Otherwise it would head a field
                       whose value is that same noun. */}
@@ -286,8 +431,16 @@ function AuditRow({
                         ? (event.targetDisplay ?? "—")
                         : (capitalise(event.targetDisplay) ?? "Nothing in particular")
                     }
+                    entity={event.targetEntity ?? undefined}
+                    userPreviews={userPreviews}
+                    orgPreviews={orgPreviews}
                   />
-                  <Field label="Recorded" value={`${event.exactTime} · ${event.relativeTime}`} />
+                  <Field
+                    label="Recorded"
+                    value={`${event.exactTime} · ${event.relativeTime}`}
+                    userPreviews={userPreviews}
+                    orgPreviews={orgPreviews}
+                  />
                 </dl>
 
                 {event.rawDetail.length > 0 && (
@@ -301,21 +454,59 @@ function AuditRow({
                         key/value pairing is the only part that carries meaning,
                         so that is the only part drawn. */}
                     <dl className="mt-2 overflow-hidden rounded-xl bg-white ring-1 ring-black/[0.06]">
-                      {event.rawDetail.map((entry) => (
-                        <div
-                          key={entry.key}
-                          className="flex flex-col gap-0.5 border-b border-black/[0.05] px-4 py-2.5 last:border-b-0 sm:flex-row sm:items-baseline sm:gap-4"
-                        >
-                          {/* Right-aligned so the key sits against its value
-                              rather than across a column of air from it. */}
-                          <dt className="shrink-0 font-mono text-[11px] text-foreground/40 sm:w-40 sm:text-right">
-                            {entry.key}
-                          </dt>
-                          <dd className="min-w-0 font-mono text-xs leading-[1.6] break-words text-foreground/75">
-                            {entry.value}
-                          </dd>
-                        </div>
-                      ))}
+                      {event.rawDetail.map((entry) => {
+                        const isUser =
+                          (entry.key.includes("user_id") ||
+                            entry.key === "actor_user_id" ||
+                            entry.key === "from_user_id" ||
+                            entry.key === "to_user_id" ||
+                            entry.key === "owner_id") &&
+                          userPreviews[entry.value];
+                        const isOrg =
+                          (entry.key.includes("organisation") ||
+                            (entry.key === "target_id" && event.targetTable === "organisations")) &&
+                          orgPreviews[entry.value];
+
+                        return (
+                          <div
+                            key={entry.key}
+                            className="flex flex-col gap-0.5 border-b border-black/[0.05] px-4 py-2.5 last:border-b-0 sm:flex-row sm:items-baseline sm:gap-4"
+                          >
+                            {/* Right-aligned so the key sits against its value
+                                rather than across a column of air from it. */}
+                            <dt className="shrink-0 font-mono text-[11px] text-foreground/40 sm:w-40 sm:text-right">
+                              {entry.key}
+                            </dt>
+                            <dd className="min-w-0 font-mono text-xs leading-[1.6] break-words text-foreground/75">
+                              {isUser ? (
+                                <EntityLink
+                                  entity={{
+                                    entityType: "user",
+                                    id: entry.value,
+                                    name: `${entry.value} (${userPreviews[entry.value].fullName ?? userPreviews[entry.value].email})`,
+                                  }}
+                                  userPreviews={userPreviews}
+                                  orgPreviews={orgPreviews}
+                                  className="font-mono text-xs"
+                                />
+                              ) : isOrg ? (
+                                <EntityLink
+                                  entity={{
+                                    entityType: "organisation",
+                                    id: entry.value,
+                                    name: `${entry.value} (${orgPreviews[entry.value].legalName})`,
+                                  }}
+                                  userPreviews={userPreviews}
+                                  orgPreviews={orgPreviews}
+                                  className="font-mono text-xs"
+                                />
+                              ) : (
+                                entry.value
+                              )}
+                            </dd>
+                          </div>
+                        );
+                      })}
                     </dl>
                   </div>
                 )}
@@ -338,14 +529,35 @@ function capitalise(value: string | null): string | null {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({
+  label,
+  value,
+  entity,
+  userPreviews,
+  orgPreviews,
+}: {
+  label: string;
+  value: string;
+  entity?: AuditEntityRef;
+  userPreviews: Record<string, UserPreview>;
+  orgPreviews: Record<string, OrganisationPreview>;
+}) {
   return (
     <div className="min-w-0">
       <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
         {label}
       </dt>
       <dd className="mt-1.5 truncate text-[13px] text-foreground/75" title={value}>
-        {value}
+        {entity ? (
+          <EntityLink
+            entity={entity}
+            userPreviews={userPreviews}
+            orgPreviews={orgPreviews}
+            className="text-[13px]"
+          />
+        ) : (
+          value
+        )}
       </dd>
     </div>
   );

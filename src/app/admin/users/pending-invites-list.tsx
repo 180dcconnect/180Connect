@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { isInviteExpired, type PendingInvite } from "@/lib/admin/team-realtime";
 import { cancelInviteAction, resendInviteAction } from "./invite-actions";
 import { InlineAlert } from "@/components/ui/inline-alert";
@@ -17,10 +18,15 @@ const ROLE_LABEL: Record<PendingInvite["role"], string> = {
 export function PendingInvitesList({
   invites,
   error,
+  onResendSuccess,
+  onCancelSuccess,
 }: {
   invites: PendingInvite[];
   error: boolean;
+  onResendSuccess?: (id: string, newInvitedAt: string) => void;
+  onCancelSuccess?: (id: string) => void;
 }) {
+  const router = useRouter();
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, ActionResult>>({});
@@ -32,6 +38,12 @@ export function PendingInvitesList({
     setResendingId(null);
 
     if (result.message) {
+      const isSuccess = result.status === "success" || result.status === "idle";
+      if (isSuccess || result.status === "warning") {
+        const nowIso = new Date().toISOString();
+        onResendSuccess?.(id, nowIso);
+        router.refresh();
+      }
       setResults((current) => ({
         ...current,
         [id]: { text: result.message!, status: result.status === "idle" ? "success" : result.status },
@@ -46,6 +58,10 @@ export function PendingInvitesList({
     setCancellingId(null);
 
     if (result.message) {
+      if (result.status === "success" || result.status === "idle") {
+        onCancelSuccess?.(id);
+        router.refresh();
+      }
       setResults((current) => ({
         ...current,
         [id]: { text: result.message!, status: result.status === "idle" ? "success" : result.status },
@@ -90,7 +106,7 @@ export function PendingInvitesList({
                   type="button"
                   disabled={busy}
                   onClick={() => handleResend(invite.id)}
-                  className="h-7 rounded-full border border-black/10 bg-white px-3 text-xs font-semibold text-foreground shadow-2xs transition-all hover:border-brand/40 hover:bg-brand/5 hover:text-brand disabled:cursor-wait disabled:opacity-50"
+                  className="h-7 rounded-sm border border-black/10 bg-white px-3 text-xs font-semibold text-foreground shadow-2xs transition-all hover:border-brand/40 hover:bg-brand/5 hover:text-brand disabled:cursor-wait disabled:opacity-50"
                 >
                   {resendingId === invite.id ? "Resending…" : "Resend"}
                 </button>

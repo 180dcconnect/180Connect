@@ -1,4 +1,4 @@
-import { AlertTriangle, TrendingDown, TrendingUp } from "lucide-react";
+import { AlertTriangle, HeartHandshake, TrendingDown, TrendingUp, Users } from "lucide-react";
 
 import {
   deriveIncomeBand,
@@ -8,10 +8,12 @@ import {
 } from "@/lib/income-band";
 import {
   buildFinancialSeries,
+  buildFundFlows,
   filingRecency,
   type FinancialPeriodInput,
   type GrantInput,
 } from "@/lib/financials/financial-series";
+import { FundFlowSankey } from "./fund-flow-sankey";
 import { IncomeBandScale } from "../income-band-scale";
 import {
   FinancialHistoryChart,
@@ -64,8 +66,24 @@ export function FinancialsHeroCard({
   // page of 10 and sorted them itself, which quietly meant a charity with five
   // filed years had its oldest one dropped from the trend.
   const series = buildFinancialSeries({ periods: filings, grants });
-  const recency = filingRecency(latest?.period_end ?? null);
+  const recency = filingRecency(
+    latest?.period_end ?? null,
+    undefined,
+    latest?.filing_date ?? null,
+  );
+  // Scale comes from the newest year that reported it: the latest return is
+  // often a totals-only filing while the one before it carries the counts, and
+  // "no employees reported this year" is not the same claim as "no employees".
+  const scaleYear = [...series.years]
+    .reverse()
+    .find((year) => year.employees !== null || year.volunteers !== null);
   const mixYear = [...series.years].reverse().find((year) => year.mix.length > 0);
+  // Every year that can be drawn as a flow, newest first — the chart's year
+  // strip steps through them. A year qualifies only with a split on *both*
+  // sides and two sides that square; buildFundFlow returns null rather than a
+  // diagram whose widths do not add up, so this list is often shorter than the
+  // filing history.
+  const flows = buildFundFlows(series);
 
   return (
     <div className="rounded-panel border border-rule bg-white p-5 sm:p-6">
@@ -79,6 +97,20 @@ export function FinancialsHeroCard({
             {latestPeriodFormatted && (
               <span className="font-mono text-[11.5px] text-faint">
                 Year ended {latestPeriodFormatted}
+                {/* Exact, not inferred. Only the bulk register extract
+                    publishes a received date — the API has no endpoint for one
+                    — so this appears for a charity imported from the extract
+                    and is silently absent for the rest. */}
+                {recency?.filedOn && (
+                  <>
+                    {" · filed "}
+                    {new Date(recency.filedOn).toLocaleDateString("en-GB", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                  </>
+                )}
               </span>
             )}
           </div>
@@ -143,6 +175,49 @@ export function FinancialsHeroCard({
               </p>
             </div>
           </div>
+
+          {/* How the organisation is actually staffed.
+              A £400k charity run by two employees and ninety volunteers is a
+              different engagement from a £400k charity with twelve employees
+              and none — same income, same band, same score, completely
+              different project. Income cannot say which, and this is the only
+              place the record can.
+
+              A filed zero is shown as a zero, not hidden: "no paid staff" is a
+              real and useful answer. Absence of a figure is what suppresses
+              the line, which is why the check is against null. */}
+          {scaleYear && (
+            <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 border-t border-rule-soft pt-3.5">
+              <span className="text-[12.5px] text-dim">
+                Scale{" "}
+                <span className="text-faint">
+                  ({scaleYear.label} return)
+                </span>
+              </span>
+              {scaleYear.employees !== null && (
+                <span className="flex items-baseline gap-1.5 text-[13px] text-ink">
+                  <Users aria-hidden="true" className="size-3.5 shrink-0 self-center text-faint" />
+                  <span className="font-mono font-semibold tabular-nums">
+                    {scaleYear.employees.toLocaleString("en-GB")}
+                  </span>
+                  <span className="text-dim">
+                    {scaleYear.employees === 1 ? "employee" : "employees"}
+                  </span>
+                </span>
+              )}
+              {scaleYear.volunteers !== null && (
+                <span className="flex items-baseline gap-1.5 text-[13px] text-ink">
+                  <HeartHandshake aria-hidden="true" className="size-3.5 shrink-0 self-center text-faint" />
+                  <span className="font-mono font-semibold tabular-nums">
+                    {scaleYear.volunteers.toLocaleString("en-GB")}
+                  </span>
+                  <span className="text-dim">
+                    {scaleYear.volunteers === 1 ? "volunteer" : "volunteers"}
+                  </span>
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right Column: 4-Stage Segmented Scale */}
@@ -174,7 +249,14 @@ export function FinancialsHeroCard({
           {/* The newest year that published a split, not necessarily the newest
               year: the latest return is often a totals-only filing while the
               one before it carries the breakdown. */}
-          {mixYear && <IncomeMixPanel year={mixYear} />}
+          {/* The flow answers "what do they turn money into" for both sides at
+              once. Where it cannot be drawn honestly, the one-sided income
+              panel still answers half of it. */}
+          {flows.length > 0 ? (
+            <FundFlowSankey flows={flows} />
+          ) : (
+            mixYear && <IncomeMixPanel year={mixYear} />
+          )}
           <GrantShareChart series={series} />
         </div>
       )}

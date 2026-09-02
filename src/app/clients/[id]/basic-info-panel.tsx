@@ -34,6 +34,7 @@ import {
 import { SectionCard } from "./section-card";
 import {
   EditDraftBar,
+  InlineCityInput,
   InlineEnumInput,
   InlineFieldInput,
   fieldErrorsFrom,
@@ -79,6 +80,15 @@ import { adminDirectEditsAction } from "./admin-actions";
  */
 const ROW_TRANSITION = { duration: 0.32, ease: [0.32, 0.72, 0, 1] } as const;
 const SWAP_TRANSITION = { duration: 0.18, ease: [0.32, 0.72, 0, 1] } as const;
+/**
+ * Smooth, slow-paced transition for the draft changes save bar appearing and disappearing.
+ * Uses a gentle, fluid decelerate curve so the bar glides into and out of place elegantly.
+ */
+const DRAFT_BAR_TRANSITION = {
+  duration: 0.52,
+  ease: [0.16, 1, 0.3, 1],
+  opacity: { duration: 0.42 },
+} as const;
 
 /**
  * A website column safe to hang an `href` on.
@@ -519,7 +529,9 @@ export function BasicInfoPanel({
               layout
               transition={ROW_TRANSITION}
               key={label}
-              className="grid gap-x-4 gap-y-0.5 border-t border-rule-soft py-2.5 first:border-t-0 first:pt-0 sm:grid-cols-[132px_minmax(0,1fr)]"
+              className={`grid gap-x-4 gap-y-0.5 border-t border-rule-soft py-2.5 first:border-t-0 first:pt-0 sm:grid-cols-[132px_minmax(0,1fr)] ${
+                isOpen ? "relative z-30" : ""
+              }`}
             >
               <dt className="text-[13px] text-dim">{label}</dt>
               <dd
@@ -554,6 +566,22 @@ export function BasicInfoPanel({
                             }))
                           }
                           onCancel={() => closeRow(column)}
+                          pending={pending}
+                        />
+                      ) : column === "city" ? (
+                        <InlineCityInput
+                          label={label}
+                          value={drafts[column] ?? ""}
+                          currentValue={rawValue}
+                          error={fieldErrors[column]}
+                          onChange={(next) =>
+                            setDrafts((current) => ({
+                              ...current,
+                              [column]: next,
+                            }))
+                          }
+                          onCancel={() => closeRow(column)}
+                          onSubmit={submit}
                           pending={pending}
                         />
                       ) : (
@@ -673,10 +701,11 @@ export function BasicInfoPanel({
         {changes.length > 0 && (
           <motion.div
             key="draft-bar"
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={SWAP_TRANSITION}
+            initial={{ opacity: 0, y: -14, scale: 0.98, height: 0, marginTop: 0 }}
+            animate={{ opacity: 1, y: 0, scale: 1, height: "auto", marginTop: 16 }}
+            exit={{ opacity: 0, y: -14, scale: 0.98, height: 0, marginTop: 0 }}
+            transition={DRAFT_BAR_TRANSITION}
+            className="overflow-hidden"
           >
             <EditDraftBar
               count={changes.length}

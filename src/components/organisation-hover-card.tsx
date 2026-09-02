@@ -39,9 +39,13 @@ function formatLocation(city: string | null, countryCode: string | null): string
 export function OrganisationHoverCard({
   org,
   className,
+  children,
+  href,
 }: {
   org: OrganisationPreview;
   className?: string;
+  children?: React.ReactNode;
+  href?: string;
 }) {
   const statusLabel = formatOutreachStatus(org.outreachStatus);
   const statusStyles: Record<string, string> = {
@@ -65,12 +69,24 @@ export function OrganisationHoverCard({
     (org.priorityBand ? BAND_STYLES[org.priorityBand.toLowerCase()] : null) ??
     'bg-black/5 text-foreground/75 border-black/10';
 
+  const triggerContent = children ?? org.legalName;
+
   return (
     <HoverCard>
       <HoverCardTrigger asChild>
-        {/* `className` was accepted and dropped, so a caller styling the trigger
-            silently got nothing — the user card already merged it. */}
-        <span className={cn('cursor-pointer', className)}>{org.legalName}</span>
+        {href ? (
+          <Link
+            href={href}
+            onClick={(e) => e.stopPropagation()}
+            className={cn('cursor-pointer', className)}
+          >
+            {triggerContent}
+          </Link>
+        ) : (
+          <span className={cn('cursor-pointer', className)}>
+            {triggerContent}
+          </span>
+        )}
       </HoverCardTrigger>
       <HoverCardContent side="right" sideOffset={8} align="start">
         <div className="flex flex-col gap-4">

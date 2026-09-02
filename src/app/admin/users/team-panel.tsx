@@ -109,6 +109,22 @@ export function TeamPanel({
     }));
   }
 
+  function handleResendSuccess(id: string, newInvitedAt: string) {
+    setState((current) => ({
+      ...current,
+      pendingInvites: current.pendingInvites.map((inv) =>
+        inv.id === id ? { ...inv, invited_at: newInvitedAt } : inv,
+      ),
+    }));
+  }
+
+  function handleCancelSuccess(id: string) {
+    setState((current) => ({
+      ...current,
+      pendingInvites: current.pendingInvites.filter((inv) => inv.id !== id),
+    }));
+  }
+
   const hasActiveFilters = Boolean(
     filterCriteria?.query ||
       (filterCriteria?.roles && filterCriteria.roles.length > 0) ||
@@ -149,7 +165,12 @@ export function TeamPanel({
         </Rise>
         <Rise>
           <div className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm">
-            <PendingInvitesList error={pendingInvitesError} invites={state.pendingInvites} />
+            <PendingInvitesList
+              error={pendingInvitesError}
+              invites={state.pendingInvites}
+              onResendSuccess={handleResendSuccess}
+              onCancelSuccess={handleCancelSuccess}
+            />
           </div>
         </Rise>
       </Group>

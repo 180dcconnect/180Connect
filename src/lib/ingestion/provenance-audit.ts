@@ -48,16 +48,16 @@ export async function runProvenanceAudit(): Promise<ProvenanceAuditResult> {
   const admin = buildAdminClient();
   if (!admin) throw new Error("Provenance audit is not configured.");
 
-  const { data: rows, error } = await admin
-    .rpc("get_unprovenanced_organisations")
-    .overrideTypes<ProvenanceAuditRow[], { merge: false }>();
+  const { data, error } = await admin
+    .rpc("get_unprovenanced_organisations");
 
   if (error) {
     await reportError(error, { operation: "provenance_audit.rpc" });
     throw error;
   }
 
-  const flagged = rows ?? [];
+  const rows = (data as unknown as ProvenanceAuditRow[] | null) ?? [];
+  const flagged = rows;
   // Sorted so the comparison against the previous sweep is order-insensitive.
   const currentIds = flagged.map((row) => row.organisation_id).sort();
 
@@ -69,7 +69,7 @@ export async function runProvenanceAudit(): Promise<ProvenanceAuditResult> {
     .eq("action", AUDIT_ACTION)
     .order("created_at", { ascending: false })
     .limit(1)
-    .overrideTypes<{ detail: { unprovenanced?: string[] } }[], { merge: false }>();
+    .overrideTypes<Array<{ detail: { unprovenanced?: string[] } }>>();
 
   if (latestError) {
     await reportError(latestError, { operation: "provenance_audit.latest_audit_read" });

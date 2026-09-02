@@ -5,12 +5,14 @@ import {
   fetchAllPages,
   promotePendingCharityCommissionRecords,
   promotePendingCompaniesHouseRecords,
+  promotePendingCharityCommissionBulkRecords,
   promotePendingFindThatCharityRecords,
   type OrganisationWriteStore,
   type PendingRecord,
 } from "./write-organisations.ts";
 import type { StandardOrganisation } from "./types.ts";
 import type { RawCharityCommissionRecord } from "./charity-commission.ts";
+import type { BulkFinancialPeriodRow } from "../financials/charity-financial-periods.ts";
 
 // ---------------------------------------------------------------------------
 // Fake store — same reasoning as runner.test.ts's fakeStore: assert against
@@ -44,6 +46,16 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
     identifierType: "uk_charity" | "uk_company";
     identifierValue: string;
   }[] = [];
+  const bulkFinancialPeriods: {
+    organisationId: string;
+    period: BulkFinancialPeriodRow;
+  }[] = [];
+  const annotations: {
+    organisationId: string;
+    sector?: string | null;
+    registeredOn?: string | null;
+    charityReportingStatus?: string | null;
+  }[] = [];
   const financialPeriods: {
     organisationId: string;
     periodStart: string;
@@ -63,7 +75,7 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
     async loadDismissedMatches() {
       return [];
     },
-    async insertOrganisation(org) {
+    async insertOrganisationAndLink(org) {
       inserted.push(org);
       return { id: `org-${nextId++}` };
     },
@@ -89,7 +101,31 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
       financialPeriods.push(input);
       return { ok: true };
     },
+    async upsertBulkFinancialPeriod({ organisationId, period }) {
+      bulkFinancialPeriods.push({ organisationId, period });
+      return { ok: true };
+    },
+    async annotateOrganisation(input) {
+      annotations.push(input);
+      return { ok: true };
+    },
     ...overrides,
+  };
+
+  // The real store's insert, "validated" mark and raw-record link are one RPC
+  // (link_raw_record_to_organisation), so the promote functions no longer follow
+  // a successful insert with markRecordStatus. The fake has to model that, or
+  // every "marks each validated" assertion sees nothing — and it is wrapped
+  // here, after the overrides, so a test that supplies its own insert (to make
+  // one fail, say) still gets the status update the real store would have
+  // written for the ones that succeeded.
+  const insert = store.insertOrganisationAndLink.bind(store);
+  store.insertOrganisationAndLink = async (org, rawRecordId) => {
+    const result = await insert(org, rawRecordId);
+    if ("id" in result) {
+      statusUpdates.push({ rawRecordId, status: "validated", matchedOrganisationId: result.id });
+    }
+    return result;
   };
 
   return {
@@ -101,6 +137,8 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
     fieldSources,
     identifiers,
     financialPeriods,
+    bulkFinancialPeriods,
+    annotations,
   };
 }
 
@@ -340,7 +378,7 @@ describe("promotePendingCharityCommissionRecords — duplicate candidate (F042)"
 
 describe("promotePendingCharityCommissionRecords — existing internal data preserved", () => {
   it("never updates or deletes an existing organisations row — only inserts new ones", async () => {
-    // insertOrganisation is only ever called with `insert`, never `update` or
+    // insertOrganisationAndLink is only ever called with `insert`, never `update` or
     // `upsert` — this test asserts the store contract rather than a live
     // database, but documents the intent: F041 as built here cannot touch
     // an existing row, by construction, since it has no matching logic yet.
@@ -691,7 +729,7 @@ describe("promotePendingCharityCommissionRecords — write failure", () => {
       async loadPendingRecords() {
         return [pendingRecord("raw-1", "Oxfam")];
       },
-      async insertOrganisation() {
+      async insertOrganisationAndLink() {
         return { error: "duplicate key value" };
       },
     });
@@ -709,7 +747,7 @@ describe("promotePendingCharityCommissionRecords — write failure", () => {
       async loadPendingRecords() {
         return [pendingRecord("raw-1", "Oxfam"), pendingRecord("raw-2", "Shelter")];
       },
-      async insertOrganisation() {
+      async insertOrganisationAndLink() {
         calls++;
         if (calls === 1) return { error: "boom" };
         return { id: "org-2" };
@@ -1024,7 +1062,7 @@ describe("promotePendingCompaniesHouseRecords — write failure", () => {
       async loadPendingRecords() {
         return [companiesHousePendingRecord("raw-1", "Acme Ltd")];
       },
-      async insertOrganisation() {
+      async insertOrganisationAndLink() {
         return { error: "duplicate key value" };
       },
     });
@@ -1045,7 +1083,7 @@ describe("promotePendingCompaniesHouseRecords — write failure", () => {
           companiesHousePendingRecord("raw-2", "Beta Ltd"),
         ];
       },
-      async insertOrganisation() {
+      async insertOrganisationAndLink() {
         calls++;
         if (calls === 1) return { error: "boom" };
         return { id: "org-2" };
@@ -1084,7 +1122,7 @@ describe("promotePendingCompaniesHouseRecords — malformed raw_payload", () => 
           companiesHousePendingRecord("raw-good", "Good Charity Ltd"),
         ];
       },
-      async insertOrganisation(org) {
+      async insertOrganisationAndLink(org) {
         calls++;
         inserted.push(org);
         return { id: `org-${calls}` };
@@ -1305,7 +1343,7 @@ describe("promotePendingFindThatCharityRecords — write failure", () => {
       async loadPendingRecords() {
         return [findThatCharityPendingRecord("raw-1", "Oxfam")];
       },
-      async insertOrganisation() {
+      async insertOrganisationAndLink() {
         return { error: "duplicate key value" };
       },
     });
@@ -1337,7 +1375,7 @@ describe("promotePendingFindThatCharityRecords — malformed raw_payload", () =>
           findThatCharityPendingRecord("raw-good", "Good Charity"),
         ];
       },
-      async insertOrganisation(org) {
+      async insertOrganisationAndLink(org) {
         calls++;
         inserted.push(org);
         return { id: `org-${calls}` };
@@ -1394,5 +1432,191 @@ describe("fetchAllPages", () => {
       () => fetchAllPages(async () => ({ data: null, error: new Error("boom") })),
       /boom/,
     );
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// The bulk register import
+// ---------------------------------------------------------------------------
+
+function bulkPendingRecord(
+  id: string,
+  charityName: string,
+  overrides: Record<string, unknown> = {},
+): PendingRecord {
+  return {
+    id,
+    source_record_id: "500001",
+    raw_payload: {
+      charity: {
+        organisation_number: 500001,
+        registered_charity_number: 1000001,
+        charity_name: charityName,
+        charity_registration_status: "Registered",
+        charity_reporting_status: "Submission Received",
+        date_of_registration: "1990-06-01T00:00:00",
+        charity_contact_address1: "12 High Street",
+        charity_contact_address5: "SHEFFIELD",
+        charity_contact_postcode: "S1 2HE",
+        charity_contact_email: "info@example.org",
+        charity_contact_web: "example.org",
+        charity_is_cio: false,
+        charity_company_registration_number: null,
+        ...overrides,
+      },
+      matched_classifications: ["Education/training"],
+      matched_areas: ["Sheffield"],
+      annual_returns: [
+        {
+          fin_period_start_date: "2024-04-01T00:00:00",
+          fin_period_end_date: "2025-03-31T00:00:00",
+          ar_received_date: "2025-11-30T00:00:00",
+          total_gross_income: 250_000,
+          total_gross_expenditure: 240_000,
+          count_employees: 6,
+          count_volunteers: 40,
+        },
+      ],
+    },
+  };
+}
+
+describe("promotePendingCharityCommissionBulkRecords", () => {
+  it("inserts the charity and reads its own source, not the API's", async () => {
+    const loaded: string[] = [];
+    const { store, inserted, statusUpdates } = fakeStore({
+      async loadPendingRecords(source) {
+        loaded.push(source);
+        return [bulkPendingRecord("raw-1", "Sheffield Example Trust")];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+
+    assert.deepEqual(loaded, ["charity_commission_bulk"]);
+    assert.equal(counts.inserted, 1);
+    assert.equal(inserted[0].legal_name, "Sheffield Example Trust");
+    assert.equal(statusUpdates[0].status, "validated");
+  });
+
+  it("writes the sector the register classified the charity under", async () => {
+    // The whole point of this import path: organisations.sector was empty for
+    // every row, so the SCOUT sector factor was neutral across the book.
+    const { store, annotations } = fakeStore({
+      async loadPendingRecords() {
+        return [bulkPendingRecord("raw-1", "Sheffield Example Trust")];
+      },
+    });
+
+    await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+
+    assert.equal(annotations.length, 1);
+    assert.equal(annotations[0].sector, "Education & Training");
+    assert.equal(annotations[0].registeredOn, "1990-06-01");
+    assert.equal(annotations[0].charityReportingStatus, "Submission Received");
+  });
+
+  it("writes the filed years from the payload, with the filing date and the counts", async () => {
+    const { store, bulkFinancialPeriods } = fakeStore({
+      async loadPendingRecords() {
+        return [bulkPendingRecord("raw-1", "Sheffield Example Trust")];
+      },
+    });
+
+    await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+
+    assert.equal(bulkFinancialPeriods.length, 1);
+    const { period } = bulkFinancialPeriods[0];
+    assert.equal(period.periodStart, "2024-04-01");
+    assert.equal(period.filingDate, "2025-11-30");
+    assert.equal(period.countEmployees, 6);
+    assert.equal(period.countVolunteers, 40);
+  });
+
+  it("writes the charity number, so a charity we already hold matches instead of duplicating", async () => {
+    const { store, identifiers } = fakeStore({
+      async loadPendingRecords() {
+        return [bulkPendingRecord("raw-1", "Sheffield Example Trust")];
+      },
+    });
+
+    await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+
+    assert.deepEqual(identifiers, [
+      { organisationId: "org-1", identifierType: "uk_charity", identifierValue: "1000001" },
+    ]);
+  });
+
+  it("flags a charity already held from the API path rather than inserting it twice", async () => {
+    const { store, inserted, flagged } = fakeStore({
+      async loadPendingRecords() {
+        return [bulkPendingRecord("raw-1", "Sheffield Example Trust")];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [
+          {
+            id: "org-existing",
+            legal_name: "Someone Else Entirely",
+            postcode: "LS1 1AA",
+            registrationNumbers: ["1000001"],
+          },
+        ];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+
+    assert.equal(inserted.length, 0);
+    assert.equal(counts.flagged, 1);
+    assert.equal(flagged[0].source, "charity_commission_bulk");
+  });
+
+  it("rejects a record with no charity name instead of inserting it", async () => {
+    const { store, inserted } = fakeStore({
+      async loadPendingRecords() {
+        return [bulkPendingRecord("raw-1", "   ")];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+
+    assert.equal(inserted.length, 0);
+    assert.equal(counts.rejected, 1);
+  });
+
+  it("keeps importing after one annotation fails — it is not part of the promote", async () => {
+    const { store, inserted } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          bulkPendingRecord("raw-1", "First Trust"),
+          bulkPendingRecord("raw-2", "Second Trust", {
+            registered_charity_number: 1000002,
+            charity_contact_postcode: "S2 3AA",
+          }),
+        ];
+      },
+      async annotateOrganisation() {
+        return { error: "column does not exist" };
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+
+    assert.equal(inserted.length, 2);
+    assert.equal(counts.failed, 0);
+  });
+
+  it("writes no financial period for a charity that has filed nothing", async () => {
+    const { store, bulkFinancialPeriods } = fakeStore({
+      async loadPendingRecords() {
+        const record = bulkPendingRecord("raw-1", "New Trust");
+        (record.raw_payload as { annual_returns: unknown[] }).annual_returns = [];
+        return [record];
+      },
+    });
+
+    await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+    assert.equal(bulkFinancialPeriods.length, 0);
   });
 });

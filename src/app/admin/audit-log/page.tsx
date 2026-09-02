@@ -19,8 +19,28 @@ import {
 import { AuditFeed } from "./audit-feed";
 import { AuditLogPagination } from "./audit-log-pagination";
 
-type UserOption = { id: string; email: string; full_name: string | null };
-type OrganisationOption = { id: string; legal_name: string };
+import type { ActorPreview as UserPreview, OrganisationPreview } from "@/lib/recent-updates";
+
+type UserOption = {
+  id: string;
+  email: string;
+  full_name: string | null;
+  role?: "admin" | "cam" | "viewer" | "leadership";
+  is_active?: boolean;
+  last_seen_at?: string | null;
+};
+
+type OrganisationOption = {
+  id: string;
+  legal_name: string;
+  organisation_type?: string | null;
+  sector?: string | null;
+  city?: string | null;
+  country_code?: string | null;
+  outreach_status?: string;
+  website?: string | null;
+  owner_id?: string | null;
+};
 
 // Next.js 16: searchParams is a Promise on App Router pages, not a plain
 // object (that changed from older versions). Same pattern already merged in
@@ -150,19 +170,50 @@ export default async function AuditLogPage({
   const [{ data: userOptions }, { data: orgOptions }] = await Promise.all([
     supabase
       .from("users")
-      .select("id, email, full_name")
+      .select("id, email, full_name, role, is_active, last_seen_at")
       .order("email")
       // Same overrideTypes note as above — current method, not deprecated.
       .overrideTypes<UserOption[], { merge: false }>(),
     referencedOrgIds.length > 0
       ? supabase
           .from("organisations")
-          .select("id, legal_name")
+          .select("id, legal_name, organisation_type, sector, city, country_code, outreach_status, website, owner_id")
           .in("id", referencedOrgIds)
           .order("legal_name")
           .overrideTypes<OrganisationOption[], { merge: false }>()
       : Promise.resolve({ data: [] as OrganisationOption[] }),
   ]);
+
+  const userPreviews: Record<string, UserPreview> = {};
+  for (const u of userOptions ?? []) {
+    userPreviews[u.id] = {
+      id: u.id,
+      fullName: u.full_name,
+      email: u.email,
+      role: (u.role as "admin" | "cam" | "viewer" | "leadership") ?? "cam",
+      isActive: u.is_active ?? true,
+      lastSeenAt: u.last_seen_at ?? null,
+      ownedClientCount: 0,
+    };
+  }
+
+  const orgPreviews: Record<string, OrganisationPreview> = {};
+  for (const org of orgOptions ?? []) {
+    const owner = org.owner_id ? userPreviews[org.owner_id] : null;
+    orgPreviews[org.id] = {
+      id: org.id,
+      legalName: org.legal_name,
+      organisationType: org.organisation_type ?? null,
+      sector: org.sector ?? null,
+      city: org.city ?? null,
+      countryCode: org.country_code ?? null,
+      outreachStatus: org.outreach_status ?? "not_contacted",
+      website: org.website ?? null,
+      ownerId: org.owner_id ?? null,
+      ownerName: owner?.fullName ?? null,
+      ownerEmail: owner?.email ?? null,
+    };
+  }
 
   const people = new Map((userOptions ?? []).map((option) => [option.id, option.full_name?.trim() || option.email]));
   const clients = new Map((orgOptions ?? []).map((option) => [option.id, option.legal_name]));
@@ -300,7 +351,11 @@ export default async function AuditLogPage({
 
             {events.length > 0 ? (
               <>
-                <AuditFeed groups={groups} />
+                <AuditFeed
+                  groups={groups}
+                  userPreviews={userPreviews}
+                  orgPreviews={orgPreviews}
+                />
                 <Rise>
                   <AuditLogPagination
                     totalItems={totalItems}

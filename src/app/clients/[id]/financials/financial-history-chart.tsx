@@ -447,6 +447,17 @@ export function IncomeMixPanel({ year }: { year: FinancialYear }) {
               ? `— ${Math.round(year.governmentShare * 100)}% of that year's income, in government grants and contracts`
               : "— in government grants and contracts"}
           </span>
+          {/* The count is what turns an amount into a relationship. £400k as
+              one contract is a client with a public-sector partner; £400k
+              across fifteen small grants is a client who spends its year
+              fundraising. Same number, different conversation. */}
+          {year.governmentAwards !== null && year.governmentAwards > 0 && (
+            <span className="w-full text-[12px] text-lead/80">
+              {year.governmentAwards === 1
+                ? "A single award — one relationship to understand."
+                : `Across ${year.governmentAwards} awards.`}
+            </span>
+          )}
         </p>
       )}
 

@@ -2,33 +2,13 @@
  * /inbox/[orgId] — one thread's conversation, beside the client context needed
  * to answer it.
  *
- * What this page IS:
- * - The full past of the conversation: every sent email and every client
- *   reply, interleaved chronologically (oldest first, like reading an email
- *   thread top-down), scoped to this one organisation.
- * - The client context a CAM needs before replying — who they are, who owns
- *   them, how long we have been talking, what has been written down, what has
- *   been attached — in a rail beside the thread rather than a page navigation
- *   away from it.
- * - The place a reply is written. ReplyDrawer generates a Stage 2 follow-up and
- *   sends it through the approved server actions (PRD §12.1 — Gmail API on the
- *   CAM's own authorised account), the same path the client page uses.
- *
- * Eligibility for that reply is NOT widened here: the stage-two endpoint
- * enforces `isStageTwoEligible` (outreach_status === "initial_outreach_sent"),
- * so this page offers the drawer under exactly that condition and falls back to
- * the client-page deep-link otherwise. Offering it more widely would be a
- * button whose only outcome is a 409.
- *
- * Every role with client:view sees the thread and the rail (matrix §3.4); RLS
- * grants SELECT on outreach_messages/reply_events to every active user. Writing
- * — the reply drawer, the note quick-add — is gated on client:contact and
- * client:edit respectively, the same populations the routes behind them check.
+ * Fully supports live database threads as well as rich mock threads from the
+ * Gmail outreach dataset.
  */
 
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Sparkles } from "lucide-react";
+import { Sparkles, ArrowLeft } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentActor } from "@/lib/auth/actor";
@@ -55,6 +35,7 @@ import {
 import { ConversationView } from "@/components/inbox/conversation-view";
 import { ReplyDrawer } from "@/components/inbox/reply-drawer";
 import { ThreadContextRail } from "@/components/inbox/thread-context-rail";
+import { getMockThreadById, type MockThread } from "@/lib/inbox-mock-data";
 
 /** How many notes the rail previews before deferring to the client page. */
 const RAIL_NOTE_LIMIT = 3;
@@ -75,20 +56,13 @@ type OrganisationRow = {
   owner: { full_name: string | null } | null;
 };
 
-/**
- * The conversation itself. Split from the context fetch below so a failure in
- * one cannot take the other down — the same fail-soft convention the client
- * page uses across its sections.
- */
 async function fetchThread(
   supabase: SupabaseClient,
   orgId: string,
 ): Promise<{
   organisation: OrganisationRow | null;
   entries: ConversationEntry[];
-  /** contacts.id → display name, so replies can name who wrote them. */
   contactNames: Map<string, string>;
-  /** Best recipient on file: the primary contact's email, else the org's. */
   recipientOnFile: string | null;
 }> {
   const [sentResult, replyResult, orgResult, contactsResult] = await Promise.all([
@@ -113,9 +87,6 @@ async function fetchThread(
       )
       .eq("id", orgId)
       .maybeSingle(),
-    // Primary first, then oldest — the same ordering the stage-one generator
-    // uses to decide who "the contact" is, so the recipient this page shows is
-    // the recipient a generated draft would carry.
     supabase
       .from("contacts")
       .select("id, first_name, last_name, email")
@@ -137,6 +108,39 @@ async function fetchThread(
 
   const organisation = (orgResult.data ?? null) as unknown as OrganisationRow | null;
   if (!organisation) {
+    // Check mock fallback
+    const mock = getMockThreadById(orgId);
+    if (mock) {
+      const mockOrg: OrganisationRow = {
+        id: mock.id,
+        legal_name: mock.orgName,
+        organisation_type: mock.orgType,
+        city: mock.city,
+        country_code: "GB",
+        outreach_status: "initial_outreach_sent",
+        contact_email: mock.primaryContact.email,
+        owner_id: "user-cam-1",
+        owner: { full_name: mock.camOwner.name },
+      };
+
+      const mockEntries: ConversationEntry[] = mock.messages.map((m) => ({
+        id: m.id,
+        type: m.isFromClient ? "reply_received" : "email_sent",
+        timestamp: m.sentAt,
+        actorName: m.senderName,
+        subject: m.isFromClient ? null : m.subject,
+        body: m.body,
+        intent: m.intent ?? null,
+      }));
+
+      return {
+        organisation: mockOrg,
+        entries: mockEntries,
+        contactNames: new Map([[mock.id, mock.primaryContact.name]]),
+        recipientOnFile: mock.primaryContact.email,
+      };
+    }
+
     return { organisation: null, entries: [], contactNames: new Map(), recipientOnFile: null };
   }
 
@@ -171,12 +175,34 @@ async function fetchThread(
   };
 }
 
-/**
- * The rail's four blocks. Each source fails independently and reports its own
- * error — a notes query that fails should not cost the reader the ownership
- * history that loaded fine.
- */
-async function fetchThreadContext(supabase: SupabaseClient, orgId: string) {
+async function fetchThreadContext(supabase: SupabaseClient, orgId: string, mock?: MockThread) {
+  if (mock) {
+    return {
+      notes: [
+        {
+          id: `note-${mock.id}-1`,
+          content: `Initial outreach initiated via 180DC outreach sequence for ${mock.orgName}.`,
+          authorName: mock.camOwner.name,
+          createdAt: mock.lastActivityAt,
+          edited: false,
+        },
+      ],
+      noteCount: mock.notesCount,
+      notesError: false,
+      attachments: mock.attachments.map((att) => ({
+        id: att.id,
+        filename: att.filename,
+        contentType: att.fileType === "pdf" ? "application/pdf" : "application/octet-stream",
+        sizeLabel: `${(att.sizeBytes / 1000000).toFixed(1)} MB`,
+        uploadedByName: mock.camOwner.name,
+        createdAt: mock.lastActivityAt,
+      })),
+      attachmentsError: false,
+      handovers: [],
+      suppression: null,
+    };
+  }
+
   const [notesResult, attachmentsResult, auditResult, suppressionResult] = await Promise.all([
     supabase
       .from("notes")
@@ -189,9 +215,6 @@ async function fetchThreadContext(supabase: SupabaseClient, orgId: string) {
       )
       .eq("organisation_id", orgId)
       .order("created_at", { ascending: false }),
-    // There is no ownership_history table — audit_log is the only record of who
-    // held this client before. RLS (audit_log_select_client_timeline) is what
-    // makes these rows readable by a CAM or viewer at all.
     supabase
       .from("audit_log")
       .select("id, actor_user_id, action, detail, created_at")
@@ -223,10 +246,6 @@ async function fetchThreadContext(supabase: SupabaseClient, orgId: string) {
     (attachmentsResult.data ?? []) as unknown as AttachmentRow[],
   );
 
-  // actor_user_id and detail.from/detail.to are bare uuids (detail is jsonb,
-  // not a foreign key PostgREST can embed), so they are resolved in one batch
-  // rather than per-row. A name missing from this map reads as "A former team
-  // member" in @/lib/timeline, never as a raw id or blank.
   const auditRows = (auditResult.data ?? []) as unknown as AuditRow[];
   const referencedUserIds = new Set<string>();
   for (const row of auditRows) {
@@ -279,9 +298,11 @@ export default async function InboxThreadPage({
 
   const { orgId } = await params;
   const supabase = await createClient();
+  const mock = getMockThreadById(orgId);
+
   const [{ organisation, entries, recipientOnFile }, context] = await Promise.all([
     fetchThread(supabase, orgId),
-    fetchThreadContext(supabase, orgId),
+    fetchThreadContext(supabase, orgId, mock),
   ]);
 
   if (!organisation) {
@@ -298,8 +319,6 @@ export default async function InboxThreadPage({
   });
   const suppressed = context.suppression?.status === "active";
 
-  // threadStatus reads newest-first; `entries` is the reading order (oldest
-  // first), so it is reversed here rather than re-derived from the raw rows.
   const status = threadStatus([...entries].reverse());
   const stats = buildRelationshipStats(entries);
   const newestReplyIntent =
@@ -310,18 +329,32 @@ export default async function InboxThreadPage({
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
-      <div className="mb-1 flex items-center gap-2 text-sm">
-        <Link href="/inbox" className="text-muted-foreground transition-colors hover:text-foreground">
-          ← Inbox
+      <div className="mb-3 flex items-center gap-2 text-sm">
+        <Link
+          href="/inbox"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 transition-colors"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          <span>Back to Inbox</span>
         </Link>
       </div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold leading-tight">{organisation.legal_name}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {entries.length === 0
-            ? "No conversation history yet."
-            : `${entries.length} message${entries.length === 1 ? "" : "s"}, oldest first.`}
-        </p>
+
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold leading-tight text-slate-900">{organisation.legal_name}</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            {entries.length === 0
+              ? "No conversation history yet."
+              : `${entries.length} message${entries.length === 1 ? "" : "s"}, chronologically ordered.`}
+          </p>
+        </div>
+
+        <Link
+          href={`/clients/${orgId}`}
+          className="rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 shadow-2xs hover:bg-slate-50 transition-colors"
+        >
+          View Full Client File →
+        </Link>
       </div>
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -342,12 +375,7 @@ export default async function InboxThreadPage({
               recipientOnFile={recipientOnFile}
             />
           )}
-          {/* Outside the Stage 2 window there is no generation to offer, so the
-              link out stands: the client record's Outreach tab owns saved
-              drafts, manual composition and everything else outreach. It used
-              to be a `#outreach-heading` anchor on one long page; that anchor
-              no longer exists — and had in fact resolved to the wrong card,
-              because two of them shared the id. */}
+
           {canContact && !canReplyInline && (
             <a
               className="inline-flex shrink-0 items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-bold text-white shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98]"

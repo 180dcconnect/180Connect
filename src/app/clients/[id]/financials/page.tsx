@@ -105,7 +105,12 @@ export default async function ClientFinancialsPage({
           "period_start, period_end, total_income, total_expenditure, income_band, " +
             "income_donations_legacies, income_charitable_activities, income_other_trading, " +
             "income_investment, income_endowments, income_other, income_govt_grants, " +
-            "income_govt_contracts",
+            "income_govt_contracts, expenditure_charitable_activities, " +
+            "expenditure_raising_funds, expenditure_governance, " +
+            "expenditure_grants_institutions, expenditure_investment_management, " +
+            "expenditure_other, filing_date, count_employees, count_volunteers, " +
+            "receives_govt_grants, receives_govt_contracts, count_govt_grants, " +
+            "count_govt_contracts",
         )
         .eq("organisation_id", id)
         .order("period_end", { ascending: false })

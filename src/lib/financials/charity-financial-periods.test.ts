@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { buildFinancialPeriods } from "./charity-financial-periods.ts";
+import {
+  buildFinancialPeriods,
+  buildFinancialPeriodsFromBulk,
+} from "./charity-financial-periods.ts";
 import type { CharityFinancialHistoryItem } from "../ingestion/sources/charity-commission-financials.ts";
 
 function historyRow(
@@ -252,5 +255,121 @@ describe("buildFinancialPeriods", () => {
       rows.map((row) => row.periodEnd),
       ["2023-03-31", "2024-03-31", "2025-03-31"],
     );
+  });
+});
+
+describe("buildFinancialPeriodsFromBulk", () => {
+  const partAandB = {
+    organisation_number: 1,
+    fin_period_start_date: "2024-04-01T00:00:00",
+    fin_period_end_date: "2025-03-31T00:00:00",
+    ar_due_date: "2026-01-31T00:00:00",
+    ar_received_date: "2025-11-30T00:00:00",
+    total_gross_income: 250_000,
+    total_gross_expenditure: 240_000,
+    income_total_income_and_endowments: 251_000,
+    expenditure_total: 241_000,
+    income_donations_and_legacies: 100_000,
+    income_charitable_activities: 140_000,
+    income_from_government_grants: 11_000,
+    expenditure_charitable_expenditure: 200_000,
+    expenditure_grants_institution: 5_000,
+    count_employees: 6,
+    count_volunteers: 40,
+    charity_receives_govt_funding_grants: true,
+    charity_receives_govt_funding_contracts: false,
+    count_govt_grants: 2,
+    count_govt_contracts: null,
+  };
+
+  it("uses the published start date instead of deriving one", () => {
+    const rows = buildFinancialPeriodsFromBulk([partAandB]);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].periodStart, "2024-04-01");
+    assert.equal(rows[0].periodEnd, "2025-03-31");
+  });
+
+  it("fills the filing date the API could never supply", () => {
+    assert.equal(buildFinancialPeriodsFromBulk([partAandB])[0].filingDate, "2025-11-30");
+  });
+
+  it("maps the extract's field names, which differ from the API's", () => {
+    const row = buildFinancialPeriodsFromBulk([partAandB])[0];
+    assert.equal(row.incomeDonationsLegacies, 100_000);
+    assert.equal(row.incomeCharitableActivities, 140_000);
+    assert.equal(row.incomeGovtGrants, 11_000);
+    assert.equal(row.expenditureCharitableActivities, 200_000);
+    assert.equal(row.expenditureGrantsInstitutions, 5_000);
+  });
+
+  it("prefers Part B's totals over Part A's where both were filed", () => {
+    const row = buildFinancialPeriodsFromBulk([partAandB])[0];
+    assert.equal(row.totalIncome, 251_000);
+    assert.equal(row.totalExpenditure, 241_000);
+    assert.equal(row.incomeBand, "100k_1m");
+  });
+
+  it("falls back to Part A's totals for a charity that files no Part B", () => {
+    const partAonly = {
+      fin_period_start_date: "2023-04-01T00:00:00",
+      fin_period_end_date: "2024-03-31T00:00:00",
+      total_gross_income: 120_000,
+      total_gross_expenditure: 118_000,
+    };
+    const row = buildFinancialPeriodsFromBulk([partAonly])[0];
+    assert.equal(row.totalIncome, 120_000);
+    assert.equal(row.countEmployees, null, "an unfiled count is null, not zero");
+  });
+
+  it("carries scale and the shape of public funding", () => {
+    const row = buildFinancialPeriodsFromBulk([partAandB])[0];
+    assert.equal(row.countEmployees, 6);
+    assert.equal(row.countVolunteers, 40);
+    assert.equal(row.receivesGovtGrants, true);
+    assert.equal(row.receivesGovtContracts, false);
+    assert.equal(row.countGovtGrants, 2);
+    assert.equal(row.countGovtContracts, null);
+  });
+
+  it("keeps a filed zero distinct from an unfiled figure", () => {
+    const row = buildFinancialPeriodsFromBulk([
+      { ...partAandB, count_employees: 0, count_volunteers: null },
+    ])[0];
+    assert.equal(row.countEmployees, 0);
+    assert.equal(row.countVolunteers, null);
+  });
+
+  it("drops a return with no dates, and one with no figures", () => {
+    assert.deepEqual(buildFinancialPeriodsFromBulk([{ total_gross_income: 1 }]), []);
+    assert.deepEqual(
+      buildFinancialPeriodsFromBulk([
+        {
+          fin_period_start_date: "2023-04-01T00:00:00",
+          fin_period_end_date: "2024-03-31T00:00:00",
+        },
+      ]),
+      [],
+    );
+  });
+
+  it("drops a period that ends before it starts", () => {
+    assert.deepEqual(
+      buildFinancialPeriodsFromBulk([
+        { ...partAandB, fin_period_start_date: "2026-04-01T00:00:00" },
+      ]),
+      [],
+    );
+  });
+
+  it("returns periods oldest first", () => {
+    const rows = buildFinancialPeriodsFromBulk([
+      partAandB,
+      {
+        fin_period_start_date: "2023-04-01T00:00:00",
+        fin_period_end_date: "2024-03-31T00:00:00",
+        total_gross_income: 200_000,
+      },
+    ]);
+    assert.deepEqual(rows.map((row) => row.periodEnd), ["2024-03-31", "2025-03-31"]);
   });
 });

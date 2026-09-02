@@ -49,9 +49,13 @@ const ROLE_STYLES: Record<UserPreview['role'], string> = {
 export function UserHoverCard({
   user,
   className,
+  children,
+  href,
 }: {
   user: UserPreview;
   className?: string;
+  children?: React.ReactNode;
+  href?: string;
 }) {
   const roleLabel = ROLE_LABEL[user.role] ?? user.role;
   const roleStyle = ROLE_STYLES[user.role] ?? 'bg-black/5 text-foreground/75 border-black/10';
@@ -59,12 +63,24 @@ export function UserHoverCard({
     ? formatRelativeTime(new Date(user.lastSeenAt), new Date())
     : 'Never signed in';
 
+  const triggerContent = children ?? user.fullName ?? user.email;
+
   return (
     <HoverCard>
       <HoverCardTrigger asChild>
-        <span className={cn('cursor-pointer', className)}>
-          {user.fullName ?? user.email}
-        </span>
+        {href ? (
+          <Link
+            href={href}
+            onClick={(e) => e.stopPropagation()}
+            className={cn('cursor-pointer', className)}
+          >
+            {triggerContent}
+          </Link>
+        ) : (
+          <span className={cn('cursor-pointer', className)}>
+            {triggerContent}
+          </span>
+        )}
       </HoverCardTrigger>
       <HoverCardContent side="right" sideOffset={8} align="start">
         <div className="flex flex-col gap-3">

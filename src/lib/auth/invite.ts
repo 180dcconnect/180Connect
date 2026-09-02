@@ -201,6 +201,13 @@ export type SendInviteDeps = {
     userId: string,
     role: InviteRole,
   ) => Promise<{ error: { message: string } | null }>;
+  /**
+   * Resets invited_at on the public.users row when an invite is resent,
+   * so the expiry clock resets from the moment of the resend.
+   */
+  touchInvitedAt?: (
+    userId: string,
+  ) => Promise<{ error: { message: string } | null }>;
 };
 
 export type SendInviteOutcome =
@@ -523,7 +530,7 @@ export async function resendInvite(
   // Role never changes on a resend — the row already carries the one it was
   // invited with, so this only threads it through for the email copy, never
   // an `applyRole` callback (that's `sendInvite`-only, see its call site).
-  return mintAndSendInvite(
+  const outcome = await mintAndSendInvite(
     adminClient,
     invitedByUserId,
     invite.email,
@@ -536,6 +543,15 @@ export async function resendInvite(
       mintFailureMessage: "Could not resend the invite. Try again.",
     },
   );
+
+  if (outcome.ok && deps.touchInvitedAt) {
+    const { error: touchError } = await deps.touchInvitedAt(userId);
+    if (touchError) {
+      logSecurityEvent("user.invite_failed", { cause: touchError.message, action: "touch" });
+    }
+  }
+
+  return outcome;
 }
 
 /** Shown when a cancel is attempted for an id that no longer has a row. */

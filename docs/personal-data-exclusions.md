@@ -62,6 +62,29 @@ calls yet; see "Rules ahead of the data" below for why that's deliberate.
 | `html` | *(global — `source` is null)* | Any source with an `html` field (today: F037's fetched-page payload, once that branch merges) | redact (phone) | §5(1), adjacent — a phone number on a scraped page is frequently a personal mobile or direct line, unlike a registry-supplied switchboard number | Not yet — `html` is the field F037 adds; the rule is inert until that field exists on a written payload, then active immediately with no further change |
 | `health_data`, `ethnicity`, `religion`, `political_affiliation`, `sexual_orientation` | *(global)* | Any | field_path (deny) | Data handling policy §2 (special category data), not §5 directly — carried here for completeness since they're seeded by the same migration family | No adapter returns these today |
 
+### Charity Commission bulk register extract (`charity_commission_bulk`)
+
+The bulk import adds a source, not a new class of personal data, so it needs no
+new rule — but it needs a record, because the payload is the widest of any
+source and "nothing was added" should be a checked statement rather than an
+assumption.
+
+| Field | What happens | Why |
+| :--- | :--- | :--- |
+| `charity.charity_contact_email` | Global `*` redaction rule. Personal addresses become `[redacted:personal-email]`, role addresses (`info@`, `enquiries@`) survive via `personal_email_role_parts` | The same treatment as every other source. Verified on the first live import: 793 records written, all stamped with the rule version, **286 personal addresses redacted** |
+| `charity.charity_contact_phone` | Kept | A registry-supplied number is the organisation's switchboard, which outreach legitimately needs. Same reasoning as the API source, recorded in `20260818100400` §5 |
+| `count_salary_band_*` (16 fields, £60k–£500k+) | **Never read.** The adapter does not carry them into the payload and there is no column for them | Aggregate in form only: "1 employee in the £450,001–£500,000 band" at a small charity identifies a specific person. Fails the identifiability test in `docs/data-lifecycle-policy.md` §5.7. See `20260913200000_add_charity_scale_and_govt_funding.sql` |
+| Trustee count | **Not stored, and not derived** | No extract we ingest publishes one — checked across `publicextract.charity`, `_annual_return_parta` and `_annual_return_partb`. The only route is `publicextract.charity_trustee`, which is trustee *names*: obtaining a count would mean downloading the banned data to count it. If a count is ever wanted it needs explicit Project-Leader approval and an in-adapter derivation that never persists the list |
+| `count_employees`, `count_volunteers`, government-funding flags and counts | Stored on `FINANCIAL_PERIODS` | Organisation-level aggregates published by the regulator, identifying no natural person: Public class, same as `total_income` |
+
+The extract is downloaded and streamed by
+`src/lib/ingestion/sources/charity-commission-bulk.ts`, whose records go through
+`runIngestion` — so `applyDataHandling` runs on every payload before it is
+written, the same as every other source. That is load-bearing: the adapter
+deliberately does **not** strip contact details itself, because the rules table
+is the single place that decides, and a source quietly pre-filtering would make
+`excluded_fields` a lie about what was actually removed.
+
 Personal email addresses that a **CAM types by hand** (F036) or that an
 import discovers into a manual entry draft (F037) are enforced at the database
 boundary on `MANUAL_ENTRY_RECORDS.contact_email` via the trigger in

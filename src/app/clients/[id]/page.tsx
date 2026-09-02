@@ -169,7 +169,7 @@ export default async function ClientOverviewPage({
     <Stage>
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
         <Group className="space-y-6">
-          <Rise>
+          <Rise className="relative z-20">
             <BasicInfoPanel
               organisation={client}
               missionStatement={enrichment?.mission_statement ?? null}

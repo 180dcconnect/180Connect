@@ -31,6 +31,7 @@ export type SecurityEvent =
   | "user.invite_cancelled"
   | "user.invite_rejected"
   | "user.invite_failed"
+  | "user.invite_touch_failed"
   | "user.invite_role_failed"
   | "user.invite_client_assignment_failed"
   | "user.invite_cancel_audit_failed"

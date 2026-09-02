@@ -10,8 +10,6 @@
 import { PipelineReport } from "../clients/pipeline-report";
 import {
   FUNNEL_STAGE_KEYS,
-  type BreakdownRow,
-  type FunnelStage,
   type FunnelStageKey,
 } from "../clients/client-insights";
 
@@ -29,7 +27,7 @@ const STAGE_COPY: Record<FunnelStageKey, { label: string; caption: string }> = {
   converted: { label: "Converted", caption: "Signed as a project" },
 };
 
-const stages: FunnelStage[] = FUNNEL_STAGE_KEYS.map((key, index) => {
+const stages = FUNNEL_STAGE_KEYS.map((key, index) => {
   const count = COUNTS[key];
   const previousKey = index === 0 ? null : FUNNEL_STAGE_KEYS[index - 1];
   const previous = previousKey === null ? null : COUNTS[previousKey];
@@ -39,6 +37,7 @@ const stages: FunnelStage[] = FUNNEL_STAGE_KEYS.map((key, index) => {
     count,
     shareOfTotal: count / COUNTS.all,
     shareOfPrevious: previous === null ? null : previous === 0 ? 0 : count / previous,
+    href: `/pipeline-preview?stage=${key}`,
   };
 });
 
@@ -54,7 +53,7 @@ const CITIES: { key: string; label: string; all: number; filterable: boolean }[]
   { key: "city:birmingham", label: "Birmingham", all: 27, filterable: true },
 ];
 
-const rows: BreakdownRow[] = CITIES.map((city) => ({
+const rows = CITIES.map((city) => ({
   key: city.key,
   label: city.label,
   counts: {
@@ -65,7 +64,8 @@ const rows: BreakdownRow[] = CITIES.map((city) => ({
   },
   count: city.all,
   share: city.all / CITIES[0].all,
-  filter: city.filterable ? { param: "city", value: city.label } : null,
+  filter: city.filterable ? { param: "city" as const, value: city.label } : null,
+  href: city.filterable ? "/pipeline-preview" : null,
 }));
 
 export default function PipelinePreviewPage() {
@@ -75,12 +75,10 @@ export default function PipelinePreviewPage() {
         <PipelineReport
           stages={stages}
           selected="all"
-          stageHref={(stage) => `/pipeline-preview?stage=${stage}`}
           caption="All clients"
           field="city"
           direction="descending"
           rows={rows}
-          rowHref={() => "/pipeline-preview"}
         />
       </div>
     </div>

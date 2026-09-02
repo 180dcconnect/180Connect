@@ -242,8 +242,19 @@ export interface OrganisationWriteStore {
    * findDuplicateMatch so a dismissed flag doesn't get re-raised every run.
    */
   loadDismissedMatches(rawRecordId: string): Promise<string[]>;
-  insertOrganisation(
+  /**
+   * Inserts the standardised organisation AND settles the originating raw
+   * record as 'validated' with its link — in one transaction, via the
+   * link_raw_record_to_organisation RPC (20260913190000). These two writes used
+   * to be separate calls (insertOrganisation + markRecordStatus), so a failure
+   * between them left a client with no linked register — a provenance gap the
+   * audit has to catch after the fact. Atomic here means it cannot happen at
+   * all. On success the record is already 'validated'; callers must NOT call
+   * markRecordStatus for the validated transition again.
+   */
+  insertOrganisationAndLink(
     org: StandardOrganisation,
+    rawRecordId: string,
   ): Promise<{ id: string } | { error: string }>;
   flagPotentialDuplicate(input: {
     rawRecordId: string;
@@ -372,12 +383,15 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
       return (data ?? []).map((row) => row.candidate_organisation_id as string);
     },
 
-    async insertOrganisation(org) {
-      const { data, error } = await supabase
-        .from("organisations")
-        .insert(org)
-        .select("id")
-        .single();
+    async insertOrganisationAndLink(org, rawRecordId) {
+      // One PostgREST call = one transaction: the insert and the
+      // validated+link update commit together or not at all. The RPC re-checks
+      // that the record is still pending, so a concurrent promote cannot
+      // double-insert an organisation for the same raw record.
+      const { data, error } = await supabase.rpc("link_raw_record_to_organisation", {
+        p_organisation: org,
+        p_raw_source_record_id: rawRecordId,
+      });
 
       if (error) return { error: error.message };
 
@@ -386,24 +400,27 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
       // The rule engine degrades missing inputs (income, sector) to their documented
       // neutrals, and the rescore hooks elsewhere refresh the row when real data
       // arrives later. Best-effort: a scoring failure must not fail the promote —
-      // an unscored client is F058 AC3's explicit state, not an error.
+      // an unscored client is F058 AC3's explicit state, not an error. It runs
+      // after the RPC on purpose: scoring is an annotation, and folding it into
+      // the atomic transaction would let a scoring bug un-promote a client.
       // F096: scored under the active SCOUT generation's weights, so a new client
       // joins the same tuning the existing book was last swept with.
+      const organisationId = data as unknown as string;
       const scoutConfig = await getActiveScoutConfig();
       const scored = await persistLatestScore(
         supabase as unknown as Parameters<typeof persistLatestScore>[0],
-        data.id,
+        organisationId,
         org,
         scoutConfig.weights,
       );
       if (!scored.ok) {
         await reportError(new Error(scored.error), {
           operation: "write_organisations.rescore_new_organisation",
-          organisationId: data.id,
+          organisationId,
         });
       }
 
-      return { id: data.id };
+      return { id: organisationId };
     },
 
     async flagPotentialDuplicate({ rawRecordId, matchedOrganisationId, matchedOn, source, matchFields }) {
@@ -891,7 +908,7 @@ export async function promotePendingCharityCommissionRecords(
       continue;
     }
 
-    const result = await store.insertOrganisation(org);
+    const result = await store.insertOrganisationAndLink(org, record.id);
     if ("error" in result) {
       await reportError(new Error(result.error), {
         operation: "standardize.charity_commission.promote",
@@ -902,7 +919,9 @@ export async function promotePendingCharityCommissionRecords(
       continue;
     }
 
-    await store.markRecordStatus(record.id, "validated", result.id);
+    // The record is already 'validated' with its link — the RPC set both
+    // atomically with the insert. Field provenance, identifiers and financials
+    // follow as best-effort annotations.
     await recordFieldSourcesOrReport(store, result.id, org, "charity_commission", record);
     await recordIdentifierOrReport(
       store,
@@ -1002,7 +1021,7 @@ export async function promotePendingCompaniesHouseRecords(
       continue;
     }
 
-    const result = await store.insertOrganisation(org);
+    const result = await store.insertOrganisationAndLink(org, record.id);
     if ("error" in result) {
       await reportError(new Error(result.error), {
         operation: "standardize.companies_house.promote",
@@ -1013,7 +1032,7 @@ export async function promotePendingCompaniesHouseRecords(
       continue;
     }
 
-    await store.markRecordStatus(record.id, "validated", result.id);
+    // Already 'validated' with its link — set atomically by the RPC.
     await recordFieldSourcesOrReport(store, result.id, org, "companies_house", record);
     await recordIdentifierOrReport(
       store,
@@ -1096,7 +1115,7 @@ export async function promotePendingFindThatCharityRecords(
       continue;
     }
 
-    const result = await store.insertOrganisation(org);
+    const result = await store.insertOrganisationAndLink(org, record.id);
     if ("error" in result) {
       await reportError(new Error(result.error), {
         operation: "standardize.find_that_charity.promote",
@@ -1107,7 +1126,7 @@ export async function promotePendingFindThatCharityRecords(
       continue;
     }
 
-    await store.markRecordStatus(record.id, "validated", result.id);
+    // Already 'validated' with its link — set atomically by the RPC.
     await recordFieldSourcesOrReport(store, result.id, org, "find_that_charity", record);
     counts.inserted++;
     existingOrganisations.push({

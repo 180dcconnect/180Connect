@@ -1,30 +1,44 @@
-import { ArrowDownRight, ArrowUpRight, TrendingDown, TrendingUp } from "lucide-react";
+import { AlertTriangle, TrendingDown, TrendingUp } from "lucide-react";
 
 import {
   deriveIncomeBand,
-  formatCompactGbp,
   formatGbp,
   INCOME_BAND_LABELS,
   type IncomeBand,
 } from "@/lib/income-band";
-import type { FinancialFilingRow } from "../financial-filing-item";
+import {
+  buildFinancialSeries,
+  filingRecency,
+  type FinancialPeriodInput,
+  type GrantInput,
+} from "@/lib/financials/financial-series";
 import { IncomeBandScale } from "../income-band-scale";
+import {
+  FinancialHistoryChart,
+  GrantShareChart,
+  IncomeMixPanel,
+} from "./financial-history-chart";
 
 interface FinancialsHeroCardProps {
-  filings: FinancialFilingRow[];
+  /** Every filed period, newest first — not the paginated first page. */
+  filings: FinancialPeriodInput[];
   totalCount: number;
   fallbackIncomeBand?: string | null;
+  /** Every award on this client, for the grant-share chart — not the paginated
+   *  first page the list below shows. */
+  grants?: GrantInput[];
 }
 
 export function FinancialsHeroCard({
   filings,
   totalCount,
   fallbackIncomeBand,
+  grants = [],
 }: FinancialsHeroCardProps) {
   const latest = filings[0] ?? null;
 
   const activeBand: IncomeBand | null =
-    latest?.income_band ??
+    (latest?.income_band as IncomeBand | null | undefined) ??
     deriveIncomeBand(latest?.total_income) ??
     (fallbackIncomeBand as IncomeBand | null) ??
     null;
@@ -45,32 +59,13 @@ export function FinancialsHeroCard({
       })
     : null;
 
-  // Compute multi-year comparison for trend (up to latest 4 filings, sorted chronologically)
-  const sortedChronological = [...filings]
-    .filter((f) => f.total_income !== null || f.total_expenditure !== null)
-    .slice(0, 4)
-    .sort((a, b) => new Date(a.period_end).getTime() - new Date(b.period_end).getTime());
-
-  const maxIncome = Math.max(
-    ...sortedChronological.map((f) => f.total_income ?? 0),
-    1,
-  );
-
-  // YoY growth calculation between the latest two chronological periods
-  let yoyGrowth: number | null = null;
-  if (sortedChronological.length >= 2) {
-    const prior = sortedChronological[sortedChronological.length - 2];
-    const curr = sortedChronological[sortedChronological.length - 1];
-    if (
-      prior.total_income &&
-      curr.total_income &&
-      prior.total_income > 0
-    ) {
-      yoyGrowth = Math.round(
-        ((curr.total_income - prior.total_income) / prior.total_income) * 100,
-      );
-    }
-  }
+  // One series for every mark on this card, built by the shared builder rather
+  // than re-derived here: the old version sliced "up to 4 filings" out of a
+  // page of 10 and sorted them itself, which quietly meant a charity with five
+  // filed years had its oldest one dropped from the trend.
+  const series = buildFinancialSeries({ periods: filings, grants });
+  const recency = filingRecency(latest?.period_end ?? null);
+  const mixYear = [...series.years].reverse().find((year) => year.mix.length > 0);
 
   return (
     <div className="rounded-panel border border-rule bg-white p-5 sm:p-6">
@@ -87,6 +82,22 @@ export function FinancialsHeroCard({
               </span>
             )}
           </div>
+
+          {/* Filing recency, said where the figure is read. A charity has ten
+              months from its year end to file, so accounts up to ~22 months old
+              are simply the newest that exist; past that, this income figure
+              describes a year that ended nearly two years ago — and the size
+              score, the client-list income filter and whoever is sizing an
+              approach are all reading it as current. */}
+          {recency?.stale && (
+            <p className="flex items-start gap-1.5 rounded-inset bg-hold-wash px-2.5 py-1.5 text-[12px] leading-[1.5] text-hold">
+              <AlertTriangle aria-hidden="true" className="mt-[1px] size-3.5 shrink-0" />
+              <span>
+                {recency.label}. Newer accounts may have been filed since — treat
+                these figures as a floor, not a current picture.
+              </span>
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
             <div>
@@ -157,68 +168,17 @@ export function FinancialsHeroCard({
         </div>
       </div>
 
-      {/* Multi-Year Historical Trend Comparison */}
-      {sortedChronological.length >= 2 && (
+      {series.years.length > 0 && (
         <div className="mt-6 border-t border-rule-soft pt-5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-[13px] font-semibold text-ink">
-              Multi-Year Income History ({sortedChronological.length} filed periods)
-            </h3>
-            {yoyGrowth !== null && (
-              <span
-                className={`inline-flex items-center gap-1 font-mono text-[12px] font-medium tabular-nums ${
-                  yoyGrowth >= 0 ? "text-go" : "text-stop"
-                }`}
-              >
-                {yoyGrowth >= 0 ? (
-                  <ArrowUpRight aria-hidden="true" className="size-3.5" />
-                ) : (
-                  <ArrowDownRight aria-hidden="true" className="size-3.5" />
-                )}
-                {yoyGrowth >= 0 ? `+${yoyGrowth}%` : `${yoyGrowth}%`} latest YoY change
-              </span>
-            )}
-          </div>
-
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {sortedChronological.map((f) => {
-              const yearNum = new Date(f.period_end).getFullYear();
-              const income = f.total_income ?? 0;
-              const barPercent = Math.max(Math.round((income / maxIncome) * 100), 6);
-              const band = f.income_band ?? deriveIncomeBand(f.total_income);
-
-              return (
-                <div
-                  key={f.id}
-                  className="rounded-inset border border-rule-soft bg-paper/40 p-3"
-                >
-                  <div className="flex items-center justify-between text-[12px]">
-                    <span className="font-semibold text-ink">FY{String(yearNum).slice(-2)}</span>
-                    <span className="font-mono text-[11px] text-faint">
-                      {band ? INCOME_BAND_LABELS[band] : "—"}
-                    </span>
-                  </div>
-
-                  <p className="mt-1 font-mono text-[15px] font-bold tabular-nums text-ink">
-                    {formatCompactGbp(f.total_income)}
-                  </p>
-
-                  <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-paper-sunk">
-                    <div
-                      className="h-full rounded-full bg-lead transition-all"
-                      style={{ width: `${barPercent}%` }}
-                    />
-                  </div>
-
-                  <div className="mt-1.5 flex items-center justify-between text-[11px] text-dim">
-                    <span>Spend: {formatCompactGbp(f.total_expenditure)}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <FinancialHistoryChart series={series} />
+          {/* The newest year that published a split, not necessarily the newest
+              year: the latest return is often a totals-only filing while the
+              one before it carries the breakdown. */}
+          {mixYear && <IncomeMixPanel year={mixYear} />}
+          <GrantShareChart series={series} />
         </div>
       )}
+
     </div>
   );
 }

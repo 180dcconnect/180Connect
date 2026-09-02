@@ -352,9 +352,9 @@ export function BrandSearchBar({
           >
             <AnimatePresence mode="wait">
               {activeFilter === null ? (
-                <motion.ul
-                  key="categories"
-                  className="flex flex-col px-4 py-4 h-[280px] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+                  <motion.ul
+                    key="categories"
+                    className="flex flex-col gap-1 px-4 py-4 h-[280px] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
                   variants={PANEL_STAGGER}
                   initial="hidden"
                   animate="show"
@@ -423,7 +423,7 @@ export function BrandSearchBar({
 
                   <motion.ul
                     variants={OPTION_LIST}
-                    className="flex-1 flex flex-col px-4 pb-4 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+                    className="flex-1 flex flex-col gap-1 px-4 pb-4 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
                   >
                     {activeOptions.map((option, index) => {
                       const isSelected = selectedFilters.some(

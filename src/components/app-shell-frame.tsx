@@ -30,7 +30,7 @@ export function AppShellFrame({
         initialCollapsed={initialCollapsed}
         onboarding={onboarding}
       />
-      <main className="min-w-0 max-w-full flex-1 overflow-x-hidden">{children}</main>
+      <main className="min-w-0 max-w-full flex-1 overflow-x-clip">{children}</main>
     </div>
   );
 }

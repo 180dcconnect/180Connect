@@ -10,13 +10,112 @@ import type {
   CharityLatestFinancials,
 } from "../ingestion/sources/charity-commission-financials.ts";
 
+/**
+ * The breakdown, carried through untouched.
+ *
+ * Nothing here is summed, reconciled against the totals, or defaulted to zero:
+ * a smaller charity files an entry-level return with totals only, so a null is
+ * "the register published no figure for this", and a zero would be a claim the
+ * data does not make. `total_income` / `total_expenditure` stay the
+ * authoritative pair — these are what those two are *made of*, where the
+ * register says so.
+ */
+export type FinancialBreakdown = {
+  incomeDonationsLegacies: number | null;
+  incomeCharitableActivities: number | null;
+  incomeOtherTrading: number | null;
+  incomeInvestment: number | null;
+  incomeEndowments: number | null;
+  incomeOther: number | null;
+  incomeGovtGrants: number | null;
+  incomeGovtContracts: number | null;
+  expenditureCharitableActivities: number | null;
+  expenditureRaisingFunds: number | null;
+  expenditureGovernance: number | null;
+  expenditureGrantsInstitutions: number | null;
+  expenditureInvestmentManagement: number | null;
+  expenditureOther: number | null;
+};
+
+export const EMPTY_BREAKDOWN: FinancialBreakdown = {
+  incomeDonationsLegacies: null,
+  incomeCharitableActivities: null,
+  incomeOtherTrading: null,
+  incomeInvestment: null,
+  incomeEndowments: null,
+  incomeOther: null,
+  incomeGovtGrants: null,
+  incomeGovtContracts: null,
+  expenditureCharitableActivities: null,
+  expenditureRaisingFunds: null,
+  expenditureGovernance: null,
+  expenditureGrantsInstitutions: null,
+  expenditureInvestmentManagement: null,
+  expenditureOther: null,
+};
+
+/** The breakdown half of an already-built row. */
+function breakdownFrom(row: FinancialBreakdown): FinancialBreakdown {
+  const {
+    incomeDonationsLegacies,
+    incomeCharitableActivities,
+    incomeOtherTrading,
+    incomeInvestment,
+    incomeEndowments,
+    incomeOther,
+    incomeGovtGrants,
+    incomeGovtContracts,
+    expenditureCharitableActivities,
+    expenditureRaisingFunds,
+    expenditureGovernance,
+    expenditureGrantsInstitutions,
+    expenditureInvestmentManagement,
+    expenditureOther,
+  } = row;
+  return {
+    incomeDonationsLegacies,
+    incomeCharitableActivities,
+    incomeOtherTrading,
+    incomeInvestment,
+    incomeEndowments,
+    incomeOther,
+    incomeGovtGrants,
+    incomeGovtContracts,
+    expenditureCharitableActivities,
+    expenditureRaisingFunds,
+    expenditureGovernance,
+    expenditureGrantsInstitutions,
+    expenditureInvestmentManagement,
+    expenditureOther,
+  };
+}
+
+function breakdownOf(row: CharityFinancialHistoryItem): FinancialBreakdown {
+  return {
+    incomeDonationsLegacies: row.incomeDonationsLegacies,
+    incomeCharitableActivities: row.incomeCharitableActivities,
+    incomeOtherTrading: row.incomeOtherTrading,
+    incomeInvestment: row.incomeInvestment,
+    incomeEndowments: row.incomeEndowments,
+    incomeOther: row.incomeOther,
+    incomeGovtGrants: row.incomeGovtGrants,
+    incomeGovtContracts: row.incomeGovtContracts,
+    expenditureCharitableActivities: row.expenditureCharitableActivities,
+    expenditureRaisingFunds: row.expenditureRaisingFunds,
+    expenditureGovernance: row.expenditureGovernance,
+    expenditureGrantsInstitutions: row.expenditureGrantsInstitutions,
+    expenditureInvestmentManagement: row.expenditureInvestmentManagement,
+    expenditureOther: row.expenditureOther,
+  };
+}
+
 export type FinancialPeriodRow = {
   periodStart: string;
   periodEnd: string;
   totalIncome: number | null;
   totalExpenditure: number | null;
   incomeBand: IncomeBand | null;
-};
+} & FinancialBreakdown;
 
 const DAY_MS = 86_400_000;
 
@@ -119,6 +218,7 @@ export function buildFinancialPeriods(input: {
       totalIncome: row.income,
       totalExpenditure: row.expenditure,
       incomeBand: deriveIncomeBand(row.income),
+      ...breakdownOf(row),
     });
     previousEnd = periodEnd;
   }
@@ -135,6 +235,11 @@ export function buildFinancialPeriods(input: {
         totalIncome,
         totalExpenditure,
         incomeBand: deriveIncomeBand(totalIncome),
+        // `charitydetailsmulti` publishes no breakdown at all, so the details
+        // row wins on dates and totals while the history row it replaces keeps
+        // its parts — dropping them here would mean the most recent year, the
+        // one anybody actually reads, is the only year with no split.
+        ...(existing ? breakdownFrom(existing) : EMPTY_BREAKDOWN),
       });
     }
   }

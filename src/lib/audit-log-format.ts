@@ -189,6 +189,32 @@ export const AUDIT_ACTIONS: Record<string, ActionSpec> = {
     tone: "caution",
     icon: "quality",
   },
+
+  url_import_drafted: {
+    label: "URL import drafted",
+    verb: "drafted a client from",
+    objectKey: "source_url",
+    tone: "neutral",
+    icon: "quality",
+  },
+  manual_entry_submitted: {
+    label: "Manual entry submitted",
+    verb: "submitted a manual entry for",
+    tone: "neutral",
+    icon: "quality",
+  },
+  manual_entry_approved: {
+    label: "Manual entry approved",
+    verb: "approved the manual entry for",
+    tone: "positive",
+    icon: "quality",
+  },
+  manual_entry_rejected: {
+    label: "Manual entry rejected",
+    verb: "rejected the manual entry for",
+    tone: "caution",
+    icon: "quality",
+  },
 };
 
 /** The three roles, spelled the way the rest of the app spells them. */
@@ -221,6 +247,11 @@ const TARGET_NOUNS: Record<string, { singular: string; anonymous: string; missin
     singular: "Imported record",
     anonymous: "an imported record",
     missing: "a deleted imported record",
+  },
+  manual_entry_records: {
+    singular: "Draft entry",
+    anonymous: "a draft entry",
+    missing: "a deleted draft entry",
   },
 };
 
@@ -351,13 +382,18 @@ const ENUM_KEYS = new Set([
   "trigger",
 ]);
 
-/** Keys that only exist so a support engineer can find the row again. */
+/** Keys that only exist so a support engineer can find the row again, or raw technical payloads. */
 const OPAQUE_KEYS = new Set([
   "suppression_id",
   "flag_id",
   "event_id",
   "entity_match_candidate_id",
   "organisation_id",
+  "imported_field_paths",
+  "import_notes",
+  "import_raw_record_id",
+  "raw_record_id",
+  "source_url",
 ]);
 
 const DETAIL_LABELS: Record<string, string> = {
@@ -379,8 +415,9 @@ const DETAIL_LABELS: Record<string, string> = {
  *
  * `from`/`to` collapse into a single transition chip: they are always written as
  * a pair (docs/audit-log-pattern.md §3.4) and reading them as two separate
- * fields is what made the old table unreadable. Opaque ids are dropped — they
- * survive in the expanded panel's raw JSON, which is where an engineer looks.
+ * fields is what made the old table unreadable. Opaque ids and raw technical arrays
+ * are dropped from the uncollapsed row — they survive in the expanded panel's raw JSON,
+ * which is where an engineer looks.
  */
 export function formatDetails(
   detail: Record<string, unknown> | null,
@@ -401,6 +438,8 @@ export function formatDetails(
     if (key === "from" || key === "to") continue;
     if (OPAQUE_KEYS.has(key) || skip.has(key)) continue;
     if (value === null || value === undefined || value === "") continue;
+    // Arrays and complex nested objects belong in the expanded raw detail view, not uncollapsed chips
+    if (Array.isArray(value) || typeof value === "object") continue;
     const formatted = formatDetailValue(key, value, resolvers);
     // An id that resolved to nothing stays a uuid however it is shortened, and a
     // chip reading "#c77c901c" is noise on a row someone is skimming. The

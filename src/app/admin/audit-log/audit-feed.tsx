@@ -64,9 +64,9 @@ const ICON_SPRING = { type: "spring", stiffness: 420, damping: 17, mass: 0.6 } a
 const ICON_MOTION: Record<AuditIconName, Variants> = {
   role: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.08, rotate: -6 } },
   access: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.08, rotate: 8 } },
-  ownership: { rest: { scale: 1, x: 0 }, hover: { scale: 1.06, x: [0, 2, -2, 0] } },
+  ownership: { rest: { scale: 1, x: 0 }, hover: { scale: 1.06, x: 2 } },
   pipeline: { rest: { scale: 1, y: 0 }, hover: { scale: 1.06, y: -2 } },
-  suppression: { rest: { scale: 1, opacity: 1 }, hover: { scale: 1.08, opacity: [1, 0.45, 1] } },
+  suppression: { rest: { scale: 1, opacity: 1 }, hover: { scale: 1.08, opacity: 0.6 } },
   flag: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.08, rotate: -8 } },
   quality: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.06, rotate: 8 } },
   invite: { rest: { scale: 1, y: 0 }, hover: { scale: 1.08, y: -2 } },

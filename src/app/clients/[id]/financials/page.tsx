@@ -11,6 +11,18 @@ import {
 import { GrantHistorySection } from "../grant-history-section";
 import { GRANT_HISTORY_PAGE_SIZE, type GrantRow } from "../grant-list-item";
 import { requireActor } from "../load-record";
+import {
+  explainMissingAccounts,
+  type FinancialPeriodInput,
+  type GrantInput,
+} from "@/lib/financials/financial-series";
+import { NoAccountsNotice } from "./no-accounts-notice";
+
+/** Charity Commission publishes five filed years; the cap is headroom, not a
+ *  page size — a client with more is a client whose whole history we want. */
+const CHART_PERIOD_LIMIT = 20;
+/** The widest grant history in the book is under 300 awards. */
+const CHART_GRANT_LIMIT = 500;
 
 type GrantRowQuery = Pick<
   GrantRow,
@@ -51,7 +63,7 @@ export default async function ClientFinancialsPage({
   await requireActor();
   const supabase = await createClient();
 
-  const [grants, filings] = await Promise.all([
+  const [grants, filings, chartData] = await Promise.all([
     supabase
       .from("grants")
       .select(
@@ -74,7 +86,64 @@ export default async function ClientFinancialsPage({
       .order("id", { ascending: true })
       .range(0, FINANCIAL_FILINGS_PAGE_SIZE - 1)
       .returns<FinancialFilingRow[]>(),
+    // The charts need every award and every filed period, not the first page of
+    // each: a grant-share column for FY22 built from "the 20 most recent
+    // awards" is a chart of the pagination, not of the client. Two small
+    // selects — a charity has at most five filed years, and the widest grant
+    // history in the book is under 300 rows.
+    Promise.all([
+      supabase
+        .from("grants")
+        .select("amount_awarded, currency, award_date")
+        .eq("organisation_id", id)
+        .order("award_date", { ascending: false })
+        .limit(CHART_GRANT_LIMIT)
+        .returns<GrantInput[]>(),
+      supabase
+        .from("financial_periods")
+        .select(
+          "period_start, period_end, total_income, total_expenditure, income_band, " +
+            "income_donations_legacies, income_charitable_activities, income_other_trading, " +
+            "income_investment, income_endowments, income_other, income_govt_grants, " +
+            "income_govt_contracts",
+        )
+        .eq("organisation_id", id)
+        .order("period_end", { ascending: false })
+        .limit(CHART_PERIOD_LIMIT)
+        .returns<FinancialPeriodInput[]>(),
+      // The two register facts that make an empty tab explainable, plus the
+      // charity number the notice links out with.
+      supabase
+        .from("organisations")
+        .select("registered_on, charity_reporting_status")
+        .eq("id", id)
+        .maybeSingle<{
+          registered_on: string | null;
+          charity_reporting_status: string | null;
+        }>(),
+      supabase
+        .from("organisation_identifiers")
+        .select("identifier_value")
+        .eq("organisation_id", id)
+        .eq("identifier_type", "uk_charity")
+        .limit(1)
+        .maybeSingle<{ identifier_value: string }>(),
+    ]),
   ]);
+
+  const [chartGrants, chartPeriods, registerFacts, charityIdentifier] = chartData;
+  if (chartGrants.error) {
+    await reportError(chartGrants.error, {
+      operation: "clients.detail_financial_chart_grants",
+      organisationId: id,
+    });
+  }
+  if (chartPeriods.error) {
+    await reportError(chartPeriods.error, {
+      operation: "clients.detail_financial_chart_periods",
+      organisationId: id,
+    });
+  }
 
   if (grants.error) {
     await reportError(grants.error, {
@@ -89,13 +158,31 @@ export default async function ClientFinancialsPage({
     });
   }
 
+  const periods = chartPeriods.data ?? [];
+  const missingAccounts = explainMissingAccounts({
+    periodCount: periods.length,
+    isCharityRegistered: Boolean(charityIdentifier.data?.identifier_value),
+    registeredOn: registerFacts.data?.registered_on,
+    reportingStatus: registerFacts.data?.charity_reporting_status,
+  });
+
   return (
     <Stage>
       <Group className="space-y-6">
+        {missingAccounts && (
+          <Rise>
+            <NoAccountsNotice
+              reason={missingAccounts}
+              charityNumber={charityIdentifier.data?.identifier_value}
+            />
+          </Rise>
+        )}
+
         <Rise>
           <FinancialsHeroCard
-            filings={filings.data ?? []}
+            filings={periods.length > 0 ? periods : (filings.data ?? [])}
             totalCount={filings.count ?? filings.data?.length ?? 0}
+            grants={chartGrants.data ?? []}
           />
         </Rise>
 

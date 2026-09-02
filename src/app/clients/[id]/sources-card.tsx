@@ -14,18 +14,13 @@ import { SectionCard } from "./section-card";
 /**
  * Which registers this record was assembled from.
  *
- * **The three rows are design scaffolding, not data.** They render on every
- * client so the layout can be worked on against a full card while the ingestion
- * side catches up — real sources are merged in on top of them, and once every
- * record carries its own, `placeholder` goes to `false` (or the constant goes)
- * and nothing else here changes.
- *
- * Until then, do not treat what this card shows as citable: the reference codes
- * on a placeholder row are derived from the organisation's UUID, and the date is
- * the record's creation date, not the day the register was read. Real rows —
- * anything that came out of ORGANISATION_SOURCES — carry the register's own
- * record id and its true `first_seen_at`, and are marked as such in the source
- * list below so the two are never confused in code.
+ * Every row here is real: the card renders exactly what
+ * `get_organisation_sources_with_actor` returns — sources linked through
+ * RAW_SOURCE_RECORDS, plus Manual Entry where `entry_method = 'manual'`. An
+ * earlier version filled the card out to three registers with placeholder rows
+ * while ingestion caught up; now that real provenance exists end to end, the
+ * placeholders are gone, so an empty card means a genuine provenance gap —
+ * which is the signal the ingestion-gap audit (20260913170000) watches for.
  */
 
 /**
@@ -97,68 +92,22 @@ const SOURCE_DETAILS: Readonly<
   },
 };
 
-/**
- * Design scaffolding — see the header. These three render on every client so the
- * card is never a one-row stub while the layout is being worked on. Their codes
- * are derived from the organisation's UUID and mean nothing; a real row always
- * wins over the placeholder for the same register.
- *
- * Delete this constant (and the `placeholder` prop) once ORGANISATION_SOURCES is
- * populated everywhere.
- */
-const PLACEHOLDER_SOURCES: { source: string; label: string; prefix: string }[] =
-  [
-    {
-      source: "charity_commission",
-      label: "Charity Commission",
-      prefix: "CC-",
-    },
-    { source: "companies_house", label: "Companies House", prefix: "CH-0" },
-    { source: "360giving", label: "360Giving", prefix: "360G-UK-" },
-  ];
-
 type SourceRow = {
   source: string;
   label: string;
   recordId: string | null;
   seenAt: string | null;
   actor: string | null;
-  real: boolean;
 };
 
-function buildRows(
-  sources: OrganisationSource[],
-  placeholder: boolean,
-  organisationId: string,
-  createdAt: string | null,
-): SourceRow[] {
-  const rows: SourceRow[] = sources.map((source) => ({
+function buildRows(sources: OrganisationSource[]): SourceRow[] {
+  return sources.map((source) => ({
     source: source.source,
     label: source.label,
     recordId: source.source_record_id?.trim() || null,
     seenAt: source.first_seen_at,
     actor: source.source_actor_name?.trim() || null,
-    real: true,
   }));
-
-  if (!placeholder) return rows;
-
-  const present = new Set(rows.map((row) => row.source));
-  const hash = organisationId.replace(/-/g, "").slice(0, 7).toUpperCase();
-
-  for (const stub of PLACEHOLDER_SOURCES) {
-    if (present.has(stub.source)) continue;
-    rows.push({
-      source: stub.source,
-      label: stub.label,
-      recordId: `${stub.prefix}${hash.slice(0, stub.prefix === "CC-" ? 7 : 6)}`,
-      seenAt: createdAt,
-      actor: null,
-      real: false,
-    });
-  }
-
-  return rows;
 }
 
 function monogram(label: string): string {
@@ -180,20 +129,13 @@ function formatDate(value: string): string | null {
 
 export function SourcesCard({
   sources,
-  organisationId,
-  createdAt = null,
   error = false,
-  placeholder = true,
 }: {
   sources: OrganisationSource[];
-  organisationId: string;
-  createdAt?: string | null;
   /** The sources query failed — say so rather than showing an empty card. */
   error?: boolean;
-  /** Design scaffolding: fill the card out to three registers. */
-  placeholder?: boolean;
 }) {
-  const rows = buildRows(sources, placeholder, organisationId, createdAt);
+  const rows = buildRows(sources);
 
   return (
     <SectionCard

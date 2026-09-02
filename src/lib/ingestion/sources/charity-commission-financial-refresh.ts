@@ -31,6 +31,7 @@
 import { buildAdminClient } from "../../supabase/admin-client-factory.ts";
 import { reportError } from "../../error-logging.ts";
 import { buildFinancialPeriods } from "../../financials/charity-financial-periods.ts";
+import { chunk } from "./charity-commission.ts";
 import {
   charityCommissionHeaders,
   fetchFinancialHistory,
@@ -49,6 +50,10 @@ export const HISTORY_CALL_BUDGET = 250;
  *  register is a public service and this job has nothing to gain from speed. */
 const HISTORY_CALL_DELAY_MS = 120;
 
+/** Organisation ids per `in (...)` filter. Keeps the query string well inside
+ *  what PostgREST accepts on a URL. */
+const ID_FILTER_CHUNK = 200;
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export type FinancialRefreshResult = {
@@ -64,6 +69,15 @@ export type FinancialRefreshResult = {
   budgetExhausted: boolean;
 };
 
+/** The columns loadTargets reads back for each stored period. */
+type StoredPeriodRow = {
+  organisation_id: string;
+  period_end: string | null;
+  income_donations_legacies: number | null;
+  income_charitable_activities: number | null;
+  income_govt_grants: number | null;
+};
+
 type CharityTarget = {
   organisationId: string;
   registeredNumber: string;
@@ -71,6 +85,8 @@ type CharityTarget = {
   storedLatestEnd: string | null;
   /** How many periods we already hold, for the "history never ran" case. */
   storedCount: number;
+  /** Whether any stored period carries the annual return's breakdown. */
+  storedHasBreakdown: boolean;
 };
 
 /**
@@ -82,13 +98,29 @@ type CharityTarget = {
  * only ever saw `latest_income` — the other four years are still out there.
  */
 export function needsHistory(
-  target: Pick<CharityTarget, "storedLatestEnd" | "storedCount">,
+  target: Pick<
+    CharityTarget,
+    "storedLatestEnd" | "storedCount" | "storedHasBreakdown"
+  >,
   latest: CharityLatestFinancials | undefined,
+  options?: {
+    /**
+     * Also re-fetch a charity whose stored periods carry no breakdown.
+     *
+     * Off for the weekly job and on for the one-off catch-up, deliberately: a
+     * charity that files an entry-level return legitimately has no breakdown to
+     * publish, and there is no column recording that we asked — so leaving this
+     * on would spend one call a week, forever, on every totals-only filer in
+     * the book. The catch-up script pays that cost once.
+     */
+    includeMissingBreakdown?: boolean;
+  },
 ): boolean {
   const registerEnd = latest?.periodEnd ?? null;
   if (!registerEnd) return false;
   if (target.storedCount === 0) return true;
   if (target.storedCount === 1) return true;
+  if (options?.includeMissingBreakdown && !target.storedHasBreakdown) return true;
   return target.storedLatestEnd === null || registerEnd > target.storedLatestEnd;
 }
 
@@ -117,31 +149,55 @@ async function loadTargets(
   );
   if (rows.length === 0) return [];
 
-  // One read of every stored period for these organisations, folded in memory:
-  // a per-organisation aggregate would be one round trip per charity, and the
-  // whole table is a few thousand rows.
-  const { data: periods, error: periodsError } = await supabase
-    .from("financial_periods")
-    .select("organisation_id, period_end")
-    .in(
-      "organisation_id",
-      rows.map((row) => row.organisation_id),
-    );
-  if (periodsError) throw periodsError;
+  // Stored periods for these organisations, folded in memory: a per-organisation
+  // aggregate would be one round trip per charity, and the whole table is a few
+  // thousand rows. Read in id chunks — a single `in` list of a thousand uuids is
+  // a ~40KB query string, and PostgREST answers that with a bare 400.
+  const periods: StoredPeriodRow[] = [];
+  for (const idChunk of chunk(
+    rows.map((row) => row.organisation_id),
+    ID_FILTER_CHUNK,
+  )) {
+    const { data, error: periodsError } = await supabase
+      .from("financial_periods")
+      .select(
+        "organisation_id, period_end, income_donations_legacies, " +
+          "income_charitable_activities, income_govt_grants",
+      )
+      .in("organisation_id", idChunk)
+      // The select string is assembled rather than a single literal, and
+      // supabase-js can only infer a row type from a literal — so the shape is
+      // named here instead of coming out as GenericStringError.
+      .returns<StoredPeriodRow[]>();
+    if (periodsError) throw periodsError;
+    periods.push(...(data ?? []));
+  }
 
-  const stored = new Map<string, { latestEnd: string | null; count: number }>();
-  for (const period of periods ?? []) {
+  const stored = new Map<
+    string,
+    { latestEnd: string | null; count: number; hasBreakdown: boolean }
+  >();
+  for (const period of periods) {
     const current = stored.get(period.organisation_id) ?? {
       latestEnd: null,
       count: 0,
+      hasBreakdown: false,
     };
     const end = period.period_end ?? null;
+    // Three of the fourteen breakdown columns are enough to tell whether this
+    // row was written before the breakdown existed: any published split names
+    // at least one of donations, charitable activities or government grants.
+    const hasBreakdown =
+      period.income_donations_legacies !== null ||
+      period.income_charitable_activities !== null ||
+      period.income_govt_grants !== null;
     stored.set(period.organisation_id, {
       latestEnd:
         end && (current.latestEnd === null || end > current.latestEnd)
           ? end
           : current.latestEnd,
       count: current.count + 1,
+      hasBreakdown: current.hasBreakdown || hasBreakdown,
     });
   }
 
@@ -152,8 +208,38 @@ async function loadTargets(
       registeredNumber: row.identifier_value.trim(),
       storedLatestEnd: known?.latestEnd ?? null,
       storedCount: known?.count ?? 0,
+      storedHasBreakdown: known?.hasBreakdown ?? false,
     };
   });
+}
+
+/**
+ * Writes back what the register says about the charity itself, when it differs
+ * from what we hold. Best-effort: a failure here must not cost the financial
+ * rows, which are what the run is for.
+ */
+async function recordRegisterFacts(
+  supabase: NonNullable<ReturnType<typeof buildAdminClient>>,
+  target: CharityTarget,
+  latest: CharityLatestFinancials | undefined,
+): Promise<void> {
+  if (!latest) return;
+  const patch: { registered_on?: string; charity_reporting_status?: string } = {};
+  if (latest.registeredOn) patch.registered_on = latest.registeredOn;
+  if (latest.reportingStatus) patch.charity_reporting_status = latest.reportingStatus;
+  if (Object.keys(patch).length === 0) return;
+
+  const { error } = await supabase
+    .from("organisations")
+    .update(patch)
+    .eq("id", target.organisationId);
+
+  if (error) {
+    await reportError(error, {
+      operation: "ingestion.charity_commission.financial_refresh.register_facts",
+      organisationId: target.organisationId,
+    });
+  }
 }
 
 /**
@@ -168,6 +254,8 @@ export async function runCharityCommissionFinancialRefresh(options?: {
   /** Cap on charities considered, for scripts that want to walk in slices. */
   limit?: number;
   historyBudget?: number;
+  /** See needsHistory — on for the one-off catch-up, off for the weekly job. */
+  includeMissingBreakdown?: boolean;
 }): Promise<FinancialRefreshResult> {
   const supabase = buildAdminClient();
   if (!supabase) {
@@ -197,7 +285,21 @@ export async function runCharityCommissionFinancialRefresh(options?: {
 
   for (const target of targets) {
     const latest = latestByNumber.get(target.registeredNumber);
-    if (!needsHistory(target, latest)) continue;
+
+    // Registration date and reporting status are written for every charity the
+    // details sweep answered for, whether or not it turns out to have accounts.
+    // The charities with nothing to fetch are exactly the ones the UI needs
+    // these two facts for: without them an eight-month-old charity and a
+    // charity three years overdue are the same empty Financials tab.
+    await recordRegisterFacts(supabase, target, latest);
+
+    if (
+      !needsHistory(target, latest, {
+        includeMissingBreakdown: options?.includeMissingBreakdown,
+      })
+    ) {
+      continue;
+    }
 
     if (result.historyFetched >= historyBudget) {
       result.budgetExhausted = true;
@@ -234,6 +336,24 @@ export async function runCharityCommissionFinancialRefresh(options?: {
         total_expenditure: period.totalExpenditure,
         income_band: period.incomeBand,
         financial_source: "charity_commission" as const,
+        // The annual return's own split. Nulls are "not published for this
+        // year", which is the common case for a smaller charity filing an
+        // entry-level return — see the migration header on
+        // 20260913150000_add_charity_financial_breakdown.sql.
+        income_donations_legacies: period.incomeDonationsLegacies,
+        income_charitable_activities: period.incomeCharitableActivities,
+        income_other_trading: period.incomeOtherTrading,
+        income_investment: period.incomeInvestment,
+        income_endowments: period.incomeEndowments,
+        income_other: period.incomeOther,
+        income_govt_grants: period.incomeGovtGrants,
+        income_govt_contracts: period.incomeGovtContracts,
+        expenditure_charitable_activities: period.expenditureCharitableActivities,
+        expenditure_raising_funds: period.expenditureRaisingFunds,
+        expenditure_governance: period.expenditureGovernance,
+        expenditure_grants_institutions: period.expenditureGrantsInstitutions,
+        expenditure_investment_management: period.expenditureInvestmentManagement,
+        expenditure_other: period.expenditureOther,
       })),
       {
         onConflict:

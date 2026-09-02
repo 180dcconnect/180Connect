@@ -2,13 +2,48 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { buildFinancialPeriods } from "./charity-financial-periods.ts";
+import type { CharityFinancialHistoryItem } from "../ingestion/sources/charity-commission-financials.ts";
 
-function historyRow(end: string, income: number | null, expenditure: number | null) {
+function historyRow(
+  end: string | null,
+  income: number | null,
+  expenditure: number | null,
+  breakdown: Partial<CharityFinancialHistoryItem> = {},
+): CharityFinancialHistoryItem {
   return {
     ar_cycle_reference: null,
     financial_period_end_date: end,
     income,
     expenditure,
+    incomeDonationsLegacies: null,
+    incomeCharitableActivities: null,
+    incomeOtherTrading: null,
+    incomeInvestment: null,
+    incomeEndowments: null,
+    incomeOther: null,
+    incomeGovtGrants: null,
+    incomeGovtContracts: null,
+    expenditureCharitableActivities: null,
+    expenditureRaisingFunds: null,
+    expenditureGovernance: null,
+    expenditureGrantsInstitutions: null,
+    expenditureInvestmentManagement: null,
+    expenditureOther: null,
+    ...breakdown,
+  };
+}
+
+function latestYear(overrides: {
+  periodStart: string | null;
+  periodEnd: string | null;
+  totalIncome: number | null;
+  totalExpenditure: number | null;
+}) {
+  return {
+    registeredNumber: "202918",
+    registeredOn: "1965-09-07",
+    reportingStatus: "Submission Received",
+    ...overrides,
   };
 }
 
@@ -64,13 +99,12 @@ describe("buildFinancialPeriods", () => {
   it("prefers the details endpoint's published start for the latest year", () => {
     const rows = buildFinancialPeriods({
       history: [historyRow("2025-03-31", 339_366_903, 362_636_196)],
-      latest: {
-        registeredNumber: "202918",
+      latest: latestYear({
         periodStart: "2024-04-01",
         periodEnd: "2025-03-31",
         totalIncome: 339_366_903,
         totalExpenditure: 362_636_196,
-      },
+      }),
     });
 
     assert.equal(rows.length, 1, "the same year must not be written twice");
@@ -81,13 +115,12 @@ describe("buildFinancialPeriods", () => {
   it("fills a figure the details endpoint is missing from the history row", () => {
     const rows = buildFinancialPeriods({
       history: [historyRow("2025-03-31", 500_000, 480_000)],
-      latest: {
-        registeredNumber: "1",
+      latest: latestYear({
         periodStart: "2024-04-01",
         periodEnd: "2025-03-31",
         totalIncome: null,
         totalExpenditure: 470_000,
-      },
+      }),
     });
 
     assert.equal(rows.length, 1);
@@ -130,9 +163,7 @@ describe("buildFinancialPeriods", () => {
 
   it("ignores history rows with no period end date", () => {
     const rows = buildFinancialPeriods({
-      history: [
-        { ar_cycle_reference: "AR24", financial_period_end_date: null, income: 1, expenditure: 1 },
-      ],
+      history: [historyRow(null, 1, 1)],
       latest: null,
     });
 
@@ -155,17 +186,56 @@ describe("buildFinancialPeriods", () => {
   it("writes the latest year even when there is no history at all", () => {
     const rows = buildFinancialPeriods({
       history: [],
-      latest: {
-        registeredNumber: "1",
+      latest: latestYear({
         periodStart: "2024-04-01",
         periodEnd: "2025-03-31",
         totalIncome: 5_000,
         totalExpenditure: null,
-      },
+      }),
     });
 
     assert.equal(rows.length, 1);
     assert.equal(rows[0].incomeBand, "under_10k");
+  });
+
+  it("carries the register's breakdown through untouched", () => {
+    const rows = buildFinancialPeriods({
+      history: [
+        historyRow("2024-03-31", 100_000, 90_000, {
+          incomeGovtGrants: 40_000,
+          incomeGovtContracts: 5_000,
+          incomeDonationsLegacies: 55_000,
+          expenditureRaisingFunds: 10_000,
+        }),
+      ],
+      latest: null,
+    });
+
+    assert.equal(rows[0].incomeGovtGrants, 40_000);
+    assert.equal(rows[0].incomeGovtContracts, 5_000);
+    assert.equal(rows[0].incomeDonationsLegacies, 55_000);
+    assert.equal(rows[0].expenditureRaisingFunds, 10_000);
+    // Nothing is inferred from the parts: an unpublished part stays null rather
+    // than becoming a zero the register never claimed.
+    assert.equal(rows[0].incomeInvestment, null);
+  });
+
+  it("keeps the history row's breakdown on the year the details endpoint overwrites", () => {
+    const rows = buildFinancialPeriods({
+      history: [
+        historyRow("2025-03-31", 500_000, 480_000, { incomeGovtGrants: 120_000 }),
+      ],
+      latest: latestYear({
+        periodStart: "2024-04-01",
+        periodEnd: "2025-03-31",
+        totalIncome: 505_000,
+        totalExpenditure: 480_000,
+      }),
+    });
+
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].totalIncome, 505_000, "details wins on the totals");
+    assert.equal(rows[0].incomeGovtGrants, 120_000, "history keeps the parts");
   });
 
   it("returns rows oldest first", () => {

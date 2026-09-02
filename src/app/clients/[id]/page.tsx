@@ -313,12 +313,7 @@ export default async function ClientOverviewPage({
           </Rise>
 
           <Rise>
-            <SourcesCard
-              createdAt={client.created_at ?? null}
-              error={sourcesError}
-              organisationId={client.id}
-              sources={sources}
-            />
+            <SourcesCard error={sourcesError} sources={sources} />
           </Rise>
         </Group>
       </div>

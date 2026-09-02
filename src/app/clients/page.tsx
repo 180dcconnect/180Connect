@@ -13,6 +13,9 @@ import {
   filterByStatus,
   filterByTags,
   filterByPriorityScore,
+  filterByFinancialRecords,
+  FINANCIAL_RECORD_FILTERS,
+  financialRecordFilterLabel,
   hasActiveQueuePreferences,
   prioritiseQueue,
   filterByType,
@@ -35,7 +38,7 @@ import {
   type VisibleClient,
 } from "./visible-clients.ts";
 import { BrandSearchBar } from "@/components/brand/search-bar";
-import { ClaimButton } from "./[id]/claim-button";
+import { BackButton } from "@/components/ui/back-button";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 import { Group, Rise } from "@/components/dashboard-stage";
 import { OriginButton } from "@/components/ui/origin-button";
@@ -100,6 +103,8 @@ type SearchParams = Promise<{
   // F058 — priority-score bands (`high` / `medium` / `low` / `unscored`), same
   // repeated-param shape as the other multi-selects.
   score?: string | string[];
+  // Filter by presence of financial records (charity commission, 360giving, any, none)
+  financials?: string | string[];
   /** Funnel stage the breakdown counts. */
   stage?: string;
   /** Field the breakdown groups by, and which end of it to show. */
@@ -153,8 +158,8 @@ function PriorityScorePill({ client }: { client: VisibleClient }) {
   );
 }
 
-/** Reserved width for the claim button, held whether or not the row has one. */
-const CLAIM_SLOT = "w-[6.5rem] shrink-0";
+/** Reserved width for the row action (View), held for every row so columns don't shift. */
+const ACTION_SLOT = "w-[6.5rem] shrink-0";
 
 /**
  * F062's checkbox column. Outside the row's Link, on the same reasoning the claim
@@ -209,6 +214,7 @@ export default async function ClientsPage({
     type: typeFilter,
     sector: sectorParam,
     score: scoreParam,
+    financials: financialsParam,
     stage: stageParam,
     sort: sortParam,
     dir: dirParam,
@@ -217,7 +223,7 @@ export default async function ClientsPage({
   } = await searchParams;
 
   const supabase = await createClient();
-  const canClaim = hasPermission(authorization.actor.role, "client:edit");
+  const canAddClient = hasPermission(authorization.actor.role, "client:edit");
   /**
    * F062 AC1 names the CAM: "CAM can select multiple individual clients from the
    * list via checkboxes". Selection was gated on `isAdmin`, so the role the whole
@@ -392,6 +398,8 @@ export default async function ClientsPage({
   // F058 — unknown values are dropped at parse time, so a hand-edited URL
   // carrying `?score=banana` filters nothing rather than matching nothing.
   const scoreBands = parsePriorityScoreFilter(scoreParam);
+  // Financial records filter: charity_commission, 360giving, any, none
+  const financialValues = filterValues(financialsParam);
 
   // BrandSearchBar always writes a multi-selected category as repeated params
   // (see its submitSearch), so this can legitimately arrive as one string or
@@ -410,6 +418,7 @@ export default async function ClientsPage({
   // F058 — bands narrow the searched set; unscored clients stay visible until a
   // band is actually chosen (the filter's own AC3, enforced inside the function).
   matchingClients = filterByPriorityScore(matchingClients, scoreBands);
+  matchingClients = filterByFinancialRecords(matchingClients, financialValues);
 
   // F196 / F197 / F199 / F094: Prioritise matching clients based on the CAM's
   // geographic, sector, size and grant-history preferences, layered on top of
@@ -438,7 +447,8 @@ export default async function ClientsPage({
       typeValues.length ||
       sectorValues.length ||
       tagFilter.length ||
-      scoreBands.length,
+      scoreBands.length ||
+      financialValues.length,
   );
   // F166 AC1/AC3: this is the CAM viewing their own filter, not just any owner
   // filter — the heading, count label and empty state read "your clients" so the
@@ -556,6 +566,7 @@ export default async function ClientsPage({
       // F058 — the parsed bands, not the raw param, for the same reason as
       // listSort below: junk leaves the URL on the next click.
       score: scoreBands,
+      financials: financialValues,
       stage: stageParam,
       sort: sortParam,
       dir: dirParam,
@@ -678,6 +689,11 @@ export default async function ClientsPage({
                   label: priorityScoreFilterLabel(band),
                   value: band,
                 })),
+                ...financialValues.map((value) => ({
+                  category: "Filter by financial records",
+                  label: financialRecordFilterLabel(value),
+                  value,
+                })),
               ]}
               params={{
                 "Filter by city": "city",
@@ -688,6 +704,7 @@ export default async function ClientsPage({
                 "Filter by owner": "owner",
                 "Filter by tag": "tags",
                 "Filter by priority score": "score",
+                "Filter by financial records": "financials",
               }}
               categories={{
                 "Filter by city": uniqueCities.map(c => ({ label: c, value: c })),
@@ -704,6 +721,10 @@ export default async function ClientsPage({
                   label: band.label,
                   value: band.value,
                 })),
+                "Filter by financial records": FINANCIAL_RECORD_FILTERS.map((f) => ({
+                  label: f.label,
+                  value: f.value,
+                })),
               }}
             />
           }
@@ -713,7 +734,7 @@ export default async function ClientsPage({
                 <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
                   {isOwnedView ? "My clients" : "Clients"}
                 </h1>
-                {canClaim && (
+                {canAddClient && (
                   <OriginButton
                     href="/clients/new"
                     size="md"
@@ -852,11 +873,9 @@ export default async function ClientsPage({
                       <span>Owner</span>
                       <span />
                     </span>
-                    {canClaim && (
-                      <span className="flex shrink-0 items-center gap-2">
-                        <span className={CLAIM_SLOT} />
-                      </span>
-                    )}
+                    <span className="flex shrink-0 items-center gap-2">
+                      <span className={ACTION_SLOT} />
+                    </span>
                   </div>
 
                   <ul>
@@ -947,17 +966,20 @@ export default async function ClientsPage({
                           </span>
                         </Link>
 
-                        {/* A fixed slot rather than a conditional child: an owned
-                            row still reserves the width, so no column shifts as
-                            the list changes hands. The booklet action lives on
-                            the client's own page only, not in this list. */}
-                        {canClaim && (
-                          <span className={`${CLAIM_SLOT} flex shrink-0 justify-end`}>
-                            {!client.ownerName && (
-                              <ClaimButton compact organisationId={client.id} />
-                            )}
-                          </span>
-                        )}
+                        {/* View replaces Claim this client: every row offers the same
+                            explicit CTA (inverse sliding-door) rather than a
+                            conditional claim that shifted columns per ownership. */}
+                        <span className={`${ACTION_SLOT} flex shrink-0 justify-end`}>
+                          <BackButton
+                            href={`/clients/${client.id}`}
+                            label="View"
+                            variant="sliding-door-right"
+                            tone="bone"
+                            size="sm"
+                            icon="arrow"
+                            aria-label={`View ${client.legal_name}`}
+                          />
+                        </span>
                       </li>
                     ))}
                   </ul>

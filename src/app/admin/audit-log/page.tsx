@@ -17,6 +17,7 @@ import {
   type AuditRow,
 } from "@/lib/audit-log-format";
 import { AuditFeed } from "./audit-feed";
+import { AuditLogPagination } from "./audit-log-pagination";
 
 type UserOption = { id: string; email: string; full_name: string | null };
 type OrganisationOption = { id: string; legal_name: string };
@@ -24,14 +25,14 @@ type OrganisationOption = { id: string; legal_name: string };
 // Next.js 16: searchParams is a Promise on App Router pages, not a plain
 // object (that changed from older versions). Same pattern already merged in
 // src/app/login/page.tsx and src/app/reset-password/page.tsx.
-type SearchParams = Promise<{ actor?: string; org?: string; action?: string; q?: string }>;
-
-/**
- * How many entries one visit reads. The trail is append-only and unbounded, so
- * this is a window, not the whole thing — the page says so rather than implying
- * the list is complete.
- */
-const WINDOW = 200;
+type SearchParams = Promise<{
+  actor?: string;
+  org?: string;
+  action?: string;
+  q?: string;
+  page?: string;
+  pageSize?: string;
+}>;
 
 /** Category label → query parameter, for the shared brand search bar. */
 const FILTER_PARAMS = {
@@ -72,16 +73,30 @@ export default async function AuditLogPage({
 
   const supabase = await createClient();
 
-  const { actor: actorFilter, org: orgFilter, action: actionFilter, q: search } = await searchParams;
+  const {
+    actor: actorFilter,
+    org: orgFilter,
+    action: actionFilter,
+    q: search,
+    page: rawPage,
+    pageSize: rawPageSize,
+  } = await searchParams;
+
+  const parsedPage = Number(rawPage);
+  const page = Number.isFinite(parsedPage) && parsedPage >= 1 ? Math.floor(parsedPage) : 1;
+
+  const parsedPageSize = Number(rawPageSize);
+  const pageSize = [25, 50, 100].includes(parsedPageSize) ? parsedPageSize : 25;
 
   // RLS also restricts this SELECT to admins (audit_log_select_admin), so a
   // bug in the getCurrentActor check above cannot leak rows to a non-admin —
   // this query fails closed on its own.
   let query = supabase
     .from("audit_log")
-    .select("id, actor_user_id, action, target_table, target_id, detail, created_at")
-    .order("created_at", { ascending: false })
-    .limit(WINDOW);
+    .select("id, actor_user_id, action, target_table, target_id, detail, created_at", {
+      count: "exact",
+    })
+    .order("created_at", { ascending: false });
 
   if (actorFilter) {
     query = query.eq("actor_user_id", actorFilter);
@@ -93,10 +108,14 @@ export default async function AuditLogPage({
     query = query.eq("action", actionFilter);
   }
 
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  query = query.range(from, to);
+
   // overrideTypes is the current @supabase/postgrest-js method for this — it
   // replaced the older .returns<T>(), which is now the deprecated one. See
   // node_modules/@supabase/postgrest-js/src/PostgrestTransformBuilder.ts.
-  const { data: rows, error } = await query.overrideTypes<AuditRow[], { merge: false }>();
+  const { data: rows, count: totalCount, error } = await query.overrideTypes<AuditRow[], { merge: false }>();
 
   if (error) {
     // Fail visibly per the project SOP, but never show the raw database error
@@ -174,6 +193,9 @@ export default async function AuditLogPage({
   const actionTokens = Array.from(
     new Set([...Object.keys(AUDIT_ACTIONS), ...described.map((event) => event.action)]),
   );
+
+  const totalItems = search ? events.length : (totalCount ?? events.length);
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
@@ -257,26 +279,36 @@ export default async function AuditLogPage({
           <Group className="space-y-4">
             <Rise className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
               <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                <span className="tabular-nums">{events.length}</span> event
-                {events.length === 1 ? "" : "s"}
+                <span className="tabular-nums">{totalItems}</span> event
+                {totalItems === 1 ? "" : "s"}
                 {filtersActive ? " matching" : ""}
                 {events.length > 0 && (
                   <>
                     {" · "}
                     <span className="tabular-nums">{actorsInvolved}</span>{" "}
-                    {actorsInvolved === 1 ? "person" : "people"} involved
+                    {actorsInvolved === 1 ? "person" : "people"} involved on this page
                   </>
                 )}
               </p>
-              {described.length === WINDOW && (
+              {totalPages > 1 && (
                 <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/25">
-                  Most recent {WINDOW} entries
+                  Page <span className="tabular-nums">{page}</span> of{" "}
+                  <span className="tabular-nums">{totalPages}</span>
                 </p>
               )}
             </Rise>
 
             {events.length > 0 ? (
-              <AuditFeed groups={groups} />
+              <>
+                <AuditFeed groups={groups} />
+                <Rise>
+                  <AuditLogPagination
+                    totalItems={totalItems}
+                    currentPage={page}
+                    pageSize={pageSize}
+                  />
+                </Rise>
+              </>
             ) : (
               <Rise>
                 <EmptyState

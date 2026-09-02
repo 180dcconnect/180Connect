@@ -33,21 +33,53 @@ import {
   type CharityCommissionDetailItem,
 } from "./charity-commission.ts";
 
-/** One annual return as `charityfinancialhistory` returns it, money only. */
+/**
+ * One annual return as `charityfinancialhistory` returns it.
+ *
+ * The breakdown is the reason this endpoint is worth a call per charity: income
+ * from government grants and from government contracts appear nowhere else in
+ * any source we hold, and the SOFA split answers a different question from the
+ * totals ("how much of this is public money?" rather than "how big are they?").
+ *
+ * Every part is nullable and none of them is trusted to sum to the total: a
+ * smaller charity files an entry-level return with totals only, and the register
+ * publishes the parts it has. `inc_legacies` is deliberately not read — it is a
+ * subset of `inc_donations_and_legacies`, and storing both invites a double
+ * count downstream.
+ */
 export type CharityFinancialHistoryItem = {
   ar_cycle_reference: string | null;
   financial_period_end_date: string | null;
   income: number | null;
   expenditure: number | null;
+  incomeDonationsLegacies: number | null;
+  incomeCharitableActivities: number | null;
+  incomeOtherTrading: number | null;
+  incomeInvestment: number | null;
+  incomeEndowments: number | null;
+  incomeOther: number | null;
+  incomeGovtGrants: number | null;
+  incomeGovtContracts: number | null;
+  expenditureCharitableActivities: number | null;
+  expenditureRaisingFunds: number | null;
+  expenditureGovernance: number | null;
+  expenditureGrantsInstitutions: number | null;
+  expenditureInvestmentManagement: number | null;
+  expenditureOther: number | null;
 };
 
-/** The latest filed year, as `charitydetailsmulti` reports it. */
+/** The latest filed year, as `charitydetailsmulti` reports it — plus the two
+ *  register facts that make an empty Financials tab explainable rather than
+ *  blank: when the charity was registered, and what the register says about its
+ *  reporting position ("New" until a first return arrives). */
 export type CharityLatestFinancials = {
   registeredNumber: string;
   periodStart: string | null;
   periodEnd: string | null;
   totalIncome: number | null;
   totalExpenditure: number | null;
+  registeredOn: string | null;
+  reportingStatus: string | null;
 };
 
 export function charityCommissionHeaders(): Record<string, string> {
@@ -105,6 +137,11 @@ export async function fetchLatestFinancials(
         periodEnd: toDate(item.latest_acc_fin_year_end_date),
         totalIncome: toNumber(item.latest_income),
         totalExpenditure: toNumber(item.latest_expenditure),
+        registeredOn: toDate(item.date_of_registration),
+        reportingStatus:
+          typeof item.reporting_status === "string" && item.reporting_status.trim()
+            ? item.reporting_status.trim()
+            : null,
       });
     }
   }
@@ -144,5 +181,19 @@ export async function fetchFinancialHistory(
     financial_period_end_date: toDate(row?.financial_period_end_date),
     income: toNumber(row?.income),
     expenditure: toNumber(row?.expenditure),
+    incomeDonationsLegacies: toNumber(row?.inc_donations_and_legacies),
+    incomeCharitableActivities: toNumber(row?.inc_charitable_activities),
+    incomeOtherTrading: toNumber(row?.inc_other_trading_activities),
+    incomeInvestment: toNumber(row?.inc_investment),
+    incomeEndowments: toNumber(row?.inc_endowments),
+    incomeOther: toNumber(row?.inc_other),
+    incomeGovtGrants: toNumber(row?.income_from_govt_grants),
+    incomeGovtContracts: toNumber(row?.income_from_govt_contracts),
+    expenditureCharitableActivities: toNumber(row?.exp_charitable_activities),
+    expenditureRaisingFunds: toNumber(row?.exp_raising_funds),
+    expenditureGovernance: toNumber(row?.exp_governance),
+    expenditureGrantsInstitutions: toNumber(row?.exp_grants_institution),
+    expenditureInvestmentManagement: toNumber(row?.exp_investment_management),
+    expenditureOther: toNumber(row?.exp_other),
   }));
 }

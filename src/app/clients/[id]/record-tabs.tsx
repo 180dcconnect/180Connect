@@ -69,21 +69,19 @@ export function RecordTabs({
   const activeIndex = TABS.findIndex((tab) => isActive(tab.segment));
 
   return (
-    // The sticky band is a frosted strip (same glass as the score dialog's
-    // sticky header): content scrolling underneath blurs through it, so the
-    // bar reads as floating over the record rather than cutting it off. The
-    // nav itself is the blur layer — wrapping the pill in it would double-apply
-    // backdrop-filter and cost GPU for nothing.
+    // The sticky bar floats over the record. The backdrop blur is constrained
+    // to the tab group pill itself so the frosted glass effect does not span
+    // end-to-end across the whole row.
     <nav
       aria-label="Sections of this client record"
-      className="sticky top-0 z-30 bg-transparent py-2 backdrop-blur-xl backdrop-saturate-150"
+      className="sticky top-0 z-30 py-2"
     >
       <Liquid
         blur={5}
         contrast={18}
         fill="var(--lead)"
         shadow="0 2px 8px rgba(35, 64, 122, 0.25)"
-        className="relative inline-flex max-w-full items-center overflow-x-auto rounded-full border border-lead/10 bg-lead-wash/50 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="relative inline-flex max-w-full items-center overflow-x-auto rounded-full border border-lead/10 bg-lead-wash/50 p-1 backdrop-blur-xl backdrop-saturate-150 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         <Liquid.Item effect="move" move={{ springiness: 0.6, trail: 0.5, stretch: 0.25 }}>
           <div

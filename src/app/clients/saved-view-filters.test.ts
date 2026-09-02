@@ -227,6 +227,13 @@ describe("describeFilters", () => {
     );
   });
 
+  it("reads financial record values as their labels", () => {
+    assert.equal(
+      describeFilters({ financials: ["charity_commission", "360giving"] }),
+      "Charity Commission (Accounts), 360Giving (Grants)",
+    );
+  });
+
   it("names the owner when one is known", () => {
     assert.equal(describeFilters({ owner: "user-1" }, "Amara Okafor"), "Amara Okafor");
   });

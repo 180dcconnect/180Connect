@@ -69,6 +69,22 @@ export interface GooeyTextInputProps {
    * it is the width of whatever holds it, minus the room the droplet needs.
    */
   fluid?: boolean;
+  /**
+   * Hard cap on the value, matching whatever the column will accept. Without it
+   * the field happily collects 400 characters for a 200-character column and
+   * the news arrives from a rejected submission.
+   */
+  maxLength?: number;
+  /**
+   * What the droplet does instead of submitting the enclosing form. A field
+   * inside a multi-row editor has no form of its own to post — the droplet is
+   * still "send", it just sends the batch.
+   */
+  onSubmit?: () => void;
+  /** Mirrors every keystroke out, for a parent holding the draft. */
+  onValueChange?: (next: string) => void;
+  /** Escape while focused — abandon this field. */
+  onEscape?: () => void;
 }
 
 /**
@@ -105,6 +121,10 @@ export function GooeyTextInput({
   label,
   align = "center",
   fluid = false,
+  maxLength,
+  onSubmit,
+  onValueChange,
+  onEscape,
 }: GooeyTextInputProps) {
   const [prevDefaultValue, setPrevDefaultValue] = React.useState(defaultValue);
   const [value, setValue] = React.useState(defaultValue ?? "");
@@ -277,6 +297,10 @@ export function GooeyTextInput({
       setTimeout(() => setErrorMessage(null), 2500);
       return;
     }
+    if (onSubmit) {
+      onSubmit();
+      return;
+    }
     const form = inputRef.current?.closest("form");
     if (form) form.requestSubmit();
   };
@@ -394,10 +418,12 @@ export function GooeyTextInput({
               autoCapitalize="off"
               spellCheck={false}
               disabled={disabled || pending}
+              maxLength={maxLength}
               placeholder={label ? undefined : placeholder}
               aria-label={label}
               onChange={(e) => {
                 setValue(e.target.value);
+                onValueChange?.(e.target.value);
                 if (errorMessage) setErrorMessage(null);
               }}
               onFocus={() => setIsFocused(true)}
@@ -406,6 +432,10 @@ export function GooeyTextInput({
                 if (e.key === "Enter") {
                   e.preventDefault();
                   trySubmit();
+                }
+                if (e.key === "Escape" && onEscape) {
+                  e.preventDefault();
+                  onEscape();
                 }
               }}
               className={`w-full h-full bg-transparent border-0 outline-none px-5 rounded-full ${dims.fontSize} font-medium ${theme.text} ${theme.placeholder} transition-colors duration-200`}

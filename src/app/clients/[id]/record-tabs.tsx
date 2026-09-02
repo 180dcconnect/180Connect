@@ -69,9 +69,14 @@ export function RecordTabs({
   const activeIndex = TABS.findIndex((tab) => isActive(tab.segment));
 
   return (
+    // The sticky band is a frosted strip (same glass as the score dialog's
+    // sticky header): content scrolling underneath blurs through it, so the
+    // bar reads as floating over the record rather than cutting it off. The
+    // nav itself is the blur layer — wrapping the pill in it would double-apply
+    // backdrop-filter and cost GPU for nothing.
     <nav
       aria-label="Sections of this client record"
-      className="sticky top-0 z-30 py-2"
+      className="sticky top-0 z-30 bg-transparent py-2 backdrop-blur-xl backdrop-saturate-150"
     >
       <Liquid
         blur={5}

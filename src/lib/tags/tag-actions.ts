@@ -32,20 +32,40 @@ export async function removeTagAction(
   return result;
 }
 
+export async function createTagAction(
+  name: string,
+  colour?: string | null,
+): Promise<CreateTagResult> {
+  const result = await createTag(name, colour);
+  if (result.ok) {
+    revalidatePath("/admin/tags");
+  }
+  return result;
+}
+
+export async function assignTagsBatchAction(
+  organisationId: string,
+  tagIds: string[],
+) {
+  const result = await assignTags(organisationId, tagIds);
+  if (result.ok) {
+    revalidatePath(`/clients/${organisationId}`);
+    revalidatePath("/clients");
+  }
+  return result;
+}
+
 export async function createAndAssignTagAction(
   organisationId: string,
   name: string,
   colour?: string | null,
-): Promise<CreateTagResult> {
-  const createResult = await createTag(name, colour);
-  if (!createResult.ok) {
-    return createResult;
-  }
-  const assignResult = await assignTags(organisationId, [createResult.tag.id]);
-  if (!assignResult.ok) {
-    return { ok: false, message: assignResult.message };
-  }
+) {
+  const createRes = await createTag(name, colour);
+  if (!createRes.ok) return createRes;
+  const assignRes = await assignTags(organisationId, [createRes.tag.id]);
+  if (!assignRes.ok) return { ok: false as const, message: assignRes.message };
   revalidatePath(`/clients/${organisationId}`);
   revalidatePath("/clients");
-  return createResult;
+  revalidatePath("/admin/tags");
+  return { ok: true as const, tag: createRes.tag };
 }

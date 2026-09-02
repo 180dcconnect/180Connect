@@ -17,13 +17,14 @@ This version has breaking changes — APIs, conventions, and file structure may 
 ```bash
 npm run lint                     # ESLint
 npx tsc --noEmit                 # typecheck
-npm run build                    # production build (catches errors the dev server tolerates)
+npm run build                    # production build (run ONLY when explicitly requested)
 npm test                         # unit tests (Node built-in test runner, not Jest/Vitest)
 npm run seed                     # load 50 fake organisations into local DB
 npm run seed:clear               # remove all is_seed rows
 ```
 
-**Pre-push order:** `npm run lint` → `npx tsc --noEmit` → `npm run build`
+**Pre-push order:** `npm run lint` → `npx tsc --noEmit`
+**CRITICAL:** Never run `npm run build` unless the user explicitly asks for it.
 
 ## Architecture at a glance
 
@@ -70,7 +71,7 @@ npm run seed:clear               # remove all is_seed rows
 - `src/lib/supabase/admin-client-factory.ts` bypasses `server-only` guard. ESLint blocks importing it from `src/` except in `admin.ts` and `src/lib/ingestion/` / `src/lib/standardize/`.
 - `NEXT_PUBLIC_` vars are inlined into the browser bundle — never prefix a secret with it.
 - Seed scripts refuse to run against production. They check `SUPABASE_DB_URL`.
-- `npm run build` is the real pre-push gate — the dev server tolerates errors that the production build does not.
+- Never run `npm run build` unless the user explicitly asks for it. Use `npm run lint` and `npx tsc --noEmit` for validation instead.
 
 ## Key reference docs
 

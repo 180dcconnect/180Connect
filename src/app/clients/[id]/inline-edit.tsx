@@ -3,10 +3,11 @@
 import { useId } from "react";
 import { Check, Undo2, X } from "lucide-react";
 
+import { GooeyTextInput } from "@/components/ui/gooey-text-input";
+
 import {
   REASON_MAX_LENGTH,
   fieldWarnings,
-  inputTypeFor,
   isLongFormField,
   maxLengthFor,
   normalisationNote,
@@ -52,6 +53,8 @@ export function InlineFieldInput({
   currentValue,
   onChange,
   onCancel,
+  onSubmit,
+  pending,
   error,
 }: {
   fieldName: string;
@@ -60,65 +63,86 @@ export function InlineFieldInput({
   currentValue: string | null;
   onChange: (next: string) => void;
   onCancel: () => void;
+  /** The droplet and the Enter key both send the whole batch, not this row. */
+  onSubmit: () => void;
+  pending: boolean;
   error?: string;
 }) {
-  const inputId = useId();
+  const textareaId = useId();
   const max = maxLengthFor(fieldName);
   const multiline = isLongFormField(fieldName);
   const warnings = fieldWarnings(fieldName, value);
   const note = normalisationNote(fieldName, value);
-  const unchanged = value.trim().length > 0 && value.trim() === (currentValue ?? "").trim();
+  const unchanged =
+    value.trim().length > 0 && value.trim() === (currentValue ?? "").trim();
   // Only worth saying near the ceiling. A live count on a 500-character field
   // you have typed nine characters into is noise.
   const showCount = value.length > max - 40;
-
-  const shared = {
-    id: inputId,
-    value,
-    maxLength: max,
-    "aria-label": `${label}, new value`,
-    "aria-invalid": Boolean(error) || undefined,
-    onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-      onChange(event.target.value),
-    onKeyDown: (event: React.KeyboardEvent) => {
-      // Escape abandons this row's edit without touching the others.
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onCancel();
-      }
-    },
-    className: `w-full rounded-inset border bg-white px-3 py-1.5 text-sm text-ink outline-none transition-colors placeholder:text-faint focus:border-lead-mid focus-visible:ring-2 focus-visible:ring-lead-mid/40 ${
-      error ? "border-stop/60" : "border-rule"
-    }`,
-  } as const;
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-1">
       <div className="flex items-start gap-1.5">
         {multiline ? (
-          <textarea {...shared} rows={3} className={`${shared.className} resize-y`} />
+          /* The liquid capsule is one line by construction — a mission
+             statement is a paragraph, and shrinking one into a pill would be
+             choosing the component over the content. */
+          <textarea
+            id={textareaId}
+            value={value}
+            rows={3}
+            maxLength={max}
+            aria-label={`${label}, new value`}
+            aria-invalid={Boolean(error) || undefined}
+            onChange={(event) => onChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                onCancel();
+              }
+            }}
+            className={`w-full resize-y rounded-inset border bg-white px-3 py-1.5 text-sm text-ink outline-none transition-colors placeholder:text-faint focus:border-lead-mid focus-visible:ring-2 focus-visible:ring-lead-mid/40 ${
+              error ? "border-stop/60" : "border-rule"
+            }`}
+          />
         ) : (
-          <input {...shared} type={inputTypeFor(fieldName)} autoComplete="off" />
+          <div className="min-w-0 flex-1">
+            <GooeyTextInput
+              name={`inline-${fieldName}`}
+              defaultValue={value}
+              label={label}
+              size="sm"
+              align="start"
+              fluid
+              maxLength={max}
+              pending={pending}
+              buttonIcon="check"
+              onValueChange={onChange}
+              onSubmit={onSubmit}
+              onEscape={onCancel}
+            />
+          </div>
         )}
         <button
           type="button"
           onClick={onCancel}
           aria-label={`Stop editing ${label.toLowerCase()}`}
-          className="mt-0.5 shrink-0 rounded-inset p-1.5 text-faint transition-colors hover:bg-paper hover:text-ink focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none"
+          className="mt-2 shrink-0 rounded-inset p-1.5 text-faint transition-colors hover:bg-paper hover:text-ink focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none"
         >
           <X aria-hidden="true" className="size-3.5" />
         </button>
       </div>
 
       {(error || note || unchanged || showCount || warnings.length > 0) && (
-        <div className="flex flex-col gap-0.5 text-[12px] leading-[1.45]">
+        <div className="-mt-1 flex flex-col gap-0.5 pl-1 text-[12px] leading-[1.45]">
           {error && (
             <p className="font-semibold text-stop" role="alert">
               {error}
             </p>
           )}
           {unchanged && (
-            <p className="text-faint">Same as the value on record — nothing to submit.</p>
+            <p className="text-faint">
+              Same as the value on record — nothing to submit.
+            </p>
           )}
           {note && <p className="text-dim">{note}</p>}
           {warnings.map((warning) => (
@@ -127,7 +151,11 @@ export function InlineFieldInput({
             </p>
           ))}
           {showCount && (
-            <p className={value.length >= max ? "font-semibold text-stop" : "text-faint"}>
+            <p
+              className={
+                value.length >= max ? "font-semibold text-stop" : "text-faint"
+              }
+            >
               {value.length} / {max} characters
             </p>
           )}
@@ -174,8 +202,12 @@ export function EditDraftBar({
 
       {isCam && (
         <div className="mt-2.5">
-          <label className="text-[12px] font-medium text-dim" htmlFor={reasonId}>
-            Why is this right? <span className="font-normal text-faint">(optional)</span>
+          <label
+            className="text-[12px] font-medium text-dim"
+            htmlFor={reasonId}
+          >
+            Why is this right?{" "}
+            <span className="font-normal text-faint">(optional)</span>
           </label>
           {/* The admin deciding this sees two strings and a name. Without a line
               of provenance, "St Mary's Trust" → "St Marys Trust" is a correction
@@ -265,7 +297,9 @@ export function fieldErrorsFrom(state: EditBatchState): Record<string, string> {
 
 /** Fields that landed, so their drafts can be cleared and the rest kept. */
 export function succeededFields(state: EditBatchState): string[] {
-  return state.results.filter((result) => result.ok).map((result) => result.fieldName);
+  return state.results
+    .filter((result) => result.ok)
+    .map((result) => result.fieldName);
 }
 
 export { restrictedFieldLabel };

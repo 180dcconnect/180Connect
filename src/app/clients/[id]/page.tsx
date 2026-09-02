@@ -1,4 +1,4 @@
-import { BookOpen, ExternalLink, Globe, Mail } from "lucide-react";
+import { ExternalLink, Globe, Mail } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
@@ -18,7 +18,15 @@ import { Pill, SectionCard } from "./section-card";
 import { FinancialScaleCard } from "./financial-scale-card";
 import { SuggestEditSection } from "./suggest-edit-section";
 import { TagsCard } from "./tags-card";
-import { loadClient, loadLatestFinancial, loadScore, loadSources, loadWebsite, requireActor } from "./load-record";
+import { SourcesCard } from "./sources-card";
+import {
+  loadClient,
+  loadLatestFinancial,
+  loadScore,
+  loadSources,
+  loadWebsite,
+  requireActor,
+} from "./load-record";
 
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
 
@@ -56,16 +64,18 @@ export default async function ClientOverviewPage({
   const [
     { score, error: scoreError },
     website,
-    { sources, error: sourcesError },
     latestFinancial,
+    sourcesResult,
     enrichmentResult,
     clientTagsResult,
     allTagsResult,
   ] = await Promise.all([
       loadScore(id),
       loadWebsite(client.website),
-      loadSources(id),
       loadLatestFinancial(id),
+      // cache()d, so the header's provenance line and this card's list are one
+      // round trip between them.
+      loadSources(id),
       // ENRICHMENT_RESULTS is append-only, so the most recently enriched row is
       // "the" mission statement, not the only one.
       supabase
@@ -89,6 +99,7 @@ export default async function ClientOverviewPage({
     if (error) await reportError(error, { operation, organisationId: id });
   }
 
+  const { sources, error: sourcesError } = sourcesResult;
   const enrichment = enrichmentResult.data;
   const clientTags = (clientTagsResult.data ?? [])
     .filter((row) => row.tags)
@@ -302,45 +313,12 @@ export default async function ClientOverviewPage({
           </Rise>
 
           <Rise>
-            <SectionCard
-              headingId="source-heading"
-              title="Where this came from"
-              hint="Each register that contributed part of this record."
-              icon={<BookOpen />}
-            >
-              {sourcesError ? (
-                <p className="mt-3.5 text-sm font-semibold text-stop" role="alert">
-                  Source information could not be loaded. Refresh and try again.
-                </p>
-              ) : sources.length === 0 ? (
-                <p className="mt-3.5 text-sm leading-[1.6] text-faint">
-                  No source information recorded.
-                </p>
-              ) : (
-                <ul className="mt-3.5 flex flex-col">
-                  {sources.map((source) => (
-                    <li
-                      key={source.source}
-                      className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 border-t border-rule-soft py-2.5 first:border-t-0 first:pt-0"
-                    >
-                      <span className="text-[13.5px] text-ink">
-                        {source.label}
-                        {source.source_actor_name ? (
-                          <span className="text-dim"> · {source.source_actor_name}</span>
-                        ) : null}
-                      </span>
-                      <span className="font-mono text-[11.5px] text-faint tabular-nums">
-                        {new Date(source.first_seen_at).toLocaleDateString("en-GB", {
-                          day: "numeric",
-                          month: "short",
-                          year: "numeric",
-                        })}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </SectionCard>
+            <SourcesCard
+              createdAt={client.created_at ?? null}
+              error={sourcesError}
+              organisationId={client.id}
+              sources={sources}
+            />
           </Rise>
         </Group>
       </div>

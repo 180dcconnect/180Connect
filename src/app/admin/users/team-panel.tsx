@@ -131,7 +131,7 @@ export function TeamPanel({
       )}
       <Group className="space-y-4">
         <Rise>
-          <div className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm overflow-hidden">
+          <div className="rounded-2xl border border-black/[0.06] bg-white shadow-sm overflow-hidden">
             <UserManagementTable
               currentUserId={currentUserId}
               hasActiveFilters={hasActiveFilters}

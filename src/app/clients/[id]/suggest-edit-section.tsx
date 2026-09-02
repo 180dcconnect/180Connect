@@ -17,10 +17,11 @@ import {
 
 /**
  * #79/#80/#81 + #23 (F077/F078/F079/F020) — the *state* of the edit-suggestion
- * system on this record. The CAM's proposal form is no longer here: it lives
- * behind "Suggest an edit" in the "What we know" heading row
- * (`suggest-edit-button.tsx`), because an always-open form for a rare, deliberate
- * act cost a full card on every visit.
+ * system on this record. Proposing happens on the row being corrected, in
+ * "General Information" (`basic-info-panel.tsx` + `inline-edit.tsx`): first this
+ * card held an always-open form, then a dialog behind a "Suggest an edit"
+ * button, and both were asking the reader to re-state the field they had just
+ * pointed at.
  *
  * What remains is only what you should see without opening anything, and the
  * card renders nothing at all when there is nothing to say:
@@ -131,6 +132,16 @@ export function SuggestEditSection({
                   proposed this on{" "}
                   {new Date(row.created_at).toLocaleString("en-GB")}
                 </p>
+
+                {/* Why, in the requester's words. Without it the decision on an
+                    identity field is a guess: "St Mary's Trust" → "St Marys
+                    Trust" is a correction or a typo with equal probability, and
+                    the admin has no better way to check than the CAM did. */}
+                {row.reason && (
+                  <p className="mt-2 border-l-2 border-hold/40 pl-2.5 text-[13px] leading-[1.55] text-ink">
+                    {row.reason}
+                  </p>
+                )}
                 <label
                   className="mt-3 block text-[13px] font-semibold"
                   htmlFor={`inline-reason-${row.id}`}

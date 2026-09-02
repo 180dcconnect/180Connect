@@ -1,7 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
-import { Lock, Pencil, Plus } from "lucide-react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+  type ReactNode,
+} from "react";
+import { Lock, Pencil, PencilLine, Plus } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { OriginButton } from "@/components/ui/origin-button";
 import { createClient } from "@/lib/supabase/browser";
 import {
   applyEnrichmentChange,
@@ -50,24 +58,71 @@ import { adminDirectEditsAction } from "./admin-actions";
  * line for display, which is fine to read and impossible to edit — you cannot
  * type a correction into half a composed string.
  */
+/**
+ * Both the row's geometry and the content inside it move on the same eased
+ * tween — no spring. A spring, even a bounceless one, spends its last third
+ * creeping toward the target, which on a 40px height change reads as the row
+ * hesitating rather than settling.
+ *
+ * The curve is the standard decelerate: quick off the mark, long slow finish,
+ * no overshoot. The swap runs shorter than the resize so the content is
+ * already in place while the row is still finding its height.
+ */
+const ROW_TRANSITION = { duration: 0.32, ease: [0.32, 0.72, 0, 1] } as const;
+const SWAP_TRANSITION = { duration: 0.18, ease: [0.32, 0.72, 0, 1] } as const;
+
 const FIELDS: {
   label: string;
   /** Live value, read from panel state so Realtime updates flow through. */
-  read: (state: BasicInfoState, info: ReturnType<typeof buildBasicInfo>) => string | null;
+  read: (
+    state: BasicInfoState,
+    info: ReturnType<typeof buildBasicInfo>,
+  ) => string | null;
   /** The organisations column (or `mission_statement`) this row edits. */
   column: string | null;
 }[] = [
-  { label: "Registered name", read: (state) => state.organisation.legal_name, column: "legal_name" },
-  { label: "Mission", read: (state) => state.missionStatement, column: "mission_statement" },
+  {
+    label: "Registered name",
+    read: (state) => state.organisation.legal_name,
+    column: "legal_name",
+  },
+  {
+    label: "Mission",
+    read: (state) => state.missionStatement,
+    column: "mission_statement",
+  },
   { label: "Type", read: (_state, info) => info.type, column: null },
-  { label: "Pipeline stage", read: (_state, info) => info.status, column: null },
-  { label: "Email", read: (state) => state.organisation.contact_email, column: "contact_email" },
-  { label: "Website", read: (state) => state.organisation.website, column: "website" },
-  { label: "Address", read: (state) => state.organisation.address_line_1, column: "address_line_1" },
-  { label: "Town or city", read: (state) => state.organisation.city, column: "city" },
-  { label: "Postcode", read: (state) => state.organisation.postcode, column: "postcode" },
+  {
+    label: "Pipeline stage",
+    read: (_state, info) => info.status,
+    column: null,
+  },
+  {
+    label: "Email",
+    read: (state) => state.organisation.contact_email,
+    column: "contact_email",
+  },
+  {
+    label: "Website",
+    read: (state) => state.organisation.website,
+    column: "website",
+  },
+  {
+    label: "Address",
+    read: (state) => state.organisation.address_line_1,
+    column: "address_line_1",
+  },
+  {
+    label: "Town or city",
+    read: (state) => state.organisation.city,
+    column: "city",
+  },
+  {
+    label: "Postcode",
+    read: (state) => state.organisation.postcode,
+    column: "postcode",
+  },
 ];
-
 
 /**
  * F068 — name, type, mission, email, address, location and status together in one
@@ -118,6 +173,7 @@ export function BasicInfoPanel({
   // Rows opened for editing, and what has been typed into them. Two maps rather
   // than one: a row can be open with the value untouched, which is not a change
   // and must not count toward the submit bar.
+  const [editMode, setEditMode] = useState(false);
   const [editing, setEditing] = useState<string[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [reason, setReason] = useState("");
@@ -202,6 +258,22 @@ export function BasicInfoPanel({
   const info = buildBasicInfo(state);
   const fieldErrors = fieldErrorsFrom(result);
 
+  /** Columns this viewer may write, in row order. */
+  const writableColumns = FIELDS.flatMap(({ column }) => {
+    if (!column) return [];
+    // Mission is not a column on organisations — it is the newest enrichment
+    // row — so it can never be a suggestion. An admin writes it directly; a CAM
+    // has nowhere to send it.
+    if (column === "mission_statement") return isAdmin ? [column] : [];
+    if (!editable.has(column)) return [];
+    if (isAdmin) return [column];
+    if (!isCam) return [];
+    // A field another CAM is already correcting is not offered: the RPC refuses
+    // it, and an input that cannot be submitted is worse than no input.
+    const blocking = pendingByField.get(column);
+    return blocking && blocking.requested_by !== actorId ? [] : [column];
+  });
+
   /** Rows whose draft actually differs from what is on record. */
   const changes = FIELDS.flatMap(({ column, read }) => {
     if (!column) return [];
@@ -213,19 +285,32 @@ export function BasicInfoPanel({
     return [{ fieldName: column, value }];
   });
 
-  function openRow(column: string, current: string | null) {
+  /**
+   * Opens one row for editing, and makes sure the card is in edit mode — the
+   * Add button on an empty row is a shortcut into the same state, not a
+   * separate one.
+   */
+  function openRow(column: string) {
+    const row = FIELDS.find((candidate) => candidate.column === column);
+    setEditMode(true);
     setEditing((rows) => (rows.includes(column) ? rows : [...rows, column]));
-    setDrafts((current_) => ({ ...current_, [column]: current_[column] ?? (current ?? "") }));
+    setDrafts((current) => ({
+      ...current,
+      [column]: current[column] ?? row?.read(state, info) ?? "",
+    }));
   }
 
   function closeRow(column: string) {
     setEditing((rows) => rows.filter((row) => row !== column));
     setDrafts((current) =>
-      Object.fromEntries(Object.entries(current).filter(([field]) => field !== column)),
+      Object.fromEntries(
+        Object.entries(current).filter(([field]) => field !== column),
+      ),
     );
   }
 
   function discardAll() {
+    setEditMode(false);
     setEditing([]);
     setDrafts({});
     setReason("");
@@ -236,7 +321,10 @@ export function BasicInfoPanel({
     if (changes.length === 0) return;
     startTransition(async () => {
       const next = isAdmin
-        ? await adminDirectEditsAction({ organisationId: organisation.id, changes })
+        ? await adminDirectEditsAction({
+            organisationId: organisation.id,
+            changes,
+          })
         : await suggestEditsAction({
             organisationId: organisation.id,
             reason: reason.trim() || null,
@@ -269,7 +357,41 @@ export function BasicInfoPanel({
           ? "Sourced from the registers above. A blank is a gap in the public record, not an error. Corrections go to an admin for review."
           : "Sourced from the registers above. A blank is a gap in the public record, not an error."
       }
-      action={action}
+      action={
+        action ??
+        (writableColumns.length > 0 ? (
+          /* One control for the whole card, where "Suggest an edit" used to be.
+             A pencil on every row, permanently, was six affordances for an act
+             that happens once a month, crowding values that are mostly two
+             words long. Pressing this does not open anything — it arms the
+             card: the rows keep reading as rows and each one this viewer may
+             write grows its own Edit button. Opening every input at once was
+             the other extreme, and turned a record you were reading into a
+             form you had not asked for. */
+          <OriginButton
+            size="xs"
+            variant={editMode ? "outline" : "blue"}
+            onClick={() => (editMode ? discardAll() : setEditMode(true))}
+            type="button"
+          >
+            {/* "Done" while nothing has been typed, "Cancel" once something
+                has — pressing it throws the drafts away, and a button that
+                says Done has no business doing that silently. */}
+            {editMode ? (
+              changes.length > 0 ? (
+                "Cancel"
+              ) : (
+                "Done"
+              )
+            ) : (
+              <>
+                <PencilLine aria-hidden="true" className="size-3.5" />
+                Edit
+              </>
+            )}
+          </OriginButton>
+        ) : null)
+      }
     >
       {/* Label-beside-value rather than label-above-value: these are short
           field names against short values, and stacking them doubled the card's
@@ -280,21 +402,24 @@ export function BasicInfoPanel({
           const display = raw?.trim() ? raw.trim() : NOT_PROVIDED;
           const missing = display === NOT_PROVIDED;
 
-          // Mission is not a column on organisations — it is the newest
-          // enrichment row — so it can never be a suggestion. An admin writes it
-          // directly; a CAM has nowhere to send it.
-          const missionOnly = column === "mission_statement";
-          const mayEdit =
-            column !== null &&
-            (isAdmin ? missionOnly || editable.has(column) : isCam && editable.has(column));
-
+          const mayEdit = column !== null && writableColumns.includes(column);
           const blocking = column ? pendingByField.get(column) : undefined;
           const blockedByOther =
-            !isAdmin && blocking !== undefined && blocking.requested_by !== actorId;
+            !isAdmin &&
+            blocking !== undefined &&
+            blocking.requested_by !== actorId;
           const isOpen = column !== null && editing.includes(column);
 
           return (
-            <div
+            /* `layout` on the row, not a height animation on the editor: the
+               capsule needs its overflow visible (the droplet flies past its
+               own box and the goo filter paints outside it), and animating a
+               height means clipping. Letting the row measure both states and
+               travel between them keeps the rows below from jumping while the
+               input is still on screen. */
+            <motion.div
+              layout
+              transition={ROW_TRANSITION}
               key={label}
               className="grid gap-x-4 gap-y-0.5 border-t border-rule-soft py-2.5 first:border-t-0 first:pt-0 sm:grid-cols-[132px_minmax(0,1fr)]"
             >
@@ -304,51 +429,82 @@ export function BasicInfoPanel({
                   missing ? "text-faint" : "text-ink"
                 }`}
               >
-                {isOpen && column ? (
-                  <InlineFieldInput
-                    fieldName={column}
-                    label={label}
-                    value={drafts[column] ?? ""}
-                    currentValue={raw}
-                    error={fieldErrors[column]}
-                    onChange={(next) =>
-                      setDrafts((current) => ({ ...current, [column]: next }))
-                    }
-                    onCancel={() => closeRow(column)}
-                  />
-                ) : (
-                  <div className="flex min-w-0 items-center gap-2.5">
-                    <span className="min-w-0 break-words">{display}</span>
+                {/* `wait`, so the outgoing state is gone before the incoming
+                    one starts: crossfading a 42px capsule over a line of text
+                    reads as a smear, and the row's own layout animation has
+                    nothing sensible to measure while both are present. */}
+                <AnimatePresence initial={false} mode="wait">
+                  {isOpen && column ? (
+                    <motion.div
+                      key="editing"
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={SWAP_TRANSITION}
+                      className="min-w-0"
+                    >
+                      <InlineFieldInput
+                        fieldName={column}
+                        label={label}
+                        value={drafts[column] ?? ""}
+                        currentValue={raw}
+                        error={fieldErrors[column]}
+                        onChange={(next) =>
+                          setDrafts((current) => ({
+                            ...current,
+                            [column]: next,
+                          }))
+                        }
+                        onCancel={() => closeRow(column)}
+                        onSubmit={submit}
+                        pending={pending}
+                      />
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="reading"
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 4 }}
+                      transition={SWAP_TRANSITION}
+                      className="flex min-w-0 items-center gap-2.5"
+                    >
+                      <span className="min-w-0 break-words">{display}</span>
 
-                    {mayEdit && !blockedByOther && (
-                      <button
-                        type="button"
-                        aria-label={`${missing ? "Add" : "Edit"} ${label.toLowerCase()}`}
-                        onClick={() => openRow(column, raw)}
-                        className="inline-flex shrink-0 items-center gap-1 rounded-inset border border-rule bg-white px-2 py-0.5 text-[12px] font-semibold text-lead transition-colors hover:border-lead focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none"
-                      >
-                        {missing ? (
-                          <>
-                            <Plus aria-hidden="true" className="size-3" />
-                            Add
-                          </>
-                        ) : (
-                          <>
-                            <Pencil aria-hidden="true" className="size-3" />
-                            Edit
-                          </>
-                        )}
-                      </button>
-                    )}
+                      {/* Add is always there on an empty row: a blank is a gap
+                        someone can close in one action, and the button is the
+                        only thing on an otherwise empty line, so it crowds
+                        nothing. Edit appears only once the card is armed. */}
+                      {mayEdit && (missing || editMode) && (
+                        <button
+                          type="button"
+                          aria-label={`${missing ? "Add" : "Edit"} ${label.toLowerCase()}`}
+                          onClick={() => openRow(column)}
+                          className="inline-flex shrink-0 items-center gap-1 rounded-inset border border-rule bg-white px-2 py-0.5 text-[12px] font-semibold text-lead transition-colors hover:border-lead focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none"
+                        >
+                          {missing ? (
+                            <>
+                              <Plus aria-hidden="true" className="size-3" />
+                              Add
+                            </>
+                          ) : (
+                            <>
+                              <Pencil aria-hidden="true" className="size-3" />
+                              Edit
+                            </>
+                          )}
+                        </button>
+                      )}
 
-                    {blockedByOther && (
-                      <span className="inline-flex shrink-0 items-center gap-1 text-[12px] text-faint">
-                        <Lock aria-hidden="true" className="size-3" />
-                        Correction pending
-                      </span>
-                    )}
-                  </div>
-                )}
+                      {blockedByOther && (
+                        <span className="inline-flex shrink-0 items-center gap-1 text-[12px] text-faint">
+                          <Lock aria-hidden="true" className="size-3" />
+                          Correction pending
+                        </span>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 {/* An open proposal by this CAM: the row still shows the live
                     value, because that is what it is until an admin says
@@ -356,36 +512,51 @@ export function BasicInfoPanel({
                 {blocking && !blockedByOther && !isOpen && (
                   <p className="text-[12px] text-dim">
                     You proposed{" "}
-                    <span className="font-semibold text-ink">{blocking.proposed_value}</span> —
-                    awaiting review.
+                    <span className="font-semibold text-ink">
+                      {blocking.proposed_value}
+                    </span>{" "}
+                    — awaiting review.
                   </p>
                 )}
 
                 {/* A field that failed while its row is shut: the message would
                     otherwise vanish with the input. */}
                 {column && !isOpen && fieldErrors[column] && (
-                  <p className="text-[12px] font-semibold text-stop" role="alert">
+                  <p
+                    className="text-[12px] font-semibold text-stop"
+                    role="alert"
+                  >
                     {fieldErrors[column]}
                   </p>
                 )}
               </dd>
-            </div>
+            </motion.div>
           );
         })}
       </dl>
 
-      {changes.length > 0 && (
-        <EditDraftBar
-          count={changes.length}
-          isCam={!isAdmin}
-          reason={reason}
-          onReasonChange={setReason}
-          onSubmit={submit}
-          onDiscard={discardAll}
-          pending={pending}
-          state={result}
-        />
-      )}
+      <AnimatePresence initial={false}>
+        {changes.length > 0 && (
+          <motion.div
+            key="draft-bar"
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={SWAP_TRANSITION}
+          >
+            <EditDraftBar
+              count={changes.length}
+              isCam={!isAdmin}
+              reason={reason}
+              onReasonChange={setReason}
+              onSubmit={submit}
+              onDiscard={discardAll}
+              pending={pending}
+              state={result}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Nothing pending, but the last submission said something worth keeping
           on screen — a success, or a failure that closed every row. */}

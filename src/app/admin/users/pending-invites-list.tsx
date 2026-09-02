@@ -4,6 +4,7 @@ import { useState } from "react";
 import { isInviteExpired, type PendingInvite } from "@/lib/admin/team-realtime";
 import { cancelInviteAction, resendInviteAction } from "./invite-actions";
 import { InlineAlert } from "@/components/ui/inline-alert";
+import { DeleteButton } from "@/components/ui/delete-button";
 
 type ActionResult = { text: string; status: "success" | "warning" | "error" };
 
@@ -38,11 +39,7 @@ export function PendingInvitesList({
     }
   }
 
-  async function handleCancel(id: string, email: string) {
-    if (!confirm(`Cancel the invite to ${email}? They'll need a brand-new invite to join.`)) {
-      return;
-    }
-
+  async function handleCancel(id: string) {
     setCancellingId(id);
 
     const result = await cancelInviteAction(id);
@@ -76,16 +73,16 @@ export function PendingInvitesList({
         const expired = isInviteExpired(invite.invited_at);
         const busy = resendingId === invite.id || cancellingId === invite.id;
         return (
-          <li key={invite.id} className="flex flex-col gap-1 py-2">
-            <div className="flex items-center justify-between gap-3">
+          <li key={invite.id} className="flex flex-col gap-1 py-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <span className="flex items-center gap-2">
                 <span className="font-bold">{invite.email}</span>
                 <span className="rounded-full bg-black/5 px-2 py-0.5 text-xs font-bold text-foreground/70">
                   {ROLE_LABEL[invite.role]}
                 </span>
               </span>
-              <div className="flex items-center gap-3">
-                <span className="text-foreground/60">
+              <div className="flex items-center gap-2.5">
+                <span className="text-xs text-foreground/60">
                   Invited {new Date(invite.invited_at).toLocaleDateString("en-GB")}
                   {expired && <span className="ml-2 font-bold text-red-700">Expired</span>}
                 </span>
@@ -93,18 +90,20 @@ export function PendingInvitesList({
                   type="button"
                   disabled={busy}
                   onClick={() => handleResend(invite.id)}
-                  className="rounded-lg border border-black/15 px-3 py-1.5 text-xs font-bold transition-colors hover:border-brand disabled:cursor-wait disabled:opacity-50"
+                  className="h-7 rounded-full border border-black/10 bg-white px-3 text-xs font-semibold text-foreground shadow-2xs transition-all hover:border-brand/40 hover:bg-brand/5 hover:text-brand disabled:cursor-wait disabled:opacity-50"
                 >
-                  {resendingId === invite.id ? "Resending..." : "Resend"}
+                  {resendingId === invite.id ? "Resending…" : "Resend"}
                 </button>
-                <button
-                  type="button"
+                <DeleteButton
+                  label="Cancel"
+                  confirmLabel="Revoke?"
+                  deletingLabel="Cancelling…"
+                  size="xs"
+                  variant="subtle"
                   disabled={busy}
-                  onClick={() => handleCancel(invite.id, invite.email)}
-                  className="rounded-lg border border-black/15 px-3 py-1.5 text-xs font-bold text-red-700 transition-colors hover:border-red-700 disabled:cursor-wait disabled:opacity-50"
-                >
-                  {cancellingId === invite.id ? "Cancelling..." : "Cancel"}
-                </button>
+                  loading={cancellingId === invite.id}
+                  onConfirm={() => handleCancel(invite.id)}
+                />
               </div>
             </div>
             {result &&

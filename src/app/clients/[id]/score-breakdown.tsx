@@ -453,7 +453,19 @@ function ScoreMethodDialog({
     // it read as a flash rather than the trigger becoming the panel. 0.5s with
     // bounce 0 is a critically damped spring: it settles once, from the exact
     // rect of the "?" button, so the morph is legible without feeling slack.
-    <MorphingDialog transition={{ type: "spring", bounce: 0, duration: 0.5 }}>
+    //
+    // The trigger is a circle and the panel is 16px, so Motion interpolates the
+    // corner radius across the whole morph and the panel spends its first
+    // frames with oversized, over-round corners. A fast standalone tween for
+    // borderRadius snaps the corners while the box still morphs on the spring.
+    <MorphingDialog
+      transition={{
+        type: "spring",
+        bounce: 0,
+        duration: 0.5,
+        borderRadius: { type: "tween", duration: 0.08 },
+      }}
+    >
       <MorphingDialogTrigger
         className="flex size-6 items-center justify-center rounded-full border border-rule bg-white text-faint transition-colors hover:border-lead-mid hover:text-lead focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead-mid"
         style={{ borderRadius: "9999px" }}
@@ -473,7 +485,7 @@ function ScoreMethodDialog({
               the body blurs through it as it scrolls under. The close is inside
               the bar — an absolutely-positioned one anchors to the scroll
               container and scrolls away with it. */}
-          <div className="sticky top-0 z-20 rounded-t-[16px] border-b border-rule-soft bg-white/85 px-6 pt-5 pb-4 backdrop-blur-[4px] backdrop-saturate-150">
+          <div className="sticky top-0 z-20 rounded-t-[16px] border-b border-rule-soft bg-white/75 px-6 pt-5 pb-4 backdrop-blur-[10px] backdrop-saturate-150">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <MorphingDialogTitle>

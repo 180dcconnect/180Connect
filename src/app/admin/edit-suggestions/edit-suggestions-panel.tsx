@@ -122,6 +122,15 @@ export function EditSuggestionsPanel({
                   {personLabel(row.requested_by_user)} proposed this on{" "}
                   {new Date(row.created_at).toLocaleString("en-GB")}
                 </p>
+
+                {/* The requester's own note (20260913120000). On an identity
+                    field this is often the only thing separating a checked
+                    correction from a typo. */}
+                {row.reason && (
+                  <p className="mt-2 border-l-2 border-amber-300 pl-2.5 text-sm text-foreground/80">
+                    {row.reason}
+                  </p>
+                )}
                 <label
                   className="mt-3 block text-sm font-bold"
                   htmlFor={`reason-${row.id}`}

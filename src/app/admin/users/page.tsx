@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
@@ -168,13 +167,6 @@ export default async function AdminUsersPage({
               <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
                 Team members
               </h1>
-              <p className="mt-3 max-w-xl text-sm leading-[1.7] text-foreground/65">
-                Role changes apply on the user&apos;s next request.{" "}
-                <Link className="font-bold text-brand underline" href="/admin/offboard">
-                  Reassign a leaver&apos;s clients
-                </Link>
-                .
-              </p>
             </div>
             <div className="shrink-0 pt-1">
               <InviteDialog />

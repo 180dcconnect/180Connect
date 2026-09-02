@@ -61,7 +61,13 @@ export function TagsCard({
                 current.some((t) => t.id === newTag.id) ? current : [...current, newTag],
               )
             }
-            onAssigned={(tag) => setClientTags((current) => [...current, tag])}
+            onBatchAssigned={(tags: AvailableTag[]) =>
+              setClientTags((current) => {
+                const existingIds = new Set(current.map((t: ClientTag) => t.id));
+                const newOnes = tags.filter((t: AvailableTag) => !existingIds.has(t.id));
+                return [...current, ...newOnes];
+              })
+            }
           />
         ) : null
       }

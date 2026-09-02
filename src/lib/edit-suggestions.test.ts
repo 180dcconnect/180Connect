@@ -2,6 +2,16 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   decideEditRpcFailure,
+  fieldWarnings,
+  inputTypeFor,
+  isLongFormField,
+  isUnchanged,
+  maxLengthFor,
+  normalisationNote,
+  normaliseFieldValue,
+  summariseBatch,
+  validateReason,
+  REASON_MAX_LENGTH,
   describePendingSuggestion,
   isSensitiveOrgField,
   pendingSuggestionNotice,
@@ -390,5 +400,142 @@ describe("restrictedFieldRpcFailure (F020)", () => {
 
   it("handles an empty error safely", () => {
     assert.equal(restrictedFieldRpcFailure({}).status, 500);
+  });
+});
+
+describe("normaliseFieldValue", () => {
+  it("collapses whitespace without changing what a value says", () => {
+    assert.equal(normaliseFieldValue("legal_name", "  St   Mary's  Trust "), "St Mary's Trust");
+  });
+
+  it("gives a bare domain a scheme and drops a trailing slash", () => {
+    assert.equal(normaliseFieldValue("website", "example.org/"), "https://example.org");
+    assert.equal(normaliseFieldValue("website", "http://example.org"), "http://example.org");
+  });
+
+  it("strips mailto: and lowercases an address", () => {
+    assert.equal(normaliseFieldValue("contact_email", "MailTo:Info@Example.ORG"), "info@example.org");
+  });
+
+  it("puts a UK postcode into canonical form", () => {
+    assert.equal(normaliseFieldValue("postcode", "sw1a1aa"), "SW1A 1AA");
+    assert.equal(normaliseFieldValue("postcode", " ec1a 1bb "), "EC1A 1BB");
+  });
+
+  it("leaves a non-UK postcode alone beyond casing", () => {
+    assert.equal(normaliseFieldValue("postcode", "75008"), "75008");
+  });
+
+  it("returns empty for a blank value", () => {
+    assert.equal(normaliseFieldValue("city", "   "), "");
+  });
+});
+
+describe("normalisationNote", () => {
+  it("says nothing when the value is already canonical", () => {
+    assert.equal(normalisationNote("website", "https://example.org"), null);
+  });
+
+  it("reports the rewrite when there is one", () => {
+    assert.equal(
+      normalisationNote("website", "example.org"),
+      "Will be saved as https://example.org",
+    );
+  });
+});
+
+describe("fieldWarnings", () => {
+  it("warns on a value that cannot be an email, without refusing it", () => {
+    assert.equal(fieldWarnings("contact_email", "info@example.org").length, 0);
+    assert.equal(fieldWarnings("contact_email", "info-at-example").length, 1);
+  });
+
+  it("warns on a web address with no dot in the host", () => {
+    assert.equal(fieldWarnings("website", "example.org/about").length, 0);
+    assert.equal(fieldWarnings("website", "localhost").length, 1);
+  });
+
+  it("warns on a postcode that is not recognisably UK", () => {
+    assert.equal(fieldWarnings("postcode", "SW1A 1AA").length, 0);
+    assert.equal(fieldWarnings("postcode", "75008").length, 1);
+  });
+
+  it("flags an all-capitals legal name", () => {
+    assert.equal(fieldWarnings("legal_name", "ST MARYS TRUST").length, 1);
+    assert.equal(fieldWarnings("legal_name", "St Marys Trust").length, 0);
+  });
+
+  it("says nothing about an empty value — that is the input's job", () => {
+    assert.deepEqual(fieldWarnings("contact_email", "  "), []);
+  });
+});
+
+describe("isUnchanged", () => {
+  it("compares normalised against stored, so a scheme is not a change", () => {
+    assert.equal(isUnchanged("website", "example.org", "https://example.org"), true);
+    assert.equal(isUnchanged("website", "example.com", "https://example.org"), false);
+  });
+
+  it("treats a null current value as empty", () => {
+    assert.equal(isUnchanged("city", "Leeds", null), false);
+  });
+});
+
+describe("field shape helpers", () => {
+  it("caps each seeded field where the column does", () => {
+    assert.equal(maxLengthFor("postcode"), 32);
+    assert.equal(maxLengthFor("legal_name"), 200);
+    assert.equal(maxLengthFor("something_an_admin_added"), 500);
+  });
+
+  it("treats prose fields as long-form and identifiers as not", () => {
+    assert.equal(isLongFormField("mission_statement"), true);
+    assert.equal(isLongFormField("postcode"), false);
+  });
+
+  it("picks the input type that gets the right keyboard", () => {
+    assert.equal(inputTypeFor("contact_email"), "email");
+    assert.equal(inputTypeFor("website"), "url");
+    assert.equal(inputTypeFor("city"), "text");
+  });
+});
+
+describe("validateReason", () => {
+  it("accepts absent, null and blank as no note", () => {
+    assert.deepEqual(validateReason(undefined), { ok: true, value: null });
+    assert.deepEqual(validateReason(null), { ok: true, value: null });
+    assert.deepEqual(validateReason("   "), { ok: true, value: null });
+  });
+
+  it("trims a real note", () => {
+    assert.deepEqual(validateReason("  checked today "), { ok: true, value: "checked today" });
+  });
+
+  it("refuses one past the column's cap", () => {
+    const result = validateReason("x".repeat(REASON_MAX_LENGTH + 1));
+    assert.equal(result.ok, false);
+  });
+});
+
+describe("summariseBatch", () => {
+  const ok = (fieldName: string) => ({ fieldName, ok: true, message: "" });
+  const bad = (fieldName: string, message: string) => ({ fieldName, ok: false, message });
+
+  it("reports a clean run as success", () => {
+    const state = summariseBatch([ok("city"), ok("postcode")], "proposed");
+    assert.equal(state.kind, "success");
+    assert.match(state.message, /2 changes proposed/);
+  });
+
+  it("uses the single failure's own message when nothing landed", () => {
+    const state = summariseBatch([bad("city", "another team member has one pending")], "proposed");
+    assert.equal(state.kind, "error");
+    assert.equal(state.message, "another team member has one pending");
+  });
+
+  it("keeps the successes visible when only some fail", () => {
+    const state = summariseBatch([ok("city"), bad("postcode", "too long")], "saved");
+    assert.equal(state.kind, "partial");
+    assert.match(state.message, /1 saved, 1 could not be/);
   });
 });

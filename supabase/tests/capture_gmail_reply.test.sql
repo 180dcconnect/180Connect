@@ -1,7 +1,7 @@
 -- F131 Detect Replies database contract. Run with `supabase test db`.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(10);
+select plan(13);
 
 select ok(
   not has_function_privilege(
@@ -94,6 +94,49 @@ select is(
       and detail ->> 'provider_message_id' = 'gmail-f131-2'),
   1::bigint,
   'capturing a previously flagged reply resolves the review flag'
+);
+
+-- F149 AC2: a reply arriving for a client a CAM already closed out must not
+-- silently reopen it. capture_gmail_reply delegates the transition to
+-- mark_organisation_responded (20260912170100), which carries this guarantee.
+insert into public.organisations (
+  id, legal_name, entry_method, organisation_type, outreach_status
+) values (
+  '00000000-0000-4000-c131-000000000002', 'F149 Converted Charity', 'manual', 'charity', 'converted'
+);
+
+insert into public.outreach_messages (
+  id, organisation_id, subject, body, send_status, sent_at, sent_to_email
+) values (
+  '00000000-0000-4000-d131-000000000003',
+  '00000000-0000-4000-c131-000000000002',
+  'F149 hello', 'Hello', 'sent', now(), 'contact@already-converted.org'
+);
+
+select isnt(
+  public.capture_gmail_reply(
+    'gmail-f149-1',
+    '00000000-0000-4000-d131-000000000003',
+    '00000000-0000-4000-c131-000000000002',
+    'Thanks again!',
+    '2026-08-26T11:00:00Z',
+    'contact@already-converted.org'
+  ),
+  null,
+  'a reply is still captured for a client with a final status'
+);
+
+select is(
+  (select outreach_status::text from public.organisations where id = '00000000-0000-4000-c131-000000000002'),
+  'converted',
+  'the converted status is not overridden by the reply'
+);
+
+select is(
+  (select count(*) from public.audit_log
+    where action = 'status_changed' and target_id = '00000000-0000-4000-c131-000000000002'),
+  0::bigint,
+  'no status_changed row is written when the transition is refused'
 );
 
 select * from finish();

@@ -6,10 +6,12 @@ import {
   describeStatusFilter,
   filterOutreachHistory,
   STATUS_FILTERS,
+  type EmailThreadEntry,
   type OutreachHistory as OutreachHistoryData,
   type StatusFilter,
 } from "@/lib/outreach-history";
 import { isRichEmailHtml, sanitizeEmailHtml } from "@/lib/outreach/email-html";
+import { AddNoteForm } from "./add-note-form";
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleDateString("en-GB", {
@@ -52,6 +54,86 @@ function StatusBadge({ status }: { status: OutreachHistoryData["sent"][number]["
   );
 }
 
+function FullEmailThread({
+  entries,
+  error,
+  noteOrganisationId,
+}: {
+  entries: readonly EmailThreadEntry[];
+  error: boolean;
+  noteOrganisationId?: string;
+}) {
+  return (
+    <section id="email-thread" aria-labelledby="email-thread-heading" className="mt-5 scroll-mt-24 rounded-xl border border-black/10 bg-black/[0.02] p-4">
+      <h3 id="email-thread-heading" className="text-sm font-bold text-foreground">
+        Full email thread
+      </h3>
+      <p className="mt-1 text-xs text-foreground/60">
+        Sent emails and client replies, oldest first.
+      </p>
+
+      {error ? (
+        <p className="mt-3 text-sm font-medium text-red-800" role="alert">
+          The full email thread could not be loaded. Refresh and try again.
+        </p>
+      ) : entries.length === 0 ? (
+        <p className="mt-3 text-sm text-foreground/65">
+          No sent emails or replies are available for this client yet.
+        </p>
+      ) : (
+        <ol className="mt-4 space-y-3">
+          {entries.map((entry) => {
+            const incoming = entry.kind === "incoming";
+            return (
+              <li
+                id={incoming ? `thread-reply-${entry.id}` : `thread-email-${entry.id}`}
+                key={`${entry.kind}-${entry.id}`}
+                className={`scroll-mt-24 rounded-xl border p-3 ${
+                  incoming
+                    ? "ml-0 mr-6 border-brand/20 bg-brand/5"
+                    : "ml-6 mr-0 border-black/10 bg-white"
+                }`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide text-foreground/60">
+                      {incoming ? "Client replied" : "180Connect sent"}
+                    </p>
+                    {entry.subject && <p className="mt-0.5 text-sm font-semibold">{entry.subject}</p>}
+                  </div>
+                  <time className="text-xs text-foreground/55" dateTime={entry.occurredAt}>
+                    {new Date(entry.occurredAt).toLocaleString("en-GB", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </time>
+                </div>
+                <EmailBodyPreview body={entry.body} />
+                {incoming && noteOrganisationId && (
+                  <div className="mt-3 border-t border-brand/10 pt-3">
+                    <AddNoteForm
+                      organisationId={noteOrganisationId}
+                      replyEventId={entry.id}
+                    />
+                  </div>
+                )}
+                {!incoming && (
+                  <p className="mt-2 text-xs text-foreground/55">
+                    Sent by {entry.senderName || "a former team member"}
+                  </p>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
+  );
+}
+
 /**
  * F070/F130: a client's outreach history, split into what the client has
  * actually received (F070 AC1) and what has not reached them yet (AC3), with
@@ -64,9 +146,15 @@ function StatusBadge({ status }: { status: OutreachHistoryData["sent"][number]["
 export function OutreachHistorySection({
   history,
   error,
+  thread,
+  threadError,
+  noteOrganisationId,
 }: {
   history: OutreachHistoryData;
   error: boolean;
+  thread: readonly EmailThreadEntry[];
+  threadError: boolean;
+  noteOrganisationId?: string;
 }) {
   // F130 AC3: filter selection is view state, not data state — it lives here,
   // never in the query, so the sent/not-sent grouping above it cannot drift.
@@ -85,10 +173,19 @@ export function OutreachHistorySection({
 
   return (
     <div className="mt-3">
+      <a className="text-sm font-semibold text-brand underline underline-offset-2" href="#email-thread">
+        View full email thread
+      </a>
+      <FullEmailThread
+        entries={thread}
+        error={threadError}
+        noteOrganisationId={noteOrganisationId}
+      />
+
       {/* AC3's filter: one control, five states, no page reload. Buttons with
           aria-pressed rather than a <select> — four options fit in a row and
           stay visible, which is the point of scanning at a glance. */}
-      <div role="group" aria-label="Filter emails by status" className="flex flex-wrap gap-1.5">
+      <div role="group" aria-label="Filter emails by status" className="mt-5 flex flex-wrap gap-1.5">
         {STATUS_FILTERS.map((option) => {
           const active = option === filter;
           return (

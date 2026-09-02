@@ -134,9 +134,22 @@ export function TimelineSection({
               <dd className="text-ink">{entry.handover.reason}</dd>
             </dl>
           ) : (
-            <p className="mt-2.5 whitespace-pre-wrap text-sm leading-[1.65] text-ink">
-              {entry.summary}
-            </p>
+<>
+              <p className="mt-2.5 whitespace-pre-wrap text-sm leading-[1.65] text-ink">
+                {entry.summary}
+              </p>
+              {/* F136's jump to the thread, in the redesign's ink and lead
+                  rather than the old foreground/brand tokens the incoming
+                  branch was written against. */}
+              {entry.type === "reply_received" && (
+                <a
+                  className="mt-2 inline-block text-sm font-semibold text-lead underline underline-offset-2"
+                  href={`#thread-reply-${entry.id.slice("reply-".length)}`}
+                >
+                  View full email thread
+                </a>
+              )}
+            </>
           )}
         </li>
       ))}

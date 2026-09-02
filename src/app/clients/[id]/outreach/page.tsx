@@ -4,7 +4,12 @@ import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { hasPermission } from "@/lib/auth/permissions";
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
-import { splitOutreachHistory, type OutreachMessageRow } from "@/lib/outreach-history";
+import {
+  buildEmailThread,
+  splitOutreachHistory,
+  type OutreachMessageRow,
+  type ThreadReplyRow,
+} from "@/lib/outreach-history";
 import { deriveSourcesFromSavedRow } from "@/lib/booklet/sources";
 import {
   emailSendWindowStart,
@@ -69,9 +74,19 @@ export default async function ClientOutreachPage({
   const supabase = await createClient();
 
   const canContact = hasPermission(actor.role, "client:contact");
+  const canEdit = hasPermission(actor.role, "client:edit");
   const isAdmin = actor.role === "admin";
 
-  const [owner, suppression, website, bookletResult, outreachResult, scheduledResult, failedResult] =
+  const [
+    owner,
+    suppression,
+    website,
+    bookletResult,
+    outreachResult,
+    scheduledResult,
+    failedResult,
+    replyResult,
+  ] =
     await Promise.all([
       loadOwner(id),
       loadSuppression(id),
@@ -112,6 +127,15 @@ export default async function ClientOutreachPage({
         .eq("send_status", "failed")
         .order("updated_at", { ascending: false })
         .returns<FailedEmailRow[]>(),
+      // F134: replies, for the conversation view. The overview page fetched
+      // these before the tab split moved everything outreach here; RLS scopes
+      // them by the same active-user rule as the messages themselves, so this
+      // opens no wider access path.
+      supabase
+        .from("reply_events")
+        .select("id, outreach_message_id, reply_body, received_at")
+        .eq("organisation_id", id)
+        .returns<ThreadReplyRow[]>(),
     ]);
 
   for (const [operation, error] of [
@@ -119,6 +143,7 @@ export default async function ClientOutreachPage({
     ["clients.detail_outreach", outreachResult.error],
     ["clients.detail_scheduled_emails", scheduledResult.error],
     ["clients.detail_failed_emails", failedResult.error],
+    ["clients.detail_replies", replyResult.error],
   ] as const) {
     if (error) await reportError(error, { operation, organisationId: id });
   }
@@ -127,6 +152,13 @@ export default async function ClientOutreachPage({
   const outreachHistory = splitOutreachHistory(
     // `as unknown` — supabase-js infers the users join as an array.
     (outreachResult.data ?? []) as unknown as OutreachMessageRow[],
+  );
+
+  // F134: only delivered messages belong in the client-visible conversation;
+  // drafts, scheduled messages and failures stay in the F070 list above it.
+  const emailThread = buildEmailThread(
+    outreachHistory.sent,
+    replyResult.data ?? [],
   );
 
   // F129: the reason comes from the newest SEND_EVENTS 'failed' record per
@@ -379,6 +411,11 @@ export default async function ClientOutreachPage({
               <OutreachHistorySection
                 history={outreachHistory}
                 error={Boolean(outreachResult.error)}
+                thread={emailThread}
+                threadError={Boolean(outreachResult.error || replyResult.error)}
+                // F136: a note written against a reply is linked to it, so only
+                // someone who may write to the record gets the composer.
+                noteOrganisationId={canEdit ? client.id : undefined}
               />
 
               {/* F101: the follow-up trigger only exists while the client sits

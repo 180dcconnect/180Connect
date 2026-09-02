@@ -3,8 +3,12 @@ import { describe, it } from "node:test";
 import {
   DEFAULT_RECOVERY_WINDOW_SECONDS,
   emailSchema,
+  fullNameSchema,
   isRecoveryAllowedPath,
+  MAX_FULL_NAME_LENGTH,
+  NAME_TOO_LONG_MESSAGE,
   newPasswordSchema,
+  normalizeFullName,
   passwordSchema,
   readRecoveryMarker,
   recoveryWindowSeconds,
@@ -91,6 +95,25 @@ describe("validation", () => {
     });
     assert.equal(result.success, false);
     assert.deepEqual(result.error?.issues[0]?.path, ["confirmPassword"]);
+  });
+
+  it("normalises and strips control/invisible characters from full names", () => {
+    assert.equal(normalizeFullName("  Jane   Doe  "), "Jane Doe");
+    assert.equal(normalizeFullName("Jane\u200BDoe"), "Jane Doe");
+    assert.equal(normalizeFullName("Jane\u0000Doe"), "Jane Doe");
+  });
+
+  it("rejects names exceeding max length", () => {
+    const tooLong = "A".repeat(MAX_FULL_NAME_LENGTH + 1);
+    const result = fullNameSchema.safeParse(tooLong);
+    assert.equal(result.success, false);
+    assert.equal(result.error?.issues[0]?.message, NAME_TOO_LONG_MESSAGE);
+  });
+
+  it("accepts valid names and normalises them in schema", () => {
+    const result = fullNameSchema.safeParse("  Jane Doe  ");
+    assert.equal(result.success, true);
+    assert.equal(result.data, "Jane Doe");
   });
 });
 

@@ -5,8 +5,10 @@ import { redirect } from "next/navigation";
 import { logAuthApiHealth, logAuthError } from "@/lib/auth/observability";
 import {
   newPasswordSchema,
+  normalizeFullName,
   RECOVERY_COOKIE_NAME,
   readRecoveryMarker,
+  REQUIRED_NAME_MESSAGE,
   RESET_LINK_ERROR,
 } from "@/lib/auth/password-reset";
 import type { ResetPasswordState } from "@/lib/auth/password-reset";
@@ -52,6 +54,29 @@ export async function setNewPassword(
       return { status: "error", message: RESET_LINK_ERROR };
     }
 
+    // Look up existing user row to check current full_name and invite status
+    const { data: existingUser } = await supabase
+      .from("users")
+      .select("full_name, invited_at, invite_accepted_at")
+      .eq("id", recoveryUserId)
+      .maybeSingle<{ full_name: string | null; invited_at: string | null; invite_accepted_at: string | null }>();
+
+    const submittedName = typeof parsed.data.fullName === "string" ? normalizeFullName(parsed.data.fullName) : "";
+    const hasExistingName = Boolean(existingUser?.full_name && existingUser.full_name.trim().length > 0);
+    const isInviteAcceptance = Boolean(existingUser?.invited_at && existingUser?.invite_accepted_at === null);
+
+    // Mandatory name requirement: any new account, pending invite, or account without an
+    // existing display name MUST provide a valid, non-empty name before setup is completed.
+    if ((isInviteAcceptance || !hasExistingName) && !submittedName) {
+      return {
+        status: "error",
+        message: "Enter your name to complete account setup.",
+        fieldErrors: {
+          fullName: [REQUIRED_NAME_MESSAGE],
+        },
+      };
+    }
+
     const startedAt = Date.now();
     const { error } = await supabase.auth.updateUser({
       password: parsed.data.password,
@@ -73,6 +98,40 @@ export async function setNewPassword(
               : "We could not update your password. Request a new reset link and try again.",
       };
     }
+
+    // Past this point the password *has* changed, so nothing below may report a
+    // failure to the user: telling them it did not work would send them round
+    // again with the password that is now the right one.
+    cookieStore.delete(RECOVERY_COOKIE_NAME);
+
+    // Save the submitted name or preserve existing name
+    const nameToSave = submittedName || existingUser?.full_name || null;
+    if (nameToSave) {
+      const { error: nameError } = await supabase
+        .from("users")
+        .update({ full_name: nameToSave })
+        .eq("id", recoveryUserId);
+      if (nameError) {
+        logAuthError("user.full_name_update_failed", nameError);
+      }
+    }
+
+    // Setting a first password is what accepts an invite (F008) — not clicking the
+    // emailed link, which only proves the mailbox is readable. This is the shared
+    // landing for recovery and invites, and the RPC is a no-op for anyone without a
+    // pending invite, so it is called unconditionally rather than trying to tell the
+    // two apart here. Must run before signOutAndReport, which ends the session it
+    // authorises against. A failure leaves the invite showing as pending, which the
+    // admin can see and act on — better than blocking a password that already changed.
+    const { error: acceptError } = await supabase.rpc("mark_invite_accepted");
+    if (acceptError) {
+      logAuthError("user.invite_accept_failed", acceptError);
+    }
+
+    // Revoke every other session, so a reset prompted by a suspected compromise
+    // actually ends the intruder's access. `signOutAndReport` records a failure
+    // rather than throwing (F006) — the redirect below has to happen either way.
+    await signOutAndReport(supabase);
   } catch (error) {
     logAuthError("authentication.password_update_failed", error);
     return {
@@ -80,40 +139,6 @@ export async function setNewPassword(
       message: "Password reset is temporarily unavailable. Please try again.",
     };
   }
-
-  // Past this point the password *has* changed, so nothing below may report a
-  // failure to the user: telling them it did not work would send them round
-  // again with the password that is now the right one.
-  cookieStore.delete(RECOVERY_COOKIE_NAME);
-
-  // Column grant is `update (full_name)` only (create_users migration), so this is
-  // the one field this session can write on its own row. Same non-blocking
-  // treatment as mark_invite_accepted below: the password already changed, so a
-  // failure here must not read to the user as the whole action having failed.
-  const { error: nameError } = await supabase
-    .from("users")
-    .update({ full_name: parsed.data.fullName })
-    .eq("id", recoveryUserId);
-  if (nameError) {
-    logAuthError("user.full_name_update_failed", nameError);
-  }
-
-  // Setting a first password is what accepts an invite (F008) — not clicking the
-  // emailed link, which only proves the mailbox is readable. This is the shared
-  // landing for recovery and invites, and the RPC is a no-op for anyone without a
-  // pending invite, so it is called unconditionally rather than trying to tell the
-  // two apart here. Must run before signOutAndReport, which ends the session it
-  // authorises against. A failure leaves the invite showing as pending, which the
-  // admin can see and act on — better than blocking a password that already changed.
-  const { error: acceptError } = await supabase.rpc("mark_invite_accepted");
-  if (acceptError) {
-    logAuthError("user.invite_accept_failed", acceptError);
-  }
-
-  // Revoke every other session, so a reset prompted by a suspected compromise
-  // actually ends the intruder's access. `signOutAndReport` records a failure
-  // rather than throwing (F006) — the redirect below has to happen either way.
-  await signOutAndReport(supabase);
 
   redirect("/login?password-reset=success");
 }

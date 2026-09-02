@@ -186,7 +186,7 @@ export default async function AuditLogPage({
               Audit log
             </h1>
             <p className="mt-3 max-w-xl text-sm leading-[1.7] text-foreground/65">
-              Every recorded action, most recent first. Append-only — this trail can
+              Every recorded action, most recent first. This trail can
               never be edited or deleted, only added to. Open a row for the exact
               stamp and the ids behind it.
             </p>

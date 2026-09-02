@@ -25,7 +25,8 @@ import type {
 } from "../type.ts";
 import { buildAdminClient } from "../../supabase/admin-client-factory.ts";
 
-const CHARITY_COMMISSION_URL = "https://api.charitycommission.gov.uk/register/api";
+export const CHARITY_COMMISSION_URL =
+  "https://api.charitycommission.gov.uk/register/api";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_ATTEMPTS = 3;
@@ -45,7 +46,7 @@ const CHUNK_DAYS = 7;
  * safe value with margin below the confirmed failure point, not the exact
  * boundary (which sits somewhere between 38 and 45, not pinned further).
  */
-const DETAILS_BATCH_SIZE = 30;
+export const DETAILS_BATCH_SIZE = 30;
 
 type CharityCommissionSearchItem = {
   organisation_number: number;
@@ -58,7 +59,7 @@ type CharityCommissionSearchItem = {
 };
 
 /** Full record shape confirmed live from GetCharityDetailsMulti. */
-type CharityCommissionDetailItem = CharityCommissionSearchItem & {
+export type CharityCommissionDetailItem = CharityCommissionSearchItem & {
   charity_type: string | null;
   address_line_one: string | null;
   address_line_two: string | null;
@@ -80,8 +81,10 @@ function formatDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Retries 429 and 5xx with exponential backoff; anything else is returned as-is. */
-async function fetchWithRetry(
+/** Retries 429 and 5xx with exponential backoff; anything else is returned as-is.
+ *  Exported for charity-commission-financials.ts, which talks to the same host
+ *  under the same key and must not invent a second retry policy for it. */
+export async function fetchWithRetry(
   url: string,
   headers: Record<string, string>,
 ): Promise<Response> {
@@ -126,7 +129,7 @@ function shape(raw: CharityCommissionDetailItem): CommonRecord {
   };
 }
 
-function chunk<T>(items: T[], size: number): T[][] {
+export function chunk<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
     chunks.push(items.slice(i, i + size));
@@ -134,8 +137,10 @@ function chunk<T>(items: T[], size: number): T[][] {
   return chunks;
 }
 
-/** Shared by the bulk backfill's batching loop and the single-charity lookup below. */
-async function fetchCharityDetails(
+/** Shared by the bulk backfill's batching loop, the single-charity lookup below,
+ *  and the financial refresh (charity-commission-financials.ts) — the same
+ *  `charitydetailsmulti` call carries the latest filed year's figures. */
+export async function fetchCharityDetails(
   regNumbers: (number | string)[],
   headers: Record<string, string>,
 ): Promise<CharityCommissionDetailItem[]> {

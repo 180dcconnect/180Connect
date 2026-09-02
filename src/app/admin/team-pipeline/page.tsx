@@ -245,6 +245,7 @@ export default async function AdminTeamPipelinePage({
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <SearchRail
         className="max-w-6xl"
+        stageClassName="space-y-10"
         heading={
           <>
             <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">

@@ -70,7 +70,7 @@ export function FeedbackPrompt({ pageContext }: { pageContext?: string }) {
           animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, filter: "blur(0px)", scale: 1 }}
           exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 12, filter: "blur(6px)", scale: 0.97 }}
           transition={{ duration: 0.5, ease: [0.2, 0.7, 0.2, 1] }}
-          className="fixed bottom-6 right-6 z-30 w-[340px] sm:w-[360px]"
+          className="fixed bottom-6 right-6 z-30 w-[340px] max-w-[calc(100vw-3rem)] sm:w-[360px]"
         >
           <div className="relative rounded-2xl border border-black/[0.06] bg-white px-6 py-5 shadow-lg shadow-black/[0.06]">
             {/* Close button */}

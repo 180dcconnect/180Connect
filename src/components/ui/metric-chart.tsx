@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useMemo, useState } from "react";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 
 /** One point on a metric line: a value and the label for its x position. */
 export type SeriesPoint = { value: number; date: string };
@@ -75,7 +75,7 @@ export function formatCompact(value: number): string {
 const BAND_TOP = 34;
 const BAND_BOTTOM = 99.5;
 const X_INSET_LEFT = 3;
-const X_INSET_RIGHT = 0;
+const X_INSET_RIGHT = 3;
 
 const toX = (i: number, len: number) =>
   len <= 1
@@ -450,61 +450,66 @@ export function MetricChart({
           );
         })}
 
-      {/* Tooltip: Glassmorphic card floating with smooth spring tracking — z-50 so it renders above the adjacent Customer Segmentation card */}
-      <motion.div
-        className="pointer-events-none absolute z-50"
-        initial={false}
-        animate={{
-          left: `${cursorX}%`,
-          top: `${BAND_TOP}%`,
-          opacity: hovered !== null ? 1 : 0,
-          scale: hovered !== null ? 1 : 0.95,
-        }}
-        transition={{
-          left: { type: "spring", stiffness: 450, damping: 32 },
-          top: { type: "spring", stiffness: 450, damping: 32 },
-          opacity: { duration: 0.15 },
-          scale: { duration: 0.15 },
-        }}
-        style={{
-          transform: cursorX > 50 ? "translate(calc(-100% - 12px), -50%)" : "translate(12px, -50%)",
-        }}
-      >
-        <div className="relative min-w-[130px] rounded-xl border border-black/[0.08] dark:border-white/[0.12] bg-popover/95 px-3.5 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.12),0_2px_6px_rgba(0,0,0,0.06)] backdrop-blur-md transition-shadow">
-          <p className="whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground/80">
-            {dateFormatter(activeDate)}
-          </p>
-          <div className="mt-1 space-y-1">
-            {series.map((s) => {
-              const val = s.data[Math.min(active, s.data.length - 1)]?.value ?? 0;
-              return (
-                <div
-                  key={s.name}
-                  className="flex items-center justify-between gap-3 whitespace-nowrap text-[13px] font-semibold tabular-nums text-foreground"
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="h-2 w-2 rounded-full ring-2 ring-white dark:ring-black/40"
-                      style={{
-                        background: s.color,
-                        boxShadow: `0 0 6px ${s.color}`,
-                      }}
-                    />
-                    {series.length > 1 && (
-                      <span className="text-[12px] font-medium text-muted-foreground">
-                        {s.name}
+      {/* Tooltip: Glassmorphic card floating with smooth spring tracking */}
+      <AnimatePresence>
+        {hovered !== null && (
+          <motion.div
+            className="pointer-events-none absolute z-50"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{
+              left: `${cursorX}%`,
+              top: `${BAND_TOP}%`,
+              opacity: 1,
+              scale: 1,
+            }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{
+              left: { type: "spring", stiffness: 450, damping: 32 },
+              top: { type: "spring", stiffness: 450, damping: 32 },
+              opacity: { duration: 0.15 },
+              scale: { duration: 0.15 },
+            }}
+            style={{
+              transform: cursorX > 50 ? "translate(calc(-100% - 12px), -50%)" : "translate(12px, -50%)",
+            }}
+          >
+            <div className="relative min-w-[130px] rounded-xl border border-black/[0.08] dark:border-white/[0.12] bg-popover/95 px-3.5 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.12),0_2px_6px_rgba(0,0,0,0.06)] backdrop-blur-md transition-shadow">
+              <p className="whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground/80">
+                {dateFormatter(activeDate)}
+              </p>
+              <div className="mt-1 space-y-1">
+                {series.map((s) => {
+                  const val = s.data[Math.min(active, s.data.length - 1)]?.value ?? 0;
+                  return (
+                    <div
+                      key={s.name}
+                      className="flex items-center justify-between gap-3 whitespace-nowrap text-[13px] font-semibold tabular-nums text-foreground"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className="h-2 w-2 rounded-full ring-2 ring-white dark:ring-black/40"
+                          style={{
+                            background: s.color,
+                            boxShadow: `0 0 6px ${s.color}`,
+                          }}
+                        />
+                        {series.length > 1 && (
+                          <span className="text-[12px] font-medium text-muted-foreground">
+                            {s.name}
+                          </span>
+                        )}
+                      </div>
+                      <span className="font-bold tracking-tight">
+                        {valueFormatter(val)}
                       </span>
-                    )}
-                  </div>
-                  <span className="font-bold tracking-tight">
-                    {valueFormatter(val)}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </motion.div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

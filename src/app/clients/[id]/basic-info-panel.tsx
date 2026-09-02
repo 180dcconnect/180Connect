@@ -7,7 +7,7 @@ import {
   useTransition,
   type ReactNode,
 } from "react";
-import { Lock, Pencil, PencilLine, Plus } from "lucide-react";
+import { ExternalLink, Lock, Pencil, PencilLine, Plus } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { OriginButton } from "@/components/ui/origin-button";
 import { createClient } from "@/lib/supabase/browser";
@@ -27,9 +27,14 @@ import {
   type EditSuggestionRow,
 } from "@/lib/edit-suggestions";
 import type { AppRole } from "@/lib/auth/permissions.ts";
+import {
+  ORGANISATION_TYPES,
+  formatOrganisationType,
+} from "@/lib/organisation-format";
 import { SectionCard } from "./section-card";
 import {
   EditDraftBar,
+  InlineEnumInput,
   InlineFieldInput,
   fieldErrorsFrom,
   succeededFields,
@@ -40,13 +45,17 @@ import { adminDirectEditsAction } from "./admin-actions";
 /**
  * Field order is reading order, not schema order.
  *
- * `column` is the organisations column the row edits in place — null for the
- * two rows that are not corrections at all (`organisation_type` and
- * `geographic_reach` are enum-typed and `add_restricted_edit_field` refuses
- * them outright; pipeline stage has its own audited control in the header).
- * `Type` used to name `organisation_type` here and offer an Add button for it,
- * which could never do anything: the field can never be in the restricted set,
- * so the button never rendered and the mapping was decoration.
+ * `column` is the organisations column the row edits in place — null only for
+ * pipeline stage, which has its own audited control in the header.
+ *
+ * `Type` is the one enum row. It is not a suggestion and never can be:
+ * `add_restricted_edit_field` refuses enum-typed columns, so a CAM has nowhere
+ * to send a correction to it — but `organisation_type` is in the admin's direct
+ * set (admin-actions.ts), so an admin can fix it here. That capability existed
+ * and was unreachable: the row was mapped to `column: null`, so nothing ever
+ * rendered a control for it. `options` marks the row as a closed set, and
+ * `raw` reads the stored enum value — `read` returns the human label, which is
+ * what the row displays but not what the column holds.
  *
  * `legal_name` is back. It was left out because the header already sets it as
  * the page's h1 — true, but it is also the single most-corrected field on a
@@ -71,6 +80,60 @@ import { adminDirectEditsAction } from "./admin-actions";
 const ROW_TRANSITION = { duration: 0.32, ease: [0.32, 0.72, 0, 1] } as const;
 const SWAP_TRANSITION = { duration: 0.18, ease: [0.32, 0.72, 0, 1] } as const;
 
+/**
+ * A website column safe to hang an `href` on.
+ *
+ * The value is whatever a register published, so it can be a bare domain (no
+ * scheme means the browser resolves it as a relative path — `/clients/<id>/x`),
+ * and in principle anything a `text` column can hold. Only http(s) survives:
+ * `javascript:` in this column would otherwise be a stored XSS with a link
+ * around it.
+ */
+function externalUrl(raw: string | null | undefined): string | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(value)
+    ? value
+    : `https://${value.replace(/^\/+/, "")}`;
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Google Maps search for the fullest address the record holds. */
+function mapsUrl(
+  organisation: Pick<
+    OrganisationDetailRow,
+    "address_line_1" | "city" | "postcode"
+  >,
+): string | null {
+  const query = [
+    organisation.address_line_1,
+    organisation.city,
+    organisation.postcode,
+  ]
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .join(", ");
+  if (!organisation.postcode?.trim()) return null;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+}
+
+/**
+ * What the row's button promises, which is not the same act for both roles: an
+ * admin writes the value, a CAM proposes one. "Suggest" on an empty row rather
+ * than "Suggest edit", because there is nothing there to edit.
+ */
+function rowActionLabel(isAdmin: boolean, missing: boolean): string {
+  if (isAdmin) return missing ? "Add" : "Edit";
+  return missing ? "Suggest" : "Suggest edit";
+}
+
 const FIELDS: {
   label: string;
   /** Live value, read from panel state so Realtime updates flow through. */
@@ -80,6 +143,12 @@ const FIELDS: {
   ) => string | null;
   /** The organisations column (or `mission_statement`) this row edits. */
   column: string | null;
+  /** Stored value behind a formatted `read`, for drafts and change detection. */
+  raw?: (state: BasicInfoState) => string | null;
+  /** Present when the column is a closed set: the row edits with a select. */
+  options?: readonly { value: string; label: string }[];
+  /** Where the value points, if anywhere. Opens in a new tab. */
+  link?: (state: BasicInfoState) => string | null;
 }[] = [
   {
     label: "Registered name",
@@ -91,7 +160,16 @@ const FIELDS: {
     read: (state) => state.missionStatement,
     column: "mission_statement",
   },
-  { label: "Type", read: (_state, info) => info.type, column: null },
+  {
+    label: "Type",
+    read: (_state, info) => info.type,
+    column: "organisation_type",
+    raw: (state) => state.organisation.organisation_type,
+    options: ORGANISATION_TYPES.map((value) => ({
+      value,
+      label: formatOrganisationType(value),
+    })),
+  },
   {
     label: "Pipeline stage",
     read: (_state, info) => info.status,
@@ -106,6 +184,7 @@ const FIELDS: {
     label: "Website",
     read: (state) => state.organisation.website,
     column: "website",
+    link: (state) => externalUrl(state.organisation.website),
   },
   {
     label: "Address",
@@ -121,6 +200,10 @@ const FIELDS: {
     label: "Postcode",
     read: (state) => state.organisation.postcode,
     column: "postcode",
+    // The whole address, not the postcode on its own: a bare UK postcode
+    // resolves to the unit centroid, which can be a few hundred metres and the
+    // wrong side of a road from the building someone is trying to visit.
+    link: (state) => mapsUrl(state.organisation),
   },
 ];
 
@@ -259,12 +342,15 @@ export function BasicInfoPanel({
   const fieldErrors = fieldErrorsFrom(result);
 
   /** Columns this viewer may write, in row order. */
-  const writableColumns = FIELDS.flatMap(({ column }) => {
+  const writableColumns = FIELDS.flatMap(({ column, options }) => {
     if (!column) return [];
     // Mission is not a column on organisations — it is the newest enrichment
     // row — so it can never be a suggestion. An admin writes it directly; a CAM
     // has nowhere to send it.
     if (column === "mission_statement") return isAdmin ? [column] : [];
+    // Same shape for an enum column: it can never be in the restricted set, so
+    // it is never in `editable` and a CAM has no proposal route for it.
+    if (options) return isAdmin ? [column] : [];
     if (!editable.has(column)) return [];
     if (isAdmin) return [column];
     if (!isCam) return [];
@@ -275,13 +361,17 @@ export function BasicInfoPanel({
   });
 
   /** Rows whose draft actually differs from what is on record. */
-  const changes = FIELDS.flatMap(({ column, read }) => {
+  const changes = FIELDS.flatMap(({ column, read, raw }) => {
     if (!column) return [];
     const draft = drafts[column];
     if (draft === undefined) return [];
     const value = normaliseFieldValue(column, draft);
     if (!value) return [];
-    if (isUnchanged(column, draft, read(state, info))) return [];
+    // Compared against the stored value, not the displayed one: picking
+    // "Social enterprise" on a row already holding `social_enterprise` is not a
+    // change, and comparing the label would call it one.
+    const current = raw ? raw(state) : read(state, info);
+    if (isUnchanged(column, draft, current)) return [];
     return [{ fieldName: column, value }];
   });
 
@@ -296,7 +386,10 @@ export function BasicInfoPanel({
     setEditing((rows) => (rows.includes(column) ? rows : [...rows, column]));
     setDrafts((current) => ({
       ...current,
-      [column]: current[column] ?? row?.read(state, info) ?? "",
+      [column]:
+        current[column] ??
+        (row?.raw ? row.raw(state) : row?.read(state, info)) ??
+        "",
     }));
   }
 
@@ -386,7 +479,10 @@ export function BasicInfoPanel({
             ) : (
               <>
                 <PencilLine aria-hidden="true" className="size-3.5" />
-                Edit
+                {/* A CAM's edit is a proposal an admin has to approve, and a
+                    button that says "Edit" promises a change that will not
+                    happen when they press Save. */}
+                {isAdmin ? "Edit" : "Suggest edits"}
               </>
             )}
           </OriginButton>
@@ -397,9 +493,11 @@ export function BasicInfoPanel({
           field names against short values, and stacking them doubled the card's
           height for no gain. */}
       <dl className="mt-3.5 flex flex-col">
-        {FIELDS.map(({ label, read, column }) => {
-          const raw = read(state, info);
-          const display = raw?.trim() ? raw.trim() : NOT_PROVIDED;
+        {FIELDS.map(({ label, read, column, raw: readRaw, options, link }) => {
+          const rawValue = readRaw ? readRaw(state) : read(state, info);
+          const displayed = read(state, info);
+          const href = link ? link(state) : null;
+          const display = displayed?.trim() ? displayed.trim() : NOT_PROVIDED;
           const missing = display === NOT_PROVIDED;
 
           const mayEdit = column !== null && writableColumns.includes(column);
@@ -443,22 +541,39 @@ export function BasicInfoPanel({
                       transition={SWAP_TRANSITION}
                       className="min-w-0"
                     >
-                      <InlineFieldInput
-                        fieldName={column}
-                        label={label}
-                        value={drafts[column] ?? ""}
-                        currentValue={raw}
-                        error={fieldErrors[column]}
-                        onChange={(next) =>
-                          setDrafts((current) => ({
-                            ...current,
-                            [column]: next,
-                          }))
-                        }
-                        onCancel={() => closeRow(column)}
-                        onSubmit={submit}
-                        pending={pending}
-                      />
+                      {options ? (
+                        <InlineEnumInput
+                          label={label}
+                          value={drafts[column] ?? ""}
+                          options={options}
+                          error={fieldErrors[column]}
+                          onChange={(next) =>
+                            setDrafts((current) => ({
+                              ...current,
+                              [column]: next,
+                            }))
+                          }
+                          onCancel={() => closeRow(column)}
+                          pending={pending}
+                        />
+                      ) : (
+                        <InlineFieldInput
+                          fieldName={column}
+                          label={label}
+                          value={drafts[column] ?? ""}
+                          currentValue={rawValue}
+                          error={fieldErrors[column]}
+                          onChange={(next) =>
+                            setDrafts((current) => ({
+                              ...current,
+                              [column]: next,
+                            }))
+                          }
+                          onCancel={() => closeRow(column)}
+                          onSubmit={submit}
+                          pending={pending}
+                        />
+                      )}
                     </motion.div>
                   ) : (
                     <motion.div
@@ -469,7 +584,26 @@ export function BasicInfoPanel({
                       transition={SWAP_TRANSITION}
                       className="flex min-w-0 items-center gap-2.5"
                     >
-                      <span className="min-w-0 break-words">{display}</span>
+                      {href ? (
+                        /* `noreferrer` as well as `noopener`: these are
+                           third-party addresses off a public register, and the
+                           referrer would leak the client's record URL to them. */
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-w-0 items-center gap-1 break-words text-lead underline decoration-lead/30 underline-offset-2 transition-colors hover:decoration-lead focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none"
+                        >
+                          <span className="min-w-0 break-words">{display}</span>
+                          <ExternalLink
+                            aria-hidden="true"
+                            className="size-3 shrink-0 text-lead/60"
+                          />
+                          <span className="sr-only"> (opens in a new tab)</span>
+                        </a>
+                      ) : (
+                        <span className="min-w-0 break-words">{display}</span>
+                      )}
 
                       {/* Add is always there on an empty row: a blank is a gap
                         someone can close in one action, and the button is the
@@ -478,19 +612,19 @@ export function BasicInfoPanel({
                       {mayEdit && (missing || editMode) && (
                         <button
                           type="button"
-                          aria-label={`${missing ? "Add" : "Edit"} ${label.toLowerCase()}`}
+                          aria-label={`${rowActionLabel(isAdmin, missing)} ${label.toLowerCase()}`}
                           onClick={() => openRow(column)}
                           className="inline-flex shrink-0 items-center gap-1 rounded-inset border border-rule bg-white px-2 py-0.5 text-[12px] font-semibold text-lead transition-colors hover:border-lead focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none"
                         >
                           {missing ? (
                             <>
                               <Plus aria-hidden="true" className="size-3" />
-                              Add
+                              {rowActionLabel(isAdmin, true)}
                             </>
                           ) : (
                             <>
                               <Pencil aria-hidden="true" className="size-3" />
-                              Edit
+                              {rowActionLabel(isAdmin, false)}
                             </>
                           )}
                         </button>

@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { HelpCircle } from "lucide-react";
 
 import { AnimateIcon } from "@/components/animate-ui/icons/icon";
@@ -72,43 +73,88 @@ export type LatestScoreDetailRow = {
 
 type FactorKey = keyof ScoreFactorsRecord["factors"];
 
-const FACTOR_ROWS: {
+/**
+ * The five checks, once.
+ *
+ * This was two arrays — the card called them "Sector / Geography / Size /
+ * Partnership history / Previous contact" and the dialog explaining the card
+ * called the same five "What they do / Where they are / How big they are / Who
+ * has funded them / Where we got to before". A panel whose entire job is
+ * explaining the card behind it was making the reader build the mapping
+ * themselves, and `priority-dial.tsx` in the header was a third vocabulary
+ * (it agrees with the card, so the card's names won).
+ *
+ * `reads` is where the plain-English phrasing survives: a short sentence under
+ * the name, which is a better home for it than a label that also has to fit a
+ * narrow card row and a dial legend.
+ */
+const CHECKS: {
   key: FactorKey;
+  /** The one name for this check, used here, on the card, and in the dial. */
   label: string;
-  /** What 0.5 honestly means for this parameter — the "we have nothing" case. */
-  neutralNote: string;
+  /** What the check looks at, in one sentence. */
+  reads: string;
+  /** What pushes this check up. */
+  raises: string;
+  /** What pushes it down. */
+  lowers: string;
+  /** What we can say when the check found nothing at all. */
+  blank: string;
   /** Names the input this parameter reads, for the "we do have something" case. */
   subject: string;
 }[] = [
   {
     key: "sector",
     label: "Sector",
-    neutralNote: "No classified sector on record yet.",
+    reads: "The sector the organisation works in.",
+    raises:
+      "Health and wellbeing rates highest, then education and youth, then poverty and community work.",
+    lowers: "Arts, heritage and environmental work sit lower down the list.",
+    blank: "No sector recorded, so this check found nothing to go on.",
     subject: "Sector fit against the branch's priorities",
   },
   {
     key: "geography",
     label: "Geography",
-    neutralNote:
-      "Branch priority regions are not configured, so this parameter is dormant for every client.",
+    reads:
+      "Whether the organisation sits in one of the branch's priority areas.",
+    raises: "Being inside a priority area.",
+    lowers: "Being outside every priority area.",
+    blank:
+      "Nobody has set the branch's priority areas yet, so this check is asleep for every client — it is not something wrong with this record.",
     subject: "Location against the branch's priority regions",
   },
   {
     key: "size",
     label: "Size",
-    neutralNote: "No income figures on record.",
+    reads: "The income on their most recent set of published accounts.",
+    raises: "Income over £1m rates highest; £100k–£1m is solid.",
+    lowers:
+      "Under £10k rates lowest — a small organisation is a smaller opportunity.",
+    blank:
+      "No accounts with an income figure have been filed against this record.",
     subject: "Income size",
   },
   {
     key: "partnershipHistory",
     label: "Partnership history",
-    neutralNote: "No previous grants recorded.",
+    reads: "How many grants we can match to them in the public 360Giving data.",
+    raises: "Five or more matched grants rates highest.",
+    lowers:
+      "Nothing here counts against a client — it either helps or stays neutral.",
+    blank: "No grants matched to this organisation.",
     subject: "Previous grant history",
   },
   {
     key: "previousContact",
     label: "Previous contact",
-    neutralNote: "No outreach history yet.",
+    reads:
+      "The stage they reached with us last time, and how long ago that was.",
+    raises:
+      "Already converted rates highest, then flagged as future potential, then replied to us. A client nobody has approached yet also rates well — the opportunity is untouched.",
+    lowers:
+      "A hard no floors it. Soft no and gone quiet sit low, and anything we are still waiting on slides down the longer the silence runs, over about a month.",
+    blank: "No outreach recorded against this client yet.",
     subject: "Outreach history",
   },
 ];
@@ -121,7 +167,7 @@ const FACTOR_ROWS: {
 function contributions(
   row: NonNullable<LatestScoreDetailRow["score_factors"]>,
 ) {
-  const parts = FACTOR_ROWS.map(({ key }) => ({
+  const parts = CHECKS.map(({ key }) => ({
     key,
     weighted:
       Math.max(0, Math.min(1, row.factors[key])) *
@@ -134,20 +180,61 @@ function contributions(
   }));
 }
 
-function toneFor(factorValue: number): {
-  barClass: string;
+/**
+ * One check's verdict — the same four states wherever they are drawn.
+ *
+ * They used to be four labels in three colours, and the collision was in the
+ * worst possible place: "Neither way" and "Holding it back" were both
+ * `text-dim` with a `bg-faint` dot, pixel for pixel, so the two states a CAM
+ * most needs to tell apart could only be told apart by reading. "Nothing on
+ * record" was a filled dot one shade lighter again, which drew absence as a
+ * pale reading rather than as no reading.
+ *
+ * Now: `--lead` for a check that is helping (the record's structural accent,
+ * already how this card draws signal), `--hold` for one that is holding the
+ * score back — amber is the palette's "worth knowing, not an error", which is
+ * exactly what a weak input is — plain grey for genuinely middling, and an
+ * *outline* dot for nothing on record, because an empty ring is the one shape
+ * that reads as absence at 6px rather than as a dimmer value.
+ */
+function verdictFor(value: number): {
+  label: string;
   textClass: string;
+  dotClass: string;
+  barClass: string;
 } {
-  // The lead colour carries the parameters that are helping; a parameter that
-  // is holding the client back is dimmed rather than reddened — it is a weaker
-  // input, not an error.
-  if (factorValue > 0.55) {
-    return { barClass: "bg-lead", textClass: "text-lead" };
+  // 0.5 survives the jsonb round trip exactly (binary-representable), so
+  // equality against the engine's no-data constant is safe.
+  if (value === 0.5) {
+    return {
+      label: "Nothing on record",
+      textClass: "text-faint",
+      dotClass: "border border-faint/70 bg-transparent",
+      barClass: "bg-rule",
+    };
   }
-  if (factorValue < 0.45) {
-    return { barClass: "bg-faint", textClass: "text-dim" };
+  if (value > 0.55) {
+    return {
+      label: "Helping the score",
+      textClass: "text-lead",
+      dotClass: "bg-lead",
+      barClass: "bg-lead",
+    };
   }
-  return { barClass: "bg-rule", textClass: "text-faint" };
+  if (value >= 0.45) {
+    return {
+      label: "Neither way",
+      textClass: "text-dim",
+      dotClass: "bg-faint",
+      barClass: "bg-faint/60",
+    };
+  }
+  return {
+    label: "Holding it back",
+    textClass: "text-hold",
+    dotClass: "bg-hold",
+    barClass: "bg-hold/70",
+  };
 }
 
 export function ScoreBreakdownCard({
@@ -195,9 +282,7 @@ export function ScoreBreakdownCard({
 
 function BreakdownTable({ factors }: { factors: ScoreFactorsRecord }) {
   const shares = new Map(contributions(factors).map((c) => [c.key, c.percent]));
-  // 0.5 survives the jsonb round trip exactly (binary-representable), so
-  // equality against the engine's no-data constant is safe.
-  const covered = FACTOR_ROWS.filter(
+  const covered = CHECKS.filter(
     ({ key }) => factors.factors[key] !== 0.5,
   ).length;
 
@@ -205,21 +290,18 @@ function BreakdownTable({ factors }: { factors: ScoreFactorsRecord }) {
     <>
       <p className="mt-3 text-[12.5px] leading-[1.5] text-dim">
         <span className="font-semibold text-ink">
-          {covered} of {FACTOR_ROWS.length} checks found something.
+          {covered} of {CHECKS.length} checks found something.
         </span>{" "}
-        {covered === FACTOR_ROWS.length
+        {covered === CHECKS.length
           ? "Every check is a real reading."
           : `The rest count as half a mark each, which is what keeps a thin record near the middle of the range rather than at either end.`}
       </p>
       <ul className="mt-2.5 space-y-2">
-        {FACTOR_ROWS.map(({ key, label, neutralNote, subject }) => {
+        {CHECKS.map(({ key, label, blank, subject }) => {
           const value = factors.factors[key];
           const percent = shares.get(key) ?? 0;
-          // The engine's explicit no-data value: report it as such instead of
-          // dressing a neutral up as a judgement. 0.5 survives the jsonb round
-          // trip exactly (binary-representable), so equality is safe.
           const isNeutral = value === 0.5;
-          const tone = toneFor(value);
+          const verdict = verdictFor(value);
 
           return (
             <li key={key}>
@@ -237,7 +319,7 @@ function BreakdownTable({ factors }: { factors: ScoreFactorsRecord }) {
                         {label}
                       </span>
                       <span
-                        className={`shrink-0 font-mono text-[12px] font-medium tabular-nums ${tone.textClass}`}
+                        className={`shrink-0 font-mono text-[12px] font-medium tabular-nums ${verdict.textClass}`}
                       >
                         {percent.toFixed(0)}%
                       </span>
@@ -247,7 +329,7 @@ function BreakdownTable({ factors }: { factors: ScoreFactorsRecord }) {
                       className="mt-1.5 block h-[5px] overflow-hidden rounded-full bg-paper-sunk"
                     >
                       <span
-                        className={`block h-full rounded-full ${tone.barClass}`}
+                        className={`block h-full rounded-full ${verdict.barClass}`}
                         style={{ width: `${Math.min(100, percent)}%` }}
                       />
                     </span>
@@ -265,7 +347,7 @@ function BreakdownTable({ factors }: { factors: ScoreFactorsRecord }) {
                   </span>
                   <span className="mt-0.5 block text-white/70">
                     {isNeutral
-                      ? neutralNote
+                      ? blank
                       : `Contributes ${percent.toFixed(1)}% of the final score.`}
                   </span>
                 </TooltipContent>
@@ -290,85 +372,6 @@ function readingFor(subject: string, value: number): string {
   if (value >= 0.25) return `${subject}: weak.`;
   return `${subject}: very weak.`;
 }
-
-/**
- * The method behind the card, one click away.
- *
- * The card answers "which parameter moved this number". The question
- * underneath — "0.9 out of what? weighted how? who decided £1m is a 0.9?" — is
- * the one that decides whether a CAM trusts the ranking at all, and until now
- * the only place it was answered was a comment header in `score-client.ts`.
- *
- * Written for the person using the tool, not the person maintaining it. The
- * first version of this dialog was a spec sheet: a four-column arithmetic
- * table, the raw 0–1 reading and weight for each factor, every scale printed
- * as a numeric lookup, and the source filename beside each one. All true, and
- * all aimed at a reader who already knew what a weighted average was. A CAM
- * opening a "?" wants to know whether to trust the ranking and what would move
- * it — so each check now says, in a sentence, what it looks at, what makes it
- * go up, and what this client actually got. The numbers are still there where
- * they carry meaning (income thresholds, the band cut-offs), and gone where
- * they were only the engine talking to itself.
- */
-
-/** One check, as a CAM meets it. Scales mirror the `score-by-*.ts` scorers. */
-const METHOD_ROWS: {
-  key: FactorKey;
-  label: string;
-  /** What the check looks at, in one sentence. */
-  reads: string;
-  /** What pushes this check up. */
-  raises: string;
-  /** What pushes it down. */
-  lowers: string;
-  /** What we can say when the check found nothing at all. */
-  blank: string;
-}[] = [
-  {
-    key: "sector",
-    label: "What they do",
-    reads: "The sector the organisation works in.",
-    raises:
-      "Health and wellbeing rates highest, then education and youth, then poverty and community work.",
-    lowers: "Arts, heritage and environmental work sit lower down the list.",
-    blank: "No sector recorded, so this check found nothing to go on.",
-  },
-  {
-    key: "geography",
-    label: "Where they are",
-    reads: "Whether the organisation sits in one of the branch's priority areas.",
-    raises: "Being inside a priority area.",
-    lowers: "Being outside every priority area.",
-    blank:
-      "Nobody has set the branch's priority areas yet, so this check is asleep for every client — it is not something wrong with this record.",
-  },
-  {
-    key: "size",
-    label: "How big they are",
-    reads: "The income on their most recent set of published accounts.",
-    raises: "Income over £1m rates highest; £100k–£1m is solid.",
-    lowers: "Under £10k rates lowest — a small organisation is a smaller opportunity.",
-    blank: "No accounts with an income figure have been filed against this record.",
-  },
-  {
-    key: "partnershipHistory",
-    label: "Who has funded them",
-    reads: "How many grants we can match to them in the public 360Giving data.",
-    raises: "Five or more matched grants rates highest.",
-    lowers: "Nothing here counts against a client — it either helps or stays neutral.",
-    blank: "No grants matched to this organisation.",
-  },
-  {
-    key: "previousContact",
-    label: "Where we got to before",
-    reads: "The stage they reached with us last time, and how long ago that was.",
-    raises:
-      "Already converted rates highest, then flagged as future potential, then replied to us. A client nobody has approached yet also rates well — the opportunity is untouched.",
-    lowers:
-      "A hard no floors it. Soft no and gone quiet sit low, and anything we are still waiting on slides down the longer the silence runs, over about a month.",
-    blank: "No outreach recorded against this client yet.",
-  },
-];
 
 /** score-client.ts's PRIORITY_BAND_THRESHOLDS, in the same order. */
 const BAND_ROWS: {
@@ -398,44 +401,60 @@ const BAND_ROWS: {
 ];
 
 /**
- * The verdict on one check, in the words a CAM would use. Deliberately four
- * outcomes rather than a number: "helping" and "holding it back" is what the
- * reader is actually deciding between.
- */
-function verdictFor(value: number): { label: string; tone: string; dot: string } {
-  if (value === 0.5) {
-    return { label: "Nothing on record", tone: "text-faint", dot: "bg-rule" };
-  }
-  if (value > 0.55) {
-    return { label: "Helping the score", tone: "text-lead", dot: "bg-lead" };
-  }
-  if (value >= 0.45) {
-    return { label: "Neither way", tone: "text-dim", dot: "bg-faint" };
-  }
-  return { label: "Holding it back", tone: "text-dim", dot: "bg-faint" };
-}
-
-/**
  * How the five checks are balanced, said in words. Equal weighting is the
  * normal state and deserves one plain sentence; anything else is an admin's
  * deliberate change, and the reader needs to know which check was favoured
  * rather than a column of decimals.
  */
 function weightingSentence(weights: ScoreFactorsRecord["weights"]): string {
-  const values = FACTOR_ROWS.map(({ key }) => weights[key]);
+  const values = CHECKS.map(({ key }) => weights[key]);
   const first = values[0];
   if (values.every((value) => Math.abs(value - first) < 0.0001)) {
     return "All five checks currently count equally.";
   }
-  const heaviest = METHOD_ROWS.reduce((top, row) =>
+  const heaviest = CHECKS.reduce((top, row) =>
     weights[row.key] > weights[top.key] ? row : top,
   );
-  const lightest = METHOD_ROWS.reduce((low, row) =>
+  const lightest = CHECKS.reduce((low, row) =>
     weights[row.key] < weights[low.key] ? row : low,
   );
-  return `The checks are not balanced equally right now — “${heaviest.label}” counts for the most and “${lightest.label}” for the least. An admin sets this.`;
+  return `The checks are not balanced equally right now — “${heaviest.label}” counts for the most and “${lightest.label}” for the least. This can be edited by an admin.`;
 }
 
+/** A section head with the hairline that separates it from what came before. */
+function MethodHeading({ children }: { children: ReactNode }) {
+  return (
+    <h3 className="mt-6 border-t border-rule-soft pt-5 text-[15px] leading-[1.3] font-semibold tracking-[-0.01em] text-ink">
+      {children}
+    </h3>
+  );
+}
+
+/**
+ * The method behind the card, one click away.
+ *
+ * The card answers "which parameter moved this number". The question
+ * underneath — "0.9 out of what? weighted how? who decided £1m is a 0.9?" — is
+ * the one that decides whether a CAM trusts the ranking at all, and until now
+ * the only place it was answered was a comment header in `score-client.ts`.
+ *
+ * Written for the person using the tool, not the person maintaining it. The
+ * first version was a spec sheet: a four-column arithmetic table, the raw 0–1
+ * reading and weight for each factor, and the source filename beside each one.
+ * The version after that was the same spec sheet in prose — every row printed
+ * what raises the check and what lowers it, permanently, above the fold, so the
+ * panel opened on reference material instead of on the answer.
+ *
+ * What it does now, in the order a reader wants it: the verdict on this client
+ * for each check, with its share of the score right-aligned beside it, and the
+ * scale behind it folded away under "What moves this check" for the one row
+ * being questioned. Reference on demand, not reference by default.
+ *
+ * The half-mark rule is stated once. It was in every neutral row, in its own
+ * section, and in the card's coverage line — three tellings of the single most
+ * repeated sentence in the panel. The section keeps it, because that is where
+ * someone goes when they doubt the number.
+ */
 function ScoreMethodDialog({
   score,
   factors,
@@ -481,11 +500,11 @@ function ScoreMethodDialog({
         >
           {/* Sticky header: the scrolling lives on the dialog content itself,
               so the title bar and close stay pinned while the body passes
-              underneath. Frosted rather than solid (the tag picker's glass):
-              the body blurs through it as it scrolls under. The close is inside
-              the bar — an absolutely-positioned one anchors to the scroll
-              container and scrolls away with it. */}
-          <div className="sticky top-0 z-20 rounded-t-[16px] border-b border-rule-soft bg-white/75 px-6 pt-5 pb-4 backdrop-blur-[10px] backdrop-saturate-150">
+              underneath. Frosted rather than solid: the body blurs through it
+              as it scrolls under. The close is inside the bar — an absolutely
+              positioned one anchors to the scroll container and scrolls away
+              with it. */}
+          <div className="sticky top-0 z-20 rounded-t-[16px] border-b border-rule-soft bg-white/85 px-6 pt-5 pb-4 backdrop-blur-[4px] backdrop-saturate-150">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <MorphingDialogTitle>
@@ -494,9 +513,11 @@ function ScoreMethodDialog({
                   </h2>
                 </MorphingDialogTitle>
                 <MorphingDialogSubtitle>
+                  {/* One premise, said once: the paragraph under the header
+                      used to restate this sentence in longer form. */}
                   <p className="mt-1 text-[13px] leading-[1.5] text-dim">
-                    Five checks on the record, averaged into one number between 0.00 and 1.00.
-                    Higher means more worth your time.
+                    Five checks on the record, averaged into one number between
+                    0.00 and 1.00.
                   </p>
                 </MorphingDialogSubtitle>
               </div>
@@ -507,7 +528,11 @@ function ScoreMethodDialog({
                   fills the 32px button, so the hover target is still the whole
                   pad. */}
               <MorphingDialogClose className="static flex size-8 shrink-0 items-center justify-center rounded-full text-faint transition-colors hover:bg-paper hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead-mid">
-                <AnimateIcon animateOnHover animateOnTap className="flex size-full items-center justify-center">
+                <AnimateIcon
+                  animateOnHover
+                  animateOnTap
+                  className="flex size-full items-center justify-center"
+                >
                   <XIcon size={16} strokeWidth={1.75} aria-hidden="true" />
                 </AnimateIcon>
               </MorphingDialogClose>
@@ -515,7 +540,6 @@ function ScoreMethodDialog({
           </div>
 
           <div className="px-6 pt-5 pb-7">
-
             <MorphingDialogDescription
               disableLayoutAnimation
               // The body rides in behind the box rather than with it: the
@@ -528,7 +552,11 @@ function ScoreMethodDialog({
                   opacity: 1,
                   scale: 1,
                   y: 0,
-                  transition: { duration: 0.42, delay: 0.08, ease: [0.32, 0.72, 0, 1] },
+                  transition: {
+                    duration: 0.42,
+                    delay: 0.08,
+                    ease: [0.32, 0.72, 0, 1],
+                  },
                 },
                 exit: {
                   opacity: 0,
@@ -538,25 +566,24 @@ function ScoreMethodDialog({
                 },
               }}
             >
-              <p className="mt-4 rounded-inset bg-paper px-4 py-3.5 text-[13px] leading-[1.6] text-dim">
-                Nothing here is a guess or a prediction. Every check reads something already
-                on the record — sector, location, published accounts, grant history, our own
-                outreach — so the same record always produces the same score, and you can see
-                exactly which fact moved it.
+              <p className="rounded-inset bg-paper px-4 py-3.5 text-[13px] leading-[1.6] text-dim">
+                Nothing here is a guess or a prediction. Every check reads
+                something already on the record — sector, location, published
+                accounts, grant history, our own outreach — so the same record
+                always produces the same score, and you can see exactly which
+                fact moved it.
                 {factors ? ` ${weightingSentence(factors.weights)}` : ""}
               </p>
 
-              <h3 className="mt-6 text-[13px] font-semibold tracking-[-0.01em] text-ink">
-                The five checks
-              </h3>
-              <p className="mt-1 text-[12.5px] leading-[1.55] text-dim">
+              <MethodHeading>The five checks</MethodHeading>
+              <p className="mt-1 text-[13px] leading-[1.55] text-dim">
                 {factors
                   ? "What each one looks at, and what it found on this client."
                   : "What each one looks at."}
               </p>
 
-              <ul className="mt-2.5 space-y-2.5">
-                {METHOD_ROWS.map((row) => {
+              <ul className="mt-3 space-y-2">
+                {CHECKS.map((row) => {
                   const value = factors ? factors.factors[row.key] : null;
                   const verdict = value === null ? null : verdictFor(value);
                   const isBlank = value === 0.5;
@@ -567,65 +594,89 @@ function ScoreMethodDialog({
                       key={row.key}
                       className="rounded-inset border border-rule-soft px-3.5 py-3"
                     >
-                      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                        <span className="text-[13.5px] font-semibold text-ink">{row.label}</span>
-                        {verdict && (
+                      {/* Name and share on one baseline, share right-aligned
+                          and tabular — the same shape the card uses, so the two
+                          surfaces read as one thing. It used to trail the
+                          verdict as prose after a middot, which put the panel's
+                          most decision-relevant number last in a sentence. */}
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="min-w-0 truncate text-[14px] font-semibold text-ink">
+                          {row.label}
+                        </span>
+                        {percent !== undefined && !isBlank && (
                           <span
-                            className={`inline-flex items-center gap-1.5 text-[11.5px] font-medium ${verdict.tone}`}
+                            className={`shrink-0 font-mono text-[12px] font-medium tabular-nums ${verdict?.textClass ?? "text-dim"}`}
                           >
-                            <span
-                              aria-hidden="true"
-                              className={`size-1.5 rounded-full ${verdict.dot}`}
-                            />
-                            {verdict.label}
-                            {percent !== undefined && !isBlank
-                              ? ` · ${percent.toFixed(0)}% of the score`
-                              : ""}
+                            {percent.toFixed(0)}%
                           </span>
                         )}
                       </div>
 
-                      <p className="mt-1 text-[12.5px] leading-[1.55] text-dim">{row.reads}</p>
+                      {verdict && (
+                        <span
+                          className={`mt-1 inline-flex items-center gap-1.5 text-[11.5px] font-medium ${verdict.textClass}`}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className={`size-1.5 rounded-full ${verdict.dotClass}`}
+                          />
+                          {verdict.label}
+                        </span>
+                      )}
 
-                      {isBlank ? (
-                        <p className="mt-1.5 text-[12.5px] leading-[1.55] text-dim">
-                          {row.blank} A check with nothing to read counts as a half mark, which
-                          is why it still takes up part of the score.
-                        </p>
-                      ) : (
-                        <dl className="mt-2 space-y-1 text-[12.5px] leading-[1.5]">
+                      <p className="mt-1.5 text-[13px] leading-[1.55] text-dim">
+                        {isBlank ? row.blank : row.reads}
+                      </p>
+
+                      {/* Native disclosure rather than state: the panel is
+                          already animating, and what raises or lowers a check
+                          is reference material for the one row someone is
+                          arguing with — not something every row should open
+                          holding. */}
+                      <details className="group mt-2">
+                        <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[12px] font-medium text-lead transition-colors hover:text-lead-mid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead-mid [&::-webkit-details-marker]:hidden">
+                          <span
+                            aria-hidden="true"
+                            className="inline-block transition-transform group-open:rotate-90"
+                          >
+                            ›
+                          </span>
+                          What moves this check
+                        </summary>
+                        <dl className="mt-1.5 space-y-1 text-[12.5px] leading-[1.5]">
                           <div className="flex gap-2">
-                            <dt className="w-[5.5rem] shrink-0 text-faint">Scores well</dt>
+                            <dt className="w-[5.5rem] shrink-0 text-faint">
+                              Scores well
+                            </dt>
                             <dd className="min-w-0 text-dim">{row.raises}</dd>
                           </div>
                           <div className="flex gap-2">
-                            <dt className="w-[5.5rem] shrink-0 text-faint">Scores badly</dt>
+                            <dt className="w-[5.5rem] shrink-0 text-faint">
+                              Scores badly
+                            </dt>
                             <dd className="min-w-0 text-dim">{row.lowers}</dd>
                           </div>
                         </dl>
-                      )}
+                      </details>
                     </li>
                   );
                 })}
               </ul>
 
-              <h3 className="mt-6 text-[13px] font-semibold tracking-[-0.01em] text-ink">
-                When we don&apos;t know something
-              </h3>
-              <p className="mt-1.5 text-[12.5px] leading-[1.6] text-dim">
-                A check with nothing to read counts as half a mark rather than being skipped.
-                Skipping it would let one known fact carry the whole score — a client we know
-                nothing about but have never contacted would come out top of the list on that
-                alone. Half a mark keeps a thin record in the middle, where it belongs. It also
-                means two clients on the same score are not the same bet if one had five real
-                readings behind it and the other had one, which is what the count at the top of
-                this card is telling you.
+              <MethodHeading>When we don&apos;t know something</MethodHeading>
+              <p className="mt-1.5 text-[13px] leading-[1.6] text-dim">
+                A check with nothing to read counts as half a mark rather than
+                being skipped. Skipping it would let one known fact carry the
+                whole score — a client we know nothing about but have never
+                contacted would come out top of the list on that alone. Half a
+                mark keeps a thin record in the middle, where it belongs. It
+                also means two clients on the same score are not the same bet if
+                one had five real readings behind it and the other had one,
+                which is what the count at the top of the card is telling you.
               </p>
 
-              <h3 className="mt-6 text-[13px] font-semibold tracking-[-0.01em] text-ink">
-                What the number means
-              </h3>
-              <ul className="mt-2 space-y-1">
+              <MethodHeading>What the number means</MethodHeading>
+              <ul className="mt-2.5 space-y-1">
                 {BAND_ROWS.map((band) => {
                   const isCurrent = score !== null && band.test(score);
                   return (
@@ -635,10 +686,14 @@ function ScoreMethodDialog({
                         isCurrent ? "bg-lead-wash text-lead" : "text-dim"
                       }`}
                     >
-                      <span className={`font-semibold ${isCurrent ? "" : "text-ink"}`}>
+                      <span
+                        className={`font-semibold ${isCurrent ? "" : "text-ink"}`}
+                      >
                         {band.label}
                       </span>
-                      <span className="font-mono tabular-nums">{band.range}</span>
+                      <span className="font-mono tabular-nums">
+                        {band.range}
+                      </span>
                       <span className="w-full text-[12px] sm:w-auto">
                         — {band.meaning}
                         {isCurrent && " This client."}
@@ -649,9 +704,10 @@ function ScoreMethodDialog({
               </ul>
 
               <p className="mt-5 text-[11.5px] leading-[1.55] text-faint">
-                The readings above are the ones saved when this client was last scored, so they
-                always add up to the score on the card. Scores refresh on their own as the
-                record changes — there is nothing to run here.
+                The readings above are the ones saved when this client was last
+                scored, so they always add up to the score on the card. Scores
+                refresh on their own as the record changes — there is nothing to
+                run here.
               </p>
             </MorphingDialogDescription>
           </div>

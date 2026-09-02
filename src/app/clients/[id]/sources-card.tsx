@@ -1,7 +1,14 @@
+"use client";
+
 import Image from "next/image";
 import { BookOpen } from "lucide-react";
 
 import type { OrganisationSource } from "@/lib/source-tracking";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/animate-ui/components/radix/tooltip";
 import { SectionCard } from "./section-card";
 
 /**
@@ -30,8 +37,64 @@ import { SectionCard } from "./section-card";
  */
 const SOURCE_LOGOS: Readonly<Record<string, string>> = {
   charity_commission: "/sources/charity-commission.png",
-  companies_house: "/sources/companies-house.png",
-  "360giving": "/sources/360giving.png",
+  companies_house: "/sources/Companies-House.png",
+  "360giving": "/sources/360Giving.png",
+};
+
+/**
+ * Explanations of what each data source is and its relevance to 180Connect.
+ */
+const SOURCE_DETAILS: Readonly<
+  Record<string, { summary: string; relevance: string }>
+> = {
+  charity_commission: {
+    summary:
+      "The official statutory regulator of charities in England and Wales.",
+    relevance:
+      "Verifies legal charitable status, public benefit objectives, trustee governance, and annual filing compliance.",
+  },
+  companies_house: {
+    summary:
+      "The UK executive agency that incorporates and registers all corporate entities.",
+    relevance:
+      "Confirms company incorporation, CIC status, registered directors, and statutory balance sheet filings.",
+  },
+  "360giving": {
+    summary:
+      "The UK open data initiative and global publishing standard for grantmaking.",
+    relevance:
+      "Maps institutional grant distributions, philanthropic funder networks, and awarded funding history.",
+  },
+  charitybase: {
+    summary:
+      "Open-source UK charity database and API platform aggregating registry data.",
+    relevance:
+      "Provides structured metadata on charitable activities, operational areas, and digital contact information.",
+  },
+  find_that_charity: {
+    summary:
+      "Unified open index linking non-profits across diverse UK regulators.",
+    relevance:
+      "Reconciles dual-registered charities, CICs, and mutuals across regional registries into one record.",
+  },
+  globalgiving: {
+    summary:
+      "International crowdfunding community and non-profit directory connecting vetted NGOs worldwide.",
+    relevance:
+      "Supplies international validation, vetted development projects, and global donor impact tracking.",
+  },
+  candid: {
+    summary:
+      "Premier global non-profit dataset formed by Foundation Center and GuideStar.",
+    relevance:
+      "Delivers international financial benchmarking, philanthropic research, and 990 non-profit filings.",
+  },
+  manual: {
+    summary:
+      "Primary information curated or imported directly by a 180 Degrees team member.",
+    relevance:
+      "Captures verified primary intelligence, direct client stakeholder contacts, and fresh organizational updates.",
+  },
 };
 
 /**
@@ -135,7 +198,7 @@ export function SourcesCard({
   return (
     <SectionCard
       headingId="source-heading"
-      title="Where this came from"
+      title="Data Sources"
       hint="Every register and dataset that contributed to this record."
       icon={<BookOpen />}
     >
@@ -156,40 +219,96 @@ export function SourcesCard({
             // A manual entry's "register" is a person, so the row names them
             // instead of pretending to a registry.
             const actor = source.actor;
+            const details = SOURCE_DETAILS[source.source];
 
             return (
               <li
                 key={source.source}
                 className="flex items-center gap-3.5 py-3 first:border-t-0 first:pt-0"
               >
-                {/* No tile, no border, no plate. A wordmark is already a
-                    designed object with its own margins; framing one is putting
-                    a frame around a frame, and it forced the logo down to 32px
-                    of usable space inside a 44px box. Unframed it can be the
-                    size it deserves. */}
-                {logo ? (
-                  <span className="flex size-14 shrink-0 items-center justify-center">
-                    <Image
-                      src={logo}
-                      alt=""
-                      width={56}
-                      height={56}
-                      className="max-h-full max-w-full object-contain"
-                    />
-                  </span>
-                ) : (
-                  <span
-                    aria-hidden="true"
-                    className="flex size-14 shrink-0 items-center justify-center font-mono text-[15px] font-semibold tracking-[0.02em] text-faint"
-                  >
-                    {monogram(source.label)}
-                  </span>
-                )}
+                <Tooltip delayDuration={150}>
+                  <TooltipTrigger asChild>
+                    {/* No tile, no border, no plate. A wordmark is already a
+                        designed object with its own margins; framing one is putting
+                        a frame around a frame, and it forced the logo down to 32px
+                        of usable space inside a 44px box. Unframed it can be the
+                        size it deserves. */}
+                    {logo ? (
+                      <span className="flex size-14 shrink-0 cursor-help items-center justify-center">
+                        <Image
+                          src={logo}
+                          alt=""
+                          width={56}
+                          height={56}
+                          className={`max-h-full object-contain ${
+                            source.source === "360giving"
+                              ? "max-w-none w-auto h-12 scale-85"
+                              : source.source === "companies_house"
+                                ? "max-w-none w-auto h-14 scale-125"
+                                : "max-w-full"
+                          }`}
+                        />
+                      </span>
+                    ) : (
+                      <span
+                        aria-hidden="true"
+                        className="flex size-14 shrink-0 cursor-help items-center justify-center font-mono text-[15px] font-semibold tracking-[0.02em] text-faint"
+                      >
+                        {monogram(source.label)}
+                      </span>
+                    )}
+                  </TooltipTrigger>
+
+                  {details && (
+                    <TooltipContent
+                      side="top"
+                      sideOffset={6}
+                      className="max-w-[18rem] rounded-inset bg-ink px-3.5 py-2.5 text-left text-[12px] leading-[1.5] text-white shadow-lg"
+                    >
+                      <span className="block font-semibold text-white">
+                        {source.label}
+                      </span>
+                      <span className="mt-1 block text-white/80">
+                        {details.summary}
+                      </span>
+                      <span className="mt-2 block border-t border-white/10 pt-1.5 text-[11px] text-white/70">
+                        <strong className="font-semibold text-white/90">
+                          Relevance:
+                        </strong>{" "}
+                        {details.relevance}
+                      </span>
+                    </TooltipContent>
+                  )}
+                </Tooltip>
 
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[17.5px] font-semibold text-ink">
-                    {source.label}
-                  </p>
+                  <Tooltip delayDuration={150}>
+                    <TooltipTrigger asChild>
+                      <p className="w-fit cursor-help truncate text-[17.5px] font-semibold text-ink hover:text-lead">
+                        {source.label}
+                      </p>
+                    </TooltipTrigger>
+                    {details && (
+                      <TooltipContent
+                        side="top"
+                        sideOffset={6}
+                        className="max-w-[18rem] rounded-inset bg-ink px-3.5 py-2.5 text-left text-[12px] leading-[1.5] text-white shadow-lg"
+                      >
+                        <span className="block font-semibold text-white">
+                          {source.label}
+                        </span>
+                        <span className="mt-1 block text-white/80">
+                          {details.summary}
+                        </span>
+                        <span className="mt-2 block border-t border-white/10 pt-1.5 text-[11px] text-white/70">
+                          <strong className="font-semibold text-white/90">
+                            Relevance:
+                          </strong>{" "}
+                          {details.relevance}
+                        </span>
+                      </TooltipContent>
+                    )}
+                  </Tooltip>
                   {/* One line, and only the parts that exist. A register with no
                       record id captured says nothing where the id would be
                       rather than filling the space with a placeholder. */}

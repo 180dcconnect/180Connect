@@ -38,7 +38,7 @@ describe("buildBasicInfo", () => {
     const info = buildBasicInfo(state());
     assert.deepEqual(info, {
       name: "Test Charity",
-      type: "charity",
+      type: "Charity",
       mission: "Helping people thrive.",
       email: "hello@example.org",
       address: "12 High Street, BS1 1AA",

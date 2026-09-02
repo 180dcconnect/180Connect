@@ -825,7 +825,7 @@ export default async function DashboardPage({
   }
 
   return (
-    <div className="min-h-screen bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+    <div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
       <Stage className="mx-auto w-full max-w-[1400px] space-y-10">
         <Rise className="flex flex-wrap items-end justify-between gap-x-8 gap-y-5">
           <div className="min-w-0">

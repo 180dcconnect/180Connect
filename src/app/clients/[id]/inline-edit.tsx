@@ -4,6 +4,13 @@ import { useId } from "react";
 import { Check, Undo2, X } from "lucide-react";
 
 import { GooeyTextInput } from "@/components/ui/gooey-text-input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 import {
   REASON_MAX_LENGTH,
@@ -160,6 +167,77 @@ export function InlineFieldInput({
             </p>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The editor for a row backed by a Postgres enum — today only `organisation_type`.
+ *
+ * A pill you can type into is the wrong shape for a closed set: the column is
+ * `public.organisation_type`, so anything outside the eight values comes back
+ * from Postgres as `22P02 invalid input value for enum`, which the batch can
+ * only report as "could not be saved". A select cannot express the invalid
+ * value in the first place, and it also names the options — "CIO" and "CIC" are
+ * not values anybody guesses from a blank input.
+ *
+ * There is no droplet: nothing is typed, so there is no keystroke to submit on.
+ * Picking a value fills the draft and the card's own bar sends the batch, the
+ * same as every other row.
+ */
+export function InlineEnumInput({
+  label,
+  value,
+  options,
+  onChange,
+  onCancel,
+  pending,
+  error,
+}: {
+  label: string;
+  value: string;
+  /** Enum values in display order, each with the label the rest of the app uses. */
+  options: readonly { value: string; label: string }[];
+  onChange: (next: string) => void;
+  onCancel: () => void;
+  pending: boolean;
+  error?: string;
+}) {
+  return (
+    <div className="flex w-full min-w-0 flex-col gap-1">
+      <div className="flex items-center gap-1.5">
+        <div className="min-w-0 flex-1">
+          <Select value={value} onValueChange={onChange} disabled={pending}>
+            <SelectTrigger
+              aria-label={`${label}, new value`}
+              aria-invalid={Boolean(error) || undefined}
+              className="w-full"
+            >
+              <SelectValue placeholder={`Choose a ${label.toLowerCase()}`} />
+            </SelectTrigger>
+            <SelectContent>
+              {options.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <button
+          type="button"
+          onClick={onCancel}
+          aria-label={`Stop editing ${label.toLowerCase()}`}
+          className="shrink-0 rounded-inset p-1.5 text-faint transition-colors hover:bg-paper hover:text-ink focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none"
+        >
+          <X aria-hidden="true" className="size-3.5" />
+        </button>
+      </div>
+      {error && (
+        <p className="pl-1 text-[12px] font-semibold text-stop" role="alert">
+          {error}
+        </p>
       )}
     </div>
   );

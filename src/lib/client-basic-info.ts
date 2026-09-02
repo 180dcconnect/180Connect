@@ -6,7 +6,11 @@
  * the admin team list.
  */
 
-import { formatLocation, formatOutreachStatus } from "./organisation-format.ts";
+import {
+  formatLocation,
+  formatOrganisationType,
+  formatOutreachStatus,
+} from "./organisation-format.ts";
 
 /** AC2's explicit blank. Exported so the UI can render it as muted rather than
  * re-deriving "is this a real value?" from a string comparison of its own. */
@@ -71,7 +75,11 @@ export function buildBasicInfo(state: BasicInfoState): BasicInfo {
   const { organisation, missionStatement } = state;
   return {
     name: organisation.legal_name,
-    type: organisation.organisation_type,
+    // Formatted, like every other enum on this page: the row read
+    // "social_enterprise" while /clients showed "Social enterprise" for the
+    // same record. formatOrganisationType falls back to the raw value, so a
+    // type the database grew first still shows rather than vanishing.
+    type: formatOrganisationType(organisation.organisation_type),
     mission: displayValue(missionStatement),
     email: displayValue(organisation.contact_email),
     address: formatAddress(organisation),

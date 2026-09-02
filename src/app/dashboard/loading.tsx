@@ -7,7 +7,7 @@
  */
 export default function Loading() {
   return (
-    <div className="min-h-screen bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+    <div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
       <div className="mx-auto w-full max-w-[1400px] space-y-10">
         {/* Heading + "View all clients" pill */}
         <div className="animate-pulse" aria-hidden="true">

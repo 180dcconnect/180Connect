@@ -59,12 +59,12 @@ export function SectionCard({
       aria-labelledby={headingId}
       className={`scroll-mt-6 rounded-panel border px-5 py-4.5 ${toneClasses} ${className}`}
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
-        <div className="flex min-w-0 items-baseline gap-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex min-w-0 items-center gap-2.5">
           {icon && (
             <span
               aria-hidden="true"
-              className={`shrink-0 self-center [&_svg]:size-[15px] ${
+              className={`shrink-0 [&_svg]:size-[15px] ${
                 tone === "danger" ? "text-stop/70" : "text-faint"
               }`}
             >

@@ -5,6 +5,7 @@ import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { reportError } from "@/lib/error-logging";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ORGANISATION_TYPES } from "@/lib/organisation-format";
 import {
   maxLengthFor,
   normaliseFieldValue,
@@ -38,6 +39,19 @@ const ADMIN_EDITABLE_FIELDS = new Set([
 ]);
 
 const MISSION_FIELDS = new Set(["mission_statement", "mission"]);
+
+/**
+ * Closed sets, checked here rather than left to Postgres.
+ *
+ * `organisation_type` is a Postgres enum, so a value outside the set comes back
+ * as `22P02 invalid input value for enum` — an error the batch can only report
+ * as "could not be saved", and one that aborts the whole UPDATE, taking the
+ * other fields in the batch down with a value the caller controls. The panel
+ * offers a select, but the select is the client's; this is the check.
+ */
+const ENUM_FIELD_VALUES: Record<string, readonly string[]> = {
+  organisation_type: ORGANISATION_TYPES,
+};
 
 /**
  * The admin's side of the inline editor: several fields, applied directly.
@@ -120,6 +134,16 @@ export async function adminDirectEditsAction(input: {
 
     if (!ADMIN_EDITABLE_FIELDS.has(fieldName)) {
       results.push({ fieldName, ok: false, message: `${label} cannot be edited here.` });
+      continue;
+    }
+
+    const allowed = ENUM_FIELD_VALUES[fieldName];
+    if (allowed && !allowed.includes(value)) {
+      results.push({
+        fieldName,
+        ok: false,
+        message: `${label} must be one of the listed options.`,
+      });
       continue;
     }
 

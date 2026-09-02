@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   mapNotificationRows,
-  sortNotificationsNewestFirst,
+  notificationPriority,
   notificationRelativeTime,
+  sortNotificationsByPriority,
+  sortNotificationsNewestFirst,
   type RawNotificationRow,
 } from "./notifications.ts";
 
@@ -84,5 +86,61 @@ describe("notificationRelativeTime (F173)", () => {
       notificationRelativeTime(item, new Date("2026-08-21T12:05:00Z")),
       "5 minutes ago",
     );
+  });
+});
+
+describe("notificationPriority (F174 AC3)", () => {
+  it("treats reply_received as high priority", () => {
+    assert.equal(notificationPriority("reply_received"), "high");
+  });
+
+  it("treats every other known type as normal priority", () => {
+    assert.equal(notificationPriority("team_activity"), "normal");
+    assert.equal(notificationPriority("outreach_send_failed"), "normal");
+  });
+
+  it("treats an unrecognised type as normal rather than throwing", () => {
+    assert.equal(notificationPriority("some_future_type"), "normal");
+  });
+});
+
+describe("sortNotificationsByPriority (F174 AC3)", () => {
+  it("puts a high-priority notification ahead of an older normal one", () => {
+    const items = mapNotificationRows([
+      row({ id: "normal-newer", notification_type: "team_activity", created_at: "2026-08-21T12:00:00Z" }),
+      row({ id: "reply-older", notification_type: "reply_received", created_at: "2026-08-20T09:00:00Z" }),
+    ]);
+    const sorted = sortNotificationsByPriority(items);
+    assert.deepEqual(sorted.map((i) => i.id), ["reply-older", "normal-newer"]);
+  });
+
+  it("keeps newest-first ordering within the same priority tier", () => {
+    const items = mapNotificationRows([
+      row({ id: "reply-older", notification_type: "reply_received", created_at: "2026-08-20T09:00:00Z" }),
+      row({ id: "reply-newer", notification_type: "reply_received", created_at: "2026-08-21T12:00:00Z" }),
+    ]);
+    const sorted = sortNotificationsByPriority(items);
+    assert.deepEqual(sorted.map((i) => i.id), ["reply-newer", "reply-older"]);
+  });
+
+  it("matches plain newest-first when nothing is high priority", () => {
+    const items = mapNotificationRows([
+      row({ id: "older", created_at: "2026-08-20T09:00:00Z" }),
+      row({ id: "newer", created_at: "2026-08-21T12:00:00Z" }),
+    ]);
+    assert.deepEqual(
+      sortNotificationsByPriority(items).map((i) => i.id),
+      sortNotificationsNewestFirst(items).map((i) => i.id),
+    );
+  });
+
+  it("does not mutate the input", () => {
+    const items = mapNotificationRows([
+      row({ id: "a", created_at: "2026-08-20T09:00:00Z" }),
+      row({ id: "b", notification_type: "reply_received", created_at: "2026-08-19T09:00:00Z" }),
+    ]);
+    const before = items.map((i) => i.id);
+    sortNotificationsByPriority(items);
+    assert.deepEqual(items.map((i) => i.id), before);
   });
 });

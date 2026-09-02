@@ -5,7 +5,7 @@ import { reportError } from "@/lib/error-logging";
 import {
   NOTIFICATIONS_PAGE_SIZE,
   mapNotificationRows,
-  sortNotificationsNewestFirst,
+  sortNotificationsByPriority,
   type NotificationItem,
 } from "@/lib/notifications";
 
@@ -50,7 +50,10 @@ export async function getMyNotifications(): Promise<NotificationsResult> {
 
   return {
     ok: true,
-    items: sortNotificationsNewestFirst(mapNotificationRows(listResult.data)),
+    // F174 AC3: high-priority (reply) notifications lead the feed, newest
+    // first within that tier, then everything else newest-first — see
+    // sortNotificationsByPriority.
+    items: sortNotificationsByPriority(mapNotificationRows(listResult.data)),
     unreadCount: countResult.count ?? 0,
   };
 }

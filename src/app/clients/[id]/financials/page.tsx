@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 
+import { FinancialsHeroCard } from "./financials-hero-card";
 import { FinancialFilingsSection } from "../financial-filings-section";
 import {
   FINANCIAL_FILINGS_PAGE_SIZE,
@@ -91,6 +92,13 @@ export default async function ClientFinancialsPage({
   return (
     <Stage>
       <Group className="space-y-6">
+        <Rise>
+          <FinancialsHeroCard
+            filings={filings.data ?? []}
+            totalCount={filings.count ?? filings.data?.length ?? 0}
+          />
+        </Rise>
+
         <Rise>
           <GrantHistorySection
             organisationId={id}

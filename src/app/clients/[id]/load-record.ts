@@ -54,6 +54,13 @@ export type IdentifierRow = {
   verified_at: string | null;
 };
 
+export type LatestFinancialRow = {
+  total_income: number | null;
+  total_expenditure: number | null;
+  income_band: string | null;
+  period_end: string;
+};
+
 export type RecordStats = {
   emailsSent: number;
   replies: number;
@@ -64,6 +71,10 @@ export type RecordStats = {
   activity: number;
   /** ISO timestamp of the most recent thing that happened to this record. */
   lastActivity: string | null;
+  /** Timestamp of the most recent outreach message sent. */
+  lastContactedAt: string | null;
+  /** Timestamp of the most recent client reply received. */
+  lastReplyAt: string | null;
 };
 
 /** The actor, memoised for the request. Redirect handling lives in `requireActor`. */
@@ -90,7 +101,7 @@ export const loadClient = cache(async (id: string) => {
   const { data, error } = await supabase
     .from("organisations")
     .select(
-      "id, legal_name, organisation_type, website, contact_email, address_line_1, city, postcode, country_code, outreach_status",
+      "id, legal_name, organisation_type, website, contact_email, address_line_1, city, postcode, country_code, outreach_status, sector, sub_sector, created_at",
     )
     .eq("id", id)
     .maybeSingle<OrganisationDetailRow>();
@@ -227,7 +238,26 @@ export const loadWebsite = cache(async (website: string | null) =>
 );
 
 /**
- * The header's five numbers.
+ * Latest filed accounts period for financial scale context in the header.
+ */
+export const loadLatestFinancial = cache(async (id: string): Promise<LatestFinancialRow | null> => {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("financial_periods")
+    .select("total_income, total_expenditure, income_band, period_end")
+    .eq("organisation_id", id)
+    .order("period_end", { ascending: false })
+    .limit(1)
+    .maybeSingle<LatestFinancialRow>();
+
+  if (error) {
+    await reportError(error, { operation: "clients.detail_latest_financial", organisationId: id });
+  }
+  return data ?? null;
+});
+
+/**
+ * The header's numbers and activity timestamps.
  *
  * The old single-page version derived these from rows it had already fetched for
  * the cards — every note, every outreach message, every reply, and a fully built
@@ -332,5 +362,7 @@ export const loadRecordStats = cache(async (id: string): Promise<RecordStats> =>
       timestamps.length > 0
         ? timestamps.reduce((latest, value) => (value > latest ? value : latest))
         : null,
+    lastContactedAt: sent.data?.[0]?.sent_at ?? null,
+    lastReplyAt: replies.data?.[0]?.received_at ?? null,
   };
 });

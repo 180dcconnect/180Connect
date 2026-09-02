@@ -23,6 +23,9 @@ export type OrganisationDetailRow = {
   postcode: string | null;
   country_code: string;
   outreach_status: string;
+  sector?: string | null;
+  sub_sector?: string | null;
+  created_at?: string;
 };
 
 /** Basic-info state as held by the client component: the org row plus the

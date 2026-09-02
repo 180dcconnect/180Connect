@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   Dialog,
@@ -62,6 +62,27 @@ export function OwnerControl({
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [dropdownOpen]);
 
   const filtered = team
     .filter((m) => (m.full_name ?? "").toLowerCase().includes(search.trim().toLowerCase()))
@@ -125,7 +146,7 @@ export function OwnerControl({
     <div className="flex min-w-0 items-center gap-2.5">
       <span className="font-body text-[12px] uppercase font-bold tracking-[-0.01em] text-ink">Owner</span>
 
-      <div className="relative">
+      <div ref={containerRef} className="relative">
         {ownerId ? (
           isAdmin ? (
             <button
@@ -210,7 +231,7 @@ export function OwnerControl({
         )}
 
         {(isAdmin || (canEdit && !ownerId)) && dropdownOpen && (
-          <div className="absolute left-0 top-full z-20 mt-2 w-72 rounded-2xl border border-black/[0.08] bg-white p-3 shadow-xl">
+          <div className="absolute left-0 top-full z-50 mt-2 w-72 rounded-2xl border border-black/[0.08] bg-white p-3 shadow-xl">
             {isAdmin ? (
               <>
                 <input

@@ -352,7 +352,10 @@ export const DeleteButton = React.forwardRef<
         className="will-change-transform"
       >
         <motion.div
-          layout="position"
+          layout
+          transition={{
+            layout: { type: "spring", stiffness: 200, damping: 24, mass: 0.9 },
+          }}
           className={cn(
             "inline-flex items-center select-none",
             currentSize.gap,
@@ -378,11 +381,11 @@ export const DeleteButton = React.forwardRef<
             aria-live="polite"
             whileTap={disabled || isExecuting ? undefined : { scale: 0.97 }}
             transition={{
-              layout: { type: "spring", stiffness: 450, damping: 30 },
-              scale: { duration: 0.1 },
+              layout: { type: "spring", stiffness: 200, damping: 24, mass: 0.9 },
+              scale: { duration: 0.15 },
             }}
             className={cn(
-              "relative inline-flex items-center justify-center font-medium tracking-tight transition-all duration-200 cursor-pointer overflow-hidden rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
+              "relative inline-flex items-center justify-center font-medium tracking-tight transition-colors duration-300 cursor-pointer overflow-hidden rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
               currentSize.button,
               buttonStyleClasses,
               buttonClassName
@@ -397,7 +400,7 @@ export const DeleteButton = React.forwardRef<
                     initial={{ opacity: 0, rotate: -45, scale: 0.7 }}
                     animate={{ opacity: 1, rotate: 0, scale: 1 }}
                     exit={{ opacity: 0, rotate: 45, scale: 0.7 }}
-                    transition={{ duration: 0.18, ease: "easeOut" }}
+                    transition={{ duration: 0.25, ease: "easeOut" }}
                     className="flex items-center justify-center"
                   >
                     <Loader2
@@ -414,9 +417,9 @@ export const DeleteButton = React.forwardRef<
                     exit={{ opacity: 0, scale: 0.5, rotate: 30 }}
                     transition={{
                       type: "spring",
-                      stiffness: 500,
-                      damping: 25,
-                      mass: 0.8,
+                      stiffness: 220,
+                      damping: 20,
+                      mass: 0.9,
                     }}
                     className="flex items-center justify-center"
                   >
@@ -434,9 +437,9 @@ export const DeleteButton = React.forwardRef<
                     exit={{ opacity: 0, scale: 0.5, rotate: -20 }}
                     transition={{
                       type: "spring",
-                      stiffness: 500,
-                      damping: 25,
-                      mass: 0.8,
+                      stiffness: 220,
+                      damping: 20,
+                      mass: 0.9,
                     }}
                     className="flex items-center justify-center"
                   >
@@ -451,15 +454,21 @@ export const DeleteButton = React.forwardRef<
             </span>
 
             {/* Dynamic Text Transition: Delete -> Confirm -> Deleting */}
-            <span className="relative flex items-center justify-center overflow-hidden">
-              <AnimatePresence mode="wait" initial={false}>
+            <motion.span
+              layout="size"
+              transition={{
+                layout: { type: "spring", stiffness: 200, damping: 24, mass: 0.9 },
+              }}
+              className="relative flex items-center justify-center overflow-hidden"
+            >
+              <AnimatePresence mode="popLayout" initial={false}>
                 {isDeleting ? (
                   <motion.span
                     key="deleting-text"
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }}
-                    transition={{ duration: 0.16, ease: "easeOut" }}
+                    transition={{ duration: 0.25, ease: "easeOut" }}
                     className="whitespace-nowrap font-medium"
                   >
                     {deletingLabel}
@@ -472,9 +481,9 @@ export const DeleteButton = React.forwardRef<
                     exit={{ opacity: 0, y: -8 }}
                     transition={{
                       type: "spring",
-                      stiffness: 450,
-                      damping: 25,
-                      mass: 0.8,
+                      stiffness: 200,
+                      damping: 22,
+                      mass: 0.9,
                     }}
                     className="whitespace-nowrap font-semibold"
                   >
@@ -488,9 +497,9 @@ export const DeleteButton = React.forwardRef<
                     exit={{ opacity: 0, y: -8 }}
                     transition={{
                       type: "spring",
-                      stiffness: 450,
-                      damping: 25,
-                      mass: 0.8,
+                      stiffness: 200,
+                      damping: 22,
+                      mass: 0.9,
                     }}
                     className="whitespace-nowrap"
                   >
@@ -498,7 +507,7 @@ export const DeleteButton = React.forwardRef<
                   </motion.span>
                 )}
               </AnimatePresence>
-            </span>
+            </motion.span>
           </motion.button>
 
           {/* Secondary Cancel "X" Button (Appears beside Confirm button, closes when deleting/snapping) */}
@@ -512,9 +521,9 @@ export const DeleteButton = React.forwardRef<
                 exit={{ opacity: 0, scale: 0.7, x: -8 }}
                 transition={{
                   type: "spring",
-                  stiffness: 500,
-                  damping: 28,
-                  mass: 0.7,
+                  stiffness: 220,
+                  damping: 22,
+                  mass: 0.8,
                 }}
                 whileTap={{ scale: 0.92 }}
                 onClick={handleCancelClick}
@@ -522,7 +531,7 @@ export const DeleteButton = React.forwardRef<
                 aria-label={cancelAriaLabel}
                 title="Cancel"
                 className={cn(
-                  "relative inline-flex items-center justify-center shrink-0 cursor-pointer rounded-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
+                  "relative inline-flex items-center justify-center shrink-0 cursor-pointer rounded-sm transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
                   currentSize.cancelBtn,
                   currentVariant.cancel,
                   cancelButtonClassName

@@ -9,7 +9,10 @@
 import { revalidatePath } from "next/cache";
 
 import { removeTag } from "./remove-tag.ts";
+import { createTag } from "./create-tag.ts";
+import { assignTags } from "./assign-tag.ts";
 import type { RemoveTagResult } from "./remove-tag-core.ts";
+import type { CreateTagResult } from "./create-tag-core.ts";
 
 export async function removeTagAction(
   organisationId: string,
@@ -27,4 +30,22 @@ export async function removeTagAction(
   }
 
   return result;
+}
+
+export async function createAndAssignTagAction(
+  organisationId: string,
+  name: string,
+  colour?: string | null,
+): Promise<CreateTagResult> {
+  const createResult = await createTag(name, colour);
+  if (!createResult.ok) {
+    return createResult;
+  }
+  const assignResult = await assignTags(organisationId, [createResult.tag.id]);
+  if (!assignResult.ok) {
+    return { ok: false, message: assignResult.message };
+  }
+  revalidatePath(`/clients/${organisationId}`);
+  revalidatePath("/clients");
+  return createResult;
 }

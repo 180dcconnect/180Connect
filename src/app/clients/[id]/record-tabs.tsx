@@ -71,7 +71,7 @@ export function RecordTabs({
   return (
     <nav
       aria-label="Sections of this client record"
-      className="sticky top-0 z-40 -mx-6 border-b border-rule bg-paper/90 px-6 py-2 backdrop-blur-sm sm:-mx-10 sm:px-10"
+      className="sticky top-0 z-30 py-2"
     >
       <Liquid
         blur={5}

@@ -19,8 +19,6 @@ import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { BasicInfoPanel } from "@/app/clients/[id]/basic-info-panel";
 import { ScoreBreakdownCard } from "@/app/clients/[id]/score-breakdown";
 import { Pill, SectionCard } from "@/app/clients/[id]/section-card";
-import { SuggestEditButton } from "@/app/clients/[id]/suggest-edit-button";
-import { AdminEditButton } from "@/app/clients/[id]/admin-edit-button";
 import { SuggestEditSection } from "@/app/clients/[id]/suggest-edit-section";
 import { TagsCard } from "@/app/clients/[id]/tags-card";
 import { loadClient, loadScore, loadWebsite, requireActor } from "@/app/clients/[id]/load-record";
@@ -116,14 +114,15 @@ export default async function PreviewClientOverviewPage({
       field_name: row.field_name,
       label: restrictedFieldLabel(row.field_name),
     }));
+
+    if (!restrictedFields.some((f) => f.field_name === "mission_statement")) {
+      restrictedFields.unshift({
+        field_name: "mission_statement",
+        label: "Mission",
+      });
+    }
   }
 
-  const sensitiveCurrentValues = Object.fromEntries(
-    restrictedFields.map((field) => [
-      field.field_name,
-      client[field.field_name as keyof typeof client] as string | null,
-    ]),
-  ) as Record<string, string | null>;
 
   return (
     <Stage>
@@ -134,23 +133,10 @@ export default async function PreviewClientOverviewPage({
               organisation={client}
               missionStatement={enrichment?.mission_statement ?? null}
               missionEnrichedAt={enrichment?.enriched_at ?? null}
-              action={
-                actor.role === "cam" ? (
-                  <SuggestEditButton
-                    organisationId={client.id}
-                    actorId={actor.id}
-                    restrictedFields={restrictedFields}
-                    currentValues={sensitiveCurrentValues}
-                    suggestions={suggestions}
-                  />
-                ) : actor.role === "admin" ? (
-                  <AdminEditButton
-                    organisationId={client.id}
-                    restrictedFields={restrictedFields}
-                    currentValues={sensitiveCurrentValues}
-                  />
-                ) : null
-              }
+              editableFields={restrictedFields.map((field) => field.field_name)}
+              actorId={actor.id}
+              actorRole={actor.role}
+              suggestions={suggestions}
             />
           </Rise>
 

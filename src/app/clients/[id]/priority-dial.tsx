@@ -211,9 +211,9 @@ export function PriorityDial({
     : null;
 
   return (
-    <div className="flex shrink-0 flex-col items-center gap-1.5">
+    <div className="flex min-h-0 shrink-0 flex-col items-center justify-center gap-1.5">
       <div
-        className="relative size-[184px]"
+        className="relative aspect-square w-[180px] max-w-full @container"
         role="img"
         aria-label={
           score === null
@@ -263,21 +263,21 @@ export function PriorityDial({
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
           {score === null ? (
             <>
-              <span className="font-mono text-[2.2rem] leading-none font-medium text-faint tabular-nums">
+              <span className="font-mono text-[19cqw] leading-none font-medium text-faint tabular-nums">
                 —
               </span>
-              <span className="mt-2 max-w-[6.5rem] text-[12px] leading-[1.35] font-medium text-faint">
+              <span className="mt-2 max-w-[6.5rem] text-[6.5cqw] leading-[1.35] font-medium text-faint">
                 Not scored yet
               </span>
             </>
           ) : (
             <>
-              <span className="font-mono text-[2.6rem] leading-none font-medium tracking-[-0.03em] text-ink tabular-nums">
+              <span className="font-mono text-[22.5cqw] leading-none font-medium tracking-[-0.03em] text-ink tabular-nums">
                 {score.toFixed(2)}
               </span>
               {bandLabel && (
                 <span
-                  className={`mt-1.5 text-[12.5px] font-semibold tracking-[-0.01em] ${bandStyle.text}`}
+                  className={`mt-[3cqw] text-[6.8cqw] font-semibold tracking-[-0.01em] ${bandStyle.text}`}
                 >
                   {bandLabel} priority
                 </span>

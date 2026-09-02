@@ -45,7 +45,37 @@ export interface GooeyTextInputProps {
   disabled?: boolean;
   /** Form is pending (server action in flight) — shows spinner */
   pending?: boolean;
+  /**
+   * Floating label, in the pattern the sign-in fields use: it sits inside the
+   * capsule as the placeholder while the field is empty, and rides up onto the
+   * capsule's top edge once there is a value or focus. Supplying it replaces
+   * `placeholder` — two pieces of resting text in one field is one too many.
+   */
+  label?: string;
+  /**
+   * Where the text capsule rests inside the widget. The widget is deliberately
+   * wider than the capsule so the submit droplet has somewhere to fly to on
+   * focus; centring the capsule inside that spare width leaves a gap on the
+   * left that no other field in a form has, so a field stacked under labelled
+   * inputs wants `start` and the padding all on the droplet's side.
+   */
+  align?: "center" | "start";
+  /**
+   * Sizes the capsule from the container it lands in rather than from the
+   * `size` preset. The presets are fixed pixels, and the dialogs around them
+   * are rem-based, so the same form drawn at a different browser zoom or root
+   * font size put the capsule and the form's other controls on different left
+   * edges — visible the moment the app was opened on a second display. Fluid,
+   * it is the width of whatever holds it, minus the room the droplet needs.
+   */
+  fluid?: boolean;
 }
+
+/**
+ * Slack on each side of a fluid widget, so the goo filter has somewhere to
+ * paint. Pulled back off with a negative margin — it is bleed, not padding.
+ */
+const FLUID_BLEED = 14;
 
 const EASING_PRESETS: Record<string, string> = {
   Bouncy: "cubic-bezier(0.34, 1.56, 0.64, 1)",
@@ -72,6 +102,9 @@ export function GooeyTextInput({
   className = "",
   disabled = false,
   pending = false,
+  label,
+  align = "center",
+  fluid = false,
 }: GooeyTextInputProps) {
   const [prevDefaultValue, setPrevDefaultValue] = React.useState(defaultValue);
   const [value, setValue] = React.useState(defaultValue ?? "");
@@ -81,6 +114,27 @@ export function GooeyTextInput({
 
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [isPulsing, setIsPulsing] = React.useState(false);
+
+  // Fluid sizing: the widget is absolutely positioned inside a fixed-pixel box,
+  // so it cannot be sized in CSS — it has to be told how much room it has.
+  const wrapperRef = React.useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = React.useState(0);
+  const isFluid = fluid && containerWidth > 0;
+
+  React.useEffect(() => {
+    if (!fluid) return;
+    const node = wrapperRef.current?.parentElement;
+    if (!node) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setContainerWidth(entry.contentRect.width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [fluid]);
+
+  // The label is up whenever the field is not resting-and-empty, so it never
+  // covers typed text and never floats over nothing.
+  const isFloated = isFocused || value.length > 0;
 
   // Sync value during render if defaultValue prop changes
   if (defaultValue !== prevDefaultValue) {
@@ -119,12 +173,26 @@ export function GooeyTextInput({
       }
     })();
 
-    const fieldW = fieldWidth ?? defaultFieldW;
+    // The droplet rests at the capsule's right edge and travels `gap` beyond
+    // it, so the room the widget needs is the capsule plus the gap — that is
+    // what comes back out of the container width.
+    const fluidFieldW = Math.max(200, containerWidth - gap);
+    const fieldW = fluid && containerWidth > 0 ? fluidFieldW : (fieldWidth ?? defaultFieldW);
     const fieldH = size === "sm" ? 42 : size === "lg" ? 52 : 48;
     const btnSize = size === "sm" ? 38 : size === "lg" ? 48 : 44;
     const fontSize = size === "sm" ? "text-xs" : size === "lg" ? "text-base" : "text-sm";
     const iconSize = size === "sm" ? 15 : size === "lg" ? 20 : 18;
-    const totalW = Math.max(340, fieldW + btnSize + gap + 40);
+    // The goo filter is a blur-then-contrast pass: the silhouette it paints
+    // spreads a few pixels past the shape that fed it. Sized to exactly the
+    // container, the droplet's own fill fell outside the filter box and got
+    // clipped away at the right edge — the icon still drew (it is unfiltered)
+    // but the white capsule under it did not, so the button arrived invisible.
+    // The widget is given bleed on both sides and pulled back by the same
+    // amount, so the capsule still starts on the container's left edge.
+    const totalW =
+      fluid && containerWidth > 0
+        ? containerWidth + FLUID_BLEED * 2
+        : Math.max(340, fieldW + btnSize + gap + 40);
     const totalH = size === "sm" ? 74 : size === "lg" ? 92 : 84;
 
     return {
@@ -136,7 +204,7 @@ export function GooeyTextInput({
       totalW,
       totalH,
     };
-  }, [size, fieldWidth, gap]);
+  }, [size, fieldWidth, gap, fluid, containerWidth]);
 
   // Variant themes
   const theme = React.useMemo(() => {
@@ -152,6 +220,8 @@ export function GooeyTextInput({
           btnColor: "text-neutral-100 hover:text-white",
           btnBg: "hover:bg-white/10",
           accentRing: "focus-visible:ring-white/40",
+          labelResting: "text-neutral-500",
+          labelFloated: "text-neutral-300",
         };
       case "glass":
         return {
@@ -164,6 +234,8 @@ export function GooeyTextInput({
           btnColor: "text-neutral-900 hover:text-black",
           btnBg: "hover:bg-black/5",
           accentRing: "focus-visible:ring-neutral-900/30",
+          labelResting: "text-neutral-400",
+          labelFloated: "text-neutral-500",
         };
       case "brand":
         return {
@@ -176,6 +248,8 @@ export function GooeyTextInput({
           btnColor: "text-[#e6f5c0] hover:text-[#f4fcd9]",
           btnBg: "hover:bg-[#e6f5c0]/10",
           accentRing: "focus-visible:ring-[#e6f5c0]/50",
+          labelResting: "text-[#f5f5f0]/40",
+          labelFloated: "text-[#f5f5f0]/60",
         };
       case "light":
       default:
@@ -189,6 +263,8 @@ export function GooeyTextInput({
           btnColor: "text-neutral-900 hover:text-black",
           btnBg: "hover:bg-black/5",
           accentRing: "focus-visible:ring-neutral-900/30",
+          labelResting: "text-neutral-400",
+          labelFloated: "text-neutral-500",
         };
     }
   }, [variant, fillColor, shadow]);
@@ -212,9 +288,13 @@ export function GooeyTextInput({
     };
   }, [duration, ease]);
 
-  // Position shifts: field shifts left, button shifts right for noticeable separation
-  const fieldShiftX = isFocused ? -gap * 0.4 : 0;
-  const btnShiftX = isFocused ? gap * 0.6 : 0;
+  // The separation is the droplet's job alone. Splitting it — field left 40%,
+  // button right 60% — meant focusing the field slid the thing you were about
+  // to type into sideways, and in a stacked form it also broke the left edge it
+  // shares with every other control. The capsule is furniture; it stays put,
+  // and the droplet travels the whole gap.
+  const fieldShiftX = 0;
+  const btnShiftX = isFocused ? gap : 0;
 
   // Compute icon to display
   const renderIcon = () => {
@@ -236,11 +316,22 @@ export function GooeyTextInput({
 
   // Fixed resting center reference for both slots
   const centerLeft = dims.totalW / 2;
-  const fieldBaseLeft = centerLeft - dims.fieldW / 2 - 10;
+  const fieldBaseLeft =
+    align === "start"
+      ? isFluid
+        ? FLUID_BLEED
+        : 0
+      : centerLeft - dims.fieldW / 2 - 10;
   const btnBaseLeft = fieldBaseLeft + dims.fieldW - dims.btnSize;
 
   return (
-    <div className={`relative inline-flex flex-col items-center select-none ${className}`}>
+    <div
+      ref={wrapperRef}
+      className={`relative flex flex-col select-none ${
+        fluid ? "w-full items-stretch" : "inline-flex items-center"
+      } ${className}`}
+      style={isFluid ? { marginLeft: -FLUID_BLEED, marginRight: -FLUID_BLEED } : undefined}
+    >
       {/* Hidden input carries the value into the server-action form */}
       <input type="hidden" name={name} value={value} />
 
@@ -275,6 +366,24 @@ export function GooeyTextInput({
               borderRadius: "9999px",
             }}
           >
+            {label && (
+              /* Not the peer-CSS trick the sign-in fields use: this input's
+                 emptiness is already state here, and `:placeholder-shown`
+                 cannot see the space we would have to put in the placeholder
+                 to keep it. Same movement, same two type treatments. */
+              <span
+                aria-hidden="true"
+                className={`pointer-events-none absolute z-10 origin-left transition-all duration-200 ease-out ${
+                  isFloated
+                    ? `left-4 top-0 -translate-y-1/2 rounded-full px-1.5 text-[11px] font-bold uppercase tracking-[0.12em] ${theme.labelFloated}`
+                    : `left-5 top-1/2 -translate-y-1/2 ${dims.fontSize} font-medium ${theme.labelResting}`
+                }`}
+                style={isFloated ? { backgroundColor: theme.fill } : undefined}
+              >
+                {label}
+              </span>
+            )}
+
             <input
               ref={inputRef}
               type="text"
@@ -285,7 +394,8 @@ export function GooeyTextInput({
               autoCapitalize="off"
               spellCheck={false}
               disabled={disabled || pending}
-              placeholder={placeholder}
+              placeholder={label ? undefined : placeholder}
+              aria-label={label}
               onChange={(e) => {
                 setValue(e.target.value);
                 if (errorMessage) setErrorMessage(null);

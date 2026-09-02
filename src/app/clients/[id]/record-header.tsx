@@ -3,7 +3,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { hasPermission } from "@/lib/auth/permissions";
-import { formatLocation, formatOrganisationType } from "@/lib/organisation-format";
+import { formatCityWithRegion, formatOrganisationType } from "@/lib/organisation-format";
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import type { OwnershipRequestStatus } from "@/lib/ownership-requests";
 import { BackButton } from "@/components/ui/back-button";
@@ -35,9 +35,13 @@ function toTitleCase(value: string): string {
     .join("");
 }
 
+import { Calendar, Mail, MapPin } from "lucide-react";
+import { INCOME_BAND_LABELS, type IncomeBand } from "@/lib/income-band";
+
 import {
   loadClient,
   loadIdentifiers,
+  loadLatestFinancial,
   loadOwner,
   loadRecordStats,
   loadScore,
@@ -45,8 +49,9 @@ import {
   loadSuppression,
   requireActor,
   type IdentifierRow,
+  type LatestFinancialRow,
 } from "./load-record";
-import { Key, Pill } from "./section-card";
+import { Pill } from "./section-card";
 import { OwnerControl } from "./owner-control";
 import { PriorityDial } from "./priority-dial";
 import { RecordMenu } from "./record-menu";
@@ -89,6 +94,124 @@ const IDENTIFIER_LABELS: Record<string, string> = {
   manual: "Manual",
 };
 
+/**
+ * Header-only wording. This strip sits beside verified register numbers, so the
+ * type says where the claim comes from — but the shared formatter's short
+ * labels stay as they are, because the client-list filters and insight groupings
+ * want "Charity", not a sentence.
+ */
+function headerOrganisationType(type: string): string {
+  if (type === "charity") return "Registered charity";
+  if (type === "company") return "Registered company";
+  if (type === "both") return "Registered charity and company";
+  return formatOrganisationType(type);
+}
+
+/** No city on the row does not mean unknown — it means the register entry is
+ * not pinned to one. Say that, in the country's own name rather than an ISO
+ * code that reads like a glitch. */
+const COUNTRY_NAMES: Record<string, string> = {
+  GB: "United Kingdom",
+};
+
+function headerLocation(client: { city: string | null; country_code: string }): string {
+  const city = client.city?.trim();
+  if (city) return formatCityWithRegion(toTitleCase(city));
+  return `Nationwide · ${COUNTRY_NAMES[client.country_code] ?? client.country_code}`;
+}
+
+function formatFinancialScale(financial: LatestFinancialRow | null): string | null {
+  if (!financial) return null;
+  const year = financial.period_end ? new Date(financial.period_end).getFullYear() : null;
+  const shortYear = year ? `FY${String(year).slice(-2)}` : null;
+
+  if (financial.total_income !== null && financial.total_income !== undefined) {
+    const income = financial.total_income;
+    const formatted =
+      income >= 1_000_000
+        ? `£${(income / 1_000_000).toFixed(1).replace(/\.0$/, "")}m`
+        : income >= 1_000
+          ? `£${Math.round(income / 1_000)}k`
+          : `£${income.toLocaleString("en-GB")}`;
+    return shortYear ? `${formatted} income (${shortYear})` : `${formatted} income`;
+  }
+
+  if (financial.income_band && financial.income_band in INCOME_BAND_LABELS) {
+    return `${INCOME_BAND_LABELS[financial.income_band as IncomeBand]} income`;
+  }
+
+  return null;
+}
+
+function formatLastContacted(
+  lastContactedAt: string | null,
+  emailsSent: number,
+  now: Date = new Date(),
+): string {
+  if (!lastContactedAt || emailsSent === 0) {
+    return "No outreach yet";
+  }
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const daysSince = Math.floor((now.getTime() - new Date(lastContactedAt).getTime()) / DAY_MS);
+  if (daysSince === 0) return "Last contacted today";
+  if (daysSince === 1) return "Last contacted yesterday";
+  if (daysSince < 30) return `Last contacted ${daysSince}d ago`;
+  return `Last contacted ${new Date(lastContactedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
+}
+
+function formatDateAdded(createdAt?: string | null): string | null {
+  if (!createdAt) return null;
+  return `Added ${new Date(createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
+}
+
+function getOperationalInsights(
+  outreachStatus: string,
+  lastContactedAt: string | null,
+  lastReplyAt: string | null,
+  now: Date = new Date(),
+): { label: string; tone: "go" | "stop" | "hold" } | null {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const nowMs = now.getTime();
+
+  if (outreachStatus === "initial_outreach_sent") {
+    if (!lastContactedAt) return { label: "Initial outreach sent", tone: "hold" };
+    const daysSince = Math.floor((nowMs - new Date(lastContactedAt).getTime()) / DAY_MS);
+    if (daysSince >= 14) {
+      return { label: `Needs follow-up (${daysSince}d silence)`, tone: "stop" };
+    }
+    if (daysSince >= 7) {
+      return { label: `Follow-up due (${daysSince}d since intro)`, tone: "hold" };
+    }
+    return { label: `Awaiting reply (sent ${daysSince === 0 ? "today" : `${daysSince}d ago`})`, tone: "hold" };
+  }
+
+  if (outreachStatus === "follow_up_sent") {
+    if (!lastContactedAt) return { label: "Follow-up sent", tone: "hold" };
+    const daysSince = Math.floor((nowMs - new Date(lastContactedAt).getTime()) / DAY_MS);
+    if (daysSince >= 14) {
+      return { label: `Needs decision (${daysSince}d since follow-up)`, tone: "stop" };
+    }
+    if (daysSince >= 7) {
+      return { label: `Follow-up due (${daysSince}d silence)`, tone: "hold" };
+    }
+    return { label: `Awaiting reply (follow-up ${daysSince === 0 ? "today" : `${daysSince}d ago`})`, tone: "hold" };
+  }
+
+  if (outreachStatus === "responded") {
+    if (lastReplyAt) {
+      const daysSince = Math.floor((nowMs - new Date(lastReplyAt).getTime()) / DAY_MS);
+      return { label: `Replied ${daysSince === 0 ? "today" : `${daysSince}d ago`}`, tone: "go" };
+    }
+    return { label: "Client responded", tone: "go" };
+  }
+
+  if (outreachStatus === "converted") {
+    return { label: "Converted client", tone: "go" };
+  }
+
+  return null;
+}
+
 function DocketChip({ row }: { row: IdentifierRow }) {
   const label = IDENTIFIER_LABELS[row.identifier_type] ?? row.identifier_type;
   const checked = row.verified_at
@@ -119,7 +242,7 @@ function DocketChip({ row }: { row: IdentifierRow }) {
 
 export async function RecordHeader({ organisationId }: { organisationId: string }) {
   const actor = await requireActor();
-  const [client, owner, suppression, { score }, stats, identifiers, { sources }] =
+  const [client, owner, suppression, { score }, stats, identifiers, { sources }, latestFinancial] =
     await Promise.all([
       loadClient(organisationId),
       loadOwner(organisationId),
@@ -128,6 +251,7 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
       loadRecordStats(organisationId),
       loadIdentifiers(organisationId),
       loadSources(organisationId),
+      loadLatestFinancial(organisationId),
     ]);
 
   const canEdit = hasPermission(actor.role, "client:edit");
@@ -184,16 +308,17 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
     ownershipDecisionNote = data?.decision_note ?? null;
   }
 
-  const lastActivity = stats.lastActivity
-    ? new Date(stats.lastActivity).toLocaleDateString("en-GB", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      })
-    : null;
+  const financialScale = formatFinancialScale(latestFinancial);
+  const lastContactedText = formatLastContacted(stats.lastContactedAt, stats.emailsSent);
+  const dateAddedText = formatDateAdded(client.created_at);
+  const operationalInsight = getOperationalInsights(
+    client.outreach_status,
+    stats.lastContactedAt,
+    stats.lastReplyAt,
+  );
 
   return (
-    <div className="rounded-panel border border-rule bg-white">
+    <div className="relative rounded-panel border border-rule bg-white">
       <div className="flex items-center justify-between gap-3 border-b border-rule-soft px-5 py-2.5">
         <BackButton href="/clients" />
         <RecordMenu
@@ -216,12 +341,33 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
             {toTitleCase(client.legal_name)}
           </h1>
 
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13.5px] text-dim">
-            <span>{formatOrganisationType(client.organisation_type)}</span>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[13.5px] text-dim">
+            <span className="capitalize">{headerOrganisationType(client.organisation_type)}</span>
             <span aria-hidden="true" className="text-rule">
               ·
             </span>
-            <span>{formatLocation(client)}</span>
+            <span className="inline-flex items-center gap-1">
+              <MapPin aria-hidden="true" className="size-3.5 shrink-0 text-faint" />
+              <span>{headerLocation(client)}</span>
+            </span>
+            {client.sector && (
+              <>
+                <span aria-hidden="true" className="text-rule">
+                  ·
+                </span>
+                <span className="font-medium text-ink/85">{toTitleCase(client.sector)}</span>
+              </>
+            )}
+            {financialScale && (
+              <>
+                <span aria-hidden="true" className="text-rule">
+                  ·
+                </span>
+                <span className="rounded-[4px] bg-emerald-500/[0.08] px-2 py-0.5 text-[12.5px] font-medium text-emerald-800">
+                  {financialScale}
+                </span>
+              </>
+            )}
             {suppression.suppressed && (
               <>
                 <span aria-hidden="true" className="text-rule">
@@ -239,6 +385,15 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
               </>
             )}
           </div>
+
+          {/* Where this record stands in the pipeline. The cadence facts that
+              used to sit beside it — last contacted, date added — now live under
+              the dial, so this row carries only the call to act. */}
+          {operationalInsight && (
+            <div className="flex flex-wrap items-center gap-2 pt-0.5 text-[12px]">
+              <Pill tone={operationalInsight.tone}>{operationalInsight.label}</Pill>
+            </div>
+          )}
 
           {/* The docket. ORGANISATION_IDENTIFIERS has been in the schema since
               the start and has never been rendered — a charity number with the
@@ -266,7 +421,7 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
                 ? new Date(lastMs).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
                 : null;
               return (
-                <p className="flex max-w-[58ch] gap-2.5 rounded-inset bg-paper px-3.5 py-3 text-[13.5px] leading-[1.55] text-dim">
+                <p className="flex max-w-[58ch] gap-2.5 rounded-inset bg-paper px-3.5 py-4 mt-4 text-[13.5px] leading-[1.55] text-dim">
                   <svg
                     aria-hidden="true"
                     className="mt-0.5 size-[15px] shrink-0 text-faint"
@@ -299,8 +454,9 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
 
         {/* The call. The number, the scale it sits on, and what earned it —
             unframed: the ring is already a container, and a panel around it was
-            a box around a circle. */}
-        <div className="flex shrink-0 items-center justify-center py-1">
+            a box around a circle. The column stretches to the identity block's
+            height, so the dial owns all of the vertical space on the right. */}
+        <div className="flex shrink-0 items-center justify-center self-center py-1">
           <PriorityDial
             band={score?.priority_band ?? null}
             factors={score?.score_factors ?? null}
@@ -309,7 +465,11 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-7 gap-y-3 px-5 py-3.5">
+      {/* Owner and stage — the two things a CAM changes — and, pushed to the
+          far end of the same row, the cadence facts that used to sit up in the
+          identity block. They read as status rather than identity, and putting
+          them here fills the run of empty space under the dial. */}
+      <div className="relative z-20 flex flex-wrap items-center gap-x-7 gap-y-3 px-5 py-3.5">
         <OwnerControl
           canEdit={canEdit}
           isAdmin={isAdmin}
@@ -328,6 +488,26 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
             />
           </div>
         )}
+
+        <div className="ml-auto flex flex-wrap items-center gap-2 text-[12px]">
+          <span
+            className="inline-flex items-center gap-1.5 rounded-inset border border-rule-soft bg-paper px-2.5 py-1 text-dim"
+            title={stats.lastContactedAt ? `Last outreach sent: ${new Date(stats.lastContactedAt).toLocaleString("en-GB")}` : undefined}
+          >
+            <Mail className="size-3.5 shrink-0 text-faint" />
+            <span>{lastContactedText}</span>
+          </span>
+
+          {dateAddedText && (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-inset border border-rule-soft bg-paper px-2.5 py-1 text-dim"
+              title={client.created_at ? `Record created: ${new Date(client.created_at).toLocaleString("en-GB")}` : undefined}
+            >
+              <Calendar className="size-3.5 shrink-0 text-faint" />
+              <span>{dateAddedText}</span>
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );

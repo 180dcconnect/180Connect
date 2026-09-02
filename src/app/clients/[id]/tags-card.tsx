@@ -36,10 +36,11 @@ export function TagsCard({
   canEdit: boolean;
 }) {
   const [clientTags, setClientTags] = useState(initialClientTags);
+  const [allAvailableTags, setAllAvailableTags] = useState(availableTags);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const assignedTagIds = new Set(clientTags.map((tag) => tag.id));
-  const assignableTags = availableTags.filter((tag) => !assignedTagIds.has(tag.id));
+  const assignableTags = allAvailableTags.filter((tag) => !assignedTagIds.has(tag.id));
 
   return (
     <SectionCard
@@ -55,6 +56,11 @@ export function TagsCard({
             assignedTags={clientTags}
             open={pickerOpen}
             onOpenChange={setPickerOpen}
+            onTagCreated={(newTag) =>
+              setAllAvailableTags((current) =>
+                current.some((t) => t.id === newTag.id) ? current : [...current, newTag],
+              )
+            }
             onAssigned={(tag) => setClientTags((current) => [...current, tag])}
           />
         ) : null

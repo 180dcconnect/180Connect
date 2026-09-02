@@ -95,8 +95,8 @@ export default async function ClientRecordLayout({
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
       <div className="mx-auto w-full max-w-[1400px] space-y-6">
-        <Stage className="space-y-6">
-          <Rise>
+        <Stage className="relative z-50 space-y-6">
+          <Rise className="relative z-50">
             <Suspense fallback={<RecordHeaderSkeleton />}>
               <RecordHeader organisationId={id} />
             </Suspense>

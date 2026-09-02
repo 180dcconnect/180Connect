@@ -15,11 +15,10 @@ import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { BasicInfoPanel } from "./basic-info-panel";
 import { ScoreBreakdownCard } from "./score-breakdown";
 import { Pill, SectionCard } from "./section-card";
-import { SuggestEditButton } from "./suggest-edit-button";
-import { AdminEditButton } from "./admin-edit-button";
+import { FinancialScaleCard } from "./financial-scale-card";
 import { SuggestEditSection } from "./suggest-edit-section";
 import { TagsCard } from "./tags-card";
-import { loadClient, loadScore, loadSources, loadWebsite, requireActor } from "./load-record";
+import { loadClient, loadLatestFinancial, loadScore, loadSources, loadWebsite, requireActor } from "./load-record";
 
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
 
@@ -58,6 +57,7 @@ export default async function ClientOverviewPage({
     { score, error: scoreError },
     website,
     { sources, error: sourcesError },
+    latestFinancial,
     enrichmentResult,
     clientTagsResult,
     allTagsResult,
@@ -65,6 +65,7 @@ export default async function ClientOverviewPage({
       loadScore(id),
       loadWebsite(client.website),
       loadSources(id),
+      loadLatestFinancial(id),
       // ENRICHMENT_RESULTS is append-only, so the most recently enriched row is
       // "the" mission statement, not the only one.
       supabase
@@ -143,14 +144,15 @@ export default async function ClientOverviewPage({
       field_name: row.field_name,
       label: restrictedFieldLabel(row.field_name),
     }));
+
+    if (!restrictedFields.some((f) => f.field_name === "mission_statement")) {
+      restrictedFields.unshift({
+        field_name: "mission_statement",
+        label: "Mission",
+      });
+    }
   }
 
-  const sensitiveCurrentValues = Object.fromEntries(
-    restrictedFields.map((field) => [
-      field.field_name,
-      client[field.field_name as keyof typeof client] as string | null,
-    ]),
-  ) as Record<string, string | null>;
 
   return (
     <Stage>
@@ -161,23 +163,10 @@ export default async function ClientOverviewPage({
               organisation={client}
               missionStatement={enrichment?.mission_statement ?? null}
               missionEnrichedAt={enrichment?.enriched_at ?? null}
-              action={
-                actor.role === "cam" ? (
-                  <SuggestEditButton
-                    organisationId={client.id}
-                    actorId={actor.id}
-                    restrictedFields={restrictedFields}
-                    currentValues={sensitiveCurrentValues}
-                    suggestions={suggestions}
-                  />
-                ) : actor.role === "admin" ? (
-                  <AdminEditButton
-                    organisationId={client.id}
-                    restrictedFields={restrictedFields}
-                    currentValues={sensitiveCurrentValues}
-                  />
-                ) : null
-              }
+              editableFields={restrictedFields.map((field) => field.field_name)}
+              actorId={actor.id}
+              actorRole={actor.role}
+              suggestions={suggestions}
             />
           </Rise>
 
@@ -192,14 +181,20 @@ export default async function ClientOverviewPage({
             />
           )}
 
+          <Rise>
+            <FinancialScaleCard
+              financial={latestFinancial}
+              organisationId={client.id}
+            />
+          </Rise>
+
           {/* Email and website were two near-identical cards — same
               heading-plus-validity-pill shape, same failure copy — so they read
               as one "can we actually reach them?" card instead. */}
           <Rise>
             <SectionCard
               headingId="contactability-heading"
-              title="Can we reach them?"
-              hint="Only channels that actually work get a shortcut in the header."
+              title="Contactability"
             >
               <div className="mt-3.5 flex flex-col">
                 <div className="grid grid-cols-[18px_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 py-3">

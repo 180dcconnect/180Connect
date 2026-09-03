@@ -1068,6 +1068,21 @@ publication for live bell-panel delivery; publication membership grants nothing
 on its own — delivery is still filtered by the SELECT policy per subscriber
 (same mechanism as §3.8 / F075).
 
+**Producer: reminder notifications** (F175, #171,
+`src/lib/outreach/reminder-sweep.ts` +
+`supabase/migrations/20260913090000_schedule_reminder_notifications_cron.sql`).
+A daily pg_cron job (`reminder_notifications_daily`, same shape as F183's
+`stall_detection_daily`) recomputes F160's team-wide follow-up recommendations
+and calls `create_notification` (service_role — an already-granted caller,
+no new grant needed) for each client's owner when one becomes due.
+`notification_type = 'follow_up_due'`; `link_path` is the client profile
+(AC2). The audit_log row this sweep writes per notification
+(`reminder_notification_sent`, `target_table: organisations`) is *not* a
+business-entity change either — it exists purely so the next sweep can tell
+"already notified for this exact staleness episode" from "the CAM has since
+acted and this is a new one" (AC3), the same self-referential comparison
+`stall_swept` already uses to decide whether the stalled set changed.
+
 ---
 
 ### 3.20 Saved filter views — own rows only

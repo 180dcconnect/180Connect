@@ -23,6 +23,10 @@ import {
   notificationRelativeTime,
   type NotificationItem,
 } from "@/lib/notifications";
+import {
+  shouldDeliverImmediately,
+  type NotificationFrequency,
+} from "@/lib/notification-preferences";
 
 /**
  * F173 — the bell in the sidebar footer. One component owns the whole
@@ -33,6 +37,14 @@ import {
  * refetching rather than folding the payload keeps one server-side mapping
  * and cannot drift from a normal page load. Window focus is the fallback
  * path, so a dropped socket self-heals the next time the tab is looked at.
+ *
+ * F178 AC2/AC3: that push is what the recipient's own frequency preference
+ * actually governs — a daily/weekly preference holds back the "look now"
+ * refetch for an ordinary new notification (it still exists in the table and
+ * shows up on the next normal open/focus), while an always-immediate type
+ * (shouldDeliverImmediately's own override, e.g. a reply) and any read-state
+ * change always push through. Nothing about the row itself is ever delayed
+ * or hidden — only how eagerly this one open tab reacts to it.
  */
 export function NotificationBell({ collapsed }: { collapsed: boolean }) {
   const router = useRouter();
@@ -40,12 +52,14 @@ export function NotificationBell({ collapsed }: { collapsed: boolean }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [open, setOpen] = useState(false);
   const userIdRef = useRef<string | null>(null);
+  const frequencyRef = useRef<NotificationFrequency>("immediate");
 
   const reload = useCallback(async () => {
     const result = await getMyNotifications();
     if (!result.ok) return;
     setItems(result.items);
     setUnreadCount(result.unreadCount);
+    frequencyRef.current = result.frequency;
   }, []);
 
   // Initial load + realtime subscription + focus fallback.
@@ -89,7 +103,24 @@ export function NotificationBell({ collapsed }: { collapsed: boolean }) {
             table: "notifications",
             filter: `recipient_user_id=eq.${uid}`,
           },
-          () => scheduleReload(),
+          (payload) => {
+            // F178 AC2/AC3: only a brand-new row is subject to the
+            // recipient's frequency preference — a read-state change
+            // (mark-read/mark-all, possibly from another tab) always
+            // reflects immediately so the two tabs never disagree about
+            // what's unread.
+            if (payload.eventType === "INSERT") {
+              const newType = (payload.new as { notification_type?: unknown })
+                ?.notification_type;
+              if (
+                typeof newType === "string" &&
+                !shouldDeliverImmediately(frequencyRef.current, newType)
+              ) {
+                return;
+              }
+            }
+            scheduleReload();
+          },
         )
         .subscribe();
     }

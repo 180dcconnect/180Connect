@@ -96,10 +96,10 @@ export default async function AdminPage() {
               Decide who gets a client when a CAM asks for one another CAM owns.
             </p>
           </Link>
-          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/edit-suggestions">
-            <h2 className="font-bold">Suggested client edits</h2>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/approvals">
+            <h2 className="font-bold">Approvals</h2>
             <p className="mt-1 text-sm text-foreground/65">
-              Approve or reject CAM-proposed corrections to sensitive client fields.
+              Review and decide pending suggested client edits across the team.
             </p>
           </Link>
           <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/restricted-fields">

@@ -80,3 +80,15 @@ export function notificationRelativeTime(
 ): string {
   return formatRelativeTime(new Date(item.createdAt), now);
 }
+
+/**
+ * F177 AC3 — the one place "is this notification unread" is decided, so the
+ * bell's badge count, each row's visual treatment, and the click-to-mark-read
+ * gate (AC2) can never silently disagree about what "unread" means. `readAt`
+ * is only ever a real ISO string or `null` (see mapNotificationRows), so this
+ * is equivalent to `!item.readAt` — named so every call site reads the same
+ * intent rather than re-deriving it.
+ */
+export function isNotificationUnread(item: Pick<NotificationItem, "readAt">): boolean {
+  return item.readAt === null;
+}

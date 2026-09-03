@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  isNotificationUnread,
   mapNotificationRows,
   sortNotificationsNewestFirst,
   notificationRelativeTime,
@@ -84,5 +85,19 @@ describe("notificationRelativeTime (F173)", () => {
       notificationRelativeTime(item, new Date("2026-08-21T12:05:00Z")),
       "5 minutes ago",
     );
+  });
+});
+
+describe("isNotificationUnread (F177 AC3)", () => {
+  it("is unread when readAt is null", () => {
+    const [item] = mapNotificationRows([row({ read_at: null })]);
+    assert.ok(item);
+    assert.equal(isNotificationUnread(item), true);
+  });
+
+  it("is not unread once readAt is set", () => {
+    const [item] = mapNotificationRows([row({ read_at: "2026-08-21T12:01:00Z" })]);
+    assert.ok(item);
+    assert.equal(isNotificationUnread(item), false);
   });
 });

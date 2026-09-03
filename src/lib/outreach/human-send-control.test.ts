@@ -30,6 +30,14 @@ const GMAIL_TRANSPORT_ALLOWLIST = new Set([
   "lib/gmail/client.ts",
   "app/clients/[id]/outreach-actions.ts",
   "lib/outreach/scheduled-worker.ts",
+  // F179: platform-to-CAM notification email (a reply arrived, etc.) — not
+  // outreach. Calls sendGmailMessage directly, deliberately bypassing
+  // sendBranchOutreach (client outreach only) so a notification can never be
+  // reachable through, or mistaken for, the approval-gated outreach path
+  // this whole file exists to protect. It has no import of, or call into,
+  // OUTREACH_MESSAGES, humanReviewDecision, or any approval RPC — see its
+  // own header for the full reasoning.
+  "lib/notification-email.ts",
 ]);
 
 describe("F250 human-send architecture", () => {

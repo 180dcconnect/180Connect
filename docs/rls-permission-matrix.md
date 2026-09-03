@@ -189,6 +189,15 @@ so a client cannot forge or backdate it. `getCurrentActor()` calls it, throttled
 per 5 minutes per user, on every signed-in page and every admin API request — not just at
 login. Not audited: presence isn't an ownership/status/role/approval change.
 
+`email_notification_types` (F179, #175) is an ordinary granted column — `own row,
+granted columns only` already covers it, same as `notification_frequency` (F201/
+F178). No RPC: choosing which notification types to also receive by email changes
+no ownership/status/role/approval state, so a self-scoped column grant plus the
+existing `users_update_self_or_admin` policy is enough (`docs/audit-log-pattern.md`
+§1 reasoning). Defaults to `{reply_received}` — F179 AC3's "sent by email by
+default... unless the CAM has explicitly opted out" is the column default itself,
+not application logic that could drift from it.
+
 ### 3.2 Canonical organisation data — shared read, admin write
 
 Everyone authorised reads canonical data (§4.3 "View canonical organisations": all
@@ -1067,6 +1076,29 @@ documented reasoning as `feedback`). The table is in the `supabase_realtime`
 publication for live bell-panel delivery; publication membership grants nothing
 on its own — delivery is still filtered by the SELECT policy per subscriber
 (same mechanism as §3.8 / F075).
+
+**Producer + email delivery: replies** (F179, #175,
+`supabase/migrations/20260913090000_add_email_notification_preferences.sql` +
+`src/lib/gmail/reply-sync.ts` + `src/lib/notification-email.ts`).
+`capture_gmail_reply` (F131) now also calls `create_notification` for the
+client's current owner — the in-app half of "email in addition to in-app"
+(AC1). Postgres cannot send email, so the email half is entirely outside the
+database: `reply-sync.ts` calls it right after `capture_gmail_reply`
+succeeds, looks up the recipient's `email_notification_types` (own-row
+column, above), and if `reply_received` is in that set (true by default —
+AC3), sends via `sendGmailMessage` (F241) directly.
+
+**Deliberately not `sendBranchOutreach`.** That function's own header says it
+is "the only transport entry point for client outreach (F124)" and sits
+behind the approval/scheduling pipeline (`OUTREACH_MESSAGES`, human-reviewed
+before send). A platform notification email to a CAM is not outreach to a
+client and must never be reachable through — or mistakable for — that path;
+`src/lib/notification-email.ts` calls the lower `sendGmailMessage` transport
+directly, with its own `180Connect <...>` display name, and touches no
+outreach table at all. This is also this ticket's own testing note ("verify
+no outreach email can be sent without human approval"): satisfied by
+construction, since the notification-email path has no code route into
+`OUTREACH_MESSAGES` or the approval RPCs to begin with.
 
 ---
 

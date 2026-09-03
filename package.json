@@ -48,6 +48,7 @@
     "ai": "^7.0.66",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "fflate": "^0.8.3",
     "framer-motion": "^13.1.0",
     "lucide-react": "^1.31.0",
     "motion": "^12.43.0",

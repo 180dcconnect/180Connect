@@ -38,6 +38,13 @@ export default async function AdminPage() {
               Assign roles, and suspend, deactivate or reactivate access.
             </p>
           </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/actions">
+            <h2 className="font-bold">Team actions</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Assign a client-linked action to a CAM and track outstanding vs completed
+              work across the team.
+            </p>
+          </Link>
           <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/offboard">
             <h2 className="font-bold">Work handover & offboarding</h2>
             <p className="mt-1 text-sm text-foreground/65">

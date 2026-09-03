@@ -6,7 +6,12 @@ import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
-import { splitOutreachHistory, type OutreachMessageRow } from "@/lib/outreach-history";
+import {
+  buildEmailThread,
+  splitOutreachHistory,
+  type OutreachMessageRow,
+  type ThreadReplyRow,
+} from "@/lib/outreach-history";
 import { validateClientEmail } from "@/lib/client-email-validation";
 import {
   formatOrganisationSources,
@@ -45,6 +50,7 @@ import { NotesSection } from "./notes-section";
 import { AddNoteForm } from "./add-note-form";
 import {
   buildTimeline,
+  collectReferencedUserIds,
   type AuditRow,
   type NoteRow as TimelineNoteRow,
   type OutreachMessageRow as TimelineOutreachRow,
@@ -592,12 +598,21 @@ export default async function ClientDetailPage({
 
   const { data: replyRows, error: replyError, count: replyCount } = await supabase
     .from("reply_events")
-    .select("id, reply_body, received_at, response_time_seconds", { count: "exact" })
+    .select("id, outreach_message_id, reply_body, received_at, response_time_seconds", { count: "exact" })
     .eq("organisation_id", id);
   if (replyError) {
     await reportError(replyError, { operation: "clients.timeline_replies", organisationId: id });
   }
   const clientAverageResponseTime = averageResponseTime(replyRows ?? []);
+
+  // F134: only delivered messages belong in the client-visible conversation;
+  // drafts, scheduled messages and failures remain in the separate F070 list.
+  // reply_events is RLS-protected by the same active-user rule as outreach, so
+  // this introduces no wider access path and makes no external API request.
+  const emailThread = buildEmailThread(
+    outreachHistory.sent,
+    (replyRows ?? []) as ThreadReplyRow[],
+  );
 
   // RLS (audit_log_select_client_timeline, 20260820110000) is what makes this
   // readable by a CAM/viewer at all — without it every row here is invisible,
@@ -622,22 +637,9 @@ export default async function ClientDetailPage({
     timelineNotesError || timelineMessagesError || replyError || auditError,
   );
 
-  // actor_user_id and detail.from/detail.to are bare uuids (detail is jsonb,
-  // not a foreign key PostgREST can embed), so they're resolved by hand in one
-  // batch rather than per-row. A name missing from this map — a deleted
-  // account, or a uuid audit_log carries no FK constraint to validate — reads
-  // as "A former team member" in @/lib/timeline.ts, never as a raw id or blank.
-  const referencedUserIds = new Set<string>();
-  for (const row of auditRows ?? []) {
-    if (row.actor_user_id) referencedUserIds.add(row.actor_user_id);
-    const from = row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).from : null;
-    const to = row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).to : null;
-    if (typeof from === "string") referencedUserIds.add(from);
-    if (typeof to === "string") referencedUserIds.add(to);
-    const requestedBy =
-      row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).requested_by : null;
-    if (typeof requestedBy === "string") referencedUserIds.add(requestedBy);
-  }
+  // See collectReferencedUserIds (src/lib/timeline.ts) for why this can't
+  // treat every detail.from/detail.to as a user id.
+  const referencedUserIds = collectReferencedUserIds((auditRows ?? []) as AuditRow[]);
 
   const timelineNames = new Map<string, string | null>();
   if (referencedUserIds.size > 0) {
@@ -1098,7 +1100,13 @@ export default async function ClientDetailPage({
                     Your sending volume: {sendingVolume.count} of your {sendingVolume.limit} emails in the current {sendingVolume.windowMinutes}-minute window.{sendingVolume.warning ? " You are close to the configured threshold; sends are refused once it is reached." : ""}
                   </p>
                 )}
-                <OutreachHistorySection history={outreachHistory} error={Boolean(outreachError)} />
+                <OutreachHistorySection
+                  history={outreachHistory}
+                  error={Boolean(outreachError)}
+                  thread={emailThread}
+                  threadError={Boolean(outreachError || replyError)}
+                  noteOrganisationId={canEdit ? client.id : undefined}
+                />
 
                 {hasPermission(authorization.actor.role, "client:contact") && (
                   <div className="mt-4">

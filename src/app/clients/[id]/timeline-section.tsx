@@ -134,9 +134,19 @@ export function TimelineSection({
               <dd className="text-foreground/80">{entry.handover.reason}</dd>
             </dl>
           ) : (
-            <p className="mt-2.5 whitespace-pre-wrap text-sm leading-[1.65] text-foreground/80">
-              {entry.summary}
-            </p>
+            <>
+              <p className="mt-2.5 whitespace-pre-wrap text-sm leading-[1.65] text-foreground/80">
+                {entry.summary}
+              </p>
+              {entry.type === "reply_received" && (
+                <a
+                  className="mt-2 inline-block text-sm font-semibold text-brand underline underline-offset-2"
+                  href={`#thread-reply-${entry.id.slice("reply-".length)}`}
+                >
+                  View full email thread
+                </a>
+              )}
+            </>
           )}
         </li>
       ))}

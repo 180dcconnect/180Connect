@@ -59,3 +59,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 supabase/snippets/
+
+# Built in CI by the Refresh charity register workflow, never committed:
+# ~180MB, and git keeps every version forever.
+data/register.sqlite

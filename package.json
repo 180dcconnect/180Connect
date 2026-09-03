@@ -14,6 +14,8 @@
     "seed:test-accounts": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/create-test-accounts.mts",
     "verify:last-admin": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/verify-last-admin-guard.mts",
     "seed:clear": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/seed-clear.mts",
+    "register:build": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-register-sqlite.mts",
+    "register:fetch": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/fetch-register.mts",
     "backfill:scores": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-priority-scores.mts",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --conditions=react-server --test \"src/**/*.test.ts\" \"scripts/**/*.test.mts\"",
     "export:data-model": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/export-data-model.mts",
@@ -28,7 +30,8 @@
     "standardize:run-three-sixty-giving": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-standardize-three-sixty-giving.mts",
     "ingest:run-three-sixty-giving": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-three-sixty-giving.mts",
     "ingest:check-isolation": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/test-isolation.mts",
-    "backfill:data-handling-rules": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-data-handling-rules.mts"
+    "backfill:data-handling-rules": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-data-handling-rules.mts",
+    "prebuild": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/fetch-register.mts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.44",
@@ -45,6 +48,7 @@
     "ai": "^7.0.66",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "fflate": "^0.8.3",
     "framer-motion": "^13.1.0",
     "lucide-react": "^1.31.0",
     "motion": "^12.43.0",

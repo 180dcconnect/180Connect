@@ -5,7 +5,7 @@ import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { canSendClientOutreach } from "@/lib/client-email-validation";
 import { reportError } from "@/lib/error-logging";
 import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
-import { dailySendLimitMessage, dailySendWindowStart, resolveOutreachDailyLimit } from "@/lib/outreach/daily-send-limit";
+import { dailySendLimitMessage } from "@/lib/outreach/daily-send-limit";
 import { discardDraftSchema } from "@/lib/outreach/discard-draft";
 import { emailHtmlToPlainText, sanitizeEmailHtml } from "@/lib/outreach/email-html";
 import { HUMAN_REVIEW_REQUIRED_MESSAGE, humanReviewDecision } from "@/lib/outreach/human-review";
@@ -293,41 +293,6 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
     return { ok: false, message: emailLimitMessage(sendLimit.windowSeconds) };
   }
 
-  // F128: a branch-wide daily cap, checked after the per-CAM limit above —
-  // every CAM sends from the same one branch mailbox, so a per-CAM limit
-  // alone never bounds the mailbox's total volume. Admin-configurable (see
-  // set_outreach_daily_send_limit), read fresh on every send. Fail-closed,
-  // same as the per-CAM check: if the count cannot be verified, nothing sends.
-  const dailyLimit = await resolveOutreachDailyLimit(async () => {
-    const { data, error } = await supabase
-      .from("outreach_daily_send_limit")
-      .select("daily_limit")
-      .eq("id", true)
-      .maybeSingle();
-    if (error) throw error;
-    return data?.daily_limit ?? null;
-  });
-  const { count: todaySentCount, error: dailyLimitError } = await supabase
-    .from("outreach_messages")
-    .select("id", { count: "exact", head: true })
-    .eq("send_status", "sent")
-    .gte("sent_at", dailySendWindowStart());
-  if (dailyLimitError || todaySentCount === null) {
-    if (dailyLimitError) await reportError(dailyLimitError, { operation: "outreach.send.daily_limit", messageId });
-    logSecurityEvent("outreach.daily_send_limit_unavailable", {
-      cause: dailyLimitError?.message ?? "no count returned",
-    });
-    return { ok: false, message: "The sending limit could not be checked. Nothing was sent." };
-  }
-  if (todaySentCount >= dailyLimit) {
-    logSecurityEvent("outreach.daily_send_limit_reached", {
-      userId: authorization.actor.id,
-      dailyLimit,
-      todaySentCount,
-    });
-    return { ok: false, message: dailySendLimitMessage() };
-  }
-
   // Save the exact reviewed content first, and REQUIRE the write to have matched:
   // `.eq(send_status)` + `.single()` turns a raced or already-sent draft into an
   // error here rather than a silent zero-row update that Gmail then makes real.
@@ -360,9 +325,24 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   // this draft; everyone else gets refused before any provider call. The claim
   // self-expires after send_claim_staleness_window(), so a crashed tab cannot lock
   // a draft forever.
+  //
+  // F128: the branch-wide daily cap is enforced inside this same RPC, under a
+  // lock that serializes every concurrent claim attempt — two CAMs racing to
+  // send the mailbox's last slot cannot both win, unlike the plain read-then-
+  // send count this used to be. A reached cap surfaces as errcode P0003 rather
+  // than a plain `false`, so it can be told apart from an ordinary lost claim.
   const { data: claimed, error: claimError } = await supabase
     .rpc("claim_outreach_send", { p_message_id: messageId });
   if (claimError) {
+    if ((claimError as { code?: string }).code === "P0003") {
+      await reportError(claimError, {
+        operation: "outreach.send.daily_limit_reached",
+        messageId,
+        userId: authorization.actor.id,
+      });
+      logSecurityEvent("outreach.daily_send_limit_reached", { userId: authorization.actor.id });
+      return { ok: false, message: dailySendLimitMessage() };
+    }
     await reportError(claimError, { operation: "outreach.send.claim", messageId });
     return { ok: false, message: "The send could not be started safely. Nothing was sent. Try again." };
   }

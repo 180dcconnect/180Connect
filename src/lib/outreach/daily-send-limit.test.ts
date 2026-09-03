@@ -1,39 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  DEFAULT_OUTREACH_DAILY_SEND_LIMIT,
-  dailySendLimitMessage,
-  dailySendWindowStart,
-  resolveOutreachDailyLimit,
-} from "./daily-send-limit.ts";
-
-describe("resolveOutreachDailyLimit", () => {
-  it("returns the configured limit", async () => {
-    assert.equal(await resolveOutreachDailyLimit(async () => 42), 42);
-  });
-
-  it("falls back to the default when no configuration row exists", async () => {
-    assert.equal(await resolveOutreachDailyLimit(async () => null), DEFAULT_OUTREACH_DAILY_SEND_LIMIT);
-  });
-
-  it("falls back to the default, and logs, when the read throws", async () => {
-    const logs: unknown[][] = [];
-    const original = console.error;
-    console.error = (...args: unknown[]) => logs.push(args);
-    try {
-      assert.equal(
-        await resolveOutreachDailyLimit(async () => {
-          throw new Error("permission denied");
-        }),
-        DEFAULT_OUTREACH_DAILY_SEND_LIMIT,
-      );
-    } finally {
-      console.error = original;
-    }
-    assert.equal(logs.length, 1);
-    assert.match(String(logs[0]?.[0]), /outreach\.daily_send_limit_unavailable/);
-  });
-});
+import { dailySendLimitMessage, dailySendWindowStart } from "./daily-send-limit.ts";
 
 describe("dailySendWindowStart", () => {
   it("returns the start of the UTC calendar day", () => {

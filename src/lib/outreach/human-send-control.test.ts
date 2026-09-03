@@ -72,13 +72,20 @@ describe("F250 human-send architecture", () => {
     const loadDue = entry.slice(entry.indexOf("async loadDue"), entry.indexOf("async isSuppressed"));
     const claim = entry.slice(entry.indexOf("async claim("), entry.indexOf("async deliver("));
     const markSent = entry.slice(entry.indexOf("async markSent("));
-    for (const [adapter, section] of [["loadDue", loadDue], ["claim", claim]] as const) {
-      assert.match(
-        section,
-        /\.eq\("send_status", "scheduled"\)/,
-        `${adapter} must be conditioned on send_status='scheduled'`,
-      );
-    }
+    assert.match(
+      loadDue,
+      /\.eq\("send_status", "scheduled"\)/,
+      "loadDue must be conditioned on send_status='scheduled'",
+    );
+    // F128: the claim itself moved into an audited service-role RPC (so the
+    // branch-wide daily cap can be enforced atomically alongside it — see
+    // that migration's header) — so the scheduled-only condition is pinned
+    // THERE, not in this adapter.
+    assert.match(
+      claim,
+      /claim_scheduled_outreach_send/,
+      "the worker must claim deliveries through the atomic F128/F129 RPC",
+    );
     // F157: the recordal itself moved into the audited service-role RPC — so
     // the scheduled-only condition must be pinned THERE, not in this adapter.
     assert.match(
@@ -94,6 +101,18 @@ describe("F250 human-send architecture", () => {
       "utf8",
     );
     assert.match(rpcMigration, /send_claimed_at = p_claim_token/, "the RPC must stay pinned to the claiming run's token");
+    const claimMigration = await readFile(
+      new URL(
+        "../../../supabase/migrations/20260912180100_enforce_daily_send_limit_atomically.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    assert.match(
+      claimMigration,
+      /and\s+send_status\s*=\s*'scheduled'/,
+      "the claim RPC must stay conditioned on send_status='scheduled'",
+    );
     assert.doesNotMatch(
       worker,
       /\.eq\(\s*"send_status"\s*,\s*"draft"\s*\)/,

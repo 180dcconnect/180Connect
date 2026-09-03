@@ -20,6 +20,7 @@ import {
   markNotificationRead,
 } from "@/lib/notifications-actions";
 import {
+  notificationCategory,
   notificationRelativeTime,
   type NotificationItem,
 } from "@/lib/notifications";
@@ -220,6 +221,11 @@ export function NotificationBell({ collapsed }: { collapsed: boolean }) {
           ) : (
             items.map((item) => {
               const unread = item.readAt === null;
+              // F176 AC3: a team-activity digest reads as lower-stakes than
+              // a personal, actionable notification — a muted tag and a
+              // gray (not blue) unread dot, not the same visual weight as
+              // "someone replied" or "this is due".
+              const isTeamActivity = notificationCategory(item.notificationType) === "team_activity";
               return (
                 <button
                   key={item.id}
@@ -232,11 +238,18 @@ export function NotificationBell({ collapsed }: { collapsed: boolean }) {
                   <p className="flex items-start gap-2 text-sm font-semibold text-black">
                     {unread && (
                       <span
-                        className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-blue-600"
+                        className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
+                          isTeamActivity ? "bg-black/25" : "bg-blue-600"
+                        }`}
                         aria-hidden="true"
                       />
                     )}
                     <span className="min-w-0">{item.title}</span>
+                    {isTeamActivity && (
+                      <span className="mt-0.5 shrink-0 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-black/45">
+                        Team
+                      </span>
+                    )}
                   </p>
                   {item.body && (
                     <p className="mt-0.5 line-clamp-2 pl-4 text-xs text-black/60">

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   mapNotificationRows,
+  notificationCategory,
   sortNotificationsNewestFirst,
   notificationRelativeTime,
   type RawNotificationRow,
@@ -84,5 +85,17 @@ describe("notificationRelativeTime (F173)", () => {
       notificationRelativeTime(item, new Date("2026-08-21T12:05:00Z")),
       "5 minutes ago",
     );
+  });
+});
+
+describe("notificationCategory (F176 AC3)", () => {
+  it("categorises a team activity digest as team_activity", () => {
+    assert.equal(notificationCategory("team_activity_digest"), "team_activity");
+  });
+
+  it("defaults every other type to personal, including unrecognised ones", () => {
+    assert.equal(notificationCategory("team_activity"), "personal");
+    assert.equal(notificationCategory("reply_received"), "personal");
+    assert.equal(notificationCategory("some_future_type"), "personal");
   });
 });

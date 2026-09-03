@@ -42,6 +42,7 @@ import {
 import { FeedbackPrompt } from "@/components/feedback-prompt";
 import { shouldPromptFeedback } from "@/lib/feedback";
 import {
+  formatResponseTime,
   summariseTrackedReplies,
   type ReplyTrackingRow,
 } from "@/lib/reply-analytics";
@@ -179,7 +180,7 @@ export default async function DashboardPage({
       while (true) {
         const { data, error } = await supabase
           .from("reply_events")
-          .select("id, organisation_id")
+          .select("id, organisation_id, response_time_seconds")
           .order("received_at", { ascending: true })
           .order("id", { ascending: true })
           .range(from, from + step - 1)
@@ -589,7 +590,7 @@ export default async function DashboardPage({
                     label="Responses received"
                     value={metrics.responsesReceived}
                     share={share(metrics.respondingClients)}
-                    caption={`${metrics.respondingClients.toLocaleString()} responding ${metrics.respondingClients === 1 ? "client" : "clients"}`}
+                    caption={`${metrics.respondingClients.toLocaleString()} responding ${metrics.respondingClients === 1 ? "client" : "clients"} · Avg ${formatResponseTime(replyTracking.averageResponseTimeSeconds)}`}
                   />
                 </Rise>
                 <Rise>

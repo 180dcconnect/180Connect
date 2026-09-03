@@ -62,6 +62,7 @@ import { RequestOwnershipForm } from "./request-ownership-form";
 import { ScheduledEmailList } from "./scheduled-email-list";
 import { FailedEmailList } from "./failed-email-list";
 import { emailSendWindowStart, isNearSendLimit, resolveEmailSendLimit } from "@/lib/outreach/send-rate-limit";
+import { averageResponseTime, formatResponseTime } from "@/lib/reply-analytics";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -597,11 +598,12 @@ export default async function ClientDetailPage({
 
   const { data: replyRows, error: replyError, count: replyCount } = await supabase
     .from("reply_events")
-    .select("id, outreach_message_id, reply_body, received_at", { count: "exact" })
+    .select("id, outreach_message_id, reply_body, received_at, response_time_seconds", { count: "exact" })
     .eq("organisation_id", id);
   if (replyError) {
     await reportError(replyError, { operation: "clients.timeline_replies", organisationId: id });
   }
+  const clientAverageResponseTime = averageResponseTime(replyRows ?? []);
 
   // F134: only delivered messages belong in the client-visible conversation;
   // drafts, scheduled messages and failures remain in the separate F070 list.
@@ -1088,6 +1090,9 @@ export default async function ClientDetailPage({
                       {(replyCount ?? 0).toLocaleString()}
                     </span>{" "}
                     {replyCount === 1 ? "reply" : "replies"} received
+                    {clientAverageResponseTime !== null
+                      ? ` · Average response ${formatResponseTime(clientAverageResponseTime)}`
+                      : " · Average response not available yet"}
                   </p>
                 )}
                 {sendingVolume && (

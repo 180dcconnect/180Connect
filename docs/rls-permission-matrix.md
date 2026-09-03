@@ -1068,6 +1068,19 @@ publication for live bell-panel delivery; publication membership grants nothing
 on its own — delivery is still filtered by the SELECT policy per subscriber
 (same mechanism as §3.8 / F075).
 
+**Producer: reply notifications** (F174, #170,
+`supabase/migrations/20260913090000_notify_reply_owner.sql`). `capture_gmail_reply`
+(F131, §3.4-adjacent — it lives with the outreach/reply tables, not here) now
+calls `create_notification` in the same transaction as capturing the reply,
+notifying the client's *current* `owner_id` (looked up fresh inside the
+function, not the owner at whenever Gmail sync queued the job).
+`notification_type = 'reply_received'`; `link_path` is the client profile,
+not a generic notifications list (AC2). This table carries no priority
+column — AC3's "high-priority by default" is decided app-side, by
+`notificationPriority()` in `src/lib/notifications.ts` mapping this one
+`notification_type` to `'high'`, not by a new column every producer would
+otherwise have to fill in.
+
 ---
 
 ### 3.20 Saved filter views — own rows only

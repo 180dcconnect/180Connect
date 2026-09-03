@@ -1068,9 +1068,23 @@ publication for live bell-panel delivery; publication membership grants nothing
 on its own — delivery is still filtered by the SELECT policy per subscriber
 (same mechanism as §3.8 / F075).
 
----
-
-### 3.20 Saved filter views — own rows only
+**Producer: team activity digests** (F176, #172,
+`src/lib/team-activity-sweep.ts` +
+`supabase/migrations/20260913090000_schedule_team_activity_digest_cron.sql`).
+An hourly pg_cron job (`team_activity_digest_hourly`, same shape as F183's
+`stall_detection_daily`) reads new `AUDIT_LOG` rows since its own last run —
+the same action allowlist `get_recent_team_activity` already exposes to the
+dashboard (§3.7-adjacent; F029) — and calls `create_notification`
+(service_role — an already-granted caller, no new grant needed) **once per
+active user**, summarising every teammate's action since their last digest,
+never one notification per event (AC2, this ticket's own answer to its
+"Noise control rules" blocker: batched, not a per-type on/off switch, since
+F178 preferences are not a dependency here). `notification_type =
+'team_activity_digest'`; `link_path` is `/dashboard`, where the same events
+render individually in the existing Team Activity feed. The sweep's own
+watermark (`team_activity_digest_swept`, `target_table` null) is not a
+business-entity change either — same reasoning as F175's
+`reminder_notification_sent` marker.
 
 Backs F066 (`supabase/migrations/20260821090000_create_saved_views.sql`). Same shape as
 §3.12 and §3.13: the user's own view state, not ownership/status/role/approval state, so

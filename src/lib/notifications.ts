@@ -73,6 +73,26 @@ export function sortNotificationsNewestFirst(
   );
 }
 
+export type NotificationCategory = "team_activity" | "personal";
+
+/**
+ * F176 AC3: a team-activity digest must read as lower-stakes than a
+ * personal, actionable notification (a reply, a reminder) "so a CAM doesn't
+ * have to treat them with the same urgency" — a lookup keyed by
+ * notification_type, the same shape a priority concept would take, rather
+ * than a stored column: NOTIFICATIONS carries no such column, and adding one
+ * to the shared table would force every existing and future producer to
+ * decide a value for a distinction only this one type needs today. Anything
+ * not explicitly team-activity defaults to "personal" — the safer default,
+ * since treating a genuinely actionable notification as background noise is
+ * the worse mistake of the two.
+ */
+const TEAM_ACTIVITY_TYPES: ReadonlySet<string> = new Set(["team_activity_digest"]);
+
+export function notificationCategory(notificationType: string): NotificationCategory {
+  return TEAM_ACTIVITY_TYPES.has(notificationType) ? "team_activity" : "personal";
+}
+
 /** Relative time for one row; callers pass their own now (see display-format.ts). */
 export function notificationRelativeTime(
   item: NotificationItem,

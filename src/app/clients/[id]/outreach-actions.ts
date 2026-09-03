@@ -8,6 +8,7 @@ import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
 import { discardDraftSchema } from "@/lib/outreach/discard-draft";
 import { emailHtmlToPlainText, sanitizeEmailHtml } from "@/lib/outreach/email-html";
 import { HUMAN_REVIEW_REQUIRED_MESSAGE, humanReviewDecision } from "@/lib/outreach/human-review";
+import { assertContactPermission } from "@/lib/outreach/contact-permission";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { saveDraftSchema } from "@/lib/outreach/save-draft";
 import { reviewedEmailSchema } from "@/lib/outreach/send-reviewed";
@@ -51,9 +52,23 @@ export async function scheduleReviewedEmail(input: unknown): Promise<ReviewedSen
     return { ok: false, message: actorFailureMessage(authorization.reason) };
   }
   const isAdmin = authorization.actor.role === "admin";
+  const supabase = await createClient();
 
   // explicitlyApproved has been consumed by the F121 checkpoint above.
   const { organisationId, messageId, subject } = parsed.data;
+
+  // F018 (#21) AC1: the contact-permission rule at the point of scheduling —
+  // the same check generation ran, re-run here because ownership may have
+  // changed since the draft was generated. This is also the grandfather gate:
+  // per PM decision, a schedule permitted here is delivered by the worker even
+  // if ownership changes before it fires.
+  const permission = await assertContactPermission(supabase, {
+    organisationId,
+    actorId: authorization.actor.id,
+    actorRole: authorization.actor.role,
+  });
+  if (!permission.allowed) return { ok: false, message: permission.message };
+
   // F117: never trust client-side sanitization alone — identical rule to the
   // send path, since what is stored here is exactly what the cron worker will
   // deliver later.
@@ -61,7 +76,6 @@ export async function scheduleReviewedEmail(input: unknown): Promise<ReviewedSen
   if (emailHtmlToPlainText(body).length === 0) {
     return { ok: false, message: "Add email content before scheduling." };
   }
-  const supabase = await createClient();
 
   // F123 AC4's ownership assertion, before the RPC gives a database-shaped error:
   // RLS lets every active user READ every draft, so ownership has to be asserted
@@ -235,6 +249,20 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   if (!isAdmin && draft.sent_by_user_id !== authorization.actor.id) {
     return { ok: false, message: "You can only send drafts you generated yourself." };
   }
+
+  // F018 (#21) AC1: the contact-permission rule at the point of sending. The
+  // draft-authorship check above only proves who wrote this draft; a client
+  // reassigned to another CAM after generation would still pass it. The action
+  // itself is blocked here with the owner-naming conflict copy (AC2) — admins
+  // pass (AC3); their last-resort confirmation lives in ComposeButton.
+  // retryFailedEmail reaches Gmail only through this action, so retries are
+  // covered by the same rule.
+  const permission = await assertContactPermission(supabase, {
+    organisationId,
+    actorId: authorization.actor.id,
+    actorRole: authorization.actor.role,
+  });
+  if (!permission.allowed) return { ok: false, message: permission.message };
 
   const suppression = await checkSuppressionBeforeSend(organisationId, async (id) => {
     const { data, error } = await supabase

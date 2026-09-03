@@ -359,6 +359,14 @@ export default async function ClientDetailPage({
     actorRole: authorization.actor.role,
   });
 
+  // F018 (#21) AC3: an admin may still send to a client owned by another CAM as
+  // a last-resort override — but ComposeButton must first confirm it with a
+  // dialog naming the owner. Null for every other viewer/shape: CAMs are
+  // blocked outright (ownershipConflict above) and unowned clients need no
+  // override.
+  const adminOverrideOwnerName =
+    isAdmin && ownerId && ownerId !== authorization.actor.id ? ownerName : null;
+
   // F163: admin's CAM picker. Only fetched for an admin — a CAM can't reach the
   // assign form, so the query would be wasted on every other page view.
   let team: { id: string; full_name: string | null }[] = [];
@@ -837,6 +845,7 @@ export default async function ClientDetailPage({
                 <ComposeButton
                   blocked={suppressed}
                   ownershipBlocked={!suppressed && ownershipConflict.hasConflict}
+                  adminOverrideOwnerName={adminOverrideOwnerName}
                   historyHref={
                     hasPermission(authorization.actor.role, "platform-settings:manage")
                       ? `/admin/ai-generations?client=${client.id}`

@@ -49,6 +49,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
       items: [
         { href: "/admin", label: "Overview", icon: "admin" },
         { href: "/admin/users", label: "Team management", icon: "users" },
+        { href: "/admin/analytics", label: "Team analytics", icon: "analytics" },
         { href: "/admin/audit-log", label: "Audit log", icon: "audit" },
         { href: "/admin/import-status", label: "Import status", icon: "import" },
         // Not duplicated here: every admin already has tags:manage, so the

@@ -44,6 +44,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     permission: "user:manage",
   },
   {
+    href: "/admin/analytics",
+    label: "Team analytics",
+    description: "Team-wide outreach performance, conversions over time, and who may need support.",
+    permission: "user:manage",
+  },
+  {
     href: "/admin/cam-settings",
     label: "CAM queue settings",
     description: "Inspect team members' outreach preferences and queue configuration.",

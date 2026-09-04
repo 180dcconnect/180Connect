@@ -179,6 +179,8 @@
 | size_bytes | bigint |  | Yes | File size in bytes | System | From the upload metadata | Must be ≥ 0 if present |
 | uploaded_by | uuid | USERS | Yes | Team member who attached the file | System | Set to logged-in user at creation | Nullable — a future automated import may have no human uploader (F081 decides) |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+| timeline_context_type | text |  | No | Timeline source this file belongs to | System | Set to client for a general upload or to the linked event type | client, note, outreach_message, reply_event, or audit_log |
+| timeline_context_id | uuid |  | Yes | Stable ID of the linked timeline source | System | Set when the attachment is linked to a specific event | Null only for a client-level File shared event |
 
 ## TAGS
 

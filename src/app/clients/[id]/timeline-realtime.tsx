@@ -59,6 +59,16 @@ export function TimelineRealtimeRefresher({ organisationId }: { organisationId: 
         .channel(`client-detail-timeline-${organisationId}`)
         .on(
           "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "attachments",
+            filter: `organisation_id=eq.${organisationId}`,
+          },
+          () => scheduleRefresh(),
+        )
+        .on(
+          "postgres_changes",
           { event: "*", schema: "public", table: "notes", filter: `organisation_id=eq.${organisationId}` },
           () => scheduleRefresh(),
         )

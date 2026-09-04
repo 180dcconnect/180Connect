@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { HandCoins } from "lucide-react";
+import { GrantFetchButton } from "./grant-fetch-button";
 import { GrantHistoryLoadMore } from "./grant-history-load-more";
 import type { GrantRow } from "./grant-list-item";
 import { SectionCard } from "./section-card";
@@ -80,6 +81,10 @@ export function GrantHistorySection({
           totalCount={totalCount}
         />
       )}
+
+      {/* Offered even when the read failed: "could not be loaded" is about our
+          database, not about 360Giving, and a CAM may still want to fetch. */}
+      <GrantFetchButton organisationId={organisationId} hasGrants={totalCount > 0} />
     </SectionCard>
   );
 }

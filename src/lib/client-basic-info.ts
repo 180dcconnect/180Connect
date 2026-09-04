@@ -27,6 +27,7 @@ export type OrganisationDetailRow = {
   postcode: string | null;
   country_code: string;
   outreach_status: string;
+  geographic_reach?: string | null;
   sector?: string | null;
   sub_sector?: string | null;
   created_at?: string;

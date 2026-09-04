@@ -173,11 +173,13 @@ export function MorphingPopoverTrigger({
     - **The box.** While open the trigger is gone, so an inert spacer of the
       size it last measured stands in for it. Without that the header row
       collapses around the absent button.
-    - **The baseline.** SectionCard's heading row is `items-baseline`. A bare
-      sized <div> has no line box, so the browser falls back to its bottom
-      margin edge, the row re-aligns around a lower baseline, and empty space
-      opens above the card's title. The spacer therefore wears the trigger's own
-      classes and carries a zero-width space: same box, same baseline.
+    - **The baseline.** A bare sized <div> has no line box, so the browser falls
+      back to its bottom margin edge, the row re-aligns around a lower baseline,
+      and empty space opens above the card's title. The spacer therefore wears
+      the trigger's own classes and carries a zero-width space: same box, same
+      baseline. SectionCard's heading row no longer aligns on the baseline —
+      it is `items-center`, and `items-start` on a numbered card — but the
+      spacer is cheap and still correct against any row that does.
 
     No `AnimatePresence` on either side of the morph. It keeps the outgoing
     element mounted for a beat, which put a real trigger and its spacer in the

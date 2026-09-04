@@ -9,7 +9,8 @@
  * single quiet line instead of a card-shaped hole.
  *
  * **Why this matters more here than it looks.** Sections 3 and 4 are empty for
- * most clients, and not because of a gap we can close: the Charity Commission
+ * most clients — the flow diagram and the headcount — and not because of a gap
+ * we can close: the Charity Commission
  * register publishes the income/expenditure breakdown and staff counts only for
  * charities with gross income over £500,000. Measured on the staging register
  * (3,825 real filed periods, no seed rows): below £500k, 2 of 361 periods in
@@ -39,20 +40,22 @@ export function SectionUnavailable({
       aria-labelledby={headingId}
       className="scroll-mt-6 rounded-panel border border-dashed border-rule bg-paper/40 px-5 py-3.5"
     >
-      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-        <span
-          aria-hidden="true"
-          className="shrink-0 font-mono text-[15px] font-medium text-faint tabular-nums"
-        >
-          {number}
-        </span>
-        <h2
-          id={headingId}
-          className="text-[15px] leading-[1.3] font-semibold tracking-[-0.01em] text-dim"
-        >
-          <span className="sr-only">Section {number}. </span>
-          {title}
-        </h2>
+      <div className="flex flex-col gap-1">
+        <div className="flex items-baseline gap-2.5">
+          <span
+            aria-hidden="true"
+            className="shrink-0 font-serif text-[20px] leading-none font-bold tabular-nums text-faint"
+          >
+            {number}
+          </span>
+          <h2
+            id={headingId}
+            className="text-[15px] leading-[1.3] font-semibold tracking-[-0.01em] text-dim"
+          >
+            <span className="sr-only">Section {number}. </span>
+            {title}
+          </h2>
+        </div>
         <p className="text-[13px] leading-[1.5] text-faint">{reason}</p>
       </div>
     </section>

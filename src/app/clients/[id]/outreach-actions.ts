@@ -24,6 +24,10 @@ import { buildScoreSnapshot } from "@/lib/scoring/build-score-snapshot";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { safeValidate } from "@/lib/validation";
+import {
+  createDefaultScrapeDependencies,
+  fetchWebsiteContext,
+} from "@/lib/booklet/scrape-website";
 import { z } from "zod";
 
 export type ReviewedSendResult =
@@ -544,6 +548,42 @@ export async function retryFailedEmail(input: unknown): Promise<RetryFailedResul
     body: failed.body,
     explicitlyApproved: true,
   });
+}
+
+export type ValidateWebsiteResult =
+  | { ok: true; hostname: string }
+  | { ok: false; message: string };
+
+/**
+ * Live verdict for the booklet composer's website field. Runs the exact
+ * `fetchWebsiteContext` the booklet route runs — format, robots, DNS, HTTP,
+ * readable text — so the droplet's tick means "generate will use this", not
+ * merely "this parses". A well-formed URL to a dead or refusing site ticks
+ * under a format check and then gets skipped on generate; this cannot.
+ *
+ * Gated on client:contact like every sibling action: settled keystrokes now
+ * trigger real outbound fetches, which must stay behind the same actors
+ * allowed to generate. The shared transport's ERROR_LOG rows on fetch
+ * failures apply here too — a pause on a half-typed host leaves a row, the
+ * price of verifying for real, kept small by the caller's debounce.
+ */
+export async function validateBookletWebsiteUrl(
+  input: unknown,
+): Promise<ValidateWebsiteResult> {
+  const parsed = safeValidate(z.object({ websiteUrl: z.string().max(2048) }), input);
+  if (!parsed.success) {
+    return { ok: false, message: "That doesn't look like a website address." };
+  }
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const result = await fetchWebsiteContext(
+    parsed.data.websiteUrl,
+    createDefaultScrapeDependencies(),
+  );
+  if (result.status === "used") return { ok: true, hostname: result.hostname };
+  return { ok: false, message: result.reason };
 }
 
 export type SaveDraftResult =

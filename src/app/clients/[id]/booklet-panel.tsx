@@ -1,26 +1,31 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Check, ChevronDown, Clock, ExternalLink, Globe, ShieldCheck, Sparkles, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Clock, ExternalLink, Globe, ShieldCheck, Sparkles } from "lucide-react";
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
+import { DeleteButton } from "@/components/ui/delete-button";
+import { GooeyEmailInput } from "@/components/ui/gooey-email-input";
 import { BrandSearchBar } from "@/components/brand/search-bar";
+import { validateBookletWebsiteUrl } from "./outreach-actions";
+import { deleteBookletVersion } from "./booklet-actions";
 import { SectionCard } from "./section-card";
 import { parseBookletSections } from "@/lib/booklet/parse-sections";
+import { MAX_STEER_CHARS } from "@/lib/booklet/build-prompt";
 import type { BookletSource } from "@/lib/booklet/sources";
 
 /**
  * F082 — Generate Client Booklet. A one-shot user-triggered action, not the
- * realtime-subscription shape basic-info-panel.tsx uses: nothing else can change a
- * booklet mid-view, since nothing is saved yet (F085 deferred — every click here
- * re-generates from Gemini, nothing is read back from or written to the client
- * record). Same fetch/busy/error shape as discrepancies-panel.tsx.
+ * realtime-subscription shape basic-info-panel.tsx uses: nothing else can change
+ * a booklet mid-view. Same fetch/busy/error shape as discrepancies-panel.tsx.
+ *
+ * Saved versions (F085) arrive from the server as `savedBooklet`/`priorVersions`,
+ * so an already-generated client renders on first paint with no fetch and no
+ * Gemini cost; only an explicit Generate/Regenerate calls the route.
  *
  * Styled as the flagship AI feature it is (per Bashir's issue: "Important AI
  * feature") rather than another plain bordered section — brand-tinted card,
- * larger type, and a prominent CTA — and placed right after BasicInfoPanel
- * (page.tsx) rather than buried near the bottom, since a CAM reads this before
- * the raw fields below it, not after.
+ * larger type, and a prominent CTA — and placed first on the Outreach tab
+ * (outreach/page.tsx), since a CAM reads this before writing the email below it.
  *
  * Real generations against Gemini ran ~1-20s during testing — long enough that a
  * static "Generating…" line reads as stalled. AiLoadingState (shared with
@@ -34,18 +39,21 @@ import type { BookletSource } from "@/lib/booklet/sources";
  * and dash-bulleted blocks into a real list — see that file for why this only
  * works because the prompt dictates that exact format.
  *
-  * F084 — Use Website URL in Booklet: before the first version exists the URL
-  * lives inside the composer's "Add website" row (pre-filled from the
-  * client's already-known, already-reachable website via `initialWebsiteUrl`,
-  * expanded on open so the CAM sees what will be used); once a version
-  * exists the standalone field below takes over for regenerations. Either
-  * way it stays editable — a CAM can clear it, paste a different
-  * page entirely, or fill one in when none is on record. Whatever's in the field at
- * generate time is what gets sent; the route re-validates it with F046's
+ * F084 — Use Website URL in Booklet: before the first version exists the URL
+ * lives inside the composer's "Add a website" row; once a version exists the
+ * standalone field below takes over for regenerations. The field always starts
+ * empty — never seeded from the client's stored website or from the last
+ * version's URL. It is an *extra* page to scrape for this run, and a prefilled
+ * one reads as a setting already applied: the CAM either pays for a scrape they
+ * never asked for or has to clear a box to decline it. The organisation's own
+ * website still reaches the prompt as a plain field from the route's own read,
+ * so nothing is lost by leaving this blank. Whatever's in the field at generate
+ * time is what gets sent; the route re-validates it with F046's
  * validateWebsiteFormat and fetches it through F037's shared robots-aware,
- * SSRF-safe transport (scrape-website.ts) fresh on every click — nothing is cached,
- * same "no persistence yet" reasoning as the booklet itself. Whether the site's
- * content actually made it in is reported back as a status line under the booklet.
+ * SSRF-safe transport (scrape-website.ts) fresh on every click. The scrape
+ * itself is never cached — only its outcome is, in the saved version's
+ * `website_url`/`website_context_used`. Whether the site's content actually
+ * made it in is reported back as a status line under the booklet.
  *
  * F086 — Regenerate Client Booklet: CLIENT_BOOKLETS is append-only now (see that
  * migration's F086 revision), so a regenerate is a new row, never an overwrite —
@@ -212,205 +220,133 @@ function initialWebsiteContext(saved: SavedBooklet): WebsiteContextResult | null
 }
 
 /**
- * The pre-generation composer: a collapsed pill that widens into a card, then
- * drops its options beneath — the search bar's choreography
- * (`components/brand/search-bar.tsx`), restyled into the filed-record's light
- * language rather than the brand's dark glass.
+ * The pre-generation composer: the brand search bar in prompt-button mode
+ * (`components/brand/search-bar.tsx`), whose `frosted`, `promptButton` and
+ * `panelRows` options exist for this placement — the prompt row triggers
+ * options rather than taking a query, and the panel offers actions rather
+ * than filters.
  *
- * Two phases, in order: the pill animates to full width first, and only then
- * does the panel unfold below it, so the eye tracks one movement at a time.
- * The panel holds a single option for now — "Add website" — which opens the
- * URL field inline, where the pill was, rather than navigating anywhere. More
- * options (tone, length, audience) slot in as further rows later without
- * touching this choreography.
+ * The panel holds one row for now — "Add a website" — an inline URL field
+ * rather than a navigation. More options (tone, length, audience) slot in as
+ * further rows without touching the bar itself.
  *
- * A pre-filled URL (page.tsx passes the reachable site) opens the field
- * already expanded, so the CAM sees what will be used rather than discovering
- * it. Escape or an outside tap collapses back to the pill; the typed URL
- * survives collapsing, since it lives in the parent's state.
+ * The field starts empty every time — see this file's header for why a
+ * client's known website is not seeded into it. It validates through the same
+ * F046 gate the route applies, so its tick can never promise what generation
+ * would refuse.
+ *
+ * The outreach page wraps this card in `Rise glass` with a z-index: the
+ * frosted panel can only blur the page behind it if no ancestor holds a
+ * filter, and it has to paint over the card beneath.
  */
 function BookletComposer({
   websiteUrl,
   onWebsiteUrlChange,
+  steer,
+  onSteerChange,
   onGenerate,
 }: {
   websiteUrl: string;
   onWebsiteUrlChange: (value: string) => void;
+  steer: string;
+  onSteerChange: (value: string) => void;
   onGenerate: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [websiteOpen, setWebsiteOpen] = useState(() => websiteUrl.trim() !== "");
-  const reduceMotion = useReducedMotion();
-  const panelId = useId();
-  const rootRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Pointerdown, not click — same reasoning as the search bar: a drag that
-  // starts inside and ends outside must not collapse the panel mid-gesture.
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("pointerdown", onDown);
-    return () => document.removeEventListener("pointerdown", onDown);
-  }, [open ]);
-
-  useEffect(() => {
-    if (websiteOpen) inputRef.current?.focus();
-  }, [websiteOpen]);
-
-  const trimmed = websiteUrl.trim();
-  let hostname: string | null = null;
-  try {
-    hostname = trimmed ? new URL(trimmed).hostname : null;
-  } catch {
-    hostname = null;
-  }
+  // Live droplet check for the search bar's website field: the same F046
+  // gate generate applies, so the tick can never promise what the route
+  // would refuse. Stable identity so the droplet's debounce isn't reset by
+  // unrelated re-renders.
+  const checkWebsite = useCallback((candidate: string) => {
+    return validateBookletWebsiteUrl({ websiteUrl: candidate }).then((result) =>
+      result.ok ? null : result.message,
+    );
+  }, []);
 
   return (
     <div className="mt-6 flex flex-col items-center gap-3">
-      <motion.div
-        ref={rootRef}
-        className={
-          open
-            ? "w-full overflow-hidden rounded-2xl border border-rule bg-white"
-            : "w-auto"
-        }
-        initial={false}
-        animate={{ width: open ? "100%" : "auto" }}
-        transition={{ duration: reduceMotion ? 0 : 0.35, ease: "easeOut" }}
-        onKeyDown={(event) => {
-          if (event.key === "Escape" && open) setOpen(false);
-        }}
-      >
-        {!open ? (
-          <button
-            aria-controls={panelId}
-            aria-expanded={false}
-            className="flex items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-ink/90"
-            onClick={() => setOpen(true)}
-            type="button"
-          >
-            <Sparkles aria-hidden="true" className="h-4 w-4" />
-            Generate booklet
-          </button>
-        ) : (
-          <div>
-            <div className="flex items-center justify-between gap-3 px-4 pt-3.5 sm:px-5">
-              <p className="flex items-center gap-2 text-sm font-semibold text-ink">
-                <Sparkles aria-hidden="true" className="h-4 w-4 text-faint" />
-                New booklet
-              </p>
-              <button
-                aria-label="Close booklet options"
-                className="grid h-7 w-7 place-items-center rounded-full text-faint transition-colors hover:bg-paper hover:text-dim"
-                onClick={() => setOpen(false)}
-                type="button"
-              >
-                <X aria-hidden="true" className="h-4 w-4" />
-              </button>
-            </div>
-            <AnimatePresence initial={false}>
-              <motion.div
-                key="booklet-options"
-                id={panelId}
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{
-                  duration: reduceMotion ? 0 : 0.3,
-                  delay: reduceMotion ? 0 : 0.22,
-                  ease: "easeOut",
-                }}
-              >
-                <p className="px-4 pt-1 text-[13px] leading-[1.55] text-dim sm:px-5">
-                  A research summary from the client&rsquo;s profile — add a
-                  website below for extra context.
-                </p>
-                <div className="px-2 pt-2 sm:px-3">
-                  <button
-                    aria-expanded={websiteOpen}
-                    className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors hover:bg-paper"
-                    onClick={() => setWebsiteOpen((value) => !value)}
-                    type="button"
-                  >
-                    <Globe aria-hidden="true" className="h-4 w-4 shrink-0 text-faint" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold text-ink">
-                        {hostname ?? "Add website"}
-                      </span>
-                      <span className="mt-0.5 block text-xs text-dim">
-                        {hostname
-                          ? "Included as unverified context — tap to change"
-                          : "Optional — quoted as unverified context"}
-                      </span>
-                    </span>
-                    {hostname && !websiteOpen ? (
-                      <Check aria-hidden="true" className="h-4 w-4 shrink-0 text-go" />
-                    ) : (
-                      <ChevronDown
-                        aria-hidden="true"
-                        className={`h-4 w-4 shrink-0 text-faint transition-transform ${websiteOpen ? "rotate-180" : ""}`}
-                      />
-                    )}
-                  </button>
-                  <AnimatePresence initial={false}>
-                    {websiteOpen && (
-                      <motion.div
-                        key="website-field"
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{
-                          duration: reduceMotion ? 0 : 0.25,
-                          ease: "easeOut",
-                        }}
-                        className="overflow-hidden"
-                      >
-                        <div className="px-2.5 pt-1 pb-1">
-                          <input
-                            ref={inputRef}
-                            aria-label="Website URL for extra context (optional)"
-                            className="w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm text-ink placeholder:text-faint focus:border-brand focus:ring-1 focus:ring-brand focus:outline-none"
-                            onChange={(event) => onWebsiteUrlChange(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") onGenerate();
-                            }}
-                            placeholder="https://example.org"
-                            type="url"
-                            value={websiteUrl}
-                          />
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-                <div className="flex justify-center px-4 pt-3 pb-4 sm:px-5">
-                  <button
-                    className="flex items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-ink/90"
-                    onClick={onGenerate}
-                    type="button"
-                  >
-                    <Sparkles aria-hidden="true" className="h-4 w-4" />
-                    Generate booklet
-                  </button>
-                </div>
-              </motion.div>
-            </AnimatePresence>
-          </div>
-        )}
-      </motion.div>
       <BrandSearchBar
         frosted
         promptButton
+        compactRest
+        subjects={["this client", "their mission", "their work", "their website"]}
         panelRows={[
           {
             label: "Add a website",
-            hint: "Optional context for the booklet",
-            icon: <Globe aria-hidden="true" className="h-4 w-4 shrink-0 text-[#f4f4ef]/70" />,
+            alwaysExpanded: true,
+            expandedContent: (
+              <div className="flex items-center justify-start overflow-x-clip py-1 pl-5">
+                <GooeyEmailInput
+                  variant="dark"
+                  size="md"
+                  align="start"
+                  gap={56}
+                  duration={900}
+                  fillColor="#2f333b"
+                  shadow="0 0 0 1px rgba(255, 255, 255, 0.14) inset, 0 10px 28px -8px rgba(0, 0, 0, 0.55)"
+                  placeholder="https://example.org"
+                  restPlaceholder="Add a website"
+                  inputType="url"
+                  fieldLabel="Website URL for extra context (optional)"
+                  submitLabel="Generate booklet"
+                  buttonIcon="x"
+                  dropletLabel="Clear website"
+                  onDropletClick={() => onWebsiteUrlChange("")}
+                  value={websiteUrl}
+                  onValueChange={onWebsiteUrlChange}
+                  validate={() => null}
+                  validateAsync={checkWebsite}
+                  validationDelayMs={800}
+                  onSubmit={() => onGenerate()}
+                />
+              </div>
+            ),
+          },
+          {
+            label: "What should it focus on?",
+            alwaysExpanded: true,
+            // ~504px matches the widened capsule's left-packed stage (see the
+            // gooey dims), so label, field and counter share one edge.
+            expandedContent: (
+              <div className="py-1 pl-5">
+                <div className="flex max-w-[504px] items-baseline justify-between gap-3 px-1 pb-1.5">
+                  <p className="text-[13px] font-semibold text-[#f4f4ef]/80">
+                    What should it focus on?{" "}
+                    <span className="font-normal text-[#f4f4ef]/50">· optional</span>
+                  </p>
+                  <p
+                    className="shrink-0 text-xs text-[#f4f4ef]/50 tabular-nums"
+                    aria-live="polite"
+                  >
+                    {steer.length} / {MAX_STEER_CHARS}
+                  </p>
+                </div>
+                <div className="flex items-center justify-start overflow-x-clip">
+                  <GooeyEmailInput
+                    variant="dark"
+                    size="lg"
+                    fieldWidth={420}
+                    align="start"
+                    gap={60}
+                    duration={900}
+                    fillColor="#2f333b"
+                    shadow="0 0 0 1px rgba(255, 255, 255, 0.14) inset, 0 10px 28px -8px rgba(0, 0, 0, 0.55)"
+                    placeholder="e.g. Emphasise their youth work"
+                    inputType="text"
+                    fieldLabel="What the booklet should focus on (optional)"
+                    submitLabel="Generate booklet"
+                    maxLength={MAX_STEER_CHARS}
+                    value={steer}
+                    onValueChange={onSteerChange}
+                    validate={() => null}
+                    onSubmit={() => onGenerate()}
+                  />
+                </div>
+              </div>
+            ),
           },
         ]}
+        onSubmit={() => void onGenerate()}
+        submitLabel="Generate booklet"
         className="w-full max-w-[600px]"
       />
     </div>
@@ -419,14 +355,19 @@ function BookletComposer({
 
 export function BookletPanel({
   organisationId,
-  initialWebsiteUrl,
   savedBooklet,
   priorVersions,
+  canDeleteBooklet = false,
 }: {
   organisationId: string;
-  initialWebsiteUrl: string | null;
   savedBooklet: SavedBooklet | null;
   priorVersions: SavedBooklet[];
+  /**
+   * Whether the viewer may delete the displayed version. Admin-only, matching
+   * the schema's delete policy — page.tsx passes actor.role === "admin", and
+   * the action re-checks server-side regardless.
+   */
+  canDeleteBooklet?: boolean;
 }) {
   // F085: seeded straight from the server-read CLIENT_BOOKLETS rows, so a client
   // with a saved booklet renders it on first paint with zero fetch and zero
@@ -450,13 +391,31 @@ export function BookletPanel({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [websiteUrl, setWebsiteUrl] = useState(initialWebsiteUrl ?? "");
+  // Always empty on mount, and left alone across regenerations: an extra page
+  // to scrape is a per-run choice, not a client setting.
+  const [websiteUrl, setWebsiteUrl] = useState("");
+  // Operator steer for the next generation only — never saved, never shown on
+  // a version. Each generation reads what is typed at click time.
+  const [steer, setSteer] = useState("");
   // Only meaningful for a version generated this session — it carries the skip
   // *reason* the API returns, which CLIENT_BOOKLETS never stores (only the
   // used/not-used boolean does). A page-load-seeded currentVersion, or any
   // historical one, falls back to the boolean-only derivation instead.
   const [freshWebsiteContext, setFreshWebsiteContext] = useState<WebsiteContextResult | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
+  // While a delete is armed-or-worse the Regenerate button stands down: a
+  // regeneration landing mid-dissolve would give onComplete a stale version
+  // set to promote. Generation in flight hides this whole action row instead.
+  const [deleteArmed, setDeleteArmed] = useState(false);
+  // Failed deletes bump the Delete button's key so a fresh idle button
+  // remounts after the old one dissolves — the pending-invites pattern, for
+  // the same reason: the button vanishes at the end of its snap regardless of
+  // outcome, and without a new key a failed row would have no way to retry.
+  const [deleteAttempts, setDeleteAttempts] = useState<Record<string, number>>({});
+  // Versions whose delete resolved while the snap played. State swaps happen
+  // in onComplete, never in onConfirm — unmounting on confirm would cut the
+  // dissolve dead mid-animation.
+  const deleteSucceeded = useRef<Set<string>>(new Set());
   const sectionRef = useRef<HTMLDivElement>(null);
   const autoTriggered = useRef(false);
   // Ref, not the busy state: two clicks inside one render window both read
@@ -496,10 +455,14 @@ export function BookletPanel({
     abortRef.current = controller;
     try {
       const trimmedUrl = websiteUrl.trim();
+      const trimmedSteer = steer.trim();
       const response = await fetch(`/api/clients/${organisationId}/booklet`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(trimmedUrl ? { websiteUrl: trimmedUrl } : {}),
+        body: JSON.stringify({
+          ...(trimmedUrl ? { websiteUrl: trimmedUrl } : {}),
+          ...(trimmedSteer ? { steer: trimmedSteer.slice(0, MAX_STEER_CHARS) } : {}),
+        }),
         signal: controller.signal,
       });
       const body = await response.json();
@@ -580,13 +543,59 @@ export function BookletPanel({
       <SectionCard
         action={
           (currentVersion || error) && !busy && !viewingVersion ? (
-            <button
-              className="shrink-0 rounded-full border border-rule px-4 py-2 text-xs font-semibold text-lead transition-colors hover:bg-lead-wash"
-              onClick={generate}
-              type="button"
-            >
-              Regenerate
-            </button>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {canDeleteBooklet && currentVersion && (
+                <DeleteButton
+                  key={`delete-booklet-${currentVersion.id}-${deleteAttempts[currentVersion.id] ?? 0}`}
+                  label="Delete"
+                  confirmLabel="Delete?"
+                  deletingLabel="Deleting…"
+                  size="sm"
+                  variant="subtle"
+                  onStartConfirm={() => setDeleteArmed(true)}
+                  onCancel={() => setDeleteArmed(false)}
+                  onConfirm={async () => {
+                    const versionId = currentVersion.id;
+                    const result = await deleteBookletVersion({
+                      organisationId,
+                      versionId,
+                    });
+                    if (result.ok) {
+                      deleteSucceeded.current.add(versionId);
+                      return;
+                    }
+                    setError(result.message);
+                    setDeleteAttempts((previous) => ({
+                      ...previous,
+                      [versionId]: (previous[versionId] ?? 0) + 1,
+                    }));
+                  }}
+                  onComplete={() => {
+                    setDeleteArmed(false);
+                    if (!currentVersion) return;
+                    const versionId = currentVersion.id;
+                    // The snap plays (and the button vanishes) whether the
+                    // delete landed or not — only a recorded success swaps the
+                    // versions. A failure remounted a fresh button above and
+                    // leaves the content exactly where it was.
+                    if (!deleteSucceeded.current.delete(versionId)) return;
+                    setCurrentVersion(history[0] ?? null);
+                    setHistory((previous) => previous.slice(1));
+                    setViewingVersionId(null);
+                    setFreshWebsiteContext(null);
+                    setSaveFailed(false);
+                  }}
+                />
+              )}
+              <button
+                className="shrink-0 rounded-full border border-rule px-4 py-2 text-xs font-semibold text-lead transition-colors hover:bg-lead-wash disabled:opacity-50"
+                disabled={deleteArmed}
+                onClick={generate}
+                type="button"
+              >
+                Regenerate
+              </button>
+            </div>
           ) : undefined
         }
         headingId="booklet-heading"
@@ -624,6 +633,8 @@ export function BookletPanel({
         <BookletComposer
           websiteUrl={websiteUrl}
           onWebsiteUrlChange={setWebsiteUrl}
+          steer={steer}
+          onSteerChange={setSteer}
           onGenerate={() => void generate()}
         />
       )}

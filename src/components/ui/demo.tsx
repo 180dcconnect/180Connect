@@ -33,4 +33,41 @@ export function DemoOne() {
   return <Component />;
 }
 
-export default DemoOne;
+import { PriceRangeSlider } from "@/components/ui/range-slider";
+
+const generateHistogramData = (length: number, seed = 42): number[] => {
+  const data = Array.from({ length }, (_, i) => {
+    const x = Math.sin(seed + i * 1.5) * 10000;
+    return x - Math.floor(x);
+  });
+  for (let i = 1; i < length - 1; i++) {
+    data[i] = (data[i - 1] + data[i] + data[i + 1]) / 3;
+  }
+  return data;
+};
+
+export const PriceRangeSliderDemo = () => {
+  // Memoize data generation so it doesn't run on every render
+  const histogramData = React.useMemo(() => generateHistogramData(60), []);
+
+  const [range, setRange] = React.useState<[number, number]>([50, 4500]);
+  void range;
+
+  return (
+    <div className="w-full max-w-md mx-auto p-8 rounded-lg">
+      <PriceRangeSlider
+        data={histogramData}
+        min={0}
+        max={5000}
+        step={50}
+        defaultValue={[50, 4500]}
+        onValueChange={(newRange) => {
+          setRange(newRange);
+          console.log("New range:", newRange);
+        }}
+      />
+    </div>
+  );
+};
+
+export default PriceRangeSliderDemo;

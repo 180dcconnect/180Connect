@@ -33,6 +33,8 @@ export type RawCharityCommissionBulkRecord = {
     charity_contact_web?: string | null;
     charity_company_registration_number?: string | null;
     charity_is_cio?: boolean | null;
+    /** The charity's own filed description of its work. Externally authored free text. */
+    charity_activities?: string | null;
   };
   annual_returns?: Record<string, unknown>[];
   matched_classifications?: string[];

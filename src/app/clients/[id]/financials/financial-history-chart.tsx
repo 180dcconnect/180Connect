@@ -1,9 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { formatCompactGbp, formatGbp } from "@/lib/income-band";
-import type { FinancialSeries, FinancialYear } from "@/lib/financials/financial-series";
+import type {
+  FinancialSeries,
+  FinancialYear,
+  GrantInput,
+} from "@/lib/financials/financial-series";
+import ProgressMetricCard, { type PeriodOption } from "@/components/ui/progress-metric-card";
+import {
+  DEFICIT,
+  EXPENDITURE,
+  INCOME,
+  Legend,
+  percent,
+  SeriesTable,
+  SURPLUS,
+} from "./chart-parts";
 
 /**
  * The filed-accounts charts: what came in against what went out, the surplus or
@@ -25,91 +39,11 @@ import type { FinancialSeries, FinancialYear } from "@/lib/financials/financial-
  * - **Marks are thin and the grid is recessive.** Columns are capped at 28px
  *   with a 2px gap; the only rules drawn are the zero baseline and the peak.
  *
- * The palette is the app's own tag colours (`src/lib/tags/tag-colours.ts`)
- * rather than new hexes: blue #175cd3 income, amber #b54708 expenditure, green
- * #067647 grant income, red #b42318 deficit. All validated against a white
- * surface for lightness, chroma, CVD separation and contrast.
+ * The palette, the share formatter, the legend and the table disclosure all
+ * live in `./chart-parts` — sections 4 and 5 draw with the same set, and two of
+ * these colours had already been copied by hand into a third file before it was
+ * shared.
  */
-
-const INCOME = "#175cd3";
-const EXPENDITURE = "#b54708";
-const SURPLUS = "#067647";
-const DEFICIT = "#b42318";
-
-function percent(value: number | null, of: number): number {
-  if (value === null || of <= 0) return 0;
-  return Math.max(0, Math.min(100, (value / of) * 100));
-}
-
-function Legend({ items }: { items: { colour: string; label: string }[] }) {
-  return (
-    <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-      {items.map((item) => (
-        <li key={item.label} className="flex items-center gap-1.5 text-[12px] text-dim">
-          <span
-            aria-hidden="true"
-            className="size-2 shrink-0 rounded-[2px]"
-            style={{ backgroundColor: item.colour }}
-          />
-          {item.label}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** The numbers behind a chart, for anyone the chart does not serve. */
-function SeriesTable({
-  years,
-  columns,
-}: {
-  years: FinancialYear[];
-  columns: { header: string; cell: (year: FinancialYear) => string }[];
-}) {
-  return (
-    <details className="group mt-3">
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[12px] font-medium text-lead transition-colors hover:text-lead-mid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead-mid [&::-webkit-details-marker]:hidden">
-        <span aria-hidden="true" className="inline-block transition-transform group-open:rotate-90">
-          ›
-        </span>
-        View as a table
-      </summary>
-      <div className="mt-2 overflow-x-auto">
-        <table className="w-full min-w-[24rem] border-collapse text-[12.5px]">
-          <thead>
-            <tr className="border-b border-rule-soft text-left text-faint">
-              <th scope="col" className="py-1.5 pr-3 font-medium">
-                Year
-              </th>
-              {columns.map((column) => (
-                <th key={column.header} scope="col" className="py-1.5 pr-3 font-medium">
-                  {column.header}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {years.map((year) => (
-              <tr key={year.periodEnd} className="border-b border-rule-soft last:border-0">
-                <th scope="row" className="py-1.5 pr-3 text-left font-medium text-ink">
-                  {year.label}
-                </th>
-                {columns.map((column) => (
-                  <td
-                    key={column.header}
-                    className="py-1.5 pr-3 font-mono tabular-nums text-dim"
-                  >
-                    {column.cell(year)}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </details>
-  );
-}
 
 export function FinancialHistoryChart({ series }: { series: FinancialSeries }) {
   const [hovered, setHovered] = useState<number | null>(null);
@@ -273,132 +207,112 @@ export function FinancialHistoryChart({ series }: { series: FinancialSeries }) {
 }
 
 /**
- * Grant funding against income, one stacked column per filed year.
- *
- * The framing in the heading is doing real work. 360Giving publishes the date
- * an award was *made*, not the years it pays out over, so a three-year grant
- * lands wholly in the year it was announced. "New grant funding won" is what
- * this actually measures; "what share of their income is grants" is the claim
- * it would be wrong to make.
+ * Year-on-year grant funding won over time, rendered with the dashboard's ProgressMetricCard.
  */
-export function GrantShareChart({ series }: { series: FinancialSeries }) {
-  const [hovered, setHovered] = useState<number | null>(null);
-  const years = series.years;
+export function YearOnYearGrantsChart({
+  series,
+  grants,
+}: {
+  series: FinancialSeries;
+  grants?: readonly GrantInput[];
+}) {
+  const points = useMemo(() => {
+    // 1. Group raw grants by award year (calendar year):
+    const byYear = new Map<string, number>();
+    if (grants && grants.length > 0) {
+      for (const grant of grants) {
+        if (!grant.award_date || grant.amount_awarded === null || grant.amount_awarded <= 0) continue;
+        const currency = (grant.currency ?? "GBP").toUpperCase();
+        if (currency !== "GBP") continue;
+        const year = grant.award_date.slice(0, 4);
+        if (!/^\d{4}$/.test(year)) continue;
+        byYear.set(year, (byYear.get(year) ?? 0) + grant.amount_awarded);
+      }
+    }
 
-  if (!series.hasGrants || !series.hasIncome) return null;
+    // 2. If series has filed financial years with grants and covers the data:
+    const filedYearsWithGrants = series.years.filter((y) => y.grantTotal > 0);
+    if (
+      series.years.length >= 2 &&
+      filedYearsWithGrants.length > 0 &&
+      filedYearsWithGrants.length >= byYear.size
+    ) {
+      return series.years.map((y) => ({
+        date: y.label,
+        value: y.grantTotal,
+      }));
+    }
 
-  const scale = Math.max(
-    series.peak,
-    ...years.map((year) => year.grantTotal),
-  );
-  const active = hovered !== null ? years[hovered] : null;
+    // 3. Otherwise, use all grants grouped by calendar year (filling gaps):
+    if (byYear.size >= 1) {
+      const yearNums = [...byYear.keys()].map(Number).sort((a, b) => a - b);
+      const min = yearNums[0];
+      const max = yearNums[yearNums.length - 1];
+      if (max - min >= 1 && max - min <= 20) {
+        const fullRange: { date: string; value: number }[] = [];
+        for (let y = min; y <= max; y++) {
+          fullRange.push({
+            date: String(y),
+            value: byYear.get(String(y)) ?? 0,
+          });
+        }
+        return fullRange;
+      }
+      if (byYear.size >= 2) {
+        return [...byYear.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([year, total]) => ({
+            date: year,
+            value: total,
+          }));
+      }
+    }
+
+    // 4. Fall back to series.years if it has at least 2 points:
+    if (series.years.length >= 2 && series.hasGrants) {
+      return series.years.map((y) => ({
+        date: y.label,
+        value: y.grantTotal,
+      }));
+    }
+
+    return [];
+  }, [series, grants]);
+
+  if (points.length < 2) return null;
+
+  const totalAmount = points.reduce((sum, p) => sum + p.value, 0);
+  const periodOptions: PeriodOption[] = [
+    ...(points.length > 5 ? [{ label: "Past 5 years", points: 5 }] : []),
+    ...(points.length > 10 ? [{ label: "Past 10 years", points: 10 }] : []),
+    { label: "All years" },
+  ];
 
   return (
-    <div className="mt-6 border-t border-rule-soft pt-5">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h3 className="text-[14px] font-semibold text-ink">
-          New grant funding against income
-        </h3>
-        <Legend
-          items={[
-            { colour: SURPLUS, label: "Grants awarded" },
-            { colour: INCOME, label: "Rest of income" },
-          ]}
-        />
-      </div>
-
-      <div className="mt-3 flex h-[110px] items-end gap-2">
-        {years.map((year, index) => {
-          const grantHeight = percent(year.grantTotal, scale);
-          const restHeight = percent(
-            year.income === null ? null : Math.max(0, year.income - year.grantTotal),
-            scale,
-          );
-          return (
-            <div
-              key={year.periodEnd}
-              onMouseEnter={() => setHovered(index)}
-              onMouseLeave={() => setHovered(null)}
-              onFocus={() => setHovered(index)}
-              onBlur={() => setHovered(null)}
-              tabIndex={0}
-              aria-label={`${year.label}: ${formatGbp(year.grantTotal)} awarded against income of ${formatGbp(year.income)}`}
-              className={`flex h-full flex-1 flex-col items-center justify-end outline-none ${
-                hovered === index ? "bg-paper" : ""
-              } rounded-t-[4px] px-1 focus-visible:ring-2 focus-visible:ring-lead-mid`}
-            >
-              {year.grantShare !== null && year.grantTotal > 0 && (
-                <span className="mb-1 font-mono text-[11px] tabular-nums text-ink">
-                  {Math.round(year.grantShare * 100)}%
-                </span>
-              )}
-              <span
-                aria-hidden="true"
-                className="w-full max-w-[28px] rounded-t-[4px]"
-                style={{ height: `${restHeight}%`, backgroundColor: INCOME }}
-              />
-              {/* 2px of surface between stacked segments, so the boundary is a
-                  gap rather than two colours meeting. */}
-              <span aria-hidden="true" className="h-[2px] w-full" />
-              <span
-                aria-hidden="true"
-                className="w-full max-w-[28px] rounded-b-[4px]"
-                style={{
-                  height: `${grantHeight}%`,
-                  backgroundColor: SURPLUS,
-                  minHeight: year.grantTotal > 0 ? 2 : 0,
-                }}
-              />
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="mt-1 flex gap-2">
-        {years.map((year, index) => (
-          <span
-            key={year.periodEnd}
-            className={`flex-1 text-center text-[11.5px] ${
-              hovered === index ? "font-semibold text-ink" : "text-dim"
-            }`}
-          >
-            {year.label}
-          </span>
-        ))}
-      </div>
-
-      <p className="mt-2 min-h-[18px] text-[12px] text-dim" aria-live="polite">
-        {active ? (
-          <>
-            <span className="font-semibold text-ink">{active.label}</span> —{" "}
-            {formatGbp(active.grantTotal)} awarded
-            {active.grantShare !== null &&
-              `, ${Math.round(active.grantShare * 100)}% of that year's income`}
-            {active.grantsExcluded > 0 &&
-              ` · ${active.grantsExcluded} award${active.grantsExcluded === 1 ? "" : "s"} in another currency, not counted`}
-          </>
-        ) : (
-          "Awards are placed by the date they were made, not the years they pay out over."
-        )}
-      </p>
-
-      <SeriesTable
-        years={years}
-        columns={[
-          { header: "Grants awarded", cell: (year) => formatGbp(year.grantTotal) },
-          { header: "Income", cell: (year) => formatGbp(year.income) },
-          {
-            header: "Share",
-            cell: (year) =>
-              year.grantShare === null
-                ? "Income not filed"
-                : `${Math.round(year.grantShare * 100)}%`,
-          },
-        ]}
+    <div className="mt-4 mb-2">
+      <ProgressMetricCard
+        size="md"
+        title="Year-on-year grant funding"
+        total={formatCompactGbp(totalAmount).toUpperCase()}
+        unit="in grants"
+        deltaLabel="vs prior year"
+        accent="brand"
+        data={points}
+        defaultView="curve"
+        fullWidth
+        period={periodOptions[0].label}
+        periodOptions={periodOptions}
+        valueFormatter={(val) => formatGbp(val)}
+        dateFormatter={(d) => d}
+        showStats
+        showDelta
+        className="rounded-2xl border-rule-soft shadow-sm"
       />
     </div>
   );
 }
+
+export { YearOnYearGrantsChart as GrantShareChart };
 
 /**
  * Where a year's income came from — the annual return's own split.

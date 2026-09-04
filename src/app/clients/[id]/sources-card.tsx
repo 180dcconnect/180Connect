@@ -6,11 +6,7 @@ import { BookOpen } from "lucide-react";
 import type { OrganisationSource } from "@/lib/source-tracking";
 import { SOURCE_LABELS } from "@/lib/source-tracking";
 import { formatShortDate } from "@/lib/display-format";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/animate-ui/components/radix/tooltip";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { SectionCard } from "./section-card";
 
 /**
@@ -142,30 +138,25 @@ function ManualEntryRow() {
 
   return (
     <li className="flex items-center gap-3.5 py-3 first:border-t-0 first:pt-0">
-      <Tooltip delayDuration={150}>
-        <TooltipTrigger asChild>
-          <span
-            aria-hidden="true"
-            className="flex size-14 shrink-0 cursor-help items-center justify-center font-mono text-[15px] font-semibold tracking-[0.02em] text-faint"
-          >
-            {monogram(label)}
-          </span>
-        </TooltipTrigger>
-        {details && (
-          <TooltipContent
-            side="top"
-            sideOffset={6}
-            className="max-w-[18rem] rounded-inset border border-white/10 bg-[#161b21] px-3.5 py-2.5 text-left text-[12px] leading-[1.5] text-white shadow-lg"
-          >
-            <span className="block font-semibold text-white">{label}</span>
-            <span className="mt-1 block text-white/80">{details.summary}</span>
-            <span className="mt-2 block border-t border-white/10 pt-1.5 text-[11px] text-white/70">
+      <InfoTooltip
+        title={details ? label : undefined}
+        content={details?.summary}
+        footer={
+          details ? (
+            <>
               <strong className="font-semibold text-white/90">Relevance:</strong>{" "}
               {details.relevance}
-            </span>
-          </TooltipContent>
-        )}
-      </Tooltip>
+            </>
+          ) : undefined
+        }
+      >
+        <span
+          aria-hidden="true"
+          className="flex size-14 shrink-0 cursor-help items-center justify-center font-mono text-[15px] font-semibold tracking-[0.02em] text-faint"
+        >
+          {monogram(label)}
+        </span>
+      </InfoTooltip>
 
       <div className="min-w-0 flex-1">
         <p className="text-[17.5px] font-semibold text-ink">{label}</p>
@@ -232,92 +223,73 @@ export function SourcesCard({
                 key={source.source}
                 className="flex items-center gap-3.5 py-3 first:border-t-0 first:pt-0"
               >
-                <Tooltip delayDuration={150}>
-                  <TooltipTrigger asChild>
-                    {/* No tile, no border, no plate. A wordmark is already a
-                        designed object with its own margins; framing one is putting
-                        a frame around a frame, and it forced the logo down to 32px
-                        of usable space inside a 44px box. Unframed it can be the
-                        size it deserves. */}
-                    {logo ? (
-                      <span className="flex size-14 shrink-0 cursor-help items-center justify-center">
-                        <Image
-                          src={logo}
-                          alt=""
-                          width={56}
-                          height={56}
-                          className={`max-h-full object-contain ${
-                            source.source === "360giving"
-                              ? "max-w-none w-auto h-12 scale-85"
-                              : source.source === "companies_house"
-                                ? "max-w-none w-auto h-14 scale-125"
-                                : source.source === "charity_commission" ||
-                                  source.source === "charity_commission_bulk"
-                                  ? "max-w-none w-auto h-14 scale-110"
-                                  : "max-w-full"
-                          }`}
-                        />
-                      </span>
-                    ) : (
-                      <span
-                        aria-hidden="true"
-                        className="flex size-14 shrink-0 cursor-help items-center justify-center font-mono text-[15px] font-semibold tracking-[0.02em] text-faint"
-                      >
-                        {monogram(source.label)}
-                      </span>
-                    )}
-                  </TooltipTrigger>
-
-                  {details && (
-                    <TooltipContent
-                      side="top"
-                      sideOffset={6}
-                      className="max-w-[18rem] rounded-inset border border-white/10 bg-[#161b21] px-3.5 py-2.5 text-left text-[12px] leading-[1.5] text-white shadow-lg"
-                    >
-                      <span className="block font-semibold text-white">
-                        {source.label}
-                      </span>
-                      <span className="mt-1 block text-white/80">
-                        {details.summary}
-                      </span>
-                      <span className="mt-2 block border-t border-white/10 pt-1.5 text-[11px] text-white/70">
+                <InfoTooltip
+                  title={details ? source.label : undefined}
+                  content={details?.summary}
+                  footer={
+                    details ? (
+                      <>
                         <strong className="font-semibold text-white/90">
                           Relevance:
                         </strong>{" "}
                         {details.relevance}
-                      </span>
-                    </TooltipContent>
+                      </>
+                    ) : undefined
+                  }
+                >
+                  {/* No tile, no border, no plate. A wordmark is already a
+                      designed object with its own margins; framing one is putting
+                      a frame around a frame, and it forced the logo down to 32px
+                      of usable space inside a 44px box. Unframed it can be the
+                      size it deserves. */}
+                  {logo ? (
+                    <span className="flex size-14 shrink-0 cursor-help items-center justify-center">
+                      <Image
+                        src={logo}
+                        alt=""
+                        width={56}
+                        height={56}
+                        className={`max-h-full object-contain ${
+                          source.source === "360giving"
+                            ? "max-w-none w-auto h-12 scale-85"
+                            : source.source === "companies_house"
+                              ? "max-w-none w-auto h-14 scale-125"
+                              : source.source === "charity_commission" ||
+                                source.source === "charity_commission_bulk"
+                                ? "max-w-none w-auto h-14 scale-110"
+                                : "max-w-full"
+                        }`}
+                      />
+                    </span>
+                  ) : (
+                    <span
+                      aria-hidden="true"
+                      className="flex size-14 shrink-0 cursor-help items-center justify-center font-mono text-[15px] font-semibold tracking-[0.02em] text-faint"
+                    >
+                      {monogram(source.label)}
+                    </span>
                   )}
-                </Tooltip>
+                </InfoTooltip>
 
                 <div className="min-w-0 flex-1">
-                  <Tooltip delayDuration={150}>
-                    <TooltipTrigger asChild>
-                      <p className="w-fit cursor-help truncate text-[17.5px] font-semibold text-ink hover:text-lead">
-                        {source.label}
-                      </p>
-                    </TooltipTrigger>
-                    {details && (
-                      <TooltipContent
-                        side="top"
-                        sideOffset={6}
-                        className="max-w-[18rem] rounded-inset border border-white/10 bg-[#161b21] px-3.5 py-2.5 text-left text-[12px] leading-[1.5] text-white shadow-lg"
-                      >
-                        <span className="block font-semibold text-white">
-                          {source.label}
-                        </span>
-                        <span className="mt-1 block text-white/80">
-                          {details.summary}
-                        </span>
-                        <span className="mt-2 block border-t border-white/10 pt-1.5 text-[11px] text-white/70">
+                  <InfoTooltip
+                    title={details ? source.label : undefined}
+                    content={details?.summary}
+                    footer={
+                      details ? (
+                        <>
                           <strong className="font-semibold text-white/90">
                             Relevance:
                           </strong>{" "}
                           {details.relevance}
-                        </span>
-                      </TooltipContent>
-                    )}
-                  </Tooltip>
+                        </>
+                      ) : undefined
+                    }
+                  >
+                    <p className="w-fit cursor-help truncate text-[17.5px] font-semibold text-ink hover:text-lead">
+                      {source.label}
+                    </p>
+                  </InfoTooltip>
                   {/* One line, and only the parts that exist. A register with no
                       record id captured says nothing where the id would be
                       rather than filling the space with a placeholder. */}

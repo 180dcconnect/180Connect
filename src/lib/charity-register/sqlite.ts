@@ -1,8 +1,39 @@
 import "server-only";
 
-import { DatabaseSync } from "node:sqlite";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+
+interface DatabaseSyncStatement {
+  get(...params: unknown[]): unknown;
+  all(...params: unknown[]): unknown[];
+  run(...params: unknown[]): unknown;
+}
+
+interface DatabaseSyncInstance {
+  prepare(sql: string): DatabaseSyncStatement;
+  close(): void;
+  exec?(sql: string): void;
+}
+
+type DatabaseSync = DatabaseSyncInstance;
+
+function getDatabaseSync(): (new (path: string, options?: { readOnly?: boolean }) => DatabaseSync) | null {
+  if (
+    typeof process !== "undefined" &&
+    "getBuiltinModule" in process &&
+    typeof (process as { getBuiltinModule?: unknown }).getBuiltinModule === "function"
+  ) {
+    const mod = (
+      process as {
+        getBuiltinModule: (name: string) => {
+          DatabaseSync?: new (path: string, options?: { readOnly?: boolean }) => DatabaseSync;
+        };
+      }
+    ).getBuiltinModule("node:sqlite");
+    if (mod?.DatabaseSync) return mod.DatabaseSync;
+  }
+  return null;
+}
 
 import { SCHEMA_VERSION } from "./sqlite-schema.ts";
 import {
@@ -63,13 +94,19 @@ function open(): { db: DatabaseSync; path: string } | null {
   if (cached) return cached;
   if (missingReason) return null;
 
+  const DatabaseSyncClass = getDatabaseSync();
+  if (!DatabaseSyncClass) {
+    missingReason = "node:sqlite is unavailable in this environment";
+    return null;
+  }
+
   const path = candidatePaths().find((candidate) => existsSync(candidate));
   if (!path) {
     missingReason = `No register file found. Looked in: ${candidatePaths().join(", ")}`;
     return null;
   }
 
-  const db = new DatabaseSync(path, { readOnly: true });
+  const db = new DatabaseSyncClass(path, { readOnly: true });
 
   // A file built by an older commit would answer queries with the wrong shape
   // rather than failing, so the version is checked once, on open.
@@ -218,3 +255,84 @@ export function charityLabels(organisationNumber: number, kind: string): string[
     .all(organisationNumber, kind) as { value: string }[];
   return rows.map((row) => row.value);
 }
+
+export type CharityOperatingAreas = {
+  organisationNumber: number;
+  registeredCharityNumber: number | null;
+  charityName: string;
+  localAuthorities: string[];
+  regions: string[];
+  countries: string[];
+};
+
+/**
+ * Returns all declared operational areas (local authorities, regions, countries)
+ * for a charity by registration number, organisation number, or name.
+ */
+export function lookupCharityOperatingAreas(
+  identifierOrName: string | number,
+): CharityOperatingAreas | null {
+  const handle = open();
+  if (!handle) return null;
+
+  let row:
+    | {
+        organisation_number: number;
+        registered_charity_number: number | null;
+        charity_name: string;
+      }
+    | undefined;
+
+  const numeric =
+    typeof identifierOrName === "number"
+      ? identifierOrName
+      : Number(String(identifierOrName).replace(/\D/g, ""));
+
+  if (numeric && Number.isFinite(numeric)) {
+    row = handle.db
+      .prepare(
+        "select organisation_number, registered_charity_number, charity_name " +
+          "from charity where registered_charity_number = ? or organisation_number = ? limit 1",
+      )
+      .get(numeric, numeric) as typeof row;
+  }
+
+  if (!row && typeof identifierOrName === "string" && identifierOrName.trim()) {
+    row = handle.db
+      .prepare(
+        "select organisation_number, registered_charity_number, charity_name " +
+          "from charity where charity_name = ? collate nocase limit 1",
+      )
+      .get(identifierOrName.trim()) as typeof row;
+  }
+
+  if (!row) return null;
+
+  const labels = handle.db
+    .prepare(
+      "select l.kind, l.value from charity_label cl join label l on l.id = cl.label_id " +
+        "where cl.organisation_number = ? and l.kind in ('Local Authority', 'Region', 'Country') " +
+        "order by l.kind, l.value",
+    )
+    .all(row.organisation_number) as { kind: string; value: string }[];
+
+  const localAuthorities: string[] = [];
+  const regions: string[] = [];
+  const countries: string[] = [];
+
+  for (const label of labels) {
+    if (label.kind === "Local Authority") localAuthorities.push(label.value);
+    else if (label.kind === "Region") regions.push(label.value);
+    else if (label.kind === "Country") countries.push(label.value);
+  }
+
+  return {
+    organisationNumber: row.organisation_number,
+    registeredCharityNumber: row.registered_charity_number,
+    charityName: row.charity_name,
+    localAuthorities,
+    regions,
+    countries,
+  };
+}
+

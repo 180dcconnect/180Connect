@@ -54,9 +54,12 @@ npm run register:build           # rebuild the charity register file (CI does th
 
 ## Visual design
 
-- Public pages (landing, legal, login — before sign-in) follow the design system in [`docs/design-system.md`](docs/design-system.md).
-- **Source of truth for brand tokens:** `src/components/brand/` — import it, never copy hex values or variants into page files.
-- Logged-in app is exempt: uses shadcn tokens in `globals.css`.
+Two systems, one per side of the login. Read the right one **before** touching UI.
+
+- Public pages (landing, legal, login — before sign-in): [`docs/design-system.md`](docs/design-system.md). Tokens in `src/components/brand/`.
+- Logged-in app (`/dashboard`, `/clients`, `/admin`, `/settings`): [`docs/app-design-system.md`](docs/app-design-system.md). Tokens in `src/app/globals.css`.
+- **Never copy hex values or variants into a page file.** Import the token.
+- **Do not copy the file next to the one you are editing.** The app is mid-migration and most screens are on the old language. `src/app/clients/[id]/` is the reference; `src/app/admin/*` and `src/app/clients/page.tsx` are not.
 
 ## CI workflows
 
@@ -77,6 +80,7 @@ npm run register:build           # rebuild the charity register file (CI does th
 ## Key reference docs
 
 - [`docs/architecture.md`](docs/architecture.md) — how auth, validation, errors, and the DB fit together
+- [`docs/app-design-system.md`](docs/app-design-system.md) — the logged-in app's visual language: surfaces, type, colour, motion, and how to convert an old screen
 - [`docs/rls-permission-matrix.md`](docs/rls-permission-matrix.md) — who can read/write what
 - [`docs/data-model/`](docs/data-model/) — table and field definitions
 - [`docs/environment-variables.md`](docs/environment-variables.md) — every env var, where to get it
@@ -85,3 +89,4 @@ npm run register:build           # rebuild the charity register file (CI does th
 - [`docs/client-list-sorting.md`](docs/client-list-sorting.md) — how `/clients` is ordered, and the pipeline-status order
 - [`docs/ingestion.md`](docs/ingestion.md) — the whole ingestion pipeline: the four stages, every source, what runs on a schedule
 - [`docs/charity-register-import.md`](docs/charity-register-import.md) — how charity imports work; criteria are data (a query over a register file), never code
+- [`docs/charity-import-guide.md`](docs/charity-import-guide.md) — the same thing for CAMs and admins: running an import, what the filters mean, refreshing the register

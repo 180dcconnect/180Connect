@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { CheckCircle2, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { OriginButton } from "@/components/ui/origin-button";
-import { refreshRegister, refreshStatus, type RefreshState } from "./refresh-actions";
+import { refreshRegister, refreshStatus, type RefreshState } from "../charity-commission/refresh-actions";
 
 /**
  * Rebuilds the register without anyone opening a terminal.

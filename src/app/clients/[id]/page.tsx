@@ -13,15 +13,18 @@ import {
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 
 import { BasicInfoPanel } from "./basic-info-panel";
+import { OperatingAreasCard } from "./operating-areas-card";
 import { ScoreBreakdownCard } from "./score-breakdown";
 import { Pill, SectionCard } from "./section-card";
 import { FinancialScaleCard } from "./financial-scale-card";
 import { SuggestEditSection } from "./suggest-edit-section";
 import { TagsCard } from "./tags-card";
 import { SourcesCard } from "./sources-card";
+import { loadOperatingGeography } from "@/lib/operating-geography";
 import {
   loadClient,
   loadFieldHistory,
+  loadIdentifiers,
   loadLatestFinancial,
   loadScore,
   loadSources,
@@ -71,6 +74,7 @@ export default async function ClientOverviewPage({
     enrichmentResult,
     clientTagsResult,
     allTagsResult,
+    identifiers,
   ] = await Promise.all([
       loadScore(id),
       loadWebsite(client.website),
@@ -94,6 +98,7 @@ export default async function ClientOverviewPage({
       // assign dropdown.
       supabase.from("org_tags").select("tag_id, tags(name, colour)").eq("organisation_id", id),
       supabase.from("tags").select("id, name, colour").order("name"),
+      loadIdentifiers(id),
     ]);
 
   for (const [operation, error] of [
@@ -105,6 +110,11 @@ export default async function ClientOverviewPage({
   }
 
   const { sources, error: sourcesError } = sourcesResult;
+  const operatingGeography = loadOperatingGeography(
+    client,
+    identifiers,
+    sources,
+  );
   const enrichment = enrichmentResult.data;
   const clientTags = (clientTagsResult.data ?? [])
     .filter((row) => row.tags)
@@ -184,6 +194,10 @@ export default async function ClientOverviewPage({
               actorRole={actor.role}
               suggestions={suggestions}
             />
+          </Rise>
+
+          <Rise>
+            <OperatingAreasCard geography={operatingGeography} />
           </Rise>
 
           {/* Proposing is a control on the card above ("Suggest an edit");

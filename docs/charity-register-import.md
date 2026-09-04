@@ -3,6 +3,11 @@
 How charities get from the regulator's register into the client list, and where
 the decisions about *which* charities live.
 
+This document is the design and the reasoning. If you want to *run* an import —
+what the screen does, what the filters mean, how to refresh the register — read
+[`charity-import-guide.md`](charity-import-guide.md) instead. It is written for
+CAMs and admins rather than for developers.
+
 ## The shape
 
 Three steps, deliberately separated, because they change at wildly different
@@ -104,6 +109,13 @@ screen opens on the whole register.
 so a selection is something the team keeps and re-runs. Re-running is safe:
 imports are idempotent by checksum, and a charity already on the list is matched
 rather than duplicated.
+
+Identity is `(source, name_key)`, where `name_key` is a stored generated column
+holding `lower(btrim(name))`: saving under a name already in use replaces that
+set rather than creating a near-twin beside it, whatever case it was typed in.
+The column exists because `ON CONFLICT` cannot target an expression index — the
+table originally carried the same rule as `(source, lower(btrim(name)))` and
+every save failed with `42P10` until `20260916120000` moved it into a column.
 
 ## Who can do it
 

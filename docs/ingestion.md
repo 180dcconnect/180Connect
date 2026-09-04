@@ -6,7 +6,8 @@ sources feed it, and what runs on a schedule.
 For the Charity Commission specifically — the filter screen, the register file
 and how imports are chosen — see
 [`charity-register-import.md`](charity-register-import.md). This document is the
-map; that one is the detail for the largest source.
+map; that one is the detail for the largest source. For running an import rather
+than understanding it, see [`charity-import-guide.md`](charity-import-guide.md).
 
 ---
 
@@ -107,7 +108,7 @@ a failed annotation is reported and does not roll back a good import.
 | `charity_commission_bulk` | **Primary.** Whole register of England & Wales | Filter and import on `/admin/charity-commission`, over a file shipped with the deployment |
 | `charity_commission` | Single-charity lookup only | By registration number, on the same page |
 | `companies_house` | Active | Weekly discovery cron + status recheck; `/admin/companies-house` |
-| `360giving` | Active | `/admin/three-sixty-giving`, grants data |
+| `360giving` | Active | Enrichment only. A background queue works through the client list (`three_sixty_giving_backfill`); a button on each client record fetches one on demand |
 | `find_that_charity` | Enrichment only | Name reconciliation against records already held. No bulk endpoint exists |
 | `website` | Manual | F037's URL import, one page at a time |
 | `charitybase` | **Not implemented** | Their API authenticates but its backing index is gone (checked 2026-09-03) |
@@ -132,6 +133,7 @@ pg_cron calls Vercel routes under `/api/cron/*`, each guarded by `CRON_SECRET`.
 | `gmail_reply_sync` | every 5 min | Captures replies to outreach |
 | `scheduled_outreach_delivery` | every 5 min | Sends queued outreach |
 | `stall_detection_daily` | 04:17 | Flags stalled conversations |
+| `three_sixty_giving_backfill` | every 15 min | Asks 360Giving about the next slice of organisations |
 
 Separately, a **GitHub Action** rebuilds the charity register file monthly — see
 [`charity-register-import.md`](charity-register-import.md). It is the only

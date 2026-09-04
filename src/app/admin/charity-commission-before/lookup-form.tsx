@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import { OriginButton } from "@/components/ui/origin-button";
-import { lookupCharity, type CharityCommissionImportState } from "./actions";
+import { lookupCharity, type CharityCommissionImportState } from "../charity-commission/actions";
 
 const initialLookupState: CharityCommissionImportState = {
   kind: "idle",

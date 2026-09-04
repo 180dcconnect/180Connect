@@ -271,3 +271,47 @@ const ORGANISATION_TYPE_LABELS: Record<string, string> = {
 export function formatOrganisationType(type: string): string {
   return ORGANISATION_TYPE_LABELS[type] ?? type;
 }
+
+/** The four public.geographic_reach enum values. */
+export const GEOGRAPHIC_REACHES = [
+  "local",
+  "regional",
+  "national",
+  "international",
+] as const;
+
+export type GeographicReach = (typeof GEOGRAPHIC_REACHES)[number];
+
+export const GEOGRAPHIC_REACH_LABELS: Record<string, string> = {
+  local: "Local",
+  regional: "Regional",
+  national: "National",
+  international: "International",
+};
+
+export const GEOGRAPHIC_REACH_OPTIONS = GEOGRAPHIC_REACHES.map((value) => ({
+  value,
+  label: GEOGRAPHIC_REACH_LABELS[value] ?? value,
+}));
+
+/** Formats a geographic reach enum value into title-case. */
+export function formatGeographicReach(reach: string | null | undefined): string {
+  if (!reach) return "";
+  const key = reach.trim().toLowerCase();
+  return GEOGRAPHIC_REACH_LABELS[key] ?? reach;
+}
+
+/** Formats an ISO country code into full name (e.g. "GB" -> "United Kingdom (GB)"). */
+export function formatCountryName(code: string | null | undefined): string {
+  if (!code) return "";
+  const upper = code.trim().toUpperCase();
+  if (upper === "GB" || upper === "UK") return "United Kingdom (GB)";
+  try {
+    const displayNames = new Intl.DisplayNames(["en"], { type: "region" });
+    const name = displayNames.of(upper);
+    return name ? `${name} (${upper})` : upper;
+  } catch {
+    return upper;
+  }
+}
+

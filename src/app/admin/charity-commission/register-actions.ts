@@ -342,8 +342,18 @@ export async function runRegisterImport(
   }
 }
 
-export type PresetState = { ok: true } | { ok: false; message: string };
+export type PresetState =
+  | { ok: true; message: string }
+  | { ok: false; message: string };
 
+/**
+ * Saves under a name, replacing any set already holding it.
+ *
+ * The conflict target is `(source, name_key)`, the generated normalised column
+ * added in 20260916120000 — `ON CONFLICT (source, name)` cannot match the
+ * expression index the table shipped with, which is why no save on this screen
+ * ever succeeded before that migration.
+ */
 export async function saveFilterPreset(
   name: string,
   filters: CharityRegisterFilters,
@@ -360,6 +370,16 @@ export async function saveFilterPreset(
   try {
     const supabase = requireAdminClient();
     const parsed = parseFilters(filters);
+
+    // Whether this replaces a set is worth telling the person before they walk
+    // away, so it is read first rather than inferred from the upsert.
+    const { data: existing } = await supabase
+      .from("import_filter_presets")
+      .select("id")
+      .eq("source", "charity_commission")
+      .eq("name_key", trimmed.toLowerCase())
+      .maybeSingle();
+
     const { error } = await supabase.from("import_filter_presets").upsert(
       {
         name: trimmed,
@@ -369,12 +389,15 @@ export async function saveFilterPreset(
         created_by_user_id: authorization.actor.id,
         updated_at: new Date().toISOString(),
       },
-      { onConflict: "source,name" },
+      { onConflict: "source,name_key" },
     );
     if (error) throw error;
 
     revalidatePath("/admin/charity-commission");
-    return { ok: true };
+    return {
+      ok: true,
+      message: existing ? `Replaced “${trimmed}”.` : `Saved as “${trimmed}”.`,
+    };
   } catch (error) {
     await reportError(error, {
       operation: "admin.charity_register.save_preset",
@@ -395,7 +418,7 @@ export async function deleteFilterPreset(id: string): Promise<PresetState> {
     const { error } = await supabase.from("import_filter_presets").delete().eq("id", id);
     if (error) throw error;
     revalidatePath("/admin/charity-commission");
-    return { ok: true };
+    return { ok: true, message: "Filter set deleted." };
   } catch (error) {
     await reportError(error, {
       operation: "admin.charity_register.delete_preset",

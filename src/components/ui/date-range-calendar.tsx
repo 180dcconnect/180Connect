@@ -1,14 +1,19 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { EASE } from "@/components/brand/motion";
+import { cn } from "@/lib/utils";
+
+const COLLAPSE_EASE = [0.8, 0, 0.3, 0.8] as const;
 import {
+  MONTH_NAMES,
   WEEKDAY_LABELS,
   addMonths,
   buildMonthGrid,
   calendarPresets,
+  clampDayToMonth,
   clampPreset,
   dayFlags,
   monthKeyOf,
@@ -75,6 +80,7 @@ export function DateRangeCalendar({
   showPresets = true,
   className = "",
 }: DateRangeCalendarProps) {
+  const reduceMotion = useReducedMotion();
   const today = useMemo(() => todayIso(now ?? new Date()), [now]);
 
   // Open on the month holding the current start, else on the newest month the
@@ -87,6 +93,90 @@ export function DateRangeCalendar({
   const [hover, setHover] = useState<string | null>(null);
   const [focusedDay, setFocusedDay] = useState<string>(() => value.from ?? today);
   const gridRef = useRef<HTMLDivElement>(null);
+
+  const [activeDropdown, setActiveDropdown] = useState<"month" | "year" | null>(null);
+  const [yearSearch, setYearSearch] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const yearInputRef = useRef<HTMLInputElement>(null);
+  const activeYearRef = useRef<HTMLButtonElement>(null);
+
+  const currentYear = Number(month.slice(0, 4));
+  const currentMonthIndex = Number(month.slice(5, 7)) - 1;
+  const currentMonthName = MONTH_NAMES[currentMonthIndex] ?? "Month";
+
+  const minYear = min ? Number(min.slice(0, 4)) : 1940;
+  const maxYear = max ? Number(max.slice(0, 4)) : new Date().getUTCFullYear() + 5;
+
+  const allYears = useMemo(() => {
+    const years: number[] = [];
+    for (let y = maxYear; y >= minYear; y -= 1) {
+      years.push(y);
+    }
+    return years;
+  }, [minYear, maxYear]);
+
+  const filteredYears = useMemo(() => {
+    if (!yearSearch.trim()) return allYears;
+    const query = yearSearch.trim();
+    return allYears.filter((y) => String(y).includes(query));
+  }, [allYears, yearSearch]);
+
+  useEffect(() => {
+    if (activeDropdown === "year") {
+      requestAnimationFrame(() => {
+        yearInputRef.current?.focus();
+        yearInputRef.current?.select();
+        activeYearRef.current?.scrollIntoView({ block: "center", behavior: "auto" });
+      });
+    }
+  }, [activeDropdown]);
+
+  useEffect(() => {
+    if (!activeDropdown) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setActiveDropdown(null);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        event.preventDefault();
+        setActiveDropdown(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [activeDropdown]);
+
+  const handleSelectMonth = (monthIndex: number) => {
+    const newMonthStr = String(monthIndex + 1).padStart(2, "0");
+    const newMonthKey = `${currentYear}-${newMonthStr}`;
+    setMonth(newMonthKey);
+    setFocusedDay((prev) => clampDayToMonth(prev, newMonthKey));
+    setActiveDropdown(null);
+  };
+
+  const handleSelectYear = (year: number) => {
+    const newMonthKey = `${year}-${String(currentMonthIndex + 1).padStart(2, "0")}`;
+    setMonth(newMonthKey);
+    setFocusedDay((prev) => clampDayToMonth(prev, newMonthKey));
+    setActiveDropdown(null);
+  };
+
+  const handleYearSearchSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const num = Number(yearSearch.trim());
+    if (!Number.isNaN(num) && num >= minYear && num <= maxYear) {
+      handleSelectYear(num);
+    } else if (filteredYears.length > 0) {
+      handleSelectYear(filteredYears[0]);
+    }
+  };
 
   /**
    * Split into weeks so the grid can carry real `role="row"` elements. The ARIA
@@ -182,46 +272,282 @@ export function DateRangeCalendar({
   })();
 
   return (
-    <div className={className} onMouseLeave={() => setHover(null)}>
-      {/* Month header — the label animates in the direction of travel, so paging
-          reads as movement through time rather than a value flicking over. */}
+    <div
+      ref={containerRef}
+      className={cn("relative", className)}
+      onMouseLeave={() => setHover(null)}
+    >
+      {/* Month & Year header */}
       <div className="flex items-center justify-between gap-1 px-0.5">
         <button
           type="button"
           aria-label={`Previous month, ${monthLabel(previousMonth)}`}
           disabled={!canGoBack}
-          onClick={() => setMonth(previousMonth)}
-          className="grid h-6 w-6 shrink-0 place-items-center rounded-lg text-foreground/50 transition-colors hover:bg-black/[0.05] hover:text-foreground disabled:pointer-events-none disabled:opacity-25 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand dark:hover:bg-white/[0.08]"
+          onClick={() => {
+            setMonth(previousMonth);
+            setActiveDropdown(null);
+          }}
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-foreground/50 transition-colors hover:bg-black/[0.05] hover:text-foreground disabled:pointer-events-none disabled:opacity-25 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand dark:hover:bg-white/[0.08]"
         >
-          <ChevronLeft size={14} strokeWidth={2.5} />
+          <ChevronLeft size={16} strokeWidth={2.5} />
         </button>
 
-        <div className="relative h-4 flex-1 overflow-hidden">
-          <AnimatePresence initial={false} mode="popLayout">
-            <motion.p
-              key={month}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: EASE }}
-              aria-live="polite"
-              className="absolute inset-0 text-center text-[12px] font-bold tracking-tight text-foreground"
-            >
-              {monthLabel(month)}
-            </motion.p>
-          </AnimatePresence>
+        {/* Center: Interactive Month & Year Buttons with enlarged text */}
+        <div className="flex items-center gap-1">
+          {/* Month Dropdown Button */}
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={activeDropdown === "month"}
+            aria-label={`Select month, currently ${currentMonthName}`}
+            onClick={() => setActiveDropdown((curr) => (curr === "month" ? null : "month"))}
+            className={cn(
+              "flex items-center gap-1 rounded-lg px-2.5 py-1 text-[14px] font-bold tracking-tight transition-colors focus-visible:outline-2 focus-visible:outline-brand cursor-pointer",
+              activeDropdown === "month"
+                ? "bg-brand/15 text-foreground"
+                : "text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
+            )}
+          >
+            <span>{currentMonthName}</span>
+            <ChevronDown
+              size={13}
+              strokeWidth={2.5}
+              className={cn(
+                "opacity-45 transition-transform duration-200",
+                activeDropdown === "month" && "rotate-180 opacity-100"
+              )}
+            />
+          </button>
+
+          {/* Year Dropdown Button */}
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={activeDropdown === "year"}
+            aria-label={`Select year, currently ${currentYear}`}
+            onClick={() => {
+              setYearSearch("");
+              setActiveDropdown((curr) => (curr === "year" ? null : "year"));
+            }}
+            className={cn(
+              "flex items-center gap-1 rounded-lg px-2 py-1 text-[14px] font-bold tracking-tight tabular-nums transition-colors focus-visible:outline-2 focus-visible:outline-brand cursor-pointer",
+              activeDropdown === "year"
+                ? "bg-brand/15 text-foreground"
+                : "text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
+            )}
+          >
+            <span>{currentYear}</span>
+            <ChevronDown
+              size={13}
+              strokeWidth={2.5}
+              className={cn(
+                "opacity-45 transition-transform duration-200",
+                activeDropdown === "year" && "rotate-180 opacity-100"
+              )}
+            />
+          </button>
         </div>
 
         <button
           type="button"
           aria-label={`Next month, ${monthLabel(nextMonth)}`}
           disabled={!canGoForward}
-          onClick={() => setMonth(nextMonth)}
-          className="grid h-6 w-6 shrink-0 place-items-center rounded-lg text-foreground/50 transition-colors hover:bg-black/[0.05] hover:text-foreground disabled:pointer-events-none disabled:opacity-25 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand dark:hover:bg-white/[0.08]"
+          onClick={() => {
+            setMonth(nextMonth);
+            setActiveDropdown(null);
+          }}
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-foreground/50 transition-colors hover:bg-black/[0.05] hover:text-foreground disabled:pointer-events-none disabled:opacity-25 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand dark:hover:bg-white/[0.08]"
         >
-          <ChevronRight size={14} strokeWidth={2.5} />
+          <ChevronRight size={16} strokeWidth={2.5} />
         </button>
       </div>
+
+      {/* Month & Year Dropdown Panels */}
+      <AnimatePresence>
+        {activeDropdown === "month" && (
+          <motion.div
+            initial={
+              reduceMotion
+                ? { opacity: 0 }
+                : { opacity: 0, scale: 0.96, y: -6, filter: "blur(4px)" }
+            }
+            animate={
+              reduceMotion
+                ? { opacity: 1, transition: { duration: 0.15 } }
+                : {
+                    opacity: 1,
+                    scale: 1,
+                    y: 0,
+                    filter: "blur(0px)",
+                    transition: { duration: 0.22, ease: EASE },
+                  }
+            }
+            exit={
+              reduceMotion
+                ? { opacity: 0, transition: { duration: 0.1 } }
+                : {
+                    opacity: 0,
+                    scale: 0.96,
+                    y: -4,
+                    filter: "blur(3px)",
+                    transition: { duration: 0.18, ease: COLLAPSE_EASE },
+                  }
+            }
+            className="absolute left-1/2 top-9 z-30 w-[270px] -translate-x-1/2 rounded-xl border border-black/[0.08] bg-popover p-2.5 shadow-xl backdrop-blur-md dark:border-white/[0.12]"
+          >
+            <div className="mb-2 flex items-center justify-between border-b border-black/[0.06] pb-1.5 dark:border-white/[0.08]">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-foreground/50">
+                Select month ({currentYear})
+              </span>
+              <button
+                type="button"
+                aria-label="Close month dropdown"
+                onClick={() => setActiveDropdown(null)}
+                className="grid h-5 w-5 place-items-center rounded text-foreground/40 hover:text-foreground"
+              >
+                <X size={12} strokeWidth={2.5} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-1">
+              {MONTH_NAMES.map((name, index) => {
+                const isSelected = index === currentMonthIndex;
+                const mKey = `${currentYear}-${String(index + 1).padStart(2, "0")}`;
+                const isDisabled = Boolean(
+                  (min && `${mKey}-31` < min) || (max && `${mKey}-01` > max)
+                );
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    disabled={isDisabled}
+                    onClick={() => handleSelectMonth(index)}
+                    className={cn(
+                      "flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors text-left",
+                      isSelected
+                        ? "bg-brand text-white font-bold"
+                        : "text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.08]",
+                      isDisabled && "opacity-25 pointer-events-none"
+                    )}
+                  >
+                    <span>{name}</span>
+                    {isSelected && <Check size={12} strokeWidth={3} />}
+                  </button>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+
+        {activeDropdown === "year" && (
+          <motion.div
+            initial={
+              reduceMotion
+                ? { opacity: 0 }
+                : { opacity: 0, scale: 0.96, y: -6, filter: "blur(4px)" }
+            }
+            animate={
+              reduceMotion
+                ? { opacity: 1, transition: { duration: 0.15 } }
+                : {
+                    opacity: 1,
+                    scale: 1,
+                    y: 0,
+                    filter: "blur(0px)",
+                    transition: { duration: 0.22, ease: EASE },
+                  }
+            }
+            exit={
+              reduceMotion
+                ? { opacity: 0, transition: { duration: 0.1 } }
+                : {
+                    opacity: 0,
+                    scale: 0.96,
+                    y: -4,
+                    filter: "blur(3px)",
+                    transition: { duration: 0.18, ease: COLLAPSE_EASE },
+                  }
+            }
+            className="absolute left-1/2 top-9 z-30 w-[270px] -translate-x-1/2 rounded-xl border border-black/[0.08] bg-popover p-2.5 shadow-xl backdrop-blur-md dark:border-white/[0.12]"
+          >
+            <div className="mb-2 flex items-center justify-between border-b border-black/[0.06] pb-1.5 dark:border-white/[0.08]">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-foreground/50">
+                Select or type year
+              </span>
+              <button
+                type="button"
+                aria-label="Close year dropdown"
+                onClick={() => setActiveDropdown(null)}
+                className="grid h-5 w-5 place-items-center rounded text-foreground/40 hover:text-foreground"
+              >
+                <X size={12} strokeWidth={2.5} />
+              </button>
+            </div>
+
+            {/* Direct Type Input */}
+            <form onSubmit={handleYearSearchSubmit} className="mb-2 flex items-center gap-1.5">
+              <div className="relative flex-1">
+                <input
+                  ref={yearInputRef}
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="Type year (e.g. 2021)…"
+                  value={yearSearch}
+                  onChange={(e) => {
+                    const cleaned = e.target.value.replace(/[^0-9]/g, "").slice(0, 4);
+                    setYearSearch(cleaned);
+                  }}
+                  className="w-full rounded-md border border-black/15 bg-white px-2.5 py-1 text-xs font-mono text-foreground placeholder:text-foreground/35 focus:border-brand focus:outline-none dark:border-white/15 dark:bg-card"
+                />
+                {yearSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setYearSearch("")}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 text-foreground/40 hover:text-foreground"
+                  >
+                    <X size={11} />
+                  </button>
+                )}
+              </div>
+              <button
+                type="submit"
+                disabled={!yearSearch.trim()}
+                className="rounded-md bg-brand px-2.5 py-1 text-xs font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+              >
+                Jump
+              </button>
+            </form>
+
+            {/* Scrollable Year Grid */}
+            <div className="grid max-h-44 grid-cols-3 gap-1 overflow-y-auto pr-1">
+              {filteredYears.map((y) => {
+                const isSelected = y === currentYear;
+                return (
+                  <button
+                    key={y}
+                    ref={isSelected ? activeYearRef : undefined}
+                    type="button"
+                    onClick={() => handleSelectYear(y)}
+                    className={cn(
+                      "rounded-md py-1.5 text-center font-mono text-xs transition-colors",
+                      isSelected
+                        ? "bg-brand font-bold text-white"
+                        : "text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
+                    )}
+                  >
+                    {y}
+                  </button>
+                );
+              })}
+              {filteredYears.length === 0 && (
+                <p className="col-span-3 py-3 text-center text-xs text-foreground/45">
+                  No matching year
+                </p>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="mt-2 grid grid-cols-7 gap-y-0.5">
         {WEEKDAY_LABELS.map((label, index) => (
@@ -247,89 +573,97 @@ export function DateRangeCalendar({
         aria-label={`${monthLabel(month)}. Use the arrow keys to move by day, Page Up and Page Down by month.`}
         onKeyDown={onGridKeyDown}
       >
-        {weeks.map((week) => (
-          <div key={week[0].iso} role="row" className="grid grid-cols-7 gap-y-0.5">
-            {week.map((cell) => {
-              const flags = dayFlags(cell.iso, {
-                selection: value,
-                hover,
-                min,
-                max,
-                today,
-              });
+        <motion.div
+          key={month}
+          role="rowgroup"
+          initial={reduceMotion ? false : { opacity: 0.5, filter: "blur(2px)" }}
+          animate={{ opacity: 1, filter: "blur(0px)" }}
+          transition={{ duration: 0.16, ease: EASE }}
+        >
+          {weeks.map((week) => (
+            <div key={week[0].iso} role="row" className="grid grid-cols-7 gap-y-0.5">
+              {week.map((cell) => {
+                const flags = dayFlags(cell.iso, {
+                  selection: value,
+                  hover,
+                  min,
+                  max,
+                  today,
+                });
 
-              // The range track is a background behind the day: full-width on the
-              // days inside the span, half-width under each end — so consecutive
-              // cells join into one continuous bar while the two caps keep their
-              // own rounded pill. A preview draws the same bar, lighter.
-              const trackTint = flags.isPreview ? "bg-brand/[0.10]" : "bg-brand/[0.16]";
-              const isCap = flags.isStart || flags.isEnd;
-              const spansOneDay = flags.isStart && flags.isEnd;
+                // The range track is a background behind the day: full-width on the
+                // days inside the span, half-width under each end — so consecutive
+                // cells join into one continuous bar while the two caps keep their
+                // own rounded pill. A preview draws the same bar, lighter.
+                const trackTint = flags.isPreview ? "bg-brand/[0.10]" : "bg-brand/[0.16]";
+                const isCap = flags.isStart || flags.isEnd;
+                const spansOneDay = flags.isStart && flags.isEnd;
 
-              return (
-                // `aria-selected` belongs on the gridcell, not the button — the
-                // button role does not support it, and the ARIA grid pattern puts
-                // selection state on the cell.
-                <div
-                  key={cell.iso}
-                  role="gridcell"
-                  aria-selected={isCap}
-                  className="relative"
-                >
-                  {flags.isInside && (
-                    <span aria-hidden="true" className={`absolute inset-0 ${trackTint}`} />
-                  )}
-                  {flags.isStart && !spansOneDay && (
-                    <span
-                      aria-hidden="true"
-                      className={`absolute inset-y-0 right-0 w-1/2 ${trackTint}`}
-                    />
-                  )}
-                  {flags.isEnd && !spansOneDay && (
-                    <span
-                      aria-hidden="true"
-                      className={`absolute inset-y-0 left-0 w-1/2 ${trackTint}`}
-                    />
-                  )}
-
-                  <button
-                    type="button"
-                    data-day={cell.iso}
-                    tabIndex={cell.iso === focusedDay ? 0 : -1}
-                    disabled={flags.isDisabled}
-                    aria-current={flags.isToday ? "date" : undefined}
-                    aria-label={new Date(`${cell.iso}T00:00:00Z`).toLocaleDateString("en-GB", {
-                      weekday: "long",
-                      day: "numeric",
-                      month: "long",
-                      year: "numeric",
-                      timeZone: "UTC",
-                    })}
-                    onMouseEnter={() => setHover(cell.iso)}
-                    onFocus={() => setHover(cell.iso)}
-                    onClick={() => selectDay(cell.iso)}
-                    className={[
-                      CELL,
-                      "relative z-10 grid place-items-center rounded-lg text-[12px] tabular-nums transition-colors",
-                      "focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-brand",
-                      flags.isDisabled
-                        ? "cursor-not-allowed text-foreground/20"
-                        : "hover:bg-black/[0.06] dark:hover:bg-white/[0.10]",
-                      isCap
-                        ? "bg-brand font-bold text-white hover:bg-brand"
-                        : cell.inMonth
-                          ? "font-medium text-foreground"
-                          : "font-medium text-foreground/30",
-                      flags.isToday && !isCap ? "ring-1 ring-inset ring-brand/45" : "",
-                    ].join(" ")}
+                return (
+                  // `aria-selected` belongs on the gridcell, not the button — the
+                  // button role does not support it, and the ARIA grid pattern puts
+                  // selection state on the cell.
+                  <div
+                    key={cell.iso}
+                    role="gridcell"
+                    aria-selected={isCap}
+                    className="relative"
                   >
-                    {cell.dayOfMonth}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        ))}
+                    {flags.isInside && (
+                      <span aria-hidden="true" className={`absolute inset-0 ${trackTint}`} />
+                    )}
+                    {flags.isStart && !spansOneDay && (
+                      <span
+                        aria-hidden="true"
+                        className={`absolute inset-y-0 right-0 w-1/2 ${trackTint}`}
+                      />
+                    )}
+                    {flags.isEnd && !spansOneDay && (
+                      <span
+                        aria-hidden="true"
+                        className={`absolute inset-y-0 left-0 w-1/2 ${trackTint}`}
+                      />
+                    )}
+
+                    <button
+                      type="button"
+                      data-day={cell.iso}
+                      tabIndex={cell.iso === focusedDay ? 0 : -1}
+                      disabled={flags.isDisabled}
+                      aria-current={flags.isToday ? "date" : undefined}
+                      aria-label={new Date(`${cell.iso}T00:00:00Z`).toLocaleDateString("en-GB", {
+                        weekday: "long",
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                        timeZone: "UTC",
+                      })}
+                      onMouseEnter={() => setHover(cell.iso)}
+                      onFocus={() => setHover(cell.iso)}
+                      onClick={() => selectDay(cell.iso)}
+                      className={[
+                        CELL,
+                        "relative z-10 grid place-items-center rounded-lg text-[12px] tabular-nums transition-colors",
+                        "focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-brand",
+                        flags.isDisabled
+                          ? "cursor-not-allowed text-foreground/20"
+                          : "hover:bg-black/[0.06] dark:hover:bg-white/[0.10]",
+                        isCap
+                          ? "bg-brand font-bold text-white hover:bg-brand"
+                          : cell.inMonth
+                            ? "font-medium text-foreground"
+                            : "font-medium text-foreground/30",
+                        flags.isToday && !isCap ? "ring-1 ring-inset ring-brand/45" : "",
+                      ].join(" ")}
+                    >
+                      {cell.dayOfMonth}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </motion.div>
       </div>
 
       <p className="mt-2 text-center text-[11px] font-medium text-foreground/45" aria-live="polite">

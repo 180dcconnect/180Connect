@@ -21,14 +21,16 @@ function PopoverContent({
   className,
   align = "start",
   sideOffset = 6,
+  forceMount,
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content>) {
   return (
-    <PopoverPrimitive.Portal>
+    <PopoverPrimitive.Portal forceMount={forceMount}>
       <PopoverPrimitive.Content
         data-slot="popover-content"
         align={align}
         sideOffset={sideOffset}
+        forceMount={forceMount}
         className={cn(
           "z-50 w-auto rounded-md border border-black/[0.08] dark:border-white/[0.1] bg-popover p-3 text-popover-foreground shadow-md outline-none",
           className

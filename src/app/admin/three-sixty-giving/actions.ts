@@ -1,158 +1,102 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
+
 import { reportError } from "@/lib/error-logging";
 import { getCurrentActor, actorFailureMessage } from "@/lib/auth/actor";
-import { runIngestion } from "@/lib/ingestion/runner";
 import {
-  createThreeSixtyGivingAdapter,
-  createThreeSixtyGivingLookupAdapter,
-} from "@/lib/ingestion/sources/threesixtygiving";
-import { promotePendingThreeSixtyGivingRecords } from "@/lib/standardize/three-sixty-giving";
-import { importStateFromSummary } from "./import-result";
-
-export type ThreeSixtyGivingImportState = {
-  kind: "idle" | "success" | "warning" | "error";
-  message: string;
-  counts?: {
-    fetched: number;
-    written: number;
-    skipped: number;
-    failed: number;
-  };
-  promoteCounts?: {
-    matched: number;
-    unmatched: number;
-    invalidData: number;
-    failed: number;
-  };
-};
+  drainBackfillQueue,
+  BACKFILL_BATCH_SIZE,
+} from "@/lib/ingestion/three-sixty-giving-backfill";
 
 /**
- * Chains matching straight after fetch, same fix companies-house/actions.ts
- * applied (promotePendingCompaniesHouseRecords used to only ever run from a
- * standalone script, so a successful import never showed up anywhere) — not
- * repeating that gap here on a brand-new source.
+ * The 360Giving admin screen's one action: run a queue slice now.
+ *
+ * ── What replaced what ──
+ *
+ * This page used to offer two buttons: a bulk walk of every known identifier,
+ * and a single-charity lookup by registration number. Both are gone.
+ *
+ * The bulk walk could not finish. It made one request per organisation at 600ms
+ * (360Giving allows 2/second), which is ~16 minutes against a 300s ceiling, so
+ * it died partway through every time — and because a partial walk looks exactly
+ * like a complete one that found nothing, it died quietly. The queue in
+ * three-sixty-giving-backfill.ts does that work properly now, a slice every 15
+ * minutes, and this button just runs the next slice early.
+ *
+ * The single lookup moved to the client record itself, where the question
+ * actually gets asked (`fetchGrantsForClient` in clients/[id]/grant-history-actions.ts).
+ * Asking an admin to copy a registration number onto a different screen to learn
+ * something about a charity they already had open was the wrong shape.
  */
-async function promoteAndMergeCounts(
-  state: ThreeSixtyGivingImportState,
-  actorUserId: string,
-): Promise<ThreeSixtyGivingImportState> {
-  if (state.kind === "error") return state;
+
+export type BackfillState = {
+  kind: "idle" | "success" | "error";
+  message: string;
+  progress?: { walked: number; grants: number; remaining: number; total: number };
+};
+
+export async function runBackfillBatchNow(
+  previous: BackfillState,
+  formData: FormData,
+): Promise<BackfillState> {
+  void previous;
+  void formData; // no inputs — the queue decides what is next
+
+  const authorization = await getCurrentActor("user:manage");
+  if (!authorization.ok) {
+    return { kind: "error", message: actorFailureMessage(authorization.reason) };
+  }
 
   try {
-    const promoted = await promotePendingThreeSixtyGivingRecords();
+    const result = await drainBackfillQueue({
+      trigger: { triggeredBy: "manual", triggeredByUserId: authorization.actor.id },
+    });
+
+    revalidatePath("/admin/three-sixty-giving");
+
+    if (result.walked === 0) {
+      return {
+        kind: "success",
+        message: "Nothing is due — every organisation has been checked recently.",
+        progress: {
+          walked: 0,
+          grants: 0,
+          remaining: result.remaining,
+          total: result.total,
+        },
+      };
+    }
+
     return {
-      ...state,
-      promoteCounts: {
-        matched: promoted.matched,
-        unmatched: promoted.unmatched,
-        invalidData: promoted.invalidData,
-        failed: promoted.failed,
+      kind: "success",
+      message:
+        `Checked ${result.walked.toLocaleString()} organisation${result.walked === 1 ? "" : "s"}, ` +
+        `${result.grantsMatched} grant${result.grantsMatched === 1 ? "" : "s"} added. ` +
+        (result.remaining > 0
+          ? `${result.remaining.toLocaleString()} still queued — the scheduled job continues automatically.`
+          : "The queue is now clear."),
+      progress: {
+        walked: result.walked,
+        grants: result.grantsMatched,
+        remaining: result.remaining,
+        total: result.total,
       },
     };
   } catch (error) {
-    // The fetch above already succeeded and is already in raw_source_records
-    // — a matching failure shouldn't be reported as an import failure, just
-    // surfaced so the admin knows records are still sitting unmatched.
     await reportError(error, {
-      operation: "admin.three_sixty_giving.promote",
-      actorUserId,
-    });
-    return {
-      ...state,
-      message: `${state.message} Records were imported but could not be matched to a charity; the failure was recorded.`,
-    };
-  }
-}
-
-export async function importThreeSixtyGiving(
-  previous: ThreeSixtyGivingImportState,
-  formData: FormData,
-): Promise<ThreeSixtyGivingImportState> {
-  void previous;
-  void formData; // no inputs — this walks every known charity/company identifier
-
-  const authorization = await getCurrentActor("user:manage");
-  if (!authorization.ok) {
-    return { kind: "error", message: actorFailureMessage(authorization.reason) };
-  }
-
-  try {
-    const [summary] = await runIngestion(
-      [createThreeSixtyGivingAdapter()],
-      { triggeredBy: "manual", triggeredByUserId: authorization.actor.id },
-    );
-
-    if (summary.status === "failed") {
-      await reportError(new Error(summary.error ?? "360Giving import failed"), {
-        operation: "admin.three_sixty_giving.import",
-        source: summary.source,
-        actorUserId: authorization.actor.id,
-      });
-      return importStateFromSummary(summary);
-    }
-
-    return await promoteAndMergeCounts(importStateFromSummary(summary), authorization.actor.id);
-  } catch (error) {
-    await reportError(error, {
-      operation: "admin.three_sixty_giving.import",
+      operation: "admin.three_sixty_giving.backfill",
       actorUserId: authorization.actor.id,
     });
     return {
       kind: "error",
-      message: "360Giving could not be imported. The failure was recorded; please try again later.",
+      message:
+        "The batch could not be run. The failure was recorded — the scheduled job will try again.",
     };
   }
 }
 
-export async function lookupThreeSixtyGivingGrants(
-  previous: ThreeSixtyGivingImportState,
-  formData: FormData,
-): Promise<ThreeSixtyGivingImportState> {
-  void previous;
-
-  const authorization = await getCurrentActor("user:manage");
-  if (!authorization.ok) {
-    return { kind: "error", message: actorFailureMessage(authorization.reason) };
-  }
-
-  const charityNumber = String(formData.get("charityNumber") ?? "").trim();
-  const companyNumber = String(formData.get("companyNumber") ?? "").trim();
-  if (!charityNumber && !companyNumber) {
-    return { kind: "error", message: "Enter a charity number or company number." };
-  }
-
-  // Charity number wins when both are supplied — same precedence rule as
-  // Companies House's number-vs-name lookup, for the same reason: it's the
-  // more specific, authoritative identifier.
-  const adapter = charityNumber
-    ? createThreeSixtyGivingLookupAdapter({ charityNumber })
-    : createThreeSixtyGivingLookupAdapter({ companyNumber });
-
-  try {
-    const [summary] = await runIngestion(
-      [adapter],
-      { triggeredBy: "manual", triggeredByUserId: authorization.actor.id },
-    );
-
-    if (summary.status === "failed") {
-      await reportError(new Error(summary.error ?? "360Giving lookup failed"), {
-        operation: "admin.three_sixty_giving.lookup",
-        source: summary.source,
-        actorUserId: authorization.actor.id,
-      });
-      return importStateFromSummary(summary);
-    }
-
-    return await promoteAndMergeCounts(importStateFromSummary(summary), authorization.actor.id);
-  } catch (error) {
-    await reportError(error, {
-      operation: "admin.three_sixty_giving.lookup",
-      actorUserId: authorization.actor.id,
-    });
-    return {
-      kind: "error",
-      message: "360Giving could not be imported. The failure was recorded; please try again later.",
-    };
-  }
+/** Exposed so the screen can say how big a slice the button will take. */
+export async function backfillBatchSize(): Promise<number> {
+  return BACKFILL_BATCH_SIZE;
 }

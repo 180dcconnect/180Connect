@@ -28,7 +28,10 @@ import {
 } from "@/lib/edit-suggestions";
 import type { AppRole } from "@/lib/auth/permissions.ts";
 import {
+  GEOGRAPHIC_REACH_OPTIONS,
   ORGANISATION_TYPES,
+  formatCountryName,
+  formatGeographicReach,
   formatOrganisationType,
 } from "@/lib/organisation-format";
 import { SectionCard } from "./section-card";
@@ -214,6 +217,18 @@ const FIELDS: {
     // resolves to the unit centroid, which can be a few hundred metres and the
     // wrong side of a road from the building someone is trying to visit.
     link: (state) => mapsUrl(state.organisation),
+  },
+  {
+    label: "Country",
+    read: (state) => formatCountryName(state.organisation.country_code),
+    column: "country_code",
+  },
+  {
+    label: "Geographic reach",
+    read: (state) => formatGeographicReach(state.organisation.geographic_reach),
+    column: "geographic_reach",
+    raw: (state) => state.organisation.geographic_reach ?? null,
+    options: GEOGRAPHIC_REACH_OPTIONS,
   },
 ];
 

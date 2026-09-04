@@ -34,6 +34,7 @@
 | is_seed | boolean |  | No | Flag for seed data | System/Human | Set in the seed data script | False by default |
 | registered_on | date |  | Yes | Date the organisation entered its register | API | Charity Commission date_of_registration | Lets the app distinguish "no accounts due yet" from "overdue" — without it both render as an empty Financials tab |
 | charity_reporting_status | text |  | Yes | The register's own reporting status for a charity | API | Charity Commission reporting_status | Values are the regulator's: New / Submission Received / … Deliberately text, not an enum, so an unseen value can't fail an ingestion run |
+| charity_activities | text |  | Yes | The charity's own description of its work, as filed with the register | API | Charity Commission publicextract.charity.charity_activities | Canonical register text, distinct from ENRICHMENT_RESULTS.mission_statement, which is LLM-derived — a reader showing both must not present them as the same kind of claim. Externally authored free text: treat as untrusted input anywhere it reaches a model. |
 
 ## ORGANISATION_IDENTIFIERS
 

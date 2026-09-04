@@ -2,10 +2,10 @@
 
 import { AnimatePresence, motion, type Variants } from "motion/react";
 import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
-import { ArrowRight, Check, ChevronLeft, SlidersHorizontal, X } from "lucide-react";
+import { ArrowRight, Check, ChevronLeft, Plus, SlidersHorizontal, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-import { EASE, entranceIndexed, entranceSoft, stagger } from "@/components/brand/motion";
+import { EASE, stagger } from "@/components/brand/motion";
 import { LIP, SEARCH_GLASS, SEARCH_GLASS_FROSTED, SEARCH_GLASS_OPEN } from "@/components/brand/tokens";
 import { tagPillStyle } from "@/lib/tags/tag-colours";
 
@@ -22,7 +22,30 @@ const PANEL_STAGGER = stagger(0.05, 0.14);
 
 const OPTION_LIST: Variants = { hidden: {}, show: {} };
 
-const OPTION_ENTRANCE = entranceIndexed(0.025, 0.3);
+/**
+ * Motion inside the glass must never touch `filter` — not even `blur(0px)`.
+ * Any non-none filter on a descendant of a `backdrop-filter` element poisons
+ * the parent's backdrop sampling in Chrome and Safari (the child-filter
+ * compositing bug): the frost reads for a second and then goes flat forever,
+ * exactly what the lingering `blur(0px)` from the old blur-up rows did. So
+ * everything in here rises on opacity and y only. The house blur-up entrance
+ * stays everywhere outside the glass.
+ */
+const GLASS_ITEM: Variants = {
+  hidden: { opacity: 0, y: 8 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.3, ease: EASE } },
+};
+
+const glassItemIndexed = (step = 0.025, cap = 0.3): Variants => ({
+  hidden: { opacity: 0, y: 8 },
+  show: (index: number = 0) => ({
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.3, ease: EASE, delay: Math.min(index * step, cap) },
+  }),
+});
+
+const GLASS_OPTIONS = glassItemIndexed(0.025, 0.3);
 
 function rankOption(label: string, query: string): number {
   const l = label.toLowerCase();
@@ -41,13 +64,24 @@ export type FilterOption = { label: string; value: string; colour?: string };
 
 /**
  * A single row in the open panel, for placements that offer actions rather
- * than filters. Rows without `onSelect` render as plain rows (no hover, no
- * tap target) until their behavior lands.
+ * than filters. Tapping a row with `expandedContent` swaps the button for
+ * that content in place (a transform, not an accordion) — the content should
+ * provide its own dismiss via the `collapse` control it receives, since no
+ * external close button is rendered beside it.
  */
 export type PanelRow = {
   label: string;
   hint?: string;
   icon?: React.ReactNode;
+  expandedContent?:
+    | React.ReactNode
+    | ((controls: { collapse: () => void }) => React.ReactNode);
+  /**
+   * Render the content directly with no button state — for fields that wear
+   * their own button face (the gooey capsule's resting label) and need no
+   * transform to become one.
+   */
+  alwaysExpanded?: boolean;
   onSelect?: () => void;
 };
 
@@ -81,6 +115,9 @@ export function BrandSearchBar({
    frosted = false,
    promptButton = false,
    panelRows,
+   compactRest = false,
+   onSubmit,
+   submitLabel = "Submit",
 }: {
   className?: string;
   placeholder?: string;
@@ -114,6 +151,21 @@ export function BrandSearchBar({
     * rather than filters.
     */
    panelRows?: PanelRow[];
+   /**
+    * Rest compact: the closed pill shrinks to its content instead of spanning
+    * full width, then widens back on open before the panel unfolds — the
+    * widen-then-drop two-beat. The widest cycling subject reserves the rest
+    * width, so word swaps never resize the pill. Opt-in per instance.
+    */
+   compactRest?: boolean;
+   /**
+    * Primary go action for the panel, rendered as the lime arrow disc beside
+    * the open/close toggle — the search bar's own submit button, copied. Only
+    * rendered when provided.
+    */
+   onSubmit?: () => void;
+   /** Accessible label for the submit disc. */
+   submitLabel?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -122,12 +174,66 @@ export function BrandSearchBar({
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [filterQuery, setFilterQuery] = useState("");
   const [selectedFilters, setSelectedFilters] = useState<(FilterOption & { category: string })[]>(defaultFilters);
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [, startTransition] = useTransition();
   const [isSearching, setIsSearching] = useState(false);
 
   const rootRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
+
+  /**
+   * `compactRest` morphs between two boxes whose sizes are known, so both ends
+   * of the widen are measured pixels. Keyword ends (`fit-content` → `100%`)
+   * cannot be tweened directly: Motion resolves them on the frame the
+   * animation starts, which is the frame the panel mounts — and the panel's
+   * own content is what `fit-content` then measures. The widen therefore began
+   * at almost its end value and read as a snap, with the delayed height drop
+   * arriving as a second one. Two numbers make it one continuous tween.
+   */
+  const [restWidth, setRestWidth] = useState<number | null>(null);
+  const [fullWidth, setFullWidth] = useState<number | null>(null);
+
+  // The frame keeps its full width whether or not the bar is open, so it is
+  // the one thing that can be observed for the open end (and for a resize).
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!compactRest || !frame) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setFullWidth(entry.contentRect.width);
+    });
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, [compactRest]);
+
+  // The resting end has to be read while the bar is closed AND unlocked —
+  // hence the null pass before each read, which lets `fit-content` resolve
+  // fresh. Re-read once fonts settle: the resting pill is sized by its own
+  // label, so a swapped face changes it.
+  useEffect(() => {
+    if (!compactRest) return;
+    let raf = 0;
+    const measure = () => {
+      setRestWidth(null);
+      raf = requestAnimationFrame(() => {
+        if (rootRef.current) setRestWidth(rootRef.current.offsetWidth);
+      });
+    };
+    measure();
+    let cancelled = false;
+    document.fonts?.ready.then(() => {
+      // Closed is read off the box itself rather than off `open`: this fires on
+      // the font loader's schedule, and re-measuring an open bar would unlock
+      // its width mid-panel.
+      if (cancelled || rootRef.current?.offsetHeight !== ROW) return;
+      measure();
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+  }, [compactRest]);
 
   const typing = query.length > 0;
 
@@ -207,6 +313,7 @@ export function BrandSearchBar({
     setTimeout(() => {
       setActiveFilter(null);
       setFilterQuery("");
+      setExpandedRow(null);
     }, 300);
   };
 
@@ -229,13 +336,22 @@ export function BrandSearchBar({
 
   return (
     <div className={`flex w-full max-w-[600px] flex-col gap-3 ${className}`}>
-      <div className="relative h-[64px] w-full z-50">
+      <div ref={frameRef} className="relative h-[64px] w-full z-50">
         <motion.div
           ref={rootRef}
-          className={`absolute top-0 left-0 w-full overflow-hidden ${frosted ? "backdrop-blur-[20px]" : "backdrop-blur-[3px]"}`}
-          style={{ boxShadow: LIP, borderRadius: ROW / 2 }}
+          className={`absolute top-0 left-1/2 w-full overflow-hidden ${frosted ? "backdrop-blur-[20px]" : "backdrop-blur-[3px]"}`}
+          style={{ boxShadow: LIP, borderRadius: ROW / 2, x: "-50%" }}
           animate={{
             height: open ? "auto" : ROW,
+            // Pixels at both ends once measured (see restWidth/fullWidth), so
+            // the widen is a pure number tween with nothing to resolve on the
+            // frame it starts. The keyword pair is only the pre-measure
+            // fallback for the first frame.
+            width: compactRest
+              ? open
+                ? (fullWidth ?? "100%")
+                : (restWidth ?? "fit-content")
+              : "100%",
             backgroundColor: open
               ? frosted
                 ? SEARCH_GLASS_FROSTED
@@ -243,7 +359,24 @@ export function BrandSearchBar({
               : SEARCH_GLASS,
           }}
           initial={false}
-          transition={{ duration: 0.7, ease: EASE }}
+          transition={
+            compactRest
+              ? {
+                  // Opening is two beats in order: the pill widens, and only
+                  // once it has settled does the panel drop out of it. The
+                  // delay is the width's own duration, so neither beat is
+                  // running while the other is. Closing keeps both together —
+                  // a collapse reads better as one movement.
+                  width: { duration: 0.42, ease: EASE },
+                  height: {
+                    duration: 0.42,
+                    ease: EASE,
+                    delay: open ? 0.42 : 0,
+                  },
+                  backgroundColor: { duration: 0.7, ease: EASE },
+                }
+              : { duration: 0.7, ease: EASE }
+          }
           onKeyDown={(e) => {
             if (e.key === "Escape" && open) {
               e.stopPropagation();
@@ -256,6 +389,22 @@ export function BrandSearchBar({
             }
           }}
         >
+          {/* The frost lives on its own childless layer, never on the container
+              that holds the panel. `backdrop-filter` is defeated by any `filter`
+              anywhere in its own subtree — a promoted `will-change: filter` layer
+              is enough — and the panel's content is full of them (liquid-gooey
+              paints its capsule through an SVG drop-shadow filter, and Motion's
+              blur-up variants settle at a lingering `blur(0px)`). Sharing one
+              element made the frost read for a second or two and then go flat for
+              the rest of the session, once the compositor promoted whichever
+              filtered descendant painted last. A leaf can never be poisoned: it
+              has no descendants. It samples the page *and* the container's own
+              tint painted beneath it, which is flat, so the look is unchanged. */}
+          <div
+            className={`pointer-events-none absolute inset-0 z-0 rounded-[inherit] ${frosted ? "backdrop-blur-[20px]" : "backdrop-blur-[3px]"}`}
+            aria-hidden="true"
+          />
+
           <div
             className="pointer-events-none absolute inset-0 z-30 rounded-[inherit] ring-1 ring-white/25 ring-inset"
             aria-hidden="true"
@@ -293,9 +442,9 @@ export function BrandSearchBar({
                   <motion.span
                     key={subjects[subject]}
                     className="absolute inset-0 text-[#f4f4ef]"
-                    initial={{ opacity: 0, y: 10, filter: "blur(6px)" }}
-                    animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-                    exit={{ opacity: 0, y: -10, filter: "blur(6px)" }}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
                     transition={{ duration: 0.45, ease: EASE }}
                   >
                     {subjects[subject]}
@@ -343,9 +492,9 @@ export function BrandSearchBar({
                   <motion.span
                     key={subjects[subject]}
                     className="absolute inset-0 text-[#f4f4ef]"
-                    initial={{ opacity: 0, y: 10, filter: "blur(6px)" }}
-                    animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-                    exit={{ opacity: 0, y: -10, filter: "blur(6px)" }}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
                     transition={{ duration: 0.45, ease: EASE }}
                   >
                     {subjects[subject]}
@@ -394,7 +543,18 @@ export function BrandSearchBar({
           )}
         </AnimatePresence>
 
-        <div className="ml-3 shrink-0">
+        <div className="ml-3 flex shrink-0 items-center gap-2">
+          {onSubmit && (
+            <button
+              type="button"
+              aria-label={submitLabel}
+              title={submitLabel}
+              onClick={onSubmit}
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e6f5c0] text-[#1a1a1a] transition-all hover:bg-[#d4e5a0] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+            >
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          )}
           <button
             type="button"
             aria-label={open ? "Close filters" : "Open filters"}
@@ -422,8 +582,13 @@ export function BrandSearchBar({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, transition: { duration: 0.18, ease: EASE } }}
-            transition={{ duration: 0.5, ease: EASE, delay: 0.2 }}
+            transition={{ duration: 0.5, ease: EASE, delay: compactRest ? 0.56 : 0.2 }}
             className="relative z-10"
+            // Held at the open width for the whole morph. Left to `w-full` it
+            // re-laid-out on every frame of the widen — rows squeezing and
+            // reflowing inside the clip — which is the other half of what read
+            // as a snap.
+            style={compactRest && fullWidth ? { width: fullWidth } : undefined}
           >
             <AnimatePresence mode="wait">
               {panelRows ? (
@@ -435,43 +600,95 @@ export function BrandSearchBar({
                   animate="show"
                   exit={{ opacity: 0, transition: { duration: 0.15 } }}
                 >
-                  {panelRows.map((row) => (
-                    <motion.li key={row.label} variants={entranceSoft}>
-                      {row.onSelect ? (
-                        <button
-                          type="button"
-                          onClick={row.onSelect}
-                          className="font-body flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
-                        >
-                          {row.icon}
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-lg font-medium text-white">
-                              {row.label}
-                            </span>
-                            {row.hint && (
-                              <span className="mt-0.5 block text-[13px] text-[#f4f4ef]/60">
-                                {row.hint}
+                  {panelRows.map((row) => {
+                    if (row.alwaysExpanded) {
+                      return (
+                        <motion.li key={row.label} variants={GLASS_ITEM}>
+                          {row.hint && (
+                            <p className="px-3 pt-1 text-[13px] text-[#f4f4ef]/60">
+                              {row.hint}
+                            </p>
+                          )}
+                          {typeof row.expandedContent === "function"
+                            ? row.expandedContent({
+                                collapse: () => setExpandedRow(null),
+                              })
+                            : row.expandedContent}
+                        </motion.li>
+                      );
+                    }
+                    const transformable = row.expandedContent !== undefined;
+                    const transformed = expandedRow === row.label;
+                    const interactive = transformable || row.onSelect !== undefined;
+                    return (
+                      <motion.li key={row.label} variants={GLASS_ITEM}>
+                        <AnimatePresence mode="wait" initial={false}>
+                          {transformable && transformed ? (
+                            <motion.div
+                              key={`${row.label}-field`}
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              exit={{ opacity: 0 }}
+                              transition={{ duration: 0.2, ease: EASE }}
+                              className="px-3 py-2"
+                            >
+                              {typeof row.expandedContent === "function"
+                                ? row.expandedContent({
+                                    collapse: () => setExpandedRow(null),
+                                  })
+                                : row.expandedContent}
+                            </motion.div>
+                          ) : interactive ? (
+                            <motion.button
+                              key={`${row.label}-button`}
+                              type="button"
+                              exit={{ opacity: 0 }}
+                              transition={{ duration: 0.15, ease: EASE }}
+                              onClick={() => {
+                                if (transformable) {
+                                  setExpandedRow(row.label);
+                                }
+                                row.onSelect?.();
+                              }}
+                              className="font-body flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+                            >
+                              {row.icon}
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-lg font-medium text-white">
+                                  {row.label}
+                                </span>
+                                {row.hint && (
+                                  <span className="mt-0.5 block text-[13px] text-[#f4f4ef]/60">
+                                    {row.hint}
+                                  </span>
+                                )}
                               </span>
-                            )}
-                          </span>
-                        </button>
-                      ) : (
-                        <div className="font-body flex w-full items-center gap-3 rounded-2xl px-3 py-2">
-                          {row.icon}
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-lg font-medium text-white">
-                              {row.label}
-                            </span>
-                            {row.hint && (
-                              <span className="mt-0.5 block text-[13px] text-[#f4f4ef]/60">
-                                {row.hint}
+                              {transformable && (
+                                <Plus
+                                  aria-hidden="true"
+                                  className="h-4 w-4 shrink-0 text-[#f4f4ef]/70"
+                                />
+                              )}
+                            </motion.button>
+                          ) : (
+                            <div className="font-body flex w-full items-center gap-3 rounded-2xl px-3 py-2">
+                              {row.icon}
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-lg font-medium text-white">
+                                  {row.label}
+                                </span>
+                                {row.hint && (
+                                  <span className="mt-0.5 block text-[13px] text-[#f4f4ef]/60">
+                                    {row.hint}
+                                  </span>
+                                )}
                               </span>
-                            )}
-                          </span>
-                        </div>
-                      )}
-                    </motion.li>
-                  ))}
+                            </div>
+                          )}
+                        </AnimatePresence>
+                      </motion.li>
+                    );
+                  })}
                 </motion.ul>
               ) : activeFilter === null ? (
                   <motion.ul
@@ -485,7 +702,7 @@ export function BrandSearchBar({
                   {Object.keys(FILTER_CATEGORIES).map((filter) => {
                     const count = selectedFilters.filter((f) => f.category === filter).length;
                     return (
-                      <motion.li key={filter} variants={entranceSoft}>
+                      <motion.li key={filter} variants={GLASS_ITEM}>
                         <button
                           type="button"
                           onClick={() => {
@@ -514,7 +731,7 @@ export function BrandSearchBar({
                   animate="show"
                   exit={{ opacity: 0, transition: { duration: 0.15 } }}
                 >
-                  <motion.div variants={entranceSoft} className="mb-4 px-4 flex items-center gap-2 shrink-0">
+                  <motion.div variants={GLASS_ITEM} className="mb-4 px-4 flex items-center gap-2 shrink-0">
                     <button
                       type="button"
                       onClick={() => {
@@ -552,7 +769,7 @@ export function BrandSearchBar({
                         (f) => f.category === activeFilter && f.value === option.value
                       );
                       return (
-                        <motion.li key={option.value} variants={OPTION_ENTRANCE} custom={index}>
+                        <motion.li key={option.value} variants={GLASS_OPTIONS} custom={index}>
                           <button
                             type="button"
                             onClick={() => {
@@ -600,9 +817,9 @@ export function BrandSearchBar({
 
                     {/* Explicit `initial`/`animate` rather than a variant. An
                         empty result is the one row that must never wait on the
-                        panel's orchestration — inheriting `entranceSoft` left it
-                        held at `hidden`, so a search that matched nothing looked
-                        identical to a search that hadn't run yet. */}
+                        panel's orchestration — inheriting the staggered variant
+                        left it held at `hidden`, so a search that matched
+                        nothing looked identical to a search that hadn't run yet. */}
                     {activeOptions.length === 0 && (
                       <motion.li
                         initial={{ opacity: 0 }}

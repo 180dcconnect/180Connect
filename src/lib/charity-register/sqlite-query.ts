@@ -73,12 +73,26 @@ export function buildWhere(input: CharityRegisterFilters): {
   const clauses: string[] = [];
   const params: (string | number)[] = [];
 
-  if (f.nameContains) {
-    // `%` and `_` are LIKE wildcards; someone searching "50_50 Club" means the
-    // literal underscore. `\` is declared as the escape character below.
-    const escaped = f.nameContains.replace(/[%_\\]/g, (ch) => `\\${ch}`);
-    clauses.push("c.charity_name like ? escape '\\'");
-    params.push(`%${escaped}%`);
+  const nameTokens = f.names && f.names.length > 0
+    ? f.names
+    : f.nameContains
+      ? [f.nameContains]
+      : [];
+
+  if (nameTokens.length > 0) {
+    const nameClauses: string[] = [];
+    for (const token of nameTokens) {
+      // `%` and `_` are LIKE wildcards; someone searching "50_50 Club" means the
+      // literal underscore. `\` is declared as the escape character below.
+      const escaped = token.replace(/[%_\\]/g, (ch) => `\\${ch}`);
+      nameClauses.push("c.charity_name like ? escape '\\'");
+      params.push(`%${escaped}%`);
+    }
+    if (nameClauses.length === 1) {
+      clauses.push(nameClauses[0]);
+    } else {
+      clauses.push(`(${nameClauses.join(" or ")})`);
+    }
   }
 
   const hasIncomeBound = f.incomeMin !== null || f.incomeMax !== null;

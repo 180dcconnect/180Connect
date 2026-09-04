@@ -47,6 +47,10 @@ export type GrantInput = {
   amount_awarded: number | null;
   currency: string | null;
   award_date: string | null;
+  /** Optional here because this builder never groups by funder — it only sums
+   *  awards into the year they fall in. `summariseFunders` in `./funders.ts`
+   *  is what needs the name, and the tab fetches one grant list for both. */
+  funder_name?: string | null;
 };
 
 export type FinancialYear = {
@@ -95,6 +99,18 @@ export type FinancialYear = {
    * Those are different conversations.
    */
   governmentAwards: number | null;
+  /**
+   * Whether the return says the relationship exists at all.
+   *
+   * Read with `governmentIncome` and `governmentAwards`, per the register's own
+   * split across Parts A and B: the flag says whether there is a relationship,
+   * the amount says how big, the count says how many awards. The flag survives
+   * on returns that publish no amounts, which is most of them — so "they take
+   * public money, size not published" is a claim we can make where
+   * `governmentIncome` alone would have to stay silent.
+   */
+  receivesGovernmentGrants: boolean | null;
+  receivesGovernmentContracts: boolean | null;
 };
 
 /** One published income source for a year. */
@@ -377,6 +393,8 @@ export function buildFinancialSeries(input: {
         employees: numberOrNull(period.count_employees),
         volunteers: numberOrNull(period.count_volunteers),
         governmentAwards: sumOrNull(period.count_govt_grants, period.count_govt_contracts),
+        receivesGovernmentGrants: period.receives_govt_grants ?? null,
+        receivesGovernmentContracts: period.receives_govt_contracts ?? null,
       };
     });
 
@@ -556,10 +574,10 @@ export function buildFundFlow(year: FinancialYear): FundFlow | null {
   // cross sides mid-sentence.
   const headline =
     gap > 0
-      ? `Took ${money(incomeAccounted)}, spent ${money(spendAccounted)}, kept ${money(gap)}`
+      ? `Spent ${money(spendAccounted)} against ${money(incomeAccounted)} of income, ending the year with a ${money(gap)} surplus.`
       : gap < 0
-        ? `Took ${money(incomeAccounted)} in, spent ${money(spendAccounted)}, drawing ${money(-gap)} from reserves`
-        : `Took ${money(incomeAccounted)} in, spent it all`;
+        ? `Spent ${money(spendAccounted)} against ${money(incomeAccounted)} of income, ending the year with a ${money(-gap)} deficit.`
+        : `Spent ${money(spendAccounted)} against ${money(incomeAccounted)} of income, ending the year balanced.`;
 
   return {
     label: year.label,

@@ -88,7 +88,7 @@ export async function POST(
   const { data: organisation, error: organisationError } = await supabase
     .from("organisations")
     .select(
-      "id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach, owner_id, contact_email, owner:users!organisations_owner_id_fkey(full_name)",
+      "id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach, sector, sub_sector, owner_id, contact_email, owner:users!organisations_owner_id_fkey(full_name)",
     )
     .eq("id", organisationId)
     .maybeSingle<{
@@ -100,6 +100,8 @@ export async function POST(
       city: string | null;
       country_code: string | null;
       geographic_reach: string | null;
+      sector: string | null;
+      sub_sector: string | null;
       owner_id: string | null;
       contact_email: string | null;
       owner: { full_name: string | null } | null;
@@ -239,8 +241,11 @@ export async function POST(
       contactJobTitle: contact?.job_title,
       missionStatement: enrichment?.mission_statement,
       missionKeywords: enrichment?.mission_keywords,
-      sector: enrichment?.sector,
-      subSector: enrichment?.sub_sector,
+      // Canonical ORGANISATIONS column first, LLM enrichment as the fallback —
+      // the same resolution build-prompt.ts applies for the booklet. Reading only
+      // enrichment reported no sector at all for register-imported charities.
+      sector: organisation.sector?.trim() || enrichment?.sector,
+      subSector: organisation.sub_sector?.trim() || enrichment?.sub_sector,
       newsHooks: enrichment?.news_hooks,
       booklet: savedBooklet?.booklet_text ?? null,
     },

@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { Liquid, type Transition } from "liquid-gooey";
-import { ArrowRight, Check, Loader2, Sparkles, Send } from "lucide-react";
+import { ArrowRight, Check, Loader2, Sparkles, Send, X, Plus } from "lucide-react";
 
 export interface GooeyEmailInputProps {
   /** Placeholder text for email input */
@@ -12,7 +13,9 @@ export interface GooeyEmailInputProps {
   /** Color theme variant */
   variant?: "dark" | "light" | "brand" | "glass" | "obsidian";
   /** Size preset */
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl";
+  /** Custom input field width in px (overrides size preset width) */
+  fieldWidth?: number;
   /** Blur sigma in px (default 6) */
   gooBlur?: number;
   /** Alpha contrast slope (default 18) */
@@ -28,11 +31,64 @@ export interface GooeyEmailInputProps {
   /** Custom box shadow string (overrides variant) */
   shadow?: string;
   /** Custom icon for submit button */
-  buttonIcon?: "arrow" | "send" | "sparkles";
+  buttonIcon?: "arrow" | "send" | "sparkles" | "x" | "plus";
+  /**
+   * Tap handler for the droplet that replaces submit — e.g. an "x" droplet
+   * that dismisses the field. Enter still submits via onSubmit.
+   */
+  onDropletClick?: () => void;
+  /** Accessible label for the droplet when onDropletClick replaces submit. */
+  dropletLabel?: string;
   /** Class name for the outer wrapper */
   className?: string;
   /** Disabled state */
   disabled?: boolean;
+  /**
+   * Controlled value. When provided the field stops owning its text (for
+   * non-email uses like the booklet's website URL) — pair with onValueChange.
+   */
+  value?: string;
+  /** Change handler for controlled mode. */
+  onValueChange?: (value: string) => void;
+  /** Input type. Defaults to email. */
+  inputType?: string;
+  /** Accessible label for the field. */
+  fieldLabel?: string;
+  /** Accessible label for the submit droplet. */
+  submitLabel?: string;
+  /**
+   * Validate before submit. Return an error message, or null when fine.
+   * Defaults to the email check — pass `() => null` where the server is the
+   * validator (it reports back through its own error box).
+   */
+  validate?: (value: string) => string | null;
+  /**
+   * Live validation for the droplet: debounced after each keystroke, spinner
+   * while it runs, tick when the value verifies. Tapping a tick submits;
+   * tapping anything else falls through to onDropletClick. Only when
+   * provided — without it the droplet keeps its legacy submit behavior.
+   */
+  validateAsync?: (value: string) => Promise<string | null>;
+  /** Debounce before a live check fires. */
+  validationDelayMs?: number;
+  /** Placeholder shown briefly after a successful submit. */
+  successPlaceholder?: string;
+  /** Focus the field on mount, for fields revealed by a transform. */
+  autoFocusField?: boolean;
+  /** Maximum input length, passed straight to the field. */
+  maxLength?: number;
+  /**
+   * Stage alignment. Centered by default; "start" left-packs the capsule so
+   * the visible pill begins at the row's edge instead of floating mid-stage.
+   */
+  align?: "center" | "start";
+  /**
+   * Button-face text. When provided and the field is empty and blurred, the
+   * capsule wears it like a button label (with `restIcon` beside it) instead
+   * of the placeholder — focusing or typing flips it into a plain field. One
+   * element throughout, so becoming a field needs no swap animation.
+   */
+  restPlaceholder?: string;
 }
 
 const EASING_PRESETS: Record<string, string> = {
@@ -47,6 +103,7 @@ export function GooeyEmailInput({
   onSubmit,
   variant = "light",
   size = "md",
+  fieldWidth,
   gooBlur = 6,
   gooContrast = 18,
   gap = 54,
@@ -55,8 +112,23 @@ export function GooeyEmailInput({
   fillColor,
   shadow,
   buttonIcon = "arrow",
+  onDropletClick,
+  dropletLabel = "Close",
   className = "",
   disabled = false,
+  value,
+  onValueChange,
+  inputType = "email",
+  fieldLabel = "Email address",
+  submitLabel = "Submit email",
+  validate,
+  validateAsync,
+  validationDelayMs = 600,
+  successPlaceholder = "Subscribed successfully!",
+  autoFocusField = false,
+  maxLength,
+  align = "center",
+  restPlaceholder,
 }: GooeyEmailInputProps) {
   const [email, setEmail] = React.useState("");
   const [isFocused, setIsFocused] = React.useState(false);
@@ -65,6 +137,44 @@ export function GooeyEmailInput({
 
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [isPulsing, setIsPulsing] = React.useState(false);
+
+  const controlled = value !== undefined;
+  const text = controlled ? value : email;
+
+  // Live droplet validation. Empty means nothing to verify (droplet keeps its
+  // resting behavior); otherwise each pause fires one check, and a stale
+  // flight that lands after newer typing is ignored rather than applied.
+  const live = validateAsync !== undefined;
+  const [checking, setChecking] = React.useState(false);
+  const [verdict, setVerdict] = React.useState<boolean | null>(null);
+  const checkId = React.useRef(0);
+
+  React.useEffect(() => {
+    if (!live) return;
+    if (!text.trim()) {
+      const resetTimer = setTimeout(() => {
+        setVerdict(null);
+        setChecking(false);
+      }, 0);
+      return () => clearTimeout(resetTimer);
+    }
+    const id = ++checkId.current;
+    const timer = setTimeout(async () => {
+      setChecking(true);
+      try {
+        const problem = await validateAsync!(text);
+        if (checkId.current !== id) return;
+        setVerdict(problem === null);
+      } catch {
+        // An unreachable validator is "not confirmed", never "confirmed".
+        if (checkId.current !== id) return;
+        setVerdict(false);
+      } finally {
+        if (checkId.current === id) setChecking(false);
+      }
+    }, validationDelayMs);
+    return () => clearTimeout(timer);
+  }, [text, live, validateAsync, validationDelayMs]);
 
   // Trigger brief icon cross-blur / pulse animation on focus change
   React.useEffect(() => {
@@ -82,39 +192,45 @@ export function GooeyEmailInput({
   // Dimensions based on size
   const dims = React.useMemo(() => {
     switch (size) {
-      case "sm":
+      case "sm": {
+        const fieldW = fieldWidth ?? 190;
         return {
-          fieldW: 190,
+          fieldW,
           fieldH: 42,
           btnSize: 38,
           fontSize: "text-xs",
           iconSize: 15,
-          totalW: Math.max(300, 190 + 38 + gap + 60),
-          totalH: 74,
+          totalW: Math.max(300, fieldW + 38 + gap + 60),
+          totalH: align === "start" ? 52 : 74,
         };
-      case "lg":
+      }
+      case "lg": {
+        const fieldW = fieldWidth ?? 260;
         return {
-          fieldW: 260,
+          fieldW,
           fieldH: 54,
           btnSize: 48,
           fontSize: "text-base",
           iconSize: 20,
-          totalW: Math.max(400, 260 + 48 + gap + 80),
-          totalH: 94,
+          totalW: Math.max(400, fieldW + 48 + gap + 80),
+          totalH: align === "start" ? 66 : 94,
         };
+      }
       case "md":
-      default:
+      default: {
+        const fieldW = fieldWidth ?? 224;
         return {
-          fieldW: 224,
+          fieldW,
           fieldH: 48,
           btnSize: 44,
           fontSize: "text-sm",
           iconSize: 18,
-          totalW: Math.max(360, 224 + 44 + gap + 70),
-          totalH: 84,
+          totalW: Math.max(360, fieldW + 44 + gap + 70),
+          totalH: align === "start" ? 58 : 84,
         };
+      }
     }
-  }, [size, gap]);
+  }, [size, gap, fieldWidth, align]);
 
   // Variant themes
   const theme = React.useMemo(() => {
@@ -186,15 +302,27 @@ export function GooeyEmailInput({
     }
   }, [variant, fillColor, shadow]);
 
+  // Button-face: empty and blurred with a rest label, the capsule carries it
+  // as an overlaid white label with its icon — real text, not a dim
+  // placeholder, so it reads as a button title. Anything else is a plain
+  // field. The overlay sits exactly where field text starts, so flipping
+  // between the two moves nothing.
+  const resting = restPlaceholder !== undefined && !isFocused && !text;
+
+  const check = (candidate: string): string | null => {
+    if (validate) return validate(candidate);
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(candidate) ? null : "Please enter a valid email";
+  };
+
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!email || status === "loading") return;
+    if (!text || status === "loading") return;
 
-    // Basic email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    const problem = check(text);
+    if (problem) {
       setStatus("error");
-      setErrorMessage("Please enter a valid email");
+      setErrorMessage(problem);
       setTimeout(() => {
         setStatus("idle");
         setErrorMessage(null);
@@ -206,13 +334,13 @@ export function GooeyEmailInput({
       setStatus("loading");
       setErrorMessage(null);
       if (onSubmit) {
-        await onSubmit(email);
+        await onSubmit(text);
       } else {
         // Default simulated network delay
         await new Promise((res) => setTimeout(res, 900));
       }
       setStatus("success");
-      setEmail("");
+      if (!controlled) setEmail("");
       inputRef.current?.blur();
       setTimeout(() => setStatus("idle"), 3500);
     } catch {
@@ -232,16 +360,21 @@ export function GooeyEmailInput({
     };
   }, [duration, ease]);
 
-  // Position shifts: field shifts left, button shifts right for noticeable separation
-  const fieldShiftX = isFocused ? -gap * 0.4 : 0;
-  const btnShiftX = isFocused ? gap * 0.6 : 0;
+  // Position shifts: when align === "start", the capsule stays anchored on the left
+  // edge with zero left offset and the droplet travels rightward. When centered, they shift symmetrically.
+  const fieldShiftX = align === "start" ? 0 : isFocused ? -gap * 0.4 : 0;
+  const btnShiftX = align === "start" ? (isFocused ? gap : 0) : isFocused ? gap * 0.6 : 0;
 
-  // Compute icon to display
+  // Compute icon to display. In live mode a tick means "verified — tap to
+  // go"; anything unverified keeps the droplet's resting behavior.
+  const hasText = text.trim() !== "";
+  const liveChecking = live && hasText && (checking || verdict === null);
+  const liveTick = live && hasText && !checking && verdict === true;
   const renderIcon = () => {
-    if (status === "loading") {
+    if (status === "loading" || liveChecking) {
       return <Loader2 className="animate-spin" size={dims.iconSize} />;
     }
-    if (status === "success") {
+    if (status === "success" || liveTick) {
       return <Check className="text-emerald-500" size={dims.iconSize} />;
     }
     switch (buttonIcon) {
@@ -249,28 +382,45 @@ export function GooeyEmailInput({
         return <Send size={dims.iconSize} className="ml-0.5" />;
       case "sparkles":
         return <Sparkles size={dims.iconSize} />;
+      case "x":
+        return <X size={dims.iconSize} />;
+      case "plus":
+        return <Plus size={dims.iconSize} />;
       case "arrow":
       default:
         return <ArrowRight size={dims.iconSize} />;
     }
   };
 
-  // Fixed resting center reference for both slots
+  // Fixed resting center reference for both slots — or a left-packed stage
+  // whose visible capsule starts neatly inset from the row's edge, keeping
+  // right-hand room for the droplet's separation travel.
   const centerLeft = dims.totalW / 2;
-  const fieldBaseLeft = centerLeft - dims.fieldW / 2 - 10;
+  const fieldBaseLeft =
+    align === "start" ? 12 : centerLeft - dims.fieldW / 2 - 10;
   const btnBaseLeft = fieldBaseLeft + dims.fieldW - dims.btnSize;
+  const stageW =
+    align === "start"
+      ? Math.ceil(fieldBaseLeft + dims.fieldW + gap + 16)
+      : dims.totalW;
 
   return (
-    <div className={`relative inline-flex flex-col items-center select-none ${className}`}>
+    <div
+      className={`relative inline-flex flex-col ${
+        align === "start" ? "items-start" : "items-center"
+      } select-none ${className}`}
+    >
       {/* Liquid Gooey Container */}
       <Liquid
         blur={gooBlur}
         contrast={gooContrast}
         fill={theme.fill}
         shadow={theme.shadow}
-        className="relative flex items-center justify-center"
+        className={`relative flex items-center ${
+          align === "start" ? "justify-start" : "justify-center"
+        }`}
         style={{
-          width: `${dims.totalW}px`,
+          width: `${stageW}px`,
           height: `${dims.totalH}px`,
         }}
       >
@@ -295,13 +445,22 @@ export function GooeyEmailInput({
           >
             <input
               ref={inputRef}
-              type="email"
-              value={email}
+              type={inputType}
+              value={text}
+              maxLength={maxLength}
               disabled={disabled || status === "loading"}
-              placeholder={status === "success" ? "Subscribed successfully!" : placeholder}
-              aria-label="Email address"
+              placeholder={
+                status === "success"
+                  ? successPlaceholder
+                  : resting
+                    ? ""
+                    : placeholder
+              }
+              aria-label={fieldLabel}
+              autoFocus={autoFocusField}
               onChange={(e) => {
-                setEmail(e.target.value);
+                if (controlled) onValueChange?.(e.target.value);
+                else setEmail(e.target.value);
                 if (status === "error") setStatus("idle");
               }}
               onFocus={() => setIsFocused(true)}
@@ -313,6 +472,25 @@ export function GooeyEmailInput({
               }}
               className={`w-full h-full bg-transparent border-0 outline-none px-5 rounded-full ${dims.fontSize} font-medium ${theme.text} ${theme.placeholder} transition-colors duration-200`}
             />
+            {restPlaceholder !== undefined && (
+              <AnimatePresence initial={false}>
+                {resting && (
+                  <motion.span
+                    key="rest-label"
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-y-0 left-5 right-5 flex items-center justify-center overflow-hidden"
+                    initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -10, scale: 1.03 }}
+                    transition={{ duration: 0.32, ease: "easeOut" }}
+                  >
+                    <span className="truncate text-sm font-semibold text-white">
+                      {restPlaceholder}
+                    </span>
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            )}
           </div>
         </Liquid.Item>
 
@@ -331,22 +509,51 @@ export function GooeyEmailInput({
             type="button"
             disabled={disabled || status === "loading"}
             tabIndex={isFocused ? 0 : -1}
-            aria-label="Submit email"
+            aria-label={
+              liveTick
+                ? "Verified"
+                : onDropletClick
+                  ? dropletLabel
+                  : submitLabel
+            }
             onPointerDown={(e) => {
-              // Prevent input blur before click finishes
-              e.preventDefault();
+              // Prevent input blur before click finishes — but only once the
+              // droplet is live; while hidden, taps must reach the input.
+              if (isFocused) e.preventDefault();
             }}
-            onClick={() => handleSubmit()}
-            className={`relative flex items-center justify-center rounded-full border-0 p-0 cursor-pointer ${theme.btnColor} ${theme.btnBg} ${theme.accentRing} focus-visible:outline-none focus-visible:ring-2 transition-all duration-200 active:scale-95`}
+            onClick={() => {
+              // Hidden droplet is a funnel, not a control: any tap on its zone
+              // focuses the field instead of falling through (or not) to the
+              // input beneath, which the goo layering cannot be trusted with.
+              if (!isFocused) {
+                inputRef.current?.focus();
+                return;
+              }
+              // A tick is a verdict, not a trigger: tapping it does nothing.
+              // Generation stays on the explicit go actions (the header arrow,
+              // Enter), never on admiring the confirmation.
+              if (status === "loading" || liveChecking || liveTick) return;
+              if (onDropletClick) {
+                // Blur first so the capsule settles back to its resting face;
+                // the caller clears (or collapses) underneath the merge.
+                inputRef.current?.blur();
+                onDropletClick();
+              } else handleSubmit();
+            }}
+            className={`relative flex items-center justify-center rounded-full border-0 p-0 transition-all duration-200 active:scale-95 focus-visible:outline-none focus-visible:ring-2 ${theme.btnColor} ${isFocused ? `${theme.btnBg} cursor-pointer` : "cursor-text"} ${theme.accentRing}`}
             style={{
               width: `${dims.btnSize}px`,
               height: `${dims.btnSize}px`,
             }}
           >
+            {/* `filter-none`, not `blur-0`: Tailwind's `blur-0` is still
+                `filter: blur(0px)`, a non-none filter that survives the pulse
+                and defeats any `backdrop-filter` this capsule is nested inside
+                (the booklet composer's frosted search panel). */}
             <span
               className={`flex items-center justify-center transition-all duration-200 ${
                 isFocused ? "opacity-100 scale-100" : "opacity-0 scale-75 pointer-events-none"
-              } ${isPulsing ? "blur-[0.5px]" : "blur-0"}`}
+              } ${isPulsing ? "blur-[0.5px]" : "filter-none"}`}
               style={{
                 transitionDelay: isFocused ? `${Math.round(duration * 0.15)}ms` : "0ms",
               }}

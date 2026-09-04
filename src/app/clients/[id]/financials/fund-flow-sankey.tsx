@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { formatCompactGbp, formatGbp } from "@/lib/income-band";
 import type { FlowBand, FundFlow } from "@/lib/financials/financial-series";
+import { Liquid } from "liquid-gooey";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 
 /**
  * A filed year as a flow: what came in, the pot it made, and what it paid for.
@@ -147,6 +149,25 @@ const TEXT_L = PAD;
 const TEXT_R = VIEW_W - PAD;
 /** Where the label rule stops running flat and turns for the node. */
 const ELBOW = 26;
+/** Equal width for each year switch tab button, enabling liquid gooey indicator positioning. */
+const YEAR_TAB_WIDTH = 58;
+
+/**
+ * The pour wipe's soft leading edge, in viewBox units.
+ *
+ * A hard clip edge sweeping across reads as a shutter; a gradient front reads as
+ * liquid, which is what the figure is about. 70 units is roughly a third of the
+ * distance a ribbon travels — wide enough that no single frame shows a line, and
+ * narrow enough that the front is still a front rather than a general brightening.
+ */
+const FEATHER = 70;
+/** How far each front travels, and where it starts. Written out rather than
+ *  inlined because the mask rect, its gradient and its keyframe distance all
+ *  have to agree, and a mismatch fails silently as a ribbon that never appears. */
+const POUR_IN_FROM = COL_L_X;
+const POUR_IN_SPAN = HUB_X + NODE_W - COL_L_X;
+const POUR_OUT_FROM = HUB_X;
+const POUR_OUT_SPAN = COL_R_X + NODE_W - HUB_X;
 
 /** Gaps between stacked bands, larger on the right where there are fewer. */
 const GAP_L = 10;
@@ -321,6 +342,11 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
   const [hovered, setHovered] = useState<string | null>(null);
   const [pinned, setPinned] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
+  /** Clip ids for the two pour wipes. Scoped per instance so two figures on one
+   *  page never share a clip. */
+  const rawId = useId().replace(/:/g, "");
+  const POUR_IN = `${rawId}-pour-in`;
+  const POUR_OUT = `${rawId}-pour-out`;
   /** Bumped on click to replay the entrance, per the reveal contract. */
   const [replay, setReplay] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -396,60 +422,134 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
   const netTag = net > 0 ? "SURPLUS" : net < 0 ? "DEFICIT" : "BALANCED";
 
   return (
-    <div ref={rootRef} className="mt-6 border-t border-rule-soft pt-5">
+    <div ref={rootRef}>
       <style>{`
-        @keyframes ffFade { from { opacity: 0 } }
-        .ff-fade { animation: ffFade .9s ease both }
-        @media (prefers-reduced-motion: reduce) { .ff-fade { animation: none } }
+        /* The entrance is the diagram's own argument played once, slowly: the
+           pot fills, the filed lines rise into it, the money pours across, the
+           labels reach out to name what they point at. Every part moves along
+           the axis it means — height for money, left-to-right for flow — so the
+           animation teaches the encoding instead of decorating it.
+
+           Nothing here overshoots and nothing snaps. A Sankey is a statement
+           about volume, and volume does not bounce; the whole sequence is one
+           long deceleration, and the beats overlap so there is never a frame
+           where the figure has stopped moving and not yet started again. */
+        @keyframes ffRise { from { opacity: 0; transform: translateY(11px) } }
+        /* Bands and hub scale from their own base, so they grow upward the way
+           a column of money does. Origin is set per element in the markup. */
+        @keyframes ffGrowUp { from { transform: scaleY(0) } to { transform: scaleY(1) } }
+        /* The soft front that carries a ribbon across. Applied to the mask rect,
+           not the ribbons, so the ribbon geometry is never distorted. The travel
+           distance differs per side, so the keyframe reads it off the element. */
+        @keyframes ffPour { to { transform: translateX(var(--ff-travel)) } }
+        @keyframes ffSlideIn { from { opacity: 0; transform: translateX(-15px) } }
+        @keyframes ffSlideOut { from { opacity: 0; transform: translateX(15px) } }
+        @keyframes ffDraw { from { stroke-dashoffset: 1 } to { stroke-dashoffset: 0 } }
+
+        /* One easing does almost all of it: a long, flat-tailed deceleration
+           that spends most of its time nearly settled. The pour gets the only
+           other curve — it eases in as well as out, because a front that starts
+           at full speed is the thing that reads as a shutter. */
+        .ff-rise { animation: ffRise .6s cubic-bezier(.22,.68,.24,1) both }
+        .ff-grow { animation: ffGrowUp .5s cubic-bezier(.22,.68,.24,1) both; transform-box: view-box }
+        .ff-pour { animation: ffPour .76s cubic-bezier(.36,.1,.24,1) both; transform-box: view-box }
+        .ff-slide-in { animation: ffSlideIn .52s cubic-bezier(.22,.68,.24,1) both }
+        .ff-slide-out { animation: ffSlideOut .52s cubic-bezier(.22,.68,.24,1) both }
+        .ff-draw { stroke-dasharray: 1; animation: ffDraw .52s cubic-bezier(.22,.68,.24,1) both }
+
+        @media (prefers-reduced-motion: reduce) {
+          .ff-rise, .ff-grow, .ff-pour,
+          .ff-slide-in, .ff-slide-out, .ff-draw { animation: none }
+          /* Both of these hide their element in the un-animated state, so the
+             finished position has to be restated rather than merely un-animated:
+             the dash would leave the rule undrawn, and the mask front would sit
+             short of the ribbons and reveal none of them. */
+          .ff-draw { stroke-dasharray: none }
+          .ff-pour { transform: translateX(var(--ff-travel)) }
+        }
       `}</style>
 
       {/* Conclusion title and the year switch share one row: the sentence says
           what happened, the switch steps through the filing history. */}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <h3 className="text-[16.5px] font-bold tracking-[-0.02em] text-ink">
-          {flow.headline}
+        <h3 className="text-[16.5px] font-medium font-serif tracking-[-0.02em] text-ink">
+          Spent{" "}
+          <span className="text-[#8C3A2B]">
+            {formatCompactGbp(spendTotal)}
+          </span>{" "}
+          against{" "}
+          <span className="text-go">
+            {formatCompactGbp(incomeTotal)}
+          </span>{" "}
+          of income,{" "}
+          {net < 0 ? (
+            <>
+              ending the year with a{" "}
+              <span className="text-stop">
+                {formatCompactGbp(-net)} deficit
+              </span>
+              .
+            </>
+          ) : net > 0 ? (
+            <>
+              ending the year with a{" "}
+              <span className="text-go">
+                {formatCompactGbp(net)} surplus
+              </span>
+              .
+            </>
+          ) : (
+            "ending the year balanced."
+          )}
         </h3>
         {flows.length > 1 && (
-          <div
-            className="relative flex rounded-full border border-rule-soft bg-paper p-0.5"
+          <Liquid
+            blur={5}
+            contrast={18}
+            fill="var(--ink)"
+            shadow="0 2px 6px rgba(20, 26, 34, 0.25)"
+            className="relative inline-flex items-center overflow-x-auto rounded-full border border-rule-soft bg-paper p-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             role="group"
             aria-label="Filed year"
           >
-            {/* Sliding thumb — one equal segment wide, gliding to the picked
-                year. Buttons sit transparent above it; only the labels and the
-                thumb move, so it stays a calm control rather than a toy. */}
-            <span
-              aria-hidden="true"
-              className="absolute top-0.5 bottom-0.5 left-0.5 rounded-full bg-ink transition-transform duration-300 ease-out motion-reduce:transition-none"
-              style={{
-                width: `calc((100% - 4px) / ${flows.length})`,
-                transform: `translateX(${yearIndex * 100}%)`,
-              }}
-            />
-            {flows.map((candidate, index) => (
-              <button
-                key={candidate.periodEnd}
-                type="button"
-                onClick={() => {
-                  setYearIndex(index);
-                  setPinned(null);
-                  setReplay((n) => n + 1);
+            <Liquid.Item effect="move" move={{ springiness: 0.6, trail: 0.5, stretch: 0.25 }}>
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute top-0.5 bottom-0.5 left-0.5 rounded-full bg-ink transition-transform duration-300 ease-out motion-reduce:transition-none"
+                style={{
+                  width: `${YEAR_TAB_WIDTH}px`,
+                  transform: `translateX(${yearIndex * YEAR_TAB_WIDTH}px)`,
                 }}
-                aria-pressed={index === yearIndex}
-                className={`relative z-10 flex-1 rounded-full px-3 py-1 font-mono text-[11px] font-semibold tracking-[0.06em] whitespace-nowrap transition-colors motion-reduce:transition-none ${
-                  index === yearIndex
-                    ? "text-white"
-                    : "text-faint hover:text-dim"
-                }`}
-              >
-                {candidate.label}
-              </button>
-            ))}
-          </div>
+              />
+            </Liquid.Item>
+
+            <div className="relative z-10 flex items-center">
+              {flows.map((candidate, index) => (
+                <button
+                  key={candidate.periodEnd}
+                  type="button"
+                  onClick={() => {
+                    setYearIndex(index);
+                    setPinned(null);
+                    setReplay((n) => n + 1);
+                  }}
+                  aria-pressed={index === yearIndex}
+                  style={{ width: `${YEAR_TAB_WIDTH}px` }}
+                  className={`flex h-7 shrink-0 cursor-pointer items-center justify-center rounded-full font-mono text-[11px] font-semibold tracking-[0.06em] whitespace-nowrap transition-colors duration-200 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink ${
+                    index === yearIndex
+                      ? "text-white"
+                      : "text-faint hover:text-dim"
+                  }`}
+                >
+                  {candidate.label}
+                </button>
+              ))}
+            </div>
+          </Liquid>
         )}
       </div>
 
-      <p className="mt-1 text-[11.5px] text-dim">
+      <p className="mt-1 text-[13.5px] text-dim">
         Ribbon width = pounds through the year · year ended{" "}
         {new Date(flow.periodEnd).toLocaleDateString("en-GB", {
           day: "numeric",
@@ -458,32 +558,90 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
         })}
       </p>
 
-      <div className="mt-3 overflow-x-auto">
-        <svg
-          key={`${flow.periodEnd}-${replay}`}
-          viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
-          className="w-full min-w-[46rem] cursor-default"
-          /* The ribbons multiply against the plate, which is what gives the
-             reference its stained-glass overlaps. Isolate so they multiply
-             against the plate rect below and never against the page. */
-          style={{ isolation: "isolate" }}
-          onClick={() => setPinned(null)}
-          role="img"
-          aria-label={`Fund flow for ${flow.label}. In: ${flow.inflows
-            .map((band) => `${band.label} ${formatGbp(band.amount)}`)
-            .join(", ")}. Out: ${flow.outflows
-            .map((band) => `${band.label} ${formatGbp(band.amount)}`)
-            .join(", ")}.`}
-        >
-          <rect
-            x={0.5}
-            y={0.5}
-            width={VIEW_W - 1}
-            height={VIEW_H - 1}
-            rx={5}
-            fill={PLATE}
-            stroke={PLATE_EDGE}
-          />
+      <div className="mt-3" onClick={() => setPinned(null)}>
+        <div className="overflow-x-auto">
+          <svg
+            key={`${flow.periodEnd}-${replay}`}
+            viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+            className="w-full min-w-[46rem] cursor-default"
+            /* The ribbons multiply against the plate, which is what gives the
+               reference its stained-glass overlaps. Isolate so they multiply
+               against the plate rect below and never against the page. */
+            style={{ isolation: "isolate" }}
+            role="img"
+            aria-label={`Fund flow for ${flow.label}. In: ${flow.inflows
+              .map((band) => `${band.label} ${formatGbp(band.amount)}`)
+              .join(", ")}. Out: ${flow.outflows
+              .map((band) => `${band.label} ${formatGbp(band.amount)}`)
+              .join(", ")}.`}
+          >
+            <rect
+              x={0}
+              y={0}
+              width={VIEW_W}
+              height={VIEW_H}
+              fill={PLATE}
+            />
+
+            {/* The two pour wipes. Each is a rect as wide as the distance it
+                has to travel, filled with a gradient that is solid behind and
+                fades out at its leading edge, and slid across the half of the
+                plot its side occupies — left column outward for the inflows, hub
+                outward for the outflows. Masking the reveal rather than
+                animating `d` keeps the curve exact at every frame, and leaves
+                the pointer targets identical to the static figure once the front
+                has passed. */}
+            <defs>
+              {[
+                {
+                  id: POUR_IN,
+                  from: POUR_IN_FROM,
+                  span: POUR_IN_SPAN,
+                  delay: "0.22s",
+                },
+                {
+                  id: POUR_OUT,
+                  from: POUR_OUT_FROM,
+                  span: POUR_OUT_SPAN,
+                  delay: "0.60s",
+                },
+              ].map(({ id, from, span, delay }) => {
+                // The rect carries its own feather, so it must travel its own
+                // width for the solid part to clear the far end.
+                const travel = span + FEATHER;
+                return (
+                  <mask
+                    key={id}
+                    id={id}
+                    maskUnits="userSpaceOnUse"
+                    x={0}
+                    y={0}
+                    width={VIEW_W}
+                    height={VIEW_H}
+                  >
+                    <linearGradient id={`${id}-front`} x1="0" y1="0" x2="1" y2="0">
+                      <stop offset={0} stopColor="#FFF" stopOpacity={1} />
+                      <stop offset={span / travel} stopColor="#FFF" stopOpacity={1} />
+                      <stop offset={1} stopColor="#FFF" stopOpacity={0} />
+                    </linearGradient>
+                    <rect
+                      x={from - travel}
+                      y={PLOT_TOP - 8}
+                      width={travel}
+                      height={PLOT_H + 16}
+                      fill={`url(#${id}-front)`}
+                      className={revealed ? "ff-pour" : undefined}
+                      style={
+                        {
+                          "--ff-travel": `${travel}px`,
+                          animationDelay: delay,
+                        } as CSSProperties
+                      }
+                    />
+                  </mask>
+                );
+              })}
+            </defs>
 
           {/* The year's three figures, top-centre in the gap between the
               columns: what came in (green), what went out (brick), and the
@@ -492,7 +650,10 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
             x={VIEW_W / 2}
             y={TRIO_Y}
             textAnchor="middle"
-            className={revealed ? "ff-fade" : undefined}
+            /* The headline figures settle in last — they are the summary of the
+               flow the reader has just watched, not its opening. */
+            className={revealed ? "ff-rise" : undefined}
+            style={{ animationDelay: "1.0s" }}
             opacity={revealed ? 1 : 0}
           >
             <tspan fontSize={12.5} fontWeight={800} fill={IN_RAMP[0]}>
@@ -589,40 +750,62 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
 
           {/* Ribbons, under the solid column bands and the labels. */}
           <g style={{ mixBlendMode: "multiply" }}>
-            {inflows.map((placed, index) => (
-              <path
-                key={`in-${placed.band.id}`}
-                d={ribbon(
-                  COL_L_X + NODE_W,
-                  HUB_X,
-                  placed.y,
-                  placed.y + Math.max(placed.height, MIN_BAND_H),
-                  placed.hubY,
-                  placed.hubY + Math.max(placed.hubHeight, MIN_BAND_H),
-                )}
-                fill={placed.shade}
-                opacity={revealed ? ribbonOpacity(placed.band.id) : 0}
-                className={revealed ? "ff-fade transition-opacity" : undefined}
-                style={{ animationDelay: `${0.2 + index * 0.06}s` }}
-              />
-            ))}
-            {outflows.map((placed, index) => (
-              <path
-                key={`out-${placed.band.id}`}
-                d={ribbon(
-                  HUB_X + NODE_W,
-                  COL_R_X,
-                  placed.hubY,
-                  placed.hubY + Math.max(placed.hubHeight, MIN_BAND_H),
-                  placed.y,
-                  placed.y + Math.max(placed.height, MIN_BAND_H),
-                )}
-                fill={placed.shade}
-                opacity={revealed ? ribbonOpacity(placed.band.id) : 0}
-                className={revealed ? "ff-fade transition-opacity" : undefined}
-                style={{ animationDelay: `${0.28 + index * 0.06}s` }}
-              />
-            ))}
+            <g mask={`url(#${POUR_IN})`}>
+              {inflows.map((placed) => (
+                <path
+                  key={`in-${placed.band.id}`}
+                  d={ribbon(
+                    COL_L_X + NODE_W,
+                    HUB_X,
+                    placed.y,
+                    placed.y + Math.max(placed.height, MIN_BAND_H),
+                    placed.hubY,
+                    placed.hubY + Math.max(placed.hubHeight, MIN_BAND_H),
+                  )}
+                  fill={placed.shade}
+                  opacity={revealed ? ribbonOpacity(placed.band.id) : 0}
+                  className="cursor-pointer transition-opacity"
+                  onMouseEnter={() => setHovered(placed.band.id)}
+                  onMouseLeave={() => setHovered(null)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setPinned((current) =>
+                      current === placed.band.id ? null : placed.band.id,
+                    );
+                  }}
+                >
+                  <title>{`${placed.band.label}: ${formatGbp(placed.band.amount)}`}</title>
+                </path>
+              ))}
+            </g>
+            <g mask={`url(#${POUR_OUT})`}>
+              {outflows.map((placed) => (
+                <path
+                  key={`out-${placed.band.id}`}
+                  d={ribbon(
+                    HUB_X + NODE_W,
+                    COL_R_X,
+                    placed.hubY,
+                    placed.hubY + Math.max(placed.hubHeight, MIN_BAND_H),
+                    placed.y,
+                    placed.y + Math.max(placed.height, MIN_BAND_H),
+                  )}
+                  fill={placed.shade}
+                  opacity={revealed ? ribbonOpacity(placed.band.id) : 0}
+                  className="cursor-pointer transition-opacity"
+                  onMouseEnter={() => setHovered(placed.band.id)}
+                  onMouseLeave={() => setHovered(null)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setPinned((current) =>
+                      current === placed.band.id ? null : placed.band.id,
+                    );
+                  }}
+                >
+                  <title>{`${placed.band.label}: ${formatGbp(placed.band.amount)}`}</title>
+                </path>
+              ))}
+            </g>
           </g>
 
           {/* The hub: one undivided block, because that is the claim. Its total
@@ -633,7 +816,8 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
             width={NODE_W}
             height={PLOT_H}
             fill={HUB_FILL}
-            className={revealed ? "ff-fade" : undefined}
+            className={revealed ? "ff-grow" : undefined}
+            style={{ transformOrigin: `${HUB_X}px ${PLOT_BOTTOM}px` }}
             opacity={revealed ? 1 : 0}
           />
 
@@ -648,8 +832,13 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
             const hitX = key === "in" ? TEXT_L - 6 : COL_R_X;
             const hitW =
               key === "in" ? COL_L_X + NODE_W - TEXT_L + 12 : TEXT_R - COL_R_X + 6;
+            /* The right column does not move until the pour has crossed the
+               hub, so the eye follows one front travelling left to right rather
+               than two halves starting at once. */
+            const beat = key === "in" ? 0.06 : 0.46;
             return placed.map((entry, index) => {
               const centre = entry.y + Math.max(entry.height, MIN_BAND_H) / 2;
+              const step = beat + index * 0.04;
               const picked = focus === entry.band.id;
               const hitTop = Math.min(entry.labelY - 15, entry.y - 3);
               const hitBottom = Math.max(entry.labelY + 16, entry.y + entry.height + 3);
@@ -684,9 +873,12 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
                     fill="none"
                     stroke={picked ? FF_INK : FF_RULE}
                     strokeWidth={picked ? 1 : 0.7}
+                    /* Normalised so one dash covers any bracket, whatever its
+                       elbow geometry works out to. */
+                    pathLength={1}
                     opacity={revealed ? labelOpacity(entry.band.id) : 0}
-                    className={revealed ? "ff-fade transition-opacity" : undefined}
-                    style={{ animationDelay: `${0.12 + index * 0.06}s` }}
+                    className={revealed ? "ff-draw transition-opacity" : undefined}
+                    style={{ animationDelay: `${step + 0.15}s` }}
                   />
                   <rect
                     x={x}
@@ -695,13 +887,22 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
                     height={Math.max(entry.height, 2)}
                     fill={entry.shade}
                     opacity={revealed ? bandOpacity(entry.band.id) : 0}
-                    className={revealed ? "ff-fade transition-opacity" : undefined}
-                    style={{ animationDelay: `${index * 0.06}s` }}
+                    className={revealed ? "ff-grow transition-opacity" : undefined}
+                    style={{
+                      transformOrigin: `${x}px ${entry.y + Math.max(entry.height, 2)}px`,
+                      animationDelay: `${step}s`,
+                    }}
                   />
                   <g
-                    className={revealed ? "ff-fade" : undefined}
+                    className={
+                      revealed
+                        ? key === "in"
+                          ? "ff-slide-in"
+                          : "ff-slide-out"
+                        : undefined
+                    }
                     opacity={revealed ? labelOpacity(entry.band.id) : 0}
-                    style={{ animationDelay: `${0.1 + index * 0.06}s` }}
+                    style={{ animationDelay: `${step + 0.12}s` }}
                   >
                     <text
                       x={textX}
@@ -732,7 +933,7 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
 
       {/* Fixed status row, not a floating card: with bands this thin, a card
           that follows the cursor covers the bands either side of the one read. */}
-      <p className="mt-1.5 min-h-[18px] text-[12px] text-dim" aria-live="polite">
+      <p className="mt-2 min-h-[22px] text-[14px] leading-snug font-medium text-[#102a4e]" aria-live="polite">
         {active ? (
           <>
             <span className="font-semibold text-ink">{active.band.label}</span> —{" "}
@@ -743,7 +944,7 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
             {active.band.kind === "reserves" &&
               " · spending the year's income did not cover"}
             {pinned && (
-              <span className="ml-2 font-mono text-[9px] font-bold tracking-[0.1em] text-faint">
+              <span className="ml-2 font-mono text-[9.5px] font-bold tracking-[0.1em] text-faint">
                 PINNED · CLICK AGAIN TO RELEASE
               </span>
             )}
@@ -752,6 +953,7 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
           "Every band is money the annual return itself reports. Hover one to trace it, click to pin."
         )}
       </p>
+    </div>
 
       {/* The reference's bordered note block, on the plate's own ground so it
           reads as part of the figure rather than as body copy. */}
@@ -760,16 +962,22 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
           className="mt-3 rounded-[5px] border px-4 py-3"
           style={{ borderColor: PLATE_EDGE, backgroundColor: PLATE }}
         >
-          <div className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
+          <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
             {flow.incomeDetail.length > 0 && (
               <div>
-                <p
-                  className="font-mono text-[9.5px] font-semibold tracking-[0.1em] uppercase"
-                  style={{ color: FF_DIM }}
+                <div className="flex items-center gap-1.5">
+                  <h4
+                    className="text-[12.5px] font-semibold"
+                    style={{ color: FF_INK }}
+                  >
+                    Included in income
+                  </h4>
+                  <InfoTooltip content="Already counted in the bands above" />
+                </div>
+                <ul
+                  className="mt-2 space-y-1.5 border-t pt-2"
+                  style={{ borderColor: `${FF_RULE}80` }}
                 >
-                  Of the income, also reported
-                </p>
-                <ul className="mt-1.5 space-y-1">
                   {flow.incomeDetail.map((source) => (
                     <li
                       key={source.label}
@@ -777,7 +985,7 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
                     >
                       <span style={{ color: FF_DIM }}>{source.label}</span>
                       <span
-                        className="font-mono tabular-nums"
+                        className="font-mono tabular-nums font-medium"
                         style={{ color: FF_INK }}
                       >
                         {formatCompactGbp(source.amount)}
@@ -789,13 +997,19 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
             )}
             {flow.spendDetail.length > 0 && (
               <div>
-                <p
-                  className="font-mono text-[9.5px] font-semibold tracking-[0.1em] uppercase"
-                  style={{ color: FF_DIM }}
+                <div className="flex items-center gap-1.5">
+                  <h4
+                    className="text-[12.5px] font-semibold"
+                    style={{ color: FF_INK }}
+                  >
+                    Included in spending
+                  </h4>
+                  <InfoTooltip content="Already counted in the bands above" />
+                </div>
+                <ul
+                  className="mt-2 space-y-1.5 border-t pt-2"
+                  style={{ borderColor: `${FF_RULE}80` }}
                 >
-                  Of the spending, also reported
-                </p>
-                <ul className="mt-1.5 space-y-1">
                   {flow.spendDetail.map((use) => (
                     <li
                       key={use.label}
@@ -804,11 +1018,14 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
                       <span style={{ color: FF_DIM }}>
                         {use.label}
                         {use.within && (
-                          <span style={{ color: FF_FAINT }}> · within {use.within}</span>
+                          <span className="text-[11.5px]" style={{ color: FF_FAINT }}>
+                            {" "}
+                            (inside {use.within})
+                          </span>
                         )}
                       </span>
                       <span
-                        className="font-mono tabular-nums"
+                        className="font-mono tabular-nums font-medium"
                         style={{ color: FF_INK }}
                       >
                         {formatCompactGbp(use.amount)}
@@ -819,18 +1036,16 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
               </div>
             )}
           </div>
-          <p
-            className="mt-2.5 text-[11.5px] leading-[1.5]"
-            style={{ color: FF_FAINT }}
-          >
-            These are components of the bands above, not extra money — the
-            register reports them inside the lines they belong to, so they are
-            listed rather than drawn.
-            {Math.max(flow.incomeDrift, flow.spendDrift) > 0.001 &&
-              ` The filed lines and the filed totals differ by ${(
+          {Math.max(flow.incomeDrift, flow.spendDrift) > 0.001 && (
+            <p
+              className="mt-2.5 border-t pt-2 text-[11.5px] leading-[1.5]"
+              style={{ borderColor: `${FF_RULE}80`, color: FF_FAINT }}
+            >
+              The filed lines and the filed totals differ by ${(
                 Math.max(flow.incomeDrift, flow.spendDrift) * 100
-              ).toFixed(1)}% this year, which is the return restating a figure between the two.`}
-          </p>
+              ).toFixed(1)}% this year, which is the return restating a figure between the two.
+            </p>
+          )}
         </div>
       )}
 
@@ -887,10 +1102,6 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
           </table>
         </div>
       </details>
-
-      <p className="mt-3 font-mono text-[9.5px] font-medium tracking-[0.08em] text-faint uppercase">
-        Aggregate Sankey · {flow.label} annual return · Charity Commission
-      </p>
     </div>
   );
 }

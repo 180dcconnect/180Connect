@@ -10,14 +10,20 @@ import {
 } from "../financial-filing-item";
 import { GrantHistorySection } from "../grant-history-section";
 import { GRANT_HISTORY_PAGE_SIZE, type GrantRow } from "../grant-list-item";
-import { requireActor } from "../load-record";
+import {
+  loadClient,
+  loadIdentifiers,
+  loadSources,
+  requireActor,
+} from "../load-record";
+import { loadOperatingGeography } from "@/lib/operating-geography";
 import {
   buildFinancialSeries,
   buildFundFlows,
   explainMissingAccounts,
   type FinancialPeriodInput,
-  type GrantInput,
 } from "@/lib/financials/financial-series";
+import type { FunderGrantInput } from "@/lib/financials/funders";
 import {
   sectorPeerStatsFromDistribution,
   type SectorDistributionRow,
@@ -27,10 +33,13 @@ import { SectionCard } from "../section-card";
 import { SectionUnavailable } from "./section-unavailable";
 import {
   FinancialHistoryChart,
-  GrantShareChart,
   IncomeMixPanel,
+  YearOnYearGrantsChart,
 } from "./financial-history-chart";
 import { FundFlowSankey } from "./fund-flow-sankey";
+import { FundingProfile } from "./funding-profile";
+import { WhoDoesTheWork } from "./who-does-the-work";
+import { WhyNowStrip } from "./why-now-strip";
 
 /** Charity Commission publishes five filed years; the cap is headroom, not a
  *  page size — a client with more is a client whose whole history we want. */
@@ -145,11 +154,14 @@ export default async function ClientFinancialsPage({
     Promise.all([
       supabase
         .from("grants")
-        .select("amount_awarded, currency, award_date")
+        // `funder_name` is here for section 5 rather than for the series: the
+        // builder only sums awards into the year they fall in, but funder
+        // concentration has to group by who gave it, and one list serves both.
+        .select("funder_name, amount_awarded, currency, award_date")
         .eq("organisation_id", id)
         .order("award_date", { ascending: false })
         .limit(CHART_GRANT_LIMIT)
-        .returns<GrantInput[]>(),
+        .returns<FunderGrantInput[]>(),
       supabase
         .from("financial_periods")
         .select(
@@ -185,10 +197,20 @@ export default async function ClientFinancialsPage({
         .eq("identifier_type", "uk_charity")
         .limit(1)
         .maybeSingle<{ identifier_value: string }>(),
+      // Declared areas of operation for section 1's reach row. The three
+      // loaders are `cache()`-wrapped and shared with the overview tab, so this
+      // is the same data that tab already reads rather than a fourth hand-rolled
+      // copy of the queries behind it — and `loadSources` in particular goes
+      // through an RPC, not a table, which is not a thing to reimplement here.
+      Promise.all([loadClient(id), loadIdentifiers(id), loadSources(id)]).then(
+        ([client, identifierRows, sourcesResult]) =>
+          loadOperatingGeography(client, identifierRows, sourcesResult.sources),
+      ),
     ]),
   ]);
 
-  const [chartGrants, chartPeriods, registerFacts, charityIdentifier] = chartData;
+  const [chartGrants, chartPeriods, registerFacts, charityIdentifier, geography] =
+    chartData;
   if (chartGrants.error) {
     await reportError(chartGrants.error, {
       operation: "clients.detail_financial_chart_grants",
@@ -257,7 +279,32 @@ export default async function ClientFinancialsPage({
   // have. A number is only useful as an address — "look at 3" has to mean the
   // same question on every record — so a section with nothing in it collapses
   // to one line and keeps its number rather than letting 4 become 3.
+  //
+  // The run is five questions about the client, in the order a CAM asks them:
+  // how big, which direction, what the money turns into, who does the work, and
+  // how fragile the funding is. What it is *not* is a list of everything on the
+  // tab. The two paginated tables underneath are the receipts for those
+  // questions rather than questions of their own, so they sit below the run
+  // unnumbered — numbering a raw table promises an insight it does not deliver,
+  // and the numbers were losing their thread exactly where they got highest.
   const hasFilings = series.years.length > 0;
+  // Section 4 needs a filed year that actually published a headcount. The
+  // newest return is often a totals-only filing while the one before it carries
+  // the counts, so this is "any year", not "the latest year".
+  const hasHeadcount = series.years.some(
+    (year) => year.employees !== null || year.volunteers !== null,
+  );
+  const chartGrantRows = chartGrants.data ?? [];
+  // Section 5 stands up on either half: awards to group by funder, or a return
+  // that says something about public money.
+  const hasFundingProfile =
+    chartGrantRows.length > 0 ||
+    series.years.some(
+      (year) =>
+        year.governmentIncome !== null ||
+        year.receivesGovernmentGrants !== null ||
+        year.receivesGovernmentContracts !== null,
+    );
 
   return (
     <Stage>
@@ -271,16 +318,22 @@ export default async function ClientFinancialsPage({
           </Rise>
         )}
 
+        {/* Renders nothing, and no wrapper, when it has nothing to say — it
+            carries its own `Rise` for exactly that reason. */}
+        <WhyNowStrip grants={chartGrantRows} series={series} />
+
         <Rise>
           {hasFilings ? (
             <SectionCard
               headingId="fin-scale-heading"
-              hint="What they file, how big that is for their sector, and who does the work."
+              hint="How big they are — money, people and ground covered — against the clients we hold."
               number={1}
               title="Scale"
             >
               <FinancialsHeroCard
                 filings={periods}
+                geography={geography}
+                organisationId={id}
                 peerStats={peerStats}
                 sector={sector}
                 series={series}
@@ -353,17 +406,60 @@ export default async function ClientFinancialsPage({
         </Rise>
 
         <Rise>
+          {hasHeadcount ? (
+            <SectionCard
+              headingId="fin-people-heading"
+              hint="Paid staff against volunteers, and what that means for who would run a project."
+              number={4}
+              title="Who does the work"
+            >
+              <WhoDoesTheWork series={series} />
+            </SectionCard>
+          ) : (
+            <SectionUnavailable
+              headingId="fin-people-heading"
+              number={4}
+              reason={
+                hasFilings
+                  ? "Not filed — the register asks for staff and volunteer counts only above its reporting threshold, so an entry-level return leaves them blank."
+                  : "No accounts on record for this organisation yet."
+              }
+              title="Who does the work"
+            />
+          )}
+        </Rise>
+
+        <Rise>
+          {hasFundingProfile ? (
+            <SectionCard
+              headingId="fin-funders-heading"
+              hint="How many funders the money comes from, how much rides on the largest, and what share is public money."
+              number={5}
+              title="Who funds them"
+            >
+              <FundingProfile grants={chartGrantRows} series={series} />
+              <div className="mt-5">
+                <YearOnYearGrantsChart grants={chartGrantRows} series={series} />
+              </div>
+            </SectionCard>
+          ) : (
+            <SectionUnavailable
+              headingId="fin-funders-heading"
+              number={5}
+              reason="No awards recorded from 360Giving, and no public funding reported on the filed returns."
+              title="Who funds them"
+            />
+          )}
+        </Rise>
+
+        {/* The receipts. Unnumbered: these are the rows behind the five
+            questions above, not a sixth and seventh question. Dropping the
+            `number` prop also reverts the grants card's title from "Funding
+            won" back to "Grant history", which is what it is down here. */}
+        <Rise>
           <GrantHistorySection
             error={Boolean(grants.error)}
             grants={grants.data ?? []}
-            intro={
-              hasFilings ? (
-                <div className="mt-4">
-                  <GrantShareChart series={series} />
-                </div>
-              ) : undefined
-            }
-            number={4}
             organisationId={id}
             totalCount={grants.count ?? grants.data?.length ?? 0}
           />

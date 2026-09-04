@@ -55,6 +55,7 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
     sector?: string | null;
     registeredOn?: string | null;
     charityReportingStatus?: string | null;
+    charityActivities?: string | null;
   }[] = [];
   const financialPeriods: {
     organisationId: string;
@@ -1463,6 +1464,7 @@ function bulkPendingRecord(
         charity_contact_web: "example.org",
         charity_is_cio: false,
         charity_company_registration_number: null,
+        charity_activities: "Provides free after-school tutoring across Sheffield.",
         ...overrides,
       },
       matched_classifications: ["Education/training"],
@@ -1515,6 +1517,41 @@ describe("promotePendingCharityCommissionBulkRecords", () => {
     assert.equal(annotations[0].sector, "Education & Training");
     assert.equal(annotations[0].registeredOn, "1990-06-01");
     assert.equal(annotations[0].charityReportingStatus, "Submission Received");
+  });
+
+  // The register's own description of the charity's work. Before this it was
+  // carried the whole way through the pipeline and dropped here, leaving the
+  // booklet and email prompts with no mission text for any imported charity —
+  // see 20260916130000_add_charity_activities.sql.
+  it("writes the charity's filed activities description", async () => {
+    const { store, annotations } = fakeStore({
+      async loadPendingRecords() {
+        return [bulkPendingRecord("raw-1", "Sheffield Example Trust")];
+      },
+    });
+
+    await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+
+    assert.equal(
+      annotations[0].charityActivities,
+      "Provides free after-school tutoring across Sheffield.",
+    );
+  });
+
+  it("treats a blank activities description as absent, not as an empty value", async () => {
+    const { store, annotations } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          bulkPendingRecord("raw-1", "Sheffield Example Trust", {
+            charity_activities: "   ",
+          }),
+        ];
+      },
+    });
+
+    await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+
+    assert.equal(annotations[0].charityActivities, null);
   });
 
   it("writes the filed years from the payload, with the filing date and the counts", async () => {

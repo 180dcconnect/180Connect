@@ -31,6 +31,9 @@ export type CharityRegisterFilters = {
   /** Free text over the charity's name. Empty means no name filter. */
   nameContains?: string;
 
+  /** Multiple names or substrings to match (matches if charity name contains ANY of these). */
+  names?: string[];
+
   /** Inclusive bounds on latest published income, in pounds. */
   incomeMin?: number | null;
   incomeMax?: number | null;
@@ -162,8 +165,18 @@ export function parseFilters(input: unknown): CharityRegisterFilters {
   const areasInput = (raw.areas ?? {}) as Record<string, unknown>;
   const classificationsInput = (raw.classifications ?? {}) as Record<string, unknown>;
 
+  const rawNames = cleanList(raw.names as string[] | undefined)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const rawNameContains = typeof raw.nameContains === "string" ? raw.nameContains.trim() : "";
+  let names = rawNames;
+  if (names.length === 0 && rawNameContains) {
+    names = rawNameContains.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+
   const filters: CharityRegisterFilters = {
-    nameContains: typeof raw.nameContains === "string" ? raw.nameContains.trim() : "",
+    nameContains: names.join(", "),
+    names,
     incomeMin,
     incomeMax,
     // Absent means true. Only an explicit `false` turns it off, so a preset
@@ -198,6 +211,7 @@ export function isUnfiltered(filters: CharityRegisterFilters): boolean {
   const f = parseFilters(filters);
   return (
     !f.nameContains &&
+    (f.names?.length ?? 0) === 0 &&
     f.incomeMin === null &&
     f.incomeMax === null &&
     !f.registeredFrom &&
@@ -210,8 +224,7 @@ export function isUnfiltered(filters: CharityRegisterFilters): boolean {
     (f.classifications?.who?.length ?? 0) === 0 &&
     (f.classifications?.how?.length ?? 0) === 0 &&
     (f.charityTypes?.length ?? 0) === 0 &&
-    !f.hasFiledAccounts &&
-    !f.excludeInsolvent
+    !f.hasFiledAccounts
   );
 }
 
@@ -224,25 +237,48 @@ const MONEY = new Intl.NumberFormat("en-GB", {
 function joinList(values: string[], conjunction = "or"): string {
   if (values.length === 1) return values[0];
   if (values.length === 2) return `${values[0]} ${conjunction} ${values[1]}`;
-  return `${values.slice(0, -1).join(", ")} ${conjunction} ${values[values.length - 1]}`;
+  return `${values.slice(0, -1).join(", ")}, ${conjunction} ${values[values.length - 1]}`;
+}
+
+function formatFilterDate(iso: string): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  if (!year || !month || !day) return iso;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return d.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 /**
- * The filter set as a sentence, for the confirmation shown before an import
- * runs and for the audit-log entry recorded after it.
+ * Turns a filter set back into one plain-English sentence.
  *
- * An import is the one action on this screen that is awkward to undo, and the
+ * Used above the sample table and in the confirmation prompt: the headline
  * count alone does not say what was asked for. Writing the criteria back in
  * words is what makes "2,000 charities" checkable before it becomes 2,000 rows
  * in the client list.
  */
 export function describeFilters(filters: CharityRegisterFilters): string {
   const f = parseFilters(filters);
-  if (isUnfiltered(f)) return "Every registered charity in England and Wales.";
+  if (isUnfiltered(f)) {
+    return f.excludeInsolvent
+      ? "Every solvent registered charity in England and Wales."
+      : "Every registered charity in England and Wales.";
+  }
 
   const parts: string[] = [];
 
-  if (f.nameContains) parts.push(`name contains “${f.nameContains}”`);
+  if (f.names && f.names.length > 0) {
+    if (f.names.length === 1) {
+      parts.push(`name contains “${f.names[0]}”`);
+    } else {
+      parts.push(`name contains ${f.names.map((n) => `“${n}”`).join(" or ")}`);
+    }
+  } else if (f.nameContains) {
+    parts.push(`name contains “${f.nameContains}”`);
+  }
 
   if (f.incomeMin !== null && f.incomeMax !== null) {
     parts.push(`income ${MONEY.format(f.incomeMin!)}–${MONEY.format(f.incomeMax!)}`);
@@ -259,11 +295,11 @@ export function describeFilters(filters: CharityRegisterFilters): string {
   }
 
   if (f.registeredFrom && f.registeredTo) {
-    parts.push(`registered between ${f.registeredFrom} and ${f.registeredTo}`);
+    parts.push(`registered between ${formatFilterDate(f.registeredFrom)} and ${formatFilterDate(f.registeredTo)}`);
   } else if (f.registeredFrom) {
-    parts.push(`registered on or after ${f.registeredFrom}`);
+    parts.push(`registered on or after ${formatFilterDate(f.registeredFrom)}`);
   } else if (f.registeredTo) {
-    parts.push(`registered on or before ${f.registeredTo}`);
+    parts.push(`registered on or before ${formatFilterDate(f.registeredTo)}`);
   }
 
   const locationClauses: string[] = [];

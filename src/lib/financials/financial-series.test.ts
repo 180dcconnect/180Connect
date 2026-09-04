@@ -500,7 +500,10 @@ describe("buildFundFlow", () => {
 
   it("titles the chart with the finding, not the chart type", () => {
     const surplus = buildFundFlow(yearOf(filedYear));
-    assert.equal(surplus!.headline, "Took £380m, spent £362.6m, kept £17.4m");
+    assert.equal(
+      surplus!.headline,
+      "Spent £362.6m against £380m of income, ending the year with a £17.4m surplus.",
+    );
 
     const deficit = buildFundFlow(
       yearOf({
@@ -509,7 +512,10 @@ describe("buildFundFlow", () => {
         income_donations_legacies: 220_000_000,
       }),
     );
-    assert.match(deficit!.headline, /drawing £62\.6m from reserves$/);
+    assert.equal(
+      deficit!.headline,
+      "Spent £362.6m against £300m of income, ending the year with a £62.6m deficit.",
+    );
   });
 
   it("never draws a nested line as a band", () => {

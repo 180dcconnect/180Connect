@@ -24,6 +24,12 @@ import type { ReactNode } from "react";
  *   around a 16px glyph is the most templated component of the last three years.
  *   Icons sit inline in muted ink, at the title's baseline, and only where they
  *   disambiguate one row from another.
+ *
+ * **The numeral sits inline with the title.** Rendered in Source Serif 4
+ * (`font-serif text-[22px] font-bold text-faint tabular-nums`), on the same
+ * baseline line as the title heading, with the subtitle (hint) seated neatly
+ * underneath it. Unnumbered cards render the title and subtitle without the
+ * numeral.
  */
 export function SectionCard({
   headingId,
@@ -32,6 +38,7 @@ export function SectionCard({
   action,
   icon,
   number,
+  font,
   children,
   className = "",
   tone = "default",
@@ -52,6 +59,12 @@ export function SectionCard({
    * every card grows. See `financials/page.tsx`.
    */
   number?: number;
+  /**
+   * Heading font family: 'serif' uses Source Serif 4 (for numbered sections on Financials);
+   * 'sans' uses the original body sans-serif font (for Overview tab and standard cards).
+   * Defaults to 'serif' when `number` is provided, and 'sans' otherwise.
+   */
+  font?: "serif" | "sans";
   children?: ReactNode;
   className?: string;
   /** `danger` tints the card where outreach is blocked. */
@@ -61,50 +74,62 @@ export function SectionCard({
     tone === "danger"
       ? "border-stop/25 bg-stop-wash/50"
       : "border-rule bg-white";
+  const numbered = number !== undefined;
+  const isSerif = font === "serif" || (font === undefined && numbered);
 
   return (
     <section
       aria-labelledby={headingId}
-      className={`scroll-mt-6 rounded-panel border px-5 py-4.5 ${toneClasses} ${className}`}
+      className={`scroll-mt-6 rounded-panel px-5 py-4.5 ${toneClasses} ${className}`}
     >
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <div className="flex min-w-0 items-center gap-2.5">
-          {number !== undefined && (
-            <span
-              aria-hidden="true"
-              className="shrink-0 self-start pt-[3px] font-mono text-[15px] font-medium tabular-nums text-faint"
-            >
-              {number}
-            </span>
-          )}
-          {icon && (
-            <span
-              aria-hidden="true"
-              className={`shrink-0 [&_svg]:size-[15px] ${
-                tone === "danger" ? "text-stop/70" : "text-faint"
-              }`}
-            >
-              {icon}
-            </span>
-          )}
-          <div className="min-w-0">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2.5">
+            {numbered && (
+              <span
+                aria-hidden="true"
+                className={`shrink-0 leading-none tabular-nums text-faint ${
+                  isSerif
+                    ? "font-serif text-[24px] font-medium"
+                    : "font-mono text-[18px] font-medium"
+                }`}
+              >
+                {number}
+              </span>
+            )}
+            {icon && (
+              <span
+                aria-hidden="true"
+                className={`shrink-0 self-center [&_svg]:size-[15px] ${
+                  tone === "danger" ? "text-stop/70" : "text-faint"
+                }`}
+              >
+                {icon}
+              </span>
+            )}
             <h2
               id={headingId}
-              className={`scroll-mt-24 text-[18px] leading-[1.3] font-semibold tracking-[-0.01em] ${
-                tone === "danger" ? "text-stop" : "text-ink"
-              }`}
+              className={`scroll-mt-24 leading-[1.3] ${
+                isSerif
+                  ? "font-serif text-[24px] font-medium tracking-[-0.05em]"
+                  : "text-[18px] font-semibold tracking-[-0.01em]"
+              } ${tone === "danger" ? "text-stop" : "text-ink"}`}
             >
-              {number !== undefined && (
-                <span className="sr-only">Section {number}. </span>
-              )}
+              {numbered && <span className="sr-only">Section {number}. </span>}
               {title}
             </h2>
-            {hint && (
-              <p className="mt-1 max-w-[54ch] text-[13px] leading-[1.55] text-dim">
-                {hint}
-              </p>
-            )}
           </div>
+          {hint && (
+            <p
+              className={`mt-1 leading-[1.55] ${
+                isSerif
+                  ? "text-[16px] text-black"
+                  : "max-w-[54ch] text-[13px] text-dim"
+              }`}
+            >
+              {hint}
+            </p>
+          )}
         </div>
         {action && <div className="shrink-0">{action}</div>}
       </div>

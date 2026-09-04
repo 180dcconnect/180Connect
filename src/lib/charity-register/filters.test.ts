@@ -173,4 +173,11 @@ describe("describeFilters", () => {
         "doing Arts/culture/heritage/science.",
     );
   });
+
+  it("describes multiple names joined with or", () => {
+    assert.match(
+      describeFilters({ names: ["Hospice", "Cancer"] }),
+      /name contains “Hospice” or “Cancer”/i,
+    );
+  });
 });

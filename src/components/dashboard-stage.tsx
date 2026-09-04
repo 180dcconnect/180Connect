@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { MotionConfig, motion } from "motion/react";
-import { entranceSoft, stagger } from "@/components/brand/motion";
+import { entranceSoft, entranceSoftFlat, stagger } from "@/components/brand/motion";
 
 /**
  * The dashboard's entrance, built from the shared brand variants rather than a
@@ -63,11 +63,27 @@ export function Group({
 export function Rise({
   children,
   className,
+  glass = false,
 }: {
   children: React.ReactNode;
   className?: string;
+  /**
+   * Set on a card that contains a `backdrop-filter` — a frosted search panel,
+   * a glass popover. It swaps the blur-up for a plain rise, because a filtered
+   * ancestor walls the glass into this card's own backdrop root for good (see
+   * `entranceSoftFlat`). The clearing below is the best a filtered Rise can do
+   * and it does not survive a re-render, so glass cannot rely on it.
+   */
+  glass?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  if (glass) {
+    return (
+      <motion.div variants={entranceSoftFlat} className={className}>
+        {children}
+      </motion.div>
+    );
+  }
   return (
     <motion.div
       ref={ref}
@@ -80,6 +96,12 @@ export function Rise({
         // behind it, so every backdrop-blur read as flat. Clearing to none
         // once the entrance lands keeps the blur-up arrival without walling
         // off every frosted descendant forever.
+        //
+        // It only holds until Motion next renders this element, though —
+        // Motion owns `filter` and re-flushes the variant's `blur(0px)` over
+        // this write, and on a record page that happens the first time the
+        // realtime refresher calls `router.refresh()`. A card that actually
+        // contains glass must pass `glass` instead of relying on this.
         if (ref.current) ref.current.style.filter = "none";
       }}
     >

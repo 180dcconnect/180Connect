@@ -6,17 +6,17 @@ import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { GroupTabs } from "@/components/ui/group-tabs";
 import { DATA_IMPORTS_TABS } from "../import-group";
-import { ThreeSixtyGivingImportForm } from "./import-form";
-import { ThreeSixtyGivingLookupForm } from "./lookup-form";
+import { BackfillCard } from "./backfill-card";
+import { BACKFILL_BATCH_SIZE, REFETCH_AFTER_DAYS, cutoffIso } from "@/lib/ingestion/three-sixty-giving-backfill";
 
-// TODO: same unresolved risk flagged on Charity Commission's admin page
-// (src/app/admin/charity-commission/page.tsx) — worse here, since the bulk
-// walk makes one request per known charity/company identifier at ~600ms
-// apart (see threesixtygiving.ts's REQUEST_INTERVAL_MS). A few hundred
-// identifiers already exceeds this timeout. Not solved here; worth deciding
-// whether this needs to become a background job rather than a synchronous
-// button once the identifier count makes that bite.
-export const maxDuration = 60;
+// Resolved: this page used to host a bulk walk that made one request per known
+// identifier at ~600ms apart, which exceeded any serverless timeout as soon as
+// there were a few hundred identifiers — the TODO that used to sit here.
+//
+// It is a background job now (src/lib/ingestion/three-sixty-giving-backfill.ts),
+// draining a bounded slice per invocation. The only action left on this page
+// runs one such slice, which is sized to fit comfortably inside the ceiling.
+export const maxDuration = 300;
 
 type IngestionRun = {
   id: string;
@@ -52,6 +52,37 @@ export default async function ThreeSixtyGivingPage() {
 
   const runs = (data ?? []) as IngestionRun[];
 
+  // Coverage, for the progress card. Counted rather than derived from the runs
+  // above: a run says how many records it fetched, which is a different question
+  // from how much of the client list has been asked about at all.
+  const cutoff = cutoffIso(new Date(), REFETCH_AFTER_DAYS);
+  const [totalResult, dueResult, oldestResult] = await Promise.all([
+    supabase.from("organisations").select("id", { count: "exact", head: true }),
+    supabase
+      .from("organisations")
+      .select("id", { count: "exact", head: true })
+      .or(`grants_fetched_at.is.null,grants_fetched_at.lt.${JSON.stringify(cutoff)}`),
+    supabase
+      .from("organisations")
+      .select("grants_fetched_at")
+      .not("grants_fetched_at", "is", null)
+      .lt("grants_fetched_at", cutoff)
+      .order("grants_fetched_at", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  if (totalResult.error || dueResult.error) {
+    await reportError(totalResult.error ?? dueResult.error, {
+      operation: "admin.three_sixty_giving.coverage",
+    });
+  }
+
+  const totalCount = totalResult.count ?? 0;
+  const checkedCount = Math.max(totalCount - (dueResult.count ?? 0), 0);
+  const oldestPending =
+    (oldestResult.data as { grants_fetched_at: string } | null)?.grants_fetched_at ?? null;
+
   return (
     <main className="min-h-screen bg-[#f1f2f4] p-6">
       <section className="mx-auto max-w-5xl rounded-2xl bg-white p-8 shadow-sm">
@@ -71,8 +102,12 @@ export default async function ThreeSixtyGivingPage() {
         {/* Group navigation: the four importer pages read as one section. */}
         <GroupTabs className="mt-6" tabs={DATA_IMPORTS_TABS} current="/admin/three-sixty-giving" />
 
-        <ThreeSixtyGivingImportForm />
-        <ThreeSixtyGivingLookupForm />
+        <BackfillCard
+          checked={checkedCount}
+          total={totalCount}
+          batchSize={BACKFILL_BATCH_SIZE}
+          oldestPending={oldestPending}
+        />
 
         <div className="mt-8">
           <h2 className="text-lg font-bold">Recent imports</h2>

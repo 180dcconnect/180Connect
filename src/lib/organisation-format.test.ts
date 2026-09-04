@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { formatCityWithRegion, PIPELINE_STATUSES } from "./organisation-format.ts";
+import {
+  formatCityWithRegion,
+  formatCountryName,
+  formatGeographicReach,
+  PIPELINE_STATUSES,
+} from "./organisation-format.ts";
 
 describe("PIPELINE_STATUSES", () => {
   it("has exactly the ten F146-F155 values, not_contacted first", () => {
@@ -57,3 +62,40 @@ describe("formatCityWithRegion", () => {
     assert.equal(formatCityWithRegion("   "), "");
   });
 });
+
+describe("formatGeographicReach", () => {
+  it("formats valid reach values into title-case", () => {
+    assert.equal(formatGeographicReach("local"), "Local");
+    assert.equal(formatGeographicReach("regional"), "Regional");
+    assert.equal(formatGeographicReach("national"), "National");
+    assert.equal(formatGeographicReach("international"), "International");
+  });
+
+  it("handles whitespace and case insensitivity", () => {
+    assert.equal(formatGeographicReach("  regional  "), "Regional");
+    assert.equal(formatGeographicReach("NATIONAL"), "National");
+  });
+
+  it("returns empty string for null or undefined", () => {
+    assert.equal(formatGeographicReach(null), "");
+    assert.equal(formatGeographicReach(undefined), "");
+  });
+});
+
+describe("formatCountryName", () => {
+  it("formats GB and UK with display names", () => {
+    assert.equal(formatCountryName("GB"), "United Kingdom (GB)");
+    assert.equal(formatCountryName("UK"), "United Kingdom (GB)");
+  });
+
+  it("formats ISO codes for foreign countries", () => {
+    assert.equal(formatCountryName("US"), "United States (US)");
+    assert.equal(formatCountryName("IT"), "Italy (IT)");
+  });
+
+  it("returns empty string for null or undefined", () => {
+    assert.equal(formatCountryName(null), "");
+    assert.equal(formatCountryName(undefined), "");
+  });
+});
+

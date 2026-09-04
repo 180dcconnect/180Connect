@@ -121,6 +121,12 @@ describe("buildWhere — other clauses", () => {
     assert.deepEqual(params, ["%50\\_50\\%%"]);
   });
 
+  it("combines multiple names with OR", () => {
+    const { clauses, params } = where({ names: ["hospice", "cancer"] });
+    assert.match(clauses[0], /c\.charity_name like \? escape '\\' or c\.charity_name like \? escape '\\'/);
+    assert.deepEqual(params, ["%hospice%", "%cancer%"]);
+  });
+
   it("adds filed-accounts and solvency clauses only when asked", () => {
     assert.deepEqual(where({}).clauses, []);
     const { clauses } = where({ hasFiledAccounts: true, excludeInsolvent: true });

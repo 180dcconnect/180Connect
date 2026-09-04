@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  MONTH_NAMES,
+  clampDayToMonth,
   GRID_CELLS,
   addMonths,
   buildMonthGrid,
@@ -47,6 +49,26 @@ describe("addMonths", () => {
     assert.equal(addMonths("2026-12", 1), "2027-01");
     assert.equal(addMonths("2026-01", -1), "2025-12");
     assert.equal(addMonths("2026-01", -13), "2024-12");
+  });
+});
+
+describe("MONTH_NAMES", () => {
+  it("contains all 12 English month names in calendar order", () => {
+    assert.equal(MONTH_NAMES.length, 12);
+    assert.equal(MONTH_NAMES[0], "January");
+    assert.equal(MONTH_NAMES[11], "December");
+  });
+});
+
+describe("clampDayToMonth", () => {
+  it("preserves day when it exists in target month", () => {
+    assert.equal(clampDayToMonth("2026-03-15", "2026-04"), "2026-04-15");
+  });
+
+  it("clamps day when target month has fewer days", () => {
+    assert.equal(clampDayToMonth("2026-03-31", "2026-04"), "2026-04-30"); // April has 30 days
+    assert.equal(clampDayToMonth("2026-03-31", "2026-02"), "2026-02-28"); // non-leap Feb
+    assert.equal(clampDayToMonth("2026-03-31", "2024-02"), "2024-02-29"); // leap year Feb
   });
 });
 

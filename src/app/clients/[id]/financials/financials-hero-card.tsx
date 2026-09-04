@@ -11,19 +11,26 @@ import {
   type FinancialPeriodInput,
   type FinancialSeries,
 } from "@/lib/financials/financial-series";
+import type { OperatingGeography } from "@/lib/operating-geography";
 import type { SectorPeerStats } from "@/lib/financials/sector-peers";
 import { IncomeBandScale } from "../income-band-scale";
 import { SectorPeerStrip } from "./sector-peer-strip";
-import { StaffingRow } from "./staffing-row";
+import { OperatingReachRow } from "./operating-reach-row";
 
 interface FinancialsHeroCardProps {
   /** Every filed period, newest first — not the paginated first page. */
   filings: FinancialPeriodInput[];
   totalCount: number;
   fallbackIncomeBand?: string | null;
-  /** Built once on the page and shared with every other section, rather than
-   *  rebuilt here — see the note where it used to be constructed. */
+  /** Built once on the page and shared with every section. Read here only for
+   *  the headcount headline — the balance, the trend and income per head are
+   *  section 4's job, and this is the size figure. */
   series: FinancialSeries;
+  /** Declared areas of operation. Null where the record is not a charity, or
+   *  where the register file is unavailable. */
+  geography?: OperatingGeography | null;
+  /** For the "see every area" link back to the overview tab's full list. */
+  organisationId: string;
   /** The client's own sector, for the peer strip. Null suppresses the strip. */
   sector?: string | null;
   /** Same-sector clients on record, already reduced. Null suppresses the strip. */
@@ -35,6 +42,8 @@ export function FinancialsHeroCard({
   totalCount,
   fallbackIncomeBand,
   series,
+  geography,
+  organisationId,
   sector,
   peerStats,
 }: FinancialsHeroCardProps) {
@@ -62,9 +71,38 @@ export function FinancialsHeroCard({
       })
     : null;
 
-  // The series is built once on the page and handed to every section, so the
-  // headline figures here and the charts in sections 2-4 can never be reading
-  // two different derivations of the same filings.
+  // The newest return that published a headcount, which is not always the
+  // newest return — an entry-level filing carries totals only. Same rule as
+  // section 4, which is where the balance and the trend live; this is only the
+  // size figure, so it stops at one number and its composition.
+  const staffed = [...series.years]
+    .reverse()
+    .find((year) => year.employees !== null || year.volunteers !== null);
+  const employees = staffed?.employees ?? null;
+  const volunteers = staffed?.volunteers ?? null;
+  // A filed zero is a zero and an absent figure is not one, so a return that
+  // published 40 volunteers and no staff count gives a headcount of 40 that is
+  // a *floor* — the caption says which of the two halves is missing rather than
+  // letting the total imply both were filed.
+  const people =
+    employees === null && volunteers === null ? null : (employees ?? 0) + (volunteers ?? 0);
+  const bothFiled = employees !== null && volunteers !== null;
+  const volunteerShare =
+    bothFiled && people !== null && people > 0 ? volunteers / people : null;
+
+  const peopleCaption =
+    people === null
+      ? "Not on the filed return"
+      : !bothFiled
+        ? employees === null
+          ? "Volunteers only — no staff figure filed"
+          : "Staff only — no volunteer figure filed"
+        : volunteers === 0
+          ? "All paid staff, no volunteers"
+          : employees === 0
+            ? "All volunteers, no paid staff"
+            : `${Math.round((volunteerShare ?? 0) * 100)}% volunteers`;
+
   const recency = filingRecency(
     latest?.period_end ?? null,
     undefined,
@@ -116,7 +154,7 @@ export function FinancialsHeroCard({
             </p>
           )}
 
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <div>
               <p className="text-[12.5px] text-dim">Annual Income</p>
               <p className="mt-1 font-mono text-[22px] font-bold tracking-tight text-ink">
@@ -135,7 +173,7 @@ export function FinancialsHeroCard({
               <p className="mt-0.5 text-[11.5px] text-faint">Operating spend</p>
             </div>
 
-            <div className="col-span-2 sm:col-span-1">
+            <div>
               <p className="text-[12.5px] text-dim">Net Annual Position</p>
               {netBalance !== null ? (
                 <div className="mt-1 flex items-center gap-1.5">
@@ -159,9 +197,33 @@ export function FinancialsHeroCard({
                 {netBalance !== null ? (netBalance >= 0 ? "Net operating surplus" : "Net operating deficit") : "Single filing metric"}
               </p>
             </div>
+
+            {/* People as a size figure. How many bodies the organisation has is
+                a scale measure in the way income is — and it is the one that
+                tells a £2m charity run by nine people apart from a £2m charity
+                run by two hundred. The paid/unpaid *balance*, the trend and
+                income per head are section 4's questions, so this stops at the
+                total and the one word of composition that makes it legible. */}
+            <div>
+              <p className="text-[12.5px] text-dim">People</p>
+              {people !== null ? (
+                <p className="mt-1 font-mono text-[22px] font-bold tracking-tight tabular-nums text-ink">
+                  {people.toLocaleString("en-GB")}
+                </p>
+              ) : (
+                <p className="mt-1 font-mono text-[18px] text-faint">Not reported</p>
+              )}
+              <p className="mt-0.5 text-[11.5px] text-faint">{peopleCaption}</p>
+            </div>
           </div>
 
-          <StaffingRow series={series} />
+
+          {geography && (
+            <OperatingReachRow
+              geography={geography}
+              organisationId={organisationId}
+            />
+          )}
         </div>
 
         {/* Right Column: 4-Stage Segmented Scale */}

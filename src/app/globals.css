@@ -126,6 +126,7 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-body: var(--font-lato);
+  --font-serif: var(--font-source-serif);
 
   /* Filed Record — see the block above for why each exists. */
   --color-paper: var(--paper);

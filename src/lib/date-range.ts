@@ -94,6 +94,34 @@ export function addMonths(month: MonthKey, delta: number): MonthKey {
   return toIsoDay(shifted.getTime()).slice(0, 7);
 }
 
+export const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+] as const;
+
+/**
+ * Clamps an ISO day string to the valid days of a target month.
+ * E.g. "2026-03-31" with month "2026-02" becomes "2026-02-28" (or "2024-02-29" in a leap year).
+ */
+export function clampDayToMonth(dayIso: string, targetMonth: MonthKey): string {
+  const year = Number(targetMonth.slice(0, 4));
+  const month = Number(targetMonth.slice(5, 7));
+  const day = Number(dayIso.slice(8, 10));
+  const maxDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const clampedDay = Math.min(day, maxDay);
+  return `${targetMonth}-${String(clampedDay).padStart(2, "0")}`;
+}
+
 /** "August 2026". The one place `Intl` is used, and it is display-only. */
 export function monthLabel(month: MonthKey): string {
   const date = new Date(`${month}-01T00:00:00Z`);

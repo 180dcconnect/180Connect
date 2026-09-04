@@ -348,7 +348,10 @@ export interface OrganisationWriteStore {
    * today, so the SCOUT sector factor is neutral for the whole book, and the
    * bulk extract carries the regulator's own classification. `registered_on` and
    * `charity_reporting_status` are what let the record explain an empty
-   * Financials tab instead of just showing one.
+   * Financials tab instead of just showing one. `charityActivities` is the
+   * charity's own filed description of its work — the only mission text most
+   * records will ever have, since ENRICHMENT_RESULTS is written by an enrichment
+   * worker that has barely run (see 20260916130000_add_charity_activities.sql).
    *
    * Written after the insert rather than inside it because
    * link_raw_record_to_organisation takes a fixed column list; widening that RPC
@@ -360,6 +363,7 @@ export interface OrganisationWriteStore {
     sector?: string | null;
     registeredOn?: string | null;
     charityReportingStatus?: string | null;
+    charityActivities?: string | null;
   }): Promise<{ ok: true } | { error: string }>;
 }
 
@@ -608,11 +612,18 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
       return { ok: true };
     },
 
-    async annotateOrganisation({ organisationId, sector, registeredOn, charityReportingStatus }) {
+    async annotateOrganisation({
+      organisationId,
+      sector,
+      registeredOn,
+      charityReportingStatus,
+      charityActivities,
+    }) {
       const patch: Record<string, string> = {};
       if (sector) patch.sector = sector;
       if (registeredOn) patch.registered_on = registeredOn;
       if (charityReportingStatus) patch.charity_reporting_status = charityReportingStatus;
+      if (charityActivities) patch.charity_activities = charityActivities;
       // Nothing to say is not an error, and an empty update would be a wasted
       // round trip per organisation across a whole import.
       if (Object.keys(patch).length === 0) return { ok: true };
@@ -705,8 +716,14 @@ export type SourceIdentifier = {
   identifierValue: string;
 };
 
-/** Charity Commission: the charity number, not organisation_number. */
-function charityCommissionIdentifier(raw: RawCharityCommissionRecord): SourceIdentifier | null {
+/**
+ * Charity Commission: the charity number, not organisation_number.
+ *
+ * Exported for the pre-import preview (lib/import/charity-preview.ts): the
+ * preview must show exactly what promotion would write, so it reads the same
+ * mapper rather than a second copy of the rule.
+ */
+export function charityCommissionIdentifier(raw: RawCharityCommissionRecord): SourceIdentifier | null {
   const value = raw.reg_charity_number;
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) return null;
   return { identifierType: "uk_charity", identifierValue: String(value) };
@@ -812,7 +829,7 @@ function toDate(value: string | null | undefined): string | null {
  * computed here from total_income (deriveIncomeBand), matching the migration's
  * "computed from total_income on ingestion, not entered".
  */
-function charityCommissionFinancialPeriod(
+export function charityCommissionFinancialPeriod(
   raw: RawCharityCommissionRecord,
 ): SourceFinancialPeriod | null {
   const periodStart = toDate(raw.latest_acc_fin_year_start_date);
@@ -864,7 +881,13 @@ async function recordFinancialPeriodOrReport(
   }
 }
 
-function buildCriteriaInput(
+/**
+ * Exported alongside the two mappers above, and for the same reason: the
+ * pre-import preview tells a reader whether this charity would be added, held
+ * for review, or rejected, and that promise is only worth making if it runs the
+ * criteria check on the identical input the promote loop builds.
+ */
+export function buildCriteriaInput(
   org: StandardOrganisation,
 ): Parameters<typeof checkClientCriteria>[0] {
   return {
@@ -1352,7 +1375,7 @@ export async function promotePendingCharityCommissionBulkRecords(
   return counts;
 }
 
-/** Sector, registration date and reporting status — best-effort, never fatal. */
+/** Sector, registration date, reporting status and filed activities — best-effort, never fatal. */
 async function annotateOrganisationOrReport(
   store: OrganisationWriteStore,
   organisationId: string,
@@ -1365,6 +1388,10 @@ async function annotateOrganisationOrReport(
       sector: bulkSector(raw.matched_classifications),
       registeredOn: (raw.charity?.date_of_registration ?? "").slice(0, 10) || null,
       charityReportingStatus: raw.charity?.charity_reporting_status ?? null,
+      // Trimmed here rather than in the patch builder: a whitespace-only
+      // description is an absent one, and "" would be stored as a present value
+      // that every downstream `is null` check then misses.
+      charityActivities: raw.charity?.charity_activities?.trim() || null,
     });
     if ("error" in result) throw new Error(result.error);
   } catch (error) {

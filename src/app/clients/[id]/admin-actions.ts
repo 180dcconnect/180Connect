@@ -5,7 +5,10 @@ import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { reportError } from "@/lib/error-logging";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { ORGANISATION_TYPES } from "@/lib/organisation-format";
+import {
+  GEOGRAPHIC_REACHES,
+  ORGANISATION_TYPES,
+} from "@/lib/organisation-format";
 import {
   maxLengthFor,
   normaliseFieldValue,
@@ -51,6 +54,7 @@ const MISSION_FIELDS = new Set(["mission_statement", "mission"]);
  */
 const ENUM_FIELD_VALUES: Record<string, readonly string[]> = {
   organisation_type: ORGANISATION_TYPES,
+  geographic_reach: GEOGRAPHIC_REACHES,
 };
 
 /**

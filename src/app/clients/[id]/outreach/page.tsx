@@ -35,7 +35,6 @@ import {
   loadClient,
   loadOwner,
   loadSuppression,
-  loadWebsite,
   requireActor,
 } from "../load-record";
 
@@ -86,7 +85,6 @@ export default async function ClientOutreachPage({
   const [
     owner,
     suppression,
-    website,
     bookletResult,
     outreachResult,
     scheduledResult,
@@ -98,7 +96,6 @@ export default async function ClientOutreachPage({
     await Promise.all([
       loadOwner(id),
       loadSuppression(id),
-      loadWebsite(client.website),
       // F085/F086: every saved version, most recent first, so BookletPanel can
       // render the current one immediately (no fresh, billed Gemini call on
       // open) and list the rest as a timeline a CAM can browse.
@@ -352,16 +349,15 @@ export default async function ClientOutreachPage({
             <>
               {/* F082 — Generate Client Booklet. First, because a CAM reads the
                   research before writing the email below it. The Rise carries
-                  z-index so the composer's search panel paints over the Stage
-                  1 card beneath it — each Rise is a `filter` stacking context,
-                  so without this the later sibling would cover the dropdown. */}
-              <Rise className="relative z-20">
+                  z-index so the composer's search panel paints over the card
+                  beneath it — `relative z-20` is what orders them, not the
+                  entrance's filter, which `glass` removes: the composer's
+                  frosted panel can only blur the page if no ancestor holds a
+                  filter (see Rise). */}
+              <Rise glass className="relative z-20">
                 <BookletPanel
                   organisationId={client.id}
-                  initialWebsiteUrl={
-                    savedBooklet?.website_url ??
-                    (website.status === "reachable" ? website.url : null)
-                  }
+                  canDeleteBooklet={actor.role === "admin"}
                   savedBooklet={
                     savedBooklet && {
                       id: savedBooklet.id,

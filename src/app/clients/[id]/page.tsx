@@ -1064,6 +1064,7 @@ export default async function ClientDetailPage({
                   hint="Where this client sits in the outreach pipeline. Shown on the client list too."
                 >
                   <StatusSelect
+                    key={`profile-${client.outreach_status}`}
                     organisationId={client.id}
                     currentStatus={client.outreach_status}
                   />
@@ -1115,6 +1116,14 @@ export default async function ClientDetailPage({
                           ownershipWarning: ownershipConflict.hasConflict
                             ? ownershipConflict.warning
                             : undefined,
+                        }
+                      : undefined
+                  }
+                  statusControl={
+                    isAdmin || ownerId === authorization.actor.id
+                      ? {
+                          organisationId: client.id,
+                          currentStatus: client.outreach_status,
                         }
                       : undefined
                   }

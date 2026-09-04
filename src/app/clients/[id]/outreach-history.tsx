@@ -12,6 +12,7 @@ import {
 } from "@/lib/outreach-history";
 import { isRichEmailHtml, sanitizeEmailHtml } from "@/lib/outreach/email-html";
 import { FollowUpButton } from "./follow-up-button";
+import { StatusSelect } from "./status-select";
 import { AddNoteForm } from "./add-note-form";
 
 type ReplyDraftControls = {
@@ -20,6 +21,11 @@ type ReplyDraftControls = {
   ownershipBlocked: boolean;
   suppressionReason?: string;
   ownershipWarning?: string;
+};
+
+type ThreadStatusControl = {
+  organisationId: string;
+  currentStatus: string;
 };
 
 function formatDate(value: string): string {
@@ -67,11 +73,13 @@ function FullEmailThread({
   entries,
   error,
   replyDraftControls,
+  statusControl,
   noteOrganisationId,
 }: {
   entries: readonly EmailThreadEntry[];
   error: boolean;
   replyDraftControls?: ReplyDraftControls;
+  statusControl?: ThreadStatusControl;
   noteOrganisationId?: string;
 }) {
   return (
@@ -82,6 +90,21 @@ function FullEmailThread({
       <p className="mt-1 text-xs text-foreground/60">
         Sent emails and client replies, oldest first.
       </p>
+
+      {statusControl && (
+        <div className="mt-4 rounded-lg border border-black/10 bg-white p-3">
+          <p className="text-sm font-bold text-foreground">Update pipeline status</p>
+          <p className="mt-1 text-xs text-foreground/60">
+            Record the latest outcome while reviewing this conversation.
+          </p>
+          <StatusSelect
+            key={`reply-thread-${statusControl.currentStatus}`}
+            organisationId={statusControl.organisationId}
+            currentStatus={statusControl.currentStatus}
+            idSuffix="reply-thread"
+          />
+        </div>
+      )}
 
       {error ? (
         <p className="mt-3 text-sm font-medium text-red-800" role="alert">
@@ -168,6 +191,7 @@ export function OutreachHistorySection({
   thread,
   threadError,
   replyDraftControls,
+  statusControl,
   noteOrganisationId,
 }: {
   history: OutreachHistoryData;
@@ -175,6 +199,7 @@ export function OutreachHistorySection({
   thread: readonly EmailThreadEntry[];
   threadError: boolean;
   replyDraftControls?: ReplyDraftControls;
+  statusControl?: ThreadStatusControl;
   noteOrganisationId?: string;
 }) {
   // F130 AC3: filter selection is view state, not data state — it lives here,
@@ -201,6 +226,7 @@ export function OutreachHistorySection({
         entries={thread}
         error={threadError}
         replyDraftControls={replyDraftControls}
+        statusControl={statusControl}
         noteOrganisationId={noteOrganisationId}
       />
 

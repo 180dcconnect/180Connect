@@ -19,6 +19,10 @@ export type AttachmentRow = {
   content_type: string | null;
   size_bytes: number | null;
   created_at: string;
+  text_extraction_status: "pending" | "succeeded" | "failed" | "not_applicable";
+  extracted_text: string | null;
+  extracted_page_count: number | null;
+  extracted_text_truncated: boolean;
   uploaded_by_user: { full_name: string | null } | null;
 };
 
@@ -29,9 +33,25 @@ export type Attachment = {
   sizeLabel: string | null;
   createdAt: string;
   uploadedByName: string;
+  textExtractionStatus: AttachmentRow["text_extraction_status"];
+  extractedText: string | null;
+  extractedPageCount: number | null;
+  extractedTextTruncated: boolean;
 };
 
 const UNKNOWN_UPLOADER = "A former team member";
+export const MAX_ATTACHMENT_EMAIL_CONTEXT_CHARACTERS = 30_000;
+
+/** Bounds attachment context before it reaches a paid model prompt. */
+export function buildAttachmentEmailContext(
+  rows: readonly { filename: string; extracted_text: string | null }[],
+): string | null {
+  const blocks = rows
+    .filter((row) => row.extracted_text?.trim())
+    .map((row) => `File: ${row.filename}\n${row.extracted_text!.trim()}`);
+  if (blocks.length === 0) return null;
+  return blocks.join("\n\n").slice(0, MAX_ATTACHMENT_EMAIL_CONTEXT_CHARACTERS);
+}
 
 /** Binary units, matching how a CAM would actually read a file size ("2.4 MB"). */
 export function formatFileSize(bytes: number | null | undefined): string | null {
@@ -65,6 +85,10 @@ export function formatAttachments(rows: readonly AttachmentRow[]): Attachment[] 
       sizeLabel: formatFileSize(row.size_bytes),
       createdAt: row.created_at,
       uploadedByName: row.uploaded_by_user?.full_name?.trim() || UNKNOWN_UPLOADER,
+      textExtractionStatus: row.text_extraction_status,
+      extractedText: row.extracted_text,
+      extractedPageCount: row.extracted_page_count,
+      extractedTextTruncated: row.extracted_text_truncated,
     }))
     .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
 }

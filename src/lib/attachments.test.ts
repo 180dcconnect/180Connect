@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  buildAttachmentEmailContext,
   ALLOWED_ATTACHMENT_MIME_TYPES,
   MAX_ATTACHMENT_SIZE_BYTES,
   attachmentRpcFailure,
@@ -14,6 +15,22 @@ import {
   type AttachmentRow,
 } from "./attachments.ts";
 
+describe("buildAttachmentEmailContext (F220)", () => {
+  it("includes only successfully populated text with its source filename", () => {
+    assert.equal(
+      buildAttachmentEmailContext([
+        { filename: "report.pdf", extracted_text: "Useful annual report context" },
+        { filename: "scan.pdf", extracted_text: null },
+      ]),
+      "File: report.pdf\nUseful annual report context",
+    );
+  });
+
+  it("returns null when no extracted PDF text is available", () => {
+    assert.equal(buildAttachmentEmailContext([{ filename: "scan.pdf", extracted_text: null }]), null);
+  });
+});
+
 function row(overrides: Partial<AttachmentRow> = {}): AttachmentRow {
   return {
     id: "attachment-1",
@@ -21,6 +38,10 @@ function row(overrides: Partial<AttachmentRow> = {}): AttachmentRow {
     content_type: "application/pdf",
     size_bytes: 245_760,
     created_at: "2026-08-01T10:00:00Z",
+    text_extraction_status: "succeeded",
+    extracted_text: "Extracted agreement text",
+    extracted_page_count: 2,
+    extracted_text_truncated: false,
     uploaded_by_user: { full_name: "Alex CAM" },
     ...overrides,
   };

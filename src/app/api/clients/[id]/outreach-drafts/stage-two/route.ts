@@ -21,6 +21,7 @@ import {
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import { computeCostUsd } from "@/lib/outreach/generation-cost";
 import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
+import { buildAttachmentEmailContext } from "@/lib/attachments";
 
 export const maxDuration = 60;
 
@@ -189,6 +190,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     await reportError(bookletError, { operation: "outreach.stage_two.load_booklet", organisationId });
   }
 
+  const { data: extractedAttachments, error: attachmentContextError } = await supabase
+    .from("attachments")
+    .select("filename, extracted_text")
+    .eq("organisation_id", organisationId)
+    .eq("text_extraction_status", "succeeded")
+    .order("created_at", { ascending: false });
+  if (attachmentContextError) {
+    await reportError(attachmentContextError, { operation: "outreach.stage_two.load_attachment_context", organisationId });
+  }
+  const attachmentText = buildAttachmentEmailContext(extractedAttachments ?? []);
+
   let callModel;
   let model: string;
   try {
@@ -228,6 +240,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       subSector: enrichment?.sub_sector,
       newsHooks: enrichment?.news_hooks,
       booklet: savedBooklet?.booklet_text ?? null,
+      attachmentText,
       previousSubject: previousMessage.subject,
       // F117: the sent message's body may be HTML (new) or plain text (sent
       // before this feature) — either way the model prompt wants readable

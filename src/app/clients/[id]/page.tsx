@@ -269,7 +269,7 @@ export default async function ClientDetailPage({
   const { data: attachmentRows, error: attachmentsError } = await supabase
     .from("attachments")
     .select(
-      "id, filename, content_type, size_bytes, created_at, uploaded_by_user:users!attachments_uploaded_by_fkey(full_name)",
+      "id, filename, content_type, size_bytes, created_at, text_extraction_status, extracted_text, extracted_page_count, extracted_text_truncated, uploaded_by_user:users!attachments_uploaded_by_fkey(full_name)",
     )
     .eq("organisation_id", id)
     .order("created_at", { ascending: false });
@@ -993,6 +993,7 @@ export default async function ClientDetailPage({
                   organisationId={client.id}
                   attachments={attachments}
                   error={Boolean(attachmentsError)}
+                  canExtract={canEdit}
                 />
                 {/* F081: upload sits inside the same card so the new file
                     appears in the list directly above it on refresh (AC4). */}

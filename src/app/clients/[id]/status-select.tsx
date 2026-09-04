@@ -21,9 +21,11 @@ import { OriginButton } from "@/components/ui/origin-button";
 export function StatusSelect({
   organisationId,
   currentStatus,
+  idSuffix = "profile",
 }: {
   organisationId: string;
   currentStatus: string;
+  idSuffix?: string;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<PipelineStatus>(
@@ -60,7 +62,7 @@ export function StatusSelect({
 
   return (
     <div className="mt-4 flex flex-wrap items-center gap-2.5">
-      <label className="sr-only" htmlFor={`status-${organisationId}`}>
+      <label className="sr-only" htmlFor={`status-${organisationId}-${idSuffix}`}>
         Pipeline status
       </label>
       <Select
@@ -68,7 +70,7 @@ export function StatusSelect({
         disabled={busy}
         onValueChange={(value) => setSelected(value as PipelineStatus)}
       >
-        <SelectTrigger id={`status-${organisationId}`} className="w-fit rounded-full bg-white text-sm">
+        <SelectTrigger id={`status-${organisationId}-${idSuffix}`} className="w-fit rounded-full bg-white text-sm">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

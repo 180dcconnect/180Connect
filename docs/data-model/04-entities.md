@@ -1,6 +1,6 @@
 <!--
   GENERATED FILE — DO NOT EDIT.
-  Source: ~/Downloads/Data Model.xlsx (the Data Model spreadsheet is the source of truth, per SOP §7).
+  Source: ~/180Connect/Data Model.xlsx (the Data Model spreadsheet is the source of truth, per SOP §7).
   To change anything here: edit the spreadsheet, then run `npm run export:data-model`.
 -->
 
@@ -32,6 +32,9 @@
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last updated timestamp | System | Auto-updated on any change |  |
 | is_seed | boolean |  | No | Flag for seed data | System/Human | Set in the seed data script | False by default |
+| registered_on | date |  | Yes | Date the organisation entered its register | API | Charity Commission date_of_registration | Lets the app distinguish "no accounts due yet" from "overdue" — without it both render as an empty Financials tab |
+| charity_reporting_status | text |  | Yes | The register's own reporting status for a charity | API | Charity Commission reporting_status | Values are the regulator's: New / Submission Received / … Deliberately text, not an enum, so an unseen value can't fail an ingestion run |
+| charity_activities | text |  | Yes | The charity's own description of its work, as filed with the register | API | Charity Commission publicextract.charity.charity_activities | Canonical register text, distinct from ENRICHMENT_RESULTS.mission_statement, which is LLM-derived — a reader showing both must not present them as the same kind of claim. Externally authored free text: treat as untrusted input anywhere it reaches a model. |
 
 ## ORGANISATION_IDENTIFIERS
 
@@ -75,8 +78,28 @@
 | total_income | numeric |  | Yes | Total income for the period | API | Pulled from financial filing |  |
 | total_expenditure | numeric |  | Yes | Total expenditure for the period | API | Pulled from financial filing |  |
 | income_band | enum |  | Yes | Banded income category | System | Computed from total_income | under_10k / 10k_100k / 100k_1m / over_1m |
-| filing_date | date |  | Yes | Date the accounts were filed | API | Pulled from Charity Commission |  |
+| filing_date | date |  | Yes | Date the accounts were filed | API | Pulled from Charity Commission | Populated from the bulk register extract's ar_received_date. The Charity Commission API publishes no accounts-submission date at any endpoint, so API-sourced periods leave this null. |
 | financial_source | enum |  | No | Which API provided this data | System | Set on ingestion | charitybase / charity_commission |
+| income_donations_legacies | numeric |  | Yes | Income from donations and legacies for the period | API | Charity Commission | Annual-return breakdown. Parts are not guaranteed to sum to total_income — smaller charities file totals only. Null = not published, never zero |
+| income_charitable_activities | numeric |  | Yes | Income from charitable activities | API | Charity Commission | " |
+| income_other_trading | numeric |  | Yes | Income from other trading activities | API | Charity Commission | " |
+| income_investment | numeric |  | Yes | Investment income | API | Charity Commission | " |
+| income_endowments | numeric |  | Yes | Endowment income | API | Charity Commission | " |
+| income_other | numeric |  | Yes | Other income | API | Charity Commission | " |
+| income_govt_grants | numeric |  | Yes | Income from government grants | API | Charity Commission | Available from no other source we hold |
+| income_govt_contracts | numeric |  | Yes | Income from government contracts | API | Charity Commission | Available from no other source we hold |
+| expenditure_charitable_activities | numeric |  | Yes | Spend on charitable activities | API | Charity Commission | Annual-return breakdown; null = not published |
+| expenditure_raising_funds | numeric |  | Yes | Spend on raising funds | API | Charity Commission | " |
+| expenditure_governance | numeric |  | Yes | Governance costs | API | Charity Commission | " |
+| expenditure_grants_institutions | numeric |  | Yes | Grants made to institutions | API | Charity Commission | " |
+| expenditure_investment_management | numeric |  | Yes | Investment management costs | API | Charity Commission | " |
+| expenditure_other | numeric |  | Yes | Other expenditure | API | Charity Commission | " |
+| count_employees | integer |  | Yes | Employees reported on the annual return for this period | API | Charity Commission bulk annual return extract (Part A / Part B) | Part B. Null = not published (entry-level returns file totals only); 0 is a filed zero. Used with income to size an engagement — income alone cannot distinguish a charity run by 2 staff and 90 volunteers from one with 12 staff and none |
+| count_volunteers | integer |  | Yes | Volunteers reported on the annual return for this period | API | Charity Commission bulk annual return extract (Part A / Part B) | Part A. Null = not published, 0 is a filed zero |
+| receives_govt_grants | boolean |  | Yes | Whether the charity reported receiving government grant funding in this period | API | Charity Commission bulk annual return extract (Part A / Part B) | Part A. Read with income_govt_grants: the flag says whether the relationship exists, the amount how big, the count how many awards |
+| receives_govt_contracts | boolean |  | Yes | Whether the charity reported income from government contracts in this period | API | Charity Commission bulk annual return extract (Part A / Part B) | Part A |
+| count_govt_grants | integer |  | Yes | Number of government grants reported for this period | API | Charity Commission bulk annual return extract (Part A / Part B) | Part A |
+| count_govt_contracts | integer |  | Yes | Number of government contracts reported for this period | API | Charity Commission bulk annual return extract (Part A / Part B) | Part A. One large contract and fifteen small ones are different funding profiles at the same total |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 
 ## GRANTS
@@ -130,8 +153,8 @@
 | deactivated_at | timestamp |  | Yes | When the account was deactivated | System | Set by deactivate_user; cleared on reactivation | Null on active and on merely, suspended accounts; distinguishes deactivation from suspension |
 | invited_at | timestamp |  | Yes | When an admin invite created this row | System | Set by app.handle_new_auth_user from the invite's raw_user_meta_data | Null for rows not created by an invite (seed rows, first bootstrapped admin). Set with invite_accepted_at null = a pending invite |
 | invite_accepted_at | timestamp |  | Yes | When the invited person first confirmed their email | System | Set by app.handle_auth_user_confirmed when email_confirmed_at goes non-null | Null while invite pending. Setting it moves the row out of the admin's pending-invites list |
-| onboarding_completed_at | timestamp |  | Yes | When the user finished the onboarding flow | System | Set when user completes onboarding | Null until completed |
-| onboarding_dismissed_at | timestamp |  | Yes | When the user dismissed the onboarding flow | System | Set when user dismisses onboarding | Null until dismissed |
+| onboarding_completed_at | timestamp | 246 | Yes | When the user finished the onboarding flow | System | Set when user completes onboarding | Null until completed |
+| onboarding_dismissed_at | timestamp | 246 | Yes | When the user dismissed the onboarding flow | System | Set when user dismisses onboarding | Null until dismissed |
 
 ## NOTES
 
@@ -155,7 +178,8 @@
 | content_type | text |  | Yes | MIME type of the file | System | Detected at upload time |  |
 | size_bytes | bigint |  | Yes | File size in bytes | System | From the upload metadata | Must be ≥ 0 if present |
 | uploaded_by | uuid | USERS | Yes | Team member who attached the file | System | Set to logged-in user at creation | Nullable — a future automated import may have no human uploader (F081 decides) |
-| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+| timeline_context_type | text |  | No | Timeline source this file belongs to | System | Set to client for a general upload or to the linked event type | client, note, outreach_message, reply_event, or audit_log |
+| timeline_context_id | uuid |  | Yes | Stable ID of the linked timeline source | System | Set when the attachment is linked to a specific event | Null only for a client-level File shared event |
 
 ## TAGS
 
@@ -199,9 +223,9 @@
 
 | Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| user_id | uuid | USERS | No | User completing the step | System | Set when step is completed |  |
-| step_key | text |  | No | Key of the onboarding step | System | Set when step is completed |  |
-| completed_at | timestamp |  | No | When the step was completed | System | Auto-generated |  |
+| user_id | uuid | USERS | No | User completing the step | System | Set when step is completed | 246 |
+| step_key | text | 246 | No | Key of the onboarding step | System | Set when step is completed | 246 |
+| completed_at | timestamp | 246 | No | When the step was completed | System | Auto-generated | 246 |
 
 ## OUTREACH_PREFERENCES
 
@@ -283,7 +307,12 @@
 | prompt_system | text |  | No | System prompt used | System | Set when generated |  |
 | prompt_user | text |  | No | User prompt used | System | Set when generated |  |
 | output | text |  | No | Generated output | System | Set when generated |  |
-| model | text |  | No | Model used for generation | System | Set when generated |  |
+| model | text |  | No | Model used for generation | System | Set when generated | Snapshotted at generation time; used with MODEL_PRICING to compute cost |
+| activity | text |  | Yes | Activity identifier for observability | System | Set when generated |  |
+| input_tokens | integer |  | Yes | Prompt tokens the AI provider reported for this call | System | Taken from the provider's API response | Blank when the provider reports nothing — never filled with 0 |
+| output_tokens | integer |  | Yes | Response tokens the provider reported | System | Taken from the provider's API response | Same rule as above |
+| total_tokens | integer |  | Yes | Total tokens as the provider reported them | System | Taken from the provider's API response | Stored as reported, may differ slightly from input + output |
+| cost_usd | decimal(12,6) |  | Yes | Cost in US dollars, priced at generation time | System | Computed against MODEL_PRICING when the booklet is generated | Blank = unknown cost (no price configured yet); never 0 |
 | created_at | timestamptz |  | No | Row creation timestamp | System | Auto-generated | Default now(). Append-only. |
 
 ## EDIT_SUGGESTIONS
@@ -326,10 +355,11 @@
 | cam_edited | boolean |  | No | Whether the CAM edited the draft before use | System | Set when the CAM saves changes | Defaults to false |
 | edit_distance | integer |  | Yes | How far the CAM's final version moved from the raw draft | System | Computed when the CAM saves | Zero or more |
 | model | text |  | No | Which specific AI model produced this draft | System | Snapshotted from app configuration at generation time | Historical rows keep the model that actually ran, never the current default |
-| input_tokens | integer |  | Yes | Prompt tokens the AI provider reported for this call | System | Taken from the provider's API response | Blank when the provider reports nothing — never filled with 0 |
-| output_tokens | integer |  | Yes | Response tokens the provider reported | System | Taken from the provider's API response | Same rule as above |
-| total_tokens | integer |  | Yes | Total tokens as the provider reported them | System | Taken from the provider's API response | Stored as reported, may differ slightly from input + output |
-| cost_usd | decimal(12,6) |  | Yes | Cost in US dollars, priced at generation time | System | Computed against MODEL_PRICING when the draft is generated | Blank = unknown cost (no price configured yet); never 0 |
+| activity | text |  | Yes | Activity identifier for observability | System | Set when generated |  |
+| input_tokens | integer |  | Yes | Prompt tokens the AI provider reported for this AI generation | System | Taken from the provider's API response | Blank when the provider reports nothing — never filled with 0 |
+| output_tokens | integer |  | Yes | Response tokens the provider reported for this AI generation | System | Taken from the provider's API response | Same rule as above |
+| total_tokens | integer |  | Yes | Total tokens as the provider reported them for this AI generation | System | Taken from the provider's API response | Stored as reported, may differ slightly from input + output |
+| cost_usd | decimal(12,6) |  | Yes | Cost in US dollars for this AI generation, priced at generation time | System | Computed against MODEL_PRICING when the draft is generated | Blank = unknown cost (no price configured yet); never 0 |
 | prompt_system | text |  | No | Exact system instruction sent to the model | System | Captured verbatim when the draft is generated | Constant today, but stored per row so a future edit never rewrites what an older row says was sent |
 | prompt_user | text |  | No | Exact user-turn prompt sent to the model | System | Built from client context when the draft is generated |  |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
@@ -344,3 +374,16 @@
 | output_usd_per_1k_tokens | decimal(12,6) |  | No | US dollars per 1,000 response tokens | Human | Same as above | Zero or more |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last time the rate changed | System | Auto-updated on change |  |
+
+## IMPORT_FILTER_PRESETS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation (gen_random_uuid()) | PK, gen_random_uuid(). RLS: enabled, no policies (service-role only). Purpose: saved import criteria — "Sheffield arts, any size" — so a cycle's selection is repeatable. |
+| name | text |  | No | Filter preset name | Human | Typed by user when saving preset | Must not be blank; unique per source, case-insensitive |
+| description | text |  | Yes | Filter preset description | Human / System | Entered by user or defaults to filter set written out in words | Defaults to the filter set written out in words |
+| filters | jsonb |  | No | Saved filter criteria | System | Captured from active filter criteria at save time | Validated in TypeScript, not by constraint |
+| source | text |  | No | Data source the preset applies to | Human / System | Selected data source (default 'charity_commission') | Default 'charity_commission' |
+| created_by_user_id | uuid | USERS | Yes | User who created the preset | System | auth.uid() at save time | FK → users.id, ON DELETE SET NULL |
+| created_at | timestamptz |  | No | Row creation timestamp | System | Auto-generated (now()) | now() |
+| updated_at | timestamptz |  | No | Last updated timestamp | System | Auto-updated on change (now()) | now() |

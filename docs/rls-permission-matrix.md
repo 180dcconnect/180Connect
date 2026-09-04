@@ -1119,8 +1119,9 @@ is the §2 pattern ("what RLS cannot do"), not an oversight.
 
 ### 3.21 Attachments — shared read, RPC-recorded write, private bucket
 
-Backs F080 View Client Attachments (#83) and F081 Upload Client Attachment
-(#84), `supabase/migrations/20260823090000_create_attachments.sql` (schema and
+Backs F080 View Client Attachments (#83), F081 Upload Client Attachment
+(#84), and F219 Link Attachment to Timeline (#214),
+`supabase/migrations/20260823090000_create_attachments.sql` (schema and
 read half) plus `20260824000000_add_attachment_upload.sql` (upload half — split
 out because the create migration had already run on staging/production by the
 time F081 landed, and an applied migration file must never be edited in
@@ -1130,6 +1131,15 @@ migration header for the full reasoning, the "storage location" answer
 (Supabase Storage, PRD §7's architecture table), and the explicit caveat that
 the size/type limits below are a provisional default, not the sign-off PRD
 §14 names as still owed.
+
+F219 adds `timeline_context_type` and `timeline_context_id` in
+`20260912180000_link_attachments_to_timeline.sql`. Existing and new manual
+uploads default to a client-level `File shared` event. A CAM/admin can use
+`link_attachment_to_timeline(attachment_id, organisation_id, context_type,
+context_id)` to associate the file with a note, sent email, reply, or supported
+audit event. The `SECURITY DEFINER` RPC re-checks `app.can_write()`, verifies
+the attachment belongs to the supplied client, and verifies the target event
+belongs to that same client. No role receives direct UPDATE permission.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|

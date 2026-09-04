@@ -50,6 +50,7 @@ import { NotesSection } from "./notes-section";
 import { AddNoteForm } from "./add-note-form";
 import {
   buildTimeline,
+  buildTimelineLinkOptions,
   collectReferencedUserIds,
   type AuditRow,
   type NoteRow as TimelineNoteRow,
@@ -269,7 +270,7 @@ export default async function ClientDetailPage({
   const { data: attachmentRows, error: attachmentsError } = await supabase
     .from("attachments")
     .select(
-      "id, filename, content_type, size_bytes, created_at, uploaded_by_user:users!attachments_uploaded_by_fkey(full_name)",
+      "id, filename, content_type, size_bytes, created_at, timeline_context_type, timeline_context_id, uploaded_by_user:users!attachments_uploaded_by_fkey(full_name)",
     )
     .eq("organisation_id", id)
     .order("created_at", { ascending: false });
@@ -661,9 +662,11 @@ export default async function ClientDetailPage({
       outreachMessages: (timelineMessageRows ?? []) as unknown as TimelineOutreachRow[],
       replyEvents: (replyRows ?? []) as unknown as ReplyEventRow[],
       auditRows: (auditRows ?? []) as unknown as AuditRow[],
+      attachments: (attachmentRows ?? []) as unknown as AttachmentRow[],
     },
     timelineNames,
   );
+  const timelineLinkOptions = buildTimelineLinkOptions(timeline);
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
@@ -993,6 +996,8 @@ export default async function ClientDetailPage({
                   organisationId={client.id}
                   attachments={attachments}
                   error={Boolean(attachmentsError)}
+                  canLink={canEdit}
+                  timelineOptions={timelineLinkOptions}
                 />
                 {/* F081: upload sits inside the same card so the new file
                     appears in the list directly above it on refresh (AC4). */}
@@ -1173,7 +1178,11 @@ export default async function ClientDetailPage({
             title="Timeline"
             hint="Every email, reply, note and change for this client, in one place."
           >
-            <TimelineSection entries={timeline} degraded={timelineDegraded} />
+            <TimelineSection
+              entries={timeline}
+              degraded={timelineDegraded}
+              organisationId={client.id}
+            />
           </SectionCard>
         </Rise>
         <TimelineRealtimeRefresher organisationId={client.id} />

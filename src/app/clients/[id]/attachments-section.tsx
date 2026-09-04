@@ -1,4 +1,5 @@
 import type { Attachment } from "@/lib/attachments";
+import { LinkAttachmentForm, type TimelineLinkOption } from "./link-attachment-form";
 
 /**
  * F080 — list / empty / error states for a client's attachments (AC1, AC3).
@@ -10,10 +11,14 @@ export function AttachmentsSection({
   organisationId,
   attachments,
   error,
+  canLink,
+  timelineOptions,
 }: {
   organisationId: string;
   attachments: readonly Attachment[];
   error: boolean;
+  canLink: boolean;
+  timelineOptions: readonly TimelineLinkOption[];
 }) {
   if (error) {
     return (
@@ -55,6 +60,18 @@ export function AttachmentsSection({
               {new Date(attachment.createdAt).toLocaleDateString("en-GB")}
               {attachment.sizeLabel ? ` · ${attachment.sizeLabel}` : ""}
             </p>
+            {canLink && (
+              <LinkAttachmentForm
+                organisationId={organisationId}
+                attachmentId={attachment.id}
+                currentKey={
+                  attachment.timelineContextType === "client"
+                    ? "client"
+                    : `${attachment.timelineContextType}:${attachment.timelineContextId}`
+                }
+                options={timelineOptions}
+              />
+            )}
           </div>
         </li>
       ))}

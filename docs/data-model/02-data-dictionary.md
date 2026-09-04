@@ -1,6 +1,6 @@
 <!--
   GENERATED FILE — DO NOT EDIT.
-  Source: ~/Downloads/Data Model.xlsx (the Data Model spreadsheet is the source of truth, per SOP §7).
+  Source: ~/180Connect/Data Model.xlsx (the Data Model spreadsheet is the source of truth, per SOP §7).
   To change anything here: edit the spreadsheet, then run `npm run export:data-model`.
 -->
 
@@ -138,6 +138,12 @@
 | 04 Entities | FINANCIAL_PERIODS | income_band | enum |  |  |
 | 04 Entities | FINANCIAL_PERIODS | filing_date | date |  |  |
 | 04 Entities | FINANCIAL_PERIODS | financial_source | enum |  |  |
+| 04 Entities | FINANCIAL_PERIODS | count_employees | integer |  |  |
+| 04 Entities | FINANCIAL_PERIODS | count_volunteers | integer |  |  |
+| 04 Entities | FINANCIAL_PERIODS | receives_govt_grants | boolean |  |  |
+| 04 Entities | FINANCIAL_PERIODS | receives_govt_contracts | boolean |  |  |
+| 04 Entities | FINANCIAL_PERIODS | count_govt_grants | integer |  |  |
+| 04 Entities | FINANCIAL_PERIODS | count_govt_contracts | integer |  |  |
 | 04 Entities | FINANCIAL_PERIODS | created_at | timestamp |  |  |
 | 04 Entities | GRANTS | id | uuid |  |  |
 | 04 Entities | GRANTS | organisation_id | uuid | ORGANISATIONS |  |
@@ -176,11 +182,11 @@
 | 04 Entities | USERS | deactivated_at | timestamp |  |  |
 | 04 Entities | USERS | invited_at | timestamp |  |  |
 | 04 Entities | USERS | invite_accepted_at | timestamp |  |  |
-| 04 Entities | USERS | onboarding_completed_at | timestamp |  | When the user finished the onboarding flow |
-| 04 Entities | USERS | onboarding_dismissed_at | timestamp |  | When the user dismissed the onboarding flow |
+| 04 Entities | USERS | onboarding_completed_at | timestamp | 246 | When the user finished the onboarding flow |
+| 04 Entities | USERS | onboarding_dismissed_at | timestamp | 246 | When the user dismissed the onboarding flow |
 | 04 Entities | USER_ONBOARDING_STEPS | user_id | uuid | USERS | User completing the step |
-| 04 Entities | USER_ONBOARDING_STEPS | step_key | text |  | Key of the onboarding step |
-| 04 Entities | USER_ONBOARDING_STEPS | completed_at | timestamp |  | When the step was completed |
+| 04 Entities | USER_ONBOARDING_STEPS | step_key | text | 246 | Key of the onboarding step |
+| 04 Entities | USER_ONBOARDING_STEPS | completed_at | timestamp | 246 | When the step was completed |
 | 04 Entities | NOTES | id | uuid |  |  |
 | 04 Entities | NOTES | organisation_id | uuid | ORGANISATIONS |  |
 | 04 Entities | NOTES | author_id | uuid | USERS |  |
@@ -246,49 +252,49 @@
 | 04 Entities | OWNERSHIP_REQUESTS | decision_note | text |  | Optional admin note |
 | 04 Entities | OWNERSHIP_REQUESTS | created_at | timestamp |  | Row creation timestamp |
 | 05 - Features | SCORING_WEIGHTS | id | model_name |  | feature_name |
-| 05 - Features | SCORING_WEIGHTS | 1.0 | SCOUT |  | south_yorkshire_flag |
-| 05 - Features | SCORING_WEIGHTS | 2.0 | SCOUT |  | mission_alignment_score |
-| 05 - Features | SCORING_WEIGHTS | 3.0 | SCOUT |  | service_fit_score |
-| 05 - Features | SCORING_WEIGHTS | 4.0 | SCOUT |  | never_contacted_flag |
-| 05 - Features | SCORING_WEIGHTS | 5.0 | SCOUT |  | income_band |
-| 05 - Features | SCORING_WEIGHTS | 6.0 | SCOUT |  | income_trend |
-| 05 - Features | SCORING_WEIGHTS | 7.0 | SCOUT |  | days_since_last_contact |
-| 05 - Features | SCORING_WEIGHTS | 8.0 | SCOUT |  | financial_stability_score |
-| 05 - Features | SCORING_WEIGHTS | 9.0 | SCOUT |  | has_recent_grant_flag |
-| 05 - Features | SCORING_WEIGHTS | 10.0 | SCOUT |  | digital_maturity_score |
-| 05 - Features | SCORING_WEIGHTS | 11.0 | SCOUT |  | data_completeness_score |
-| 05 - Features | SCORING_WEIGHTS | 12.0 | SCOUT |  | grant_count |
-| 05 - Features | SCORING_WEIGHTS | 13.0 | SCOUT |  | has_partnership_history_flag |
-| 05 - Features | SCORING_WEIGHTS | 14.0 | COMPASS |  | semester_fit_score |
-| 05 - Features | SCORING_WEIGHTS | 15.0 | COMPASS |  | project_complexity_score |
-| 05 - Features | SCORING_WEIGHTS | 16.0 | COMPASS |  | repeat_engagement_score |
-| 05 - Features | SCORING_WEIGHTS | 17.0 | COMPASS |  | case_study_potential_score |
-| 05 - Features | SCORING_WEIGHTS | 18.0 | COMPASS |  | portfolio_sector_score |
+| 05 - Features | SCORING_WEIGHTS | 1 | SCOUT |  | south_yorkshire_flag |
+| 05 - Features | SCORING_WEIGHTS | 2 | SCOUT |  | mission_alignment_score |
+| 05 - Features | SCORING_WEIGHTS | 3 | SCOUT |  | service_fit_score |
+| 05 - Features | SCORING_WEIGHTS | 4 | SCOUT |  | never_contacted_flag |
+| 05 - Features | SCORING_WEIGHTS | 5 | SCOUT |  | income_band |
+| 05 - Features | SCORING_WEIGHTS | 6 | SCOUT |  | income_trend |
+| 05 - Features | SCORING_WEIGHTS | 7 | SCOUT |  | days_since_last_contact |
+| 05 - Features | SCORING_WEIGHTS | 8 | SCOUT |  | financial_stability_score |
+| 05 - Features | SCORING_WEIGHTS | 9 | SCOUT |  | has_recent_grant_flag |
+| 05 - Features | SCORING_WEIGHTS | 10 | SCOUT |  | digital_maturity_score |
+| 05 - Features | SCORING_WEIGHTS | 11 | SCOUT |  | data_completeness_score |
+| 05 - Features | SCORING_WEIGHTS | 12 | SCOUT |  | grant_count |
+| 05 - Features | SCORING_WEIGHTS | 13 | SCOUT |  | has_partnership_history_flag |
+| 05 - Features | SCORING_WEIGHTS | 14 | COMPASS |  | semester_fit_score |
+| 05 - Features | SCORING_WEIGHTS | 15 | COMPASS |  | project_complexity_score |
+| 05 - Features | SCORING_WEIGHTS | 16 | COMPASS |  | repeat_engagement_score |
+| 05 - Features | SCORING_WEIGHTS | 17 | COMPASS |  | case_study_potential_score |
+| 05 - Features | SCORING_WEIGHTS | 18 | COMPASS |  | portfolio_sector_score |
 | 05 - Features | FEATURE_DEFINITIONS | id | feature_name |  | description |
-| 05 - Features | FEATURE_DEFINITIONS | 1.0 | south_yorkshire_flag |  | Whether the organisation is based in South Yorkshire |
-| 05 - Features | FEATURE_DEFINITIONS | 2.0 | mission_alignment_score |  | How well the organisation’s mission matches 180DC services |
-| 05 - Features | FEATURE_DEFINITIONS | 3.0 | service_fit_score |  | Highest score across all 180DC service-fit categories |
-| 05 - Features | FEATURE_DEFINITIONS | 4.0 | income_band |  | Bucketed organisation income level |
-| 05 - Features | FEATURE_DEFINITIONS | 5.0 | income_trend |  | Year-over-year income direction |
-| 05 - Features | FEATURE_DEFINITIONS | 6.0 | never_contacted_flag |  | Whether the organisation has never been sent an outreach email |
-| 05 - Features | FEATURE_DEFINITIONS | 7.0 | days_since_last_contact |  | Number of days since the most recent outreach |
-| 05 - Features | FEATURE_DEFINITIONS | 8.0 | financial_stability_score |  | Composite measure of overall financial health |
-| 05 - Features | FEATURE_DEFINITIONS | 9.0 | has_recent_grant_flag |  | Whether the organisation received a grant during the previous 24 months |
-| 05 - Features | FEATURE_DEFINITIONS | 10.0 | digital_maturity_score |  | How digitally developed the organisation is |
-| 05 - Features | FEATURE_DEFINITIONS | 11.0 | data_completeness_score |  | Percentage of required organisation fields that are populated |
-| 05 - Features | FEATURE_DEFINITIONS | 12.0 | grant_count |  | Total number of grants received |
-| 05 - Features | FEATURE_DEFINITIONS | 13.0 | has_partnership_history_flag |  | Whether the organisation previously converted to a 180DC client |
-| 05 - Features | FEATURE_DEFINITIONS | 14.0 | semester_fit_score |  | How well project timing aligns with the student semester |
-| 05 - Features | FEATURE_DEFINITIONS | 15.0 | project_complexity_score |  | Whether the project has suitable complexity for a student team |
-| 05 - Features | FEATURE_DEFINITIONS | 16.0 | repeat_engagement_score |  | Strength of the organisation’s prior relationship with 180DC |
-| 05 - Features | FEATURE_DEFINITIONS | 17.0 | case_study_potential_score |  | Potential for the engagement to produce a publishable case study |
-| 05 - Features | FEATURE_DEFINITIONS | 18.0 | portfolio_sector_score |  | How underrepresented the organisation’s sector is in the current portfolio |
-| 05 - Features | FEATURE_DEFINITIONS | 19.0 | performance_score |  | How well an email performed based on its confirmed outcome |
-| 05 - Features | FEATURE_DEFINITIONS | 20.0 | used_as_example_count |  | Number of times the email has been supplied to Gemini as a few-shot example |
+| 05 - Features | FEATURE_DEFINITIONS | 1 | south_yorkshire_flag |  | Whether the organisation is based in South Yorkshire |
+| 05 - Features | FEATURE_DEFINITIONS | 2 | mission_alignment_score |  | How well the organisation’s mission matches 180DC services |
+| 05 - Features | FEATURE_DEFINITIONS | 3 | service_fit_score |  | Highest score across all 180DC service-fit categories |
+| 05 - Features | FEATURE_DEFINITIONS | 4 | income_band |  | Bucketed organisation income level |
+| 05 - Features | FEATURE_DEFINITIONS | 5 | income_trend |  | Year-over-year income direction |
+| 05 - Features | FEATURE_DEFINITIONS | 6 | never_contacted_flag |  | Whether the organisation has never been sent an outreach email |
+| 05 - Features | FEATURE_DEFINITIONS | 7 | days_since_last_contact |  | Number of days since the most recent outreach |
+| 05 - Features | FEATURE_DEFINITIONS | 8 | financial_stability_score |  | Composite measure of overall financial health |
+| 05 - Features | FEATURE_DEFINITIONS | 9 | has_recent_grant_flag |  | Whether the organisation received a grant during the previous 24 months |
+| 05 - Features | FEATURE_DEFINITIONS | 10 | digital_maturity_score |  | How digitally developed the organisation is |
+| 05 - Features | FEATURE_DEFINITIONS | 11 | data_completeness_score |  | Percentage of required organisation fields that are populated |
+| 05 - Features | FEATURE_DEFINITIONS | 12 | grant_count |  | Total number of grants received |
+| 05 - Features | FEATURE_DEFINITIONS | 13 | has_partnership_history_flag |  | Whether the organisation previously converted to a 180DC client |
+| 05 - Features | FEATURE_DEFINITIONS | 14 | semester_fit_score |  | How well project timing aligns with the student semester |
+| 05 - Features | FEATURE_DEFINITIONS | 15 | project_complexity_score |  | Whether the project has suitable complexity for a student team |
+| 05 - Features | FEATURE_DEFINITIONS | 16 | repeat_engagement_score |  | Strength of the organisation’s prior relationship with 180DC |
+| 05 - Features | FEATURE_DEFINITIONS | 17 | case_study_potential_score |  | Potential for the engagement to produce a publishable case study |
+| 05 - Features | FEATURE_DEFINITIONS | 18 | portfolio_sector_score |  | How underrepresented the organisation’s sector is in the current portfolio |
+| 05 - Features | FEATURE_DEFINITIONS | 19 | performance_score |  | How well an email performed based on its confirmed outcome |
+| 05 - Features | FEATURE_DEFINITIONS | 20 | used_as_example_count |  | Number of times the email has been supplied to Gemini as a few-shot example |
 | 05 - Features | AGENT_PROMPTS | id | agent_name |  | prompt_template |
-| 05 - Features | AGENT_PROMPTS | 1.0 | SCOUT |  |  |
-| 05 - Features | AGENT_PROMPTS | 2.0 | COMPASS |  |  |
-| 05 - Features | AGENT_PROMPTS | 3.0 | VOICE |  | You are writing a cold outreach email for 180 Degrees Consulting Sheffield, a student consultancy at the University of Sheffield working with social enterprises and non-profits. Organisation profile: {org_profile}. Service to pitch: {service}. Tone: {tone}. Here are {n} emails that successfully converted or received replies from similar organisations: {examples}. Write a new email following similar patterns. Return JSON: { subject, body, tone_used, hook_type } |
+| 05 - Features | AGENT_PROMPTS | 1 | SCOUT |  |  |
+| 05 - Features | AGENT_PROMPTS | 2 | COMPASS |  |  |
+| 05 - Features | AGENT_PROMPTS | 3 | VOICE |  | You are writing a cold outreach email for 180 Degrees Consulting Sheffield, a student consultancy at the University of Sheffield working with social enterprises and non-profits. Organisation profile: {org_profile}. Service to pitch: {service}. Tone: {tone}. Here are {n} emails that successfully converted or received replies from similar organisations: {examples}. Write a new email following similar patterns. Return JSON: { subject, body, tone_used, hook_type } |
 | 05 - Features | EMAIL_PERFORMANCE_LIBRARY | id | outreach_message_id |  | organisation_id |
 | 05 - Features | EMAIL_PERFORMANCE_LIBRARY | — | links to OUTREACH_MESSAGES |  | which org |
 | 06 - Predictions | AGENT_RUNS | id | uuid |  | Primary key |
@@ -550,3 +556,27 @@
 | 04 Entities | RESTRICTED_EDIT_FIELDS | reason | text |  | Why the field is restricted |
 | 04 Entities | RESTRICTED_EDIT_FIELDS | added_by | uuid | USERS | Admin who added/re-added the restriction |
 | 04 Entities | RESTRICTED_EDIT_FIELDS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | BOOKLET_GENERATIONS | activity | text |  | Activity identifier for observability |
+| 04 Entities | BOOKLET_GENERATIONS | input_tokens | integer |  | Prompt tokens the AI provider reported for this call |
+| 04 Entities | BOOKLET_GENERATIONS | output_tokens | integer |  | Response tokens the provider reported |
+| 04 Entities | BOOKLET_GENERATIONS | total_tokens | integer |  | Total tokens as the provider reported them |
+| 04 Entities | BOOKLET_GENERATIONS | cost_usd | decimal(12,6) |  | Cost in US dollars, priced at generation time |
+| 04 Entities | AI_GENERATIONS | activity | text |  | Activity identifier for observability |
+| 04 Entities | FINANCIAL_PERIODS | income_donations_legacies | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_charitable_activities | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_other_trading | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_investment | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_endowments | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_other | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_govt_grants | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_govt_contracts | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_charitable_activities | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_raising_funds | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_governance | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_grants_institutions | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_investment_management | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_other | numeric |  |  |
+| 04 Entities | ORGANISATIONS | registered_on | date |  |  |
+| 04 Entities | ORGANISATIONS | charity_reporting_status | text |  |  |
+| 04 Entities | ATTACHMENTS | timeline_context_type | text |  | Timeline source: client, note, outreach_message, reply_event, or audit_log |
+| 04 Entities | ATTACHMENTS | timeline_context_id | uuid |  | Stable linked event ID; null for a client-level File shared event |

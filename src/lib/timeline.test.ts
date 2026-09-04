@@ -12,6 +12,7 @@ import {
   buildReplyReceivedEntry,
   buildStatusChangedEntry,
   buildTimeline,
+  buildTimelineLinkOptions,
   collectReferencedUserIds,
   type AuditRow,
   type NoteRow,
@@ -19,6 +20,7 @@ import {
   type ReplyEventRow,
   type TimelineEventType,
 } from "./timeline.ts";
+import type { AttachmentRow } from "./attachments.ts";
 
 const CAM_A = "cam-a";
 const CAM_B = "cam-b";
@@ -36,7 +38,22 @@ const ALL_EVENT_TYPES: TimelineEventType[] = [
   "ownership_reassigned",
   "edit_applied",
   "edit_rejected",
+  "attachment_added",
 ];
+
+function attachmentRow(overrides: Partial<AttachmentRow> = {}): AttachmentRow {
+  return {
+    id: "attachment-1",
+    filename: "proposal.pdf",
+    content_type: "application/pdf",
+    size_bytes: 1024,
+    created_at: "2026-08-06T09:00:00Z",
+    timeline_context_type: "client",
+    timeline_context_id: null,
+    uploaded_by_user: { full_name: "Ada Lovelace" },
+    ...overrides,
+  };
+}
 
 function noteRow(overrides: Partial<NoteRow> = {}): NoteRow {
   return {
@@ -335,6 +352,60 @@ describe("collectReferencedUserIds", () => {
 });
 
 describe("buildTimeline", () => {
+  it("adds a client-level attachment as its own downloadable timeline event (F219 AC1/AC2)", () => {
+    const timeline = buildTimeline(
+      {
+        notes: [], outreachMessages: [], replyEvents: [], auditRows: [],
+        attachments: [attachmentRow()],
+      },
+      NAMES,
+    );
+    assert.equal(timeline[0]?.type, "attachment_added");
+    assert.deepEqual(timeline[0]?.attachments, [{ id: "attachment-1", filename: "proposal.pdf" }]);
+  });
+
+  it("links a reply attachment by stable event id even when later events are added (F219 AC1/AC3)", () => {
+    const linked = attachmentRow({
+      timeline_context_type: "reply_event",
+      timeline_context_id: "reply-1",
+    });
+    const timeline = buildTimeline(
+      {
+        notes: [noteRow({ id: "later", created_at: "2026-09-01T00:00:00Z" })],
+        outreachMessages: [],
+        replyEvents: [replyRow({ id: "reply-1" })],
+        auditRows: [],
+        attachments: [linked],
+      },
+      NAMES,
+    );
+    const reply = timeline.find((entry) => entry.id === "reply-reply-1");
+    assert.deepEqual(reply?.attachments, [{ id: "attachment-1", filename: "proposal.pdf" }]);
+  });
+
+  it("keeps a file visible if its linked source temporarily fails to load", () => {
+    const timeline = buildTimeline(
+      {
+        notes: [], outreachMessages: [], replyEvents: [], auditRows: [],
+        attachments: [attachmentRow({ timeline_context_type: "reply_event", timeline_context_id: "missing" })],
+      },
+      NAMES,
+    );
+    assert.equal(timeline[0]?.type, "attachment_added");
+    assert.match(timeline[0]?.summary ?? "", /temporarily unavailable/i);
+  });
+
+  it("builds link choices from actual stable timeline sources", () => {
+    const timeline = buildTimeline(
+      { notes: [], outreachMessages: [], replyEvents: [replyRow()], auditRows: [] },
+      NAMES,
+    );
+    const options = buildTimelineLinkOptions(timeline);
+    assert.equal(options[0]?.key, "client");
+    assert.equal(options[1]?.key, "reply_event:reply-1");
+    assert.match(options[1]?.label ?? "", /Reply received/);
+  });
+
   it("merges every source into one feed, newest first", () => {
     const timeline = buildTimeline(
       {

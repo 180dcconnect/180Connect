@@ -3,7 +3,6 @@
 import { useState, useTransition } from "react";
 import { HandCoins, RefreshCw } from "lucide-react";
 
-import { OriginButton } from "@/components/ui/origin-button";
 import { fetchGrantsForClient } from "./grant-history-actions";
 
 /**
@@ -45,18 +44,29 @@ export function GrantFetchButton({
 
   return (
     <div className="mt-4 flex flex-wrap items-center gap-3">
-      <OriginButton onClick={run} disabled={pending} size="sm" type="button">
-        <Icon className={`h-3.5 w-3.5 ${pending ? "animate-spin" : ""}`} strokeWidth={2.2} />
+      {/* The same quiet bordered action as the Add button on an empty General
+          Information row — a secondary action beside the list, not a primary
+          one competing with it. */}
+      <button
+        type="button"
+        onClick={run}
+        disabled={pending}
+        className="inline-flex shrink-0 items-center gap-1 rounded-inset border border-rule bg-white px-2 py-0.5 text-[12px] font-semibold text-lead transition-colors hover:border-lead focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <Icon
+          aria-hidden="true"
+          className={`size-3 ${pending ? "animate-spin" : ""}`}
+        />
         {pending
           ? "Checking 360Giving…"
           : hasGrants
             ? "Check for new grants"
             : "Fetch grant history"}
-      </OriginButton>
+      </button>
 
       {result && (
         <p
-          className={`text-xs font-semibold ${result.ok ? "text-foreground/60" : "text-red-800"}`}
+          className={`text-xs font-semibold ${result.ok ? "text-dim" : "text-stop"}`}
           role="status"
         >
           {result.message}

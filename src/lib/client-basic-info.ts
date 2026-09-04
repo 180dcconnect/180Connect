@@ -6,6 +6,7 @@
  * the admin team list.
  */
 
+import { containsRedactionPlaceholder } from "./ingestion/personal-data.ts";
 import {
   formatLocation,
   formatOrganisationType,
@@ -82,7 +83,12 @@ export function buildBasicInfo(state: BasicInfoState): BasicInfo {
     // type the database grew first still shows rather than vanishing.
     type: formatOrganisationType(organisation.organisation_type),
     mission: displayValue(missionStatement),
-    email: displayValue(organisation.contact_email),
+    // A redaction placeholder is a record of a removal, not an address: shown
+    // as the blank it is rather than printed back at the reader as though the
+    // register had published `[redacted:personal-email]`.
+    email: containsRedactionPlaceholder(organisation.contact_email)
+      ? NOT_PROVIDED
+      : displayValue(organisation.contact_email),
     address: formatAddress(organisation),
     location: formatLocation(organisation),
     website: displayValue(organisation.website),

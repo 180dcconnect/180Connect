@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion, type Variants } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
 import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { ArrowRight, Check, ChevronLeft, Plus, SlidersHorizontal, X } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -104,6 +104,46 @@ const DEFAULT_PARAMS: Record<string, string> = {
   "Filter by source": "source",
 };
 
+/**
+ * The host's status lines, cycling where the prompt normally sits. Its own
+ * component so a run's first line is guaranteed by mounting rather than by an
+ * effect that resets an index — and so reduced motion is handled in one place:
+ * it holds the first line instead of swapping under someone who asked for
+ * stillness.
+ */
+function StatusLine({ messages }: { messages: readonly string[] }) {
+  const reducedMotion = useReducedMotion();
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    if (reducedMotion || messages.length < 2) return;
+    const id = setInterval(() => setIndex((i) => (i + 1) % messages.length), 3200);
+    return () => clearInterval(id);
+  }, [reducedMotion, messages.length]);
+
+  const message = messages[index % messages.length];
+
+  return (
+    <span
+      aria-live="polite"
+      className="font-body flex min-w-0 items-center text-[15px] sm:text-base"
+    >
+      <AnimatePresence initial={false} mode="wait">
+        <motion.span
+          key={message}
+          className="truncate text-[#f4f4ef]"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.3, ease: EASE }}
+        >
+          {message}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  );
+}
+
 export function BrandSearchBar({
   className = "",
   placeholder = "I want to learn about",
@@ -118,6 +158,9 @@ export function BrandSearchBar({
    compactRest = false,
    onSubmit,
    submitLabel = "Submit",
+   confirm,
+   submitting = false,
+   submittingMessages,
 }: {
   className?: string;
   placeholder?: string;
@@ -166,6 +209,31 @@ export function BrandSearchBar({
    onSubmit?: () => void;
    /** Accessible label for the submit disc. */
    submitLabel?: string;
+   /**
+    * Turns the submit disc into a two-step: the first click collapses the bar
+    * and floats this under it, and `onSubmit` runs only once the CAM confirms.
+    * For placements where submitting spends real money (a Gemini generation),
+    * an arrow that fires on one stray click is the wrong shape.
+    *
+    * `details` is the "confirm your details" half — the host lists what the run
+    * will actually use, so the choices made up in the panel are re-read at the
+    * moment they take effect rather than remembered.
+    */
+   confirm?: {
+     title: string;
+     description?: string;
+     details?: { label: string; value: string }[];
+     confirmLabel?: string;
+     cancelLabel?: string;
+   };
+   /**
+    * The host's own work is running. The bar wears it: the disc becomes the
+    * rolling square, and `submittingMessages` cycles where the prompt sits, so
+    * a generation never has to be reported by a second block of UI somewhere
+    * below the bar that started it.
+    */
+   submitting?: boolean;
+   submittingMessages?: readonly string[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -194,6 +262,12 @@ export function BrandSearchBar({
    */
   const [restWidth, setRestWidth] = useState<number | null>(null);
   const [fullWidth, setFullWidth] = useState<number | null>(null);
+
+  // The confirmation is a panel state, not a popover: it opens the bar and
+  // takes over the drawer the rows live in, so everything this component does
+  // happens inside one box.
+  const [confirming, setConfirming] = useState(false);
+  const confirmButtonRef = useRef<HTMLButtonElement>(null);
 
   // The frame keeps its full width whether or not the bar is open, so it is
   // the one thing that can be observed for the open end (and for a resize).
@@ -235,7 +309,18 @@ export function BrandSearchBar({
     };
   }, [compactRest]);
 
+
+  // Confirm is the drawer's whole content while it is up, so it takes the
+  // focus the drawer would otherwise hand to its rows.
+  useEffect(() => {
+    if (!confirming) return;
+    confirmButtonRef.current?.focus();
+  }, [confirming]);
+
   const typing = query.length > 0;
+
+  const statusMessages =
+    submitting && submittingMessages?.length ? submittingMessages : null;
 
   // The subject only cycles while there is nothing else in the row to read —
   // except in prompt-button mode, where the cycling words ARE the button's
@@ -255,7 +340,9 @@ export function BrandSearchBar({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      if (rootRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+      setConfirming(false);
     };
     document.addEventListener("pointerdown", onDown);
     return () => document.removeEventListener("pointerdown", onDown);
@@ -310,6 +397,7 @@ export function BrandSearchBar({
 
   const close = () => {
     setOpen(false);
+    setConfirming(false);
     setTimeout(() => {
       setActiveFilter(null);
       setFilterQuery("");
@@ -362,23 +450,21 @@ export function BrandSearchBar({
           transition={
             compactRest
               ? {
-                  // Opening is two beats in order: the pill widens, and only
-                  // once it has settled does the panel drop out of it. The
-                  // delay is the width's own duration, so neither beat is
-                  // running while the other is. Closing keeps both together —
-                  // a collapse reads better as one movement.
-                  width: { duration: 0.42, ease: EASE },
-                  height: {
-                    duration: 0.42,
-                    ease: EASE,
-                    delay: open ? 0.42 : 0,
-                  },
+                  // Two beats in order, and closing runs them backwards: open
+                  // widens then drops, close lifts then narrows. Each delay is
+                  // the other axis's full duration, so only one is ever moving
+                  // and the box retraces its own path.
+                  width: { duration: 0.42, ease: EASE, delay: open ? 0 : 0.42 },
+                  height: { duration: 0.42, ease: EASE, delay: open ? 0.42 : 0 },
                   backgroundColor: { duration: 0.7, ease: EASE },
                 }
               : { duration: 0.7, ease: EASE }
           }
           onKeyDown={(e) => {
-            if (e.key === "Escape" && open) {
+            if (e.key === "Escape" && confirming) {
+              e.stopPropagation();
+              setConfirming(false);
+            } else if (e.key === "Escape" && open) {
               e.stopPropagation();
               close();
               inputRef.current?.blur();
@@ -423,35 +509,45 @@ export function BrandSearchBar({
         {promptButton ? (
           <button
             type="button"
-            onClick={() => setOpen(true)}
+            onClick={() => {
+              if (!submitting) setOpen(true);
+            }}
+            disabled={submitting}
             aria-expanded={open}
             aria-controls={open ? listId : undefined}
             aria-label="Open options"
-            className="relative mr-3 min-w-0 flex-1 cursor-pointer text-left"
+            className="relative mr-3 min-w-0 flex-1 cursor-pointer text-left disabled:cursor-default"
           >
-            <span
-              className="font-body flex items-center gap-[0.4ch] text-[15px] whitespace-nowrap sm:text-base"
-              aria-hidden="true"
-            >
-              <span className="text-[#f4f4ef]/55">{placeholder}</span>
-              <span className="relative">
-                <span className="invisible">
-                  {subjects.reduce((a, b) => (b.length > a.length ? b : a), "")}
+            {statusMessages ? (
+              // Reported here rather than under the card, so the thing that
+              // started the run is the thing that shows it running. Mounted per
+              // run, so every run opens on the first line without a reset.
+              <StatusLine messages={statusMessages} />
+            ) : (
+              <span
+                className="font-body flex items-center gap-[0.4ch] text-[15px] whitespace-nowrap sm:text-base"
+                aria-hidden="true"
+              >
+                <span className="text-[#f4f4ef]/55">{placeholder}</span>
+                <span className="relative">
+                  <span className="invisible">
+                    {subjects.reduce((a, b) => (b.length > a.length ? b : a), "")}
+                  </span>
+                  <AnimatePresence initial={false} mode="popLayout">
+                    <motion.span
+                      key={subjects[subject]}
+                      className="absolute inset-0 text-[#f4f4ef]"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.45, ease: EASE }}
+                    >
+                      {subjects[subject]}
+                    </motion.span>
+                  </AnimatePresence>
                 </span>
-                <AnimatePresence initial={false} mode="popLayout">
-                  <motion.span
-                    key={subjects[subject]}
-                    className="absolute inset-0 text-[#f4f4ef]"
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    transition={{ duration: 0.45, ease: EASE }}
-                  >
-                    {subjects[subject]}
-                  </motion.span>
-                </AnimatePresence>
               </span>
-            </span>
+            )}
           </button>
         ) : (
         <div className="relative min-w-0 flex-1 mr-3">
@@ -547,12 +643,33 @@ export function BrandSearchBar({
           {onSubmit && (
             <button
               type="button"
-              aria-label={submitLabel}
-              title={submitLabel}
-              onClick={onSubmit}
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e6f5c0] text-[#1a1a1a] transition-all hover:bg-[#d4e5a0] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+              aria-label={submitting ? `${submitLabel} — working…` : submitLabel}
+              title={submitting ? `${submitLabel} — working…` : submitLabel}
+              aria-expanded={confirm ? confirming : undefined}
+              disabled={submitting}
+              onClick={() => {
+                if (submitting) return;
+                if (!confirm) {
+                  onSubmit();
+                  return;
+                }
+                setOpen(true);
+                setConfirming(true);
+              }}
+              className={`grid h-8 w-8 shrink-0 place-items-center rounded-full transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0] ${
+                submitting
+                  ? "bg-transparent"
+                  : "bg-[#e6f5c0] text-[#1a1a1a] hover:bg-[#d4e5a0]"
+              }`}
             >
-              <ArrowRight className="h-4 w-4" />
+              {submitting ? (
+                <div
+                  className="h-4.5 w-4.5 rounded-[4px] bg-[#e6f5c0] animate-spin shadow-[0_0_10px_rgba(230,245,192,0.65)]"
+                  style={{ animationDuration: "2.5s" }}
+                />
+              ) : (
+                <ArrowRight className="h-4 w-4" />
+              )}
             </button>
           )}
           <button
@@ -591,7 +708,60 @@ export function BrandSearchBar({
             style={compactRest && fullWidth ? { width: fullWidth } : undefined}
           >
             <AnimatePresence mode="wait">
-              {panelRows ? (
+              {confirm && confirming ? (
+                <motion.div
+                  key="confirm"
+                  className="flex h-[280px] flex-col justify-center px-6 py-5"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, transition: { duration: 0.15 } }}
+                  transition={{ duration: 0.3, ease: EASE }}
+                  role="group"
+                  aria-label={confirm.title}
+                >
+                  <p className="font-body text-xl font-medium text-white">{confirm.title}</p>
+                  {confirm.description && (
+                    <p className="mt-1.5 text-[13px] text-[#f4f4ef]/60">{confirm.description}</p>
+                  )}
+
+                  {confirm.details && confirm.details.length > 0 && (
+                    <dl className="mt-4 flex flex-col gap-2 rounded-2xl bg-black/25 px-4 py-3">
+                      {confirm.details.map((detail) => (
+                        <div className="flex items-baseline gap-4" key={detail.label}>
+                          <dt className="shrink-0 text-[12px] text-[#f4f4ef]/50">{detail.label}</dt>
+                          <dd className="min-w-0 flex-1 truncate text-right text-[13px] text-[#f4f4ef]">
+                            {detail.value}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
+
+                  <div className="mt-5 flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setConfirming(false)}
+                      className="rounded-full px-4 py-2 text-[13px] font-semibold text-[#f4f4ef]/70 transition-colors hover:bg-white/10 hover:text-[#f4f4ef] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+                    >
+                      {confirm.cancelLabel ?? "Back"}
+                    </button>
+                    <button
+                      ref={confirmButtonRef}
+                      type="button"
+                      onClick={() => {
+                        // Closing hands the run to the pill, which wears it as
+                        // the rolling square and the status line.
+                        setConfirming(false);
+                        setOpen(false);
+                        onSubmit?.();
+                      }}
+                      className="rounded-full bg-[#e6f5c0] px-5 py-2 text-[13px] font-semibold text-[#1a1a1a] transition-colors hover:bg-[#d4e5a0] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+                    >
+                      {confirm.confirmLabel ?? submitLabel}
+                    </button>
+                  </div>
+                </motion.div>
+              ) : panelRows ? (
                 <motion.ul
                   key="rows"
                   className="flex flex-col gap-1 px-4 py-4 h-[280px] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
@@ -841,6 +1011,7 @@ export function BrandSearchBar({
         )}
       </AnimatePresence>
       </motion.div>
+
       </div>
 
       {/* Under the pill, not above it. The bar is pinned by its host page, and

@@ -169,19 +169,21 @@ export default async function PreviewClientOverviewPage({
                   <div className="min-w-[12rem] flex-1">
                     <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
                       <dt className="text-[11px] font-bold tracking-[0.12em] text-foreground/35 uppercase">Email</dt>
-                      <Pill tone={email.status === "valid" ? "go" : "stop"}>
-                        {email.status === "valid" ? "Valid format" : email.status === "invalid" ? "Invalid format" : "Missing"}
+                      {/* `hold` for a redaction: outreach is blocked either way,
+                          but the address was removed by policy, not mistyped. */}
+                      <Pill tone={email.status === "valid" ? "go" : email.status === "redacted" ? "hold" : "stop"}>
+                        {email.status === "valid" ? "Valid format" : email.status === "invalid" ? "Invalid format" : email.status === "redacted" ? "Redacted" : "Missing"}
                       </Pill>
                     </div>
                     <dd
                       className={`mt-1.5 text-sm leading-[1.6] break-all ${
-                        email.status === "invalid" ? "font-bold text-destructive" : email.value ? "text-foreground/80" : "text-foreground/35"
+                        email.status === "invalid" ? "font-bold text-destructive" : email.status === "valid" ? "text-foreground/80" : "text-foreground/35"
                       }`}
                     >
-                      {email.value ?? "Not provided"}
+                      {email.status === "redacted" ? "Removed — personal address" : (email.value ?? "Not provided")}
                     </dd>
                     {email.message && (
-                      <p className="mt-1.5 text-[13px] leading-[1.6] text-destructive/80" role="alert">
+                      <p className={`mt-1.5 text-[13px] leading-[1.6] ${email.status === "redacted" ? "text-foreground/55" : "text-destructive/80"}`} role="alert">
                         {email.message} The rest of this client record is still available.
                       </p>
                     )}

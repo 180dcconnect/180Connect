@@ -7,6 +7,7 @@ import {
   type BasicInfoState,
   type OrganisationDetailRow,
 } from "./client-basic-info.ts";
+import { REDACTED_EMAIL } from "./ingestion/personal-data.ts";
 
 function org(overrides: Partial<OrganisationDetailRow> = {}): OrganisationDetailRow {
   return {
@@ -46,6 +47,13 @@ describe("buildBasicInfo", () => {
       website: "https://example.org",
       status: "Not contacted",
     });
+  });
+
+  it("shows a redacted email as blank rather than printing the placeholder", () => {
+    const info = buildBasicInfo(
+      state({ organisation: org({ contact_email: REDACTED_EMAIL }) }),
+    );
+    assert.equal(info.email, "Not provided");
   });
 
   it("shows an explicit placeholder for every missing field rather than omitting it", () => {

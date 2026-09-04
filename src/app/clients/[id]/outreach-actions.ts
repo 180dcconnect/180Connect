@@ -9,7 +9,7 @@ import { revalidatePath } from "next/cache";
  * otherwise not appear in the thread it was sent from.
  */
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
-import { canSendClientOutreach } from "@/lib/client-email-validation";
+import { canSendClientOutreach, onFileEmail } from "@/lib/client-email-validation";
 import { reportError } from "@/lib/error-logging";
 import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
 import { discardDraftSchema } from "@/lib/outreach/discard-draft";
@@ -531,7 +531,7 @@ export async function retryFailedEmail(input: unknown): Promise<RetryFailedResul
   const contact = Array.isArray(failed.contacts) ? failed.contacts[0] : failed.contacts;
   const organisation = Array.isArray(failed.organisations) ? failed.organisations[0] : failed.organisations;
   const recipient =
-    failed.sent_to_email?.trim() || contact?.email?.trim() || organisation?.contact_email?.trim() || "";
+    failed.sent_to_email?.trim() || contact?.email?.trim() || onFileEmail(organisation?.contact_email) || "";
   if (!recipient) {
     return {
       ok: false,

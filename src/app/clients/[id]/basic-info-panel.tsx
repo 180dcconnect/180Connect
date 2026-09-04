@@ -27,6 +27,7 @@ import {
   type EditSuggestionRow,
 } from "@/lib/edit-suggestions";
 import type { AppRole } from "@/lib/auth/permissions.ts";
+import { containsRedactionPlaceholder } from "@/lib/ingestion/personal-data";
 import {
   GEOGRAPHIC_REACH_OPTIONS,
   ORGANISATION_TYPES,
@@ -190,7 +191,15 @@ const FIELDS: {
   },
   {
     label: "Email",
-    read: (state) => state.organisation.contact_email,
+    // A redacted placeholder is not a value to display or to prefill an input
+    // with — a CAM opening the row would otherwise be editing `[redacted:…]`,
+    // and saving it would relaunder the placeholder as manually entered data.
+    // Null makes the row read as the gap it is, with the Add/Suggest
+    // affordance; Contactability below says why the gap is there.
+    read: (state) =>
+      containsRedactionPlaceholder(state.organisation.contact_email)
+        ? null
+        : state.organisation.contact_email,
     column: "contact_email",
   },
   {

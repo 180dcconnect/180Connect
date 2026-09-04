@@ -1,6 +1,6 @@
 "use client";
 
-import { useContext, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 
@@ -10,7 +10,6 @@ import {
   summariseRun,
   type CharityCommissionRun,
 } from "./bulk-funnel";
-import { ConsoleContext } from "./import-console";
 
 /**
  * The recent Charity Commission runs — and the landing view of this screen.
@@ -101,11 +100,7 @@ export function RecentRuns({
    */
   secondaryAction?: ReactNode;
 }) {
-  const consoleCtx = useContext(ConsoleContext);
-  const displayRuns = consoleCtx?.simulatedRuns?.length
-    ? [...consoleCtx.simulatedRuns, ...runs]
-    : runs;
-  const [latest, ...older] = displayRuns;
+  const [latest, ...older] = runs;
 
   return (
     <section className="overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-xs">
@@ -117,7 +112,7 @@ export function RecentRuns({
         </div>
       </div>
 
-      {displayRuns.length === 0 ? (
+      {runs.length === 0 ? (
         <div className="border-t border-black/[0.06] px-5 py-10 text-center sm:px-6">
           <p className="text-sm font-bold text-foreground">Nothing imported yet</p>
           <p className="mx-auto mt-1.5 max-w-sm text-sm leading-[1.6] text-foreground/55">
@@ -136,11 +131,6 @@ export function RecentRuns({
                   {" · "}
                   <span className="text-foreground/55">{when(latest.started_at, true)}</span>
                 </p>
-                {latest.id.startsWith("sim-") && (
-                  <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-800">
-                    Simulated
-                  </span>
-                )}
               </div>
               <StatusBadge status={latest.job_status} />
             </div>
@@ -179,11 +169,6 @@ export function RecentRuns({
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm text-foreground/70 flex items-center gap-2">
                     <span className="truncate">{summariseRun(run)}</span>
-                    {run.id.startsWith("sim-") && (
-                      <span className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-800">
-                        Simulated
-                      </span>
-                    )}
                   </span>
                   <StatusBadge status={run.job_status} />
                 </li>

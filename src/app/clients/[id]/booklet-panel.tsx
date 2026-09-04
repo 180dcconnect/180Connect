@@ -230,6 +230,13 @@ function initialWebsiteContext(saved: SavedBooklet): WebsiteContextResult | null
  * rather than a navigation. More options (tone, length, audience) slot in as
  * further rows without touching the bar itself.
  *
+ * Neither field's own arrow generates. Left with an `onSubmit` they each
+ * became a second, unguarded Generate — one stray Enter in a text box and the
+ * Gemini call was away. With none, GooeyEmailInput runs its own accept
+ * gesture: a beat of loading, then a tick that means "this reads fine", the
+ * same verdict the website field's live droplet gives. Generation has exactly
+ * one door, the bar's arrow, and that one asks first.
+ *
  * The field starts empty every time — see this file's header for why a
  * client's known website is not seeded into it. It validates through the same
  * F046 gate the route applies, so its tick can never promise what generation
@@ -245,7 +252,9 @@ function BookletComposer({
   steer,
   onSteerChange,
   onGenerate,
+  busy,
 }: {
+  busy: boolean;
   websiteUrl: string;
   onWebsiteUrlChange: (value: string) => void;
   steer: string;
@@ -287,7 +296,7 @@ function BookletComposer({
                   restPlaceholder="Add a website"
                   inputType="url"
                   fieldLabel="Website URL for extra context (optional)"
-                  submitLabel="Generate booklet"
+                  submitLabel="Check this website"
                   buttonIcon="x"
                   dropletLabel="Clear website"
                   onDropletClick={() => onWebsiteUrlChange("")}
@@ -296,7 +305,6 @@ function BookletComposer({
                   validate={() => null}
                   validateAsync={checkWebsite}
                   validationDelayMs={800}
-                  onSubmit={() => onGenerate()}
                 />
               </div>
             ),
@@ -333,12 +341,11 @@ function BookletComposer({
                     placeholder="e.g. Emphasise their youth work"
                     inputType="text"
                     fieldLabel="What the booklet should focus on (optional)"
-                    submitLabel="Generate booklet"
+                    submitLabel="Accept this focus"
                     maxLength={MAX_STEER_CHARS}
                     value={steer}
                     onValueChange={onSteerChange}
                     validate={() => null}
-                    onSubmit={() => onGenerate()}
                   />
                 </div>
               </div>
@@ -347,6 +354,23 @@ function BookletComposer({
         ]}
         onSubmit={() => void onGenerate()}
         submitLabel="Generate booklet"
+        // A generation is a paid Gemini call, so the arrow asks first — and the
+        // sheet re-states what this run will use, since the website and steer
+        // were typed in a panel that is closed by the time it matters.
+        confirm={{
+          title: "Generate this booklet?",
+          description:
+            "Reads the client's profile and anything you added below. Takes a few seconds.",
+          details: [
+            { label: "Website", value: websiteUrl.trim() || "None — profile only" },
+            { label: "Focus", value: steer.trim() || "No steer" },
+          ],
+          confirmLabel: "Generate",
+        }}
+        // The bar reports its own run: rolling square on the disc, status lines
+        // where the prompt sits. Nothing appears below the card.
+        submitting={busy}
+        submittingMessages={STATUS_MESSAGES}
         className="w-full max-w-[600px]"
       />
     </div>
@@ -629,8 +653,9 @@ export function BookletPanel({
         </div>
       )}
 
-      {!currentVersion && !busy && !error && (
+      {!currentVersion && !error && (
         <BookletComposer
+          busy={busy}
           websiteUrl={websiteUrl}
           onWebsiteUrlChange={setWebsiteUrl}
           steer={steer}
@@ -639,7 +664,10 @@ export function BookletPanel({
         />
       )}
 
-      {busy && (
+      {/* Only the regenerate path needs a loading block of its own — the first
+          generation is started from the composer bar, which wears the run
+          itself (see its `submitting` prop). */}
+      {busy && currentVersion && (
         <AiLoadingState
           messages={STATUS_MESSAGES}
           reducedMotionLabel="Generating booklet — this can take several seconds…"

@@ -7,7 +7,6 @@ import { Plus } from "lucide-react";
 import { EASE } from "@/components/brand/motion";
 import { BackButton } from "@/components/ui/back-button";
 import { OriginButton } from "@/components/ui/origin-button";
-import type { CharityCommissionRun } from "./bulk-funnel";
 
 /**
  * Which of the screen's two jobs is on show.
@@ -30,8 +29,6 @@ import type { CharityCommissionRun } from "./bulk-funnel";
 export interface ConsoleContextValue {
   openComposer: () => void;
   closeComposer: () => void;
-  recordSimulatedRun: (run: CharityCommissionRun) => void;
-  simulatedRuns: CharityCommissionRun[];
 }
 
 export const ConsoleContext = createContext<ConsoleContextValue | null>(null);
@@ -67,7 +64,6 @@ export function ImportConsole({
   composer: ReactNode;
 }) {
   const [mode, setMode] = useState<"home" | "composer">("home");
-  const [simulatedRuns, setSimulatedRuns] = useState<CharityCommissionRun[]>([]);
 
   const go = (next: "home" | "composer") => {
     setMode(next);
@@ -76,17 +72,11 @@ export function ImportConsole({
     window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
   };
 
-  const recordSimulatedRun = (run: CharityCommissionRun) => {
-    setSimulatedRuns((prev) => [run, ...prev]);
-  };
-
   return (
     <ConsoleContext.Provider
       value={{
         openComposer: () => go("composer"),
         closeComposer: () => go("home"),
-        recordSimulatedRun,
-        simulatedRuns,
       }}
     >
       <motion.div

@@ -2,6 +2,7 @@ import { Clock, Mail, Paperclip, Reply, StickyNote } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
+import { onFileEmail } from "@/lib/client-email-validation";
 import { hasPermission } from "@/lib/auth/permissions";
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import {
@@ -336,7 +337,8 @@ export default async function ClientOutreachPage({
         // contacts.email. The on-file address stays separate purely as the
         // mismatch-warning baseline (F116 AC3).
         savedRecipient: draftRow.sent_to_email?.trim() || null,
-        recipientOnFile: contactEmail?.trim() || client.contact_email?.trim() || null,
+        // A redacted contact_email is not an address on file — see onFileEmail.
+        recipientOnFile: contactEmail?.trim() || onFileEmail(client.contact_email) || null,
       };
     }
   }

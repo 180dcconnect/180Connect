@@ -14,6 +14,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
+import { onFileEmail } from "@/lib/client-email-validation";
 import { formatAttachments, type AttachmentRow } from "@/lib/attachments";
 import { buildRelationshipStats, recentHandovers } from "@/lib/inbox-thread-context";
 import { buildDisplayNote, orderNotesNewestFirst, type NoteRow } from "@/lib/note-history";
@@ -168,9 +169,11 @@ async function fetchThread(
     organisation,
     entries,
     contactNames,
+    // A redacted contact_email is not an address on file — offering it as the
+    // recipient would put `[redacted:personal-email]` in the To field.
     recipientOnFile:
       contactRows.find((row) => row.email?.trim())?.email?.trim() ||
-      organisation.contact_email?.trim() ||
+      onFileEmail(organisation.contact_email) ||
       null,
   };
 }

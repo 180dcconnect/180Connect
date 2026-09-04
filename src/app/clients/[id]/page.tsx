@@ -129,6 +129,22 @@ export default async function ClientOverviewPage({
   // "link" to `1-1coco.org` navigated to /clients/1-1coco.org.
   const websiteLink = websiteHref(website);
   const email = validateClientEmail(client.contact_email);
+  // A redacted address is neither on file nor malformed, so it gets its own line
+  // and its own pill. "Invalid" in red described a broken import that never
+  // happened — the register published a personal address and the pipeline did
+  // exactly what it is supposed to do with one.
+  const emailDisplay =
+    email.status === "redacted"
+      ? "Removed — personal address"
+      : (email.value ?? "Not on file");
+  const emailPillLabel =
+    email.status === "valid"
+      ? "Valid"
+      : email.status === "invalid"
+        ? "Invalid"
+        : email.status === "redacted"
+          ? "Redacted"
+          : "Missing";
 
   // #79/#80/#81 (F077/F078/F079): fetched without a status filter and filtered
   // in the component — RLS already scopes what each role may see. Viewers have
@@ -235,25 +251,36 @@ export default async function ClientOverviewPage({
                       className={`mt-0.5 text-sm leading-[1.55] break-words ${
                         email.status === "invalid"
                           ? "font-semibold text-stop"
-                          : email.value
+                          : email.status === "valid"
                             ? "text-ink"
                             : "text-faint"
                       }`}
                     >
-                      {email.value ?? "Not on file"}
+                      {emailDisplay}
                     </p>
                     {email.message && (
-                      <p className="mt-1 text-[12.5px] leading-[1.5] text-stop" role="alert">
+                      <p
+                        className={`mt-1 text-[12.5px] leading-[1.5] ${
+                          email.status === "redacted" ? "text-dim" : "text-stop"
+                        }`}
+                        role="alert"
+                      >
                         {email.message} 
                       </p>
                     )}
                   </div>
-                  <Pill tone={email.status === "valid" ? "go" : "stop"}>
-                    {email.status === "valid"
-                      ? "Valid"
-                      : email.status === "invalid"
-                        ? "Invalid"
-                        : "Missing"}
+                  {/* `hold`, not `stop`: outreach is blocked either way, but this
+                      one is the policy working rather than the data being wrong. */}
+                  <Pill
+                    tone={
+                      email.status === "valid"
+                        ? "go"
+                        : email.status === "redacted"
+                          ? "hold"
+                          : "stop"
+                    }
+                  >
+                    {emailPillLabel}
                   </Pill>
                 </div>
 

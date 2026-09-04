@@ -9,6 +9,7 @@ import {
   type DiscrepancyField,
 } from "./detect-field-discrepancies.ts";
 import type { StandardOrganisation } from "../standardize/types.ts";
+import { REDACTED_EMAIL } from "../ingestion/personal-data.ts";
 
 function org(overrides: Partial<Pick<StandardOrganisation, DiscrepancyField>> = {}) {
   return {
@@ -44,6 +45,25 @@ describe("findFieldDiscrepancies", () => {
       org({ website: "" }),
     );
     assert.deepEqual(result, []);
+  });
+
+  it("does not flag a field either side had redacted — a removal is not a conflict", () => {
+    // Both directions: the stored column can hold the placeholder (imported
+    // before this record had a role address) and so can the incoming record.
+    assert.deepEqual(
+      findFieldDiscrepancies(
+        org({ contact_email: "info@test-charity.org" }),
+        org({ contact_email: REDACTED_EMAIL }),
+      ),
+      [],
+    );
+    assert.deepEqual(
+      findFieldDiscrepancies(
+        org({ contact_email: REDACTED_EMAIL }),
+        org({ contact_email: "info@test-charity.org" }),
+      ),
+      [],
+    );
   });
 
   it("flags every differing field independently", () => {

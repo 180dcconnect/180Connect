@@ -4,18 +4,14 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   ArrowDownToLine,
-  ArrowRight,
   ArrowUpToLine,
   Bookmark,
   BookmarkPlus,
   Check,
-  CheckCircle2,
   ChevronDown,
-  Database,
   Loader2,
   RotateCcw,
   Search,
-  Sparkles,
   Trash2,
   TriangleAlert,
   X,
@@ -27,7 +23,6 @@ import { PriceRangeSlider } from "@/components/ui/range-slider";
 import { Checkbox } from "@/components/animate-ui/components/radix/checkbox";
 import { GooeyEmailInput } from "@/components/ui/gooey-email-input";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
-import { useConsole } from "./import-console";
 import {
   Dialog,
   DialogClose,
@@ -68,36 +63,12 @@ import {
   deleteFilterPreset,
   previewRegisterSelection,
   saveFilterPreset,
-  type ImportState,
   type PreviewState,
 } from "./register-actions";
 import {
   RegistrationDatePicker,
   formatRegistrationDate,
 } from "./registration-date-picker";
-
-const SIMULATION_PIPELINE_STAGES = [
-  {
-    name: "Acquire",
-    title: "Reading register database",
-    detail: "Extracting records matching criteria from local SQLite register",
-  },
-  {
-    name: "Raw & Standardise",
-    title: "Normalising profiles & filed accounts",
-    detail: "Parsing contact info, governance data, and operations",
-  },
-  {
-    name: "Client Criteria",
-    title: "Evaluating client eligibility",
-    detail: "Screening against 180DC rules & matching existing clients",
-  },
-  {
-    name: "Promote",
-    title: "Finalising client staging & audit trail",
-    detail: "Writing audit log record and preparing run statistics",
-  },
-];
 
 /**
  * The import screen's centre of gravity: choose what to import, see how many
@@ -147,14 +118,6 @@ function formatIncome(value: number | null): string {
   if (value >= 1_000) return `£${value / 1_000}k`;
   return MONEY.format(value);
 }
-
-/**
- * Threshold above which an import is considered high volume (~70 MB+ on our
- * 500 MB Supabase database quota), requiring typed confirmation to prevent
- * accidental database capacity exhaustion and costly plan overages.
- */
-const HIGH_VOLUME_IMPORT_THRESHOLD = 7_000;
-const CONFIRMATION_PHRASE = "I understand the consequences";
 
 const INCOME_SLIDER_MIN = 0;
 const INCOME_SLIDER_MAX_PLUS = 5_250_000;
@@ -577,21 +540,6 @@ export function FilterBuilder({
   const [counting, setCounting] = useState(false);
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
   const [showPreview, setShowPreview] = useState(false);
-  const [importState, setImportState] = useState<ImportState>({ kind: "idle" });
-  const [confirming, setConfirming] = useState(false);
-  const [confirmationInput, setConfirmationInput] = useState("");
-  const consoleCtx = useConsole();
-  const [flowStep, setFlowStep] = useState<"confirm" | "simulating" | "complete">("confirm");
-  const [simProgress, setSimProgress] = useState(0);
-  const [simStageIndex, setSimStageIndex] = useState(0);
-  const [simResult, setSimResult] = useState<{
-    total: number;
-    added: number;
-    needsReview: number;
-    doesNotMeet: number;
-    alreadyHeld: number;
-    summary: string;
-  } | null>(null);
   const [presetName, setPresetName] = useState("");
   /** The set the current selection was loaded from, so the bar can say so. */
   const [loadedPreset, setLoadedPreset] = useState<PresetSummary | null>(null);
@@ -639,17 +587,12 @@ export function FilterBuilder({
 
   const description = useMemo(() => describeFilters(filters), [filters]);
   const unfiltered = useMemo(() => isUnfiltered(filters), [filters]);
-  const isHighVolume = count !== null && (count >= HIGH_VOLUME_IMPORT_THRESHOLD || unfiltered);
-  const isConfirmationSatisfied =
-    !isHighVolume ||
-    confirmationInput.trim().toLowerCase() === CONFIRMATION_PHRASE.toLowerCase();
 
   /**
    * Every filter mutation goes through here, because changing a filter
-   * invalidates two things that would otherwise sit on screen describing a
-   * selection that no longer exists: the preview sample, and the summary of a
-   * finished import. Clearing them here rather than in an effect keeps the
-   * invalidation on the event that caused it.
+   * invalidates the preview sample, which would otherwise sit on screen
+   * describing a selection that no longer exists. Clearing it here rather
+   * than in an effect keeps the invalidation on the event that caused it.
    */
   const changeFilters = (
     next: (current: CharityRegisterFilters) => CharityRegisterFilters,
@@ -657,8 +600,6 @@ export function FilterBuilder({
     setFilters(next);
     setPreview({ kind: "idle" });
     setShowPreview(false);
-    setImportState({ kind: "idle" });
-    setConfirming(false);
   };
 
   const update = (patch: Partial<CharityRegisterFilters>) =>
@@ -871,105 +812,6 @@ export function FilterBuilder({
     });
   };
 
-  const startSimulation = () => {
-    const total = count ?? 0;
-    if (total === 0) return;
-
-    // Realistic proportional breakdown matching client criteria & duplicate rules:
-    const added = total === 1 ? 1 : Math.max(1, Math.round(total * 0.86));
-    const needsReview = total <= 2 ? 0 : Math.round(total * 0.08);
-    const doesNotMeet = total <= 3 ? 0 : Math.round(total * 0.04);
-    const alreadyHeld = Math.max(0, total - (added + needsReview + doesNotMeet));
-    const diff = total - (added + needsReview + doesNotMeet + alreadyHeld);
-    const adjustedAdded = Math.max(0, added + diff);
-
-    const parts = [
-      `${adjustedAdded.toLocaleString()} added to the client list`,
-      needsReview > 0 ? `${needsReview.toLocaleString()} flagged for review` : "",
-      doesNotMeet > 0 ? `${doesNotMeet.toLocaleString()} did not meet the client criteria` : "",
-      alreadyHeld > 0 ? `${alreadyHeld.toLocaleString()} already held` : "",
-    ].filter(Boolean);
-    const summaryText = `${parts.join(", ")}.`;
-
-    const result = {
-      total,
-      added: adjustedAdded,
-      needsReview,
-      doesNotMeet,
-      alreadyHeld,
-      summary: summaryText,
-    };
-
-    setSimResult(result);
-    setFlowStep("simulating");
-    setSimProgress(15);
-    setSimStageIndex(0);
-
-    setTimeout(() => {
-      setSimProgress(45);
-      setSimStageIndex(1);
-    }, 750);
-
-    setTimeout(() => {
-      setSimProgress(75);
-      setSimStageIndex(2);
-    }, 1550);
-
-    setTimeout(() => {
-      setSimProgress(95);
-      setSimStageIndex(3);
-    }, 2350);
-
-    setTimeout(() => {
-      setSimProgress(100);
-      setFlowStep("complete");
-
-      // Record simulated run in console context
-      consoleCtx?.recordSimulatedRun({
-        id: `sim-${Date.now()}`,
-        api_source: "charity_commission_bulk",
-        started_at: new Date().toISOString(),
-        job_status: "completed",
-        records_fetched: total,
-        records_inserted: adjustedAdded,
-        records_skipped: alreadyHeld,
-        records_failed: doesNotMeet,
-        run_stats: {
-          selected: total,
-          written: adjustedAdded,
-          unchanged: alreadyHeld,
-        },
-      });
-
-      // Update importState on FilterBuilder page
-      setImportState({
-        kind: "done",
-        message: `Simulated import: ${summaryText}`,
-        selected: total,
-        written: adjustedAdded,
-        unchanged: alreadyHeld,
-        added: adjustedAdded,
-        needsReview,
-        doesNotMeet,
-        duplicates: 0,
-      });
-    }, 3000);
-  };
-
-  const handleOpenChange = (open: boolean) => {
-    if (!open && flowStep === "simulating") {
-      return;
-    }
-    setConfirming(open);
-    if (!open) {
-      setTimeout(() => {
-        setFlowStep("confirm");
-        setSimProgress(0);
-        setSimStageIndex(0);
-        setConfirmationInput("");
-      }, 250);
-    }
-  };
 
   const doSave = () =>
     startTransition(async () => {
@@ -1136,18 +978,6 @@ export function FilterBuilder({
               >
                 {showPreview ? "Hide sample" : "See a sample"}
               </button>
-              <OriginButton
-                onClick={() => {
-                  setConfirmationInput("");
-                  setFlowStep("confirm");
-                  setConfirming(true);
-                }}
-                disabled={isPending || count === 0}
-                size="md"
-                type="button"
-              >
-                Import{count !== null && count > 0 ? ` ${count.toLocaleString()}` : ""}
-              </OriginButton>
             </div>
           </div>
 
@@ -1155,36 +985,8 @@ export function FilterBuilder({
             <p className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-[1.6] text-amber-900">
               <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
               <span>
-                No filters set, so this is the entire register. Narrow it below
-                before importing.
+                No filters set, so this is the entire register. Narrow it below.
               </span>
-            </p>
-          )}
-
-          {importState.kind === "done" && (
-            <div
-              className="mt-3 flex items-center justify-between gap-3 rounded-lg bg-green-50 px-3 py-2 text-xs font-bold leading-[1.6] text-green-900"
-              role="status"
-            >
-              <span className="flex items-center gap-1.5">
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" strokeWidth={2.4} />
-                {importState.message}
-              </span>
-              <button
-                type="button"
-                onClick={() => setImportState({ kind: "idle" })}
-                className="shrink-0 text-xs font-bold text-green-800 underline underline-offset-2 hover:text-green-950"
-              >
-                Dismiss
-              </button>
-            </div>
-          )}
-          {importState.kind === "error" && (
-            <p
-              className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold leading-[1.6] text-red-900"
-              role="alert"
-            >
-              {importState.message}
             </p>
           )}
 
@@ -1952,356 +1754,6 @@ export function FilterBuilder({
         </DialogContent>
       </Dialog>
 
-      {/* ── Confirmation ──────────────────────────────────────────────────
-          A dialog rather than the button swapping itself for "Yes, import N":
-          the thing worth reading before committing is the selection restated in
-          words, and that never fitted on a button. */}
-      <Dialog open={confirming} onOpenChange={handleOpenChange}>
-        <DialogContent className="rounded-2xl sm:max-w-md">
-          {flowStep === "confirm" && (
-            <>
-              <DialogHeader>
-                <DialogTitle>
-                  Import {count?.toLocaleString() ?? ""}{" "}
-                  {count === 1 ? "charity" : "charities"}?
-                </DialogTitle>
-                <DialogDescription className="leading-[1.65]">
-                  {description}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="flex items-start gap-2.5 rounded-xl border border-sky-200/80 bg-sky-50/70 p-3 text-xs leading-[1.6] text-sky-950">
-                <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
-                <div>
-                  <span className="font-bold text-sky-950">Simulation mode active</span>
-                  <p className="mt-0.5 text-sky-900/80">
-                    Preview the entire import pipeline safely. Everything behaves as intended, but no records will be written to your database.
-                  </p>
-                </div>
-              </div>
-
-              <p className="text-sm leading-[1.65] text-foreground/65">
-                They join the client list with their filed accounts where the
-                register has them. Charities already on the list are matched, not
-                duplicated. Grant history follows on its own in the background —
-                360Giving is asked one charity at a time, so a large import fills in
-                over the following hours. This will be recorded against your name in
-                the audit log.
-              </p>
-
-              {isHighVolume ? (
-                (() => {
-                  const estimatedMb = unfiltered ? 1720 : Math.round(((count ?? 0) * 10) / 1024);
-                  const isOverQuota = estimatedMb > 500;
-                  const quotaPercent = Math.min(Math.round((estimatedMb / 500) * 100), 100);
-                  const isVerified = isConfirmationSatisfied && confirmationInput.trim().length > 0;
-
-                  return (
-                    <div className="space-y-3.5 rounded-xl bg-red-500 p-3.5 sm:p-4 text-xs text-white shadow-sm dark:border-red-800 dark:bg-red-700">
-                      {/* Header */}
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-2.5">
-                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/30 bg-white/20 text-white">
-                            <TriangleAlert className="h-4 w-4" strokeWidth={2.2} />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h4 className="font-semibold text-white">
-                                High-Volume Import Advisory
-                              </h4>
-                              <span className="rounded-full border border-white/30 bg-white/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-                                {isOverQuota ? "Exceeds Quota" : "Capacity Warning"}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Storage Quota Meter Box */}
-                      <div className="rounded-lg border border-white/20 bg-black/20 p-3 space-y-2 backdrop-blur-xs">
-                        <div className="flex items-center justify-between text-[11.5px]">
-                          <span className="flex items-center gap-1.5 font-medium text-white">
-                            <Database className="h-3.5 w-3.5 text-white" />
-                            Estimated DB Footprint
-                          </span>
-                          <span className="font-mono font-bold text-white">
-                            {unfiltered
-                              ? "~1.7 GB (>340% quota)"
-                              : `~${estimatedMb} MB (${quotaPercent}% of quota)`}
-                          </span>
-                        </div>
-
-                        {/* Visual Progress Bar */}
-                        <div className="h-2 w-full overflow-hidden rounded-full bg-white/20">
-                          <div
-                            className="h-full rounded-full bg-white transition-all duration-300"
-                            style={{ width: `${quotaPercent}%` }}
-                          />
-                        </div>
-
-                        <div className="flex items-center justify-end text-[10.5px] text-white/80">
-                          <span>Free limit: 500 MB</span>
-                        </div>
-                      </div>
-
-                      {/* Contextual Narrative */}
-                      <p className="leading-relaxed text-white/95">
-                        {unfiltered ? (
-                          <>
-                            No filters are set, which would attempt to import all{" "}
-                            <strong className="font-bold text-white">~172,000 organisations (~1.7 GB)</strong>. Storing the
-                            entire register exceeds our 500 MB database quota by more than 3×
-                            and will trigger expensive hosting overages.
-                          </>
-                        ) : (
-                          <>
-                            Importing <strong className="font-bold text-white">{count?.toLocaleString()} charities</strong> will
-                            consume an estimated ~<strong className="font-bold text-white">{estimatedMb} MB</strong> of database
-                            storage. Large cohorts with multi-year filed accounts can rapidly exhaust
-                            free tier headroom.
-                          </>
-                        )}
-                      </p>
-
-                      {/* Typed Confirmation Section */}
-                      <div className="border-t border-white/20 pt-3 space-y-2">
-                        <label
-                          htmlFor="consequences-confirmation"
-                          className="block text-[11px] font-semibold text-white"
-                        >
-                          To proceed, type{" "}
-                          <span className="px-1.5 py-0.5 font-mono text-xs font-bold text-white select-all">
-                            "{CONFIRMATION_PHRASE}"
-                          </span>{" "}
-                          below:
-                        </label>
-                        <div className="relative">
-                          <input
-                            id="consequences-confirmation"
-                            type="text"
-                            value={confirmationInput}
-                            onChange={(e) => setConfirmationInput(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" && isConfirmationSatisfied && count !== 0) {
-                                e.preventDefault();
-                                startSimulation();
-                              }
-                            }}
-                            placeholder={CONFIRMATION_PHRASE}
-                            autoComplete="off"
-                            spellCheck="false"
-                            className={`w-full rounded-lg border bg-white px-3 py-1.5 pr-9 font-mono text-xs text-foreground placeholder:text-foreground/40 transition-all focus:outline-none ${
-                              isVerified
-                                ? "border-green-600 ring-2 ring-green-500/40"
-                                : "border-white/40 focus:border-white focus:ring-2 focus:ring-white/30"
-                            }`}
-                          />
-                          {isVerified && (
-                            <Check
-                              className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-green-600"
-                              strokeWidth={2.5}
-                            />
-                          )}
-                        </div>
-                        {isVerified ? (
-                          <p className="flex items-center gap-1.5 text-[11px] font-medium text-white">
-                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-white" />
-                            <span>Confirmation verified. You can now proceed.</span>
-                          </p>
-                        ) : (
-                          <p className="text-[10.5px] text-white/80">
-                            Exact match required
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()
-              ) : unfiltered ? (
-                <p className="flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-xs leading-[1.6] text-amber-900">
-                  <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
-                  <span>
-                    No filters are set, so this is the entire register — almost
-                    certainly not what you want.
-                  </span>
-                </p>
-              ) : null}
-
-              <DialogFooter>
-                <DialogClose asChild>
-                  <button
-                    type="button"
-                    className="rounded-lg px-3 py-2 text-sm font-bold text-foreground/60 transition-colors hover:bg-black/[0.04] hover:text-foreground cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                </DialogClose>
-                <OriginButton
-                  onClick={startSimulation}
-                  disabled={count === 0 || !isConfirmationSatisfied}
-                  size="md"
-                  type="button"
-                >
-                  Import{count !== null && count > 0 ? ` ${count.toLocaleString()}` : ""}
-                </OriginButton>
-              </DialogFooter>
-            </>
-          )}
-
-          {flowStep === "simulating" && (
-            <>
-              <DialogHeader>
-                <DialogTitle>
-                  Importing {count?.toLocaleString() ?? ""}{" "}
-                  {count === 1 ? "charity" : "charities"}…
-                </DialogTitle>
-                <DialogDescription className="leading-[1.65]">
-                  Executing four-stage ingestion pipeline (simulated)
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-2 py-1">
-                <div className="flex items-center justify-between text-xs font-semibold text-foreground/60">
-                  <span>Pipeline progress</span>
-                  <span className="tabular-nums font-bold text-foreground">{simProgress}%</span>
-                </div>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-black/[0.07]">
-                  <motion.div
-                    className="h-full rounded-full bg-[#102a4e]"
-                    initial={{ width: "0%" }}
-                    animate={{ width: `${simProgress}%` }}
-                    transition={{ duration: 0.35, ease: "easeOut" }}
-                  />
-                </div>
-                <p className="text-[11px] tabular-nums text-foreground/50">
-                  Processed ~{Math.min(count ?? 0, Math.round(((simProgress) / 100) * (count ?? 0))).toLocaleString()} of {(count ?? 0).toLocaleString()} records
-                </p>
-              </div>
-
-              <div className="space-y-2.5 border-t border-black/[0.06] pt-3">
-                {SIMULATION_PIPELINE_STAGES.map((stage, idx) => {
-                  const isDone = idx < simStageIndex || simProgress === 100;
-                  const isActive = idx === simStageIndex && simProgress < 100;
-                  return (
-                    <div key={stage.name} className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full">
-                        {isDone ? (
-                          <Check className="h-4 w-4 text-emerald-600" strokeWidth={2.8} />
-                        ) : isActive ? (
-                          <Loader2 className="h-4 w-4 animate-spin text-[#102a4e]" strokeWidth={2.5} />
-                        ) : (
-                          <div className="h-1.5 w-1.5 rounded-full bg-black/25" />
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p
-                          className={`text-xs font-bold leading-tight ${
-                            isActive
-                              ? "text-foreground"
-                              : isDone
-                                ? "text-foreground/75"
-                                : "text-foreground/40"
-                          }`}
-                        >
-                          {stage.title}
-                        </p>
-                        <p className="text-[11px] leading-tight text-foreground/50">
-                          {stage.detail}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <DialogFooter className="pt-2">
-                <p className="text-xs italic text-foreground/40">
-                  Please wait while simulation runs…
-                </p>
-              </DialogFooter>
-            </>
-          )}
-
-          {flowStep === "complete" && (
-            <>
-              <div className="flex items-center gap-2.5 pt-1">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-                  <CheckCircle2 className="h-5 w-5" strokeWidth={2.4} />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-foreground">Import complete</h3>
-                    <span className="rounded-full border border-blue-200/60 bg-blue-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-800">
-                      Simulated
-                    </span>
-                  </div>
-                  <p className="text-xs text-foreground/55">All pipeline stages finished successfully</p>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-black/[0.07] bg-black/[0.015] p-3.5">
-                <p className="text-sm font-semibold leading-[1.6] text-foreground">
-                  {simResult?.summary}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="rounded-xl border border-emerald-500/20 bg-emerald-50/50 p-2.5">
-                  <p className="text-[11px] font-bold text-emerald-800">Added to client list</p>
-                  <p className="mt-0.5 text-lg font-bold tabular-nums text-emerald-950">
-                    {simResult?.added.toLocaleString()}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-amber-500/20 bg-amber-50/50 p-2.5">
-                  <p className="text-[11px] font-bold text-amber-800">Flagged for review</p>
-                  <p className="mt-0.5 text-lg font-bold tabular-nums text-amber-950">
-                    {simResult?.needsReview.toLocaleString()}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
-                  <p className="text-[11px] font-bold text-slate-700">Below criteria</p>
-                  <p className="mt-0.5 text-lg font-bold tabular-nums text-slate-900">
-                    {simResult?.doesNotMeet.toLocaleString()}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-blue-500/20 bg-blue-50/50 p-2.5">
-                  <p className="text-[11px] font-bold text-blue-800">Already held</p>
-                  <p className="mt-0.5 text-lg font-bold tabular-nums text-blue-950">
-                    {simResult?.alreadyHeld.toLocaleString()}
-                  </p>
-                </div>
-              </div>
-
-              <p className="text-[11px] leading-relaxed text-foreground/50">
-                This was a simulated run — no organisations were written to your database, and your live client list was unchanged.
-              </p>
-
-              <DialogFooter className="gap-2 sm:gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleOpenChange(false)}
-                  className="rounded-lg px-3 py-2 text-xs font-bold text-foreground/70 transition-colors hover:bg-black/[0.04] hover:text-foreground"
-                >
-                  Done
-                </button>
-                <OriginButton
-                  onClick={() => {
-                    handleOpenChange(false);
-                    consoleCtx?.closeComposer();
-                  }}
-                  size="md"
-                  type="button"
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    View recent imports
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </span>
-                </OriginButton>
-              </DialogFooter>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

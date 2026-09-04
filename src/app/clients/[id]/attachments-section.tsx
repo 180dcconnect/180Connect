@@ -1,4 +1,5 @@
 import type { Attachment } from "@/lib/attachments";
+import { extractAttachmentTextForm } from "./attachment-actions";
 
 /**
  * F080 — list / empty / error states for a client's attachments (AC1, AC3).
@@ -10,10 +11,12 @@ export function AttachmentsSection({
   organisationId,
   attachments,
   error,
+  canExtract,
 }: {
   organisationId: string;
   attachments: readonly Attachment[];
   error: boolean;
+  canExtract: boolean;
 }) {
   if (error) {
     return (
@@ -55,6 +58,31 @@ export function AttachmentsSection({
               {new Date(attachment.createdAt).toLocaleDateString("en-GB")}
               {attachment.sizeLabel ? ` · ${attachment.sizeLabel}` : ""}
             </p>
+            {attachment.textExtractionStatus === "succeeded" && attachment.extractedText && (
+              <details className="mt-2 max-w-2xl text-xs text-foreground/65">
+                <summary className="cursor-pointer font-bold text-brand-hover">
+                  Text extracted{attachment.extractedPageCount ? ` · ${attachment.extractedPageCount} pages` : ""}
+                  {attachment.extractedTextTruncated ? " · shortened" : ""}
+                </summary>
+                <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-black/[0.03] p-3 font-sans leading-relaxed">
+                  {attachment.extractedText}
+                </pre>
+              </details>
+            )}
+            {attachment.textExtractionStatus === "failed" && (
+              <p className="mt-1 text-xs font-bold text-destructive">
+                Text could not be extracted. This PDF may be scanned or image-only.
+              </p>
+            )}
+            {canExtract && (attachment.textExtractionStatus === "pending" || attachment.textExtractionStatus === "failed") && (
+              <form action={extractAttachmentTextForm} className="mt-2">
+                <input type="hidden" name="organisationId" value={organisationId} />
+                <input type="hidden" name="attachmentId" value={attachment.id} />
+                <button className="text-xs font-bold text-brand-hover underline underline-offset-2" type="submit">
+                  {attachment.textExtractionStatus === "failed" ? "Try extraction again" : "Extract text"}
+                </button>
+              </form>
+            )}
           </div>
         </li>
       ))}

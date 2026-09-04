@@ -1151,6 +1151,15 @@ confirms the Storage object exists before recording it. No `audit_log` entry:
 attaching a file changes no ownership/status/role/approval state
 (`docs/audit-log-pattern.md` §1), same reasoning as `NOTES`.
 
+**PDF text extraction (F220):** extraction metadata and `extracted_text` remain
+on the same RLS-protected `ATTACHMENTS` row, so every active role that can read
+the file can read its searchable text. Authenticated users receive no direct
+UPDATE grant. `record_attachment_text_extraction(...)` is the sole write path;
+it is `SECURITY DEFINER`, checks `app.can_write()`, accepts only the documented
+terminal states, and refuses a successful state without non-empty text. This
+write changes no ownership, pipeline status, role, or approval state, so it is
+outside the audit-log trigger list in `docs/audit-log-pattern.md` §1.
+
 **Storage**: a private bucket, `client-attachments` (never public — nothing
 about a client's files is meant to be reachable by an unauthenticated guess at
 a path), with a real, Storage-enforced `file_size_limit` (25 MB) and

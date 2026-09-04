@@ -21,3 +21,13 @@ test("Stage 2 prompt only exposes a live news hook when enabled", () => {
   assert.doesNotMatch(buildStageTwoPrompt(context).prompt, /New programme launched/);
   assert.match(buildStageTwoPrompt(context, { newsEnabled: true }).prompt, /New programme launched/);
 });
+
+test("Stage 2 prompt includes extracted PDF context (F220)", () => {
+  const result = buildStageTwoPrompt({
+    organisationName: "Example",
+    organisationType: "charity",
+    attachmentText: "File: strategy.pdf\nPriority is volunteer retention.",
+  });
+  assert.match(result.prompt, /strategy\.pdf/);
+  assert.match(result.prompt, /volunteer retention/);
+});

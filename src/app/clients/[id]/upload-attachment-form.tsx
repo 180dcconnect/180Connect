@@ -9,6 +9,7 @@ import {
   buildAttachmentStoragePath,
   validateAttachmentFile,
 } from "@/lib/attachments";
+import { recordUploadedAttachment } from "./attachment-actions";
 
 const ATTACHMENTS_BUCKET = "client-attachments";
 
@@ -69,23 +70,19 @@ export function UploadAttachmentForm({ organisationId }: { organisationId: strin
         return;
       }
 
-      const response = await fetch(`/api/clients/${organisationId}/attachments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: file.name,
-          storagePath,
-          contentType: file.type || undefined,
-          sizeBytes: file.size,
-        }),
+      const result = await recordUploadedAttachment({
+        organisationId,
+        filename: file.name,
+        storagePath,
+        contentType: file.type || null,
+        sizeBytes: file.size,
       });
 
-      if (response.ok) {
+      if (result.ok) {
         startRefresh(() => router.refresh());
         return;
       }
-      const body = await response.json().catch(() => null);
-      setError(body?.error ?? "The attachment could not be saved.");
+      setError(result.message);
     } catch {
       setError("Could not reach the server. Check your connection and try again.");
     } finally {

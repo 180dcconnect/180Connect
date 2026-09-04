@@ -29,6 +29,12 @@ export interface DeleteButtonProps {
   onCancel?: () => void;
   /** Callback fired when the button enters confirmation mode */
   onStartConfirm?: () => void;
+  /**
+   * Callback fired once the dissolve has finished playing. Consumers that
+   * unmount the row on success should do it here, not in `onConfirm` — removing
+   * the element while the snap is still running cuts the animation dead.
+   */
+  onComplete?: () => void;
   /** Button visual style variant. Defaults to "solid" (rich red) */
   variant?: DeleteButtonVariant;
   /** Size scale. Defaults to "md" */
@@ -169,6 +175,7 @@ export const DeleteButton = React.forwardRef<
     onConfirm,
     onCancel,
     onStartConfirm,
+    onComplete,
     variant = "solid",
     size = "md",
     snapOnConfirm = true,
@@ -213,7 +220,16 @@ export const DeleteButton = React.forwardRef<
     status === "snapping";
   const isConfirming = status === "confirming";
   const isDeleting = status === "deleting";
+  const isSnapping = status === "snapping";
   const isVanished = status === "vanished";
+  /**
+   * Once the user commits, "deleting" and "snapping" must render *identically*.
+   * The dissolve has to eat the exact frame that was already on screen — if any
+   * of the style, icon or label branches distinguish the two, the button visibly
+   * reverts at the instant the snap begins and the particles are made of the
+   * reverted frame instead of the committed one.
+   */
+  const isCommitted = isDeleting || isSnapping;
 
   const currentSize = sizeConfig[size] || sizeConfig.md;
   const currentVariant = variantStyles[variant] || variantStyles.solid;
@@ -307,6 +323,7 @@ export const DeleteButton = React.forwardRef<
           setStatus("idle");
         }
         setInternalLoading(false);
+        onComplete?.();
       } catch (err) {
         setStatus("idle");
         setInternalLoading(false);
@@ -324,6 +341,7 @@ export const DeleteButton = React.forwardRef<
             setStatus("idle");
           }
           setInternalLoading(false);
+          onComplete?.();
         } catch (err) {
           setStatus("idle");
           setInternalLoading(false);
@@ -331,6 +349,7 @@ export const DeleteButton = React.forwardRef<
         }
       } else {
         setStatus(vanishOnComplete ? "vanished" : "idle");
+        onComplete?.();
       }
     }
   };
@@ -343,7 +362,7 @@ export const DeleteButton = React.forwardRef<
     onCancel?.();
   };
 
-  const buttonStyleClasses = isDeleting
+  const buttonStyleClasses = isCommitted
     ? currentVariant.deleting
     : isConfirming
     ? currentVariant.confirming
@@ -384,7 +403,12 @@ export const DeleteButton = React.forwardRef<
             aria-live="polite"
             whileTap={disabled || isExecuting ? undefined : { scale: 0.97 }}
             className={cn(
-              "relative inline-flex items-center justify-center font-medium tracking-tight transition-colors duration-150 cursor-pointer overflow-hidden rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
+              "relative inline-flex items-center justify-center font-medium tracking-tight transition-colors duration-150 cursor-pointer overflow-hidden rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none",
+              // The button disables itself while deleting/snapping, so a blanket
+              // `disabled:opacity-50` would run the whole dissolve at half
+              // opacity and wash the particles out. Only dim a genuinely
+              // disabled control.
+              disabled && !isExecuting && "opacity-50",
               currentSize.button,
               buttonStyleClasses,
               buttonClassName
@@ -393,7 +417,7 @@ export const DeleteButton = React.forwardRef<
             {/* Dynamic Icon Morphing: Trash -> Tick -> Spinner */}
             <span className="relative flex items-center justify-center shrink-0">
               <AnimatePresence mode="popLayout" initial={false}>
-                {isDeleting ? (
+                {isCommitted ? (
                   <motion.span
                     key="loading-icon"
                     initial={{ opacity: 0, rotate: -45, scale: 0.7 }}
@@ -408,7 +432,7 @@ export const DeleteButton = React.forwardRef<
                       aria-hidden="true"
                     />
                   </motion.span>
-                ) : isConfirming || status === "snapping" ? (
+                ) : isConfirming ? (
                   <motion.span
                     key="confirm-tick-icon"
                     initial={{ opacity: 0, scale: 0.6, rotate: -20 }}
@@ -444,11 +468,28 @@ export const DeleteButton = React.forwardRef<
 
             {/* Dynamic Text Transition: Delete -> Confirm -> Deleting */}
             <span className="relative inline-grid items-center justify-items-center overflow-hidden">
+              {/* The executing label is usually the longest of the three, so it
+                  gets its own sizer that grows in on the shared curve instead of
+                  padding out the resting button. The grid column tracks the
+                  widest item, so animating this one animates the button. */}
+              <AnimatePresence initial={false}>
+                {isCommitted && (
+                  <motion.span
+                    key="executing-sizer"
+                    aria-hidden="true"
+                    initial={{ width: 0 }}
+                    animate={{ width: "auto" }}
+                    exit={{ width: 0 }}
+                    transition={MORPH_TRANSITION}
+                    className="invisible col-start-1 row-start-1 overflow-hidden whitespace-nowrap font-semibold"
+                  >
+                    {deletingLabel}
+                  </motion.span>
+                )}
+              </AnimatePresence>
               {/* Invisible sizers hold the column at the width of the wider of
                   the two resting labels, so swapping between them never resizes
-                  the button and never nudges the surrounding row. The executing
-                  state deliberately shows no text (the spinner carries it), so
-                  it is left out here and cannot widen the idle button. */}
+                  the button and never nudges the surrounding row. */}
               {[label, confirmLabel].map((sizerLabel, index) => (
                 <span
                   key={`label-sizer-${index}`}
@@ -458,10 +499,20 @@ export const DeleteButton = React.forwardRef<
                   {sizerLabel}
                 </span>
               ))}
-              <span className="col-start-1 row-start-1 flex items-center justify-center">
-                {isDeleting && <span className="sr-only">{deletingLabel}</span>}
+              <span className="absolute inset-0 flex items-center justify-center">
                 <AnimatePresence mode="popLayout" initial={false}>
-                  {isDeleting ? null : isConfirming || status === "snapping" ? (
+                  {isCommitted ? (
+                    <motion.span
+                      key="deleting-text"
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -5 }}
+                      transition={SWAP_TRANSITION}
+                      className="whitespace-nowrap font-medium"
+                    >
+                      {deletingLabel}
+                    </motion.span>
+                  ) : isConfirming ? (
                     <motion.span
                       key="confirming-text"
                       initial={{ opacity: 0, y: 5 }}

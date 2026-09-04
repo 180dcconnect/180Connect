@@ -338,7 +338,7 @@ function BreakdownTable({ factors }: { factors: ScoreFactorsRecord }) {
                 <TooltipContent
                   side="top"
                   sideOffset={6}
-                  className="max-w-[17rem] rounded-inset bg-ink px-3 py-2 text-left text-[12px] leading-[1.5] text-white shadow-lg"
+                  className="max-w-[17rem] rounded-inset border border-white/10 bg-[#161b21] px-3 py-2 text-left text-[12px] leading-[1.5] text-white shadow-lg"
                 >
                   <span className="block font-semibold">
                     {isNeutral

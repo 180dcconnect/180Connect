@@ -6,7 +6,7 @@ import { ArrowRight, Check, ChevronLeft, SlidersHorizontal, X } from "lucide-rea
 import { useRouter } from "next/navigation";
 
 import { EASE, entranceIndexed, entranceSoft, stagger } from "@/components/brand/motion";
-import { LIP, SEARCH_GLASS, SEARCH_GLASS_OPEN } from "@/components/brand/tokens";
+import { LIP, SEARCH_GLASS, SEARCH_GLASS_FROSTED, SEARCH_GLASS_OPEN } from "@/components/brand/tokens";
 import { tagPillStyle } from "@/lib/tags/tag-colours";
 
 /** Cycles behind the prompt while the field is empty and unfocused. */
@@ -40,6 +40,18 @@ function rankOption(label: string, query: string): number {
 export type FilterOption = { label: string; value: string; colour?: string };
 
 /**
+ * A single row in the open panel, for placements that offer actions rather
+ * than filters. Rows without `onSelect` render as plain rows (no hover, no
+ * tap target) until their behavior lands.
+ */
+export type PanelRow = {
+  label: string;
+  hint?: string;
+  icon?: React.ReactNode;
+  onSelect?: () => void;
+};
+
+/**
  * Demo content, used only when a host page passes no `categories`. The matching
  * `DEFAULT_PARAMS` below keeps the two halves of that fallback in one place —
  * a category with no query parameter silently searches for nothing.
@@ -66,6 +78,9 @@ export function BrandSearchBar({
   params: paramNames,
    defaultQuery = "",
    defaultFilters = [],
+   frosted = false,
+   promptButton = false,
+   panelRows,
 }: {
   className?: string;
   placeholder?: string;
@@ -81,6 +96,24 @@ export function BrandSearchBar({
    params?: Record<string, string>;
    defaultQuery?: string;
    defaultFilters?: (FilterOption & { category: string })[];
+   /**
+    * Stronger frost on the glass (20px backdrop blur under a 0.5 tint instead
+    * of 3px under 0.72), so the page behind an open panel reads as blurred
+    * texture. Opt-in per instance — the clients-list bar keeps its look.
+    */
+   frosted?: boolean;
+   /**
+    * Render the prompt row as a button that opens the panel instead of a
+    * text input — for placements where the bar triggers options rather than
+    * taking a query. The cycling subjects stay exactly as they are.
+    */
+   promptButton?: boolean;
+   /**
+    * Replace the filter categories (and their drill-down) with plain rows.
+    * For placements like the booklet composer, whose panel offers actions
+    * rather than filters.
+    */
+   panelRows?: PanelRow[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -98,15 +131,18 @@ export function BrandSearchBar({
 
   const typing = query.length > 0;
 
-  // The subject only cycles while there is nothing else in the row to read.
+  // The subject only cycles while there is nothing else in the row to read —
+  // except in prompt-button mode, where the cycling words ARE the button's
+  // label and must keep turning even with the panel open.
   useEffect(() => {
-    if (open || typing) return;
+    if (typing) return;
+    if (open && !promptButton) return;
     const id = setInterval(
       () => setSubject((i) => (i + 1) % subjects.length),
       SUBJECT_HOLD,
     );
     return () => clearInterval(id);
-  }, [open, typing, subjects.length]);
+  }, [open, typing, promptButton, subjects.length]);
 
   // Pointerdown, not click: a click that starts inside and ends outside (a drag
   // over the results) would otherwise close the panel out from under the cursor.
@@ -196,11 +232,15 @@ export function BrandSearchBar({
       <div className="relative h-[64px] w-full z-50">
         <motion.div
           ref={rootRef}
-          className="absolute top-0 left-0 w-full overflow-hidden backdrop-blur-[3px]"
+          className={`absolute top-0 left-0 w-full overflow-hidden ${frosted ? "backdrop-blur-[20px]" : "backdrop-blur-[3px]"}`}
           style={{ boxShadow: LIP, borderRadius: ROW / 2 }}
           animate={{
             height: open ? "auto" : ROW,
-            backgroundColor: open ? SEARCH_GLASS_OPEN : SEARCH_GLASS,
+            backgroundColor: open
+              ? frosted
+                ? SEARCH_GLASS_FROSTED
+                : SEARCH_GLASS_OPEN
+              : SEARCH_GLASS,
           }}
           initial={false}
           transition={{ duration: 0.7, ease: EASE }}
@@ -231,6 +271,40 @@ export function BrandSearchBar({
       />
 
       <div className="relative z-20 flex items-center pr-3 pl-7 rounded-[32px] bg-black/20" style={{ height: ROW }}>
+        {promptButton ? (
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            aria-expanded={open}
+            aria-controls={open ? listId : undefined}
+            aria-label="Open options"
+            className="relative mr-3 min-w-0 flex-1 cursor-pointer text-left"
+          >
+            <span
+              className="font-body flex items-center gap-[0.4ch] text-[15px] whitespace-nowrap sm:text-base"
+              aria-hidden="true"
+            >
+              <span className="text-[#f4f4ef]/55">{placeholder}</span>
+              <span className="relative">
+                <span className="invisible">
+                  {subjects.reduce((a, b) => (b.length > a.length ? b : a), "")}
+                </span>
+                <AnimatePresence initial={false} mode="popLayout">
+                  <motion.span
+                    key={subjects[subject]}
+                    className="absolute inset-0 text-[#f4f4ef]"
+                    initial={{ opacity: 0, y: 10, filter: "blur(6px)" }}
+                    animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                    exit={{ opacity: 0, y: -10, filter: "blur(6px)" }}
+                    transition={{ duration: 0.45, ease: EASE }}
+                  >
+                    {subjects[subject]}
+                  </motion.span>
+                </AnimatePresence>
+              </span>
+            </span>
+          </button>
+        ) : (
         <div className="relative min-w-0 flex-1 mr-3">
           <input
             ref={inputRef}
@@ -281,6 +355,7 @@ export function BrandSearchBar({
             </div>
           )}
         </div>
+        )}
 
         <AnimatePresence>
           {(typing || selectedFilters.length > 0 || isSearching) && (
@@ -351,7 +426,54 @@ export function BrandSearchBar({
             className="relative z-10"
           >
             <AnimatePresence mode="wait">
-              {activeFilter === null ? (
+              {panelRows ? (
+                <motion.ul
+                  key="rows"
+                  className="flex flex-col gap-1 px-4 py-4 h-[280px] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+                  variants={PANEL_STAGGER}
+                  initial="hidden"
+                  animate="show"
+                  exit={{ opacity: 0, transition: { duration: 0.15 } }}
+                >
+                  {panelRows.map((row) => (
+                    <motion.li key={row.label} variants={entranceSoft}>
+                      {row.onSelect ? (
+                        <button
+                          type="button"
+                          onClick={row.onSelect}
+                          className="font-body flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+                        >
+                          {row.icon}
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-lg font-medium text-white">
+                              {row.label}
+                            </span>
+                            {row.hint && (
+                              <span className="mt-0.5 block text-[13px] text-[#f4f4ef]/60">
+                                {row.hint}
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                      ) : (
+                        <div className="font-body flex w-full items-center gap-3 rounded-2xl px-3 py-2">
+                          {row.icon}
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-lg font-medium text-white">
+                              {row.label}
+                            </span>
+                            {row.hint && (
+                              <span className="mt-0.5 block text-[13px] text-[#f4f4ef]/60">
+                                {row.hint}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      )}
+                    </motion.li>
+                  ))}
+                </motion.ul>
+              ) : activeFilter === null ? (
                   <motion.ul
                     key="categories"
                     className="flex flex-col gap-1 px-4 py-4 h-[280px] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"

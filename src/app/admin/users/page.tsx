@@ -10,7 +10,8 @@ import type { TeamUser } from "./user-management-table";
 import { Rise } from "@/components/dashboard-stage";
 import { SearchRail } from "@/components/search-rail";
 import { BrandSearchBar } from "@/components/brand/search-bar";
-import { InviteDialog } from "./invite-dialog";
+import { DarkInviteSheet } from "./invite-sheet-dark";
+import { allowedEmailDomains } from "@/lib/auth/email-domain";
 import {
   CLIENT_COUNT_FILTER_OPTIONS,
   LAST_ACTIVE_FILTER_OPTIONS,
@@ -23,13 +24,6 @@ import {
 } from "@/lib/admin/team-filter";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
-
-const DUMMY_PENDING_INVITE: PendingInvite = {
-  id: "dummy-invite-1",
-  email: "alex.dummy@180dc.org",
-  invited_at: "2026-09-02T12:00:00.000Z",
-  role: "cam",
-};
 
 export default async function AdminUsersPage({
   searchParams,
@@ -176,7 +170,19 @@ export default async function AdminUsersPage({
               </h1>
             </div>
             <div className="shrink-0 pt-1">
-              <InviteDialog />
+              {/* Resolved here, not in the sheet: the allowlist lives in
+                  AUTH_ALLOWED_EMAIL_DOMAIN, and process.env is not readable
+                  from a Client Component. */}
+              <DarkInviteSheet
+                allowedDomains={allowedEmailDomains()}
+                pendingEmails={(pendingInvites ?? []).map((p) => p.email)}
+                existingUserEmails={(users ?? [])
+                  .filter((u) => !u.deactivated_at && u.is_active !== false)
+                  .map((u) => u.email)}
+                deactivatedEmails={(users ?? [])
+                  .filter((u) => Boolean(u.deactivated_at) || u.is_active === false)
+                  .map((u) => u.email)}
+              />
             </div>
           </div>
         }
@@ -204,10 +210,7 @@ export default async function AdminUsersPage({
           <TeamPanel
             currentUserId={authorization.actor.id}
             filterCriteria={filterCriteria}
-            initialPendingInvites={[
-              ...((pendingInvites as PendingInvite[] | null) ?? []),
-              DUMMY_PENDING_INVITE,
-            ]}
+            initialPendingInvites={(pendingInvites as PendingInvite[] | null) ?? []}
             initialTeamUsers={teamUsers}
             pendingInvitesError={Boolean(pendingError)}
           />

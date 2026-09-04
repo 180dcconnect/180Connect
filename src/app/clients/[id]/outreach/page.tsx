@@ -1,4 +1,4 @@
-import { Mail } from "lucide-react";
+import { Clock, Mail, Paperclip, Reply, StickyNote } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
@@ -16,15 +16,21 @@ import {
   isNearSendLimit,
   resolveEmailSendLimit,
 } from "@/lib/outreach/send-rate-limit";
+import { formatAttachments, type AttachmentRow } from "@/lib/attachments";
+import { buildNoteList, type NoteRow } from "@/lib/note-history";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 
+import { AddNoteForm } from "../add-note-form";
+import { AttachmentsSection } from "../attachments-section";
 import { BookletPanel } from "../booklet-panel";
 import { ComposeButton } from "../compose-button";
 import { FailedEmailList } from "../failed-email-list";
 import { FollowUpButton } from "../follow-up-button";
+import { NotesSection } from "../notes-section";
 import { OutreachHistorySection } from "../outreach-history";
 import { ScheduledEmailList } from "../scheduled-email-list";
 import { SectionCard } from "../section-card";
+import { UploadAttachmentForm } from "../upload-attachment-form";
 import {
   loadClient,
   loadOwner,
@@ -86,6 +92,8 @@ export default async function ClientOutreachPage({
     scheduledResult,
     failedResult,
     replyResult,
+    notesResult,
+    attachmentsResult,
   ] =
     await Promise.all([
       loadOwner(id),
@@ -136,6 +144,21 @@ export default async function ClientOutreachPage({
         .select("id, outreach_message_id, reply_body, received_at")
         .eq("organisation_id", id)
         .returns<ThreadReplyRow[]>(),
+      // F071–F074: notes left against this client.
+      supabase
+        .from("notes")
+        .select(
+          "id, content, created_at, updated_at, author_id, author:users!notes_author_id_fkey(full_name)",
+        )
+        .eq("organisation_id", id),
+      // F080/F081: attachments uploaded to this client.
+      supabase
+        .from("attachments")
+        .select(
+          "id, filename, content_type, size_bytes, created_at, uploaded_by_user:users!attachments_uploaded_by_fkey(full_name)",
+        )
+        .eq("organisation_id", id)
+        .order("created_at", { ascending: false }),
     ]);
 
   for (const [operation, error] of [
@@ -144,9 +167,19 @@ export default async function ClientOutreachPage({
     ["clients.detail_scheduled_emails", scheduledResult.error],
     ["clients.detail_failed_emails", failedResult.error],
     ["clients.detail_replies", replyResult.error],
+    ["clients.detail_notes", notesResult.error],
+    ["clients.detail_attachments", attachmentsResult.error],
   ] as const) {
     if (error) await reportError(error, { operation, organisationId: id });
   }
+
+  const noteList = buildNoteList((notesResult.data ?? []) as unknown as NoteRow[], {
+    id: actor.id,
+    role: actor.role,
+  });
+  const attachments = formatAttachments(
+    (attachmentsResult.data ?? []) as unknown as AttachmentRow[],
+  );
 
   const savedBooklet = bookletResult.data?.[0] ?? null;
   const outreachHistory = splitOutreachHistory(
@@ -204,6 +237,21 @@ export default async function ClientOutreachPage({
     actorId: actor.id,
     actorRole: actor.role,
   });
+
+  // F101: the follow-up trigger only exists while the client sits at
+  // initial_outreach_sent — Stage 1 sent, nothing since. The route
+  // re-enforces eligibility server-side, so this gate is convenience over an
+  // enforcement that does not depend on it.
+  const canFollowUp =
+    canContact && client.outreach_status === "initial_outreach_sent";
+  const followUpBlocked =
+    suppression.suppressed || ownershipConflict.hasConflict;
+
+  // The queue card only exists when there is something queued or failed —
+  // the lists render nothing on empty, and a card around two nothings would
+  // be a heading with no body.
+  const hasQueue =
+    (scheduledResult.data?.length ?? 0) > 0 || failedEmails.length > 0;
 
   // F228: the admin sees their own position against the F227 send limit, so the
   // warning arrives before sends start failing rather than after. Counted
@@ -303,8 +351,11 @@ export default async function ClientOutreachPage({
           {canContact ? (
             <>
               {/* F082 — Generate Client Booklet. First, because a CAM reads the
-                  research before writing the email below it. */}
-              <Rise>
+                  research before writing the email below it. The Rise carries
+                  z-index so the composer's search panel paints over the Stage
+                  1 card beneath it — each Rise is a `filter` stacking context,
+                  so without this the later sibling would cover the dropdown. */}
+              <Rise className="relative z-20">
                 <BookletPanel
                   organisationId={client.id}
                   initialWebsiteUrl={
@@ -362,16 +413,25 @@ export default async function ClientOutreachPage({
                 />
               </Rise>
 
-              {/* F126: what is queued for later, with cancel. F129: what did
-                  not leave, with retry. Both directly under the compose flow
-                  that created them. */}
-              <Rise>
-                <ScheduledEmailList
-                  organisationId={client.id}
-                  messages={scheduledResult.data ?? []}
-                />
-                <FailedEmailList organisationId={client.id} messages={failedEmails} />
-              </Rise>
+              {/* What is waiting to go out, and what failed to leave — with
+                  cancel and retry where each was created. One card rather
+                  than two orphan lists, so the queue reads as one state. */}
+              {hasQueue && (
+                <Rise>
+                  <SectionCard
+                    headingId="outreach-queue-heading"
+                    title="Queued and failed"
+                    hint="Scheduled sends waiting to go out, and sends that failed to leave."
+                    icon={<Clock />}
+                  >
+                    <ScheduledEmailList
+                      organisationId={client.id}
+                      messages={scheduledResult.data ?? []}
+                    />
+                    <FailedEmailList organisationId={client.id} messages={failedEmails} />
+                  </SectionCard>
+                </Rise>
+              )}
             </>
           ) : (
             <Rise>
@@ -391,10 +451,15 @@ export default async function ClientOutreachPage({
               client:contact — only the actions above and the follow-up below
               are. */}
           <Rise>
-            <SectionCard headingId="outreach-history-heading" title="Outreach history" icon={<Mail />}>
+            <SectionCard
+              headingId="outreach-history-heading"
+              title="Outreach history"
+              hint="Sent emails, client replies and everything still unsent."
+              icon={<Mail />}
+            >
               {sendingVolume && (
                 <p
-                  className={`mt-3 rounded-inset p-3 text-sm font-semibold ${
+                  className={`mt-3 rounded-inset p-3 text-sm font-medium ${
                     sendingVolume.warning
                       ? "bg-hold-wash text-hold"
                       : "bg-paper text-dim"
@@ -417,12 +482,21 @@ export default async function ClientOutreachPage({
                 // someone who may write to the record gets the composer.
                 noteOrganisationId={canEdit ? client.id : undefined}
               />
+            </SectionCard>
+          </Rise>
 
-              {/* F101: the follow-up trigger only exists while the client sits
-                  at initial_outreach_sent — Stage 1 sent, nothing since. The
-                  route re-enforces eligibility server-side, so this gate is
-                  convenience over an enforcement that does not depend on it. */}
-              {canContact && client.outreach_status === "initial_outreach_sent" && (
+          {/* Stage 2 gets its own card rather than living as a footnote
+              inside the history: it exists at exactly one pipeline stage,
+              and it is an action, not history. */}
+          {canFollowUp && (
+            <Rise>
+              <SectionCard
+                headingId="outreach-followup-heading"
+                title="Follow-up"
+                hint="One follow-up email, available while the first email is out and unanswered."
+                icon={<Reply />}
+                tone={followUpBlocked ? "danger" : "default"}
+              >
                 <FollowUpButton
                   blocked={suppression.suppressed}
                   ownershipBlocked={!suppression.suppressed && ownershipConflict.hasConflict}
@@ -434,7 +508,43 @@ export default async function ClientOutreachPage({
                     ownershipConflict.hasConflict ? ownershipConflict.warning : undefined
                   }
                 />
-              )}
+              </SectionCard>
+            </Rise>
+          )}
+
+          <Rise>
+            {/* Add note rides the heading row, so the composer opens downward
+                over the list rather than pushing it — see add-note-form.tsx. */}
+            <SectionCard
+              action={canEdit ? <AddNoteForm organisationId={client.id} /> : undefined}
+              headingId="notes-heading"
+              title="Notes"
+              hint="Left by any team member — relationship history everyone can see."
+              icon={<StickyNote />}
+            >
+              <NotesSection
+                notes={noteList}
+                error={Boolean(notesResult.error)}
+                organisationId={client.id}
+              />
+            </SectionCard>
+          </Rise>
+
+          <Rise>
+            <SectionCard
+              headingId="attachments-heading"
+              title="Attachments"
+              hint="Files attached to this client."
+              icon={<Paperclip />}
+            >
+              <AttachmentsSection
+                organisationId={client.id}
+                attachments={attachments}
+                error={Boolean(attachmentsResult.error)}
+              />
+              {/* F081: upload sits inside the same card so the new file appears
+                  in the list directly above it on refresh (AC4). */}
+              {canEdit && <UploadAttachmentForm organisationId={client.id} />}
             </SectionCard>
           </Rise>
         </Group>

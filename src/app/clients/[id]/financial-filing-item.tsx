@@ -40,13 +40,7 @@ function formatAmount(amount: number | null): string {
   return amount === null ? "Not disclosed" : GBP.format(amount);
 }
 
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
+import { formatShortDate } from "@/lib/display-format";
 
 export function FinancialFilingListItem({ filing }: { filing: FinancialFilingRow }) {
   const bandLabel = filing.income_band ? INCOME_BAND_LABELS[filing.income_band] : null;
@@ -54,10 +48,10 @@ export function FinancialFilingListItem({ filing }: { filing: FinancialFilingRow
     <li className="border-t border-rule-soft py-3 first:border-t-0 first:pt-0">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <p className="min-w-0 truncate text-[13.5px] font-medium text-ink">
-          Year ending {formatDate(filing.period_end)}
+          Year ending {formatShortDate(filing.period_end)}
         </p>
         <p className="shrink-0 font-mono text-[12px] text-faint tabular-nums">
-          {formatDate(filing.period_start)} – {formatDate(filing.period_end)}
+          {formatShortDate(filing.period_start)} – {formatShortDate(filing.period_end)}
         </p>
       </div>
       <div className="mt-1.5 grid gap-x-8 gap-y-1 sm:grid-cols-2">
@@ -77,7 +71,7 @@ export function FinancialFilingListItem({ filing }: { filing: FinancialFilingRow
       <p className="mt-1.5 text-[12px] text-faint">
         {formatSource(filing.financial_source)}
         {bandLabel ? ` · ${bandLabel} income band` : ""}
-        {filing.filing_date ? ` · filed ${formatDate(filing.filing_date)}` : ""}
+        {filing.filing_date ? ` · filed ${formatShortDate(filing.filing_date)}` : ""}
       </p>
     </li>
   );

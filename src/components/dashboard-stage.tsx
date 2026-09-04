@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import { MotionConfig, motion } from "motion/react";
 import { entranceSoft, stagger } from "@/components/brand/motion";
 
@@ -66,8 +67,22 @@ export function Rise({
   children: React.ReactNode;
   className?: string;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
   return (
-    <motion.div variants={entranceSoft} className={className}>
+    <motion.div
+      ref={ref}
+      variants={entranceSoft}
+      className={className}
+      onAnimationComplete={() => {
+        // The entrance settles at filter: blur(0px), and any non-none filter
+        // makes this a permanent backdrop root — glass inside (search panels,
+        // popovers) could then only ever sample this card, never the page
+        // behind it, so every backdrop-blur read as flat. Clearing to none
+        // once the entrance lands keeps the blur-up arrival without walling
+        // off every frosted descendant forever.
+        if (ref.current) ref.current.style.filter = "none";
+      }}
+    >
       {children}
     </motion.div>
   );

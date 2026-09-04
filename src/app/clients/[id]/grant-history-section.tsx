@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { HandCoins } from "lucide-react";
 import { GrantHistoryLoadMore } from "./grant-history-load-more";
 import type { GrantRow } from "./grant-list-item";
@@ -30,18 +32,30 @@ export function GrantHistorySection({
   grants,
   totalCount,
   error,
+  number,
+  intro,
 }: {
   organisationId: string;
   grants: readonly GrantRow[];
   totalCount: number;
   error: boolean;
+  /** Position in the Financials tab's numbered run. Omitted elsewhere. */
+  number?: number;
+  /**
+   * Rendered above the list. The Financials tab puts the grant-share chart
+   * here: the chart and the table are the same question — what funding has this
+   * client won — and splitting them across two numbers would have made the run
+   * longer without making it clearer.
+   */
+  intro?: ReactNode;
 }) {
   return (
     <SectionCard
       headingId="grant-history-heading"
-      title="Grant history"
+      title={number === undefined ? "Grant history" : "Funding won"}
       hint="Awards recorded from 360Giving — funding this client has received, newest first."
       icon={<HandCoins aria-hidden="true" />}
+      number={number}
       action={
         totalCount > 0 ? (
           <span className="rounded-full bg-paper-sunk px-2.5 py-1 font-mono text-[11.5px] font-medium tabular-nums text-dim">
@@ -50,6 +64,7 @@ export function GrantHistorySection({
         ) : undefined
       }
     >
+      {intro}
       {error ? (
         <p className="mt-3.5 text-sm font-semibold text-stop" role="alert">
           Grant history could not be loaded. Refresh and try again.

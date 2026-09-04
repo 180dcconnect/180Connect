@@ -1,10 +1,7 @@
-import { History, Paperclip, StickyNote } from "lucide-react";
+import { History } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
-import { hasPermission } from "@/lib/auth/permissions";
-import { formatAttachments, type AttachmentRow } from "@/lib/attachments";
-import { buildNoteList, type NoteRow } from "@/lib/note-history";
 import { buildTimeline, type AuditRow, type NoteRow as TimelineNoteRow, type OutreachMessageRow as TimelineOutreachRow, type ReplyEventRow } from "@/lib/timeline";
 import {
   stageEventsFromAudit,
@@ -12,13 +9,9 @@ import {
 } from "@/lib/field-sources";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 
-import { AddNoteForm } from "../add-note-form";
-import { AttachmentsSection } from "../attachments-section";
-import { NotesSection } from "../notes-section";
 import { SectionCard } from "../section-card";
 import { TimelineSection } from "../timeline-section";
-import { UploadAttachmentForm } from "../upload-attachment-form";
-import { loadClient, loadFieldHistory, requireActor } from "../load-record";
+import { loadFieldHistory, requireActor } from "../load-record";
 import { WhatCameFromWhereCard } from "../what-came-from-where-card";
 
 /** The audit actions the client timeline surfaces. */
@@ -30,14 +23,11 @@ const TIMELINE_AUDIT_ACTIONS = [
 ] as const;
 
 /**
- * F075/F076 timeline + F071–F074 notes + F080/F081 attachments — the
- * **Activity** tab: what has happened to this record, and what people have
- * attached to it.
+ * F075/F076 timeline + provenance — the **Activity** tab: what has happened
+ * to this record, and what came from where.
  *
  * The timeline reads across every other tab — emails, replies, notes, status,
- * ownership — so it gets the wide column, with notes and files beside it. On the
- * old single page it was pinned full-width at the very bottom, below sixteen
- * cards, and notes were the last card of the left column above it.
+ * ownership — so it gets the wide column, with provenance beside it.
  */
 export default async function ClientActivityPage({
   params,
@@ -45,11 +35,8 @@ export default async function ClientActivityPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const actor = await requireActor();
-  const client = await loadClient(id);
+  await requireActor();
   const supabase = await createClient();
-
-  const canEdit = hasPermission(actor.role, "client:edit");
 
   /*
    * The timeline's four sources are independent queries, not one join — the
@@ -63,21 +50,8 @@ export default async function ClientActivityPage({
    * by a CAM or viewer at all — without it every row is invisible, not merely
    * filtered, to anyone but an admin.
    */
-  const [notesResult, attachmentsResult, timelineNotes, timelineMessages, replies, audit, fieldHistory] =
+  const [timelineNotes, timelineMessages, replies, audit, fieldHistory] =
     await Promise.all([
-      supabase
-        .from("notes")
-        .select(
-          "id, content, created_at, updated_at, author_id, author:users!notes_author_id_fkey(full_name)",
-        )
-        .eq("organisation_id", id),
-      supabase
-        .from("attachments")
-        .select(
-          "id, filename, content_type, size_bytes, created_at, uploaded_by_user:users!attachments_uploaded_by_fkey(full_name)",
-        )
-        .eq("organisation_id", id)
-        .order("created_at", { ascending: false }),
       supabase
         .from("notes")
         .select(
@@ -107,8 +81,6 @@ export default async function ClientActivityPage({
     ]);
 
   for (const [operation, error] of [
-    ["clients.detail_notes", notesResult.error],
-    ["clients.detail_attachments", attachmentsResult.error],
     ["clients.timeline_notes", timelineNotes.error],
     ["clients.timeline_messages", timelineMessages.error],
     ["clients.timeline_replies", replies.error],
@@ -182,14 +154,6 @@ export default async function ClientActivityPage({
     timelineNames,
   );
 
-  const noteList = buildNoteList((notesResult.data ?? []) as unknown as NoteRow[], {
-    id: actor.id,
-    role: actor.role,
-  });
-  const attachments = formatAttachments(
-    (attachmentsResult.data ?? []) as unknown as AttachmentRow[],
-  );
-
   // The stage column of the what-came-from-where card reads the same audit
   // rows the timeline does — one query serves both, and the actor names are
   // the map resolved above, so a person reads as a person in both places.
@@ -222,42 +186,6 @@ export default async function ClientActivityPage({
               stageEvents={stageEvents}
               error={fieldHistory.error}
             />
-          </Rise>
-
-          <Rise>
-            {/* Add note rides the heading row, so the composer opens downward
-                over the list rather than pushing it — see add-note-form.tsx. */}
-            <SectionCard
-              action={canEdit ? <AddNoteForm organisationId={client.id} /> : undefined}
-              headingId="notes-heading"
-              title="Notes"
-              hint="Left by any team member — relationship history everyone can see."
-              icon={<StickyNote />}
-            >
-              <NotesSection
-                notes={noteList}
-                error={Boolean(notesResult.error)}
-                organisationId={client.id}
-              />
-            </SectionCard>
-          </Rise>
-
-          <Rise>
-            <SectionCard
-              headingId="attachments-heading"
-              title="Attachments"
-              hint="Files attached to this client."
-              icon={<Paperclip />}
-            >
-              <AttachmentsSection
-                organisationId={client.id}
-                attachments={attachments}
-                error={Boolean(attachmentsResult.error)}
-              />
-              {/* F081: upload sits inside the same card so the new file appears
-                  in the list directly above it on refresh (AC4). */}
-              {canEdit && <UploadAttachmentForm organisationId={client.id} />}
-            </SectionCard>
           </Rise>
         </Group>
       </div>

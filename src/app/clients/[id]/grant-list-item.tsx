@@ -15,7 +15,7 @@
  * Next.js only allows async-function exports from a "use server" module — and
  * the client-side pager needs the number for its "Load N more" label.
  */
-export const GRANT_HISTORY_PAGE_SIZE = 20;
+export const GRANT_HISTORY_PAGE_SIZE = 10;
 
 export type GrantRow = {
   id: string;
@@ -55,13 +55,7 @@ function formatAmount(amount: number, currency: string): string {
   }
 }
 
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
+import { formatShortDate } from "@/lib/display-format";
 
 export function GrantListItem({ grant }: { grant: GrantRow }) {
   return (
@@ -80,7 +74,7 @@ export function GrantListItem({ grant }: { grant: GrantRow }) {
         {grant.grant_programme ?? "Programme not recorded"}
       </p>
       <p className="shrink-0 font-mono text-[12px] text-faint tabular-nums">
-        {grant.award_date ? formatDate(grant.award_date) : "—"}
+        {formatShortDate(grant.award_date)}
       </p>
       {grant.description && (
         <p className="col-span-2 mt-0.5 text-[13px] leading-[1.55] text-dim">

@@ -79,3 +79,13 @@ export const SEARCH_GLASS = "rgba(28, 26, 24, 0.4)";
  * this opacity would be unreadable if the blur were doing the work.
  */
 export const SEARCH_GLASS_OPEN = "rgba(24, 22, 20, 0.72)";
+
+/**
+ * The frosted variant of the open pill (opt-in per instance). Same charcoal,
+ * far more translucent (0.5) with a 20px backdrop blur doing the work instead
+ * of the tint — the kunuminst.org recipe: their island is a 0.375 tint under a
+ * 20px blur, which is why its frost reads while a dark 0.72 tint with a small
+ * blur reads as flat. Kept at 0.5 rather than 0.375 so white filter names
+ * stay readable over dense page content rather than photography.
+ */
+export const SEARCH_GLASS_FROSTED = "rgba(24, 22, 20, 0.5)";

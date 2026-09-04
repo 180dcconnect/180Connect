@@ -46,7 +46,7 @@ function StatusBadge({ status }: { status: OutreachHistoryData["sent"][number]["
   return (
     <span
       className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
-        failed ? "bg-destructive/10 text-stop" : "bg-black/5 text-dim"
+        failed ? "bg-stop-wash text-stop" : "bg-paper-sunk text-dim"
       }`}
     >
       {describeSendStatus(status)}
@@ -64,20 +64,20 @@ function FullEmailThread({
   noteOrganisationId?: string;
 }) {
   return (
-    <section id="email-thread" aria-labelledby="email-thread-heading" className="mt-5 scroll-mt-24 rounded-xl border border-black/10 bg-black/[0.02] p-4">
-      <h3 id="email-thread-heading" className="text-sm font-bold text-foreground">
+    <section id="email-thread" aria-labelledby="email-thread-heading" className="mt-5 scroll-mt-24 rounded-xl border border-rule bg-paper p-4">
+      <h3 id="email-thread-heading" className="text-sm font-bold text-ink">
         Full email thread
       </h3>
-      <p className="mt-1 text-xs text-foreground/60">
+      <p className="mt-1 text-xs text-dim">
         Sent emails and client replies, oldest first.
       </p>
 
       {error ? (
-        <p className="mt-3 text-sm font-medium text-red-800" role="alert">
+        <p className="mt-3 text-sm font-medium text-stop" role="alert">
           The full email thread could not be loaded. Refresh and try again.
         </p>
       ) : entries.length === 0 ? (
-        <p className="mt-3 text-sm text-foreground/65">
+        <p className="mt-3 text-sm text-dim">
           No sent emails or replies are available for this client yet.
         </p>
       ) : (
@@ -91,17 +91,17 @@ function FullEmailThread({
                 className={`scroll-mt-24 rounded-xl border p-3 ${
                   incoming
                     ? "ml-0 mr-6 border-brand/20 bg-brand/5"
-                    : "ml-6 mr-0 border-black/10 bg-white"
+                    : "ml-6 mr-0 border-rule bg-white"
                 }`}
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <p className="text-xs font-bold uppercase tracking-wide text-foreground/60">
+                    <p className="text-xs font-semibold text-dim">
                       {incoming ? "Client replied" : "180Connect sent"}
                     </p>
                     {entry.subject && <p className="mt-0.5 text-sm font-semibold">{entry.subject}</p>}
                   </div>
-                  <time className="text-xs text-foreground/55" dateTime={entry.occurredAt}>
+                  <time className="text-xs text-faint" dateTime={entry.occurredAt}>
                     {new Date(entry.occurredAt).toLocaleString("en-GB", {
                       day: "numeric",
                       month: "short",
@@ -121,7 +121,7 @@ function FullEmailThread({
                   </div>
                 )}
                 {!incoming && (
-                  <p className="mt-2 text-xs text-foreground/55">
+                  <p className="mt-2 text-xs text-faint">
                     Sent by {entry.senderName || "a former team member"}
                   </p>
                 )}
@@ -197,7 +197,7 @@ export function OutreachHistorySection({
               className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
                 active
                   ? "bg-ink text-white"
-                  : "bg-black/5 text-dim hover:bg-black/10 hover:text-ink"
+                  : "bg-paper-sunk text-dim hover:bg-paper hover:text-ink"
               }`}
             >
               {describeStatusFilter(option)}
@@ -214,7 +214,7 @@ export function OutreachHistorySection({
 
       {(filtered.sent.length > 0 || filter === "all") && (
         <>
-          <h3 className="mt-6 text-xs font-semibold uppercase tracking-wide text-dim">
+          <h3 className="mt-6 text-sm font-semibold text-ink">
             Sent
           </h3>
           {filtered.sent.length === 0 ? (
@@ -222,7 +222,7 @@ export function OutreachHistorySection({
               No emails have been sent to this client yet.
             </p>
           ) : (
-            <ul className="mt-2 divide-y divide-black/5">
+            <ul className="mt-2 divide-y divide-rule-soft">
               {filtered.sent.map((message) => (
                 <li key={message.id}>
                   <details className="py-2">
@@ -257,13 +257,13 @@ export function OutreachHistorySection({
 
       {(filtered.notSent.length > 0 || (filter === "all")) && (
         <>
-          <h3 className="mt-6 text-xs font-semibold uppercase tracking-wide text-dim">
+          <h3 className="mt-6 text-sm font-semibold text-ink">
             Not sent
           </h3>
           {filtered.notSent.length === 0 ? (
             <p className="mt-2 text-sm text-dim">Nothing waiting to be sent.</p>
           ) : (
-            <ul className="mt-2 divide-y divide-black/5">
+            <ul className="mt-2 divide-y divide-rule-soft">
               {filtered.notSent.map((message) => (
                 <li key={message.id}>
                   <details className="py-2">

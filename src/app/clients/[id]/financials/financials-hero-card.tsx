@@ -1,4 +1,4 @@
-import { AlertTriangle, HeartHandshake, TrendingDown, TrendingUp, Users } from "lucide-react";
+import { AlertTriangle, TrendingDown, TrendingUp } from "lucide-react";
 
 import {
   deriveIncomeBand,
@@ -7,35 +7,36 @@ import {
   type IncomeBand,
 } from "@/lib/income-band";
 import {
-  buildFinancialSeries,
-  buildFundFlows,
   filingRecency,
   type FinancialPeriodInput,
-  type GrantInput,
+  type FinancialSeries,
 } from "@/lib/financials/financial-series";
-import { FundFlowSankey } from "./fund-flow-sankey";
+import type { SectorPeerStats } from "@/lib/financials/sector-peers";
 import { IncomeBandScale } from "../income-band-scale";
-import {
-  FinancialHistoryChart,
-  GrantShareChart,
-  IncomeMixPanel,
-} from "./financial-history-chart";
+import { SectorPeerStrip } from "./sector-peer-strip";
+import { StaffingRow } from "./staffing-row";
 
 interface FinancialsHeroCardProps {
   /** Every filed period, newest first — not the paginated first page. */
   filings: FinancialPeriodInput[];
   totalCount: number;
   fallbackIncomeBand?: string | null;
-  /** Every award on this client, for the grant-share chart — not the paginated
-   *  first page the list below shows. */
-  grants?: GrantInput[];
+  /** Built once on the page and shared with every other section, rather than
+   *  rebuilt here — see the note where it used to be constructed. */
+  series: FinancialSeries;
+  /** The client's own sector, for the peer strip. Null suppresses the strip. */
+  sector?: string | null;
+  /** Same-sector clients on record, already reduced. Null suppresses the strip. */
+  peerStats?: SectorPeerStats | null;
 }
 
 export function FinancialsHeroCard({
   filings,
   totalCount,
   fallbackIncomeBand,
-  grants = [],
+  series,
+  sector,
+  peerStats,
 }: FinancialsHeroCardProps) {
   const latest = filings[0] ?? null;
 
@@ -61,38 +62,22 @@ export function FinancialsHeroCard({
       })
     : null;
 
-  // One series for every mark on this card, built by the shared builder rather
-  // than re-derived here: the old version sliced "up to 4 filings" out of a
-  // page of 10 and sorted them itself, which quietly meant a charity with five
-  // filed years had its oldest one dropped from the trend.
-  const series = buildFinancialSeries({ periods: filings, grants });
+  // The series is built once on the page and handed to every section, so the
+  // headline figures here and the charts in sections 2-4 can never be reading
+  // two different derivations of the same filings.
   const recency = filingRecency(
     latest?.period_end ?? null,
     undefined,
     latest?.filing_date ?? null,
   );
-  // Scale comes from the newest year that reported it: the latest return is
-  // often a totals-only filing while the one before it carries the counts, and
-  // "no employees reported this year" is not the same claim as "no employees".
-  const scaleYear = [...series.years]
-    .reverse()
-    .find((year) => year.employees !== null || year.volunteers !== null);
-  const mixYear = [...series.years].reverse().find((year) => year.mix.length > 0);
-  // Every year that can be drawn as a flow, newest first — the chart's year
-  // strip steps through them. A year qualifies only with a split on *both*
-  // sides and two sides that square; buildFundFlow returns null rather than a
-  // diagram whose widths do not add up, so this list is often shorter than the
-  // filing history.
-  const flows = buildFundFlows(series);
-
   return (
-    <div className="rounded-panel border border-rule bg-white p-5 sm:p-6">
+    <div className="mt-4">
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
         {/* Left Column: Key Headline Metrics */}
         <div className="min-w-0 flex-1 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <span className="font-mono text-[11px] font-semibold tracking-[0.08em] text-faint uppercase">
-              Latest Filed Accounts{totalCount > 1 ? ` (${totalCount} filed)` : ""}
+              Latest filed{totalCount > 1 ? ` of ${totalCount}` : ""}
             </span>
             {latestPeriodFormatted && (
               <span className="font-mono text-[11.5px] text-faint">
@@ -176,48 +161,7 @@ export function FinancialsHeroCard({
             </div>
           </div>
 
-          {/* How the organisation is actually staffed.
-              A £400k charity run by two employees and ninety volunteers is a
-              different engagement from a £400k charity with twelve employees
-              and none — same income, same band, same score, completely
-              different project. Income cannot say which, and this is the only
-              place the record can.
-
-              A filed zero is shown as a zero, not hidden: "no paid staff" is a
-              real and useful answer. Absence of a figure is what suppresses
-              the line, which is why the check is against null. */}
-          {scaleYear && (
-            <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 border-t border-rule-soft pt-3.5">
-              <span className="text-[12.5px] text-dim">
-                Scale{" "}
-                <span className="text-faint">
-                  ({scaleYear.label} return)
-                </span>
-              </span>
-              {scaleYear.employees !== null && (
-                <span className="flex items-baseline gap-1.5 text-[13px] text-ink">
-                  <Users aria-hidden="true" className="size-3.5 shrink-0 self-center text-faint" />
-                  <span className="font-mono font-semibold tabular-nums">
-                    {scaleYear.employees.toLocaleString("en-GB")}
-                  </span>
-                  <span className="text-dim">
-                    {scaleYear.employees === 1 ? "employee" : "employees"}
-                  </span>
-                </span>
-              )}
-              {scaleYear.volunteers !== null && (
-                <span className="flex items-baseline gap-1.5 text-[13px] text-ink">
-                  <HeartHandshake aria-hidden="true" className="size-3.5 shrink-0 self-center text-faint" />
-                  <span className="font-mono font-semibold tabular-nums">
-                    {scaleYear.volunteers.toLocaleString("en-GB")}
-                  </span>
-                  <span className="text-dim">
-                    {scaleYear.volunteers === 1 ? "volunteer" : "volunteers"}
-                  </span>
-                </span>
-              )}
-            </div>
-          )}
+          <StaffingRow series={series} />
         </div>
 
         {/* Right Column: 4-Stage Segmented Scale */}
@@ -240,26 +184,19 @@ export function FinancialsHeroCard({
             showSummary={true}
             totalIncome={totalIncome}
           />
+
+          {/* Directly under the tier, because it answers the question the tier
+              raises and cannot: "£420,000 — is that big?" The tier says which
+              of four buckets; this says where in our own book. */}
+          {sector && peerStats && (
+            <SectorPeerStrip
+              income={totalIncome}
+              sector={sector}
+              stats={peerStats}
+            />
+          )}
         </div>
       </div>
-
-      {series.years.length > 0 && (
-        <div className="mt-6 border-t border-rule-soft pt-5">
-          <FinancialHistoryChart series={series} />
-          {/* The newest year that published a split, not necessarily the newest
-              year: the latest return is often a totals-only filing while the
-              one before it carries the breakdown. */}
-          {/* The flow answers "what do they turn money into" for both sides at
-              once. Where it cannot be drawn honestly, the one-sided income
-              panel still answers half of it. */}
-          {flows.length > 0 ? (
-            <FundFlowSankey flows={flows} />
-          ) : (
-            mixYear && <IncomeMixPanel year={mixYear} />
-          )}
-          <GrantShareChart series={series} />
-        </div>
-      )}
 
     </div>
   );

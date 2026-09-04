@@ -1,94 +1,120 @@
 // Charity Commission imports.
 //
-// Rebuilt onto the design system (docs/design-system.md §Inside the app), the
-// same language as /admin/import-status: bone ground, white cards floating on
-// it, a display heading against 11px labels, and a staged blur-up entrance from
-// the shared brand variants.
+// This screen used to show two buttons and a table of counts. The criteria that
+// decided what those buttons did — an income floor, five accepted sectors, four
+// place names — lived in charity-commission-bulk-config.ts and were applied
+// inside a streaming download, so nobody without a pull request could change
+// them and nobody looking at the page could see what they cost.
 //
-// Three things were wrong with the page this replaces, beyond its palette:
+// Measured against the 2026-09-03 extract, they cost a great deal: the £100k
+// floor alone excluded 3,229 of the 4,340 charities local to the branch, the
+// five-sector list left out arts, heritage, environment and religion entirely,
+// and the locality clause compared "sheffield" against a register that spells it
+// "Sheffield City", so it never matched at all.
 //
-//   1. It showed the weakest pipeline and hid the strongest. The runs table
-//      filtered `api_source = 'charity_commission'`, so bulk register runs — the
-//      ones that delivered every charity with filed accounts — were invisible on
-//      the Charity Commission page. Both are shown now.
-//   2. It had no way to say what the import accepts. "Why isn't charity X in the
-//      list" could only be settled by reading charity-commission-bulk-config.ts.
-//      ImportCriteria renders that config, and the last run's funnel shows what
-//      it did to the register.
-//   3. Its "Run import" button ran the fixed date-range backfill, whose own TODO
-//      said a wide range could exceed the serverless timeout. The bulk register
-//      extract supersedes it and does the job properly, so both the button and
-//      the adapter behind it are gone.
-//
-// The "Back to admin" and "Review queue" links are gone too: GroupTabs is this
-// section's navigation, and the review queue is a different job on a different
-// day.
+// So the shape changed rather than the constants. The expensive half — reading
+// ~1.8GB of daily extracts — is now a snapshot job that filters nothing and
+// stages the whole register of England and Wales. The selective half is this
+// page: an ordinary query over that table, with a live count, so a criterion is
+// something you set and immediately see the consequence of.
 //
 // The root element is a `div`, not a `main`: the admin layout's AppShell already
 // renders the `main` this is slotted into.
 
 import { redirect } from "next/navigation";
+
 import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { GroupTabs } from "@/components/ui/group-tabs";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
+import { parseFilters } from "@/lib/charity-register/filters";
+import { labelValues, registerMeta } from "@/lib/charity-register/sqlite";
+import { LABEL_KIND } from "@/lib/charity-register/sqlite-query";
 import { DATA_IMPORTS_TABS } from "../import-group";
-import { CharityCommissionImportAutoButton } from "./import-auto-button";
 import { CharityCommissionLookupForm } from "./lookup-form";
-import { BulkImportCard, type LastBulkRun } from "./bulk-import-card";
-import { ImportCriteria } from "./import-criteria";
+import { FilterBuilder, type PresetSummary } from "./filter-builder";
 import { PipelinesGuide } from "./pipelines-guide";
 import { RecentRuns } from "./recent-runs";
+import { SnapshotCard } from "./snapshot-card";
 import type { CharityCommissionRun } from "./bulk-funnel";
 
-// The discovery trigger is a weekly delta — a handful of search calls and one
-// batched details call — which finishes well inside this. The bulk register
-// import is deliberately not reachable from here at all: 508MB of charities and
-// 1.26GB of annual returns is not work for a function with a 300s ceiling, so
-// BulkImportCard hands over the command instead of pretending to be a button.
-export const maxDuration = 60;
+// The import runs inside a Server Action, not this page — but promotion of a
+// large selection is the slowest thing on the route, so the ceiling is raised
+// from the default. The snapshot itself is a CLI job precisely because no
+// serverless timeout would hold it.
+export const maxDuration = 300;
 
-/** Both Charity Commission pipelines, newest first. */
 const RUN_WINDOW = 8;
 
 export default async function CharityCommissionPage() {
-  const authorization = await getCurrentActor("user:manage");
+  // `client:edit`, not `user:manage`: the team decided everyone who works the
+  // client list can shape and run imports. Viewers still cannot.
+  const authorization = await getCurrentActor("client:edit");
   if (!authorization.ok) {
     if (authorization.reason === "unauthenticated") redirect("/login");
     redirect("/dashboard?error=admin-access-required");
   }
 
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("ingestion_runs")
-    .select(
-      "id, api_source, started_at, job_status, records_fetched, records_inserted, records_skipped, records_failed, run_stats",
-    )
-    .in("api_source", ["charity_commission", "charity_commission_bulk"])
-    .order("started_at", { ascending: false })
-    .limit(RUN_WINDOW);
+  const admin = createAdminClient();
 
-  if (error) {
-    await reportError(error, { operation: "admin.charity_commission.list_runs" });
+  const [runsResult, presetsResult] = await Promise.all([
+    supabase
+      .from("ingestion_runs")
+      .select(
+        "id, api_source, started_at, job_status, records_fetched, records_inserted, records_skipped, records_failed, run_stats",
+      )
+      .in("api_source", ["charity_commission", "charity_commission_bulk"])
+      .order("started_at", { ascending: false })
+      .limit(RUN_WINDOW),
+    admin
+      ? admin
+          .from("import_filter_presets")
+          .select("id, name, description, filters")
+          .eq("source", "charity_commission")
+          .order("name")
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  // The register is a file in the deployment, not a table — reading it is
+  // synchronous and needs no await, and no Supabase round trip.
+  const meta = registerMeta();
+  const localAuthorities = labelValues(LABEL_KIND.localAuthority);
+
+  if (runsResult.error) {
+    await reportError(runsResult.error, { operation: "admin.charity_commission.list_runs" });
   }
 
-  const runs = (data ?? []) as CharityCommissionRun[];
-  const configured = Boolean(process.env.CHARITY_COMMISSION_API_KEY?.trim());
+  const runs = (runsResult.data ?? []) as CharityCommissionRun[];
 
-  // The most recent bulk run within the window. A page where bulk has not run in
-  // the last eight runs shows no funnel rather than a stale one dressed as
-  // current — the full history is one link away.
-  const latestBulk = runs.find((run) => run.api_source === "charity_commission_bulk");
-  const lastBulkRun: LastBulkRun = latestBulk
-    ? {
-        startedAt: latestBulk.started_at,
-        status: latestBulk.job_status,
-        recordsInserted: latestBulk.records_inserted,
-        runStats: latestBulk.run_stats,
-      }
+  const presets: PresetSummary[] = ((presetsResult.data ?? []) as Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    filters: unknown;
+  }>).map((row) => ({
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    filters: parseFilters(row.filters),
+  }));
+
+  const snapshotDate = meta?.builtOn ?? null;
+  const registerSize = meta?.charities ?? 0;
+
+  // One clock for the page, read here rather than inside a component: a server
+  // component's render must stay pure, and two reads could disagree. `new Date()`
+  // rather than `Date.now()` — the same shape /admin/import-status uses, and the
+  // one the React Compiler's purity rule accepts.
+  const now = new Date();
+  const staleDays = snapshotDate
+    ? Math.floor((now.getTime() - new Date(snapshotDate).getTime()) / 86_400_000)
     : null;
+
+  const staged = registerSize > 0;
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
@@ -103,20 +129,11 @@ export default async function CharityCommissionPage() {
             current="/admin/charity-commission"
           />
           <p className="mt-3 max-w-xl text-sm leading-[1.7] text-foreground/65">
-            Two imports read the same register. One catches charities as they
-            register; the other brings in established charities with their filed
-            accounts.
+            The whole register of England and Wales is staged here, unfiltered.
+            Choose which charities you want and import them — nothing is decided
+            in advance.
           </p>
         </Rise>
-
-        {!configured && (
-          <Rise>
-            <InlineAlert
-              variant="page"
-              message="Charity Commission API access is not configured. Add the server-side API key before running an import."
-            />
-          </Rise>
-        )}
 
         <Group className="space-y-6">
           <Rise>
@@ -124,23 +141,38 @@ export default async function CharityCommissionPage() {
           </Rise>
 
           <Rise>
-            <BulkImportCard lastRun={lastBulkRun} />
+            <SnapshotCard
+              snapshotDate={snapshotDate}
+              registerSize={registerSize}
+              staleDays={staleDays}
+              canRefresh={Boolean(process.env.GITHUB_REGISTER_TOKEN?.trim())}
+            />
+          </Rise>
+
+          {staged ? (
+            <Rise>
+              <FilterBuilder
+                presets={presets}
+                localAuthorities={localAuthorities}
+                snapshotDate={snapshotDate}
+                registerSize={registerSize}
+              />
+            </Rise>
+          ) : (
+            <Rise>
+              <InlineAlert
+                variant="page"
+                message="The register has not been staged yet. Run the snapshot job before importing — the card above has the command."
+              />
+            </Rise>
+          )}
+
+          <Rise>
+            <CharityCommissionLookupForm configured={Boolean(process.env.CHARITY_COMMISSION_API_KEY?.trim())} />
           </Rise>
 
           <Rise>
-            <ImportCriteria />
-          </Rise>
-
-          <Rise>
-            <CharityCommissionImportAutoButton configured={configured} />
-          </Rise>
-
-          <Rise>
-            <CharityCommissionLookupForm configured={configured} />
-          </Rise>
-
-          <Rise>
-            {error ? (
+            {runsResult.error ? (
               <InlineAlert
                 variant="page"
                 message="Import history could not be loaded. This has been recorded — refresh and try again."

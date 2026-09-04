@@ -56,8 +56,8 @@ import type { FlowBand, FundFlow } from "@/lib/financials/financial-series";
  *
  * The balancing band sits outside both ramps on purpose: a slate that is
  * neither green nor brick, because a residual is not a line the charity filed
- * and colour is the cheapest way to say so. The dotted rule and the BALANCE
- * rubric above it say it in words.
+ * and colour is the cheapest way to say so. It sits at the bottom of its
+ * column, out of the rank order.
  *
  * ── A warm plate inside a cool app ──────────────────────────────────────────
  *
@@ -80,12 +80,12 @@ import type { FlowBand, FundFlow } from "@/lib/financials/financial-series";
 
 /* ── Plate tokens ─────────────────────────────────────────────────────────────
  *
- * Sampled from the two reference plates: a cream ground, warm brown-black ink,
- * and a hairline in the same warm family. Local constants rather than CSS
- * variables because they exist only inside this figure — promoting them to the
- * theme would invite them into pages that are cool by design.
+ * A white ground with warm brown-black ink and a hairline in the same warm
+ * family. Local constants rather than CSS variables because they exist only
+ * inside this figure — promoting them to the theme would invite them into
+ * pages that are cool by design.
  */
-const PLATE = "#F4F1EA";
+const PLATE = "#FFFFFF";
 const PLATE_EDGE = "#E3DED1";
 const FF_INK = "#2A2722";
 const FF_DIM = "#6C665C";
@@ -113,23 +113,29 @@ const OUT_RAMP = ["#8C3A2B", "#B05840", "#C67C5C", "#D8A07D", "#E6BE9E", "#F0D7B
  * of the small stock of colours that still read as neither green nor brick.
  */
 const RESIDUAL_FILL = "#8695A3";
+/**
+ * The hub is the pooled pot both sides flow through, so it takes the darkest
+ * income green rather than the plate ink — it reads as money, not furniture.
+ */
+const HUB_FILL = IN_RAMP[0];
 
 /* ── Geometry, in viewBox units ───────────────────────────────────────────── */
 const VIEW_W = 900;
-const VIEW_H = 520;
+const VIEW_H = 505;
 const PAD = 16;
-/** Column-header baseline, then the shade legend under it. */
-const HEAD_Y = 25;
-const LEGEND_Y = 43;
-const SWATCH_Y = 47;
+/** The IN / OUT / NET trio sits top-centre, in the gap between the columns. */
+const TRIO_Y = 27;
+/** Column-header baseline, then the shade legend under it. Pushed down to
+ *  clear the trio above. */
+const HEAD_Y = 60;
+const LEGEND_Y = 78;
+const SWATCH_Y = 82;
 const SWATCH_H = 7;
 const SWATCH_W = 22;
 const SWATCH_GAP = 2;
-/** The group rubric and its dotted rule, above the first band on each side. */
-const GROUP_LABEL_Y = 71;
-const GROUP_RULE_Y = 75;
-const PLOT_TOP = 88;
-const PLOT_BOTTOM = VIEW_H - 40;
+/** The plot starts below the shade legend. */
+const PLOT_TOP = 104;
+const PLOT_BOTTOM = VIEW_H - 25;
 const PLOT_H = PLOT_BOTTOM - PLOT_TOP;
 
 const NODE_W = 10;
@@ -145,8 +151,6 @@ const ELBOW = 26;
 /** Gaps between stacked bands, larger on the right where there are fewer. */
 const GAP_L = 10;
 const GAP_R = 16;
-/** How much wider the gap above a residual band is, to hold the BALANCE rule. */
-const RESIDUAL_GAP_SCALE = 2.4;
 /**
  * Vertical room one label block needs.
  *
@@ -214,7 +218,7 @@ function declash(centres: number[], pitch: number, top: number, bottom: number):
  *
  * The balancing band is pushed to the bottom of its column and taken out of the
  * ramp entirely, because it is a residual rather than a filed line — position
- * and hue both say so, and the dotted BALANCE rule says it a third time.
+ * and hue both say so.
  */
 function stack(bands: FlowBand[], total: number, gap: number, ramp: string[]): Placed[] {
   const ordered = [...bands].sort((a, b) => {
@@ -222,13 +226,7 @@ function stack(bands: FlowBand[], total: number, gap: number, ramp: string[]): P
     return residual(a) - residual(b) || b.amount - a.amount;
   });
   const filedCount = ordered.filter((band) => band.kind === "filed").length;
-  // The boundary above a residual band is opened wider than the rest, because
-  // the BALANCE rule and its rubric have to fit in it without landing on the
-  // label of the band above. The hub face takes none of these gaps — it is one
-  // undivided pot and has to stay solid.
-  const gapAbove = ordered.map((band, index) =>
-    index === 0 ? 0 : band.kind === "filed" ? gap : gap * RESIDUAL_GAP_SCALE,
-  );
+  const gapAbove = ordered.map((_, index) => (index === 0 ? 0 : gap));
   const gaps = gapAbove.reduce((sum, each) => sum + each, 0);
   const drawable = Math.max(0, PLOT_H - gaps);
   let y = PLOT_TOP;
@@ -257,8 +255,8 @@ function stack(bands: FlowBand[], total: number, gap: number, ramp: string[]): P
   const centres = declash(
     laid.map((placed) => placed.labelY),
     LABEL_PITCH,
-    // Inset so the topmost name clears the dotted group rule and the lowest
-    // bracket clears the pooled-total caption.
+    // Inset so the topmost name clears the column headers and the lowest
+    // bracket clears the plot edge.
     PLOT_TOP + 12,
     PLOT_BOTTOM - 14,
   );
@@ -380,9 +378,22 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
   const labelOpacity = (id: string) => (focus === null || focus === id ? 1 : 0.3);
 
   const sides = [
-    { key: "in" as const, placed: inflows, ramp: IN_RAMP, rubric: "Filed income lines" },
-    { key: "out" as const, placed: outflows, ramp: OUT_RAMP, rubric: "Filed spending lines" },
+    { key: "in" as const, placed: inflows, ramp: IN_RAMP },
+    { key: "out" as const, placed: outflows, ramp: OUT_RAMP },
   ];
+
+  /* The three figures for the trio above the columns: true filed income,
+   * true filed spending, and the year's result. Residuals are excluded from
+   * both sides, so IN − OUT is the result by construction. */
+  const incomeTotal = flow.inflows
+    .filter((band) => band.kind === "filed")
+    .reduce((sum, band) => sum + band.amount, 0);
+  const spendTotal = flow.outflows
+    .filter((band) => band.kind === "filed")
+    .reduce((sum, band) => sum + band.amount, 0);
+  const net = incomeTotal - spendTotal;
+  const netFill = net > 0 ? IN_RAMP[0] : net < 0 ? OUT_RAMP[0] : FF_DIM;
+  const netTag = net > 0 ? "SURPLUS" : net < 0 ? "DEFICIT" : "BALANCED";
 
   return (
     <div ref={rootRef} className="mt-6 border-t border-rule-soft pt-5">
@@ -392,14 +403,29 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
         @media (prefers-reduced-motion: reduce) { .ff-fade { animation: none } }
       `}</style>
 
-      {/* Card four-piece: conclusion title, subtitle carrying the legend and
-          the range, the figure, then the all-caps source line. */}
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+      {/* Conclusion title and the year switch share one row: the sentence says
+          what happened, the switch steps through the filing history. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <h3 className="text-[16.5px] font-bold tracking-[-0.02em] text-ink">
           {flow.headline}
         </h3>
         {flows.length > 1 && (
-          <div className="flex items-center gap-1" role="group" aria-label="Filed year">
+          <div
+            className="relative flex rounded-full border border-rule-soft bg-paper p-0.5"
+            role="group"
+            aria-label="Filed year"
+          >
+            {/* Sliding thumb — one equal segment wide, gliding to the picked
+                year. Buttons sit transparent above it; only the labels and the
+                thumb move, so it stays a calm control rather than a toy. */}
+            <span
+              aria-hidden="true"
+              className="absolute top-0.5 bottom-0.5 left-0.5 rounded-full bg-ink transition-transform duration-300 ease-out motion-reduce:transition-none"
+              style={{
+                width: `calc((100% - 4px) / ${flows.length})`,
+                transform: `translateX(${yearIndex * 100}%)`,
+              }}
+            />
             {flows.map((candidate, index) => (
               <button
                 key={candidate.periodEnd}
@@ -410,10 +436,10 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
                   setReplay((n) => n + 1);
                 }}
                 aria-pressed={index === yearIndex}
-                className={`rounded-[4px] px-2 py-0.5 font-mono text-[11px] font-semibold tracking-[0.06em] transition-colors ${
+                className={`relative z-10 flex-1 rounded-full px-3 py-1 font-mono text-[11px] font-semibold tracking-[0.06em] whitespace-nowrap transition-colors motion-reduce:transition-none ${
                   index === yearIndex
-                    ? "bg-ink text-white"
-                    : "text-faint hover:bg-paper hover:text-dim"
+                    ? "text-white"
+                    : "text-faint hover:text-dim"
                 }`}
               >
                 {candidate.label}
@@ -424,14 +450,12 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
       </div>
 
       <p className="mt-1 text-[11.5px] text-dim">
-        Ribbon width = pounds through the year · green in, brick out · shade =
-        rank by size · year ended{" "}
+        Ribbon width = pounds through the year · year ended{" "}
         {new Date(flow.periodEnd).toLocaleDateString("en-GB", {
           day: "numeric",
           month: "short",
           year: "numeric",
         })}
-        {flows.length > 1 && " · pick a year above"}
       </p>
 
       <div className="mt-3 overflow-x-auto">
@@ -441,7 +465,7 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
           className="w-full min-w-[46rem] cursor-default"
           /* The ribbons multiply against the plate, which is what gives the
              reference its stained-glass overlaps. Isolate so they multiply
-             against the cream rect below and never against the page. */
+             against the plate rect below and never against the page. */
           style={{ isolation: "isolate" }}
           onClick={() => setPinned(null)}
           role="img"
@@ -460,6 +484,49 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
             fill={PLATE}
             stroke={PLATE_EDGE}
           />
+
+          {/* The year's three figures, top-centre in the gap between the
+              columns: what came in (green), what went out (brick), and the
+              result. One line, centred, in the plate's own type scale. */}
+          <text
+            x={VIEW_W / 2}
+            y={TRIO_Y}
+            textAnchor="middle"
+            className={revealed ? "ff-fade" : undefined}
+            opacity={revealed ? 1 : 0}
+          >
+            <tspan fontSize={12.5} fontWeight={800} fill={IN_RAMP[0]}>
+              {formatCompactGbp(incomeTotal).toUpperCase()}
+            </tspan>
+            <tspan
+              fontSize={7.5}
+              fontWeight={700}
+              letterSpacing="0.12em"
+              fill={FF_DIM}
+            >
+              {"  IN  "}
+            </tspan>
+            <tspan fontSize={10} fill={FF_FAINT}>
+              {"·"}
+            </tspan>
+            <tspan fontSize={12.5} fontWeight={800} fill={OUT_RAMP[0]}>
+              {`  ${formatCompactGbp(spendTotal).toUpperCase()}`}
+            </tspan>
+            <tspan
+              fontSize={7.5}
+              fontWeight={700}
+              letterSpacing="0.12em"
+              fill={FF_DIM}
+            >
+              {"  OUT  "}
+            </tspan>
+            <tspan fontSize={10} fill={FF_FAINT}>
+              {"·"}
+            </tspan>
+            <tspan fontSize={12.5} fontWeight={800} fill={netFill}>
+              {`  ${net === 0 ? "" : formatCompactGbp(Math.abs(net)).toUpperCase()}${net === 0 ? "" : " "}${netTag}`}
+            </tspan>
+          </text>
 
           {/* Column headers and the shade legend, mirrored on the two sides. */}
           <text
@@ -487,18 +554,24 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
           {sides.map(({ key, ramp }) => {
             const width = ramp.length * SWATCH_W + (ramp.length - 1) * SWATCH_GAP;
             const x0 = key === "in" ? TEXT_L : TEXT_R - width;
+            const wordProps = {
+              fontSize: 6.5,
+              fontWeight: 600,
+              letterSpacing: "0.12em",
+              fill: FF_FAINT,
+            } as const;
             return (
               <g key={`legend-${key}`}>
+                <text x={x0} y={LEGEND_Y} textAnchor="start" {...wordProps}>
+                  SMALLEST
+                </text>
                 <text
-                  x={key === "in" ? TEXT_L : TEXT_R}
+                  x={x0 + width}
                   y={LEGEND_Y}
-                  textAnchor={key === "in" ? "start" : "end"}
-                  fontSize={6.5}
-                  fontWeight={600}
-                  letterSpacing="0.12em"
-                  fill={FF_FAINT}
+                  textAnchor="end"
+                  {...wordProps}
                 >
-                  SMALLEST SHARE OF THE YEAR ⟶ LARGEST
+                  LARGEST
                 </text>
                 {[...ramp].reverse().map((fill, index) => (
                   <rect
@@ -513,32 +586,6 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
               </g>
             );
           })}
-
-          {/* Group rubrics, after the reference's SOURCES / USAGES rules. */}
-          {sides.map(({ key, rubric }) => (
-            <g key={`rubric-${key}`}>
-              <text
-                x={key === "in" ? TEXT_L : TEXT_R}
-                y={GROUP_LABEL_Y}
-                textAnchor={key === "in" ? "start" : "end"}
-                fontSize={7.5}
-                fontWeight={700}
-                letterSpacing="0.13em"
-                fill={FF_DIM}
-              >
-                {rubric.toUpperCase()}
-              </text>
-              <line
-                x1={key === "in" ? TEXT_L : COL_R_X}
-                x2={key === "in" ? COL_L_X + NODE_W : TEXT_R}
-                y1={GROUP_RULE_Y}
-                y2={GROUP_RULE_Y}
-                stroke={FF_RULE}
-                strokeWidth={0.8}
-                strokeDasharray="1 3"
-              />
-            </g>
-          ))}
 
           {/* Ribbons, under the solid column bands and the labels. */}
           <g style={{ mixBlendMode: "multiply" }}>
@@ -578,63 +625,17 @@ export function FundFlowSankey({ flows }: { flows: FundFlow[] }) {
             ))}
           </g>
 
-          {/* The hub: one undivided block, because that is the claim. */}
+          {/* The hub: one undivided block, because that is the claim. Its total
+              now lives in the trio above the columns, so it carries no label. */}
           <rect
             x={HUB_X}
             y={PLOT_TOP}
             width={NODE_W}
             height={PLOT_H}
-            rx={2}
-            fill={FF_INK}
+            fill={HUB_FILL}
             className={revealed ? "ff-fade" : undefined}
             opacity={revealed ? 1 : 0}
           />
-          <text
-            x={HUB_X + NODE_W / 2}
-            y={PLOT_BOTTOM + 16}
-            textAnchor="middle"
-            fontSize={7}
-            fontWeight={700}
-            letterSpacing="0.13em"
-            fill={FF_DIM}
-          >
-            {`${formatCompactGbp(flow.total)} POOLED`.toUpperCase()}
-          </text>
-
-          {/* The BALANCE rule, drawn only on the side that carries a residual.
-              It separates what the charity filed from what the arithmetic
-              leaves over, which is a distinction the reader is owed. */}
-          {sides.map(({ key, placed }) => {
-            const residual = placed.find((entry) => entry.band.kind !== "filed");
-            if (!residual) return null;
-            // Centred in the widened boundary that `stack` opened for it.
-            const y =
-              residual.y - ((key === "in" ? GAP_L : GAP_R) * RESIDUAL_GAP_SCALE) / 2;
-            return (
-              <g key={`balance-${key}`} opacity={revealed ? 1 : 0}>
-                <text
-                  x={key === "in" ? TEXT_L : TEXT_R}
-                  y={y - 4}
-                  textAnchor={key === "in" ? "start" : "end"}
-                  fontSize={7.5}
-                  fontWeight={700}
-                  letterSpacing="0.13em"
-                  fill={FF_DIM}
-                >
-                  BALANCE
-                </text>
-                <line
-                  x1={key === "in" ? TEXT_L : COL_R_X}
-                  x2={key === "in" ? COL_L_X + NODE_W : TEXT_R}
-                  y1={y}
-                  y2={y}
-                  stroke={FF_RULE}
-                  strokeWidth={0.8}
-                  strokeDasharray="1 3"
-                />
-              </g>
-            );
-          })}
 
           {/* Columns and their bracketed labels. */}
           {sides.map(({ key, placed }) => {

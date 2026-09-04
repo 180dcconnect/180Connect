@@ -365,6 +365,10 @@ grant execute on function public.record_field_source(uuid, text, text, text, uui
 drop function if exists public.record_field_source(uuid, text, text, text, uuid, uuid);
 
 -- 5. Narrow get_field_sources back to the admin-only F044 body and policy.
+-- Narrowing the OUT columns is a return-type change, which `create or replace`
+-- refuses; drop the widened signature first (mirrors the up migration).
+drop function if exists public.get_field_sources(uuid);
+
 create or replace function public.get_field_sources(p_organisation_id uuid)
 returns table (
   field_name            text,
@@ -418,6 +422,13 @@ create policy field_sources_select_admin on public.field_sources
   using (app.is_admin() and app.is_active_user());
 
 -- 6. Narrow the table: back to the six-field CHECK, drop recorded_by.
+--
+-- NOTE: unlike the rest of this file this step is not guaranteed to succeed
+-- on a database that has been running the widened schema: any organisation_type
+-- provenance row written since the migration violates the restored CHECK and
+-- Postgres validates it against existing rows. Delete those rows first (they
+-- are the rows this migration introduced) — this rollback preserves the
+-- schema, not data that only the widened schema could hold.
 alter table public.field_sources
   drop constraint field_sources_field_name_check;
 

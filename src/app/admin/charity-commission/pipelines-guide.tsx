@@ -6,17 +6,12 @@ import { BookOpen, ChevronDown } from "lucide-react";
 import { EASE } from "@/components/brand/motion";
 
 /**
- * Why there are two Charity Commission imports, and which one to reach for.
+ * How this screen works, and what changed.
  *
  * Same collapsed-by-default explainer as the Import Status page's
  * `IngestionGuide` — the family of admin pages should explain itself the same
- * way — but about the one thing that page cannot cover: the two pipelines here
- * ask opposite questions of the same register, and the difference decides
- * whether an imported charity arrives with accounts or without.
- *
- * The empty-Financials-tab question is the one this answers. It is asked
- * repeatedly, the answer is not a bug, and it lives in a code comment where
- * nobody who asks it will find it.
+ * way — but about the thing people will notice first: the criteria that used to
+ * be fixed are gone, and there is now one register rather than two pipelines.
  */
 export function PipelinesGuide() {
   const [isOpen, setIsOpen] = useState(false);
@@ -34,12 +29,10 @@ export function PipelinesGuide() {
             <BookOpen className="h-4 w-4" strokeWidth={2.2} />
           </span>
           <div>
-            <h2 className="text-sm font-bold text-foreground">
-              Why there are two imports
-            </h2>
+            <h2 className="text-sm font-bold text-foreground">How this works</h2>
             <p className="text-xs text-foreground/60">
-              New registrations against established charities — and why one of
-              them never has financial history.
+              One staged register, filtered however you like. Nothing is excluded
+              before you see it.
             </p>
           </div>
         </div>
@@ -69,78 +62,92 @@ export function PipelinesGuide() {
             className="overflow-hidden border-t border-black/[0.06] bg-black/[0.01]"
           >
             <div className="space-y-4 p-5 sm:p-6">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="rounded-xl border border-black/[0.06] bg-white p-4 shadow-2xs">
-                  <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/45">
-                    Weekly, automatic
-                  </span>
-                  <h3 className="mt-2 text-sm font-bold text-foreground">
-                    New registrations
-                  </h3>
-                  <p className="mt-1.5 text-xs leading-[1.6] text-foreground/70">
-                    Asks the register for charities registered since the last
-                    run, and keeps the ones in the branch&rsquo;s postcode areas.
-                    It is the only way a charity registered last month reaches
-                    the list at all.
-                  </p>
-                  <p className="mt-2 text-xs leading-[1.6] text-foreground/50">
-                    These charities have <strong className="font-bold">no filed accounts</strong>. A
-                    charity has twelve months to reach its first financial year
-                    end and ten more to file, so for nearly two years there is
-                    nothing to fetch. An empty Financials tab on one of these is
-                    the register being new, not the pipeline being broken.
-                  </p>
-                </div>
-
-                <div className="rounded-xl border border-black/[0.06] bg-white p-4 shadow-2xs">
-                  <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/45">
-                    Run by hand, occasionally
-                  </span>
-                  <h3 className="mt-2 text-sm font-bold text-foreground">
-                    Established charities
-                  </h3>
-                  <p className="mt-1.5 text-xs leading-[1.6] text-foreground/70">
-                    Reads the regulator&rsquo;s daily extract of the whole
-                    register — every charity already on it, with its annual
-                    return history in the same download — and keeps the ones
-                    matching the criteria on this page.
-                  </p>
-                  <p className="mt-2 text-xs leading-[1.6] text-foreground/50">
-                    These arrive with <strong className="font-bold">up to five years of accounts</strong>,
-                    already classified into a sector by the regulator. This is
-                    the import that fills the Financials tab.
-                  </p>
-                </div>
+              <div className="grid gap-4 sm:grid-cols-3">
+                {[
+                  {
+                    step: "1. Stage",
+                    body: "A job downloads the regulator's daily extract and writes every registered charity in England and Wales — around 172,000 of them — into a local table. No criteria are applied. It runs when someone runs it, or on a schedule.",
+                  },
+                  {
+                    step: "2. Choose",
+                    body: "Filter that table however you want: income range, any of the register's 17 causes, 7 beneficiary groups and 10 ways of working, any of its 174 local authorities, postcode areas, registration dates. The count updates as you go, so you always see what a change costs before you commit to it.",
+                  },
+                  {
+                    step: "3. Import",
+                    body: "The selection becomes clients, with their filed accounts attached. Charities already on the list are matched rather than duplicated, so re-running a saved filter set is safe.",
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.step}
+                    className="rounded-xl border border-black/[0.06] bg-white p-4 shadow-2xs"
+                  >
+                    <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/45">
+                      {item.step}
+                    </span>
+                    <p className="mt-2 text-xs leading-[1.6] text-foreground/70">{item.body}</p>
+                  </div>
+                ))}
               </div>
 
               <div className="rounded-xl border border-black/[0.06] bg-white p-4">
                 <h4 className="text-xs font-bold uppercase tracking-[0.1em] text-foreground/50">
-                  Which one do I want?
+                  What changed, and why
                 </h4>
                 <ul className="mt-2.5 space-y-2 text-xs leading-[1.6] text-foreground/70">
                   <li>
                     <strong className="font-bold text-foreground">
-                      Nothing, most of the time.
+                      There is no minimum income any more.
                     </strong>{" "}
-                    New registrations are picked up weekly without anyone
-                    clicking anything.
+                    There used to be a £100,000 floor built into the code. Measured
+                    against the register, it was hiding 3,229 of the 4,340 charities
+                    local to the branch — including every charity that publishes no
+                    income figure at all. Size is now a filter you set, and it starts
+                    off.
                   </li>
                   <li>
                     <strong className="font-bold text-foreground">
-                      The bulk import
+                      Every cause is available.
                     </strong>{" "}
-                    when the criteria change — a new postcode area, a different
-                    income floor — or when the list needs charities with a track
-                    record rather than charities that exist.
+                    Five of the register&rsquo;s seventeen were previously accepted;
+                    arts, heritage, environment, religion, sport and the rest could
+                    not be imported at all. All seventeen are selectable, and
+                    &ldquo;who the charity helps&rdquo; and &ldquo;how it
+                    works&rdquo; are filterable for the first time.
                   </li>
                   <li>
                     <strong className="font-bold text-foreground">
-                      The single lookup
+                      Anywhere, not four places.
                     </strong>{" "}
-                    when someone names one specific charity and you have its
-                    registration number.
+                    Location was four hardcoded names — and one of them never
+                    matched, because the register spells it &ldquo;Sheffield
+                    City&rdquo; and the code looked for &ldquo;sheffield&rdquo;. That
+                    alone hid 127 charities working in Sheffield. Every local
+                    authority the register knows is now selectable.
+                  </li>
+                  <li>
+                    <strong className="font-bold text-foreground">
+                      Any date range, not just &ldquo;since last time&rdquo;.
+                    </strong>{" "}
+                    A separate weekly job used to fetch newly registered charities
+                    and nothing else. The staged register already contains them, so
+                    that job is retired: &ldquo;registered in the last month&rdquo;
+                    is now one filter among many, and you can just as easily ask for
+                    a period ten years ago.
                   </li>
                 </ul>
+              </div>
+
+              <div className="rounded-xl border border-black/[0.06] bg-white p-4">
+                <h4 className="text-xs font-bold uppercase tracking-[0.1em] text-foreground/50">
+                  A note on empty Financials tabs
+                </h4>
+                <p className="mt-2 text-xs leading-[1.6] text-foreground/70">
+                  A charity has twelve months to reach its first financial year end
+                  and ten more to file, so a recently registered charity has no
+                  accounts to show. That is the register being new, not an import
+                  failing. If you want only charities with a track record, tick
+                  &ldquo;only charities that have filed accounts&rdquo;.
+                </p>
               </div>
             </div>
           </motion.div>

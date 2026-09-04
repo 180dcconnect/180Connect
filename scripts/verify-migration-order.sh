@@ -37,6 +37,19 @@
 # catches it. Nothing here can detect it without the PR being re-run, since GitHub
 # does not re-run a PR's checks when the base branch moves.
 #
+# RESTORATION CARVE-OUT (added 3 Sep 2026, after the F044 incident)
+#
+# A migration can be deleted from the repo after it was already merged and
+# applied (F044's create_field_sources was, swept up in an unrelated PR's
+# "drop duplicate" fix). Restoring that file is the correct repair — the remote
+# ledger already has its version recorded, so `db push` would skip it — but
+# "present here, absent on the base tree" reads it as newly introduced and the
+# timestamp check fails it. So: when a file IS stale, this script deepens the
+# base fetch and looks for that exact filename anywhere in the base branch's
+# history. Found = a restoration under its original, already-applied timestamp
+# → waived with a notice. Not found = the error stands. Fails closed: if the
+# deep fetch cannot prove the history, the check is not waived.
+#
 # Usage:
 #   scripts/verify-migration-order.sh [base-ref]   # default: dev
 
@@ -84,19 +97,54 @@ printf '  %s\n' $added
 
 # Equal timestamps fail too: two migrations sharing one timestamp have no defined
 # order between them, which is the same problem wearing a different hat.
+#
+# ::error annotations are withheld until after the restoration carve-out below
+# has had its say: an error emitted here and then waived would still render as
+# a red annotation on a green check on GitHub.
 stale=""
 for name in $added; do
   stamp="$(printf '%s\n' "$name" | timestamps_of)"
   if [ -z "$stamp" ]; then
-    echo "::error file=$MIGRATIONS_DIR/$name::'$name' is not named <14-digit-timestamp>_<name>.sql (see supabase/MIGRATIONS.md)."
-    stale="yes"
+    stale="$stale $name"
     continue
   fi
   if [ "$stamp" \< "$base_head" ] || [ "$stamp" = "$base_head" ]; then
-    echo "::error file=$MIGRATIONS_DIR/$name::'$name' is dated $stamp, which is not after $base_head — the newest migration already on '$BASE_REF'. 'supabase db push' will refuse it. Rename this file and its supabase/rollback/ counterpart to a timestamp after $base_head."
-    stale="yes"
+    stale="$stale $name"
   fi
 done
+
+# Restoration carve-out — see the header. Only runs when something is stale,
+# so the happy path keeps its shallow one-commit fetch. The deepen is retried
+# and verified (rev-list count > 1): a silently failed fetch would otherwise
+# leave depth at 1, find no history, and fail the very restoration this exists
+# to allow.
+if [ -n "$stale" ]; then
+  for _attempt in 1 2; do
+    git fetch --quiet --depth=2000 origin "$BASE_REF" 2>/dev/null || true
+    depth="$(git rev-list --count FETCH_HEAD 2>/dev/null || echo 0)"
+    [ "$depth" -gt 1 ] && break
+  done
+  still_stale=""
+  for name in $stale; do
+    # A malformed name is never waivable: the carve-out is about timestamps,
+    # not about letting badly-named files through.
+    stamp="$(printf '%s\n' "$name" | timestamps_of)"
+    if [ -z "$stamp" ]; then
+      still_stale="$still_stale $name"
+      continue
+    fi
+    # Captured, not piped into grep -q: git log streams, grep -q closes the
+    # pipe on the first match, and under `set -o pipefail` that SIGPIPEs git
+    # log into exit 141 — turning every successful match into a failure.
+    seen="$(git log --format=%H --full-history FETCH_HEAD -- "$MIGRATIONS_DIR/$name" 2>/dev/null || true)"
+    if [ -n "$seen" ]; then
+      echo "::notice file=$MIGRATIONS_DIR/$name::$name was previously merged into '$BASE_REF' (restored under its original, already-applied timestamp) — staleness check waived."
+      continue
+    fi
+    still_stale="$still_stale $name"
+  done
+  stale="$still_stale"
+fi
 
 if [ -n "$stale" ]; then
   echo
@@ -104,6 +152,16 @@ if [ -n "$stale" ]; then
   echo "Rename the files listed above — both the migration and its rollback — to a"
   echo "timestamp after $base_head, then push again. Anyone who already applied the"
   echo "old name locally needs 'supabase db reset'."
+  # Annotations after the verdict, so only files that genuinely fail the gate
+  # land as red annotations on the PR.
+  for name in $stale; do
+    stamp="$(printf '%s\n' "$name" | timestamps_of)"
+    if [ -z "$stamp" ]; then
+      echo "::error file=$MIGRATIONS_DIR/$name::'$name' is not named <14-digit-timestamp>_<name>.sql (see supabase/MIGRATIONS.md)."
+    else
+      echo "::error file=$MIGRATIONS_DIR/$name::'$name' is dated $stamp, which is not after $base_head — the newest migration already on '$BASE_REF'. 'supabase db push' will refuse it. Rename this file and its supabase/rollback/ counterpart to a timestamp after $base_head."
+    fi
+  done
   exit 1
 fi
 

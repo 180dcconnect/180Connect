@@ -5,7 +5,7 @@ import { motion } from "motion/react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { CTA_FILL, CTA_WASH, LIFT, ctaArrow, ctaDisc, ctaLabel, ctaWash } from "./motion";
-import { GLASS, INK, LABEL_REST, LIME, LIP } from "./tokens";
+import { GLASS, GROUND, INK, LABEL_REST, LIME, LIP, SHEET_TINT } from "./tokens";
 
 export interface GooeyBrandCtaProps {
   /** Label inside the primary pill. Defaults to "Get Started" */
@@ -14,6 +14,8 @@ export interface GooeyBrandCtaProps {
   onClick?: () => void;
   /** Link href if behaving as an anchor */
   href?: string;
+  /** Tone variant */
+  tone?: "glass" | "sheet";
   /** Size preset ('sm' for nav 36px, 'lg' for hero 40px) */
   size?: "sm" | "lg";
   /** Delay before arrow disc begins budding out (in ms) */
@@ -24,8 +26,14 @@ export interface GooeyBrandCtaProps {
   gooBlur?: number;
   /** Alpha contrast slope */
   gooContrast?: number;
-  /** Force detached state (for static previews) */
+  /** Force detached state (reactive boolean) */
   forceOpen?: boolean;
+  /** Disabled state */
+  disabled?: boolean;
+  /** Button type */
+  type?: "button" | "submit";
+  /** Form attribute */
+  form?: string;
   /** Accessible aria label */
   ariaLabel?: string;
   /** Custom class */
@@ -36,42 +44,67 @@ export function GooeyBrandCta({
   label = "Get Started",
   onClick,
   href,
+  tone = "glass",
   size = "lg",
   entranceDelay = 250,
   duration = 640,
   gooBlur = 6,
   gooContrast = 14,
   forceOpen,
+  disabled = false,
+  type = "button",
+  form,
   ariaLabel,
   className = "",
 }: GooeyBrandCtaProps) {
   const [hasDetached, setHasDetached] = React.useState(forceOpen ?? false);
   const [isEmerging, setIsEmerging] = React.useState(forceOpen === undefined);
   const [isHovered, setIsHovered] = React.useState(false);
+  const prevForceOpenRef = React.useRef(forceOpen);
   const large = size === "lg";
 
   const discSize = large ? 40 : 36;
   const arrow = ctaArrow(large ? 26 : 22, large ? CTA_FILL : 0);
 
-  // Trigger the budding animation after mount + delay
+  const isSheet = tone === "sheet";
+  const pillBg = isSheet ? SHEET_TINT : GLASS;
+  const accentBg = isSheet ? GROUND : LIME;
+  const accentColor = isSheet ? INK : INK;
+  const washBg = isSheet ? GROUND : LIME;
+
+  // Trigger the budding animation when forceOpen transitions from false -> true or on mount
   React.useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     let endTimer: ReturnType<typeof setTimeout>;
 
     const raf = requestAnimationFrame(() => {
-      if (forceOpen !== undefined) {
-        setHasDetached(forceOpen);
-        setIsEmerging(false);
+      if (forceOpen === undefined) {
+        setIsEmerging(true);
+        timer = setTimeout(() => {
+          setHasDetached(true);
+          endTimer = setTimeout(() => {
+            setIsEmerging(false);
+          }, duration + 100);
+        }, entranceDelay);
         return;
       }
-      setIsEmerging(true);
-      timer = setTimeout(() => {
-        setHasDetached(true);
-        // Cleanly complete emergence after animation duration
+
+      if (forceOpen && !prevForceOpenRef.current) {
+        setIsEmerging(true);
+        timer = setTimeout(() => {
+          setHasDetached(true);
+        }, 40);
         endTimer = setTimeout(() => {
           setIsEmerging(false);
         }, duration + 100);
-      }, entranceDelay);
+        prevForceOpenRef.current = true;
+      } else if (!forceOpen && prevForceOpenRef.current) {
+        setHasDetached(false);
+        setIsEmerging(false);
+        prevForceOpenRef.current = false;
+      } else {
+        setHasDetached(Boolean(forceOpen));
+      }
     });
 
     return () => {
@@ -123,7 +156,7 @@ export function GooeyBrandCta({
           <div
             className="rounded-full ml-auto"
             style={{
-              backgroundColor: GLASS,
+              backgroundColor: pillBg,
               width: `${discSize}px`,
               height: `${discSize}px`,
               marginRight: `${discSize}px`,
@@ -141,33 +174,33 @@ export function GooeyBrandCta({
             style={{
               width: `${discSize}px`,
               height: `${discSize}px`,
-              backgroundColor: GLASS,
+              backgroundColor: pillBg,
             }}
           />
         </div>
       )}
 
-      {/* Main Interactive Button Pair (Single layer of GLASS — 100% identical to BrandCta) */}
+      {/* Main Interactive Button Pair */}
       <motion.div
         className="relative z-10 inline-flex items-center focus-visible:outline-2 focus-visible:outline-offset-4"
-        style={{ outlineColor: INK }}
+        style={{ outlineColor: isSheet ? GROUND : INK }}
         initial="rest"
-        animate={isHovered ? "hover" : "rest"}
-        whileTap={{ scale: large ? 0.97 : 0.96 }}
+        animate={!disabled && isHovered ? "hover" : "rest"}
+        whileTap={!disabled ? { scale: large ? 0.97 : 0.96 } : undefined}
         variants={{ rest: { y: 0 }, hover: { y: -2 } }}
         transition={LIFT}
       >
-        {/* 1. The "Get Started" Label Pill */}
+        {/* 1. The Label Pill */}
         <motion.span
           className={`relative flex items-center overflow-hidden rounded-full ring-1 ring-white/25 ${
             large ? "h-10 px-6" : "h-9 px-4 sm:px-5"
           }`}
           style={{ boxShadow: LIP }}
         >
-          {/* Single authentic dark glass underlay */}
+          {/* Resting background underlay */}
           <motion.span
-            className="pointer-events-none absolute inset-0 rounded-full backdrop-blur-md"
-            style={{ backgroundColor: GLASS }}
+            className={`pointer-events-none absolute inset-0 rounded-full ${isSheet ? "" : "backdrop-blur-md"}`}
+            style={{ backgroundColor: pillBg }}
             variants={{
               rest: { opacity: 1, transition: { duration: 0.2 } },
               hover: { opacity: 0, transition: { duration: CTA_WASH, delay: CTA_FILL } },
@@ -175,17 +208,17 @@ export function GooeyBrandCta({
             aria-hidden="true"
           />
 
-          {/* Directional lime wash background sweep on hover */}
+          {/* Directional wash background sweep on hover */}
           <motion.span
             variants={ctaWash}
             className="absolute -inset-y-[2px] left-full block w-[200%] rounded-l-full"
-            style={{ backgroundColor: LIME }}
+            style={{ backgroundColor: washBg }}
             aria-hidden="true"
           />
 
           {/* Label typography */}
           <motion.span
-            variants={ctaLabel(LABEL_REST, INK)}
+            variants={ctaLabel(LABEL_REST, isSheet ? INK : INK)}
             className={`relative z-10 whitespace-nowrap font-body font-medium ${
               large ? "text-sm" : "text-xs sm:text-sm"
             }`}
@@ -203,13 +236,13 @@ export function GooeyBrandCta({
             scale: hasDetached ? 1 : 0.8,
           }}
           transition={emergenceTransition}
-          variants={ctaDisc(GLASS)}
+          variants={ctaDisc(pillBg)}
           className={`relative flex items-center justify-center overflow-hidden rounded-full ${
             large ? "h-10 w-10" : "h-9 w-9"
           }`}
           style={{
-            backgroundColor: LIME,
-            color: INK,
+            backgroundColor: accentBg,
+            color: accentColor,
             pointerEvents: hasDetached ? "auto" : "none",
           }}
         >
@@ -249,10 +282,14 @@ export function GooeyBrandCta({
 
   return (
     <button
-      type="button"
+      type={type}
+      form={form}
+      disabled={disabled}
       onClick={onClick}
       aria-label={ariaLabel}
-      className="inline-block bg-transparent border-0 p-0 cursor-pointer focus-visible:outline-none"
+      className={`inline-block bg-transparent border-0 p-0 ${
+        disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
+      } focus-visible:outline-none`}
     >
       {content}
     </button>

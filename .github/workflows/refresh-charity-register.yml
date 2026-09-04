@@ -1,0 +1,122 @@
+# Rebuilds the Charity Commission register file and ships it to the app.
+#
+# This is the only thing that ever runs the build script. Nobody on the team
+# opens a terminal: the schedule keeps the register current, and the "Refresh
+# register" button on /admin/charity-commission triggers this same workflow
+# through workflow_dispatch when someone wants it now.
+#
+# Why a Release asset rather than a commit: the file is ~180MB and is rebuilt
+# monthly. Committing it would add that to git history every single time, and
+# git keeps every version forever. A Release asset is replaced in place, so the
+# repository stays the size of its source code.
+#
+# The job needs no database credentials and no API keys. It reads a public file
+# the regulator publishes and writes a file. The data-handling rules (F246/F247)
+# are applied when charities are imported into the client list, not here — see
+# src/lib/charity-register/import.ts.
+
+name: Refresh charity register
+
+on:
+  schedule:
+    # 03:00 UTC on the 1st. The Commission republishes daily, so any day works;
+    # monthly is ample for quarterly outreach cycles and keeps the job cheap.
+    - cron: "0 3 1 * *"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why this refresh was triggered (recorded in the run)"
+        required: false
+        default: "Manual refresh"
+
+# Two refreshes at once would each spend ten minutes producing the same file and
+# race to upload it. The second waits; it does not cancel the first, which may
+# be most of the way through.
+concurrency:
+  group: charity-register
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Downloading ~100MB of zips and parsing 1.8GB takes about 12 minutes. The
+    # ceiling is generous so a slow day at the regulator does not fail the run.
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # node:sqlite is built in from Node 22 and stable in 24, which is the
+          # version the Vercel project runs. No native module to compile.
+          node-version: "24"
+
+      - name: Build the register
+        run: npm run register:build -- --out data/register.sqlite
+
+      - name: Summarise
+        env:
+          # Through the environment, never interpolated into the script body:
+          # `reason` is attacker-controlled by anyone who can dispatch this
+          # workflow, and `${{ }}` inside `run:` is substituted before bash sees
+          # it, so a crafted value would execute as shell.
+          REASON: ${{ github.event.inputs.reason || 'Scheduled refresh' }}
+        run: |
+          SIZE=$(du -m data/register.sqlite | cut -f1)
+          {
+            echo "### Charity register rebuilt"
+            echo ""
+            echo "- File size: ${SIZE} MB"
+            echo "- Reason: ${REASON}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish as the register release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # One long-lived release, its asset replaced each time. The app's build
+          # always fetches "latest from the charity-register tag", so there is
+          # exactly one answer to "which register is current".
+          gh release view charity-register >/dev/null 2>&1 \
+            || gh release create charity-register \
+                 --title "Charity register" \
+                 --notes "Rebuilt automatically from the Charity Commission's daily extracts. Replaced on each refresh."
+          gh release upload charity-register data/register.sqlite --clobber
+
+      - name: Redeploy so the app picks it up
+        # The file is fetched during the Vercel build, so a new deployment is what
+        # actually puts the fresh register in front of anyone.
+        #
+        # Two hooks, because this project deploys two environments from two
+        # branches (vercel.json: dev = staging, main = production) and they are
+        # separate deployments with separate builds. One hook would leave the
+        # other environment serving whatever register it was last built with,
+        # going quietly staler every month — the kind of drift nobody notices
+        # until a filter returns a number that makes no sense.
+        #
+        # The release itself is repo-wide, so both environments fetch the same
+        # file. Only the redeploy is per-environment.
+        #
+        # Both are optional. With neither, the register still publishes and ships
+        # with whatever deploys next.
+        env:
+          STAGING: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+          PRODUCTION: ${{ secrets.VERCEL_DEPLOY_HOOK_URL_PRODUCTION }}
+        run: |
+          triggered=0
+          for hook in "$STAGING" "$PRODUCTION"; do
+            [ -z "$hook" ] && continue
+            # --fail so a rejected hook fails the step rather than passing
+            # silently; the register is published by now either way.
+            curl -fsS -X POST "$hook" > /dev/null
+            triggered=$((triggered + 1))
+          done
+          if [ "$triggered" -eq 0 ]; then
+            echo "No deploy hooks configured — the new register ships with the next deployment."
+          else
+            echo "Triggered $triggered redeploy(s)."
+          fi

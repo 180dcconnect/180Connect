@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Clock, ExternalLink, Globe, ShieldCheck, Sparkles } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { Check, ChevronDown, Clock, ExternalLink, Globe, ShieldCheck, Sparkles, X } from "lucide-react";
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
+import { BrandSearchBar } from "@/components/brand/search-bar";
 import { SectionCard } from "./section-card";
 import { parseBookletSections } from "@/lib/booklet/parse-sections";
 import type { BookletSource } from "@/lib/booklet/sources";
@@ -32,10 +34,13 @@ import type { BookletSource } from "@/lib/booklet/sources";
  * and dash-bulleted blocks into a real list — see that file for why this only
  * works because the prompt dictates that exact format.
  *
- * F084 — Use Website URL in Booklet: the URL field below is pre-filled from the
- * client's already-known, already-reachable website (page.tsx passes
- * `initialWebsiteUrl`) but stays editable — a CAM can clear it, paste a different
- * page entirely, or fill one in when none is on record. Whatever's in the field at
+  * F084 — Use Website URL in Booklet: before the first version exists the URL
+  * lives inside the composer's "Add website" row (pre-filled from the
+  * client's already-known, already-reachable website via `initialWebsiteUrl`,
+  * expanded on open so the CAM sees what will be used); once a version
+  * exists the standalone field below takes over for regenerations. Either
+  * way it stays editable — a CAM can clear it, paste a different
+  * page entirely, or fill one in when none is on record. Whatever's in the field at
  * generate time is what gets sent; the route re-validates it with F046's
  * validateWebsiteFormat and fetches it through F037's shared robots-aware,
  * SSRF-safe transport (scrape-website.ts) fresh on every click — nothing is cached,
@@ -204,6 +209,212 @@ function initialWebsiteContext(saved: SavedBooklet): WebsiteContextResult | null
   } catch {
     return null;
   }
+}
+
+/**
+ * The pre-generation composer: a collapsed pill that widens into a card, then
+ * drops its options beneath — the search bar's choreography
+ * (`components/brand/search-bar.tsx`), restyled into the filed-record's light
+ * language rather than the brand's dark glass.
+ *
+ * Two phases, in order: the pill animates to full width first, and only then
+ * does the panel unfold below it, so the eye tracks one movement at a time.
+ * The panel holds a single option for now — "Add website" — which opens the
+ * URL field inline, where the pill was, rather than navigating anywhere. More
+ * options (tone, length, audience) slot in as further rows later without
+ * touching this choreography.
+ *
+ * A pre-filled URL (page.tsx passes the reachable site) opens the field
+ * already expanded, so the CAM sees what will be used rather than discovering
+ * it. Escape or an outside tap collapses back to the pill; the typed URL
+ * survives collapsing, since it lives in the parent's state.
+ */
+function BookletComposer({
+  websiteUrl,
+  onWebsiteUrlChange,
+  onGenerate,
+}: {
+  websiteUrl: string;
+  onWebsiteUrlChange: (value: string) => void;
+  onGenerate: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [websiteOpen, setWebsiteOpen] = useState(() => websiteUrl.trim() !== "");
+  const reduceMotion = useReducedMotion();
+  const panelId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Pointerdown, not click — same reasoning as the search bar: a drag that
+  // starts inside and ends outside must not collapse the panel mid-gesture.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [open ]);
+
+  useEffect(() => {
+    if (websiteOpen) inputRef.current?.focus();
+  }, [websiteOpen]);
+
+  const trimmed = websiteUrl.trim();
+  let hostname: string | null = null;
+  try {
+    hostname = trimmed ? new URL(trimmed).hostname : null;
+  } catch {
+    hostname = null;
+  }
+
+  return (
+    <div className="mt-6 flex flex-col items-center gap-3">
+      <motion.div
+        ref={rootRef}
+        className={
+          open
+            ? "w-full overflow-hidden rounded-2xl border border-rule bg-white"
+            : "w-auto"
+        }
+        initial={false}
+        animate={{ width: open ? "100%" : "auto" }}
+        transition={{ duration: reduceMotion ? 0 : 0.35, ease: "easeOut" }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && open) setOpen(false);
+        }}
+      >
+        {!open ? (
+          <button
+            aria-controls={panelId}
+            aria-expanded={false}
+            className="flex items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-ink/90"
+            onClick={() => setOpen(true)}
+            type="button"
+          >
+            <Sparkles aria-hidden="true" className="h-4 w-4" />
+            Generate booklet
+          </button>
+        ) : (
+          <div>
+            <div className="flex items-center justify-between gap-3 px-4 pt-3.5 sm:px-5">
+              <p className="flex items-center gap-2 text-sm font-semibold text-ink">
+                <Sparkles aria-hidden="true" className="h-4 w-4 text-faint" />
+                New booklet
+              </p>
+              <button
+                aria-label="Close booklet options"
+                className="grid h-7 w-7 place-items-center rounded-full text-faint transition-colors hover:bg-paper hover:text-dim"
+                onClick={() => setOpen(false)}
+                type="button"
+              >
+                <X aria-hidden="true" className="h-4 w-4" />
+              </button>
+            </div>
+            <AnimatePresence initial={false}>
+              <motion.div
+                key="booklet-options"
+                id={panelId}
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{
+                  duration: reduceMotion ? 0 : 0.3,
+                  delay: reduceMotion ? 0 : 0.22,
+                  ease: "easeOut",
+                }}
+              >
+                <p className="px-4 pt-1 text-[13px] leading-[1.55] text-dim sm:px-5">
+                  A research summary from the client&rsquo;s profile — add a
+                  website below for extra context.
+                </p>
+                <div className="px-2 pt-2 sm:px-3">
+                  <button
+                    aria-expanded={websiteOpen}
+                    className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors hover:bg-paper"
+                    onClick={() => setWebsiteOpen((value) => !value)}
+                    type="button"
+                  >
+                    <Globe aria-hidden="true" className="h-4 w-4 shrink-0 text-faint" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-ink">
+                        {hostname ?? "Add website"}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-dim">
+                        {hostname
+                          ? "Included as unverified context — tap to change"
+                          : "Optional — quoted as unverified context"}
+                      </span>
+                    </span>
+                    {hostname && !websiteOpen ? (
+                      <Check aria-hidden="true" className="h-4 w-4 shrink-0 text-go" />
+                    ) : (
+                      <ChevronDown
+                        aria-hidden="true"
+                        className={`h-4 w-4 shrink-0 text-faint transition-transform ${websiteOpen ? "rotate-180" : ""}`}
+                      />
+                    )}
+                  </button>
+                  <AnimatePresence initial={false}>
+                    {websiteOpen && (
+                      <motion.div
+                        key="website-field"
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{
+                          duration: reduceMotion ? 0 : 0.25,
+                          ease: "easeOut",
+                        }}
+                        className="overflow-hidden"
+                      >
+                        <div className="px-2.5 pt-1 pb-1">
+                          <input
+                            ref={inputRef}
+                            aria-label="Website URL for extra context (optional)"
+                            className="w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm text-ink placeholder:text-faint focus:border-brand focus:ring-1 focus:ring-brand focus:outline-none"
+                            onChange={(event) => onWebsiteUrlChange(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") onGenerate();
+                            }}
+                            placeholder="https://example.org"
+                            type="url"
+                            value={websiteUrl}
+                          />
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+                <div className="flex justify-center px-4 pt-3 pb-4 sm:px-5">
+                  <button
+                    className="flex items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-ink/90"
+                    onClick={onGenerate}
+                    type="button"
+                  >
+                    <Sparkles aria-hidden="true" className="h-4 w-4" />
+                    Generate booklet
+                  </button>
+                </div>
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        )}
+      </motion.div>
+      <BrandSearchBar
+        frosted
+        promptButton
+        panelRows={[
+          {
+            label: "Add a website",
+            hint: "Optional context for the booklet",
+            icon: <Globe aria-hidden="true" className="h-4 w-4 shrink-0 text-[#f4f4ef]/70" />,
+          },
+        ]}
+        className="w-full max-w-[600px]"
+      />
+    </div>
+  );
 }
 
 export function BookletPanel({
@@ -384,7 +595,7 @@ export function BookletPanel({
         title="Client booklet"
       >
 
-      {!busy && !viewingVersion && (
+      {!busy && !viewingVersion && currentVersion && (
         <div className="mt-4">
           <label
             className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-dim"
@@ -410,20 +621,11 @@ export function BookletPanel({
       )}
 
       {!currentVersion && !busy && !error && (
-        <div className="mt-6 flex flex-col items-center gap-3 rounded-inset border border-dashed border-brand/25 bg-white/60 px-6 py-8 text-center">
-          <p className="max-w-sm text-sm text-dim">
-            Generate a quick summary of this charity&rsquo;s mission and profile
-            data, with suggested angles for outreach.
-          </p>
-          <button
-            className="flex items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-ink/90"
-            onClick={generate}
-            type="button"
-          >
-            <Sparkles aria-hidden="true" className="h-4 w-4" />
-            Generate booklet
-          </button>
-        </div>
+        <BookletComposer
+          websiteUrl={websiteUrl}
+          onWebsiteUrlChange={setWebsiteUrl}
+          onGenerate={() => void generate()}
+        />
       )}
 
       {busy && (

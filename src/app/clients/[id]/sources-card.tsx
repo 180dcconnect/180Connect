@@ -5,6 +5,7 @@ import { BookOpen } from "lucide-react";
 
 import type { OrganisationSource } from "@/lib/source-tracking";
 import { SOURCE_LABELS } from "@/lib/source-tracking";
+import { formatShortDate } from "@/lib/display-format";
 import {
   Tooltip,
   TooltipContent,
@@ -33,8 +34,9 @@ import { SectionCard } from "./section-card";
  */
 const SOURCE_LOGOS: Readonly<Record<string, string>> = {
   charity_commission: "/sources/charity-commission.png",
-  companies_house: "/sources/Companies-House.png",
-  "360giving": "/sources/360Giving.png",
+  charity_commission_bulk: "/sources/charity-commission.png",
+  companies_house: "/sources/companies-house.png",
+  "360giving": "/sources/360giving.png",
 };
 
 /**
@@ -44,6 +46,12 @@ const SOURCE_DETAILS: Readonly<
   Record<string, { summary: string; relevance: string }>
 > = {
   charity_commission: {
+    summary:
+      "The official statutory regulator of charities in England and Wales.",
+    relevance:
+      "Verifies legal charitable status, public benefit objectives, trustee governance, and annual filing compliance.",
+  },
+  charity_commission_bulk: {
     summary:
       "The official statutory regulator of charities in England and Wales.",
     relevance:
@@ -118,15 +126,7 @@ function monogram(label: string): string {
   return (words[0][0] + words[1][0]).toUpperCase();
 }
 
-function formatDate(value: string): string | null {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
+
 
 /**
  * Manual Input, rendered like any other register row — same geometry, same
@@ -155,7 +155,7 @@ function ManualEntryRow() {
           <TooltipContent
             side="top"
             sideOffset={6}
-            className="max-w-[18rem] rounded-inset bg-ink px-3.5 py-2.5 text-left text-[12px] leading-[1.5] text-white shadow-lg"
+            className="max-w-[18rem] rounded-inset border border-white/10 bg-[#161b21] px-3.5 py-2.5 text-left text-[12px] leading-[1.5] text-white shadow-lg"
           >
             <span className="block font-semibold text-white">{label}</span>
             <span className="mt-1 block text-white/80">{details.summary}</span>
@@ -221,7 +221,7 @@ export function SourcesCard({
           {hasManualFields && <ManualEntryRow />}
           {rows.map((source) => {
             const logo = SOURCE_LOGOS[source.source];
-            const seen = source.seenAt ? formatDate(source.seenAt) : null;
+            const seen = source.seenAt ? formatShortDate(source.seenAt) : null;
             // A manual entry's "register" is a person, so the row names them
             // instead of pretending to a registry.
             const actor = source.actor;
@@ -251,7 +251,10 @@ export function SourcesCard({
                               ? "max-w-none w-auto h-12 scale-85"
                               : source.source === "companies_house"
                                 ? "max-w-none w-auto h-14 scale-125"
-                                : "max-w-full"
+                                : source.source === "charity_commission" ||
+                                  source.source === "charity_commission_bulk"
+                                  ? "max-w-none w-auto h-14 scale-110"
+                                  : "max-w-full"
                           }`}
                         />
                       </span>
@@ -269,7 +272,7 @@ export function SourcesCard({
                     <TooltipContent
                       side="top"
                       sideOffset={6}
-                      className="max-w-[18rem] rounded-inset bg-ink px-3.5 py-2.5 text-left text-[12px] leading-[1.5] text-white shadow-lg"
+                      className="max-w-[18rem] rounded-inset border border-white/10 bg-[#161b21] px-3.5 py-2.5 text-left text-[12px] leading-[1.5] text-white shadow-lg"
                     >
                       <span className="block font-semibold text-white">
                         {source.label}
@@ -298,7 +301,7 @@ export function SourcesCard({
                       <TooltipContent
                         side="top"
                         sideOffset={6}
-                        className="max-w-[18rem] rounded-inset bg-ink px-3.5 py-2.5 text-left text-[12px] leading-[1.5] text-white shadow-lg"
+                        className="max-w-[18rem] rounded-inset border border-white/10 bg-[#161b21] px-3.5 py-2.5 text-left text-[12px] leading-[1.5] text-white shadow-lg"
                       >
                         <span className="block font-semibold text-white">
                           {source.label}

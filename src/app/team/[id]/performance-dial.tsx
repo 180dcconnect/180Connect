@@ -80,10 +80,10 @@ export function PerformanceDial({
         index,
         runKey: run.key,
         colour: run.colour,
-        x1: 100 + R_INNER * cos,
-        y1: 100 + R_INNER * sin,
-        x2: 100 + R_OUTER * cos,
-        y2: 100 + R_OUTER * sin,
+        x1: Math.round((100 + R_INNER * cos) * 1000) / 1000,
+        y1: Math.round((100 + R_INNER * sin) * 1000) / 1000,
+        x2: Math.round((100 + R_OUTER * cos) * 1000) / 1000,
+        y2: Math.round((100 + R_OUTER * sin) * 1000) / 1000,
       });
     }
     return out;

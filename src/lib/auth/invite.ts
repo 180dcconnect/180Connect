@@ -58,6 +58,7 @@ const ROLE_SHORT_LABEL: Record<InviteRole, string> = {
 export function inviteSchema(rule: DomainRule = allowedEmailDomains()) {
   const domains = toDomainList(rule);
   return z.object({
+    fullName: z.string().trim().max(120).optional().nullable(),
     email: emailField("Enter a valid email address.").refine(
       (email) => isOnAllowedDomain(email, domains),
       {
@@ -84,6 +85,7 @@ export type InviteState = {
   message?: string;
   link?: string;
   fieldErrors?: {
+    fullName?: string[];
     email?: string[];
     role?: string[];
   };
@@ -185,7 +187,11 @@ export type InviteSender = (message: {
   html: string;
 }) => Promise<{ status: "sent" | "skipped" | "failed"; reason?: string }>;
 
-export type SendInviteInput = { email: unknown; role?: unknown };
+export type SendInviteInput = {
+  email: unknown;
+  role?: unknown;
+  fullName?: unknown;
+};
 
 /** Optional collaborators. Defaults are the real ones. */
 export type SendInviteDeps = {
@@ -203,8 +209,16 @@ export type SendInviteDeps = {
     role: InviteRole,
   ) => Promise<{ error: { message: string } | null }>;
   /**
-   * Resets invited_at on the public.users row when an invite is resent,
-   * so the expiry clock resets from the moment of the resend.
+   * Sets preset full name on public.users row.
+   */
+  setUserName?: (
+    userId: string,
+    fullName: string,
+  ) => Promise<{ error: { message: string } | null }>;
+  /**
+   * Stamped by `resendInvite` to move the invite to the top of the pending list
+   * and restart the 24h clock. Never called by `sendInvite` — the row is fresh,
+   * its default `invited_at` is already `now()`.
    */
   touchInvitedAt?: (
     userId: string,
@@ -238,6 +252,7 @@ export async function sendInvite(
   const result = safeValidate(inviteSchema(rule), {
     email: input.email,
     role: input.role,
+    fullName: input.fullName,
   });
 
   if (!result.success) {
@@ -255,7 +270,7 @@ export async function sendInvite(
     };
   }
 
-  const { email, role } = result.data;
+  const { email, role, fullName } = result.data;
 
   let existing: { id: string; deactivatedAt: string | null } | null;
   try {
@@ -322,6 +337,7 @@ export async function sendInvite(
       mintFailureMessage: "Could not send the invite. Try again.",
     },
     applyRole,
+    fullName,
   );
 }
 
@@ -348,6 +364,7 @@ async function mintAndSendInvite(
   outcome: { successEvent: "user.invited" | "user.invite_resent"; successMessage: string; mintFailureMessage: string },
   /** Only `sendInvite` passes this — see its call site. */
   applyRole?: (userId: string) => Promise<{ error: { message: string } | null }>,
+  fullName?: string | null,
 ): Promise<SendInviteOutcome> {
   let tokenHash: string;
   let mintedUserId: string | undefined;
@@ -364,7 +381,17 @@ async function mintAndSendInvite(
       // only ever writes it `on conflict (id) do nothing` — this call cannot
       // overwrite it. Passed anyway so the metadata reflects who most recently
       // acted on the invite, if that ever needs to be read.
-      options: { redirectTo, data: { invited_by_user_id: invitedByUserId } },
+      options: {
+        redirectTo,
+        data: fullName?.trim()
+          ? {
+              invited_by_user_id: invitedByUserId,
+              full_name: fullName.trim(),
+            }
+          : {
+              invited_by_user_id: invitedByUserId,
+            },
+      },
     });
 
     if (error) {
@@ -396,6 +423,14 @@ async function mintAndSendInvite(
       ok: false,
       state: { status: "error", message: outcome.mintFailureMessage },
     };
+  }
+
+  if (mintedUserId && fullName?.trim() && deps.setUserName) {
+    try {
+      await deps.setUserName(mintedUserId, fullName.trim());
+    } catch {
+      // Non-fatal if public.users update fails; metadata is stored on auth.user
+    }
   }
 
   // Applied before the email is composed, so a role warning never contradicts

@@ -4,13 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { NoteListItem } from "@/lib/note-history";
 
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
+import { formatShortDate } from "@/lib/display-format";
 
 /**
  * F071 (list) / F073 (edit) / F074 (delete): every note left against this
@@ -156,7 +150,7 @@ export function NotesSection({
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[13px] text-dim">
               <span className="font-semibold text-dim">{note.authorName}</span>
               <span>
-                {formatDate(note.createdAt)}
+                {formatShortDate(note.createdAt)}
                 {note.edited ? " · edited" : ""}
               </span>
             </div>

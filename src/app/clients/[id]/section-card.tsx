@@ -31,6 +31,7 @@ export function SectionCard({
   hint,
   action,
   icon,
+  number,
   children,
   className = "",
   tone = "default",
@@ -44,6 +45,13 @@ export function SectionCard({
   action?: ReactNode;
   /** Optional glyph, inline beside the title. Sized to 15px. */
   icon?: ReactNode;
+  /**
+   * Optional position in a numbered run, as on the Financials tab. A number is
+   * only worth printing where it is *stable* — the same number means the same
+   * question on every record — so it is opt-in per tab rather than something
+   * every card grows. See `financials/page.tsx`.
+   */
+  number?: number;
   children?: ReactNode;
   className?: string;
   /** `danger` tints the card where outreach is blocked. */
@@ -61,6 +69,14 @@ export function SectionCard({
     >
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="flex min-w-0 items-center gap-2.5">
+          {number !== undefined && (
+            <span
+              aria-hidden="true"
+              className="shrink-0 self-start pt-[3px] font-mono text-[15px] font-medium tabular-nums text-faint"
+            >
+              {number}
+            </span>
+          )}
           {icon && (
             <span
               aria-hidden="true"
@@ -78,6 +94,9 @@ export function SectionCard({
                 tone === "danger" ? "text-stop" : "text-ink"
               }`}
             >
+              {number !== undefined && (
+                <span className="sr-only">Section {number}. </span>
+              )}
               {title}
             </h2>
             {hint && (

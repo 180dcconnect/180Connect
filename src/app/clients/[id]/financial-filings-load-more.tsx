@@ -7,17 +7,11 @@ import {
   FinancialFilingListItem,
   type FinancialFilingRow,
 } from "./financial-filing-item";
+import { FeedPagination } from "@/components/ui/feed-pagination";
 
 /**
- * The Financial filings section's list + pager. Owns the loaded-filings state
- * so "Load more" can append a page without a full page reload — same pattern
- * as GrantHistoryLoadMore: the initial page is seeded from the server render
- * (state, like TagsSection's initialClientTags), and each click fetches the
- * next page of the identical ordered query via loadMoreFinancialFilings.
- *
- * Renders nothing until there is either a list to show or a button worth
- * showing, so a client with no filings (or one whose whole history fits on the
- * first page) never pays for the interactivity.
+ * The Financial filings section's list + paginator. Owns the loaded-filings state
+ * and page navigation with per-page selection and cached pages.
  */
 export function FinancialFilingsLoadMore({
   organisationId,
@@ -28,64 +22,83 @@ export function FinancialFilingsLoadMore({
   initialFilings: readonly FinancialFilingRow[];
   totalCount: number;
 }) {
-  const [rows, setRows] = useState<readonly FinancialFilingRow[]>(initialFilings);
+  const [pageSize, setPageSize] = useState<number>(FINANCIAL_FILINGS_PAGE_SIZE);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [cache, setCache] = useState<Record<string, readonly FinancialFilingRow[]>>({
+    [`1-${FINANCIAL_FILINGS_PAGE_SIZE}`]: initialFilings,
+  });
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const hasMore = rows.length < totalCount;
+  if (totalCount === 0 && initialFilings.length === 0) return null;
 
-  if (rows.length === 0) return null;
+  const cacheKey = `${currentPage}-${pageSize}`;
+  const currentRows =
+    cache[cacheKey] ??
+    (currentPage === 1 && pageSize === FINANCIAL_FILINGS_PAGE_SIZE ? initialFilings : []);
 
-  function handleLoadMore() {
-    if (pending) return;
+  function fetchPage(targetPage: number, targetPageSize: number) {
+    const key = `${targetPage}-${targetPageSize}`;
+    if (cache[key]) {
+      setCurrentPage(targetPage);
+      setPageSize(targetPageSize);
+      return;
+    }
+
     setError(null);
     startTransition(async () => {
       const result = await loadMoreFinancialFilings({
         organisationId,
-        // rows is seeded with the server-rendered first page and only ever
-        // grows, so its length is exactly the number of filings already shown
-        // — the offset of the next page of the same ordered query.
-        offset: rows.length,
+        offset: (targetPage - 1) * targetPageSize,
+        limit: targetPageSize,
       });
       if (!result.ok) {
         setError(result.message);
         return;
       }
-      setRows((current) => [...current, ...result.filings]);
+      setCache((prev) => ({ ...prev, [key]: result.filings }));
+      setCurrentPage(targetPage);
+      setPageSize(targetPageSize);
     });
+  }
+
+  function handlePageChange(page: number) {
+    if (page === currentPage || pending) return;
+    fetchPage(page, pageSize);
+  }
+
+  function handlePageSizeChange(newSize: number) {
+    if (newSize === pageSize || pending) return;
+    fetchPage(1, newSize);
   }
 
   return (
     <>
-      <ul className="mt-3.5 flex flex-col">
-        {rows.map((filing) => (
+      <ul
+        className={`mt-3.5 flex flex-col transition-opacity duration-150 ${
+          pending ? "pointer-events-none opacity-50" : "opacity-100"
+        }`}
+      >
+        {currentRows.map((filing) => (
           <FinancialFilingListItem key={filing.id} filing={filing} />
         ))}
       </ul>
 
-      <div className="mt-4 flex flex-col items-start gap-2">
-        <p className="font-mono text-[11.5px] text-faint tabular-nums">
-          Showing {rows.length} of {totalCount}{" "}
-          {totalCount === 1 ? "filing" : "filings"}
+      {error && (
+        <p className="mt-3 text-xs font-semibold text-stop" role="alert">
+          {error}
         </p>
-        {hasMore && (
-          <button
-            type="button"
-            onClick={handleLoadMore}
-            disabled={pending}
-            className="cursor-pointer rounded-full border border-rule px-3.5 py-1.5 text-[12.5px] font-semibold text-lead transition-colors hover:bg-lead-wash disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {pending
-              ? "Loading…"
-              : `Load ${Math.min(FINANCIAL_FILINGS_PAGE_SIZE, totalCount - rows.length)} more`}
-          </button>
-        )}
-        {error && (
-          <p className="text-xs font-semibold text-stop" role="alert">
-            {error}
-          </p>
-        )}
-      </div>
+      )}
+
+      <FeedPagination
+        totalItems={totalCount}
+        pageSize={pageSize}
+        currentPage={currentPage}
+        onPageChange={handlePageChange}
+        onPageSizeChange={handlePageSizeChange}
+        pageSizeOptions={[5, 10, 20]}
+        className="-mx-5 -mb-4.5 mt-4 rounded-b-panel border-t border-rule bg-paper-sunk/30 px-5 py-3"
+      />
     </>
   );
 }

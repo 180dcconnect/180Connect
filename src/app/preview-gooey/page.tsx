@@ -24,6 +24,7 @@ import { GooeyEmailInput } from "@/components/ui/gooey-email-input";
 import { BrandCta } from "@/components/brand/brand-cta";
 import { GooeyBrandCta } from "@/components/brand/gooey-brand-cta";
 import { BackButton } from "@/components/ui/back-button";
+import { DarkEmailPlayground } from "./dark-email-playground";
 
 type ThemeVariant = "light" | "brand" | "dark" | "glass";
 type SizePreset = "sm" | "md" | "lg";
@@ -788,6 +789,9 @@ export function NewsletterSignup() {
             </div>
           </div>
         </section>
+
+        {/* SECTION 2b: THE SAME PLAYGROUND, TUNED ON THE OBSIDIAN SHEET */}
+        <DarkEmailPlayground />
 
         {/* Other Liquid Effects from the Library (Gooey Tabs & Plus Menu in Light Mode) */}
         <section className="space-y-6">

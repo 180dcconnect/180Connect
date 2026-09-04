@@ -1,14 +1,20 @@
 /**
- * Admin email digests for the Charity Commission discovery and status-recheck jobs
- * (F049). Mirrors companies-house-digest.ts — built on the same platform-mail
- * transport (sendEmail/send.ts — Resend, console fallback when unconfigured), no new
- * transport, only two message shapes and the shared admin recipient lookup.
+ * Admin email digest for the Charity Commission status-recheck job (F049).
+ * Mirrors companies-house-digest.ts — built on the same platform-mail transport
+ * (sendEmail/send.ts — Resend, console fallback when unconfigured), no new
+ * transport, one message shape and the shared admin recipient lookup.
  *
- * Called from the shared run functions (charity-commission-discovery.ts,
- * charity-commission-status-recheck.ts), which run from both the manual admin
- * buttons (a signed-in Server Action) and the weekly cron route (no session at
- * all) — recipients are always resolved with the service-role admin client, never
- * from a request-scoped session, so both callers behave identically.
+ * There was a second digest here, for the weekly API discovery run. That job was
+ * retired once the staged register covered it
+ * (supabase/migrations/20260915110000_retire_charity_commission_discovery_cron.sql),
+ * and its digest went with it rather than being left as a function nothing calls.
+ * Imports are now deliberate acts on /admin/charity-commission, so they report
+ * their result on screen to the person who ran them — an email telling an admin
+ * what somebody else just chose to import is noise.
+ *
+ * Called from charity-commission-status-recheck.ts, which runs from the weekly
+ * cron route with no session at all — recipients are resolved with the
+ * service-role admin client, never from a request-scoped session.
  */
 import { buildAdminClient } from "../supabase/admin-client-factory.ts";
 import { reportError } from "../error-logging.ts";
@@ -33,32 +39,6 @@ async function loadAdminRecipients(): Promise<string[]> {
   return (data ?? [])
     .map((row) => (row as { email: string }).email)
     .filter((email): email is string => Boolean(email));
-}
-
-/**
- * Sent after a discovery run. Skipped entirely (not even a console-logged
- * no-op) when there's nothing to report — a weekly email that always says
- * "0 new, 0 flagged" trains admins to stop reading it.
- */
-export async function sendCharityCommissionDiscoveryDigest(counts: {
-  newOrganisations: number;
-  flaggedForReview: number;
-}): Promise<void> {
-  if (counts.newOrganisations === 0 && counts.flaggedForReview === 0) return;
-
-  const to = await loadAdminRecipients();
-  if (to.length === 0) return;
-
-  const lines = [
-    `${counts.newOrganisations} new organisation(s) added automatically from Charity Commission.`,
-    `${counts.flaggedForReview} record(s) flagged for review — see the admin review queue.`,
-  ];
-
-  await sendEmail({
-    to,
-    subject: `Charity Commission import: ${counts.newOrganisations} added, ${counts.flaggedForReview} flagged`,
-    text: lines.join("\n"),
-  });
 }
 
 /**

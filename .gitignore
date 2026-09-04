@@ -59,3 +59,4 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 supabase/snippets/
+data/register.sqlite

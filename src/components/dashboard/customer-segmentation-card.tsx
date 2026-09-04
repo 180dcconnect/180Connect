@@ -123,10 +123,10 @@ export function CustomerSegmentationCard({
       const cos = Math.cos(angleRad);
       const sin = Math.sin(angleRad);
 
-      const x1 = cx + r1 * cos;
-      const y1 = cy + r1 * sin;
-      const x2 = cx + r2 * cos;
-      const y2 = cy + r2 * sin;
+      const x1 = Math.round((cx + r1 * cos) * 1000) / 1000;
+      const y1 = Math.round((cy + r1 * sin) * 1000) / 1000;
+      const x2 = Math.round((cx + r2 * cos) * 1000) / 1000;
+      const y2 = Math.round((cy + r2 * sin) * 1000) / 1000;
 
       // Find which segment this tick belongs to
       let tickSegment = segmentRanges[0].segment;

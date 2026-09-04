@@ -12,11 +12,25 @@ import { GrantHistorySection } from "../grant-history-section";
 import { GRANT_HISTORY_PAGE_SIZE, type GrantRow } from "../grant-list-item";
 import { requireActor } from "../load-record";
 import {
+  buildFinancialSeries,
+  buildFundFlows,
   explainMissingAccounts,
   type FinancialPeriodInput,
   type GrantInput,
 } from "@/lib/financials/financial-series";
+import {
+  sectorPeerStatsFromDistribution,
+  type SectorDistributionRow,
+} from "@/lib/financials/sector-peers";
 import { NoAccountsNotice } from "./no-accounts-notice";
+import { SectionCard } from "../section-card";
+import { SectionUnavailable } from "./section-unavailable";
+import {
+  FinancialHistoryChart,
+  GrantShareChart,
+  IncomeMixPanel,
+} from "./financial-history-chart";
+import { FundFlowSankey } from "./fund-flow-sankey";
 
 /** Charity Commission publishes five filed years; the cap is headroom, not a
  *  page size — a client with more is a client whose whole history we want. */
@@ -54,6 +68,43 @@ type GrantRowQuery = Pick<
  * ordering — the id tiebreaker is what keeps the offset pagination
  * deterministic when rows share a date.
  */
+/**
+ * The same-sector income distribution, in one round trip.
+ *
+ * All the work is `get_sector_income_distribution` (migration 20260916090000):
+ * picking one income per peer is a max-per-group, PostgREST cannot express
+ * DISTINCT ON, and the version of this that did the reduction in Node pulled
+ * every same-sector organisation id and then every financial_periods row behind
+ * them — ~1,750 rows on the largest sector, to produce six numbers.
+ *
+ * The RPC is SECURITY INVOKER, so a deactivated caller gets the same nothing
+ * here as everywhere else rather than a special case.
+ *
+ * Failures degrade to null rather than being reported: the peer strip is the
+ * least important thing on this tab and must never be the reason the page
+ * errors. A sector we simply hold no other clients in is the same shape as a
+ * failure to the caller — an absent strip — and is not worth an error row.
+ */
+async function loadSectorDistribution(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  organisationId: string,
+  sector: string,
+  income: number | null,
+): Promise<SectorDistributionRow | null> {
+  const { data, error } = await supabase.rpc("get_sector_income_distribution", {
+    p_sector: sector,
+    p_exclude_organisation_id: organisationId,
+    p_income: income,
+  });
+  if (error) return null;
+  // Cast rather than `.returns<>()`: the client is untyped (no generated
+  // `Database`), so the builder defaults to a single-object shape and the
+  // generic fights it. Same pattern as the other table-returning RPC call
+  // sites — see admin/team-pipeline/page.tsx.
+  const rows = (data ?? []) as SectorDistributionRow[];
+  return rows[0] ?? null;
+}
+
 export default async function ClientFinancialsPage({
   params,
 }: {
@@ -120,11 +171,12 @@ export default async function ClientFinancialsPage({
       // charity number the notice links out with.
       supabase
         .from("organisations")
-        .select("registered_on, charity_reporting_status")
+        .select("registered_on, charity_reporting_status, sector")
         .eq("id", id)
         .maybeSingle<{
           registered_on: string | null;
           charity_reporting_status: string | null;
+          sector: string | null;
         }>(),
       supabase
         .from("organisation_identifiers")
@@ -164,6 +216,36 @@ export default async function ClientFinancialsPage({
   }
 
   const periods = chartPeriods.data ?? [];
+
+  // One series for every mark on this tab, built by the shared builder rather
+  // than re-derived per section: the version that lived in the hero card sliced
+  // "up to 4 filings" out of a page of 10 and sorted them itself, which quietly
+  // meant a charity with five filed years had its oldest dropped from the trend.
+  const series = buildFinancialSeries({
+    periods,
+    grants: chartGrants.data ?? [],
+  });
+
+  // Every year that can be drawn as a flow, newest first. A year qualifies only
+  // with a split on *both* sides and two sides that square; buildFundFlow
+  // returns null rather than a diagram whose widths do not add up, so this is
+  // often shorter than the filing history — and empty for every client under
+  // the register's £500k reporting threshold. Section 3 says so when it is.
+  const flows = buildFundFlows(series);
+  const mixYear = [...series.years].reverse().find((year) => year.mix.length > 0);
+
+  const sector = registerFacts.data?.sector ?? null;
+  // Derived exactly as the hero card derives the figure it prints — newest
+  // filed period, straight off the row — so the strip's percentile and the
+  // number above it can never be talking about two different years.
+  const latestIncome = periods[0]?.total_income ?? null;
+  const distribution = sector
+    ? await loadSectorDistribution(supabase, id, sector, latestIncome)
+    : null;
+  const peerStats = distribution
+    ? sectorPeerStatsFromDistribution(distribution, latestIncome)
+    : null;
+
   const missingAccounts = explainMissingAccounts({
     periodCount: periods.length,
     isCharityRegistered: Boolean(charityIdentifier.data?.identifier_value),
@@ -171,9 +253,15 @@ export default async function ClientFinancialsPage({
     reportingStatus: registerFacts.data?.charity_reporting_status,
   });
 
+  // The section numbers are fixed, not derived from what this client happens to
+  // have. A number is only useful as an address — "look at 3" has to mean the
+  // same question on every record — so a section with nothing in it collapses
+  // to one line and keeps its number rather than letting 4 become 3.
+  const hasFilings = series.years.length > 0;
+
   return (
     <Stage>
-      <Group className="space-y-6">
+      <Group className="space-y-4">
         {missingAccounts && (
           <Rise>
             <NoAccountsNotice
@@ -184,28 +272,109 @@ export default async function ClientFinancialsPage({
         )}
 
         <Rise>
-          <FinancialsHeroCard
-            filings={periods.length > 0 ? periods : (filings.data ?? [])}
-            totalCount={filings.count ?? filings.data?.length ?? 0}
-            grants={chartGrants.data ?? []}
-          />
+          {hasFilings ? (
+            <SectionCard
+              headingId="fin-scale-heading"
+              hint="What they file, how big that is for their sector, and who does the work."
+              number={1}
+              title="Scale"
+            >
+              <FinancialsHeroCard
+                filings={periods}
+                peerStats={peerStats}
+                sector={sector}
+                series={series}
+                totalCount={filings.count ?? filings.data?.length ?? 0}
+              />
+            </SectionCard>
+          ) : (
+            <SectionUnavailable
+              headingId="fin-scale-heading"
+              number={1}
+              reason="No accounts on record for this organisation yet."
+              title="Scale"
+            />
+          )}
+        </Rise>
+
+        <Rise>
+          {series.years.length > 1 ? (
+            <SectionCard
+              headingId="fin-track-heading"
+              hint="Income against expenditure across every filed year, and the surplus or deficit that leaves."
+              number={2}
+              title="Track record"
+            >
+              <div className="mt-4">
+                <FinancialHistoryChart series={series} />
+              </div>
+            </SectionCard>
+          ) : (
+            <SectionUnavailable
+              headingId="fin-track-heading"
+              number={2}
+              reason={
+                hasFilings
+                  ? "Only one filed year on record — a trend needs two."
+                  : "No accounts on record for this organisation yet."
+              }
+              title="Track record"
+            />
+          )}
+        </Rise>
+
+        <Rise>
+          {flows.length > 0 || mixYear ? (
+            <SectionCard
+              headingId="fin-flow-heading"
+              hint="Where the money comes from and what it turns into, as filed."
+              number={3}
+              title="Where the money goes"
+            >
+              <div className="mt-4">
+                {/* The flow answers both halves at once. Where it cannot be
+                    drawn honestly — a split on one side only, or two sides that
+                    do not square — the income panel still answers half of it. */}
+                {flows.length > 0 ? (
+                  <FundFlowSankey flows={flows} />
+                ) : (
+                  mixYear && <IncomeMixPanel year={mixYear} />
+                )}
+              </div>
+            </SectionCard>
+          ) : (
+            <SectionUnavailable
+              headingId="fin-flow-heading"
+              number={3}
+              reason="Not filed — the register publishes this breakdown only for charities with income over £500,000."
+              title="Where the money goes"
+            />
+          )}
         </Rise>
 
         <Rise>
           <GrantHistorySection
-            organisationId={id}
-            grants={grants.data ?? []}
-            totalCount={grants.count ?? grants.data?.length ?? 0}
             error={Boolean(grants.error)}
+            grants={grants.data ?? []}
+            intro={
+              hasFilings ? (
+                <div className="mt-4">
+                  <GrantShareChart series={series} />
+                </div>
+              ) : undefined
+            }
+            number={4}
+            organisationId={id}
+            totalCount={grants.count ?? grants.data?.length ?? 0}
           />
         </Rise>
 
         <Rise>
           <FinancialFilingsSection
-            organisationId={id}
-            filings={filings.data ?? []}
-            totalCount={filings.count ?? filings.data?.length ?? 0}
             error={Boolean(filings.error)}
+            filings={filings.data ?? []}
+            organisationId={id}
+            totalCount={filings.count ?? filings.data?.length ?? 0}
           />
         </Rise>
       </Group>

@@ -13,6 +13,7 @@ import {
 const loadMoreSchema = z.object({
   organisationId: z.uuid(),
   offset: z.number().int().nonnegative(),
+  limit: z.number().int().positive().max(100).optional(),
 });
 
 export type LoadMoreFilingsResult =
@@ -44,6 +45,7 @@ export async function loadMoreFinancialFilings(input: unknown): Promise<LoadMore
     return { ok: false, message: actorFailureMessage(authorization.reason) };
   }
 
+  const limit = parsed.data.limit ?? FINANCIAL_FILINGS_PAGE_SIZE;
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("financial_periods")
@@ -53,7 +55,7 @@ export async function loadMoreFinancialFilings(input: unknown): Promise<LoadMore
     .eq("organisation_id", parsed.data.organisationId)
     .order("period_end", { ascending: false })
     .order("id", { ascending: true })
-    .range(parsed.data.offset, parsed.data.offset + FINANCIAL_FILINGS_PAGE_SIZE - 1)
+    .range(parsed.data.offset, parsed.data.offset + limit - 1)
     .returns<FinancialFilingRow[]>();
 
   if (error) {
@@ -64,5 +66,5 @@ export async function loadMoreFinancialFilings(input: unknown): Promise<LoadMore
     return { ok: false, message: "More filings could not be loaded. Try again." };
   }
 
-  return { ok: true, filings: data, hasMore: data.length === FINANCIAL_FILINGS_PAGE_SIZE };
+  return { ok: true, filings: data, hasMore: data.length === limit };
 }

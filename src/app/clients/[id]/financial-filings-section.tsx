@@ -28,15 +28,19 @@ export function FinancialFilingsSection({
   filings,
   totalCount,
   error,
+  number,
 }: {
   organisationId: string;
   filings: readonly FinancialFilingRow[];
   totalCount: number;
   error: boolean;
+  /** Position in the Financials tab's numbered run. Omitted elsewhere. */
+  number?: number;
 }) {
   return (
     <SectionCard
       headingId="financial-filings-heading"
+      number={number}
       title="Financial filings"
       hint="Filed Charity Commission accounts — this client's reported income and expenditure, newest first."
       icon={<Landmark aria-hidden="true" />}

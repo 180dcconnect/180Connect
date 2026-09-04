@@ -551,12 +551,15 @@ export function buildFundFlow(year: FinancialYear): FundFlow | null {
   // about how many millions a number is.
   const money = formatCompactGbp;
 
+  // Income first in every reading: money in lives on the left of the chart,
+  // so the sentence leads with the left-hand figure and the eye never has to
+  // cross sides mid-sentence.
   const headline =
     gap > 0
       ? `Took ${money(incomeAccounted)}, spent ${money(spendAccounted)}, kept ${money(gap)}`
       : gap < 0
-        ? `Spent ${money(spendAccounted)} against ${money(incomeAccounted)} in, drawing ${money(-gap)} from reserves`
-        : `Spent every one of the ${money(incomeAccounted)} it took in`;
+        ? `Took ${money(incomeAccounted)} in, spent ${money(spendAccounted)}, drawing ${money(-gap)} from reserves`
+        : `Took ${money(incomeAccounted)} in, spent it all`;
 
   return {
     label: year.label,

@@ -469,43 +469,45 @@ export function UserManagementTable({
                     )}
                   </button>
                 </th>
-                <th className="px-4 py-3.5">
+                <th className="w-36 px-4 py-3.5 text-center">
                   <button
                     type="button"
                     onClick={() => handleSort("role")}
-                    className="group inline-flex items-center gap-1.5 text-[11px] font-bold tracking-[0.12em] text-foreground/50 uppercase hover:text-foreground"
+                    className="group inline-flex items-center justify-center gap-1.5 text-[11px] font-bold tracking-[0.12em] text-foreground/50 uppercase hover:text-foreground"
                   >
+                    <span className="size-3.5 shrink-0" aria-hidden="true" />
                     <span>Role</span>
                     {sortBy === "role" ? (
                       sortOrder === "asc" ? (
-                        <ArrowUp className="size-3.5 text-foreground" />
+                        <ArrowUp className="size-3.5 shrink-0 text-foreground" />
                       ) : (
-                        <ArrowDown className="size-3.5 text-foreground" />
+                        <ArrowDown className="size-3.5 shrink-0 text-foreground" />
                       )
                     ) : (
-                      <ArrowUpDown className="size-3.5 opacity-0 transition-opacity group-hover:opacity-60" />
+                      <ArrowUpDown className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
                     )}
                   </button>
                 </th>
-                <th className="px-4 py-3.5">
+                <th className="w-28 px-4 py-3.5 text-center">
                   <button
                     type="button"
                     onClick={() => handleSort("clients")}
-                    className="group inline-flex items-center gap-1.5 text-[11px] font-bold tracking-[0.12em] text-foreground/50 uppercase hover:text-foreground"
+                    className="group inline-flex items-center justify-center gap-1.5 text-[11px] font-bold tracking-[0.12em] text-foreground/50 uppercase hover:text-foreground"
                   >
+                    <span className="size-3.5 shrink-0" aria-hidden="true" />
                     <span>Clients</span>
                     {sortBy === "clients" ? (
                       sortOrder === "asc" ? (
-                        <ArrowUp className="size-3.5 text-foreground" />
+                        <ArrowUp className="size-3.5 shrink-0 text-foreground" />
                       ) : (
-                        <ArrowDown className="size-3.5 text-foreground" />
+                        <ArrowDown className="size-3.5 shrink-0 text-foreground" />
                       )
                     ) : (
-                      <ArrowUpDown className="size-3.5 opacity-0 transition-opacity group-hover:opacity-60" />
+                      <ArrowUpDown className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
                     )}
                   </button>
                 </th>
-                <th className="px-4 py-3.5">
+                <th className="w-36 px-4 py-3.5">
                   <button
                     type="button"
                     onClick={() => handleSort("last_active")}
@@ -514,16 +516,16 @@ export function UserManagementTable({
                     <span>Last active</span>
                     {sortBy === "last_active" ? (
                       sortOrder === "asc" ? (
-                        <ArrowUp className="size-3.5 text-foreground" />
+                        <ArrowUp className="size-3.5 shrink-0 text-foreground" />
                       ) : (
-                        <ArrowDown className="size-3.5 text-foreground" />
+                        <ArrowDown className="size-3.5 shrink-0 text-foreground" />
                       )
                     ) : (
-                      <ArrowUpDown className="size-3.5 opacity-0 transition-opacity group-hover:opacity-60" />
+                      <ArrowUpDown className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
                     )}
                   </button>
                 </th>
-                <th className="px-4 py-3.5 text-right text-[11px] font-bold tracking-[0.12em] text-foreground/40 uppercase">
+                <th className="w-28 px-4 py-3.5 text-right text-[11px] font-bold tracking-[0.12em] text-foreground/40 uppercase">
                   {hasActiveFilters ? (
                     <Link
                       href="/admin/users"
@@ -604,16 +606,16 @@ export function UserManagementTable({
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-4 py-3.5 text-center">
                       <span
                         aria-label={`Role for ${user.email}: ${roleLabel}`}
                         title="Change role on the member's profile page or via bulk actions"
-                        className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-bold tracking-wide capitalize ${roleStyle}`}
+                        className={`inline-flex items-center justify-center rounded-full border px-2.5 py-1 text-xs font-bold tracking-wide capitalize ${roleStyle}`}
                       >
                         {roleLabel}
                       </span>
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-4 py-3.5 text-center">
                       {user.listed_client_count > 0 ? (
                         <Link
                           href={`/clients?owner=${user.id}`}

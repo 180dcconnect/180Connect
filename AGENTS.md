@@ -21,6 +21,7 @@ npm run build                    # production build (run ONLY when explicitly re
 npm test                         # unit tests (Node built-in test runner, not Jest/Vitest)
 npm run seed                     # load 50 fake organisations into local DB
 npm run seed:clear               # remove all is_seed rows
+npm run register:build           # rebuild the charity register file (CI does this; ~12 min)
 ```
 
 **Pre-push order:** `npm run lint` → `npx tsc --noEmit`
@@ -82,3 +83,5 @@ npm run seed:clear               # remove all is_seed rows
 - [`supabase/MIGRATIONS.md`](supabase/MIGRATIONS.md) — migration conventions and workflow
 - [`docs/audit-log-pattern.md`](docs/audit-log-pattern.md) — required pattern for privileged writes
 - [`docs/client-list-sorting.md`](docs/client-list-sorting.md) — how `/clients` is ordered, and the pipeline-status order
+- [`docs/ingestion.md`](docs/ingestion.md) — the whole ingestion pipeline: the four stages, every source, what runs on a schedule
+- [`docs/charity-register-import.md`](docs/charity-register-import.md) — how charity imports work; criteria are data (a query over a register file), never code

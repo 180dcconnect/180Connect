@@ -372,3 +372,16 @@
 | output_usd_per_1k_tokens | decimal(12,6) |  | No | US dollars per 1,000 response tokens | Human | Same as above | Zero or more |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last time the rate changed | System | Auto-updated on change |  |
+
+## IMPORT_FILTER_PRESETS
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation (gen_random_uuid()) | PK, gen_random_uuid(). RLS: enabled, no policies (service-role only). Purpose: saved import criteria — "Sheffield arts, any size" — so a cycle's selection is repeatable. |
+| name | text |  | No | Filter preset name | Human | Typed by user when saving preset | Must not be blank; unique per source, case-insensitive |
+| description | text |  | Yes | Filter preset description | Human / System | Entered by user or defaults to filter set written out in words | Defaults to the filter set written out in words |
+| filters | jsonb |  | No | Saved filter criteria | System | Captured from active filter criteria at save time | Validated in TypeScript, not by constraint |
+| source | text |  | No | Data source the preset applies to | Human / System | Selected data source (default 'charity_commission') | Default 'charity_commission' |
+| created_by_user_id | uuid | USERS | Yes | User who created the preset | System | auth.uid() at save time | FK → users.id, ON DELETE SET NULL |
+| created_at | timestamptz |  | No | Row creation timestamp | System | Auto-generated (now()) | now() |
+| updated_at | timestamptz |  | No | Last updated timestamp | System | Auto-updated on change (now()) | now() |

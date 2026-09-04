@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { History, Sparkles } from "lucide-react";
+import { History, PenLine, Sparkles } from "lucide-react";
 import {
   EmailReviewPanel,
   type EmailReviewDirtyState,
@@ -250,8 +250,8 @@ export function ComposeButton({
         action={historyLink}
         headingId="stage-one-heading"
         hint="AI-generated outreach draft, for CAM review before sending"
-        icon={<Sparkles />}
-        title="Stage 1 email"
+        icon={<PenLine />}
+        title="Introductory email"
         tone="danger"
       >
         <p
@@ -282,8 +282,8 @@ export function ComposeButton({
       }
       headingId="stage-one-heading"
       hint="AI-generated outreach draft, for CAM review before sending"
-      icon={<Sparkles />}
-      title="Stage 1 email"
+      icon={<PenLine />}
+      title="Introductory email"
     >
 
       <div className="mt-4 space-y-3">
@@ -371,7 +371,7 @@ export function ComposeButton({
       {!draft && !busy && !error && (
         <div className="mt-6 flex flex-col items-center gap-3 rounded-inset border border-dashed border-brand/25 bg-white/60 px-6 py-8 text-center">
           <p className="max-w-sm text-sm text-dim">
-            Generate a personalised Stage 1 outreach email from this client&rsquo;s profile.
+            Generate a personalised introductory email from this client&rsquo;s profile.
           </p>
           <button
             className="flex items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-ink/90"

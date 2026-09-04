@@ -104,6 +104,7 @@ export async function sendInviteAction(
     {
       email: formData.get("email"),
       role: formData.get("role"),
+      fullName: formData.get("fullName") || formData.get("full_name"),
     },
     redirectTo,
     undefined,
@@ -123,6 +124,13 @@ export async function sendInviteAction(
         });
         return { error };
       },
+      setUserName: async (userId, fullName) => {
+        const { error } = await supabase
+          .from("users")
+          .update({ full_name: fullName })
+          .eq("id", userId);
+        return { error: error ? { message: error.message } : null };
+      },
     },
   );
 
@@ -134,6 +142,182 @@ export async function sendInviteAction(
   return outcome.state;
 }
 
+export type BulkInviteRecipient = {
+  email: string;
+  role: "cam" | "admin" | "viewer";
+  fullName?: string | null;
+};
+
+export type BulkInviteResponse = {
+  status: "success" | "warning" | "error";
+  message: string;
+  total: number;
+  successCount: number;
+  failureCount: number;
+  results: Array<{
+    email: string;
+    success: boolean;
+    message?: string;
+    link?: string;
+  }>;
+};
+
+export async function sendBulkInvitesAction(
+  recipients: BulkInviteRecipient[],
+): Promise<BulkInviteResponse> {
+  const authorization = await getCurrentActor("user:manage");
+  if (!authorization.ok) {
+    return {
+      status: "error",
+      message: actorFailureMessage(authorization.reason),
+      total: recipients.length,
+      successCount: 0,
+      failureCount: recipients.length,
+      results: [],
+    };
+  }
+
+  if (!recipients || recipients.length === 0) {
+    return {
+      status: "error",
+      message: "No email recipients provided.",
+      total: 0,
+      successCount: 0,
+      failureCount: 0,
+      results: [],
+    };
+  }
+
+  const adminClient = createAdminClient();
+  if (!adminClient) {
+    return {
+      status: "error",
+      message: "Invites are not configured in this environment.",
+      total: recipients.length,
+      successCount: 0,
+      failureCount: recipients.length,
+      results: [],
+    };
+  }
+
+  let redirectTo: string;
+  try {
+    redirectTo = inviteRedirectUrl();
+  } catch {
+    return {
+      status: "error",
+      message: "Invites are not configured in this environment.",
+      total: recipients.length,
+      successCount: 0,
+      failureCount: recipients.length,
+      results: [],
+    };
+  }
+
+  const supabase = await createClient();
+  const lookupExistingUser = async (email: string) => {
+    const { data, error } = await supabase
+      .from("users")
+      .select("id, deactivated_at")
+      .eq("email", email)
+      .maybeSingle<{ id: string; deactivated_at: string | null }>();
+    if (error) throw new Error(error.message);
+    return data ? { id: data.id, deactivatedAt: data.deactivated_at } : null;
+  };
+
+  const results: Array<{
+    email: string;
+    success: boolean;
+    message?: string;
+    link?: string;
+  }> = [];
+
+  let successCount = 0;
+  let failureCount = 0;
+
+  for (const recipient of recipients) {
+    try {
+      const outcome = await sendInvite(
+        lookupExistingUser,
+        adminClient,
+        authorization.actor.id,
+        {
+          email: recipient.email,
+          role: recipient.role,
+          fullName: recipient.fullName,
+        },
+        redirectTo,
+        undefined,
+        {
+          inviterName:
+            authorization.actor.fullName ?? authorization.actor.email ?? "An admin",
+          setUserRole: async (userId, role) => {
+            const { error } = await supabase.rpc("set_user_role", {
+              p_user_id: userId,
+              p_new_role: role,
+            });
+            return { error };
+          },
+          setUserName: async (userId, fullName) => {
+            const { error } = await supabase
+              .from("users")
+              .update({ full_name: fullName })
+              .eq("id", userId);
+            return { error: error ? { message: error.message } : null };
+          },
+        },
+      );
+
+      if (outcome.ok) {
+        successCount++;
+        results.push({
+          email: recipient.email,
+          success: true,
+          message: outcome.state.message,
+          link: outcome.state.link,
+        });
+      } else {
+        failureCount++;
+        results.push({
+          email: recipient.email,
+          success: false,
+          message: outcome.state.message ?? "Could not send invite.",
+        });
+      }
+    } catch (err) {
+      failureCount++;
+      results.push({
+        email: recipient.email,
+        success: false,
+        message: err instanceof Error ? err.message : "Unknown error occurred.",
+      });
+    }
+  }
+
+  if (successCount > 0) {
+    revalidatePath("/admin/users");
+  }
+
+  const status: "success" | "warning" | "error" =
+    failureCount === 0 ? "success" : successCount > 0 ? "warning" : "error";
+
+  const message =
+    failureCount === 0
+      ? `Successfully sent ${successCount} invitation${successCount > 1 ? "s" : ""}.`
+      : successCount === 0
+      ? `Failed to send ${failureCount} invitation${failureCount > 1 ? "s" : ""}.`
+      : `Sent ${successCount} invitation${successCount > 1 ? "s" : ""}, but ${failureCount} failed.`;
+
+  return {
+    status,
+    message,
+    total: recipients.length,
+    successCount,
+    failureCount,
+    results,
+  };
+}
+
 /**
  * F252. Called directly from the pending-invites list's "Resend" button — a
  * plain function call, not a form action, since there is no field to submit,
@@ -143,14 +327,6 @@ export async function resendInviteAction(userId: string): Promise<InviteState> {
   const authorization = await getCurrentActor("user:manage");
   if (!authorization.ok) {
     return { status: "error", message: actorFailureMessage(authorization.reason) };
-  }
-
-  if (userId.startsWith("dummy-")) {
-    return {
-      status: "success",
-      message: "A new invite was sent to alex.dummy@180dc.org.",
-      link: "https://localhost:3000/auth/confirm?token_hash=dummy_token_hash&type=invite",
-    };
   }
 
   const adminClient = createAdminClient();
@@ -208,10 +384,6 @@ export async function cancelInviteAction(userId: string): Promise<InviteState> {
   const authorization = await getCurrentActor("user:manage");
   if (!authorization.ok) {
     return { status: "error", message: actorFailureMessage(authorization.reason) };
-  }
-
-  if (userId.startsWith("dummy-")) {
-    return { status: "success", message: "Invite was cancelled." };
   }
 
   // Deleting the auth user needs the Admin API, same service-role client as

@@ -63,6 +63,8 @@ export type LatestFinancialRow = {
   total_income: number | null;
   total_expenditure: number | null;
   income_band: string | null;
+  count_employees?: number | null;
+  count_volunteers?: number | null;
   period_end: string;
 };
 
@@ -284,7 +286,7 @@ export const loadLatestFinancial = cache(async (id: string): Promise<LatestFinan
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("financial_periods")
-    .select("total_income, total_expenditure, income_band, period_end")
+    .select("total_income, total_expenditure, income_band, count_employees, count_volunteers, period_end")
     .eq("organisation_id", id)
     .order("period_end", { ascending: false })
     .limit(1)
@@ -390,14 +392,15 @@ export const loadRecordStats = cache(async (id: string): Promise<RecordStats> =>
     emailsSent: sent.count ?? 0,
     replies: replies.count ?? 0,
     notes: notes.count ?? 0,
-    outreach: messages.count ?? 0,
+    outreach:
+      (messages.count ?? 0) + (notes.count ?? 0) + (attachments.count ?? 0),
     financials: (grants.count ?? 0) + (filings.count ?? 0),
-    // What the Activity tab actually lists: the timeline plus the files.
+    // What the Activity tab lists: timeline events (notes + emails + replies + audit rows).
     activity:
       (notes.count ?? 0) +
       (messages.count ?? 0) +
       (replies.count ?? 0) +
-      (attachments.count ?? 0),
+      (audit.count ?? 0),
     lastActivity:
       timestamps.length > 0
         ? timestamps.reduce((latest, value) => (value > latest ? value : latest))

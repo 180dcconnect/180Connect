@@ -1,11 +1,12 @@
 /**
  * UK postcode *area* matching — the branch-locality test, in one place.
  *
- * Lived in charity-commission-bulk-config.ts while the bulk import was its only
- * caller. Charity Commission discovery now applies the same locality test to
- * newly registered charities, and a second copy of this rule is the last thing
- * two import paths should have: they are supposed to agree about what "local"
- * means, and the failure mode when they don't is silent.
+ * Lived in charity-commission-bulk-config.ts while the legacy bulk import was
+ * its only caller. It is shared now because more than one place needs to agree
+ * about what a postcode *area* is: the import filter builder normalises what
+ * someone types into one, and `checkClientCriteria` tests the same prefixes on
+ * the way into the client list. A second copy of this rule is the last thing
+ * they should have — the failure mode when two copies disagree is silent.
  *
  * Independent of `checkClientCriteria`, which applies the same prefixes to an
  * already-standardised organisation (city OR postcode, plus type and mission).

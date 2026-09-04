@@ -10,6 +10,7 @@ import { GRANT_HISTORY_PAGE_SIZE, type GrantRow } from "./grant-list-item";
 const loadMoreSchema = z.object({
   organisationId: z.uuid(),
   offset: z.number().int().nonnegative(),
+  limit: z.number().int().positive().max(100).optional(),
 });
 
 export type LoadMoreGrantsResult =
@@ -40,6 +41,7 @@ export async function loadMoreGrants(input: unknown): Promise<LoadMoreGrantsResu
     return { ok: false, message: actorFailureMessage(authorization.reason) };
   }
 
+  const limit = parsed.data.limit ?? GRANT_HISTORY_PAGE_SIZE;
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("grants")
@@ -47,7 +49,7 @@ export async function loadMoreGrants(input: unknown): Promise<LoadMoreGrantsResu
     .eq("organisation_id", parsed.data.organisationId)
     .order("award_date", { ascending: false })
     .order("id", { ascending: true })
-    .range(parsed.data.offset, parsed.data.offset + GRANT_HISTORY_PAGE_SIZE - 1)
+    .range(parsed.data.offset, parsed.data.offset + limit - 1)
     .returns<GrantRow[]>();
 
   if (error) {
@@ -58,5 +60,5 @@ export async function loadMoreGrants(input: unknown): Promise<LoadMoreGrantsResu
     return { ok: false, message: "More grants could not be loaded. Try again." };
   }
 
-  return { ok: true, grants: data, hasMore: data.length === GRANT_HISTORY_PAGE_SIZE };
+  return { ok: true, grants: data, hasMore: data.length === limit };
 }

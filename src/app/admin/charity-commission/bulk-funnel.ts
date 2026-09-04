@@ -129,8 +129,10 @@ export type CharityCommissionRun = {
 
 /** Which pipeline a run came from, in the words this page uses for them. */
 export const PIPELINE_LABEL: Record<string, string> = {
-  charity_commission: "New registrations",
-  charity_commission_bulk: "Bulk register",
+  // Retired 2026-09-03 — kept so historical runs still read as something rather
+  // than as a raw source token.
+  charity_commission: "API discovery (retired)",
+  charity_commission_bulk: "Register import",
 };
 
 /**

@@ -10,7 +10,7 @@ export interface GooeyEmailInputProps {
   /** Callback when the user submits a valid email */
   onSubmit?: (email: string) => Promise<void> | void;
   /** Color theme variant */
-  variant?: "dark" | "light" | "brand" | "glass";
+  variant?: "dark" | "light" | "brand" | "glass" | "obsidian";
   /** Size preset */
   size?: "sm" | "md" | "lg";
   /** Blur sigma in px (default 6) */
@@ -119,6 +119,21 @@ export function GooeyEmailInput({
   // Variant themes
   const theme = React.useMemo(() => {
     switch (variant) {
+      case "obsidian":
+        // Matches the raised obsidian sheet the invite drawer sits on
+        // (INK_RAISED #161b21 + the single lime accent), so the input can be
+        // dropped straight into that surface without re-tinting anything.
+        return {
+          fill: fillColor ?? "#161b21",
+          shadow:
+            shadow ??
+            "0 0 0 1px rgba(230, 245, 192, 0.22) inset, inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 10px 30px -6px rgba(0, 0, 0, 0.7)",
+          text: "text-[#f4f4ef]",
+          placeholder: "placeholder:text-[#f4f4ef]/45",
+          btnColor: "text-[#e6f5c0] hover:text-[#f4fcd9]",
+          btnBg: "hover:bg-[#e6f5c0]/12",
+          accentRing: "focus-visible:ring-[#e6f5c0]/50",
+        };
       case "dark":
         return {
           fill: fillColor ?? "#1e1e24",

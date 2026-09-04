@@ -4,7 +4,6 @@ import { reportError } from "@/lib/error-logging";
 import { getCurrentActor, actorFailureMessage } from "@/lib/auth/actor";
 import { runIngestion } from "@/lib/ingestion/runner";
 import { createCharityCommissionLookupAdapter } from "@/lib/ingestion/sources/charity-commission";
-import { runCharityCommissionDiscoveryImport } from "@/lib/ingestion/sources/charity-commission-discovery";
 import { promotePendingCharityCommissionRecords } from "@/lib/standardize/write-organisations";
 import { importStateFromSummary, describePromotion } from "./import-result";
 
@@ -27,11 +26,13 @@ export type CharityCommissionImportState = {
 };
 
 /**
- * F049: ingest, then promote the whole pending backlog.
+ * Ingest, then promote the whole pending backlog.
  *
- * Used by the single lookup below. The discovery trigger does its own promotion
- * inside runCharityCommissionDiscoveryImport, so that the weekly cron job and
- * the manual button cannot drift apart.
+ * The single-charity lookup is all that remains of the API path: bulk discovery
+ * was retired once the staged register covered it (see
+ * supabase/migrations/20260915110000_retire_charity_commission_discovery_cron.sql).
+ * A named charity is the one case where hitting the API still beats the
+ * snapshot — the answer is immediate and needs no refresh.
  */
 async function withPromotion(
   ingestState: CharityCommissionImportState,
@@ -60,82 +61,15 @@ async function withPromotion(
   }
 }
 
-/**
- * Zero-input discovery (F049): searches from the latest already-ingested
- * registration date to today, rather than a bulk backfill's fixed date range.
- * Runs the same function the weekly cron job runs
- * (charity-commission-discovery.ts's runCharityCommissionDiscoveryImport), so the
- * manual button and the scheduled job can never drift apart. Promotion happens
- * inside that shared function, not here — unlike lookupCharity below, which
- * calls withPromotion separately because createCharityCommissionLookupAdapter
- * does not promote on its own. Mirrors companies-house/actions.ts's
- * importCompaniesHouseAuto.
- */
-export async function importCharityCommissionAuto(
-  previous: CharityCommissionImportState,
-  formData: FormData,
-): Promise<CharityCommissionImportState> {
-  void previous;
-  void formData;
-
-  const authorization = await getCurrentActor("user:manage");
-  if (!authorization.ok) {
-    return {
-      kind: "error",
-      message: actorFailureMessage(authorization.reason),
-    };
-  }
-
-  try {
-    const result = await runCharityCommissionDiscoveryImport(
-      { triggeredBy: "manual", triggeredByUserId: authorization.actor.id },
-      authorization.actor.id,
-    );
-
-    if (result.summary.status === "failed") {
-      await reportError(new Error(result.summary.error ?? "Charity Commission discovery import failed"), {
-        operation: "admin.charity_commission.import_auto",
-        source: result.summary.source,
-        actorUserId: authorization.actor.id,
-      });
-      return importStateFromSummary(result.summary);
-    }
-
-    const state = importStateFromSummary(result.summary);
-    if (!result.promoteCounts) {
-      return { ...state, message: `${state.message} ${result.promoteError}`.trim() };
-    }
-    return {
-      ...state,
-      message: `${state.message} ${describePromotion(result.promoteCounts)}`,
-      promoted: {
-        inserted: result.promoteCounts.inserted,
-        needsReview: result.promoteCounts.needsReview,
-        doesNotMeet: result.promoteCounts.doesNotMeet,
-        invalidData: result.promoteCounts.invalidData,
-        failed: result.promoteCounts.failed,
-      },
-    };
-  } catch (error) {
-    await reportError(error, {
-      operation: "admin.charity_commission.import_auto",
-      actorUserId: authorization.actor.id,
-    });
-    return {
-      kind: "error",
-      message:
-        "Charity Commission could not be imported. The failure was recorded; please try again later.",
-    };
-  }
-}
-
 export async function lookupCharity(
   previous: CharityCommissionImportState,
   formData: FormData,
 ): Promise<CharityCommissionImportState> {
   void previous;
 
-  const authorization = await getCurrentActor("user:manage");
+  // client:edit, matching the rest of this screen: a CAM who can shape an
+  // import can also look one charity up.
+  const authorization = await getCurrentActor("client:edit");
   if (!authorization.ok) {
     return {
       kind: "error",

@@ -143,6 +143,8 @@ function formatFinancialScale(financial: LatestFinancialRow | null): string | nu
   return null;
 }
 
+import { formatShortDate } from "@/lib/display-format";
+
 function formatLastContacted(
   lastContactedAt: string | null,
   emailsSent: number,
@@ -156,12 +158,12 @@ function formatLastContacted(
   if (daysSince === 0) return "Last contacted today";
   if (daysSince === 1) return "Last contacted yesterday";
   if (daysSince < 30) return `Last contacted ${daysSince}d ago`;
-  return `Last contacted ${new Date(lastContactedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
+  return `Last contacted ${formatShortDate(lastContactedAt)}`;
 }
 
 function formatDateAdded(createdAt?: string | null): string | null {
   if (!createdAt) return null;
-  return `Added ${new Date(createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
+  return `Added ${formatShortDate(createdAt)}`;
 }
 
 function getOperationalInsights(
@@ -335,8 +337,8 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
         />
       </div>
 
-      <div className="grid items-start gap-x-8 gap-y-6 px-5 py-6 lg:grid-cols-[minmax(0,1fr)_auto]">
-        <div className="flex min-w-0 flex-col gap-3.5">
+      <div className="grid items-start gap-x-8 gap-y-4 px-5 pt-5 pb-1 lg:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="flex min-w-0 flex-col gap-3">
           <h1 className="font-body text-[clamp(2rem,4vw,2.75rem)] font-semibold leading-[1] tracking-[-0.03em] text-balance text-ink">
             {toTitleCase(client.legal_name)}
           </h1>
@@ -418,10 +420,10 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
                     : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
               const lastMs = Math.max(...sources.map((s) => new Date(s.first_seen_at).getTime()));
               const lastChecked = Number.isFinite(lastMs)
-                ? new Date(lastMs).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+                ? formatShortDate(lastMs)
                 : null;
               return (
-                <p className="flex max-w-[58ch] gap-2.5 rounded-inset bg-paper px-3.5 py-4 mt-4 text-[13.5px] leading-[1.55] text-dim">
+                <p className="flex max-w-[58ch] gap-2.5 rounded-inset bg-paper px-3.5 py-2.5 mt-2.5 text-[13px] leading-[1.5] text-dim">
                   <svg
                     aria-hidden="true"
                     className="mt-0.5 size-[15px] shrink-0 text-faint"
@@ -442,7 +444,7 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
                     — {labelText}.{lastChecked ? ` Last checked ${lastChecked}.` : ""}{" "}
                     <Link
                       className="border-b border-lead-wash whitespace-nowrap text-lead transition-colors hover:border-lead focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none"
-                      href={`/clients/${organisationId}#source-heading`}
+                      href={`/clients/${organisationId}/activity#wfww-heading`}
                     >
                       See what came from where
                     </Link>
@@ -456,7 +458,7 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
             unframed: the ring is already a container, and a panel around it was
             a box around a circle. The column stretches to the identity block's
             height, so the dial owns all of the vertical space on the right. */}
-        <div className="flex shrink-0 items-center justify-center self-center py-1">
+        <div className="flex shrink-0 items-center justify-center self-end pb-0">
           <PriorityDial
             band={score?.priority_band ?? null}
             factors={score?.score_factors ?? null}
@@ -469,7 +471,7 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
           far end of the same row, the cadence facts that used to sit up in the
           identity block. They read as status rather than identity, and putting
           them here fills the run of empty space under the dial. */}
-      <div className="relative z-20 flex flex-wrap items-center gap-x-7 gap-y-3 px-5 py-3.5">
+      <div className="relative z-20 flex flex-wrap items-center gap-x-7 gap-y-2 border-t border-rule-soft px-5 py-2.5">
         <OwnerControl
           canEdit={canEdit}
           isAdmin={isAdmin}

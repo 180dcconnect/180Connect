@@ -18,6 +18,7 @@
     "backfill:identifiers": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-identifiers.mts",
     "backfill:financial-periods": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-financial-periods.mts",
     "backfill:charity-financials": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-charity-financials.mts",
+    "backfill:field-sources": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-field-sources.mts",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --conditions=react-server --test \"src/**/*.test.ts\" \"scripts/**/*.test.mts\"",
     "export:data-model": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/export-data-model.mts",
     "export:training-dataset": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/export-training-dataset.mts",
@@ -26,6 +27,8 @@
     "ingest:check-charity-commission": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/test-charity-commission.mts",
     "ingest:run-charity-commission": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-charity-commission.mts",
     "ingest:charity-commission-bulk": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-charity-commission-bulk.mts",
+    "register:build": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-register-sqlite.mts",
+    "register:fetch": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/fetch-register.mts",
     "ingest:check-connection": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/test-runner-connection.mts",
     "standardize:run-charity-commission": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-standardize-charity-commission.mts",
     "standardize:run-charity-commission-bulk": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --conditions=react-server --env-file-if-exists=.env.local scripts/run-standardize-charity-commission-bulk.mts",
@@ -33,7 +36,8 @@
     "standardize:run-three-sixty-giving": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-standardize-three-sixty-giving.mts",
     "ingest:run-three-sixty-giving": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-three-sixty-giving.mts",
     "ingest:check-isolation": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/test-isolation.mts",
-    "backfill:data-handling-rules": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-data-handling-rules.mts"
+    "backfill:data-handling-rules": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-data-handling-rules.mts",
+    "prebuild": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/fetch-register.mts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.44",

@@ -9,7 +9,7 @@ export type FieldSourceRow = {
   raw_source_record_id: string | null;
   is_current: boolean;
   recorded_at: string;
-  /** The user whose action produced this value (20260914100000). Null = pipeline. */
+  /** The user whose action produced this value (20260914110000). Null = pipeline. */
   recorded_by?: string | null;
   /** Resolved server-side by get_field_sources' join; absent on older callers. */
   recorded_by_name?: string | null;
@@ -43,7 +43,7 @@ export type FieldProvenance = {
 };
 
 // Same seven fields as write-organisations.ts's TRACKED_FIELD_SOURCES and the
-// field_sources check constraint (organisation_type joined in 20260914100000) —
+// field_sources check constraint (organisation_type joined in 20260914110000) —
 // kept in this fixed order (rather than deriving it from whatever rows happen
 // to come back) so the card's field order doesn't reshuffle between
 // organisations depending on which fields happen to have data.
@@ -107,7 +107,7 @@ export function groupFieldSources(rows: readonly FieldSourceRow[]): FieldProvena
 }
 
 // ---------------------------------------------------------------------------
-// The Activity tab's "What came from where" card (20260914100000).
+// The Activity tab's "What came from where" card (20260914110000).
 //
 // Three provenance streams meet in one card, each from the table that actually
 // owns that history:

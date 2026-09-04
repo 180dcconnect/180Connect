@@ -130,8 +130,7 @@ export function FollowUpButton({
   }
 
   return (
-    <div className="space-y-4 border-t border-rule pt-4">
-      <p className="text-xs font-semibold text-dim">Follow up on the sent email</p>
+    <div className="mt-4 space-y-3">
       <label className="block max-w-xs text-xs font-semibold text-dim">
         Email length
         <select
@@ -177,7 +176,7 @@ export function FollowUpButton({
           ))}
         </select>
       </label>
-      <OriginButton variant="outline" size="sm" onClick={generate} disabled={busy} type="button">
+      <OriginButton variant="ink" size="md" onClick={generate} disabled={busy} type="button">
         <RefreshCw aria-hidden="true" className="h-4 w-4" />
         {busy ? "Checking and generating…" : draft ? "Regenerate follow-up" : "Generate follow-up"}
       </OriginButton>
@@ -194,7 +193,11 @@ export function FollowUpButton({
       {error && (
         <div className="rounded-inset bg-stop-wash p-3" role="alert">
           <p className="text-sm font-semibold text-stop">{error}</p>
-          <button className="mt-2 text-xs font-semibold text-stop underline" onClick={generate} type="button">
+          <button
+            className="mt-2 rounded-inset border border-stop/25 px-3 py-1 text-xs font-semibold text-stop"
+            onClick={generate}
+            type="button"
+          >
             Try again
           </button>
         </div>

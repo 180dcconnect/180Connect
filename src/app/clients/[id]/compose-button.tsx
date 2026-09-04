@@ -6,7 +6,9 @@ import { History, Sparkles } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
 import { RichTextEmailEditor } from "@/components/rich-text-email-editor";
 import { discardEmailDraft, saveEmailDraft, scheduleReviewedEmail, sendReviewedEmail } from "./outreach-actions";
+import { AttachmentPicker } from "./attachment-picker";
 import { validateClientEmail } from "@/lib/client-email-validation";
+import type { Attachment } from "@/lib/attachments";
 import { emailHtmlToPlainText, isRichEmailHtml, plainTextToEditorHtml } from "@/lib/outreach/email-html";
 import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
@@ -132,6 +134,7 @@ export function ComposeButton({
   hasSavedBooklet = false,
   historyHref,
   existingDraft = null,
+  clientAttachments = [],
 }: {
   blocked: boolean;
   ownershipBlocked?: boolean;
@@ -141,6 +144,7 @@ export function ComposeButton({
   hasSavedBooklet?: boolean;
   historyHref?: string;
   existingDraft?: ExistingDraft | null;
+  clientAttachments?: readonly Attachment[];
 }) {
   const [draft, setDraft] = useState<Draft | null>(
     existingDraft ? { ...existingDraft, sizeTemplate: undefined } : null,
@@ -641,6 +645,11 @@ export function ComposeButton({
               />
             </div>
           </div>
+          <AttachmentPicker
+            clientAttachments={clientAttachments}
+            messageId={draft.id}
+            organisationId={organisationId}
+          />
           <label className="flex items-start gap-2 text-xs font-bold text-foreground/70">
             <input checked={approved} className="mt-0.5" onChange={(event) => setApproved(event.target.checked)} type="checkbox" />
             I have reviewed the recipient, subject and body and approve this email for sending.

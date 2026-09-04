@@ -4,6 +4,8 @@ import { describe, it } from "node:test";
 import {
   ALLOWED_ATTACHMENT_MIME_TYPES,
   MAX_ATTACHMENT_SIZE_BYTES,
+  MAX_ATTACHMENTS_PER_DRAFT,
+  MAX_COMBINED_ATTACHMENT_SIZE_BYTES,
   attachmentRpcFailure,
   attachmentUploadFailureMessage,
   buildAttachmentStoragePath,
@@ -11,6 +13,7 @@ import {
   formatFileSize,
   sanitizeAttachmentFilename,
   validateAttachmentFile,
+  validateDraftAttachmentSet,
   type AttachmentRow,
 } from "./attachments.ts";
 
@@ -250,5 +253,51 @@ describe("attachmentRpcFailure", () => {
 
   it("hides a message-less error too", () => {
     assert.equal(attachmentRpcFailure({ code: "42501", message: "  " }).status, 500);
+  });
+});
+
+describe("validateDraftAttachmentSet (F217)", () => {
+  it("allows a first attachment on an empty draft", () => {
+    assert.equal(
+      validateDraftAttachmentSet({ count: 0, totalSizeBytes: 0 }, { sizeBytes: 1024 }),
+      null,
+    );
+  });
+
+  it(`refuses an ${MAX_ATTACHMENTS_PER_DRAFT + 1}th attachment`, () => {
+    const message = validateDraftAttachmentSet(
+      { count: MAX_ATTACHMENTS_PER_DRAFT, totalSizeBytes: 0 },
+      { sizeBytes: 1 },
+    );
+    assert.match(message ?? "", new RegExp(`${MAX_ATTACHMENTS_PER_DRAFT}`));
+  });
+
+  it("allows exactly reaching the combined size cap", () => {
+    assert.equal(
+      validateDraftAttachmentSet(
+        { count: 0, totalSizeBytes: 0 },
+        { sizeBytes: MAX_COMBINED_ATTACHMENT_SIZE_BYTES },
+      ),
+      null,
+    );
+  });
+
+  it("refuses a file that would push the combined total over the cap", () => {
+    const message = validateDraftAttachmentSet(
+      { count: 1, totalSizeBytes: MAX_COMBINED_ATTACHMENT_SIZE_BYTES - 100 },
+      { sizeBytes: 101 },
+    );
+    assert.match(message ?? "", /too large to send together/);
+  });
+
+  it("checks the count cap before the size cap when both would fail", () => {
+    // The count message is the more actionable one when a draft is already
+    // both full and heavy — no point telling a CAM to shrink files they
+    // cannot add a 11th of anyway.
+    const message = validateDraftAttachmentSet(
+      { count: MAX_ATTACHMENTS_PER_DRAFT, totalSizeBytes: MAX_COMBINED_ATTACHMENT_SIZE_BYTES },
+      { sizeBytes: 1 },
+    );
+    assert.match(message ?? "", new RegExp(`${MAX_ATTACHMENTS_PER_DRAFT}`));
   });
 });

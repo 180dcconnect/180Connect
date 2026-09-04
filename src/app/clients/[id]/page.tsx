@@ -851,6 +851,7 @@ export default async function ClientDetailPage({
                   }
                   hasSavedBooklet={savedBooklet !== null}
                   existingDraft={existingDraft}
+                  clientAttachments={attachments}
                 />
                 {/* F126: what is queued for later, with cancel — shown in the same
                     card as the compose flow that created the schedule. */}

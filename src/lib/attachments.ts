@@ -109,6 +109,42 @@ export const ALLOWED_ATTACHMENT_MIME_TYPES: readonly string[] = [
 const ALLOWED_TYPES_DESCRIPTION =
   "PDF, Word, Excel, PowerPoint, text, CSV, or image file";
 
+// ---------------------------------------------------------------------------
+// F217 — attaching an existing or newly uploaded file to a draft email.
+// ---------------------------------------------------------------------------
+
+/** Mirrors attach_file_to_draft's own cap (20260913090000). */
+export const MAX_ATTACHMENTS_PER_DRAFT = 10;
+
+/**
+ * Gmail's real send limit is 25MB for the ENCODED message; base64 inflates
+ * raw bytes by ~33%, so capping raw bytes at 25MB would produce a message
+ * Gmail itself rejects. 18MB raw (~24MB encoded) leaves headroom for headers
+ * and MIME boundaries. Provisional, not signed-off policy — same caveat as
+ * MAX_ATTACHMENT_SIZE_BYTES above. Mirrored by hand in attach_file_to_draft
+ * (the actual enforcement boundary).
+ */
+export const MAX_COMBINED_ATTACHMENT_SIZE_BYTES = 18 * 1024 * 1024;
+
+/**
+ * Fast client-side check before calling attach_file_to_draft — same
+ * "not the enforcement boundary" relationship the RPC has to this file's
+ * other validators. Takes the draft's current state and the file being
+ * added, returns a message to show or null to proceed.
+ */
+export function validateDraftAttachmentSet(
+  current: { count: number; totalSizeBytes: number },
+  incoming: { sizeBytes: number },
+): string | null {
+  if (current.count >= MAX_ATTACHMENTS_PER_DRAFT) {
+    return `A draft can have at most ${MAX_ATTACHMENTS_PER_DRAFT} attachments.`;
+  }
+  if (current.totalSizeBytes + incoming.sizeBytes > MAX_COMBINED_ATTACHMENT_SIZE_BYTES) {
+    return "These attachments are too large to send together (25MB email limit).";
+  }
+  return null;
+}
+
 /**
  * AC3 (fast path): catches the common cases — too big, obviously wrong type —
  * before a byte is uploaded. Not the enforcement boundary; the bucket's own

@@ -2,10 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
+import { attachmentRpcFailure, MAX_COMBINED_ATTACHMENT_SIZE_BYTES } from "@/lib/attachments";
 import { canSendClientOutreach } from "@/lib/client-email-validation";
 import { reportError } from "@/lib/error-logging";
 import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
 import { discardDraftSchema } from "@/lib/outreach/discard-draft";
+import { draftAttachmentSchema } from "@/lib/outreach/draft-attachments";
 import { emailHtmlToPlainText, sanitizeEmailHtml } from "@/lib/outreach/email-html";
 import { HUMAN_REVIEW_REQUIRED_MESSAGE, humanReviewDecision } from "@/lib/outreach/human-review";
 import { logSecurityEvent } from "@/lib/log-security-event";
@@ -24,6 +26,27 @@ export type ReviewedSendResult =
   | { ok: false; message: string };
 
 const scheduleSchema = reviewedEmailSchema.extend({ scheduledAt: z.iso.datetime() });
+
+/**
+ * Releases an outreach_send claim after a definite, pre-Gmail-call refusal —
+ * nothing was attempted with the provider, so unlike the post-send failure
+ * path (see sendReviewedEmail's own comment on `sent.retryable`), it is
+ * always safe to let a clean retry happen. Extracted since F217 added several
+ * new attachment-validation exits that all need the same release.
+ */
+async function releaseClaimAfterDefiniteRefusal(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  messageId: string,
+): Promise<void> {
+  const { error: unclaimError } = await supabase
+    .from("outreach_messages")
+    .update({ send_claimed_at: null })
+    .eq("id", messageId)
+    .eq("send_status", "draft");
+  if (unclaimError) {
+    await reportError(unclaimError, { operation: "outreach.send.unclaim", messageId });
+  }
+}
 
 /**
  * F126 (#122): queue a reviewed email for future delivery. Same review gate as
@@ -334,11 +357,80 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
     return { ok: false, message: "This email is already being sent, or was just sent. Refresh to see its current state." };
   }
 
+  // F217 AC2: whatever the CAM attached must actually leave with the email —
+  // not just be visible in the editor. A linked attachment whose bytes can no
+  // longer be found (deleted from Storage, or some other integrity gap) fails
+  // the send outright rather than going out silently short a file (F118's own
+  // testing note: "broken or missing attachment reference shows a clear
+  // error"). The claim above is already taken at this point; a failure here
+  // still releases it below via the same non-retryable path as any other
+  // definite refusal.
+  const { data: attachmentLinks, error: attachmentLinksError } = await supabase
+    .from("outreach_message_attachments")
+    .select("attachments(filename, storage_path, content_type, size_bytes)")
+    .eq("outreach_message_id", messageId);
+  if (attachmentLinksError) {
+    await reportError(attachmentLinksError, { operation: "outreach.send.load_attachments", messageId });
+    await releaseClaimAfterDefiniteRefusal(supabase, messageId);
+    return { ok: false, message: "The attached files could not be verified. Nothing was sent." };
+  }
+
+  type LinkedAttachment = { filename: string; storage_path: string; content_type: string | null; size_bytes: number | null };
+  const linked = (attachmentLinks ?? [])
+    .map((row) => (Array.isArray(row.attachments) ? row.attachments[0] : row.attachments) as LinkedAttachment | null)
+    .filter((row): row is LinkedAttachment => row != null);
+
+  let attachments: { filename: string; contentType: string | null; content: Buffer }[] | undefined;
+  if (linked.length > 0) {
+    const totalSize = linked.reduce((sum, row) => sum + (row.size_bytes ?? 0), 0);
+    if (totalSize > MAX_COMBINED_ATTACHMENT_SIZE_BYTES) {
+      // Defense in depth: attach_file_to_draft already enforces this at attach
+      // time, re-checked here in case the set changed between attaching and
+      // sending in some way that RPC didn't see (it cannot, today, but a
+      // limit that's only ever checked once is a latent gap the next change
+      // to either side could reopen silently).
+      await releaseClaimAfterDefiniteRefusal(supabase, messageId);
+      return { ok: false, message: "These attachments are too large to send together (25MB email limit)." };
+    }
+
+    const admin = createAdminClient();
+    if (!admin) {
+      await reportError(new Error("No admin client available for attachment download"), {
+        operation: "outreach.send.attachments_no_admin_client",
+        messageId,
+      });
+      await releaseClaimAfterDefiniteRefusal(supabase, messageId);
+      return { ok: false, message: "The attached files could not be sent. Nothing was sent." };
+    }
+
+    attachments = [];
+    for (const row of linked) {
+      const { data: bytes, error: downloadError } = await admin.storage
+        .from("client-attachments")
+        .download(row.storage_path);
+      if (downloadError || !bytes) {
+        await reportError(downloadError ?? new Error("Attachment download returned no data"), {
+          operation: "outreach.send.attachment_download_failed",
+          messageId,
+          storagePath: row.storage_path,
+        });
+        await releaseClaimAfterDefiniteRefusal(supabase, messageId);
+        return { ok: false, message: "One of the attached files could not be found. Nothing was sent." };
+      }
+      attachments.push({
+        filename: row.filename,
+        contentType: row.content_type,
+        content: Buffer.from(await bytes.arrayBuffer()),
+      });
+    }
+  }
+
   const sent = await sendBranchOutreach({
     to: decision.recipient,
     subject,
     text: emailHtmlToPlainText(body),
     html: body,
+    attachments,
   });
 
   if (!sent.ok) {
@@ -371,14 +463,7 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
     // duplicate email to the client, which is worse than asking a human to check
     // the mailbox. Stale claims expire via send_claim_staleness_window().
     if (!sent.retryable) {
-      const { error: unclaimError } = await supabase
-        .from("outreach_messages")
-        .update({ send_claimed_at: null })
-        .eq("id", messageId)
-        .eq("send_status", "draft");
-      if (unclaimError) {
-        await reportError(unclaimError, { operation: "outreach.send.unclaim", messageId });
-      }
+      await releaseClaimAfterDefiniteRefusal(supabase, messageId);
     } else {
       await reportError(new Error(`Gmail send failed with retryable outcome (${sent.reason}).`), {
         operation: "outreach.send.ambiguous_failure",
@@ -683,4 +768,74 @@ export async function discardEmailDraft(input: unknown): Promise<DiscardDraftRes
 
   revalidatePath(`/clients/${organisationId}`);
   return { ok: true, message: "Draft discarded." };
+}
+
+export type DraftAttachmentResult =
+  | { ok: true }
+  | { ok: false; message: string };
+
+/**
+ * F217: links an existing (or just-uploaded) client attachment to a draft.
+ * No manual ownership/status pre-check here — unlike sendReviewedEmail's
+ * multi-step gauntlet, attach_file_to_draft (20260913090000) already does the
+ * full authoritative check (admin or the draft's own owner, still a draft,
+ * same client, count/size caps) inside its SECURITY DEFINER body — same
+ * "go straight to the RPC" shape as discardEmailDraft above.
+ */
+export async function attachDraftFile(input: unknown): Promise<DraftAttachmentResult> {
+  const parsed = safeValidate(draftAttachmentSchema, input);
+  if (!parsed.success) {
+    return { ok: false, message: "That attachment could not be identified." };
+  }
+
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+
+  const { organisationId, messageId, attachmentId } = parsed.data;
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("attach_file_to_draft", {
+    p_message_id: messageId,
+    p_attachment_id: attachmentId,
+  });
+  if (error) {
+    await reportError(error, { operation: "outreach.attach_draft_file", messageId, attachmentId });
+    return { ok: false, message: attachmentRpcFailure(error).error };
+  }
+
+  revalidatePath(`/clients/${organisationId}`);
+  return { ok: true };
+}
+
+/**
+ * F217: removes a file from a draft before it is sent — the minimum "undo an
+ * attach" a CAM needs while composing. The full attachment review experience
+ * (list before the final send click, broken-reference handling) is F118's
+ * ticket, not this one.
+ */
+export async function detachDraftFile(input: unknown): Promise<DraftAttachmentResult> {
+  const parsed = safeValidate(draftAttachmentSchema, input);
+  if (!parsed.success) {
+    return { ok: false, message: "That attachment could not be identified." };
+  }
+
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+
+  const { organisationId, messageId, attachmentId } = parsed.data;
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("detach_file_from_draft", {
+    p_message_id: messageId,
+    p_attachment_id: attachmentId,
+  });
+  if (error) {
+    await reportError(error, { operation: "outreach.detach_draft_file", messageId, attachmentId });
+    return { ok: false, message: attachmentRpcFailure(error).error };
+  }
+
+  revalidatePath(`/clients/${organisationId}`);
+  return { ok: true };
 }

@@ -12,6 +12,7 @@ import {
 } from "@/lib/outreach-history";
 import { isRichEmailHtml, sanitizeEmailHtml } from "@/lib/outreach/email-html";
 import { FollowUpButton } from "./follow-up-button";
+import { AddNoteForm } from "./add-note-form";
 
 type ReplyDraftControls = {
   organisationId: string;
@@ -66,10 +67,12 @@ function FullEmailThread({
   entries,
   error,
   replyDraftControls,
+  noteOrganisationId,
 }: {
   entries: readonly EmailThreadEntry[];
   error: boolean;
   replyDraftControls?: ReplyDraftControls;
+  noteOrganisationId?: string;
 }) {
   return (
     <section id="email-thread" aria-labelledby="email-thread-heading" className="mt-5 scroll-mt-24 rounded-xl border border-black/10 bg-black/[0.02] p-4">
@@ -128,6 +131,14 @@ function FullEmailThread({
                     />
                   </div>
                 )}
+                {incoming && noteOrganisationId && (
+                  <div className="mt-3 border-t border-brand/10 pt-3">
+                    <AddNoteForm
+                      organisationId={noteOrganisationId}
+                      replyEventId={entry.id}
+                    />
+                  </div>
+                )}
                 {!incoming && (
                   <p className="mt-2 text-xs text-foreground/55">
                     Sent by {entry.senderName || "a former team member"}
@@ -157,12 +168,14 @@ export function OutreachHistorySection({
   thread,
   threadError,
   replyDraftControls,
+  noteOrganisationId,
 }: {
   history: OutreachHistoryData;
   error: boolean;
   thread: readonly EmailThreadEntry[];
   threadError: boolean;
   replyDraftControls?: ReplyDraftControls;
+  noteOrganisationId?: string;
 }) {
   // F130 AC3: filter selection is view state, not data state — it lives here,
   // never in the query, so the sent/not-sent grouping above it cannot drift.
@@ -188,6 +201,7 @@ export function OutreachHistorySection({
         entries={thread}
         error={threadError}
         replyDraftControls={replyDraftControls}
+        noteOrganisationId={noteOrganisationId}
       />
 
       {/* AC3's filter: one control, five states, no page reload. Buttons with

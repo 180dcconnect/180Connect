@@ -50,6 +50,7 @@ import { NotesSection } from "./notes-section";
 import { AddNoteForm } from "./add-note-form";
 import {
   buildTimeline,
+  collectReferencedUserIds,
   type AuditRow,
   type NoteRow as TimelineNoteRow,
   type OutreachMessageRow as TimelineOutreachRow,
@@ -61,6 +62,7 @@ import { RequestOwnershipForm } from "./request-ownership-form";
 import { ScheduledEmailList } from "./scheduled-email-list";
 import { FailedEmailList } from "./failed-email-list";
 import { emailSendWindowStart, isNearSendLimit, resolveEmailSendLimit } from "@/lib/outreach/send-rate-limit";
+import { averageResponseTime, formatResponseTime } from "@/lib/reply-analytics";
 
 type OrganisationRow = OrganisationDetailRow;
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
@@ -594,13 +596,14 @@ export default async function ClientDetailPage({
     });
   }
 
-  const { data: replyRows, error: replyError } = await supabase
+  const { data: replyRows, error: replyError, count: replyCount } = await supabase
     .from("reply_events")
-    .select("id, outreach_message_id, reply_body, received_at")
+    .select("id, outreach_message_id, reply_body, received_at, response_time_seconds", { count: "exact" })
     .eq("organisation_id", id);
   if (replyError) {
     await reportError(replyError, { operation: "clients.timeline_replies", organisationId: id });
   }
+  const clientAverageResponseTime = averageResponseTime(replyRows ?? []);
 
   // F134: only delivered messages belong in the client-visible conversation;
   // drafts, scheduled messages and failures remain in the separate F070 list.
@@ -634,22 +637,9 @@ export default async function ClientDetailPage({
     timelineNotesError || timelineMessagesError || replyError || auditError,
   );
 
-  // actor_user_id and detail.from/detail.to are bare uuids (detail is jsonb,
-  // not a foreign key PostgREST can embed), so they're resolved by hand in one
-  // batch rather than per-row. A name missing from this map — a deleted
-  // account, or a uuid audit_log carries no FK constraint to validate — reads
-  // as "A former team member" in @/lib/timeline.ts, never as a raw id or blank.
-  const referencedUserIds = new Set<string>();
-  for (const row of auditRows ?? []) {
-    if (row.actor_user_id) referencedUserIds.add(row.actor_user_id);
-    const from = row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).from : null;
-    const to = row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).to : null;
-    if (typeof from === "string") referencedUserIds.add(from);
-    if (typeof to === "string") referencedUserIds.add(to);
-    const requestedBy =
-      row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>).requested_by : null;
-    if (typeof requestedBy === "string") referencedUserIds.add(requestedBy);
-  }
+  // See collectReferencedUserIds (src/lib/timeline.ts) for why this can't
+  // treat every detail.from/detail.to as a user id.
+  const referencedUserIds = collectReferencedUserIds((auditRows ?? []) as AuditRow[]);
 
   const timelineNames = new Map<string, string | null>();
   if (referencedUserIds.size > 0) {
@@ -1090,6 +1080,21 @@ export default async function ClientDetailPage({
                 enforcement either way. */}
             <Rise>
               <SectionCard headingId="outreach-heading" title="Outreach">
+                {replyError ? (
+                  <p className="mt-3 text-sm font-medium text-red-800" role="alert">
+                    Reply count could not be loaded. Refresh and try again.
+                  </p>
+                ) : (
+                  <p className="mt-3 text-sm text-foreground/65">
+                    <span className="font-bold text-foreground">
+                      {(replyCount ?? 0).toLocaleString()}
+                    </span>{" "}
+                    {replyCount === 1 ? "reply" : "replies"} received
+                    {clientAverageResponseTime !== null
+                      ? ` · Average response ${formatResponseTime(clientAverageResponseTime)}`
+                      : " · Average response not available yet"}
+                  </p>
+                )}
                 {sendingVolume && (
                   <p className={`mt-3 rounded-lg p-3 text-sm font-bold ${sendingVolume.warning ? "bg-amber-50 text-amber-900" : "bg-black/[0.03] text-foreground/60"}`} role={sendingVolume.warning ? "alert" : "status"}>
                     Your sending volume: {sendingVolume.count} of your {sendingVolume.limit} emails in the current {sendingVolume.windowMinutes}-minute window.{sendingVolume.warning ? " You are close to the configured threshold; sends are refused once it is reached." : ""}
@@ -1113,6 +1118,7 @@ export default async function ClientDetailPage({
                         }
                       : undefined
                   }
+                  noteOrganisationId={canEdit ? client.id : undefined}
                 />
 
                 {hasPermission(authorization.actor.role, "client:contact") && (

@@ -47,6 +47,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     voice: z.enum(EMAIL_VOICES).default("180dc"),
     tone: z.enum(EMAIL_TONES).default("balanced"),
     closing: z.enum(CLOSING_APPROACHES).default("soft_cta"),
+    replyEventId: z.uuid().optional(),
   }).safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) {
     return NextResponse.json({ error: "Choose valid follow-up preferences and try again." }, { status: 400 });
@@ -81,7 +82,33 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (organisationError) await reportError(organisationError, { operation: "outreach.stage_two.load_client", organisationId });
     return NextResponse.json({ error: "That client could not be loaded." }, { status: organisation ? 500 : 404 });
   }
-  if (!isStageTwoEligible(organisation.outreach_status)) {
+  let replyEvent: {
+    id: string;
+    outreach_message_id: string | null;
+    reply_body: string;
+  } | null = null;
+  if (parsed.data.replyEventId) {
+    const { data, error } = await supabase
+      .from("reply_events")
+      .select("id, outreach_message_id, reply_body")
+      .eq("id", parsed.data.replyEventId)
+      .eq("organisation_id", organisationId)
+      .maybeSingle<{ id: string; outreach_message_id: string | null; reply_body: string }>();
+    if (error) {
+      await reportError(error, {
+        operation: "outreach.stage_two.load_reply",
+        organisationId,
+        replyEventId: parsed.data.replyEventId,
+      });
+      return NextResponse.json({ error: "The client reply could not be loaded. Try again." }, { status: 500 });
+    }
+    if (!data) {
+      return NextResponse.json({ error: "That client reply is no longer available." }, { status: 404 });
+    }
+    replyEvent = data;
+  }
+
+  if (!replyEvent && !isStageTwoEligible(organisation.outreach_status)) {
     return NextResponse.json(
       { error: "A follow-up can only be generated after the Stage 1 email was sent and before a response or follow-up is recorded." },
       { status: 409 },
@@ -152,6 +179,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     );
   }
 
+  // F135: when drafting from a reply, use the exact sent message that reply is
+  // linked to. The browser supplies only the event id; both reply text and the
+  // original email are loaded under RLS and scoped to this client here.
+  let previousMessageQuery = supabase
+    .from("outreach_messages")
+    .select("subject, body")
+    .eq("organisation_id", organisationId)
+    .eq("send_status", "sent");
+  if (replyEvent?.outreach_message_id) {
+    previousMessageQuery = previousMessageQuery.eq("id", replyEvent.outreach_message_id);
+  } else {
+    previousMessageQuery = previousMessageQuery.order("sent_at", { ascending: false }).limit(1);
+  }
+
   const [
     { data: contact, error: contactError },
     { data: enrichment, error: enrichmentError },
@@ -161,7 +202,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     supabase.from("contacts").select("id, first_name, last_name, job_title").eq("organisation_id", organisationId).order("is_primary", { ascending: false }).order("created_at", { ascending: true }).limit(1).maybeSingle(),
     supabase.from("enrichment_results").select("mission_statement, mission_keywords, sector, sub_sector, news_hooks").eq("organisation_id", organisationId).order("enriched_at", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("financial_periods").select("income_band").eq("organisation_id", organisationId).order("period_end", { ascending: false }).limit(1).maybeSingle(),
-    supabase.from("outreach_messages").select("subject, body").eq("organisation_id", organisationId).eq("send_status", "sent").order("sent_at", { ascending: false }).limit(1).maybeSingle(),
+    previousMessageQuery.maybeSingle(),
   ]);
   if (contactError) await reportError(contactError, { operation: "outreach.stage_two.load_contact", organisationId });
   if (enrichmentError) await reportError(enrichmentError, { operation: "outreach.stage_two.load_context", organisationId });
@@ -233,6 +274,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       // before this feature) — either way the model prompt wants readable
       // plain text, not markup.
       previousBody: emailHtmlToPlainText(previousMessage.body),
+      replyBody: replyEvent?.reply_body ?? null,
     },
     callModel,
     {

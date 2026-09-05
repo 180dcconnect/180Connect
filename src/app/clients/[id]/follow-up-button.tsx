@@ -51,16 +51,21 @@ export function FollowUpButton({
   blocked,
   ownershipBlocked = false,
   organisationId,
+  replyEventId,
   suppressionReason,
   ownershipWarning,
 }: {
   blocked: boolean;
   ownershipBlocked?: boolean;
   organisationId: string;
+  /** F135: identifies the stored reply whose content the server must load. */
+  replyEventId?: string;
   suppressionReason?: string;
   ownershipWarning?: string;
 }) {
+  const isReplyDraft = Boolean(replyEventId);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [composerOpen, setComposerOpen] = useState(!replyEventId);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [warning, setWarning] = useState<Warning | null>(
@@ -98,7 +103,7 @@ export function FollowUpButton({
       const response = await fetch(`/api/clients/${organisationId}/outreach-drafts/stage-two`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ length, voice, tone, closing }),
+        body: JSON.stringify({ length, voice, tone, closing, replyEventId }),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -117,7 +122,7 @@ export function FollowUpButton({
     return (
       <div>
         <OriginButton variant="outline" size="sm" disabled type="button">
-          Generate follow-up email
+          {isReplyDraft ? "Draft response" : "Generate follow-up email"}
         </OriginButton>
         <p
           className={`mt-2.5 text-[13px] font-bold leading-[1.6] ${warning?.tone === "conflict" ? "text-amber-800" : "text-red-800"}`}
@@ -129,9 +134,19 @@ export function FollowUpButton({
     );
   }
 
+  if (!composerOpen) {
+    return (
+      <OriginButton variant="outline" size="sm" onClick={() => setComposerOpen(true)} type="button">
+        Draft response
+      </OriginButton>
+    );
+  }
+
   return (
     <div className="space-y-4 border-t border-black/[0.06] pt-4">
-      <p className="text-xs font-bold text-foreground/65">Follow up on the sent email</p>
+      <p className="text-xs font-bold text-foreground/65">
+        {isReplyDraft ? "Draft a response to this reply" : "Follow up on the sent email"}
+      </p>
       <label className="block max-w-xs text-xs font-bold text-foreground/65">
         Email length
         <select
@@ -179,7 +194,11 @@ export function FollowUpButton({
       </label>
       <OriginButton variant="outline" size="sm" onClick={generate} disabled={busy} type="button">
         <RefreshCw aria-hidden="true" className="h-4 w-4" />
-        {busy ? "Checking and generating…" : draft ? "Regenerate follow-up" : "Generate follow-up"}
+        {busy
+          ? "Checking and generating…"
+          : draft
+            ? isReplyDraft ? "Regenerate response" : "Regenerate follow-up"
+            : isReplyDraft ? "Draft response" : "Generate follow-up"}
       </OriginButton>
 
       {warning && (
@@ -206,7 +225,9 @@ export function FollowUpButton({
       {draft && !busy && (
         <section key={draft.id} aria-labelledby="followup-review-heading" className="space-y-3 rounded-xl border border-brand/20 bg-brand/[0.04] p-4">
           <div>
-            <h3 className="text-sm font-bold" id="followup-review-heading">Review generated follow-up</h3>
+            <h3 className="text-sm font-bold" id="followup-review-heading">
+              {isReplyDraft ? "Review drafted response" : "Review generated follow-up"}
+            </h3>
             <p className="mt-1 text-xs text-foreground/55">
               Saved as a draft. Review and edit it before a separate human send action is made available.
             </p>

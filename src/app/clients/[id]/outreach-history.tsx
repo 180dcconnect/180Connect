@@ -11,8 +11,17 @@ import {
   type StatusFilter,
 } from "@/lib/outreach-history";
 import { isRichEmailHtml, sanitizeEmailHtml } from "@/lib/outreach/email-html";
+import { FollowUpButton } from "./follow-up-button";
 import { StatusSelect } from "./status-select";
 import { AddNoteForm } from "./add-note-form";
+
+type ReplyDraftControls = {
+  organisationId: string;
+  blocked: boolean;
+  ownershipBlocked: boolean;
+  suppressionReason?: string;
+  ownershipWarning?: string;
+};
 
 type ThreadStatusControl = {
   organisationId: string;
@@ -63,11 +72,13 @@ function StatusBadge({ status }: { status: OutreachHistoryData["sent"][number]["
 function FullEmailThread({
   entries,
   error,
+  replyDraftControls,
   statusControl,
   noteOrganisationId,
 }: {
   entries: readonly EmailThreadEntry[];
   error: boolean;
+  replyDraftControls?: ReplyDraftControls;
   statusControl?: ThreadStatusControl;
   noteOrganisationId?: string;
 }) {
@@ -135,6 +146,14 @@ function FullEmailThread({
                   </time>
                 </div>
                 <EmailBodyPreview body={entry.body} />
+                {incoming && replyDraftControls && (
+                  <div className="mt-3 border-t border-brand/10 pt-3">
+                    <FollowUpButton
+                      {...replyDraftControls}
+                      replyEventId={entry.id}
+                    />
+                  </div>
+                )}
                 {incoming && noteOrganisationId && (
                   <div className="mt-3 border-t border-brand/10 pt-3">
                     <AddNoteForm
@@ -171,6 +190,7 @@ export function OutreachHistorySection({
   error,
   thread,
   threadError,
+  replyDraftControls,
   statusControl,
   noteOrganisationId,
 }: {
@@ -178,6 +198,7 @@ export function OutreachHistorySection({
   error: boolean;
   thread: readonly EmailThreadEntry[];
   threadError: boolean;
+  replyDraftControls?: ReplyDraftControls;
   statusControl?: ThreadStatusControl;
   noteOrganisationId?: string;
 }) {
@@ -204,6 +225,7 @@ export function OutreachHistorySection({
       <FullEmailThread
         entries={thread}
         error={threadError}
+        replyDraftControls={replyDraftControls}
         statusControl={statusControl}
         noteOrganisationId={noteOrganisationId}
       />

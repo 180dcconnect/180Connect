@@ -32,9 +32,21 @@ export const NAV_ITEMS: readonly NavItem[] = [
     permission: "client:edit",
   },
   {
+    href: "/analytics",
+    label: "Your analytics",
+    description: "Your own outreach: emails sent, replies, conversions and response time.",
+    permission: "client:view",
+  },
+  {
     href: "/admin",
     label: "Admin workspace",
     description: "Manage users, audit activity and import Companies House data.",
+    permission: "user:manage",
+  },
+  {
+    href: "/admin/analytics",
+    label: "Team analytics",
+    description: "Team-wide outreach performance, conversions over time, and who may need support.",
     permission: "user:manage",
   },
   {

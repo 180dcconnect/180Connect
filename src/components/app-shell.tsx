@@ -32,6 +32,10 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     sections[0].items.push({ href: "/clients", label: "Clients", icon: "clients" });
   }
 
+  if (hasPermission(actor.role, "client:view")) {
+    sections[0].items.push({ href: "/analytics", label: "Analytics", icon: "analytics" });
+  }
+
   if (hasPermission(actor.role, "client:edit")) {
     sections[0].items.push({ href: "/clients/new", label: "Add client", icon: "add" });
   }
@@ -45,6 +49,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
       items: [
         { href: "/admin", label: "Overview", icon: "admin" },
         { href: "/admin/users", label: "Team management", icon: "users" },
+        { href: "/admin/analytics", label: "Team analytics", icon: "analytics" },
         { href: "/admin/audit-log", label: "Audit log", icon: "audit" },
         { href: "/admin/import-status", label: "Import status", icon: "import" },
         // Not duplicated here: every admin already has tags:manage, so the

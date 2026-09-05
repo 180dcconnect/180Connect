@@ -39,6 +39,21 @@ export function emailAddressOf(value: string): string {
   return (match ? match[1] : value).trim().toLowerCase();
 }
 
+/** Keep unrelated inbox traffic out of CRM storage and review queues. */
+export function isPotentialCrmReply(
+  reply: ParsedInboundReply,
+  rows: readonly SentThreadReference[],
+  branchSender: string,
+): boolean {
+  if (emailAddressOf(reply.to) !== emailAddressOf(branchSender)) return false;
+  return rows.some((row) =>
+    row.detail.provider_thread_id === reply.providerThreadId ||
+    (reply.hasReplyHeaders &&
+      typeof row.detail.sent_to === "string" &&
+      emailAddressOf(row.detail.sent_to) === emailAddressOf(reply.from)),
+  );
+}
+
 function decodeBase64Url(value: string): string {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
   return Buffer.from(normalized, "base64").toString("utf8");

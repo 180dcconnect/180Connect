@@ -116,9 +116,9 @@ describe("syncGmailReplies", () => {
     assert.equal(rpcCalls[0].args.p_organisation_id, "org-1");
   });
 
-  it("flags a reply with no matching sent thread for manual review", async () => {
+  it("flags a CRM-related reply that cannot be matched safely for manual review", async () => {
     const { admin, rpcCalls } = fakeAdmin({
-      sentRows: [],
+      sentRows: [{ target_id: "outreach-1", detail: { organisation_id: "org-1", provider_thread_id: "thread-1", sent_to: "another@charity.org" } }],
       rpcResults: { flag_unmatched_gmail_reply: ["review-id-1"] },
     });
     const result = await syncGmailReplies({
@@ -128,6 +128,16 @@ describe("syncGmailReplies", () => {
     assert.deepEqual(result, { scanned: 1, captured: 0, duplicates: 0, ignored: 0, unmatched: 1, failed: 0 });
     assert.equal(rpcCalls[0].name, "flag_unmatched_gmail_reply");
     assert.equal(rpcCalls[0].args.p_sender_email, "contact@charity.org");
+  });
+
+  it("ignores genuine inbox mail that has no connection to CRM outreach", async () => {
+    const { admin, rpcCalls } = fakeAdmin({ sentRows: [] });
+    const result = await syncGmailReplies({
+      admin, config, sender, tokenProvider,
+      fetchImpl: fetchStub({ "gmail-1": inboundMessage() }),
+    });
+    assert.deepEqual(result, { scanned: 1, captured: 0, duplicates: 0, ignored: 1, unmatched: 0, failed: 0 });
+    assert.equal(rpcCalls.length, 0);
   });
 
   it("counts a replayed capture as a duplicate, not a capture", async () => {
@@ -143,7 +153,10 @@ describe("syncGmailReplies", () => {
   });
 
   it("counts a replayed unmatched flag as a duplicate too", async () => {
-    const { admin } = fakeAdmin({ sentRows: [], rpcResults: { flag_unmatched_gmail_reply: [null] } });
+    const { admin } = fakeAdmin({
+      sentRows: [{ target_id: "outreach-1", detail: { organisation_id: "org-1", provider_thread_id: "thread-1", sent_to: "another@charity.org" } }],
+      rpcResults: { flag_unmatched_gmail_reply: [null] },
+    });
     const result = await syncGmailReplies({
       admin, config, sender, tokenProvider,
       fetchImpl: fetchStub({ "gmail-1": inboundMessage() }),

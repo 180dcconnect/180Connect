@@ -5,7 +5,7 @@ import { logApiHealth } from "../api-health-log.ts";
 import { reportError } from "../error-logging.ts";
 import { createAdminClient } from "../supabase/admin.ts";
 import { getGmailAccessToken, resolveGmailConfig, resolveGmailSender, type GmailConfig } from "./client.ts";
-import { matchInboundReply, parseInboundReply, type GmailInboundMessage, type SentThreadReference } from "./reply-message.ts";
+import { isPotentialCrmReply, matchInboundReply, parseInboundReply, type GmailInboundMessage, type SentThreadReference } from "./reply-message.ts";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
 const TIMEOUT_MS = 15_000;
@@ -90,6 +90,10 @@ export async function syncGmailReplies(deps?: Dependencies): Promise<ReplySyncRe
         );
         const reply = parseInboundReply(message);
         if (!reply) { result.ignored += 1; continue; }
+        if (!isPotentialCrmReply(reply, threads, sender)) {
+          result.ignored += 1;
+          continue;
+        }
         const match = matchInboundReply(reply, threads, sender);
         if (!match || typeof match.detail.organisation_id !== "string") {
           const { data, error } = await admin.rpc("flag_unmatched_gmail_reply", {

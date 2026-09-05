@@ -1,19 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { motion } from "motion/react";
 
 import { formatCompactGbp, formatGbp } from "@/lib/income-band";
 import type {
   FinancialSeries,
   FinancialYear,
-  GrantInput,
 } from "@/lib/financials/financial-series";
-import ProgressMetricCard, { type PeriodOption } from "@/components/ui/progress-metric-card";
 import {
+  calculateNiceYAxis,
   DEFICIT,
   EXPENDITURE,
   INCOME,
-  Legend,
   percent,
   SeriesTable,
   SURPLUS,
@@ -45,100 +44,260 @@ import {
  * shared.
  */
 
+const MAX_BARREL_STICKS = 36;
+const MAX_NET_STICKS = 10;
+
 export function FinancialHistoryChart({ series }: { series: FinancialSeries }) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState<number | null>(null);
+  const [hasEnteredView, setHasEnteredView] = useState(false);
   const { years, peak, peakNet } = series;
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+
+    if (typeof IntersectionObserver === "undefined") {
+      const frame = requestAnimationFrame(() => setHasEnteredView(true));
+      return () => cancelAnimationFrame(frame);
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          setHasEnteredView(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.1 },
+    );
+    observer.observe(node);
+
+    const timer = setTimeout(() => setHasEnteredView(true), 1200);
+    return () => {
+      observer.disconnect();
+      clearTimeout(timer);
+    };
+  }, []);
+
+  const yAxis = useMemo(() => calculateNiceYAxis(peak), [peak]);
 
   if (years.length === 0) return null;
 
   const active = hovered !== null ? years[hovered] : null;
+  const isAnyHovered = hovered !== null;
+  const safeYMax = yAxis.max > 0 ? yAxis.max : 1;
+  const safePeakNet = peakNet > 0 ? peakNet : 1;
 
   return (
-    <div className="mt-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h3 className="text-[14px] font-semibold text-ink">Income and spending</h3>
-        <Legend
-          items={[
-            { colour: INCOME, label: "Income" },
-            { colour: EXPENDITURE, label: "Spending" },
-          ]}
-        />
+    <div ref={containerRef} className="mt-4 select-none">
+      <div className="flex items-center justify-end">
+        <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5" aria-label="Chart legend">
+          <li className="flex items-center gap-2 text-[12px] text-dim">
+            <span aria-hidden="true" className="flex flex-col gap-[1.5px]">
+              <span className="h-[2px] w-3 rounded-full" style={{ backgroundColor: INCOME }} />
+              <span className="h-[2px] w-3 rounded-full" style={{ backgroundColor: INCOME }} />
+              <span className="h-[2px] w-3 rounded-full" style={{ backgroundColor: INCOME }} />
+            </span>
+            Income
+          </li>
+          <li className="flex items-center gap-2 text-[12px] text-dim">
+            <span aria-hidden="true" className="flex flex-col gap-[1.5px]">
+              <span className="h-[2px] w-3 rounded-full" style={{ backgroundColor: EXPENDITURE }} />
+              <span className="h-[2px] w-3 rounded-full" style={{ backgroundColor: EXPENDITURE }} />
+              <span className="h-[2px] w-3 rounded-full" style={{ backgroundColor: EXPENDITURE }} />
+            </span>
+            Spending
+          </li>
+        </ul>
       </div>
 
-      <div className="relative mt-3">
-        {/* Peak rule and zero baseline are the whole grid. A gridline every
-            £50k on a five-column chart is furniture, not information. */}
-        <div className="absolute inset-x-0 top-0 flex items-center gap-2">
-          <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-faint">
-            {formatCompactGbp(peak)}
-          </span>
-          <span aria-hidden="true" className="h-px flex-1 bg-rule-soft" />
-        </div>
+      {/* Main plot area with Y-axis graduation scale on the left */}
+      <div className="relative mt-4 pt-2.5">
+        <div className="flex items-end">
+          {/* Left Y-axis graduation scale */}
+          <div className="relative h-[214px] w-14 shrink-0 sm:w-16" aria-hidden="true">
+            {yAxis.ticks.map((tick) => {
+              const topPercent = (1 - tick / safeYMax) * 100;
+              return (
+                <div
+                  key={tick}
+                  className="absolute right-2.5 -translate-y-1/2 flex items-center justify-end"
+                  style={{ top: `${topPercent}%` }}
+                >
+                  <span className="font-mono text-[10.5px] tabular-nums text-faint">
+                    {formatCompactGbp(tick)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
 
-        <div className="flex h-[132px] items-end gap-2 pt-4">
-          {years.map((year, index) => (
-            <div
-              key={year.periodEnd}
-              onMouseEnter={() => setHovered(index)}
-              onMouseLeave={() => setHovered(null)}
-              onFocus={() => setHovered(index)}
-              onBlur={() => setHovered(null)}
-              tabIndex={0}
-              aria-label={`${year.label}: income ${formatGbp(year.income)}, spending ${formatGbp(year.expenditure)}`}
-              className={`flex h-full flex-1 items-end justify-center gap-[2px] rounded-t-[4px] px-1 outline-none transition-colors ${
-                hovered === index ? "bg-paper" : ""
-              } focus-visible:ring-2 focus-visible:ring-lead-mid`}
-            >
-              <span
-                aria-hidden="true"
-                className="w-full max-w-[28px] rounded-t-[4px]"
-                style={{
-                  height: `${percent(year.income, peak)}%`,
-                  backgroundColor: INCOME,
-                  minHeight: year.income !== null ? 2 : 0,
-                }}
-              />
-              <span
-                aria-hidden="true"
-                className="w-full max-w-[28px] rounded-t-[4px]"
-                style={{
-                  height: `${percent(year.expenditure, peak)}%`,
-                  backgroundColor: EXPENDITURE,
-                  minHeight: year.expenditure !== null ? 2 : 0,
-                }}
-              />
+          {/* Right plot area: gridlines + year columns */}
+          <div className="relative h-[214px] flex-1 min-w-0">
+            {/* Horizontal gridlines for each graduation tick */}
+            <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+              {yAxis.ticks.map((tick) => {
+                const topPercent = (1 - tick / safeYMax) * 100;
+                const isZero = tick === 0;
+                return (
+                  <div
+                    key={`grid-${tick}`}
+                    className={`absolute inset-x-0 h-px ${
+                      isZero ? "bg-rule" : "bg-rule-soft/60"
+                    }`}
+                    style={{ top: `${topPercent}%` }}
+                  />
+                );
+              })}
             </div>
-          ))}
+
+            {/* Year columns */}
+            <div className="relative flex h-full items-end gap-2">
+              {years.map((year, index) => {
+                const isHovered = hovered === index;
+                const hasIncome = year.income !== null && year.income > 0;
+                const hasExpenditure = year.expenditure !== null && year.expenditure > 0;
+
+                const incomeStickCount = hasIncome
+                  ? Math.max(1, Math.min(MAX_BARREL_STICKS, Math.round((year.income! / safeYMax) * MAX_BARREL_STICKS)))
+                  : 0;
+
+                const expStickCount = hasExpenditure
+                  ? Math.max(1, Math.min(MAX_BARREL_STICKS, Math.round((year.expenditure! / safeYMax) * MAX_BARREL_STICKS)))
+                  : 0;
+
+                return (
+                  <div
+                    key={year.periodEnd}
+                    onMouseEnter={() => setHovered(index)}
+                    onMouseLeave={() => setHovered(null)}
+                    onFocus={() => setHovered(index)}
+                    onBlur={() => setHovered(null)}
+                    tabIndex={0}
+                    aria-label={`${year.label}: income ${formatGbp(year.income)}, spending ${formatGbp(year.expenditure)}${
+                      year.net !== null
+                        ? `, ${year.net >= 0 ? "surplus" : "deficit"} ${formatGbp(Math.abs(year.net))}`
+                        : ""
+                    }`}
+                    className={`flex h-full flex-1 cursor-pointer flex-col items-center justify-end rounded-t-panel px-1 outline-none transition-all duration-150 ${
+                      isHovered ? "bg-paper/80 shadow-xs" : ""
+                    } ${isAnyHovered && !isHovered ? "opacity-45" : "opacity-100"} focus-visible:ring-2 focus-visible:ring-lead-mid`}
+                  >
+                    {/* Two barrels side by side: Income (left) and Spending (right) */}
+                    <div className="flex items-end gap-1.5 pb-0.5 sm:gap-2">
+                      {/* Income barrel: horizontal sticks stacked bottom-to-top */}
+                      <div className="flex h-[214px] flex-col-reverse justify-start gap-[2px]" aria-hidden="true">
+                        {hasIncome ? (
+                          Array.from({ length: incomeStickCount }, (_, stickIdx) => (
+                            <motion.div
+                              key={`inc-stick-${stickIdx}`}
+                              initial={{ opacity: 0, scaleX: 0.6, originX: 0.5 }}
+                              animate={{
+                                opacity: hasEnteredView ? (isHovered ? 1 : 0.9) : 0,
+                                scaleX: hasEnteredView ? (isHovered ? 1.08 : 1) : 0.6,
+                              }}
+                              transition={{
+                                duration: 0.2,
+                                delay: index * 0.05 + stickIdx * 0.008,
+                                ease: [0.16, 1, 0.3, 1],
+                              }}
+                              className="h-[4px] w-[18px] rounded-[1.5px] transition-all duration-150 sm:w-[22px]"
+                              style={{ backgroundColor: INCOME }}
+                            />
+                          ))
+                        ) : year.income !== null ? (
+                          <span className="h-[2px] w-[18px] rounded-full bg-rule-soft sm:w-[22px]" />
+                        ) : null}
+                      </div>
+
+                      {/* Spending barrel: horizontal sticks stacked bottom-to-top */}
+                      <div className="flex h-[214px] flex-col-reverse justify-start gap-[2px]" aria-hidden="true">
+                        {hasExpenditure ? (
+                          Array.from({ length: expStickCount }, (_, stickIdx) => (
+                            <motion.div
+                              key={`exp-stick-${stickIdx}`}
+                              initial={{ opacity: 0, scaleX: 0.6, originX: 0.5 }}
+                              animate={{
+                                opacity: hasEnteredView ? (isHovered ? 1 : 0.9) : 0,
+                                scaleX: hasEnteredView ? (isHovered ? 1.08 : 1) : 0.6,
+                              }}
+                              transition={{
+                                duration: 0.2,
+                                delay: index * 0.05 + 0.02 + stickIdx * 0.008,
+                                ease: [0.16, 1, 0.3, 1],
+                              }}
+                              className="h-[4px] w-[18px] rounded-[1.5px] transition-all duration-150 sm:w-[22px]"
+                              style={{ backgroundColor: EXPENDITURE }}
+                            />
+                          ))
+                        ) : year.expenditure !== null ? (
+                          <span className="h-[2px] w-[18px] rounded-full bg-rule-soft sm:w-[22px]" />
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Surplus and deficit: its own panel under the same columns, because it
-          is a different scale. Direction from the zero line carries the sign
-          before any colour does, and the number is signed as well. */}
-      <div className="mt-1 border-t border-rule pt-1">
-        <div className="flex h-[46px] items-center gap-2">
-          {years.map((year) => {
+      {/* Surplus and deficit: horizontal sticks stacked vertically downwards from the zero baseline */}
+      <div className="flex items-start pt-1.5">
+        <div className="flex w-14 shrink-0 items-start justify-end pr-2.5 pt-1 sm:w-16" aria-hidden="true">
+          <span className="font-mono text-[10px] font-medium tracking-wider text-faint uppercase">
+            Net
+          </span>
+        </div>
+        <div className="flex min-h-[82px] flex-1 min-w-0 items-start gap-2">
+          {years.map((year, index) => {
+            const isHovered = hovered === index;
             const net = year.net;
-            const magnitude = percent(net === null ? null : Math.abs(net), peakNet);
+            const hasNet = net !== null && Math.abs(net) > 0;
+            const netStickCount = hasNet
+              ? Math.max(1, Math.min(MAX_NET_STICKS, Math.round((Math.abs(net) / safePeakNet) * MAX_NET_STICKS)))
+              : 0;
+            const netColor = net !== null && net >= 0 ? SURPLUS : DEFICIT;
+
             return (
               <div
                 key={year.periodEnd}
-                className="flex h-full flex-1 flex-col items-center justify-start"
+                onMouseEnter={() => setHovered(index)}
+                onMouseLeave={() => setHovered(null)}
+                className={`flex flex-1 cursor-pointer flex-col items-center justify-start rounded-b-panel px-1 pb-1 transition-all duration-150 ${
+                  isHovered ? "bg-paper/80 shadow-xs" : ""
+                } ${isAnyHovered && !isHovered ? "opacity-45" : "opacity-100"}`}
               >
-                {net === null ? null : (
-                  <span
-                    aria-hidden="true"
-                    className="w-full max-w-[28px] rounded-b-[4px]"
-                    style={{
-                      height: `${Math.max(magnitude * 0.34, 2)}%`,
-                      backgroundColor: net >= 0 ? SURPLUS : DEFICIT,
-                      alignSelf: "center",
-                    }}
-                  />
-                )}
+                {/* Net barrel: horizontal sticks stacked downwards from the zero line */}
+                <div className="flex min-h-[58px] flex-col justify-start gap-[2px]" aria-hidden="true">
+                  {hasNet ? (
+                    Array.from({ length: netStickCount }, (_, stickIdx) => (
+                      <motion.div
+                        key={`net-stick-${stickIdx}`}
+                        initial={{ opacity: 0, scaleX: 0.6, originX: 0.5 }}
+                        animate={{
+                          opacity: hasEnteredView ? (isHovered ? 1 : 0.9) : 0,
+                          scaleX: hasEnteredView ? (isHovered ? 1.08 : 1) : 0.6,
+                        }}
+                        transition={{
+                          duration: 0.18,
+                          delay: index * 0.05 + 0.1 + stickIdx * 0.012,
+                          ease: [0.16, 1, 0.3, 1],
+                        }}
+                        className="h-[4px] w-[20px] rounded-[1.5px] transition-all duration-150 sm:w-[24px]"
+                        style={{ backgroundColor: netColor }}
+                      />
+                    ))
+                  ) : (
+                    <div className="h-[4px] w-[20px] sm:w-[24px]" />
+                  )}
+                </div>
+
                 <span
-                  className={`mt-1 font-mono text-[11px] tabular-nums ${
-                    net === null ? "text-faint" : net >= 0 ? "text-go" : "text-stop"
+                  className={`mt-1 font-mono text-[11px] tabular-nums transition-colors ${
+                    net === null ? "text-faint" : net >= 0 ? "text-go font-medium" : "text-stop font-medium"
                   }`}
                 >
                   {net === null
@@ -151,42 +310,51 @@ export function FinancialHistoryChart({ series }: { series: FinancialSeries }) {
         </div>
       </div>
 
-      <div className="mt-1 flex gap-2">
-        {years.map((year, index) => (
-          <span
-            key={year.periodEnd}
-            className={`flex-1 text-center text-[11.5px] ${
-              hovered === index ? "font-semibold text-ink" : "text-dim"
-            }`}
-          >
-            {year.label}
-          </span>
-        ))}
+      <div className="mt-1 flex items-center">
+        <div className="w-14 shrink-0 sm:w-16" aria-hidden="true" />
+        <div className="flex flex-1 min-w-0 gap-2">
+          {years.map((year, index) => {
+            const isHovered = hovered === index;
+            return (
+              <span
+                key={year.periodEnd}
+                onMouseEnter={() => setHovered(index)}
+                onMouseLeave={() => setHovered(null)}
+                className={`flex-1 cursor-pointer text-center text-[11.5px] transition-colors ${
+                  isHovered ? "font-semibold text-ink" : "text-dim"
+                } ${isAnyHovered && !isHovered ? "opacity-45" : "opacity-100"}`}
+              >
+                {year.label}
+              </span>
+            );
+          })}
+        </div>
       </div>
 
-      {/* The tooltip is a fixed row rather than a floating card: with five
-          columns in a narrow card, a card that follows the cursor spends its
-          life covering the columns either side of the one being read. */}
-      <p className="mt-2 min-h-[18px] text-[12px] text-dim" aria-live="polite">
-        {active ? (
-          <>
-            <span className="font-semibold text-ink">
-              {active.label} · year ended{" "}
-              {new Date(active.periodEnd).toLocaleDateString("en-GB", {
-                day: "numeric",
-                month: "short",
-                year: "numeric",
-              })}
-            </span>
-            {" — "}
-            income {formatGbp(active.income)}, spending {formatGbp(active.expenditure)}
-            {active.net !== null &&
-              `, ${active.net >= 0 ? "surplus" : "deficit"} ${formatGbp(Math.abs(active.net))}`}
-          </>
-        ) : (
-          "Hover a year for its filed figures."
-        )}
-      </p>
+      {/* The tooltip is a fixed row rather than a floating card */}
+      <div className="mt-2 flex items-start">
+        <div className="w-14 shrink-0 sm:w-16" aria-hidden="true" />
+        <p className="min-h-[18px] flex-1 min-w-0 text-[12px] text-dim" aria-live="polite">
+          {active ? (
+            <>
+              <span className="font-semibold text-ink">
+                {active.label} · year ended{" "}
+                {new Date(active.periodEnd).toLocaleDateString("en-GB", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </span>
+              {" — "}
+              income {formatGbp(active.income)}, spending {formatGbp(active.expenditure)}
+              {active.net !== null &&
+                `, ${active.net >= 0 ? "surplus" : "deficit"} ${formatGbp(Math.abs(active.net))}`}
+            </>
+          ) : (
+            "Hover a year for its filed figures."
+          )}
+        </p>
+      </div>
 
       <SeriesTable
         years={years}
@@ -206,113 +374,8 @@ export function FinancialHistoryChart({ series }: { series: FinancialSeries }) {
   );
 }
 
-/**
- * Year-on-year grant funding won over time, rendered with the dashboard's ProgressMetricCard.
- */
-export function YearOnYearGrantsChart({
-  series,
-  grants,
-}: {
-  series: FinancialSeries;
-  grants?: readonly GrantInput[];
-}) {
-  const points = useMemo(() => {
-    // 1. Group raw grants by award year (calendar year):
-    const byYear = new Map<string, number>();
-    if (grants && grants.length > 0) {
-      for (const grant of grants) {
-        if (!grant.award_date || grant.amount_awarded === null || grant.amount_awarded <= 0) continue;
-        const currency = (grant.currency ?? "GBP").toUpperCase();
-        if (currency !== "GBP") continue;
-        const year = grant.award_date.slice(0, 4);
-        if (!/^\d{4}$/.test(year)) continue;
-        byYear.set(year, (byYear.get(year) ?? 0) + grant.amount_awarded);
-      }
-    }
-
-    // 2. If series has filed financial years with grants and covers the data:
-    const filedYearsWithGrants = series.years.filter((y) => y.grantTotal > 0);
-    if (
-      series.years.length >= 2 &&
-      filedYearsWithGrants.length > 0 &&
-      filedYearsWithGrants.length >= byYear.size
-    ) {
-      return series.years.map((y) => ({
-        date: y.label,
-        value: y.grantTotal,
-      }));
-    }
-
-    // 3. Otherwise, use all grants grouped by calendar year (filling gaps):
-    if (byYear.size >= 1) {
-      const yearNums = [...byYear.keys()].map(Number).sort((a, b) => a - b);
-      const min = yearNums[0];
-      const max = yearNums[yearNums.length - 1];
-      if (max - min >= 1 && max - min <= 20) {
-        const fullRange: { date: string; value: number }[] = [];
-        for (let y = min; y <= max; y++) {
-          fullRange.push({
-            date: String(y),
-            value: byYear.get(String(y)) ?? 0,
-          });
-        }
-        return fullRange;
-      }
-      if (byYear.size >= 2) {
-        return [...byYear.entries()]
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([year, total]) => ({
-            date: year,
-            value: total,
-          }));
-      }
-    }
-
-    // 4. Fall back to series.years if it has at least 2 points:
-    if (series.years.length >= 2 && series.hasGrants) {
-      return series.years.map((y) => ({
-        date: y.label,
-        value: y.grantTotal,
-      }));
-    }
-
-    return [];
-  }, [series, grants]);
-
-  if (points.length < 2) return null;
-
-  const totalAmount = points.reduce((sum, p) => sum + p.value, 0);
-  const periodOptions: PeriodOption[] = [
-    ...(points.length > 5 ? [{ label: "Past 5 years", points: 5 }] : []),
-    ...(points.length > 10 ? [{ label: "Past 10 years", points: 10 }] : []),
-    { label: "All years" },
-  ];
-
-  return (
-    <div className="mt-4 mb-2">
-      <ProgressMetricCard
-        size="md"
-        title="Year-on-year grant funding"
-        total={formatCompactGbp(totalAmount).toUpperCase()}
-        unit="in grants"
-        deltaLabel="vs prior year"
-        accent="brand"
-        data={points}
-        defaultView="curve"
-        fullWidth
-        period={periodOptions[0].label}
-        periodOptions={periodOptions}
-        valueFormatter={(val) => formatGbp(val)}
-        dateFormatter={(d) => d}
-        showStats
-        showDelta
-        className="rounded-2xl border-rule-soft shadow-sm"
-      />
-    </div>
-  );
-}
-
-export { YearOnYearGrantsChart as GrantShareChart };
+export { YearOnYearGrantsChart } from "./year-on-year-grants-chart";
+export { YearOnYearGrantsChart as GrantShareChart } from "./year-on-year-grants-chart";
 
 /**
  * Where a year's income came from — the annual return's own split.

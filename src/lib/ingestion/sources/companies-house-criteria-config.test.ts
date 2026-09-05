@@ -25,6 +25,12 @@ describe("classifyCompaniesHouseTier", () => {
     );
   });
 
+  it("classifies a file-sourced CIC category as Tier B without a subtype", () => {
+    // The bulk product records CICs as their own CompanyCategory; the import
+    // path carries that through as company_type (see toRawPayload).
+    assert.equal(classifyCompaniesHouseTier({ company_type: "community-interest-company" }), "B");
+  });
+
   it("does not classify an ordinary ltd with no CIC subtype as Tier B", () => {
     assert.equal(classifyCompaniesHouseTier({ company_type: "ltd" }), null);
   });

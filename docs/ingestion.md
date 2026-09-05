@@ -107,7 +107,7 @@ a failed annotation is reported and does not roll back a good import.
 | --- | --- | --- |
 | `charity_commission_bulk` | **Primary.** Whole register of England & Wales | Filter and import on `/admin/charity-commission`, over a file shipped with the deployment |
 | `charity_commission` | Single-charity lookup only | By registration number, on the same page. The weekly financial refresh writes under this source too |
-| `companies_house` | Active | Weekly discovery cron + status recheck; `/admin/companies-house` |
+| `companies_house` | Active | Filter and import on `/admin/companies-house`, over a file shipped with the deployment; single-company lookup by number; weekly status recheck |
 | `360giving` | Active | Enrichment only. A background queue works through the client list (`three_sixty_giving_backfill`); a button on each client record fetches one on demand |
 | `find_that_charity` | Enrichment only | Name reconciliation against records already held. No bulk endpoint exists |
 | `website` | Manual | F037's URL import, one page at a time |
@@ -125,7 +125,6 @@ pg_cron calls Vercel routes under `/api/cron/*`, each guarded by `CRON_SECRET`.
 
 | Job | When | What |
 | --- | --- | --- |
-| `companies_house_discovery_weekly` | Mon 02:00 | New company registrations |
 | `charity_commission_status_recheck_weekly` | Fri 02:00 | Charities removed from the register |
 | `companies_house_status_recheck_weekly` | Thu 02:00 | Companies dissolved or struck off |
 | `charity_commission_financial_refresh_weekly` | Wed 03:00 | Refreshes filed accounts per charity, then fills Part B from the register file |
@@ -236,3 +235,13 @@ Two things about it are worth remembering, because both were invisible:
 
 Both are the same failure: a decision buried where nobody using the product
 could see it. That is the standard the current design is trying to hold to.
+
+**Companies House API discovery** (`companies_house_discovery_weekly`,
+`/api/cron/companies-house-import`), removed 2026-09-05. It ran three
+hard-coded tier queries (CIO legal forms, CIC subtype, SIC-gated royal
+charter / societas) against the live advanced-search API from an
+incorporation-date watermark. The monthly bulk snapshot already contains the
+whole population those queries could return, and "incorporated since X" is
+now one filter among many on `/admin/companies-house`. The single-company
+lookup and the Thursday status watch still use the API, where hitting it
+directly beats waiting for a snapshot refresh.

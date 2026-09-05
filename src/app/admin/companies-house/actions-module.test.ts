@@ -12,6 +12,8 @@ describe("Companies House server-action module", () => {
     assert.doesNotMatch(source, /export\s+const\s+/);
     assert.doesNotMatch(source, /export\s+let\s+/);
     assert.match(source, /export\s+async\s+function\s+importCompaniesHouse\b/);
-    assert.match(source, /export\s+async\s+function\s+importCompaniesHouseAuto/);
+    // The zero-input discovery action is retired: bulk imports run through the
+    // staged register (register-actions.ts), not the live API.
+    assert.doesNotMatch(source, /importCompaniesHouseAuto/);
   });
 });

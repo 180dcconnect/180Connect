@@ -317,16 +317,16 @@ export function isBranchLocalCharity(detail: CharityCommissionDetailItem): boole
 
 /** How far back of the last known registration date to re-scan, to absorb any
  * registration that lands just before/after the boundary of a previous run's
- * watermark — same reasoning as companieshouse.ts's WATERMARK_OVERLAP_DAYS.
- * Re-fetching an already-known charity is a safe no-op — checksum dedup in the
- * ingestion runner skips it. */
+ * watermark — the same overlap reasoning the retired Companies House discovery
+ * used. Re-fetching an already-known charity is a safe no-op — checksum dedup
+ * in the ingestion runner skips it. */
 const WATERMARK_OVERLAP_DAYS = 7;
 
 /**
  * Fallback start when no watermark exists yet (a genuinely empty
  * raw_source_records table for this source). Deliberately NOT a full-history
- * scan back to 2000: unlike Companies House's discovery, which sends the whole
- * unbounded range as one query, this adapter must chunk client-side into
+ * scan back to 2000: unlike the retired Companies House discovery, which sent
+ * the whole unbounded range as one query, this adapter must chunk client-side into
  * CHUNK_DAYS windows to satisfy the search endpoint's date-range-per-call
  * contract — a true 26-year fallback would be well over a thousand chunk calls,
  * blowing past the 300s cron timeout by orders of magnitude. A first-time
@@ -343,10 +343,9 @@ export type RegistrationWatermarkResolver = () => Promise<string | null>;
 /**
  * Reads the latest `date_of_registration` already seen for charity_commission, so
  * the discovery adapter can search only what's registered since then. No new state
- * table — raw_source_records.raw_payload already carries this per record, same
- * pattern as companieshouse.ts's defaultResolveIncorporationWatermark. Returns null
- * (falls back to the fixed backfill range) when nothing has been ingested yet, or
- * the admin client isn't configured.
+ * table — raw_source_records.raw_payload already carries this per record. Returns
+ * null (falls back to the fixed backfill range) when nothing has been ingested
+ * yet, or the admin client isn't configured.
  */
 async function defaultResolveRegistrationWatermark(): Promise<string | null> {
   const supabase = buildAdminClient();
@@ -369,8 +368,8 @@ async function defaultResolveRegistrationWatermark(): Promise<string | null> {
  * Zero-input discovery: searches from (the latest already-ingested registration
  * date, minus a 7-day overlap buffer) to today. This is what both the weekly cron
  * job and the manual "Check for new registrations" button call, so the two trigger
- * paths cannot drift apart — same shape as companies-house-discovery.ts /
- * createCompaniesHouseDiscoveryAdapter.
+ * paths cannot drift apart — the same shared-function shape the retired
+ * Companies House discovery used.
  *
  * Results are filtered to the branch's postcode areas (isBranchLocalCharity).
  * They were not, originally, on the reasoning that every Charity Commission

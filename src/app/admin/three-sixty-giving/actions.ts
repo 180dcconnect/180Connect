@@ -94,7 +94,12 @@ export async function runBackfillBatchNow(
 
     return {
       kind: "success",
-      message: "",
+      message:
+        `Checked ${result.walked.toLocaleString()} client${result.walked === 1 ? "" : "s"}, ` +
+        `${result.grantsMatched} grant${result.grantsMatched === 1 ? "" : "s"} added. ` +
+        (result.remaining > 0
+          ? `${result.remaining.toLocaleString()} still to check — the system will keep working through them on its own.`
+          : "That's everything — all clients are now checked."),
       progress: {
         walked: result.walked,
         grants: result.grantsMatched,

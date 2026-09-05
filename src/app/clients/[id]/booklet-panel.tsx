@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Clock, ExternalLink, Globe, ShieldCheck, Sparkles } from "lucide-react";
-import { AiLoadingState } from "@/components/ui/ai-loading-state";
 import { DeleteButton } from "@/components/ui/delete-button";
 import { GooeyEmailInput } from "@/components/ui/gooey-email-input";
 import { AnimateIcon } from "@/components/animate-ui/icons/icon";
@@ -532,6 +531,7 @@ function BookletComposer({
         // The bar reports its own run: rolling square on the disc, status lines
         // where the prompt sits. Nothing appears below the card.
         submitting={busy}
+        submittingMessages={STATUS_MESSAGES}
         className="w-full max-w-[600px]"
       />
     </div>
@@ -819,17 +819,9 @@ export function BookletPanel({
         />
       )}
 
-      {/* Only the regenerate path needs a loading block of its own — the first
-          generation is started from the composer bar, which wears the run
-          itself (see its `submitting` prop). The cycling lines live here, in
-          this block, and nowhere else: the bar row stays blank behind its
-          spinner while a run is in flight. */}
-      {busy && currentVersion && (
-        <AiLoadingState
-          messages={STATUS_MESSAGES}
-          reducedMotionLabel="Generating booklet — this can take several seconds…"
-        />
-      )}
+      {/* While a run is in flight the bar wears it all: rolling square on the
+          disc plus the cycling status line in the prompt row. Nothing renders
+          below the bar — no separate loading block on either path. */}
 
       {/* Failures outside the composer report here: the arrival-time
           auto-generate (?booklet=generate) runs with no composer on screen.
@@ -848,7 +840,7 @@ export function BookletPanel({
         </div>
       )}
 
-      {displayed && !busy && (
+      {displayed && (
         <p className="mt-1 text-xs text-dim">
           Generated {formatGeneratedAt(displayed.generatedAt)}
           {saveFailed
@@ -860,20 +852,23 @@ export function BookletPanel({
           website only when it actually contributed — never listed as a source it
           wasn't (AC3). Rendered regardless of error state, consistent with the
           saved-content-stays-visible behaviour above. */}
-      {displayed && !busy && displayedSources.length > 0 && (
+      {displayed && displayedSources.length > 0 && (
         <div className="mt-2.5 flex flex-wrap items-center gap-2">
           {displayedSources.map((source) => (
             <SourceBadge key={source.type} source={source} />
           ))}
         </div>
       )}
-      {displayed && !busy && displayedWebsiteContext?.status === "skipped" && (
+      {displayed && displayedWebsiteContext?.status === "skipped" && (
         <p className="mt-1.5 flex items-start gap-1.5 text-xs font-medium text-hold">
           <Globe aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           {`Website content not used — ${displayedWebsiteContext.reason}`}
         </p>
       )}
-      {displayed && !busy && <BookletContent booklet={displayed.text} />}
+      {/* The current version stays on screen while its replacement generates —
+          hiding it behind the run would discard exactly the artifact saving
+          exists to preserve. */}
+      {displayed && <BookletContent booklet={displayed.text} />}
 
       {/* F086 AC2: the timeline — every prior version opens on screen in its own
           dialog, rather than swapping the card. Collapsed by default so it
@@ -893,8 +888,50 @@ export function BookletPanel({
           {historyOpen && (
             <ul className="mt-3 space-y-1.5">
               {history.map((version) => (
-                <li key={version.id}>
-                  <HistoryVersionDialog version={version} />
+                <li
+                  key={version.id}
+                  className="flex items-center justify-between gap-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <HistoryVersionDialog version={version} />
+                  </div>
+                  {canDeleteBooklet && (
+                    <div className="shrink-0">
+                      <DeleteButton
+                        key={`delete-history-${version.id}-${deleteAttempts[version.id] ?? 0}`}
+                        label="Delete"
+                        confirmLabel="Delete?"
+                        deletingLabel="Deleting…"
+                        size="xs"
+                        variant="subtle"
+                        aria-label={`Delete booklet version from ${formatGeneratedAt(version.generatedAt)}`}
+                        onStartConfirm={() => setDeleteArmed(true)}
+                        onCancel={() => setDeleteArmed(false)}
+                        onConfirm={async () => {
+                          const result = await deleteBookletVersion({
+                            organisationId,
+                            versionId: version.id,
+                          });
+                          if (result.ok) {
+                            deleteSucceeded.current.add(version.id);
+                            return;
+                          }
+                          setError(result.message);
+                          setDeleteAttempts((previous) => ({
+                            ...previous,
+                            [version.id]: (previous[version.id] ?? 0) + 1,
+                          }));
+                        }}
+                        onComplete={() => {
+                          setDeleteArmed(false);
+                          if (!deleteSucceeded.current.delete(version.id)) return;
+                          setHistory((previous) =>
+                            previous.filter((v) => v.id !== version.id),
+                          );
+                        }}
+                      />
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>

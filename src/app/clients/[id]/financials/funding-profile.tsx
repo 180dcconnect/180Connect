@@ -1,8 +1,11 @@
+"use client";
+
 import type { FinancialSeries } from "@/lib/financials/financial-series";
 import { summariseFunders, type FunderGrantInput } from "@/lib/financials/funders";
 import { formatCompactGbp, formatGbp } from "@/lib/income-band";
 
-import { INCOME, percent, share, StatBlock, StatFigure, StatMissing, SURPLUS } from "./chart-parts";
+import { HorizontalStickGauge } from "@/components/ui/horizontal-stick-gauge";
+import { share, StatBlock, StatFigure, StatMissing } from "./chart-parts";
 
 /**
  * Where the money comes from, and how many places it comes from.
@@ -51,16 +54,17 @@ function FunderRow({
       <span className="truncate text-[12.5px] text-ink" title={name}>
         {name}
       </span>
-      <span aria-hidden="true" className="h-[6px] w-full rounded-full bg-paper-sunk">
-        <span
-          className="block h-full rounded-full"
-          style={{
-            width: `${percent(amount, of)}%`,
-            backgroundColor: INCOME,
-            minWidth: amount > 0 ? 2 : 0,
-          }}
+      <div className="min-w-0">
+        <HorizontalStickGauge
+          checked={amount}
+          total={of}
+          stickHeight={10}
+          pitch={6.5}
+          stickWidth={2.5}
+          showTooltip={false}
+          ariaLabel={`${name} funding share`}
         />
-      </span>
+      </div>
       <span className="font-mono text-[12px] tabular-nums text-ink">
         {formatCompactGbp(amount)}
         {awards > 1 && (
@@ -204,19 +208,14 @@ export function FundingProfile({
               </p>
               {governmentYear.governmentShare !== null && (
                 <div className="mt-3">
-                  <span
-                    aria-hidden="true"
-                    className="block h-[6px] w-full rounded-full bg-paper-sunk"
-                  >
-                    <span
-                      className="block h-full rounded-full"
-                      style={{
-                        width: `${percent(governmentYear.governmentIncome, governmentYear.income ?? 0)}%`,
-                        backgroundColor: SURPLUS,
-                        minWidth: 2,
-                      }}
-                    />
-                  </span>
+                  <HorizontalStickGauge
+                    checked={governmentYear.governmentIncome ?? 0}
+                    total={governmentYear.income ?? 0}
+                    checkedLabel="Public money"
+                    remainingLabel="Other income"
+                    ariaLabel="Share of income from public money"
+                    valueFormatter={formatGbp}
+                  />
                   <p className="mt-2 text-[11.5px] leading-[1.5] text-faint">
                     One large contract and fifteen small grants are different
                     funding profiles at the same total, which is why the count

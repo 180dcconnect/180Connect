@@ -1,8 +1,9 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 
+import { HorizontalStickGauge } from "@/components/ui/horizontal-stick-gauge";
 import { runProfileBackfillNow, type ProfileBackfillState } from "./register-actions";
 
 const INITIAL: ProfileBackfillState = { kind: "idle", message: "" };
@@ -53,14 +54,12 @@ export function RegisterProfileCard({
   const selected =
     Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, maxBatchSize) : pending;
 
-  const percent = charities === 0 ? 0 : Math.round((covered / charities) * 100);
-
   return (
     <section className="rounded-panel border border-rule bg-white px-5 py-5 sm:px-6">
       <h2 className="font-body text-[19px] leading-[1.3] font-normal tracking-[-0.01em] text-ink">
         Mission and sector from the register
       </h2>
-      <p className="mt-1.5 max-w-[54ch] text-[13px] leading-[1.55] text-dim">
+      <p className="mt-1.5 text-[13px] leading-[1.55] text-dim">
         Every charity files its own description of what it does, along with the
         classifications the sector is read from. Clients added before the
         register import existed never received either, and re-importing skips
@@ -83,17 +82,11 @@ export function RegisterProfileCard({
           )}
         </span>
       </p>
-      <div
-        className="mt-2 h-2 w-full overflow-hidden rounded-full bg-paper"
-        role="progressbar"
-        aria-valuenow={percent}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label="Charities holding the register's profile details"
-      >
-        <div
-          className="h-full rounded-full bg-lead transition-[width] duration-500"
-          style={{ width: `${percent}%` }}
+      <div className="mt-3">
+        <HorizontalStickGauge
+          checked={covered}
+          total={charities}
+          ariaLabel="Charities holding the register's profile details"
         />
       </div>
 
@@ -140,11 +133,18 @@ export function RegisterProfileCard({
             </button>
             {state.kind !== "idle" && !running && (
               <p
-                className={`text-xs font-semibold ${
-                  state.kind === "error" ? "text-stop" : "text-dim"
+                className={`flex w-full items-start gap-1.5 text-xs font-semibold ${
+                  state.kind === "error" ? "text-stop" : "text-go"
                 }`}
                 role="status"
               >
+                {state.kind === "done" && (
+                  <Check
+                    aria-hidden="true"
+                    className="mt-0.5 size-3.5 shrink-0 text-go"
+                    strokeWidth={2.5}
+                  />
+                )}
                 {state.message}
               </p>
             )}

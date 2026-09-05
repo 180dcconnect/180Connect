@@ -1,7 +1,25 @@
 import type { FinancialSeries, FinancialYear } from "@/lib/financials/financial-series";
 import { formatGbp } from "@/lib/income-band";
 
-import { INCOME, percent, SeriesTable, share, StatBlock, StatFigure, StatMissing, SURPLUS } from "./chart-parts";
+import { HorizontalStickGauge } from "@/components/ui/horizontal-stick-gauge";
+import {
+  EXPENDITURE,
+  Legend,
+  SeriesTable,
+  share,
+  StatBlock,
+  StatFigure,
+  StatMissing,
+  SURPLUS,
+} from "./chart-parts";
+
+/**
+ * Non-blue palette for Section 4: Forest Emerald (#067647) for paid staff,
+ * and warm terracotta/amber (#b54708) for unpaid volunteers.
+ */
+const STAFF_COLOUR = SURPLUS;
+const VOLUNTEER_COLOUR = EXPENDITURE;
+const VOLUNTEER_HOVER_COLOUR = "#d97706";
 
 /**
  * Who actually does the work, and what that means for an engagement.
@@ -49,28 +67,25 @@ function PeopleBar({
   if (total <= 0) return null;
 
   return (
-    <div className="mt-4">
-      <div
-        aria-hidden="true"
-        className="flex h-[6px] w-full overflow-hidden rounded-full bg-paper-sunk"
-      >
-        <span
-          className="h-full"
-          style={{
-            width: `${percent(employees, total)}%`,
-            backgroundColor: INCOME,
-            minWidth: employees > 0 ? 2 : 0,
-          }}
-        />
-        <span
-          className="h-full"
-          style={{
-            width: `${percent(volunteers, total)}%`,
-            backgroundColor: SURPLUS,
-            minWidth: volunteers > 0 ? 2 : 0,
-          }}
+    <div className="mt-4 space-y-2">
+      <div className="flex items-center justify-between">
+        <Legend
+          items={[
+            { colour: STAFF_COLOUR, label: `Paid staff (${employees.toLocaleString("en-GB")})` },
+            { colour: VOLUNTEER_COLOUR, label: `Volunteers (${volunteers.toLocaleString("en-GB")})` },
+          ]}
         />
       </div>
+      <HorizontalStickGauge
+        checked={employees}
+        total={total}
+        activeColor={STAFF_COLOUR}
+        inactiveColor={VOLUNTEER_COLOUR}
+        hoverInactiveColor={VOLUNTEER_HOVER_COLOUR}
+        checkedLabel="Paid staff"
+        remainingLabel="Volunteers"
+        ariaLabel="Paid staff against volunteers"
+      />
       <p className="mt-2 text-[12.5px] leading-[1.55] text-dim">
         {volunteers === 0
           ? "Every person on the return is paid staff."

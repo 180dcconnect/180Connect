@@ -249,7 +249,7 @@ export function SubSection({
         </h3>
       </div>
       {hint && (
-        <p className="mt-1 max-w-[62ch] text-[13px] leading-[1.55] text-dim">{hint}</p>
+        <p className="mt-1 text-[13px] leading-[1.55] text-dim">{hint}</p>
       )}
       {children}
     </div>

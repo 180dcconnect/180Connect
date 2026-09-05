@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   buildFinancialSeries,
   buildFundFlow,
+  calculateNiceYAxis,
   explainMissingAccounts,
   filingRecency,
 } from "./financial-series.ts";
@@ -635,3 +636,58 @@ describe("filingRecency with a published filing date", () => {
     assert.equal(filingRecency("2025-03-31", now, "not-a-date")?.filedOn, null);
   });
 });
+
+describe("calculateNiceYAxis", () => {
+  it("calculates clean graduation ticks for large charities in the hundreds of millions", () => {
+    const scale = calculateNiceYAxis(362_636_196);
+    assert.equal(scale.max, 400_000_000);
+    assert.deepEqual(scale.ticks, [
+      400_000_000,
+      300_000_000,
+      200_000_000,
+      100_000_000,
+      0,
+    ]);
+  });
+
+  it("calculates clean graduation ticks for charities around 100m", () => {
+    const scale = calculateNiceYAxis(100_000_000);
+    assert.equal(scale.max, 100_000_000);
+    assert.deepEqual(scale.ticks, [
+      100_000_000,
+      75_000_000,
+      50_000_000,
+      25_000_000,
+      0,
+    ]);
+  });
+
+  it("calculates clean graduation ticks for smaller charities in the hundreds of thousands", () => {
+    const scale = calculateNiceYAxis(450_000);
+    assert.equal(scale.max, 500_000);
+    assert.deepEqual(scale.ticks, [
+      500_000,
+      400_000,
+      300_000,
+      200_000,
+      100_000,
+      0,
+    ]);
+  });
+
+  it("handles zero or non-positive values gracefully", () => {
+    const scaleZero = calculateNiceYAxis(0);
+    assert.equal(scaleZero.max, 1000);
+    assert.deepEqual(scaleZero.ticks, [1000, 500, 0]);
+
+    const scaleNeg = calculateNiceYAxis(-500);
+    assert.equal(scaleNeg.max, 1000);
+  });
+
+  it("handles tiny amounts without fractional division issues", () => {
+    const scaleSmall = calculateNiceYAxis(5);
+    assert.equal(scaleSmall.max, 10);
+    assert.deepEqual(scaleSmall.ticks, [10, 5, 0]);
+  });
+});
+

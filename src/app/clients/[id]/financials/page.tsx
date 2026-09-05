@@ -39,7 +39,10 @@ import {
 import { FundFlowSankey } from "./fund-flow-sankey";
 import { FundingProfile } from "./funding-profile";
 import { WhoDoesTheWork } from "./who-does-the-work";
-import { WhyNowStrip } from "./why-now-strip";
+import { computeSpendEfficiency } from "@/lib/financials/spend-efficiency";
+import { SpendEfficiencyCard } from "./spend-efficiency-card";
+import { computeFilingTimeliness } from "@/lib/financials/filing-timeliness";
+import { FilingTimelinessCard } from "./filing-timeliness-card";
 
 /** Charity Commission publishes five filed years; the cap is headroom, not a
  *  page size — a client with more is a client whose whole history we want. */
@@ -255,6 +258,12 @@ export default async function ClientFinancialsPage({
   // the register's £500k reporting threshold. Section 3 says so when it is.
   const flows = buildFundFlows(series);
   const mixYear = [...series.years].reverse().find((year) => year.mix.length > 0);
+  const spendEfficiency = computeSpendEfficiency(periods);
+  const timelinessSummary = computeFilingTimeliness({
+    periods,
+    reportingStatus: registerFacts.data?.charity_reporting_status,
+    registeredOn: registerFacts.data?.registered_on,
+  });
 
   const sector = registerFacts.data?.sector ?? null;
   // Derived exactly as the hero card derives the figure it prints — newest
@@ -318,10 +327,6 @@ export default async function ClientFinancialsPage({
           </Rise>
         )}
 
-        {/* Renders nothing, and no wrapper, when it has nothing to say — it
-            carries its own `Rise` for exactly that reason. */}
-        <WhyNowStrip grants={chartGrantRows} series={series} />
-
         <Rise>
           {hasFilings ? (
             <SectionCard
@@ -350,15 +355,30 @@ export default async function ClientFinancialsPage({
         </Rise>
 
         <Rise>
-          {series.years.length > 1 ? (
+          {series.years.length > 1 || timelinessSummary ? (
             <SectionCard
               headingId="fin-track-heading"
-              hint="Income against expenditure across every filed year, and the surplus or deficit that leaves."
+              hint="Income against expenditure across every filed year, the surplus or deficit that leaves, and filing timeliness with the regulator."
               number={2}
               title="Track record"
             >
-              <div className="mt-4">
-                <FinancialHistoryChart series={series} />
+              <div className="mt-4 space-y-6">
+                {series.years.length > 1 && (
+                  <FinancialHistoryChart series={series} />
+                )}
+                {timelinessSummary && (
+                  <div className={series.years.length > 1 ? "border-t border-rule-soft pt-6" : ""}>
+                    <div className="mb-3.5 flex items-center justify-between">
+                      <h3 className="text-[14px] font-semibold text-ink">
+                        Governance and filing health
+                      </h3>
+                      <span className="font-mono text-[11.5px] text-faint">
+                        Statutory 10-month window
+                      </span>
+                    </div>
+                    <FilingTimelinessCard summary={timelinessSummary} />
+                  </div>
+                )}
               </div>
             </SectionCard>
           ) : (
@@ -376,14 +396,17 @@ export default async function ClientFinancialsPage({
         </Rise>
 
         <Rise>
-          {flows.length > 0 || mixYear ? (
+          {flows.length > 0 || mixYear || spendEfficiency ? (
             <SectionCard
               headingId="fin-flow-heading"
               hint="Where the money comes from and what it turns into, as filed."
               number={3}
               title="Where the money goes"
             >
-              <div className="mt-4">
+              <div className="mt-4 space-y-6">
+                {spendEfficiency && (
+                  <SpendEfficiencyCard summary={spendEfficiency} />
+                )}
                 {/* The flow answers both halves at once. Where it cannot be
                     drawn honestly — a split on one side only, or two sides that
                     do not square — the income panel still answers half of it. */}

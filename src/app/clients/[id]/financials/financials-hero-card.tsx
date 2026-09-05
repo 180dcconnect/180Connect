@@ -2,6 +2,7 @@ import { AlertTriangle, TrendingDown, TrendingUp } from "lucide-react";
 
 import {
   deriveIncomeBand,
+  formatCompactGbp,
   formatGbp,
   INCOME_BAND_LABELS,
   type IncomeBand,
@@ -14,6 +15,7 @@ import {
 import type { OperatingGeography } from "@/lib/operating-geography";
 import type { SectorPeerStats } from "@/lib/financials/sector-peers";
 import { IncomeBandScale } from "../income-band-scale";
+import { PeopleDial } from "./people-dial";
 import { SubSection } from "../section-card";
 import { SectorPeerStrip } from "./sector-peer-strip";
 import { OperatingReach } from "./operating-reach";
@@ -58,9 +60,6 @@ export function FinancialsHeroCard({
   const hasBoth = totalIncome !== null && totalExpenditure !== null;
   const netBalance = hasBoth ? totalIncome - totalExpenditure : null;
 
-  const latestYear = latest?.period_end
-    ? new Date(latest.period_end).getFullYear()
-    : null;
   const latestPeriodFormatted = latest?.period_end
     ? new Date(latest.period_end).toLocaleDateString("en-GB", {
         day: "numeric",
@@ -71,41 +70,74 @@ export function FinancialsHeroCard({
 
   // The newest return that published a headcount, which is not always the
   // newest return — an entry-level filing carries totals only. Same rule as
-  // section 4, which is where the balance and the trend live; this is only the
-  // size figure, so it stops at one number and its composition.
+  // section 4, which is where the balance and the trend live; the dial beside
+  // these figures owns the total and how it splits.
   const staffed = [...series.years]
     .reverse()
     .find((year) => year.employees !== null || year.volunteers !== null);
-  const employees = staffed?.employees ?? null;
-  const volunteers = staffed?.volunteers ?? null;
-  // A filed zero is a zero and an absent figure is not one, so a return that
-  // published 40 volunteers and no staff count gives a headcount of 40 that is
-  // a *floor* — the caption says which of the two halves is missing rather than
-  // letting the total imply both were filed.
-  const people =
-    employees === null && volunteers === null ? null : (employees ?? 0) + (volunteers ?? 0);
-  const bothFiled = employees !== null && volunteers !== null;
-  const volunteerShare =
-    bothFiled && people !== null && people > 0 ? volunteers / people : null;
-
-  const peopleCaption =
-    people === null
-      ? "Not on the filed return"
-      : !bothFiled
-        ? employees === null
-          ? "Volunteers only — no staff figure filed"
-          : "Staff only — no volunteer figure filed"
-        : volunteers === 0
-          ? "All paid staff, no volunteers"
-          : employees === 0
-            ? "All volunteers, no paid staff"
-            : `${Math.round((volunteerShare ?? 0) * 100)}% volunteers`;
 
   const recency = filingRecency(
     latest?.period_end ?? null,
     undefined,
     latest?.filing_date ?? null,
   );
+  const previous = filings[1] ?? null;
+  const previousYear = previous?.period_end
+    ? new Date(previous.period_end).getFullYear()
+    : null;
+  const prevLabel = previousYear ? `FY${String(previousYear).slice(-2)}` : "last year";
+
+  const prevIncome = previous?.total_income ?? null;
+  const prevExpenditure = previous?.total_expenditure ?? null;
+  const prevNetBalance =
+    prevIncome !== null && prevExpenditure !== null
+      ? prevIncome - prevExpenditure
+      : null;
+
+  const incomeYoY = (() => {
+    if (totalIncome === null || prevIncome === null) return null;
+    const { pctStr, diff } = formatYoYPercent(totalIncome, prevIncome);
+    const compactDiff = diff > 0 ? `+${formatCompactGbp(diff)}` : formatCompactGbp(diff);
+    const tone: "go" | "stop" | "dim" = diff > 0 ? "go" : diff < 0 ? "stop" : "dim";
+    return {
+      pctStr,
+      compactDiff,
+      diff,
+      tone,
+      tooltip: `vs ${prevLabel}: ${formatGbp(prevIncome)} (${compactDiff})`,
+    };
+  })();
+
+  const expenditureYoY = (() => {
+    if (totalExpenditure === null || prevExpenditure === null) return null;
+    const { pctStr, diff } = formatYoYPercent(totalExpenditure, prevExpenditure);
+    const compactDiff = diff > 0 ? `+${formatCompactGbp(diff)}` : formatCompactGbp(diff);
+    return {
+      pctStr,
+      compactDiff,
+      diff,
+      tooltip: `vs ${prevLabel}: ${formatGbp(prevExpenditure)} (${compactDiff})`,
+    };
+  })();
+
+  const netYoY = (() => {
+    if (netBalance === null || prevNetBalance === null) return null;
+    const diff = netBalance - prevNetBalance;
+    const compactDiff = diff > 0 ? `+${formatCompactGbp(diff)}` : formatCompactGbp(diff);
+    const tone: "go" | "stop" | "dim" = diff > 0 ? "go" : diff < 0 ? "stop" : "dim";
+    let pctStr: string | null = null;
+    if (prevNetBalance > 0 && netBalance > 0) {
+      pctStr = formatYoYPercent(netBalance, prevNetBalance).pctStr;
+    }
+    return {
+      compactDiff,
+      pctStr,
+      diff,
+      tone,
+      tooltip: `vs ${prevLabel}: ${prevNetBalance >= 0 ? "+" : ""}${formatGbp(prevNetBalance)} (${compactDiff})`,
+    };
+  })();
+
   return (
     <div className="mt-4 space-y-6">
       {/* 1.1 and 1.2 answer "how big" off two different filings, the accounts
@@ -118,7 +150,7 @@ export function FinancialsHeroCard({
         title="Money and people"
         hint="The latest filed year, and the headcount behind it."
       >
-        <div className="mt-3.5 flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+        <div className="mt-3.5 flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between lg:gap-8 xl:gap-10">
           {/* Left Column: Key Headline Metrics */}
           <div className="min-w-0 flex-1 space-y-4">
             <div className="flex items-center justify-between gap-3">
@@ -162,14 +194,41 @@ export function FinancialsHeroCard({
               </p>
             )}
 
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
               <div>
                 <p className="text-[12.5px] text-dim">Annual Income</p>
                 <p className="mt-1 font-mono text-[22px] font-bold tracking-tight text-ink">
                   {formatGbp(totalIncome)}
                 </p>
-                {latestYear && (
-                  <p className="mt-0.5 text-[11.5px] text-faint">FY{String(latestYear).slice(-2)} filing</p>
+                {incomeYoY ? (
+                  <p
+                    className="mt-0.5 text-[11.5px] text-faint"
+                    title={incomeYoY.tooltip}
+                  >
+                    {incomeYoY.diff === 0 ? (
+                      <span className="font-medium text-dim">No change</span>
+                    ) : (
+                      <>
+                        <span
+                          className={`font-semibold ${
+                            incomeYoY.tone === "go"
+                              ? "text-go"
+                              : incomeYoY.tone === "stop"
+                                ? "text-stop"
+                                : "text-dim"
+                          }`}
+                        >
+                          {incomeYoY.pctStr}
+                        </span>{" "}
+                        <span className="tabular-nums">({incomeYoY.compactDiff})</span>
+                      </>
+                    )}{" "}
+                    vs last year
+                  </p>
+                ) : (
+                  <p className="mt-0.5 text-[11.5px] text-faint">
+                    {totalCount > 1 ? "Prior year not reported" : "No prior year data"}
+                  </p>
                 )}
               </div>
 
@@ -178,7 +237,28 @@ export function FinancialsHeroCard({
                 <p className="mt-1 font-mono text-[22px] font-bold tracking-tight text-ink">
                   {formatGbp(totalExpenditure)}
                 </p>
-                <p className="mt-0.5 text-[11.5px] text-faint">Operating spend</p>
+                {expenditureYoY ? (
+                  <p
+                    className="mt-0.5 text-[11.5px] text-faint"
+                    title={expenditureYoY.tooltip}
+                  >
+                    {expenditureYoY.diff === 0 ? (
+                      <span className="font-medium text-dim">No change</span>
+                    ) : (
+                      <>
+                        <span className="font-semibold text-dim">
+                          {expenditureYoY.pctStr}
+                        </span>{" "}
+                        <span className="tabular-nums">({expenditureYoY.compactDiff})</span>
+                      </>
+                    )}{" "}
+                    vs last year
+                  </p>
+                ) : (
+                  <p className="mt-0.5 text-[11.5px] text-faint">
+                    {totalCount > 1 ? "Prior year not reported" : "No prior year data"}
+                  </p>
+                )}
               </div>
 
               <div>
@@ -201,36 +281,54 @@ export function FinancialsHeroCard({
                 ) : (
                   <p className="mt-1 font-mono text-[18px] text-faint">Not reported</p>
                 )}
-                <p className="mt-0.5 text-[11.5px] text-faint">
-                  {netBalance !== null ? (netBalance >= 0 ? "Net operating surplus" : "Net operating deficit") : "Single filing metric"}
-                </p>
-              </div>
-
-              {/* People as a size figure. How many bodies the organisation has is
-                  a scale measure in the way income is — and it is the one that
-                  tells a £2m charity run by nine people apart from a £2m charity
-                  run by two hundred. The paid/unpaid *balance*, the trend and
-                  income per head are section 4's questions, so this stops at the
-                  total and the one word of composition that makes it legible. */}
-              <div>
-                <p className="text-[12.5px] text-dim">People</p>
-                {people !== null ? (
-                  <p className="mt-1 font-mono text-[22px] font-bold tracking-tight tabular-nums text-ink">
-                    {people.toLocaleString("en-GB")}
+                {netYoY ? (
+                  <p
+                    className="mt-0.5 text-[11.5px] text-faint"
+                    title={netYoY.tooltip}
+                  >
+                    {netYoY.diff === 0 ? (
+                      <span className="font-medium text-dim">No change</span>
+                    ) : (
+                      <>
+                        <span
+                          className={`font-semibold ${
+                            netYoY.tone === "go"
+                              ? "text-go"
+                              : netYoY.tone === "stop"
+                                ? "text-stop"
+                                : "text-dim"
+                          }`}
+                        >
+                          {netYoY.compactDiff}
+                        </span>
+                        {netYoY.pctStr && (
+                          <>
+                            {" "}
+                            <span className="tabular-nums">({netYoY.pctStr})</span>
+                          </>
+                        )}
+                      </>
+                    )}{" "}
+                    vs last year
                   </p>
                 ) : (
-                  <p className="mt-1 font-mono text-[18px] text-faint">Not reported</p>
+                  <p className="mt-0.5 text-[11.5px] text-faint">
+                    {totalCount > 1 ? "Prior year not reported" : "No prior year data"}
+                  </p>
                 )}
-                <p className="mt-0.5 text-[11.5px] text-faint">{peopleCaption}</p>
               </div>
             </div>
-          </div>
 
-          {/* Right Column: 4-Stage Segmented Scale */}
-          <div className="w-full lg:max-w-md lg:border-l lg:border-rule-soft lg:pl-6">
+          {/* Size, under the money it is derived from rather than beside it.
+              The tier and the peer strip are both full-width horizontal tracks:
+              side by side in a narrow rail they each lost about half the length
+              they need, and the peer strip in particular is a log axis spanning
+              four orders of magnitude — squeezing that is how it stopped being
+              readable. Stacked, in the column whose figures they describe. */}
+          <div className="border-t border-rule-soft pt-4">
             <div className="mb-2.5 flex items-center justify-between">
               <span className="text-[12.5px] font-semibold text-ink">
-                Organisation Size Tier
+                Organisation size tier
               </span>
               {activeBand && (
                 <span className="rounded-[4px] bg-lead-wash px-2 py-0.5 text-[11px] font-semibold text-lead">
@@ -259,6 +357,19 @@ export function FinancialsHeroCard({
             )}
           </div>
         </div>
+
+          {/* People, on the right, because it is the one figure here that is not
+              money and reads as a different question. */}
+          <div className="w-full shrink-0 lg:w-[320px] xl:w-[360px] lg:border-l lg:border-rule-soft lg:pl-8 xl:pl-10">
+            <PeopleDial
+              employees={staffed?.employees ?? null}
+              volunteers={staffed?.volunteers ?? null}
+              year={
+                staffed?.periodEnd ? new Date(staffed.periodEnd).getFullYear() : null
+              }
+            />
+          </div>
+        </div>
       </SubSection>
 
       {/* Absent for a company-only record, and for a charity whose return
@@ -277,3 +388,28 @@ export function FinancialsHeroCard({
     </div>
   );
 }
+
+function formatYoYPercent(
+  current: number,
+  previous: number,
+): {
+  pctStr: string;
+  diff: number;
+} {
+  const diff = current - previous;
+  if (previous === 0) {
+    return { pctStr: diff > 0 ? "+100%" : "0%", diff };
+  }
+  const pct = (diff / previous) * 100;
+  const absPct = Math.abs(pct);
+  if (absPct < 0.05) {
+    return { pctStr: "0.0%", diff };
+  }
+  const formatted =
+    absPct >= 100
+      ? Math.round(absPct).toString()
+      : (Math.round(absPct * 10) / 10).toFixed(absPct % 1 < 0.05 ? 0 : 1);
+  const sign = pct > 0 ? "+" : "-";
+  return { pctStr: `${sign}${formatted}%`, diff };
+}
+

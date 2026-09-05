@@ -34,6 +34,8 @@ export const EXPENDITURE = "#b54708";
 export const SURPLUS = "#067647";
 export const DEFICIT = "#b42318";
 
+export { calculateNiceYAxis } from "@/lib/financials/financial-series";
+
 /** A bar width, as a percentage of the largest value in its group. Null is not
  *  zero anywhere else on this tab, but a bar has to be drawn at some width, and
  *  the caller is expected to have suppressed the row before it gets here. */

@@ -43,19 +43,25 @@ export function GrantFetchButton({
   const Icon = hasGrants ? RefreshCw : HandCoins;
 
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-3">
-      {/* The same quiet bordered action as the Add button on an empty General
-          Information row — a secondary action beside the list, not a primary
-          one competing with it. */}
+    <div className="flex items-center gap-2">
+      {result && (
+        <p
+          className={`text-xs font-semibold ${result.ok ? "text-go" : "text-stop"}`}
+          role="status"
+        >
+          {result.message}
+        </p>
+      )}
+
       <button
         type="button"
         onClick={run}
         disabled={pending}
-        className="inline-flex shrink-0 items-center gap-1 rounded-inset border border-rule bg-white px-2 py-0.5 text-[12px] font-semibold text-lead transition-colors hover:border-lead focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+        className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-inset border border-lead bg-lead px-2.5 py-1 text-[12px] font-medium text-white transition-colors hover:bg-lead-mid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30 disabled:pointer-events-none disabled:opacity-50"
       >
         <Icon
           aria-hidden="true"
-          className={`size-3 ${pending ? "animate-spin" : ""}`}
+          className={`size-3 text-white ${pending ? "animate-spin" : ""}`}
         />
         {pending
           ? "Checking 360Giving…"
@@ -63,15 +69,6 @@ export function GrantFetchButton({
             ? "Check for new grants"
             : "Fetch grant history"}
       </button>
-
-      {result && (
-        <p
-          className={`text-xs font-semibold ${result.ok ? "text-dim" : "text-stop"}`}
-          role="status"
-        >
-          {result.message}
-        </p>
-      )}
     </div>
   );
 }

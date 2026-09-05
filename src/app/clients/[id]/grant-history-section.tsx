@@ -58,11 +58,14 @@ export function GrantHistorySection({
       icon={<HandCoins aria-hidden="true" />}
       number={number}
       action={
-        totalCount > 0 ? (
-          <span className="rounded-full bg-paper-sunk px-2.5 py-1 font-mono text-[11.5px] font-medium tabular-nums text-dim">
-            {totalCount} {totalCount === 1 ? "grant" : "grants"}
-          </span>
-        ) : undefined
+        <div className="flex items-center gap-2">
+          {totalCount > 0 && (
+            <span className="rounded-full bg-paper-sunk px-2.5 py-1 font-mono text-[11.5px] font-medium tabular-nums text-dim">
+              {totalCount} {totalCount === 1 ? "grant" : "grants"}
+            </span>
+          )}
+          <GrantFetchButton organisationId={organisationId} hasGrants={totalCount > 0} />
+        </div>
       }
     >
       {intro}
@@ -81,10 +84,6 @@ export function GrantHistorySection({
           totalCount={totalCount}
         />
       )}
-
-      {/* Offered even when the read failed: "could not be loaded" is about our
-          database, not about 360Giving, and a CAM may still want to fetch. */}
-      <GrantFetchButton organisationId={organisationId} hasGrants={totalCount > 0} />
     </SectionCard>
   );
 }

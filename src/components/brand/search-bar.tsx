@@ -365,10 +365,12 @@ export function BrandSearchBar({
 
 
   // Confirm is the drawer's whole content while it is up, so it takes the
-  // focus the drawer would otherwise hand to its rows.
+  // focus the drawer would otherwise hand to its rows. Without preventScroll
+  // the browser yanks the page to the button mid-morph — the widen, the drop
+  // and a scroll jump landing together is what reads as a broken animation.
   useEffect(() => {
     if (!confirming) return;
-    confirmButtonRef.current?.focus();
+    confirmButtonRef.current?.focus({ preventScroll: true });
   }, [confirming]);
 
   const typing = query.length > 0;

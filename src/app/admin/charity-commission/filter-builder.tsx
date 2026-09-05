@@ -144,7 +144,7 @@ const CHARITY_INCOME_HISTOGRAM: readonly number[] = [
 ];
 
 /** A list of labels, shortened once it stops being readable at a glance. */
-function summariseList(labels: string[], noun: string): string | null {
+export function summariseList(labels: string[], noun: string): string | null {
   if (labels.length === 0) return null;
   if (labels.length <= 2) return labels.join(", ");
   return `${labels.length} ${noun}`;
@@ -205,7 +205,7 @@ function stableSerialize(val: unknown): string {
   return JSON.stringify(val);
 }
 
-function FilterSection({
+export function FilterSection({
   title,
   summary,
   hint,
@@ -348,7 +348,7 @@ function FilterSection({
   );
 }
 
-function Chip({
+export function Chip({
   selected,
   onClick,
   children,

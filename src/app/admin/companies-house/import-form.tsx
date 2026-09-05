@@ -29,7 +29,8 @@ export function CompaniesHouseImportForm({ configured }: { configured: boolean }
       <h2 className="text-lg font-bold">Look up one company</h2>
       <p className="mt-2 text-sm text-foreground/65">
         Enter a company number when known. Otherwise, enter the exact registered
-        name. For matching many companies at once, use bulk search below instead.
+        name. For choosing many companies at once by type, sector or area, use
+        New import above instead — this lookup is for one exact company.
       </p>
 
       {!configured && (

@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 
 import type { JobStatus } from "@/lib/ingestion/type";
 import { HorizontalStickGauge } from "@/components/ui/horizontal-stick-gauge";
@@ -218,8 +218,20 @@ export function BackfillCard({
             {pending && <Loader2 className="size-3.5 animate-spin" strokeWidth={2.2} />}
             {pending ? "Checking…" : `Check the next ${selectedBatch.toLocaleString()} now`}
           </button>
-          {state.kind === "error" && !pending && (
-            <p className="text-xs font-semibold text-stop" role="status">
+          {state.kind !== "idle" && !pending && (
+            <p
+              className={`flex w-full items-start gap-1.5 text-xs font-semibold ${
+                state.kind === "error" ? "text-stop" : "text-go"
+              }`}
+              role="status"
+            >
+              {state.kind === "success" && (
+                <Check
+                  aria-hidden="true"
+                  className="mt-0.5 size-3.5 shrink-0 text-go"
+                  strokeWidth={2.5}
+                />
+              )}
               {state.message}
             </p>
           )}

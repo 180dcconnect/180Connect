@@ -3,6 +3,8 @@
 import { useId, useMemo, useState } from "react";
 import { ArrowDown, ArrowRight, ArrowUp } from "lucide-react";
 import { motion } from "motion/react";
+
+import { cn } from "@/lib/utils";
 import {
   ACCENTS,
   formatCompact,
@@ -140,7 +142,11 @@ export default function ProgressMetricCard({
   const hasFooter = showFooter && (showDelta || showStats);
   const gridId = `grid-${useId().replace(/:/g, "")}`;
   const sz = SIZES[size];
-  const shell = `relative flex ${sz.minH} w-full flex-col overflow-hidden rounded-[28px] border border-border bg-card shadow-[0_2px_10px_rgba(0,0,0,0.04)] ${className}`;
+  const shell = cn(
+    "relative flex w-full flex-col overflow-hidden rounded-[28px] border border-border bg-card shadow-[0_2px_10px_rgba(0,0,0,0.04)]",
+    sz.minH,
+    className,
+  );
 
   const periods = periodOptions ?? DEFAULT_PERIODS;
   // The whole selected option is kept (not just its label) because an applied

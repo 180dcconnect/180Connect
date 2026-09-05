@@ -29,6 +29,8 @@
     "ingest:charity-commission-bulk": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-charity-commission-bulk.mts",
     "register:build": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-register-sqlite.mts",
     "register:fetch": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/fetch-register.mts",
+    "companies-register:build": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-companies-register-sqlite.mts",
+    "companies-register:fetch": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/fetch-companies-register.mts",
     "ingest:check-connection": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/test-runner-connection.mts",
     "standardize:run-charity-commission": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-standardize-charity-commission.mts",
     "standardize:run-charity-commission-bulk": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --conditions=react-server --env-file-if-exists=.env.local scripts/run-standardize-charity-commission-bulk.mts",
@@ -37,7 +39,7 @@
     "ingest:run-three-sixty-giving": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/run-three-sixty-giving.mts",
     "ingest:check-isolation": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/test-isolation.mts",
     "backfill:data-handling-rules": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-data-handling-rules.mts",
-    "prebuild": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/fetch-register.mts"
+    "prebuild": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/fetch-register.mts && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/fetch-companies-register.mts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.44",

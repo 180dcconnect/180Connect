@@ -180,9 +180,9 @@ export default async function CharityCommissionPage() {
               <Image
                 src="/sources/charity-commission.png"
                 alt=""
-                width={56}
-                height={56}
-                className="h-14 w-auto"
+                width={112}
+                height={112}
+                className="h-20 w-auto sm:h-24 md:h-28"
               />
             </a>
             <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">

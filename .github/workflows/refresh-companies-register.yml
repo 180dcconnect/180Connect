@@ -1,0 +1,133 @@
+# Rebuilds the companies-register file and ships it to the app.
+#
+# The twin of refresh-charity-register.yml: same shape, different source. The
+# build reads Companies House's monthly Basic Company Data product (one row
+# per live company, ~5.2M rows) and keeps only mission-plausible companies —
+# Tier A legal forms, CICs, Tier C legal forms and SIC-allowlist matches, ~12%
+# of the register — because the whole file would be ~1GB and unshippable
+# inside the deployment. See scripts/build-companies-register-sqlite.mts and
+# docs/companies-register-import.md for the full reasoning.
+#
+# The job needs no database credentials and no API keys. It reads a public
+# file and writes a file. The data-handling rules (F246/F247) are applied when
+# companies are imported into the client list, not here — see
+# src/lib/companies-register/import.ts (Phase B).
+
+name: Refresh companies register
+
+on:
+  schedule:
+    # 03:00 UTC on the 8th. The snapshot compiles up to the end of the previous
+    # month and lands within 5 working days of month end, so the 8th always has
+    # a complete file while the 1st often does not. The build also steps back
+    # through recent months if a snapshot is ever late.
+    - cron: "0 3 8 * *"
+  workflow_dispatch:
+    inputs:
+      month:
+        description: "Snapshot month as YYYY-MM (default: newest published)"
+        required: false
+        default: ""
+      reason:
+        description: "Why this refresh was triggered (recorded in the run)"
+        required: false
+        default: "Manual refresh"
+
+# Two refreshes at once would each spend twenty minutes producing the same file
+# and race to upload it. The second waits; it does not cancel the first, which
+# may be most of the way through.
+concurrency:
+  group: companies-register
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Downloading ~470MB of zips and parsing ~2GB of CSV takes about twenty
+    # minutes. The ceiling is generous so a slow day at Companies House does
+    # not fail the run.
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # node:sqlite is built in from Node 22 and stable in 24, which is the
+          # version the Vercel project runs. No native module to compile.
+          node-version: "24"
+
+      - name: Build the companies register
+        env:
+          # Through the environment, never interpolated into the script body:
+          # inputs are attacker-controlled by anyone who can dispatch this
+          # workflow. Quoted expansion cannot execute, and the build script
+          # itself rejects anything but YYYY-MM — the case below just keeps a
+          # typo from failing a twenty-minute run at argument parsing.
+          SNAPSHOT_MONTH: ${{ github.event.inputs.month }}
+        run: |
+          MONTH_ARGS=""
+          case "$SNAPSHOT_MONTH" in
+            "") ;;
+            ????-??) MONTH_ARGS="-- --month $SNAPSHOT_MONTH" ;;
+            *) echo "Ignoring malformed month: $SNAPSHOT_MONTH" ;;
+          esac
+          npm run companies-register:build -- --out data/companies-register.sqlite $MONTH_ARGS
+
+      - name: Summarise
+        env:
+          # Through the environment, never interpolated into the script body:
+          # inputs are attacker-controlled by anyone who can dispatch this
+          # workflow, and `${{ }}` inside `run:` is substituted before bash sees
+          # it, so a crafted value would execute as shell.
+          REASON: ${{ github.event.inputs.reason || 'Scheduled refresh' }}
+          MONTH: ${{ github.event.inputs.month || 'newest published' }}
+        run: |
+          SIZE=$(du -m data/companies-register.sqlite | cut -f1)
+          {
+            echo "### Companies register rebuilt"
+            echo ""
+            echo "- File size: ${SIZE} MB"
+            echo "- Snapshot month: ${MONTH}"
+            echo "- Reason: ${REASON}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish as the companies-register release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # One long-lived release, its asset replaced each time. The app's build
+          # always fetches "latest from the companies-register tag", so there is
+          # exactly one answer to "which companies register is current".
+          gh release view companies-register >/dev/null 2>&1 \
+            || gh release create companies-register \
+                 --title "Companies register" \
+                 --notes "Rebuilt automatically from Companies House's monthly Basic Company Data product (mission-plausible subset). Replaced on each refresh."
+          gh release upload companies-register data/companies-register.sqlite --clobber
+
+      - name: Redeploy so the app picks it up
+        # The file is fetched during the Vercel build, so a new deployment is what
+        # actually puts the fresh register in front of anyone. Same hooks as the
+        # charity workflow: both environments fetch the same release assets, only
+        # the redeploy is per-environment. Both are optional — with neither, the
+        # register still publishes and ships with whatever deploys next.
+        env:
+          STAGING: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+          PRODUCTION: ${{ secrets.VERCEL_DEPLOY_HOOK_URL_PRODUCTION }}
+        run: |
+          triggered=0
+          for hook in "$STAGING" "$PRODUCTION"; do
+            [ -z "$hook" ] && continue
+            # --fail so a rejected hook fails the step rather than passing
+            # silently; the register is published by now either way.
+            curl -fsS -X POST "$hook" > /dev/null
+            triggered=$((triggered + 1))
+          done
+          if [ "$triggered" -eq 0 ]; then
+            echo "No deploy hooks configured — the new register ships with the next deployment."
+          else
+            echo "Triggered $triggered redeploy(s)."
+          fi

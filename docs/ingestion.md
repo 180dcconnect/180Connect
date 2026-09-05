@@ -106,7 +106,7 @@ a failed annotation is reported and does not roll back a good import.
 | Source | Status | How it runs |
 | --- | --- | --- |
 | `charity_commission_bulk` | **Primary.** Whole register of England & Wales | Filter and import on `/admin/charity-commission`, over a file shipped with the deployment |
-| `charity_commission` | Single-charity lookup only | By registration number, on the same page |
+| `charity_commission` | Single-charity lookup only | By registration number, on the same page. The weekly financial refresh writes under this source too |
 | `companies_house` | Active | Weekly discovery cron + status recheck; `/admin/companies-house` |
 | `360giving` | Active | Enrichment only. A background queue works through the client list (`three_sixty_giving_backfill`); a button on each client record fetches one on demand |
 | `find_that_charity` | Enrichment only | Name reconciliation against records already held. No bulk endpoint exists |
@@ -128,12 +128,29 @@ pg_cron calls Vercel routes under `/api/cron/*`, each guarded by `CRON_SECRET`.
 | `companies_house_discovery_weekly` | Mon 02:00 | New company registrations |
 | `charity_commission_status_recheck_weekly` | Fri 02:00 | Charities removed from the register |
 | `companies_house_status_recheck_weekly` | Thu 02:00 | Companies dissolved or struck off |
-| `charity_commission_financial_refresh_weekly` | Wed 03:00 | Refreshes filed accounts per charity |
+| `charity_commission_financial_refresh_weekly` | Wed 03:00 | Refreshes filed accounts per charity, then fills Part B from the register file |
 | `provenance_audit_daily` | 04:41 | Checks field provenance is intact |
 | `gmail_reply_sync` | every 5 min | Captures replies to outreach |
 | `scheduled_outreach_delivery` | every 5 min | Sends queued outreach |
 | `stall_detection_daily` | 04:17 | Flags stalled conversations |
 | `three_sixty_giving_backfill` | every 15 min | Asks 360Giving about the next slice of organisations |
+
+**Part B of the annual return** — staff and volunteer counts, the received date,
+the government-funding flags — is published only in the bulk extract, never by
+the API. So `charity_commission_financial_refresh_weekly` ends by filling those
+columns from the register file for the charities it just wrote
+(`fillPartBFor`). That is what stops a newly filed year arriving with a blank
+headcount and staying blank.
+
+One window stays open: the register file rebuilds monthly, so a year filed since
+the last rebuild has no Part B anywhere yet. It fills itself on the first refresh
+after the next rebuild. The **annual return backfill** card on
+`/admin/charity-commission` is the manual counterpart — it shows how many
+charities are outstanding and catches up without waiting a week. Both use the
+same code path. See
+[`annual-return-backfill.ts`](../src/lib/charity-register/annual-return-backfill.ts)
+for what it will and will not overwrite; the short version is that it only ever
+fills a gap, and a column it is not filling never appears in the write.
 
 Separately, a **GitHub Action** rebuilds the charity register file monthly — see
 [`charity-register-import.md`](charity-register-import.md). It is the only

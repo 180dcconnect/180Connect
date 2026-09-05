@@ -3,13 +3,19 @@ import { describe, it } from "node:test";
 
 import {
   BACKFILL_BATCH_SIZE,
+  MANUAL_BACKFILL_BATCH_SIZE,
+  MANUAL_BACKFILL_MAX,
   REFETCH_AFTER_DAYS,
   cutoffIso,
   drainBackfillQueue,
+  resolveManualBatchSize,
+  selectDueOrganisations,
   type BackfillStore,
+  type OrgFetchState,
 } from "./three-sixty-giving-backfill.ts";
 
 const NOW = new Date("2026-09-04T12:00:00.000Z");
+const CUTOFF = cutoffIso(NOW);
 
 type Recorded = {
   stamped: string[][];
@@ -50,6 +56,68 @@ describe("cutoffIso", () => {
 
   it("defaults to the documented refetch window", () => {
     assert.equal(cutoffIso(NOW), cutoffIso(NOW, REFETCH_AFTER_DAYS));
+  });
+});
+
+describe("resolveManualBatchSize", () => {
+  it("accepts a number within range", () => {
+    assert.equal(resolveManualBatchSize(50), 50);
+  });
+
+  it("coerces the FormData string the button submits", () => {
+    assert.equal(resolveManualBatchSize("50"), 50);
+  });
+
+  it("falls back to the default when nothing was submitted", () => {
+    assert.equal(resolveManualBatchSize(null), MANUAL_BACKFILL_BATCH_SIZE);
+    assert.equal(resolveManualBatchSize(undefined), MANUAL_BACKFILL_BATCH_SIZE);
+    assert.equal(resolveManualBatchSize(""), MANUAL_BACKFILL_BATCH_SIZE);
+  });
+
+  it("falls back to the default above the max rather than running it", () => {
+    // A tampered value must never widen the slice past what fits the ceiling.
+    assert.equal(resolveManualBatchSize(MANUAL_BACKFILL_MAX + 1), MANUAL_BACKFILL_BATCH_SIZE);
+    assert.equal(resolveManualBatchSize(0), MANUAL_BACKFILL_BATCH_SIZE);
+    assert.equal(resolveManualBatchSize(2.5), MANUAL_BACKFILL_BATCH_SIZE);
+    assert.equal(resolveManualBatchSize("fifty"), MANUAL_BACKFILL_BATCH_SIZE);
+  });
+});
+
+describe("selectDueOrganisations", () => {
+  const state = (id: string, grants_fetched_at: string | null): OrgFetchState => ({
+    id,
+    grants_fetched_at,
+  });
+
+  it("leaves out suppressed organisations entirely", () => {
+    const states = [state("org-a", null), state("org-b", null), state("org-c", null)];
+    assert.deepEqual(
+      selectDueOrganisations(states, new Set(["org-b"]), CUTOFF, 10),
+      ["org-a", "org-c"],
+    );
+  });
+
+  it("takes never-checked rows first, then oldest first", () => {
+    const states = [
+      state("fresh", "2026-03-01T00:00:00.000Z"),
+      state("never", null),
+      state("stale", "2026-01-01T00:00:00.000Z"),
+    ];
+    assert.deepEqual(selectDueOrganisations(states, new Set(), CUTOFF, 10), [
+      "never",
+      "stale",
+      "fresh",
+    ]);
+  });
+
+  it("treats the cutoff as strictly older-than, like the SQL it replaced", () => {
+    const states = [state("edge", CUTOFF), state("due", "2026-01-01T00:00:00.000Z")];
+    assert.deepEqual(selectDueOrganisations(states, new Set(), CUTOFF, 10), ["due"]);
+  });
+
+  it("respects the slice limit", () => {
+    const states = [state("a", null), state("b", null), state("c", null)];
+    assert.deepEqual(selectDueOrganisations(states, new Set(), CUTOFF, 2), ["a", "b"]);
   });
 });
 

@@ -30,6 +30,7 @@
 import type {
   CommonRecord,
   DataSourceAdapter,
+  FetchProgressCallback,
   SourceFetchResult,
 } from "../type.ts";
 import { buildAdminClient } from "../../supabase/admin-client-factory.ts";
@@ -150,11 +151,12 @@ export function createThreeSixtyGivingLookupAdapter(
   return {
     name: "360giving",
 
-    async fetch(): Promise<SourceFetchResult> {
+    async fetch(reportProgress?: FetchProgressCallback): Promise<SourceFetchResult> {
       const orgId = lookupToOrgId(lookup);
       const records = await fetchGrantsForOrgId(orgId);
       // A single-organisation lookup always walks exactly one org — even when
       // it has no grants, that is a real result, not an empty walk.
+      reportProgress?.({ walked: 1, total: 1 });
       return { records, truncated: false, walkedOrganisations: 1 };
     },
 
@@ -211,7 +213,7 @@ export function createThreeSixtyGivingAdapter(
   return {
     name: "360giving",
 
-    async fetch(): Promise<SourceFetchResult> {
+    async fetch(reportProgress?: FetchProgressCallback): Promise<SourceFetchResult> {
       const identifiers = await loadIdentifiers();
       const walkable = identifiers.filter(
         (identifier) => ORG_ID_PREFIX[identifier.identifier_type],
@@ -219,7 +221,8 @@ export function createThreeSixtyGivingAdapter(
       const records: CommonRecord[] = [];
       const seenSourceRecordIds = new Set<string>();
 
-      for (const identifier of walkable) {
+      for (let index = 0; index < walkable.length; index++) {
+        const identifier = walkable[index];
         const prefix = ORG_ID_PREFIX[identifier.identifier_type];
         const orgRecords = await fetchGrantsForOrgId(`${prefix}${identifier.identifier_value}`);
         for (const record of orgRecords) {
@@ -232,6 +235,11 @@ export function createThreeSixtyGivingAdapter(
           seenSourceRecordIds.add(record.source_record_id);
           records.push(record);
         }
+
+        // One heartbeat per organisation walked — this is the signal the
+        // admin screen polls for its live "asked X of Y" count. Synchronous
+        // and non-throwing by contract, so it adds no latency to the walk.
+        reportProgress?.({ walked: index + 1, total: walkable.length });
 
         await sleep(REQUEST_INTERVAL_MS);
       }

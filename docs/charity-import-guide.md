@@ -274,6 +274,45 @@ that refreshing isn't configured here.
 
 ---
 
+## Staff and volunteer counts
+
+Charities report how many staff and volunteers they have on Part B of the annual
+return. That part is only published in the bulk extract, so it reaches us through
+the register file and never through the live lookup. A client whose accounts came
+in through the lookup therefore has five years of income and a blank where the
+headcount should be, and the Financials tab says "People — not reported" for a
+charity that in fact declares thousands of them.
+
+Re-running an import does not fix it: a charity already on the client list is
+recorded as a match rather than imported again.
+
+The weekly accounts refresh now fills this in by itself, straight after it
+writes, so in normal running you should never need to touch it. **Staff and
+volunteer counts** on the imports page is there for when you do: it shows how
+many of your charities already hold everything the register publishes about their
+filed years, and fills in the rest at one press, rather than waiting for the next
+weekly run. Same permission as importing: CAMs and admins, not viewers.
+
+One gap neither can close: the register file rebuilds monthly, so a year filed
+since the last rebuild has no staff count published anywhere yet. It appears on
+its own once the register is next refreshed.
+
+Worth knowing:
+
+- It only ever **adds**. A figure already on a record is left exactly as it is,
+  even where the register now disagrees.
+- It only touches years you already hold. Adding a missing filed year is an
+  import, and the import screen is where that decision is made.
+- Income, expenditure and the income breakdown are never rewritten. Those come
+  from the nightly lookup and stay its job.
+- A charity that files an entry-level return has no Part B anywhere, so it is
+  never counted as outstanding. The counter reaching every charity means every
+  charity.
+- It needs the register loaded, so if the card offers nothing, check the register
+  card above it first.
+
+---
+
 ## Common questions
 
 **Can I undo an import?**

@@ -326,14 +326,13 @@ export default async function ClientFinancialsPage({
           {hasFilings ? (
             <SectionCard
               headingId="fin-scale-heading"
-              hint="How big they are — money, people and ground covered — against the clients we hold."
+              hint="How big they are in money, people and ground covered, set against the clients we hold."
               number={1}
               title="Scale"
             >
               <FinancialsHeroCard
                 filings={periods}
                 geography={geography}
-                organisationId={id}
                 peerStats={peerStats}
                 sector={sector}
                 series={series}

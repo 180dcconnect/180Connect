@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Tag } from "lucide-react";
 
+import { MAX_TAGS_PER_CLIENT } from "@/lib/tags/assign-tag-core";
 import { AddTagPopover } from "./add-tag-popover";
 import { SectionCard } from "./section-card";
 import { TagsSection, type AvailableTag, type ClientTag } from "./tags-section";
@@ -50,25 +51,34 @@ export function TagsCard({
       className={pickerOpen ? "relative z-40" : ""}
       action={
         canEdit ? (
-          <AddTagPopover
-            organisationId={organisationId}
-            assignableTags={assignableTags}
-            assignedTags={clientTags}
-            open={pickerOpen}
-            onOpenChange={setPickerOpen}
-            onTagCreated={(newTag) =>
-              setAllAvailableTags((current) =>
-                current.some((t) => t.id === newTag.id) ? current : [...current, newTag],
-              )
-            }
-            onBatchAssigned={(tags: AvailableTag[]) =>
-              setClientTags((current) => {
-                const existingIds = new Set(current.map((t: ClientTag) => t.id));
-                const newOnes = tags.filter((t: AvailableTag) => !existingIds.has(t.id));
-                return [...current, ...newOnes];
-              })
-            }
-          />
+          clientTags.length >= MAX_TAGS_PER_CLIENT ? (
+            /* At the per-client cap there is nothing to add, so the picker is
+                not offered — a count the removal buttons beside each tag can
+                bring back under the limit. */
+            <span className="text-xs font-semibold text-faint">
+              {MAX_TAGS_PER_CLIENT} of {MAX_TAGS_PER_CLIENT} tags used
+            </span>
+          ) : (
+            <AddTagPopover
+              organisationId={organisationId}
+              assignableTags={assignableTags}
+              assignedTags={clientTags}
+              open={pickerOpen}
+              onOpenChange={setPickerOpen}
+              onTagCreated={(newTag) =>
+                setAllAvailableTags((current) =>
+                  current.some((t) => t.id === newTag.id) ? current : [...current, newTag],
+                )
+              }
+              onBatchAssigned={(tags: AvailableTag[]) =>
+                setClientTags((current) => {
+                  const existingIds = new Set(current.map((t: ClientTag) => t.id));
+                  const newOnes = tags.filter((t: AvailableTag) => !existingIds.has(t.id));
+                  return [...current, ...newOnes];
+                })
+              }
+            />
+          )
         ) : null
       }
     >

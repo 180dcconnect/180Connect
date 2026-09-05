@@ -307,9 +307,22 @@ function numberAt(row: BulkAnnualReturn, key: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * A filed yes/no, from either shape the extract reaches us in.
+ *
+ * The daily extract publishes real JSON booleans. The register file does not:
+ * SQLite has no boolean type, so `scripts/build-register-sqlite.mts` stores
+ * these as INTEGER and `node:sqlite` reads them back as 0 and 1 — all 513,910
+ * of them. Accepting only `boolean` therefore turned every government-funding
+ * flag that came through the register file into a null, silently, on the import
+ * path as well as the backfill. Anything else — a string, undefined, a missing
+ * key — is still "not published", because that is what it is.
+ */
 function booleanAt(row: BulkAnnualReturn, key: string): boolean | null {
   const value = row[key];
-  return typeof value === "boolean" ? value : null;
+  if (typeof value === "boolean") return value;
+  if (value === 0 || value === 1) return value === 1;
+  return null;
 }
 
 function dateAt(row: BulkAnnualReturn, key: string): string | null {

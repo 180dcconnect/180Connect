@@ -19,6 +19,16 @@ import {
 import { LABEL_KIND } from "@/lib/charity-register/sqlite-query";
 import { createDefaultIngestionStore } from "@/lib/ingestion/store";
 import { importSelection } from "@/lib/charity-register/import";
+import {
+  runAnnualReturnBackfill,
+  MAX_BACKFILL,
+  DEFAULT_BACKFILL,
+} from "@/lib/charity-register/annual-return-backfill";
+import {
+  runProfileBackfill,
+  MAX_BACKFILL as MAX_PROFILE_BACKFILL,
+  DEFAULT_BACKFILL as DEFAULT_PROFILE_BACKFILL,
+} from "@/lib/charity-register/profile-backfill";
 import { promotePendingCharityCommissionBulkRecords } from "@/lib/standardize/write-organisations";
 
 /**
@@ -425,5 +435,252 @@ export async function deleteFilterPreset(id: string): Promise<PresetState> {
       actorUserId: authorization.actor.id,
     });
     return { ok: false, message: "The filter set could not be deleted." };
+  }
+}
+
+/**
+ * ── Annual return backfill ──
+ *
+ * The Part B catch-up. See `lib/charity-register/annual-return-backfill.ts` for
+ * why it exists; this is the door onto it, gated the same way every other
+ * action on this screen is and recorded the same way an import is.
+ */
+
+export type AnnualReturnBackfillState =
+  | { kind: "idle"; message: string }
+  | { kind: "error"; message: string }
+  | { kind: "done"; message: string; organisations: number; periods: number; remaining: number };
+
+export async function runAnnualReturnBackfillNow(
+  _previous: AnnualReturnBackfillState,
+  formData: FormData,
+): Promise<AnnualReturnBackfillState> {
+  const authorization = await getCurrentActor(IMPORT_PERMISSION);
+  if (!authorization.ok) {
+    return { kind: "error", message: actorFailureMessage(authorization.reason) };
+  }
+
+  if (registerUnavailableReason()) {
+    return { kind: "error", message: REGISTER_MISSING };
+  }
+
+  const requested = Number(formData.get("batchSize"));
+  const limit =
+    Number.isInteger(requested) && requested > 0
+      ? Math.min(requested, MAX_BACKFILL)
+      : DEFAULT_BACKFILL;
+
+  let runId: string | null = null;
+  try {
+    const supabase = requireAdminClient();
+
+    const { data: run, error: runError } = await supabase
+      .from("ingestion_runs")
+      .insert({
+        api_source: "charity_commission_bulk",
+        triggered_by: "manual",
+        triggered_by_user_id: authorization.actor.id,
+        job_status: "running",
+      })
+      .select("id")
+      .single();
+    if (runError) throw runError;
+    runId = run.id as string;
+
+    const outcome = await runAnnualReturnBackfill(supabase, limit);
+
+    await supabase
+      .from("ingestion_runs")
+      .update({
+        job_status: outcome.remaining > 0 ? "partial" : "completed",
+        completed_at: new Date().toISOString(),
+        records_fetched: outcome.organisations,
+        records_inserted: outcome.periods,
+        records_skipped: 0,
+        records_failed: 0,
+        run_stats: {
+          job: "annual_return_backfill",
+          organisations: outcome.organisations,
+          periods: outcome.periods,
+          remaining: outcome.remaining,
+        },
+      })
+      .eq("id", runId);
+
+    await supabase.from("audit_log").insert({
+      actor_user_id: authorization.actor.id,
+      action: "charity_annual_return_backfilled",
+      target_table: "ingestion_runs",
+      target_id: runId,
+      detail: {
+        organisations: outcome.organisations,
+        periods: outcome.periods,
+        remaining: outcome.remaining,
+        limit,
+      },
+    });
+
+    revalidatePath("/admin/charity-commission");
+
+    if (outcome.organisations === 0) {
+      return {
+        kind: "done",
+        message: "Nothing to fill in — every charity already holds what the register publishes.",
+        ...outcome,
+      };
+    }
+
+    return {
+      kind: "done",
+      message:
+        `Filled ${outcome.periods.toLocaleString()} filed ${outcome.periods === 1 ? "year" : "years"} ` +
+        `across ${outcome.organisations.toLocaleString()} ${outcome.organisations === 1 ? "charity" : "charities"}` +
+        (outcome.remaining > 0 ? `. ${outcome.remaining.toLocaleString()} still queued.` : "."),
+      ...outcome,
+    };
+  } catch (error) {
+    if (runId) {
+      const supabase = createAdminClient();
+      await supabase
+        ?.from("ingestion_runs")
+        .update({
+          job_status: "failed",
+          completed_at: new Date().toISOString(),
+          error_message: error instanceof Error ? error.message : String(error),
+        })
+        .eq("id", runId);
+    }
+    await reportError(error, { operation: "admin.charity_annual_return_backfill" });
+    return {
+      kind: "error",
+      message: "The backfill could not be run. The error has been reported.",
+    };
+  }
+}
+
+/**
+ * ── Register profile backfill ──
+ *
+ * The activities/sector catch-up. See
+ * `lib/charity-register/profile-backfill.ts` for why it exists — in short, the
+ * import writes these four fields only on the insert path, so a charity already
+ * on the client list can never receive them. This is the door onto it, gated
+ * and recorded exactly as the Part B backfill beside it.
+ */
+
+export type ProfileBackfillState =
+  | { kind: "idle"; message: string }
+  | { kind: "error"; message: string }
+  | { kind: "done"; message: string; organisations: number; fields: number; remaining: number };
+
+export async function runProfileBackfillNow(
+  _previous: ProfileBackfillState,
+  formData: FormData,
+): Promise<ProfileBackfillState> {
+  const authorization = await getCurrentActor(IMPORT_PERMISSION);
+  if (!authorization.ok) {
+    return { kind: "error", message: actorFailureMessage(authorization.reason) };
+  }
+
+  if (registerUnavailableReason()) {
+    return { kind: "error", message: REGISTER_MISSING };
+  }
+
+  const requested = Number(formData.get("batchSize"));
+  const limit =
+    Number.isInteger(requested) && requested > 0
+      ? Math.min(requested, MAX_PROFILE_BACKFILL)
+      : DEFAULT_PROFILE_BACKFILL;
+
+  let runId: string | null = null;
+  try {
+    const supabase = requireAdminClient();
+
+    const { data: run, error: runError } = await supabase
+      .from("ingestion_runs")
+      .insert({
+        api_source: "charity_commission_bulk",
+        triggered_by: "manual",
+        triggered_by_user_id: authorization.actor.id,
+        job_status: "running",
+      })
+      .select("id")
+      .single();
+    if (runError) throw runError;
+    runId = run.id as string;
+
+    const outcome = await runProfileBackfill(supabase, limit);
+
+    await supabase
+      .from("ingestion_runs")
+      .update({
+        job_status: outcome.remaining > 0 ? "partial" : "completed",
+        completed_at: new Date().toISOString(),
+        records_fetched: outcome.organisations,
+        // This job updates organisations in place and never inserts one. There
+        // is no records_updated column, and counting the updates as "inserted"
+        // would put organisations on Import Status that were never created —
+        // so the count stays zero here and the real figures live in run_stats,
+        // which is where the admin card reads them from anyway.
+        records_inserted: 0,
+        records_skipped: 0,
+        records_failed: 0,
+        run_stats: {
+          job: "profile_backfill",
+          organisations: outcome.organisations,
+          fields: outcome.fields,
+          remaining: outcome.remaining,
+        },
+      })
+      .eq("id", runId);
+
+    await supabase.from("audit_log").insert({
+      actor_user_id: authorization.actor.id,
+      action: "charity_register_profile_backfilled",
+      target_table: "ingestion_runs",
+      target_id: runId,
+      detail: {
+        organisations: outcome.organisations,
+        fields: outcome.fields,
+        remaining: outcome.remaining,
+        limit,
+      },
+    });
+
+    revalidatePath("/admin/charity-commission");
+
+    if (outcome.organisations === 0) {
+      return {
+        kind: "done",
+        message: "Nothing to fill in — every charity already holds what the register publishes.",
+        ...outcome,
+      };
+    }
+
+    return {
+      kind: "done",
+      message:
+        `Filled ${outcome.fields.toLocaleString()} ${outcome.fields === 1 ? "field" : "fields"} ` +
+        `across ${outcome.organisations.toLocaleString()} ${outcome.organisations === 1 ? "charity" : "charities"}` +
+        (outcome.remaining > 0 ? `. ${outcome.remaining.toLocaleString()} still queued.` : "."),
+      ...outcome,
+    };
+  } catch (error) {
+    if (runId) {
+      const supabase = createAdminClient();
+      await supabase
+        ?.from("ingestion_runs")
+        .update({
+          job_status: "failed",
+          completed_at: new Date().toISOString(),
+          error_message: error instanceof Error ? error.message : String(error),
+        })
+        .eq("id", runId);
+    }
+    await reportError(error, { operation: "admin.charity_register_profile_backfill" });
+    return {
+      kind: "error",
+      message: "The backfill could not be run. The error has been reported.",
+    };
   }
 }

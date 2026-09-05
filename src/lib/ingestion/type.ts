@@ -86,9 +86,33 @@ export interface SourceFetchResult {
 /** Implemented once per external source. The runner knows nothing else about them. */
 export interface DataSourceAdapter {
   name: DataSourceName;
-  fetch(): Promise<SourceFetchResult>;
+  /**
+   * Optional progress sink, called as the fetch works through its own units
+   * of work. Only adapters whose fetch is a long per-organisation walk
+   * (360giving) emit it — every other adapter ignores the argument, so this
+   * stays optional and no existing adapter changes. The runner persists each
+   * report onto the run row, so a client polling `ingestion_runs` sees a live
+   * walked/total count instead of a frozen spinner.
+   */
+  fetch(reportProgress?: FetchProgressCallback): Promise<SourceFetchResult>;
   onError(err: Error): void;
 }
+
+/**
+ * Incremental progress from a long fetch, reported while it runs.
+ *
+ * `walked` counts organisation-level lookups completed so far; `total` is how
+ * many the walk will attempt. Flat numbers, same convention as
+ * SourceFetchResult.stats — nothing computes from them, they are only read by
+ * the admin screens.
+ */
+export type FetchProgress = {
+  walked: number;
+  total: number;
+};
+
+/** Receives FetchProgress reports during `fetch()`. Synchronous and non-throwing: the runner persists the report in the background. */
+export type FetchProgressCallback = (progress: FetchProgress) => void;
 
 export type JobStatus = "running" | "completed" | "failed" | "partial";
 
@@ -140,6 +164,16 @@ export interface IngestionStore {
     sourceRecordIds: string[],
   ): Promise<Map<string, { checksum: string; ingestion_attempt: number }>>;
   writeRecords(rows: RawRecordRow[]): Promise<void>;
+  /**
+   * Records incremental fetch progress on a still-running run row, written
+   * into `run_stats` as `{ walked_organisations, total_organisations }` for a
+   * client polling the run to read.
+   *
+   * Best-effort by contract: the runner swallows a rejection rather than
+   * failing the import over it, and `finishRun` overwrites `run_stats` with
+   * the source's final stats, so a missed heartbeat leaves no trace.
+   */
+  updateRunProgress(runId: string, progress: FetchProgress): Promise<void>;
   finishRun(
     runId: string,
     status: JobStatus,

@@ -173,4 +173,38 @@ describe("createThreeSixtyGivingAdapter", () => {
     assert.equal(result.records.length, 1);
     assert.equal(result.records[0].source_record_id, "360G-shared");
   });
+
+  it("reports one heartbeat per organisation walked, skipping other types", async () => {
+    globalThis.fetch = async () => grantsPage([]);
+
+    const seen: Array<{ walked: number; total: number }> = [];
+    const result = await createThreeSixtyGivingAdapter({
+      loadIdentifiers: async () => [
+        { identifier_type: "uk_charity", identifier_value: "1164883" },
+        { identifier_type: "uk_company", identifier_value: "09668396" },
+        { identifier_type: "website", identifier_value: "https://example.org" },
+      ],
+    }).fetch((progress) => {
+      seen.push(progress);
+    });
+
+    assert.equal(result.walkedOrganisations, 2);
+    assert.deepEqual(seen, [
+      { walked: 1, total: 2 },
+      { walked: 2, total: 2 },
+    ]);
+  });
+
+  it("reports a single 1-of-1 heartbeat for a single-organisation lookup", async () => {
+    globalThis.fetch = async () => grantsPage([]);
+
+    const seen: Array<{ walked: number; total: number }> = [];
+    await createThreeSixtyGivingLookupAdapter({
+      charityNumber: "1164883",
+    }).fetch((progress) => {
+      seen.push(progress);
+    });
+
+    assert.deepEqual(seen, [{ walked: 1, total: 1 }]);
+  });
 });

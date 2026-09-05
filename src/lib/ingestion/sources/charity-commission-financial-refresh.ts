@@ -31,6 +31,7 @@
 import { buildAdminClient } from "../../supabase/admin-client-factory.ts";
 import { reportError } from "../../error-logging.ts";
 import { buildFinancialPeriods } from "../../financials/charity-financial-periods.ts";
+import { fillPartBFor } from "../../charity-register/annual-return-backfill.ts";
 import { chunk } from "./charity-commission.ts";
 import {
   charityCommissionHeaders,
@@ -67,6 +68,8 @@ export type FinancialRefreshResult = {
   periodsWritten: number;
   /** True when the budget stopped the run early — there is more to do. */
   budgetExhausted: boolean;
+  /** Period rows the register filled in behind the API write. */
+  partBFilled: number;
 };
 
 /** The columns loadTargets reads back for each stored period. */
@@ -268,12 +271,17 @@ export async function runCharityCommissionFinancialRefresh(options?: {
   const headers = charityCommissionHeaders();
   const targets = await loadTargets(supabase, options?.limit ?? 5_000);
 
+  // The charities this run actually wrote, so the Part B pass below asks the
+  // register about those rather than re-walking the whole book every week.
+  const written = new Set<string>();
+
   const result: FinancialRefreshResult = {
     checked: 0,
     historyFetched: 0,
     organisationsWritten: 0,
     periodsWritten: 0,
     budgetExhausted: false,
+    partBFilled: 0,
   };
   if (targets.length === 0) return result;
 
@@ -371,6 +379,24 @@ export async function runCharityCommissionFinancialRefresh(options?: {
 
     result.organisationsWritten += 1;
     result.periodsWritten += periods.length;
+    written.add(target.organisationId);
+  }
+
+  // The half of the annual return this endpoint does not publish, taken off the
+  // register file that already ships with the deployment. Doing it here rather
+  // than leaving it to the button is what keeps a newly filed year from arriving
+  // with a blank headcount and staying that way — see `fillPartBFor`.
+  //
+  // Swallowed rather than reported as a run failure: the refresh has already
+  // written what it came for, and a deployment with no register file (or one
+  // built by an older commit) must not turn that into a failed job.
+  try {
+    const filled = await fillPartBFor(supabase, written);
+    result.partBFilled = filled.periods;
+  } catch (error) {
+    await reportError(error, {
+      operation: "ingestion.charity_commission.financial_refresh.part_b",
+    });
   }
 
   return result;

@@ -117,7 +117,7 @@ export function MorphingPopover({
         reportTriggerSize,
       }}
     >
-      <div className={`relative inline-block ${className}`}>
+      <div className={`relative inline-block ${isOpen ? "z-50" : ""} ${className}`}>
         {children}
       </div>
     </MorphingPopoverContext.Provider>

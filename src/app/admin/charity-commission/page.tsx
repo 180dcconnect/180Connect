@@ -30,6 +30,7 @@
 // renders the `main` this is slotted into.
 
 import { redirect } from "next/navigation";
+import Image from "next/image";
 
 import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
@@ -39,15 +40,21 @@ import { InlineAlert } from "@/components/ui/inline-alert";
 import { GroupTabs } from "@/components/ui/group-tabs";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { parseFilters } from "@/lib/charity-register/filters";
+import { findBackfillTargets } from "@/lib/charity-register/annual-return-backfill";
+import { findProfileTargets } from "@/lib/charity-register/profile-backfill";
 import { labelValues, registerMeta } from "@/lib/charity-register/sqlite";
 import { LABEL_KIND } from "@/lib/charity-register/sqlite-query";
 import { DATA_IMPORTS_TABS } from "../import-group";
+import { AnnualReturnCard } from "./annual-return-card";
+import { RegisterProfileCard } from "./profile-card";
 import { CharityLookupDialog } from "./lookup-dialog";
 import { FilterBuilder, type PresetSummary } from "./filter-builder";
 import { ImportConsole, NewImportButton } from "./import-console";
 import { PipelinesGuide } from "./pipelines-guide";
 import { RecentRuns } from "./recent-runs";
 import { RegisterRail } from "./register-rail";
+import { MAX_BACKFILL } from "@/lib/charity-register/annual-return-backfill";
+import { MAX_BACKFILL as MAX_PROFILE_BACKFILL } from "@/lib/charity-register/profile-backfill";
 import type { CharityCommissionRun } from "./bulk-funnel";
 
 // The import runs inside a Server Action, not this page — but promotion of a
@@ -87,6 +94,36 @@ export default async function CharityCommissionPage() {
           .order("name")
       : Promise.resolve({ data: [], error: null }),
   ]);
+
+  // What the register could still add to the client list. Cheap enough to read
+  // on every page load: the expensive half is the local file, and the Postgres
+  // half is two reads of a few thousand rows. Degrades to null rather than
+  // failing the page — the coverage card is the least important thing here, and
+  // a missing register file is its normal empty case, not an error.
+  let coverage = null;
+  if (admin) {
+    try {
+      coverage = (await findBackfillTargets(admin)).coverage;
+    } catch (error) {
+      await reportError(error, {
+        operation: "admin.charity_commission.annual_return_coverage",
+      });
+    }
+  }
+
+  // The same read for the profile fields, degrading the same way and for the
+  // same reasons. Kept separate rather than folded into the one above: they
+  // answer different questions and either can be empty while the other is not.
+  let profileCoverage = null;
+  if (admin) {
+    try {
+      profileCoverage = (await findProfileTargets(admin)).coverage;
+    } catch (error) {
+      await reportError(error, {
+        operation: "admin.charity_commission.register_profile_coverage",
+      });
+    }
+  }
 
   // The register is a file in the deployment, not a table — reading it is
   // synchronous and needs no await, and no Supabase round trip.
@@ -132,9 +169,26 @@ export default async function CharityCommissionPage() {
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="mx-auto max-w-5xl space-y-8">
         <Rise>
-          <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
-            Charity Commission
-          </h1>
+          <div className="flex items-center gap-4">
+            <a
+              href="https://register-of-charities.charitycommission.gov.uk"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Charity Commission register (opens in a new tab)"
+              className="shrink-0 transition-opacity hover:opacity-80"
+            >
+              <Image
+                src="/sources/charity-commission.png"
+                alt=""
+                width={56}
+                height={56}
+                className="h-14 w-auto"
+              />
+            </a>
+            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
+              Charity Commission
+            </h1>
+          </div>
           <GroupTabs
             className="mt-4"
             tabs={DATA_IMPORTS_TABS}
@@ -188,6 +242,26 @@ export default async function CharityCommissionPage() {
                     <InlineAlert
                       variant="page"
                       message="The register has not been loaded yet, so there is nothing to import from. Refresh it from the link above the history."
+                    />
+                  )}
+
+                  {coverage && coverage.charities > 0 && (
+                    <AnnualReturnCard
+                      charities={coverage.charities}
+                      covered={coverage.covered}
+                      pending={coverage.pending}
+                      pendingPeriods={coverage.pendingPeriods}
+                      maxBatchSize={MAX_BACKFILL}
+                    />
+                  )}
+
+                  {profileCoverage && profileCoverage.charities > 0 && (
+                    <RegisterProfileCard
+                      charities={profileCoverage.charities}
+                      covered={profileCoverage.covered}
+                      pending={profileCoverage.pending}
+                      pendingFields={profileCoverage.pendingFields}
+                      maxBatchSize={MAX_PROFILE_BACKFILL}
                     />
                   )}
 

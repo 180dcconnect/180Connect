@@ -21,6 +21,7 @@ import type {
   CommonRecord,
   DataSourceAdapter,
   DataSourceName,
+  FetchProgressCallback,
   IngestionStore,
   JobStatus,
   RawRecordRow,
@@ -182,7 +183,17 @@ async function runOneSource(
   }
 
   try {
-    const { records, truncated, walkedOrganisations, stats } = await source.fetch();
+    // Incremental progress for long per-organisation walks (360Giving): the
+    // adapter reports each completed lookup and the store persists it onto
+    // the run row, so an admin screen polling ingestion_runs sees a live
+    // walked/total count. Best-effort — a failed progress write is swallowed
+    // rather than failing the import, and finishRun still records the
+    // authoritative totals below.
+    const reportProgress: FetchProgressCallback = (progress) => {
+      void store.updateRunProgress(run.id, progress).catch(() => {});
+    };
+    const { records, truncated, walkedOrganisations, stats } =
+      await source.fetch(reportProgress);
     counts.fetched = records.length;
 
     const existing = await store.loadChecksums(

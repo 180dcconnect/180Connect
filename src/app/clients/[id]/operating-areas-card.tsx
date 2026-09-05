@@ -18,6 +18,7 @@ import {
   formatCountryName,
   formatGeographicReach,
 } from "@/lib/organisation-format";
+import { countryFlagEmoji } from "@/lib/country-flags";
 import { Pill, SectionCard } from "./section-card";
 
 const INITIAL_VISIBLE_COUNT = 12;
@@ -111,7 +112,10 @@ export function OperatingAreasCard({
                 <span>{formattedCity || "Not on file"}</span>
               )}
             </p>
-            <p className="text-[12px] text-faint">{formattedCountry}</p>
+            <p className="text-[12px] text-faint">
+              {countryFlagEmoji(registeredCountry) ? `${countryFlagEmoji(registeredCountry)} ` : ""}
+              {formattedCountry}
+            </p>
           </div>
 
           <div className="min-w-0">
@@ -224,15 +228,27 @@ export function OperatingAreasCard({
                   </h3>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                  {visibleCountries.map((country) => (
-                    <span
-                      key={country}
-                      className="inline-flex items-center gap-1 rounded-md border border-rule-soft bg-rule-subtle px-2.5 py-1 text-[12.5px] font-medium text-ink transition-colors hover:bg-black/[0.04]"
-                    >
-                      <Globe className="size-3 text-faint" />
-                      {country}
-                    </span>
-                  ))}
+                  {visibleCountries.map((country) => {
+                    const flag = countryFlagEmoji(country);
+                    return (
+                      <span
+                        key={country}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-rule-soft bg-rule-subtle px-2.5 py-1 text-[12.5px] font-medium text-ink transition-colors hover:bg-black/[0.04]"
+                      >
+                        {flag ? (
+                          <span
+                            aria-hidden="true"
+                            className="text-[14px] leading-none select-none"
+                          >
+                            {flag}
+                          </span>
+                        ) : (
+                          <Globe className="size-3 text-faint" />
+                        )}
+                        {country}
+                      </span>
+                    );
+                  })}
                 </div>
                 {countries.length > INITIAL_VISIBLE_COUNT && (
                   <button

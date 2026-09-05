@@ -30,9 +30,12 @@ import { SectionCard } from "./section-card";
  *
  * Answers the CAM's "why does this client score what it scores?" straight on
  * the profile: each parameter's contribution to the final number as a
- * percentage of the score. Percentages rather than raw 0–1 factor values
- * because the audience is CAMs, not the engine — "sector contributed 18%" is
- * actionable; "sector = 0.9 × 0.2" is not.
+ * percentage of the score. Percentages as the headline rather than raw 0–1
+ * factor values, because the audience is CAMs, not the engine — "sector
+ * contributed 18%" is actionable; "sector = 0.9 × 0.2" is not. The raw grade
+ * is still available for the moment someone wants the number behind the
+ * verdict: the tooltip prints it beside the contribution share, and the method
+ * dialog rows carry it next to their verdict.
  *
  * The number itself, and the same split drawn as a ring, live in the record
  * header (`priority-dial.tsx`). This card is the readable form of it: named
@@ -62,7 +65,9 @@ import { SectionCard } from "./section-card";
  * that read as filler the second time you saw it — and the explanation is only
  * wanted for the one row you are questioning. Hover or focus a row and it tells
  * you what that parameter found; the phrasing changes with the value, so a
- * missing input says what is missing and a real reading says how strong it is.
+ * missing input says what is missing and a real reading says how strong it is,
+ * then prints the raw 0–1 grade itself — "how good was the previous contact"
+ * gets its number, not just its direction.
  */
 
 export type LatestScoreDetailRow = {
@@ -348,7 +353,7 @@ function BreakdownTable({ factors }: { factors: ScoreFactorsRecord }) {
                   <span className="mt-0.5 block text-white/70">
                     {isNeutral
                       ? blank
-                      : `Contributes ${percent.toFixed(1)}% of the final score.`}
+                      : `${value.toFixed(2)} out of 1.00 — contributes ${percent.toFixed(1)}% of the final score.`}
                   </span>
                 </TooltipContent>
               </Tooltip>
@@ -446,9 +451,11 @@ function MethodHeading({ children }: { children: ReactNode }) {
  * panel opened on reference material instead of on the answer.
  *
  * What it does now, in the order a reader wants it: the verdict on this client
- * for each check, with its share of the score right-aligned beside it, and the
- * scale behind it folded away under "What moves this check" for the one row
- * being questioned. Reference on demand, not reference by default.
+ * for each check, with its share of the score right-aligned beside it, the raw
+ * 0–1 reading printed beside the verdict for the moment the percentage isn't
+ * enough, and the scale behind it folded away under "What moves this check"
+ * for the one row being questioned. Reference on demand, not reference by
+ * default.
  *
  * The half-mark rule is stated once. It was in every neutral row, in its own
  * section, and in the card's coverage line — three tellings of the single most
@@ -621,6 +628,11 @@ function ScoreMethodDialog({
                             className={`size-1.5 rounded-full ${verdict.dotClass}`}
                           />
                           {verdict.label}
+                          {value !== null && !isBlank && (
+                            <span className="font-mono text-[11px] tabular-nums opacity-80">
+                              · {value.toFixed(2)} / 1.00
+                            </span>
+                          )}
                         </span>
                       )}
 

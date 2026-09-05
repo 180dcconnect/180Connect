@@ -63,7 +63,25 @@ export function PipelinesGuide() {
                 {[
                   {
                     step: "1. The register",
-                    body: "We keep a register file in the codebase containing every charity registered in England and Wales — around 172,000 of them. Every charity is registered in this file, but they are not in our database yet. The Refresh button at the top keeps this file up to date with the regulator's latest data.",
+                    body: (
+                      <>
+                        We keep a register file in the codebase containing every
+                        charity registered in England and Wales — around 172,000
+                        of them, matching{" "}
+                        <a
+                          href="https://register-of-charities.charitycommission.gov.uk"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-semibold text-lead hover:underline"
+                        >
+                          the Charity Commission&apos;s public register
+                        </a>
+                        . Every charity is registered in this file, but they are
+                        not in our database yet. The Refresh button at the top
+                        keeps this file up to date with the regulator&apos;s
+                        latest data.
+                      </>
+                    ),
                   },
                   {
                     step: "2. New import & filter",

@@ -31,10 +31,13 @@
  * grants and an organisation never asked about look identical on screen.
  */
 
+import { z } from "zod";
+
 import { createThreeSixtyGivingAdapter, type OrganisationIdentifier } from "./sources/threesixtygiving.ts";
 import { runIngestion } from "./runner.ts";
 import { promotePendingThreeSixtyGivingRecords } from "../standardize/three-sixty-giving.ts";
 import { buildAdminClient } from "../supabase/admin-client-factory.ts";
+import { boundedInt, safeValidate } from "../validation.ts";
 import type { RunTrigger } from "./type.ts";
 
 /**
@@ -50,6 +53,44 @@ import type { RunTrigger } from "./type.ts";
  * the schedule catches up within the hour.
  */
 export const BACKFILL_BATCH_SIZE = 200;
+
+/**
+ * How many organisations the admin "Run the next batch now" button walks.
+ *
+ * Deliberately much smaller than BACKFILL_BATCH_SIZE. The button runs as a
+ * Server Action behind `useActionState`, which only has a pending boolean —
+ * no progress events — so a 200-org slice (~3 minutes of 600ms-paced
+ * requests) looks exactly like a hung button. At ~1s per organisation, 25
+ * finishes in under ~30s, inside what anyone will wait for a button, while
+ * the 15-minute cron keeps draining 200 a slice in the background.
+ */
+export const MANUAL_BACKFILL_BATCH_SIZE = 25;
+
+/**
+ * Largest slice the admin button may take in one press.
+ *
+ * Arithmetic, not taste: at ~1s per organisation, 100 is around two minutes
+ * of fetching inside a 300s ceiling — the most anyone should wait behind a
+ * button, even one with a live count. Anything bigger belongs to the
+ * 15-minute schedule, which drains BACKFILL_BATCH_SIZE a slice unattended.
+ */
+export const MANUAL_BACKFILL_MAX = 100;
+
+const manualBatchSchema = z.object({
+  batchSize: boundedInt(1, MANUAL_BACKFILL_MAX),
+});
+
+/**
+ * Reads the admin button's requested slice size (a FormData string) and
+ * clamps it to the safe range. Anything missing, malformed or out of range —
+ * including a tampered value above the max — falls back to the default
+ * rather than erroring: every value in 1..MAX is safe to run, so there is
+ * nothing worth rejecting loudly here.
+ */
+export function resolveManualBatchSize(input: unknown): number {
+  const parsed = safeValidate(manualBatchSchema, { batchSize: input });
+  return parsed.success ? parsed.data.batchSize : MANUAL_BACKFILL_BATCH_SIZE;
+}
 
 /**
  * How long a fetched answer stays good.
@@ -69,6 +110,44 @@ export type QueuedOrganisation = {
   identifiers: OrganisationIdentifier[];
 };
 
+/** The two columns the queue reads to decide what is due. */
+export type OrgFetchState = {
+  id: string;
+  grants_fetched_at: string | null;
+};
+
+/**
+ * Picks the next slice of the queue out of already-fetched states.
+ *
+ * Pure so it is testable without a database: the store fetches, this decides.
+ * Suppressed (opted-out) organisations are out — they sit outside the outreach
+ * pool the dashboard's Total Organisations reports
+ * (`filterActiveSuppressed` in dashboard-metrics.ts), so counting or checking
+ * them here would push this page's total above that number. Never-checked
+ * (null) rows come first, then oldest first, matching the nulls-first index
+ * ordering the SQL version relied on.
+ */
+export function selectDueOrganisations(
+  states: OrgFetchState[],
+  suppressedIds: ReadonlySet<string>,
+  cutoffIsoValue: string,
+  limit: number,
+): string[] {
+  const due = states.filter(
+    (row) =>
+      !suppressedIds.has(row.id) &&
+      (row.grants_fetched_at === null || row.grants_fetched_at < cutoffIsoValue),
+  );
+  due.sort((a, b) => {
+    if (a.grants_fetched_at === null && b.grants_fetched_at === null) return 0;
+    if (a.grants_fetched_at === null) return -1;
+    if (b.grants_fetched_at === null) return 1;
+    if (a.grants_fetched_at === b.grants_fetched_at) return 0;
+    return a.grants_fetched_at < b.grants_fetched_at ? -1 : 1;
+  });
+  return due.slice(0, limit).map((row) => row.id);
+}
+
 export type BackfillStore = {
   loadDueOrganisations(limit: number, cutoffIso: string): Promise<string[]>;
   loadIdentifiersFor(organisationIds: string[]): Promise<
@@ -81,28 +160,60 @@ export type BackfillStore = {
 export function createDefaultBackfillStore(): BackfillStore | null {
   const supabase = buildAdminClient();
   if (!supabase) return null;
+  // Narrowed once for the closures below, which the guard above does not reach.
+  const db = supabase;
+
+  // Organisations with no registry identifier are selected too, and stamped
+  // like any other — see drainBackfillQueue for why that is the correct
+  // outcome rather than an oversight. Organisations under an active
+  // suppression are not selected at all: they are out of the outreach pool,
+  // so checking them would spend lookups on clients nobody may contact.
+  async function loadFetchStates(): Promise<OrgFetchState[]> {
+    const all: OrgFetchState[] = [];
+    const step = 1000;
+    for (let from = 0; ; from += step) {
+      const { data, error } = await db
+        .from("organisations")
+        .select("id, grants_fetched_at")
+        .order("id", { ascending: true })
+        .range(from, from + step - 1);
+
+      if (error) throw new Error(`Could not load the grants backfill queue: ${error.message}`);
+      const page = (data ?? []) as OrgFetchState[];
+      all.push(...page);
+      if (page.length < step) break;
+    }
+    return all;
+  }
+
+  async function loadSuppressedIds(): Promise<Set<string>> {
+    const ids = new Set<string>();
+    const step = 1000;
+    for (let from = 0; ; from += step) {
+      const { data, error } = await db
+        .from("suppressions")
+        .select("organisation_id")
+        .eq("status", "active")
+        .order("organisation_id", { ascending: true })
+        .range(from, from + step - 1);
+
+      if (error) throw new Error(`Could not load suppressed organisations: ${error.message}`);
+      const page = (data ?? []) as Array<{ organisation_id: string }>;
+      for (const row of page) ids.add(row.organisation_id);
+      if (page.length < step) break;
+    }
+    return ids;
+  }
 
   return {
     async loadDueOrganisations(limit, cutoffIso) {
-      // `nulls first` matches organisations_grants_fetched_at_idx, so this is an
-      // index scan rather than a sort of the whole table. Organisations with no
-      // registry identifier are selected too, and stamped like any other — see
-      // drainBackfillQueue for why that is the correct outcome rather than an
-      // oversight.
-      const { data, error } = await supabase
-        .from("organisations")
-        .select("id")
-        .or(`grants_fetched_at.is.null,grants_fetched_at.lt.${JSON.stringify(cutoffIso)}`)
-        .order("grants_fetched_at", { ascending: true, nullsFirst: true })
-        .limit(limit);
-
-      if (error) throw new Error(`Could not load the grants backfill queue: ${error.message}`);
-      return (data ?? []).map((row) => (row as { id: string }).id);
+      const [states, suppressed] = await Promise.all([loadFetchStates(), loadSuppressedIds()]);
+      return selectDueOrganisations(states, suppressed, cutoffIso, limit);
     },
 
     async loadIdentifiersFor(organisationIds) {
       if (organisationIds.length === 0) return [];
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("organisation_identifiers")
         .select("organisation_id, identifier_type, identifier_value")
         .in("organisation_id", organisationIds)
@@ -118,7 +229,7 @@ export function createDefaultBackfillStore(): BackfillStore | null {
 
     async markFetched(organisationIds, fetchedAtIso) {
       if (organisationIds.length === 0) return;
-      const { error } = await supabase
+      const { error } = await db
         .from("organisations")
         .update({ grants_fetched_at: fetchedAtIso })
         .in("id", organisationIds);
@@ -127,17 +238,12 @@ export function createDefaultBackfillStore(): BackfillStore | null {
     },
 
     async countRemaining(cutoffIso) {
-      const [due, total] = await Promise.all([
-        supabase
-          .from("organisations")
-          .select("id", { count: "exact", head: true })
-          .or(`grants_fetched_at.is.null,grants_fetched_at.lt.${JSON.stringify(cutoffIso)}`),
-        supabase.from("organisations").select("id", { count: "exact", head: true }),
-      ]);
-
-      if (due.error) throw new Error(`Could not count the queue: ${due.error.message}`);
-      if (total.error) throw new Error(`Could not count organisations: ${total.error.message}`);
-      return { due: due.count ?? 0, total: total.count ?? 0 };
+      const [states, suppressed] = await Promise.all([loadFetchStates(), loadSuppressedIds()]);
+      const live = states.filter((row) => !suppressed.has(row.id));
+      const due = live.filter(
+        (row) => row.grants_fetched_at === null || row.grants_fetched_at < cutoffIso,
+      ).length;
+      return { due, total: live.length };
     },
   };
 }
@@ -163,7 +269,7 @@ export type BackfillResult = {
  *
  * Returns without touching the network when nothing is due, which is the normal
  * outcome once the queue has drained. That is what makes a frequent schedule
- * cheap: an idle run costs one counting query and no API calls at all.
+ * cheap: an idle run costs a few light queries and no API calls at all.
  */
 export async function drainBackfillQueue(
   options: {

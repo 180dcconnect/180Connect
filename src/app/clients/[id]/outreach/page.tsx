@@ -510,7 +510,7 @@ export default async function ClientOutreachPage({
             </Rise>
           )}
 
-          <Rise>
+          <Rise className="relative z-30">
             {/* Add note rides the heading row, so the composer opens downward
                 over the list rather than pushing it — see add-note-form.tsx. */}
             <SectionCard
@@ -528,7 +528,7 @@ export default async function ClientOutreachPage({
             </SectionCard>
           </Rise>
 
-          <Rise>
+          <Rise className="relative z-10">
             <SectionCard
               headingId="attachments-heading"
               title="Attachments"

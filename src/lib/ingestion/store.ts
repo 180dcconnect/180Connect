@@ -8,6 +8,7 @@ import { buildAdminClient } from "../supabase/admin-client-factory.ts";
 import type { RedactionKind } from "./personal-data.ts";
 import type {
   DataSourceName,
+  FetchProgress,
   IngestionStore,
   JobStatus,
   RawRecordRow,
@@ -85,6 +86,23 @@ export function createSupabaseIngestionStore(
 
         if (error) throw error;
       }
+    },
+
+    async updateRunProgress(runId: string, progress: FetchProgress) {
+      // A heartbeat, not a ledger: finishRun overwrites run_stats with the
+      // source's final stats, so each write simply replaces the last one.
+      // Flat numbers only, per the SourceFetchResult.stats convention.
+      const { error } = await supabase
+        .from("ingestion_runs")
+        .update({
+          run_stats: {
+            walked_organisations: progress.walked,
+            total_organisations: progress.total,
+          },
+        })
+        .eq("id", runId);
+
+      if (error) throw error;
     },
 
     async finishRun(

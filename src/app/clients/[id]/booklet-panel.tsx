@@ -5,6 +5,18 @@ import { Clock, ExternalLink, Globe, ShieldCheck, Sparkles } from "lucide-react"
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
 import { DeleteButton } from "@/components/ui/delete-button";
 import { GooeyEmailInput } from "@/components/ui/gooey-email-input";
+import { AnimateIcon } from "@/components/animate-ui/icons/icon";
+import { XIcon } from "@/components/animate-ui/icons/x";
+import {
+  MorphingDialog,
+  MorphingDialogClose,
+  MorphingDialogContainer,
+  MorphingDialogContent,
+  MorphingDialogDescription,
+  MorphingDialogSubtitle,
+  MorphingDialogTitle,
+  MorphingDialogTrigger,
+} from "@/components/core/morphing-dialog";
 import { BrandSearchBar } from "@/components/brand/search-bar";
 import { validateBookletWebsiteUrl } from "./outreach-actions";
 import { deleteBookletVersion } from "./booklet-actions";
@@ -39,12 +51,13 @@ import type { BookletSource } from "@/lib/booklet/sources";
  * and dash-bulleted blocks into a real list — see that file for why this only
  * works because the prompt dictates that exact format.
  *
- * F084 — Use Website URL in Booklet: before the first version exists the URL
- * lives inside the composer's "Add a website" row; once a version exists the
- * standalone field below takes over for regenerations. The field always starts
- * empty — never seeded from the client's stored website or from the last
- * version's URL. It is an *extra* page to scrape for this run, and a prefilled
- * one reads as a setting already applied: the CAM either pays for a scrape they
+ * F084 — Use Website URL in Booklet: the URL lives inside the composer's "Add
+ * a website" row, for first generations and regenerations alike — the header's
+ * Regenerate button reveals the composer rather than firing off the click.
+ * The field always starts empty and clears after each successful run — never
+ * seeded from the client's stored website or from the last version's URL. It
+ * is an *extra* page to scrape for this run, and a prefilled one reads as a
+ * setting already applied: the CAM either pays for a scrape they
  * never asked for or has to clear a box to decline it. The organisation's own
  * website still reaches the prompt as a plain field from the route's own read,
  * so nothing is lost by leaving this blank. Whatever's in the field at generate
@@ -60,14 +73,10 @@ import type { BookletSource } from "@/lib/booklet/sources";
  * AC2 needs the prior version to stay retrievable, not just timestamped. `history`
  * holds every earlier version this component knows about (seeded from
  * `priorVersions`, then grown in place each time generate() succeeds by archiving
- * whatever was `currentVersion` before the call). `viewingVersionId` picks a
- * historical entry to display read-only in place of the current one; it is purely
- * a local view toggle; nothing about the DB records or Regenerate's own behavior
- * changes while browsing history — regenerating always acts on "current", never on
- * whatever old version happens to be on screen, so a browsed history entry never
- * looks like it could be silently replaced by clicking Regenerate. Regenerate and
- * the URL field are hidden while a historical entry is shown for exactly that
- * reason; "Back to current" is the one action available there.
+ * whatever was `currentVersion` before the call). Each history entry opens in a
+ * MorphingDialog that shows that version's own text and sources on screen; the
+ * main card always shows the current version, so Regenerate never sits next to
+ * old content it could be mistaken for replacing.
  *
  * F087 — Booklet Source References: every version (fresh or historical) carries a
  * `sources` list (see sources.ts) rendered as a row of badges — profile data is
@@ -84,6 +93,15 @@ const STATUS_MESSAGES = [
   "Drafting outreach angles…",
   "Polishing the summary…",
 ];
+
+/**
+ * Floor for the generating spinner, in milliseconds. Real runs take ~1-20s,
+ * but a fast one would otherwise flash the loading state for a beat and read
+ * as a glitch rather than work done — so `generate()` holds `busy` to at
+ * least this long, artificially when it has to. Only extends short runs; a
+ * run that already took longer is unaffected.
+ */
+const MIN_GENERATION_SPIN_MS = 2500;
 
 // Matches bare URLs Gemini may emit (the prompt says "plain text only").
 // Trailing punctuation like "." or ")" is stripped so "https://example.org." links correctly.
@@ -185,6 +203,102 @@ function BookletContent({ booklet }: { booklet: string }) {
   );
 }
 
+/**
+ * F086 AC2: a prior version opened on screen. Each history row owns its dialog —
+ * MorphingDialog keeps its open state internally under its own useId, so a list
+ * of them needs no shared state. No image variant: booklets have no artwork, so
+ * the trigger is the row itself and the panel opens onto the sticky title bar,
+ * the same shape as the score method dialog in score-breakdown.tsx.
+ */
+function HistoryVersionDialog({ version }: { version: SavedBooklet }) {
+  return (
+    <MorphingDialog
+      transition={{
+        type: "spring",
+        bounce: 0,
+        duration: 0.5,
+        borderRadius: { type: "tween", duration: 0.08 },
+      }}
+    >
+      <MorphingDialogTrigger
+        className="w-full rounded-inset px-3 py-2 text-left text-sm text-dim transition-colors hover:bg-paper"
+        style={{ borderRadius: "6px" }}
+      >
+        Generated {formatGeneratedAt(version.generatedAt)}
+      </MorphingDialogTrigger>
+      <MorphingDialogContainer>
+        <MorphingDialogContent
+          className="pointer-events-auto relative flex max-h-[85vh] w-full flex-col overflow-y-auto border border-rule bg-white sm:w-[560px]"
+          style={{ borderRadius: "16px" }}
+        >
+          {/* Sticky header: scrolling lives on the dialog content itself, so the
+              title bar and close stay pinned while the version passes
+              underneath — same treatment as score-breakdown.tsx. */}
+          <div className="sticky top-0 z-20 rounded-t-[16px] border-b border-rule-soft bg-white/85 px-6 pt-5 pb-4 backdrop-blur-[4px] backdrop-saturate-150">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <MorphingDialogTitle>
+                  <h2 className="text-[19px] leading-[1.3] font-semibold tracking-[-0.01em] text-ink">
+                    Older booklet version
+                  </h2>
+                </MorphingDialogTitle>
+                <MorphingDialogSubtitle>
+                  <p className="mt-1 text-[13px] leading-[1.5] text-dim">
+                    Generated {formatGeneratedAt(version.generatedAt)} — read-only.
+                  </p>
+                </MorphingDialogSubtitle>
+              </div>
+              <MorphingDialogClose className="static flex size-8 shrink-0 items-center justify-center rounded-full text-faint transition-colors hover:bg-paper hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead-mid">
+                <AnimateIcon
+                  animateOnHover
+                  animateOnTap
+                  className="flex size-full items-center justify-center"
+                >
+                  <XIcon size={16} strokeWidth={1.75} aria-hidden="true" />
+                </AnimateIcon>
+              </MorphingDialogClose>
+            </div>
+          </div>
+
+          <div className="px-6 pt-5 pb-7">
+            <MorphingDialogDescription
+              disableLayoutAnimation
+              variants={{
+                initial: { opacity: 0, scale: 0.985, y: 20 },
+                animate: {
+                  opacity: 1,
+                  scale: 1,
+                  y: 0,
+                  transition: {
+                    duration: 0.42,
+                    delay: 0.08,
+                    ease: [0.32, 0.72, 0, 1],
+                  },
+                },
+                exit: {
+                  opacity: 0,
+                  scale: 0.985,
+                  y: 20,
+                  transition: { duration: 0.22, ease: [0.4, 0, 1, 1] },
+                },
+              }}
+            >
+              {version.sources.length > 0 && (
+                <div className="mb-1 flex flex-wrap items-center gap-2">
+                  {version.sources.map((source) => (
+                    <SourceBadge key={source.type} source={source} />
+                  ))}
+                </div>
+              )}
+              <BookletContent booklet={version.text} />
+            </MorphingDialogDescription>
+          </div>
+        </MorphingDialogContent>
+      </MorphingDialogContainer>
+    </MorphingDialog>
+  );
+}
+
 type WebsiteContextResult =
   | { status: "not_provided" }
   | { status: "used"; hostname: string }
@@ -220,11 +334,12 @@ function initialWebsiteContext(saved: SavedBooklet): WebsiteContextResult | null
 }
 
 /**
- * The pre-generation composer: the brand search bar in prompt-button mode
+ * The generation composer: the brand search bar in prompt-button mode
  * (`components/brand/search-bar.tsx`), whose `frosted`, `promptButton` and
  * `panelRows` options exist for this placement — the prompt row triggers
  * options rather than taking a query, and the panel offers actions rather
- * than filters.
+ * than filters. Used for the first generation and, revealed by the header's
+ * Regenerate button, for every regeneration after it.
  *
  * The panel holds one row for now — "Add a website" — an inline URL field
  * rather than a navigation. More options (tone, length, audience) slot in as
@@ -251,7 +366,11 @@ function BookletComposer({
   onWebsiteUrlChange,
   steer,
   onSteerChange,
+  error,
+  openSignal,
   onGenerate,
+  onRetry,
+  confirmSignal,
   busy,
 }: {
   busy: boolean;
@@ -259,7 +378,21 @@ function BookletComposer({
   onWebsiteUrlChange: (value: string) => void;
   steer: string;
   onSteerChange: (value: string) => void;
+  /** Generation failure, reported as the panel's first row while open. */
+  error: string | null;
+  /** Bumped per failure so a closed panel opens onto the error row. */
+  openSignal: number;
   onGenerate: () => void;
+  /**
+   * Clears the failure and hands the CAM back the step *before* the run — the
+   * confirmation sheet, with Generate and Back still on it. A retry is a
+   * decision to make again, not one already made: the website and focus fields
+   * are one Back away, so a failure can be answered by editing rather than
+   * only by firing the same paid call a second time.
+   */
+  onRetry: () => void;
+  /** Bumped by onRetry so the bar reopens onto the confirmation sheet. */
+  confirmSignal: number;
 }) {
   // Live droplet check for the search bar's website field: the same F046
   // gate generate applies, so the tick can never promise what the route
@@ -272,86 +405,115 @@ function BookletComposer({
   }, []);
 
   return (
-    <div className="mt-6 flex flex-col items-center gap-3">
+    <div className="mt-6 flex flex-col items-start gap-3">
       <BrandSearchBar
         frosted
         promptButton
         compactRest
+        anchorLeft
         subjects={["this client", "their mission", "their work", "their website"]}
-        panelRows={[
-          {
-            label: "Add a website",
-            alwaysExpanded: true,
-            expandedContent: (
-              <div className="flex items-center justify-start overflow-x-clip py-1 pl-5">
-                <GooeyEmailInput
-                  variant="dark"
-                  size="md"
-                  align="start"
-                  gap={56}
-                  duration={900}
-                  fillColor="#2f333b"
-                  shadow="0 0 0 1px rgba(255, 255, 255, 0.14) inset, 0 10px 28px -8px rgba(0, 0, 0, 0.55)"
-                  placeholder="https://example.org"
-                  restPlaceholder="Add a website"
-                  inputType="url"
-                  fieldLabel="Website URL for extra context (optional)"
-                  submitLabel="Check this website"
-                  buttonIcon="x"
-                  dropletLabel="Clear website"
-                  onDropletClick={() => onWebsiteUrlChange("")}
-                  value={websiteUrl}
-                  onValueChange={onWebsiteUrlChange}
-                  validate={() => null}
-                  validateAsync={checkWebsite}
-                  validationDelayMs={800}
-                />
-              </div>
-            ),
-          },
-          {
-            label: "What should it focus on?",
-            alwaysExpanded: true,
-            // ~504px matches the widened capsule's left-packed stage (see the
-            // gooey dims), so label, field and counter share one edge.
-            expandedContent: (
-              <div className="py-1 pl-5">
-                <div className="flex max-w-[504px] items-baseline justify-between gap-3 px-1 pb-1.5">
-                  <p className="text-[13px] font-semibold text-[#f4f4ef]/80">
-                    What should it focus on?{" "}
-                    <span className="font-normal text-[#f4f4ef]/50">· optional</span>
-                  </p>
-                  <p
-                    className="shrink-0 text-xs text-[#f4f4ef]/50 tabular-nums"
-                    aria-live="polite"
-                  >
-                    {steer.length} / {MAX_STEER_CHARS}
-                  </p>
-                </div>
-                <div className="flex items-center justify-start overflow-x-clip">
-                  <GooeyEmailInput
-                    variant="dark"
-                    size="lg"
-                    fieldWidth={420}
-                    align="start"
-                    gap={60}
-                    duration={900}
-                    fillColor="#2f333b"
-                    shadow="0 0 0 1px rgba(255, 255, 255, 0.14) inset, 0 10px 28px -8px rgba(0, 0, 0, 0.55)"
-                    placeholder="e.g. Emphasise their youth work"
-                    inputType="text"
-                    fieldLabel="What the booklet should focus on (optional)"
-                    submitLabel="Accept this focus"
-                    maxLength={MAX_STEER_CHARS}
-                    value={steer}
-                    onValueChange={onSteerChange}
-                    validate={() => null}
-                  />
-                </div>
-              </div>
-            ),
-          },
-        ]}
+        openSignal={openSignal}
+        confirmSignal={confirmSignal}
+        // A failed run takes over the whole panel: the error reports alone,
+        // and the website/focus rows return once Try again clears it.
+        panelRows={
+          error
+            ? [
+                {
+                  label: "Generation failed",
+                  alwaysExpanded: true,
+                  expandedContent: (
+                    <div
+                      className="mx-3 mb-1 rounded-xl border border-red-400/30 bg-red-500/10 p-3"
+                      role="alert"
+                    >
+                      <p className="text-sm font-semibold text-red-100">{error}</p>
+                      <button
+                        type="button"
+                        onClick={onRetry}
+                        className="mt-2 rounded-full border border-red-200/40 px-3 py-1 text-xs font-semibold text-red-100 transition-colors hover:bg-red-500/20"
+                      >
+                        Try again
+                      </button>
+                    </div>
+                  ),
+                },
+              ]
+            : [
+                {
+                  label: "Add a website",
+                  alwaysExpanded: true,
+                  expandedContent: (
+                    <div className="flex items-center justify-start overflow-x-clip py-1 pl-5">
+                      <GooeyEmailInput
+                        variant="dark"
+                        size="md"
+                        align="start"
+                        gap={56}
+                        duration={900}
+                        fillColor="#2f333b"
+                        shadow="0 0 0 1px rgba(255, 255, 255, 0.14) inset, 0 10px 28px -8px rgba(0, 0, 0, 0.55)"
+                        placeholder="https://example.org"
+                        restPlaceholder="Add a website"
+                        inputType="url"
+                        fieldLabel="Website URL for extra context (optional)"
+                        submitLabel="Check this website"
+                        buttonIcon="x"
+                        dropletLabel="Clear website"
+                        onDropletClick={() => onWebsiteUrlChange("")}
+                        value={websiteUrl}
+                        onValueChange={onWebsiteUrlChange}
+                        validate={() => null}
+                        validateAsync={checkWebsite}
+                        validationDelayMs={800}
+                      />
+                    </div>
+                  ),
+                },
+                {
+                  label: "What should it focus on?",
+                  alwaysExpanded: true,
+                  // ~504px matches the widened capsule's left-packed stage (see the
+                  // gooey dims), so label, field and counter share one edge.
+                  expandedContent: (
+                    <div className="py-1 pl-5">
+                      <div className="flex max-w-[504px] items-baseline justify-between gap-3 px-1 pb-1.5">
+                        <p className="text-[13px] font-semibold text-[#f4f4ef]/80">
+                          What should it focus on?{" "}
+                          <span className="font-normal text-[#f4f4ef]/50">· optional</span>
+                        </p>
+                        <p
+                          className="shrink-0 text-xs text-[#f4f4ef]/50 tabular-nums"
+                          aria-live="polite"
+                        >
+                          {steer.length} / {MAX_STEER_CHARS}
+                        </p>
+                      </div>
+                      <div className="flex items-center justify-start overflow-x-clip">
+                        <GooeyEmailInput
+                          variant="dark"
+                          size="lg"
+                          fieldWidth={420}
+                          align="start"
+                          gap={60}
+                          duration={900}
+                          fillColor="#2f333b"
+                          shadow="0 0 0 1px rgba(255, 255, 255, 0.14) inset, 0 10px 28px -8px rgba(0, 0, 0, 0.55)"
+                          placeholder="e.g. Emphasise their youth work"
+                          inputType="text"
+                          fieldLabel="What the booklet should focus on (optional)"
+                          submitLabel="Accept this focus"
+                          maxLength={MAX_STEER_CHARS}
+                          value={steer}
+                          onValueChange={onSteerChange}
+                          validate={() => null}
+                        />
+                      </div>
+                    </div>
+                  ),
+                },
+              ]
+        }
         onSubmit={() => void onGenerate()}
         submitLabel="Generate booklet"
         // A generation is a paid Gemini call, so the arrow asks first — and the
@@ -370,7 +532,6 @@ function BookletComposer({
         // The bar reports its own run: rolling square on the disc, status lines
         // where the prompt sits. Nothing appears below the card.
         submitting={busy}
-        submittingMessages={STATUS_MESSAGES}
         className="w-full max-w-[600px]"
       />
     </div>
@@ -403,23 +564,30 @@ export function BookletPanel({
   // stay retrievable, not just timestamped. `history` holds every earlier version
   // this component knows about (seeded from `priorVersions`, then grown in place
   // each time generate() succeeds by archiving whatever was `currentVersion`
-  // before the call). `viewingVersionId` picks a historical entry to display
-  // read-only in place of the current one; it is purely a local view toggle —
-  // nothing about the DB records or Regenerate's own behaviour changes while
-  // browsing history, and Regenerate plus the URL field are hidden while a
-  // historical entry is shown, so there is no path where clicking something here
-  // looks like it edits or replaces an old version.
+  // before the call). Old versions open in their own MorphingDialog
+  // (HistoryVersionDialog above), so this card always shows the current one.
   const [currentVersion, setCurrentVersion] = useState<SavedBooklet | null>(savedBooklet);
   const [history, setHistory] = useState<SavedBooklet[]>(priorVersions);
-  const [viewingVersionId, setViewingVersionId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // Regeneration is set up first: the header's Regenerate button reveals the
+  // full composer (website + focus + confirm sheet) rather than firing a paid
+  // call off the click itself.
+  const [composerOpen, setComposerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // Always empty on mount, and left alone across regenerations: an extra page
-  // to scrape is a per-run choice, not a client setting.
+  // Bumped per generation failure so a closed composer panel opens onto the
+  // in-panel error row — an invisible error is no error at all.
+  const [errorSignal, setErrorSignal] = useState(0);
+  // Bumped by Try again so the composer reopens on the confirmation sheet
+  // rather than firing a second generation straight off the failure.
+  const [retrySignal, setRetrySignal] = useState(0);
+  // Always empty on mount, and cleared again after each successful run: an
+  // extra page to scrape is a per-run choice, not a client setting, and a
+  // leftover URL reads as belonging to the version on screen.
   const [websiteUrl, setWebsiteUrl] = useState("");
   // Operator steer for the next generation only — never saved, never shown on
-  // a version. Each generation reads what is typed at click time.
+  // a version, cleared with the URL once its run succeeds. Each generation
+  // reads what is typed at click time.
   const [steer, setSteer] = useState("");
   // Only meaningful for a version generated this session — it carries the skip
   // *reason* the API returns, which CLIENT_BOOKLETS never stores (only the
@@ -456,25 +624,17 @@ export function BookletPanel({
     };
   }, []);
 
-  // A viewing id that no longer resolves to a history entry (state corruption,
-  // a future change that prunes history) is treated as not viewing at all, so
-  // the read-only banner can never be orphaned and Regenerate never stays
-  // hidden behind a stale id.
-  const viewingVersion =
-    viewingVersionId != null
-      ? (history.find((version) => version.id === viewingVersionId) ?? null)
-      : null;
-  const displayed = viewingVersion ?? currentVersion;
+  const displayed = currentVersion;
   const displayedSources = displayed?.sources ?? [];
-  const displayedWebsiteContext = viewingVersion
-    ? initialWebsiteContext(viewingVersion)
-    : (freshWebsiteContext ?? (currentVersion ? initialWebsiteContext(currentVersion) : null));
+  const displayedWebsiteContext =
+    freshWebsiteContext ?? (currentVersion ? initialWebsiteContext(currentVersion) : null);
 
   async function generate() {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
     setError(null);
+    const startedAt = Date.now();
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -492,6 +652,7 @@ export function BookletPanel({
       const body = await response.json();
       if (!response.ok) {
         setError(body.error ?? "The booklet could not be generated. Try again.");
+        setErrorSignal((n) => n + 1);
         return;
       }
       const websiteContextResult = (body.websiteContext as WebsiteContextResult | undefined) ?? null;
@@ -518,12 +679,24 @@ export function BookletPanel({
       setHistory((previous) => (currentVersion ? [currentVersion, ...previous] : previous));
       setCurrentVersion(newVersion);
       setFreshWebsiteContext(websiteContextResult);
-      setViewingVersionId(null);
+      // A run's inputs are spent once it succeeds: leaving the previous URL
+      // and focus typed in reads as leftover from the old version, and each
+      // generation is a per-run choice read at click time.
+      setWebsiteUrl("");
+      setSteer("");
+      setComposerOpen(false);
       setSaveFailed(body.saved === false);
     } catch {
       if (controller.signal.aborted) return;
       setError("Could not reach the server. Check your connection and try again.");
+      setErrorSignal((n) => n + 1);
     } finally {
+      // Hold the spinner to its floor (see MIN_GENERATION_SPIN_MS) — then the
+      // usual abort guard, so navigating away mid-run still settles silently.
+      const remaining = MIN_GENERATION_SPIN_MS - (Date.now() - startedAt);
+      if (remaining > 0 && !controller.signal.aborted) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
       if (!controller.signal.aborted) {
         inFlight.current = false;
         setBusy(false);
@@ -566,7 +739,7 @@ export function BookletPanel({
     <div ref={sectionRef}>
       <SectionCard
         action={
-          (currentVersion || error) && !busy && !viewingVersion ? (
+          currentVersion && !busy ? (
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               {canDeleteBooklet && currentVersion && (
                 <DeleteButton
@@ -605,7 +778,6 @@ export function BookletPanel({
                     if (!deleteSucceeded.current.delete(versionId)) return;
                     setCurrentVersion(history[0] ?? null);
                     setHistory((previous) => previous.slice(1));
-                    setViewingVersionId(null);
                     setFreshWebsiteContext(null);
                     setSaveFailed(false);
                   }}
@@ -614,10 +786,11 @@ export function BookletPanel({
               <button
                 className="shrink-0 rounded-full border border-rule px-4 py-2 text-xs font-semibold text-lead transition-colors hover:bg-lead-wash disabled:opacity-50"
                 disabled={deleteArmed}
-                onClick={generate}
+                onClick={() => setComposerOpen((open) => !open)}
                 type="button"
+                aria-expanded={composerOpen}
               >
-                Regenerate
+                {composerOpen ? "Close" : "Regenerate"}
               </button>
             </div>
           ) : undefined
@@ -628,45 +801,29 @@ export function BookletPanel({
         title="Client booklet"
       >
 
-      {!busy && !viewingVersion && currentVersion && (
-        <div className="mt-4">
-          <label
-            className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-dim"
-            htmlFor="booklet-website-url"
-          >
-            <Globe aria-hidden="true" className="h-3.5 w-3.5" />
-            Website URL for extra context (optional)
-          </label>
-          <input
-            className="w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm text-ink placeholder:text-faint focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-            id="booklet-website-url"
-            onChange={(event) => setWebsiteUrl(event.target.value)}
-            onKeyDown={(event) => {
-              // generate() itself refuses concurrent runs (inFlight guard), so a
-              // second Enter mid-generation is a no-op, not a second paid call.
-              if (event.key === "Enter") generate();
-            }}
-            placeholder="https://example.org"
-            type="url"
-            value={websiteUrl}
-          />
-        </div>
-      )}
-
-      {!currentVersion && !error && (
+      {(!currentVersion || composerOpen) && (
         <BookletComposer
           busy={busy}
           websiteUrl={websiteUrl}
           onWebsiteUrlChange={setWebsiteUrl}
           steer={steer}
           onSteerChange={setSteer}
+          error={error}
+          openSignal={errorSignal}
+          confirmSignal={retrySignal}
           onGenerate={() => void generate()}
+          onRetry={() => {
+            setError(null);
+            setRetrySignal((n) => n + 1);
+          }}
         />
       )}
 
       {/* Only the regenerate path needs a loading block of its own — the first
           generation is started from the composer bar, which wears the run
-          itself (see its `submitting` prop). */}
+          itself (see its `submitting` prop). The cycling lines live here, in
+          this block, and nowhere else: the bar row stays blank behind its
+          spinner while a run is in flight. */}
       {busy && currentVersion && (
         <AiLoadingState
           messages={STATUS_MESSAGES}
@@ -674,12 +831,16 @@ export function BookletPanel({
         />
       )}
 
-      {error && !busy && (
+      {/* Failures outside the composer report here: the arrival-time
+          auto-generate (?booklet=generate) runs with no composer on screen.
+          Its Try again opens the composer onto the error, rather than firing
+          another paid call sight unseen. */}
+      {error && !busy && currentVersion && !composerOpen && (
         <div className="mt-5 rounded-inset bg-stop-wash p-3" role="alert">
           <p className="text-sm font-semibold text-stop">{error}</p>
           <button
             className="mt-2 rounded-inset border border-stop/25 px-3 py-1 text-xs font-semibold text-stop"
-            onClick={generate}
+            onClick={() => setComposerOpen(true)}
             type="button"
           >
             Try again
@@ -687,35 +848,10 @@ export function BookletPanel({
         </div>
       )}
 
-      {/* F086: read-only banner while browsing a historical entry — the one exit
-          is "Back to current", never Regenerate (hidden above), so there is no
-          path where clicking something here looks like it edits an old version. */}
-      {viewingVersion && !busy && (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-inset bg-hold-wash px-3 py-2.5">
-          <p className="flex items-center gap-1.5 text-xs font-medium text-hold">
-            <Clock aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
-            Viewing an older version — generated {formatGeneratedAt(viewingVersion.generatedAt)}
-          </p>
-          <button
-            className="shrink-0 text-xs font-semibold text-hold underline underline-offset-2 hover:text-hold"
-            onClick={() => setViewingVersionId(null)}
-            type="button"
-          >
-            Back to current
-          </button>
-        </div>
-      )}
-
-      {/* F085/F086: the saved/generated booklet stays visible even when a
-          regeneration fails — hiding it behind the error box would discard exactly
-          the artifact saving exists to preserve, and F086 makes the prior version
-          retrievable by design, so the error state must not undo that in the UI.
-          The error box above makes clear that what's shown below is the previous
-          version, not a fresh generation. */}
       {displayed && !busy && (
         <p className="mt-1 text-xs text-dim">
           Generated {formatGeneratedAt(displayed.generatedAt)}
-          {!viewingVersion && saveFailed
+          {saveFailed
             ? " — could not be saved, will re-generate next time this client is opened."
             : "."}
         </p>
@@ -739,10 +875,11 @@ export function BookletPanel({
       )}
       {displayed && !busy && <BookletContent booklet={displayed.text} />}
 
-      {/* F086 AC2: the timeline — every prior version stays retrievable, not just
-          timestamped. Collapsed by default so it doesn't compete with the
-          booklet itself; only rendered once there's something to browse. */}
-      {history.length > 0 && !busy && !viewingVersion && (
+      {/* F086 AC2: the timeline — every prior version opens on screen in its own
+          dialog, rather than swapping the card. Collapsed by default so it
+          doesn't compete with the booklet itself; only rendered once there's
+          something to browse. */}
+      {history.length > 0 && !busy && (
         <div className="mt-6 border-t border-rule pt-4">
           <button
             aria-expanded={historyOpen}
@@ -757,17 +894,7 @@ export function BookletPanel({
             <ul className="mt-3 space-y-1.5">
               {history.map((version) => (
                 <li key={version.id}>
-                  <button
-                    className={`w-full rounded-inset px-3 py-2 text-left text-sm transition-colors ${
-                      viewingVersionId === version.id
-                        ? "bg-lead-wash font-semibold text-lead"
-                        : "text-dim hover:bg-paper"
-                    }`}
-                    onClick={() => setViewingVersionId(version.id)}
-                    type="button"
-                  >
-                    Generated {formatGeneratedAt(version.generatedAt)}
-                  </button>
+                  <HistoryVersionDialog version={version} />
                 </li>
               ))}
             </ul>

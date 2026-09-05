@@ -19,6 +19,7 @@ import {
 import { OriginButton } from "@/components/ui/origin-button";
 import { assignTagsBatchAction, createTagAction } from "@/lib/tags/tag-actions";
 import { isTagColour, TAG_COLOURS } from "@/lib/tags/tag-colours";
+import { MAX_TAGS_PER_CLIENT } from "@/lib/tags/assign-tag-core";
 
 import type { AvailableTag } from "./tags-section";
 
@@ -89,6 +90,11 @@ export function AddTagPopover({
     [assignedTags],
   );
 
+  // Slots left before this client hits the per-client tag cap. The card hides
+  // the picker entirely at zero; this is the guard for the last few slots,
+  // where a selection could otherwise outgrow what the server will accept.
+  const remaining = Math.max(0, MAX_TAGS_PER_CLIENT - assignedTags.length);
+
   const selectedTagIds = useMemo(
     () => new Set(selectedTags.map((tag) => tag.id)),
     [selectedTags],
@@ -146,11 +152,16 @@ export function AddTagPopover({
 
   function toggleTag(tag: AvailableTag) {
     if (assignedTagIds.has(tag.id)) return; // Already on this client.
+    const isSelected = selectedTags.some((t) => t.id === tag.id);
+    if (!isSelected && selectedTags.length >= remaining) {
+      setError(
+        `A client can have at most ${MAX_TAGS_PER_CLIENT} tags. Remove one before adding more.`,
+      );
+      return;
+    }
     setError(null);
     setSelectedTags((prev) =>
-      prev.some((t) => t.id === tag.id)
-        ? prev.filter((t) => t.id !== tag.id)
-        : [...prev, tag],
+      isSelected ? prev.filter((t) => t.id !== tag.id) : [...prev, tag],
     );
     setSearch("");
     setActive(0);
@@ -286,6 +297,9 @@ export function AddTagPopover({
             {selectedCount > 0 && (
               <span className="shrink-0 text-[11px] font-semibold text-lead tabular-nums">
                 {selectedCount}
+                {remaining > 0 && (
+                  <span className="text-faint"> of {remaining}</span>
+                )}
               </span>
             )}
           </div>

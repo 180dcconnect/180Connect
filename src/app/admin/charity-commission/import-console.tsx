@@ -6,7 +6,6 @@ import { Plus } from "lucide-react";
 
 import { EASE } from "@/components/brand/motion";
 import { BackButton } from "@/components/ui/back-button";
-import { OriginButton } from "@/components/ui/origin-button";
 
 /**
  * Which of the screen's two jobs is on show.
@@ -47,12 +46,14 @@ export function NewImportButton() {
   if (!context) return null;
 
   return (
-    <OriginButton onClick={context.openComposer} size="md" type="button">
-      <span className="inline-flex items-center gap-1.5">
-        <Plus className="h-3.5 w-3.5" strokeWidth={2.6} />
-        New import
-      </span>
-    </OriginButton>
+    <button
+      onClick={context.openComposer}
+      type="button"
+      className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-inset border border-lead bg-lead px-2.5 py-1 text-[13px] font-medium text-white transition-colors hover:bg-lead-mid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30"
+    >
+      <Plus className="size-3.5" strokeWidth={2.6} />
+      New import
+    </button>
   );
 }
 

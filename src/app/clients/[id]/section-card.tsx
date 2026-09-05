@@ -196,3 +196,62 @@ export function Key({ children }: { children: ReactNode }) {
     </span>
   );
 }
+
+/**
+ * A numbered part *inside* a numbered section — `1.1`, `1.2`.
+ *
+ * Sections are addresses ("look at 3"), and a section that answers its question
+ * with two different kinds of evidence needs the address to go one level
+ * deeper. Scale is the case that forced it: money and headcount come off the
+ * filed accounts, reach comes off the annual return's declared areas, and
+ * before this the second one was a hairline rule under the first with no name
+ * and no number — the most interesting fact about a client like Oxfam,
+ * rendered as a footnote.
+ *
+ * Same voice as `SectionCard`, one level down: serif numeral and title on a
+ * shared baseline, hint underneath. Deliberately no card of its own — a card
+ * inside a card is how a page starts looking like a dashboard. The numeral is
+ * a string, not a number, because `1.10` has to be able to follow `1.9`.
+ */
+export function SubSection({
+  headingId,
+  number,
+  title,
+  hint,
+  children,
+  className = "",
+}: {
+  /** Target for an `aria-labelledby` where one is wanted. */
+  headingId?: string;
+  /** Position within the parent section, e.g. `"1.2"`. */
+  number: string;
+  title: string;
+  /** Optional one-line explanation under the title. */
+  hint?: ReactNode;
+  children?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <div className="flex items-baseline gap-2">
+        <span
+          aria-hidden="true"
+          className="shrink-0 font-serif text-[16px] leading-none font-medium tabular-nums text-faint"
+        >
+          {number}
+        </span>
+        <h3
+          id={headingId}
+          className="scroll-mt-24 font-serif text-[17px] leading-[1.3] font-medium tracking-[-0.03em] text-ink"
+        >
+          <span className="sr-only">Section {number}. </span>
+          {title}
+        </h3>
+      </div>
+      {hint && (
+        <p className="mt-1 max-w-[62ch] text-[13px] leading-[1.55] text-dim">{hint}</p>
+      )}
+      {children}
+    </div>
+  );
+}

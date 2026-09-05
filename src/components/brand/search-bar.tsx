@@ -152,12 +152,16 @@ export function BrandSearchBar({
   params: paramNames,
    defaultQuery = "",
    defaultFilters = [],
+   startOpen = false,
    frosted = false,
    promptButton = false,
    panelRows,
    compactRest = false,
+   anchorLeft = false,
    onSubmit,
    submitLabel = "Submit",
+   openSignal,
+   confirmSignal,
    confirm,
    submitting = false,
    submittingMessages,
@@ -176,6 +180,26 @@ export function BrandSearchBar({
    params?: Record<string, string>;
    defaultQuery?: string;
    defaultFilters?: (FilterOption & { category: string })[];
+   /**
+    * Open on mount. For hosts that remount the bar around an async job:
+    * remounting with a failure already set reopens straight onto it instead
+    * of hiding it behind a closed pill.
+    */
+   startOpen?: boolean;
+   /**
+    * Reactive open signal: whenever this value changes (after mount), the
+    * panel opens. For failures that land while the panel is closed — the
+    * error row is inside, so an invisible error is no error at all.
+    */
+   openSignal?: unknown;
+   /**
+    * Reactive confirm signal: whenever this value changes (after mount), the
+    * panel opens straight onto the confirmation sheet. For hosts that need to
+    * put the CAM back at the last step *before* the run — a retry after a
+    * failure returns to "confirm or go back and edit", never straight into a
+    * second paid call. Ignored when `confirm` is not set.
+    */
+   confirmSignal?: unknown;
    /**
     * Stronger frost on the glass (20px backdrop blur under a 0.5 tint instead
     * of 3px under 0.72), so the page behind an open panel reads as blurred
@@ -202,6 +226,13 @@ export function BrandSearchBar({
     */
    compactRest?: boolean;
    /**
+    * Anchor the pill to the left edge instead of centring it, so the
+    * compact-rest widen grows rightward only before the panel drops down.
+    * Inert without `compactRest`: a full-width pill is the same box centred
+    * or left-anchored. Opt-in per instance.
+    */
+   anchorLeft?: boolean;
+   /**
     * Primary go action for the panel, rendered as the lime arrow disc beside
     * the open/close toggle — the search bar's own submit button, copied. Only
     * rendered when provided.
@@ -226,17 +257,30 @@ export function BrandSearchBar({
      confirmLabel?: string;
      cancelLabel?: string;
    };
-   /**
-    * The host's own work is running. The bar wears it: the disc becomes the
-    * rolling square, and `submittingMessages` cycles where the prompt sits, so
-    * a generation never has to be reported by a second block of UI somewhere
-    * below the bar that started it.
-    */
+    /**
+     * The host's own work is running. The bar wears it: the disc becomes the
+     * rolling square, and `submittingMessages` cycles where the prompt sits, so
+     * a generation never has to be reported by a second block of UI somewhere
+     * below the bar that started it. Omit the messages and the row stays
+     * blank behind the spinner instead.
+     */
    submitting?: boolean;
    submittingMessages?: readonly string[];
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(startOpen);
+  // StrictMode-safe: a first-render guard ref would be consumed by the
+  // double-invoked mount effect in dev and then open the panel for real on
+  // the second pass. Comparing values instead only ever opens on a genuine
+  // bump from the host.
+  // Adjusted during render rather than in an effect: React re-runs this pass
+  // before committing, so the panel is already open on the frame the bump
+  // lands — no flash of the closed pill, and no cascading-render lint error.
+  const [seenOpenSignal, setSeenOpenSignal] = useState(openSignal);
+  if (seenOpenSignal !== openSignal) {
+    setSeenOpenSignal(openSignal);
+    if (openSignal) setOpen(true);
+  }
   const [query, setQuery] = useState(defaultQuery);
   const [subject, setSubject] = useState(0);
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
@@ -268,6 +312,16 @@ export function BrandSearchBar({
   // happens inside one box.
   const [confirming, setConfirming] = useState(false);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Same render-phase adjustment as openSignal above.
+  const [seenConfirmSignal, setSeenConfirmSignal] = useState(confirmSignal);
+  if (seenConfirmSignal !== confirmSignal) {
+    setSeenConfirmSignal(confirmSignal);
+    if (confirmSignal && confirm) {
+      setOpen(true);
+      setConfirming(true);
+    }
+  }
 
   // The frame keeps its full width whether or not the bar is open, so it is
   // the one thing that can be observed for the open end (and for a resize).
@@ -427,8 +481,12 @@ export function BrandSearchBar({
       <div ref={frameRef} className="relative h-[64px] w-full z-50">
         <motion.div
           ref={rootRef}
-          className={`absolute top-0 left-1/2 w-full overflow-hidden ${frosted ? "backdrop-blur-[20px]" : "backdrop-blur-[3px]"}`}
-          style={{ boxShadow: LIP, borderRadius: ROW / 2, x: "-50%" }}
+          className={`absolute top-0 ${anchorLeft ? "left-0" : "left-1/2"} w-full overflow-hidden ${frosted ? "backdrop-blur-[20px]" : "backdrop-blur-[3px]"}`}
+          style={{
+            boxShadow: LIP,
+            borderRadius: ROW / 2,
+            ...(anchorLeft ? {} : { x: "-50%" }),
+          }}
           animate={{
             height: open ? "auto" : ROW,
             // Pixels at both ends once measured (see restWidth/fullWidth), so
@@ -523,6 +581,13 @@ export function BrandSearchBar({
               // started the run is the thing that shows it running. Mounted per
               // run, so every run opens on the first line without a reset.
               <StatusLine messages={statusMessages} />
+            ) : submitting ? (
+              // A submitting host with no messages wants the spinner alone:
+              // blank row, screen-reader label only. The row's height comes
+              // from its fixed-height parent, so nothing collapses.
+              <span className="font-body flex min-w-0 items-center text-[15px] sm:text-base">
+                <span className="sr-only">Working…</span>
+              </span>
             ) : (
               <span
                 className="font-body flex items-center gap-[0.4ch] text-[15px] whitespace-nowrap sm:text-base"
@@ -650,6 +715,15 @@ export function BrandSearchBar({
               onClick={() => {
                 if (submitting) return;
                 if (!confirm) {
+                  onSubmit();
+                  return;
+                }
+                // Arrow and Generate are the same button once the sheet is up:
+                // the sheet already re-states the run, so a second arrow press
+                // is the CAM agreeing to it, not a request to re-open it.
+                if (confirming) {
+                  setConfirming(false);
+                  setOpen(false);
                   onSubmit();
                   return;
                 }

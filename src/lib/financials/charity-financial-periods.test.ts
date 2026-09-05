@@ -372,4 +372,28 @@ describe("buildFinancialPeriodsFromBulk", () => {
     ]);
     assert.deepEqual(rows.map((row) => row.periodEnd), ["2024-03-31", "2025-03-31"]);
   });
+
+  it("reads the register file's 0/1 government-funding flags as booleans", () => {
+    // SQLite has no boolean type, so the register file stores these as INTEGER
+    // and node:sqlite reads them back as numbers. Rejecting them nulled the flag
+    // on every charity imported from that file.
+    const [row] = buildFinancialPeriodsFromBulk([
+      {
+        ...partAandB,
+        charity_receives_govt_funding_grants: 1,
+        charity_receives_govt_funding_contracts: 0,
+      },
+    ]);
+
+    assert.equal(row.receivesGovtGrants, true);
+    assert.equal(row.receivesGovtContracts, false);
+  });
+
+  it("treats anything else as not published", () => {
+    const [row] = buildFinancialPeriodsFromBulk([
+      { ...partAandB, charity_receives_govt_funding_grants: "Yes" },
+    ]);
+
+    assert.equal(row.receivesGovtGrants, null);
+  });
 });

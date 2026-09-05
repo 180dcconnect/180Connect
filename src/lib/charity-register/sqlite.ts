@@ -38,6 +38,7 @@ function getDatabaseSync(): (new (path: string, options?: { readOnly?: boolean }
 import { SCHEMA_VERSION } from "./sqlite-schema.ts";
 import {
   countQuery,
+  LABEL_KIND,
   labelValuesQuery,
   previewQuery,
   selectionQuery,
@@ -336,3 +337,118 @@ export function lookupCharityOperatingAreas(
   };
 }
 
+
+/**
+ * The filed returns the register holds for one charity, by registration number.
+ *
+ * `selectCharities` attaches returns to a *filter selection*; this answers for a
+ * charity we already hold, which is the shape the annual-return backfill needs —
+ * it starts from the client list, not from a query over the file.
+ *
+ * Matches on `registered_charity_number` or `organisation_number`, the same two
+ * keys as `lookupCharityOperatingAreas`, because a record's `uk_charity`
+ * identifier is written from whichever the promote path saw.
+ *
+ * Rows come back in the file's own column names (`count_employees`,
+ * `income_donations_legacies`). `toExtractReturn` converts them to the extract
+ * vocabulary the standardiser reads.
+ */
+export function lookupCharityReturns(
+  identifier: string | number,
+): { organisationNumber: number; returns: Record<string, unknown>[] } | null {
+  const handle = open();
+  if (!handle) return null;
+
+  const numeric =
+    typeof identifier === "number"
+      ? identifier
+      : Number(String(identifier).replace(/\D/g, ""));
+  if (!numeric || !Number.isFinite(numeric)) return null;
+
+  const row = handle.db
+    .prepare(
+      "select organisation_number from charity " +
+        "where registered_charity_number = ? or organisation_number = ? limit 1",
+    )
+    .get(numeric, numeric) as { organisation_number: number } | undefined;
+  if (!row) return null;
+
+  return {
+    organisationNumber: row.organisation_number,
+    returns: handle.db
+      .prepare(
+        "select * from charity_return where organisation_number = ? order by period_end",
+      )
+      .all(row.organisation_number) as Record<string, unknown>[],
+  };
+}
+
+/**
+ * The register's profile facts for one charity, plus the classifications the
+ * sector mapping reads.
+ *
+ * The annual-return lookup above answers "what did they file"; this answers
+ * "what does the register say they *are*" — the filed activities description,
+ * the registration date, the reporting status, and the "What the charity does"
+ * labels. `profile-backfill.ts` is the only caller: an organisation already on
+ * the client list never passes back through the import that would otherwise
+ * write these, so this is how they reach a record that predates the bulk path.
+ *
+ * Matched on registration number or organisation number, the same pair
+ * `lookupCharityReturns` accepts, so a caller holding either identifier gets
+ * the same row.
+ */
+export type RegisterProfile = {
+  organisationNumber: number;
+  registeredCharityNumber: number | null;
+  charityName: string;
+  /** The charity's own filed description of its work. Externally authored free
+   *  text — every reader must treat it as untrusted input. */
+  activities: string | null;
+  dateOfRegistration: string | null;
+  reportingStatus: string | null;
+  /** "What the charity does" values, in the extract's own spelling, for
+   *  `bulkSector` to map. */
+  classifications: string[];
+};
+
+export function lookupCharityProfile(identifier: string | number): RegisterProfile | null {
+  const handle = open();
+  if (!handle) return null;
+
+  const numeric =
+    typeof identifier === "number" ? identifier : Number(String(identifier).replace(/\D/g, ""));
+  if (!numeric || !Number.isFinite(numeric)) return null;
+
+  const row = handle.db
+    .prepare(
+      "select organisation_number, registered_charity_number, charity_name, " +
+        "activities, date_of_registration, reporting_status from charity " +
+        "where registered_charity_number = ? or organisation_number = ? limit 1",
+    )
+    .get(numeric, numeric) as
+    | {
+        organisation_number: number;
+        registered_charity_number: number | null;
+        charity_name: string;
+        activities: string | null;
+        date_of_registration: string | null;
+        reporting_status: string | null;
+      }
+    | undefined;
+  if (!row) return null;
+
+  return {
+    organisationNumber: row.organisation_number,
+    registeredCharityNumber: row.registered_charity_number,
+    charityName: row.charity_name,
+    // Trimmed here, and blank read as absent: "" stored as a present value is
+    // what every downstream `is null` check then misses — the same rule the
+    // bulk import's own annotate step follows.
+    activities: row.activities?.trim() || null,
+    // The extract publishes a full timestamp; the column is a date.
+    dateOfRegistration: row.date_of_registration?.slice(0, 10) || null,
+    reportingStatus: row.reporting_status?.trim() || null,
+    classifications: charityLabels(row.organisation_number, LABEL_KIND.what),
+  };
+}

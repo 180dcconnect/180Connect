@@ -1350,7 +1350,7 @@ send to enforce it. The value carries no sensitive information; hiding it from a
 CAM would only mean a less informative block message.
 
 The only write path is `set_outreach_daily_send_limit`
-(`20260912130000_create_outreach_daily_send_limit.sql`), which re-checks
+(`20260913100000_create_outreach_daily_send_limit.sql`), which re-checks
 `app.is_admin()` in its body (`SECURITY DEFINER` bypasses RLS) and writes the
 `audit_log` row (`outreach_daily_send_limit_changed`) in the same transaction —
 docs/audit-log-pattern.md. No-op writes (same value) are skipped, same as

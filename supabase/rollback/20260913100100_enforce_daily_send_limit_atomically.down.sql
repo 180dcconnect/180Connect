@@ -1,4 +1,4 @@
--- Rollback: 20260912180100_enforce_daily_send_limit_atomically
+-- Rollback: 20260913100100_enforce_daily_send_limit_atomically
 -- Restores claim_outreach_send's prior body (20260901110000): the per-message
 -- claim with no daily-cap check, and drops claim_scheduled_outreach_send. This
 -- is a functional regression (F128's daily cap stops being enforced atomically,

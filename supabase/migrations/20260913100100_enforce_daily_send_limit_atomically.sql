@@ -63,7 +63,7 @@
 --                 | matrix entry as mark_scheduled_outreach_delivered.
 --
 -- Reversibility: paired rollback in
---   ../rollback/20260912180100_enforce_daily_send_limit_atomically.down.sql
+--   ../rollback/20260913100100_enforce_daily_send_limit_atomically.down.sql
 
 -- ---------------------------------------------------------------------------
 -- claim_outreach_send — now also enforces the daily cap atomically

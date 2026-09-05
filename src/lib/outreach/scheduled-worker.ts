@@ -67,7 +67,7 @@ export type ScheduledOutreachDeps = {
   underSendLimit(sentByUserId: string): Promise<boolean>;
   /**
    * Atomically claims a message for delivery, via claim_scheduled_outreach_send
-   * (20260912180100). 'daily_limit_reached': F128's branch-wide cap is
+   * (20260913100100). 'daily_limit_reached': F128's branch-wide cap is
    * exhausted right now — every CAM shares the one branch mailbox, so this is
    * checked inside the same claim as the per-message lock (splitting the two
    * into separate calls cannot be made atomic — see that migration's header).
@@ -311,7 +311,7 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
       },
 
       async claim(messageId, nowIso) {
-        // F128/F129: claim_scheduled_outreach_send (20260912180100) folds the
+        // F128/F129: claim_scheduled_outreach_send (20260913100100) folds the
         // per-message claim (conditional on still-scheduled AND unclaimed, or
         // claim gone stale — same rule the raw UPDATE this replaces used) and
         // the branch-wide daily-cap check into one atomic call, under a lock

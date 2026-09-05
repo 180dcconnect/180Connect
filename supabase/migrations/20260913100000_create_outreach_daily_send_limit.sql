@@ -28,7 +28,7 @@
 --                 | transaction (docs/audit-log-pattern.md).
 --   Documentation | Data Model tabs 02, 08, 11; matrix new §3.24.
 -- Reversibility: paired rollback in
---   ../rollback/20260912180000_create_outreach_daily_send_limit.down.sql
+--   ../rollback/20260913100000_create_outreach_daily_send_limit.down.sql
 
 create table public.outreach_daily_send_limit (
   id          boolean primary key default true check (id = true),

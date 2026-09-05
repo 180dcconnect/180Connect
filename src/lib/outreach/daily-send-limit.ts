@@ -1,7 +1,7 @@
 // F128: DEFAULT_OUTREACH_DAILY_SEND_LIMIT and dailySendWindowStart are display-
 // only helpers now (the admin sending-limits page's "today's volume" reading).
 // Enforcement itself lives entirely in claim_outreach_send / claim_scheduled_
-// outreach_send (20260912180100) — a two-step "resolve the limit, then check
+// outreach_send (20260913100100) — a two-step "resolve the limit, then check
 // the count" in application code is exactly the race PR #516's review found,
 // so there is deliberately no app-side resolver here to enforce with.
 export const DEFAULT_OUTREACH_DAILY_SEND_LIMIT = 250;

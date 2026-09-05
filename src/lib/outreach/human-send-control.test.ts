@@ -103,7 +103,7 @@ describe("F250 human-send architecture", () => {
     assert.match(rpcMigration, /send_claimed_at = p_claim_token/, "the RPC must stay pinned to the claiming run's token");
     const claimMigration = await readFile(
       new URL(
-        "../../../supabase/migrations/20260912180100_enforce_daily_send_limit_atomically.sql",
+        "../../../supabase/migrations/20260913100100_enforce_daily_send_limit_atomically.sql",
         import.meta.url,
       ),
       "utf8",

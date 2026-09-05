@@ -19,8 +19,20 @@ export type AttachmentRow = {
   content_type: string | null;
   size_bytes: number | null;
   created_at: string;
+  timeline_context_type: TimelineContextType;
+  timeline_context_id: string | null;
   uploaded_by_user: { full_name: string | null } | null;
 };
+
+export const TIMELINE_CONTEXT_TYPES = [
+  "client",
+  "note",
+  "outreach_message",
+  "reply_event",
+  "audit_log",
+] as const;
+
+export type TimelineContextType = (typeof TIMELINE_CONTEXT_TYPES)[number];
 
 export type Attachment = {
   id: string;
@@ -29,6 +41,8 @@ export type Attachment = {
   sizeLabel: string | null;
   createdAt: string;
   uploadedByName: string;
+  timelineContextType: TimelineContextType;
+  timelineContextId: string | null;
 };
 
 const UNKNOWN_UPLOADER = "A former team member";
@@ -65,6 +79,8 @@ export function formatAttachments(rows: readonly AttachmentRow[]): Attachment[] 
       sizeLabel: formatFileSize(row.size_bytes),
       createdAt: row.created_at,
       uploadedByName: row.uploaded_by_user?.full_name?.trim() || UNKNOWN_UPLOADER,
+      timelineContextType: row.timeline_context_type,
+      timelineContextId: row.timeline_context_id,
     }))
     .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
 }
@@ -224,5 +240,25 @@ export function attachmentRpcFailure(error: { code?: string; message?: string })
       return { status: 404, error: error.message };
     default:
       return { status: 500, error: GENERIC_RECORD_FAILURE };
+  }
+}
+
+/** Safe UI mapping for the F219 SECURITY DEFINER linking RPC. */
+export function attachmentTimelineRpcFailure(error: {
+  code?: string;
+  message?: string;
+}): RpcFailure {
+  if (!error.message?.trim()) {
+    return { status: 500, error: "The timeline link could not be saved. Refresh and try again." };
+  }
+  switch (error.code) {
+    case "42501":
+      return { status: 403, error: error.message };
+    case "22023":
+      return { status: 400, error: error.message };
+    case "P0002":
+      return { status: 404, error: error.message };
+    default:
+      return { status: 500, error: "The timeline link could not be saved. Refresh and try again." };
   }
 }

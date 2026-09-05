@@ -4764,6 +4764,7 @@ declare
   v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
   v_org_a       uuid := '00000000-0000-4000-b000-000000000002';  -- owned by cam_a
   v_att         uuid;
+  v_reply       uuid;
   v_count       bigint;
   v_rls         boolean;
 begin
@@ -4924,6 +4925,53 @@ begin
     '23505',
     'recording the same storage path twice is refused'
   );
+
+  -- -----------------------------------------------------------------------
+  -- F219: stable attachment-to-timeline links
+  -- -----------------------------------------------------------------------
+  if to_regprocedure('public.link_attachment_to_timeline(uuid,uuid,text,uuid)') is null then
+    return next skip(4, 'link_attachment_to_timeline not yet migrated (F219)');
+    return;
+  end if;
+
+  insert into public.reply_events (organisation_id, reply_body, received_at)
+  values (v_org_a, 'Please see the attached proposal.', now())
+  returning id into v_reply;
+
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.link_attachment_to_timeline(%L, %L, ''reply_event'', %L)',
+      v_att, v_org_a, v_reply)),
+    '42501',
+    'a viewer cannot change an attachment timeline link'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.link_attachment_to_timeline(%L, %L, ''reply_event'', %L)',
+      v_att, v_org_a, '99999999-9999-4999-8999-999999999999'::uuid)),
+    'P0002',
+    'an attachment cannot link to a missing or different-client event'
+  );
+
+  perform tests.login_as(v_cam_a);
+  perform public.link_attachment_to_timeline(v_att, v_org_a, 'reply_event', v_reply);
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select count(*) into v_count from public.attachments
+   where id = v_att
+     and timeline_context_type = 'reply_event'
+     and timeline_context_id = v_reply;
+  return next is(v_count, 1::bigint,
+    'a CAM links an attachment to a reply on the same client');
+
+  insert into public.notes (organisation_id, author_id, content)
+  values (v_org_a, v_cam_a, 'A later timeline event');
+  select count(*) into v_count from public.attachments
+   where id = v_att and timeline_context_id = v_reply;
+  return next is(v_count, 1::bigint,
+    'adding later timeline events does not change the stored attachment link');
 end;
 $$;
 

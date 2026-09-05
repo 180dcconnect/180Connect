@@ -1,6 +1,6 @@
 <!--
   GENERATED FILE — DO NOT EDIT.
-  Source: ~/Downloads/Data Model.xlsx (the Data Model spreadsheet is the source of truth, per SOP §7).
+  Source: ~/180Connect/Data Model.xlsx (the Data Model spreadsheet is the source of truth, per SOP §7).
   To change anything here: edit the spreadsheet, then run `npm run export:data-model`.
 -->
 

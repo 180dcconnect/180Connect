@@ -5,6 +5,7 @@ import {
   ALLOWED_ATTACHMENT_MIME_TYPES,
   MAX_ATTACHMENT_SIZE_BYTES,
   attachmentRpcFailure,
+  attachmentTimelineRpcFailure,
   attachmentUploadFailureMessage,
   buildAttachmentStoragePath,
   formatAttachments,
@@ -21,6 +22,8 @@ function row(overrides: Partial<AttachmentRow> = {}): AttachmentRow {
     content_type: "application/pdf",
     size_bytes: 245_760,
     created_at: "2026-08-01T10:00:00Z",
+    timeline_context_type: "client",
+    timeline_context_id: null,
     uploaded_by_user: { full_name: "Alex CAM" },
     ...overrides,
   };
@@ -52,6 +55,8 @@ describe("formatAttachments", () => {
     assert.equal(attachment?.filename, "signed-agreement.pdf");
     assert.equal(attachment?.sizeLabel, "240.0 KB");
     assert.equal(attachment?.uploadedByName, "Alex CAM");
+    assert.equal(attachment?.timelineContextType, "client");
+    assert.equal(attachment?.timelineContextId, null);
   });
 
   it("returns an empty list for a client with no attachments", () => {
@@ -81,6 +86,20 @@ describe("formatAttachments", () => {
       row({ id: "newer", created_at: "2026-08-05T10:00:00Z" }),
     ]);
     assert.deepEqual(attachments.map((a) => a.id), ["newer", "older"]);
+  });
+});
+
+describe("attachmentTimelineRpcFailure (F219)", () => {
+  it("passes through deliberate permission, validation, and missing-target errors", () => {
+    assert.equal(attachmentTimelineRpcFailure({ code: "42501", message: "not allowed" }).status, 403);
+    assert.equal(attachmentTimelineRpcFailure({ code: "22023", message: "choose an event" }).status, 400);
+    assert.equal(attachmentTimelineRpcFailure({ code: "P0002", message: "not found" }).status, 404);
+  });
+
+  it("does not expose an unexpected database error", () => {
+    const failure = attachmentTimelineRpcFailure({ code: "42P01", message: "secret table detail" });
+    assert.equal(failure.status, 500);
+    assert.ok(!failure.error.includes("secret"));
   });
 });
 

@@ -9,6 +9,8 @@ export type BranchEmail = {
   inReplyTo?: string;
   references?: readonly string[];
   threadId?: string;
+  /** F217: files to send as real MIME attachments. */
+  attachments?: readonly { filename: string; contentType: string | null; content: Buffer }[];
 };
 
 /**
@@ -45,6 +47,7 @@ export async function sendBranchOutreach(
       html: email.html,
       inReplyTo: email.inReplyTo,
       references: email.references,
+      attachments: email.attachments,
     },
     { config, threadId: email.threadId },
   );

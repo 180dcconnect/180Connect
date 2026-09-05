@@ -21,6 +21,7 @@ npm run build                    # production build (catches errors the dev serv
 npm test                         # unit tests (Node built-in test runner, not Jest/Vitest)
 npm run seed                     # load 50 fake organisations into local DB
 npm run seed:clear               # remove all is_seed rows
+npm run companies-register:build # rebuild the companies register file (CI does this; ~20 min)
 ```
 
 **Pre-push order:** `npm run lint` → `npx tsc --noEmit` → `npm run build`
@@ -44,6 +45,13 @@ npm run seed:clear               # remove all is_seed rows
 
 ## Branching & PRs
 
+- **The default branch is `dev`, not `main`.** Tooling that reports `main` as
+  the default — Claude Code's session header included — is reading a stale
+  repository setting someone set by mistake. Every PR targets `dev`; treat any
+  suggestion to PR into `main` as wrong. This matters beyond etiquette:
+  GitHub only exposes a workflow to `workflow_dispatch`, and only fires its
+  `schedule`, once the file exists on the **default** branch — so a workflow
+  that has not reached `dev` cannot be run at all.
 - Branch from `dev`, PR into `dev`. **Never commit straight to `main` or `dev`.**
 - `main` only receives weekly merges from `dev` (PM decision).
 - Branch naming: `feature/`, `fix/`, `chore/` + backlog ID where applicable.
@@ -81,3 +89,4 @@ npm run seed:clear               # remove all is_seed rows
 - [`supabase/MIGRATIONS.md`](supabase/MIGRATIONS.md) — migration conventions and workflow
 - [`docs/audit-log-pattern.md`](docs/audit-log-pattern.md) — required pattern for privileged writes
 - [`docs/client-list-sorting.md`](docs/client-list-sorting.md) — how `/clients` is ordered, and the pipeline-status order
+- [`docs/companies-register-import.md`](docs/companies-register-import.md) — how Companies House imports work: why the register file is a filtered ~12%, what the monthly build keeps, what the screen chooses

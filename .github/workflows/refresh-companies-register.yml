@@ -59,6 +59,16 @@ jobs:
           # node:sqlite is built in from Node 22 and stable in 24, which is the
           # version the Vercel project runs. No native module to compile.
           node-version: "24"
+          cache: npm
+
+      # The charity twin skips this, and it is why this workflow failed its
+      # first run: that build script imports nothing but node builtins, while
+      # this one needs fflate to stream the part ZIPs (Node has gzip and
+      # deflate, but no ZIP container reader). Copying the twin inherited its
+      # missing install step. `npm ci` rather than `npm install` so the build
+      # runs against the committed lockfile.
+      - name: Install dependencies
+        run: npm ci
 
       - name: Build the companies register
         env:

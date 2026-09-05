@@ -102,6 +102,29 @@ export async function scheduleReviewedEmail(input: unknown): Promise<ReviewedSen
     return { ok: false, message: "You can only schedule drafts you generated yourself." };
   }
 
+  // F217: the scheduled worker does not yet load attachment bytes. Refuse the
+  // transition instead of accepting a schedule that would silently send the
+  // email without the files the CAM reviewed.
+  const { count: attachmentCount, error: attachmentCountError } = await supabase
+    .from("outreach_message_attachments")
+    .select("attachment_id", { count: "exact", head: true })
+    .eq("outreach_message_id", messageId);
+  if (attachmentCountError || attachmentCount === null) {
+    if (attachmentCountError) {
+      await reportError(attachmentCountError, {
+        operation: "outreach.schedule.check_attachments",
+        messageId,
+      });
+    }
+    return { ok: false, message: "Attachments could not be checked. Nothing was scheduled." };
+  }
+  if (attachmentCount > 0) {
+    return {
+      ok: false,
+      message: "Emails with attachments must be sent now; scheduled attachment delivery is not supported yet.",
+    };
+  }
+
   // Suppression at point-of-scheduling — the worker re-checks at point-of-send,
   // but refusing here gives the CAM an immediate answer instead of a silent skip.
   const suppression = await checkSuppressionBeforeSend(organisationId, async (id) => {

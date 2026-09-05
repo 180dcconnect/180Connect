@@ -16,6 +16,8 @@
     "seed:clear": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/seed-clear.mts",
     "register:build": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-register-sqlite.mts",
     "register:fetch": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/fetch-register.mts",
+    "companies-register:build": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-companies-register-sqlite.mts",
+    "companies-register:fetch": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/fetch-companies-register.mts",
     "backfill:scores": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-priority-scores.mts",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --conditions=react-server --test \"src/**/*.test.ts\" \"scripts/**/*.test.mts\"",
     "export:data-model": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/export-data-model.mts",

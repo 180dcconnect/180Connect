@@ -1331,6 +1331,33 @@ the `ON DELETE CASCADE`. No audit row: same §1 reasoning as colour.
 
 ---
 
+### 3.24 Outreach daily send limit — RPC-only write, shared read
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `OUTREACH_DAILY_SEND_LIMIT` | any active user | — (seeded once by migration) | — (`SECURITY DEFINER` RPC only) | **none** |
+
+F128's branch-wide daily cap on outreach sends, distinct from §3.10a's per-user AI
+throttle and from F227's per-CAM `EMAIL_SEND_RATE_LIMIT` env var: every CAM sends
+from the same one branch mailbox, so a per-CAM limit alone never bounds the
+mailbox's total volume. A singleton row (`id` pinned `true`), the same shape as
+`DATA_HANDLING_RULE_VERSIONS`.
+
+SELECT is open to any active user, not admin-only — unlike §3.10a — because the
+send path itself (`sendReviewedEmail`, running as the sending CAM, and the
+scheduled worker, running as `service_role`) must read the current limit on every
+send to enforce it. The value carries no sensitive information; hiding it from a
+CAM would only mean a less informative block message.
+
+The only write path is `set_outreach_daily_send_limit`
+(`20260913100000_create_outreach_daily_send_limit.sql`), which re-checks
+`app.is_admin()` in its body (`SECURITY DEFINER` bypasses RLS) and writes the
+`audit_log` row (`outreach_daily_send_limit_changed`) in the same transaction —
+docs/audit-log-pattern.md. No-op writes (same value) are skipped, same as
+`set_data_handling_rule_active`.
+
+---
+
 ## 4. Denial behaviour and feedback
 
 Important and frequently got wrong: **a blocked read is not an error.**

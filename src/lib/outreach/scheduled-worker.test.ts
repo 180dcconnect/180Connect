@@ -32,7 +32,7 @@ function message(overrides: Partial<DueScheduledMessage> = {}): DueScheduledMess
 function harness(options: {
   due?: DueScheduledMessage[];
   suppressed?: boolean;
-  claimWon?: boolean;
+  claimResult?: "claimed" | "daily_limit_reached" | "lost_claim";
   delivery?: "ok" | "failed";
   flipSucceeds?: boolean;
   failFlipSucceeds?: boolean;
@@ -54,7 +54,7 @@ function harness(options: {
     },
     async claim(id) {
       calls.push(`claim:${id}`);
-      return options.claimWon ?? true;
+      return options.claimResult ?? "claimed";
     },
     async deliver(input) {
       calls.push(`deliver:${input.recipient}`);
@@ -99,6 +99,22 @@ test("an exhausted send limit blocks the delivery before any claim or Gmail call
   // NOT failed and its scheduler is not notified.
   assert.ok(!calls.some((c) => c.startsWith("claim:") || c.startsWith("deliver:")), "no claim or delivery when over the F227 limit");
   assert.ok(!calls.some((c) => c.startsWith("markFailed:") || c.startsWith("notify:")), "a transient rate-limit block must not fail the message");
+});
+
+test("an exhausted daily send limit blocks the delivery before any Gmail call", async () => {
+  // F128: the daily cap is enforced inside the same atomic claim as the
+  // per-message lock (claim_scheduled_outreach_send) — it cannot be a
+  // separate pre-check without reopening the race two concurrent claims
+  // would otherwise hit, so this loop sees it as a claim() outcome, not a
+  // gate ahead of the claim.
+  const { deps, calls } = harness({ due: [message()], claimResult: "daily_limit_reached" });
+  const summary = await deliverDueScheduledEmails(deps);
+  assert.deepEqual(summary, { sent: 0, blocked: 1, failed: 0 });
+  // Same transient treatment as F227's per-CAM block — the message stays
+  // scheduled, it is NOT failed and its scheduler is not notified.
+  assert.ok(calls.includes(`claim:00000000-0000-4000-d000-000000000001`), "the claim was still attempted");
+  assert.ok(!calls.some((c) => c.startsWith("deliver:")), "no delivery when over the daily limit");
+  assert.ok(!calls.some((c) => c.startsWith("markFailed:") || c.startsWith("notify:")), "a transient daily-limit block must not fail the message");
 });
 
 test("an unattributable scheduled email is failed — it would otherwise loop forever", async () => {
@@ -146,7 +162,7 @@ test("a failed-flip that races away counts as blocked, not failed", async () => 
 });
 
 test("a lost claim delivers nothing — another runner won the message", async () => {
-  const { deps, calls } = harness({ due: [message()], claimWon: false });
+  const { deps, calls } = harness({ due: [message()], claimResult: "lost_claim" });
   const summary = await deliverDueScheduledEmails(deps);
   assert.deepEqual(summary, { sent: 0, blocked: 0, failed: 0 });
   assert.ok(!calls.some((c) => c.startsWith("deliver:")), "Gmail must not be called on a lost claim");
@@ -199,7 +215,7 @@ test("mixed outcomes across a batch are counted independently", async () => {
       return true;
     },
     async claim(id) {
-      return !id.endsWith("3"); // third message lost to a concurrent runner
+      return id.endsWith("3") ? "lost_claim" : "claimed"; // third message lost to a concurrent runner
     },
     async deliver() {
       deliveries += 1;

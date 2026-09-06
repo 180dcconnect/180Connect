@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import {
-  chunkIds,
-  fetchPaged,
-  fetchPagedForOrgs,
-  FETCH_STEP,
-  ID_CHUNK,
-} from "./fetch-paged.ts";
+import { chunk, fetchPaged, fetchPagedForOrgs, FETCH_STEP, ID_CHUNK } from "./fetch-paged.ts";
 
 /** A source of `total` rows that answers range requests the way PostgREST does. */
 const pageSource = (total: number) => {
@@ -54,24 +48,34 @@ describe("fetchPaged", () => {
     assert.equal(source.calls.length, 2);
   });
 
-  it("surfaces an error instead of returning a partial page", async () => {
+  it("withholds a half-read table from `data` but keeps it in `partial`", async () => {
     let call = 0;
-    const { data, error } = await fetchPaged<number>(() => {
+    const { data, error, partial } = await fetchPaged<number>(() => {
       call += 1;
       return call === 1
         ? Promise.resolve({ data: Array.from({ length: FETCH_STEP }, () => 1), error: null })
         : Promise.resolve({ data: null, error: { message: "boom" } });
     });
 
+    // A count from half a table is a wrong number, not a smaller one, so a
+    // caller has to reach for `partial` deliberately.
     assert.equal(data, null);
     assert.deepEqual(error, { message: "boom" });
+    assert.equal(partial.length, FETCH_STEP);
+  });
+
+  it("has `partial` equal to `data` on a clean read", async () => {
+    const source = pageSource(10);
+    const { data, partial } = await fetchPaged<number>(source.build);
+
+    assert.deepEqual(partial, data);
   });
 });
 
-describe("chunkIds", () => {
+describe("chunk", () => {
   it("splits an oversized id list into URL-sized batches", () => {
     const ids = Array.from({ length: ID_CHUNK * 2 + 1 }, (_, i) => `id-${i}`);
-    const chunks = chunkIds(ids);
+    const chunks = chunk(ids);
 
     assert.equal(chunks.length, 3);
     assert.equal(chunks[0].length, ID_CHUNK);
@@ -80,7 +84,11 @@ describe("chunkIds", () => {
   });
 
   it("returns nothing for an empty list rather than one empty chunk", () => {
-    assert.deepEqual(chunkIds([]), []);
+    assert.deepEqual(chunk([]), []);
+  });
+
+  it("rejects a size that would never terminate", () => {
+    assert.throws(() => chunk([1, 2, 3], 0), RangeError);
   });
 });
 
@@ -101,9 +109,9 @@ describe("fetchPagedForOrgs", () => {
     const ids = Array.from({ length: ID_CHUNK + 3 }, (_, i) => `id-${i}`);
     const seen: number[] = [];
 
-    const { data } = await fetchPagedForOrgs<string>(ids, (chunk) => {
-      seen.push(chunk.length);
-      return Promise.resolve({ data: [...chunk], error: null });
+    const { data } = await fetchPagedForOrgs<string>(ids, (batch) => {
+      seen.push(batch.length);
+      return Promise.resolve({ data: [...batch], error: null });
     });
 
     assert.deepEqual(seen, [ID_CHUNK, 3]);
@@ -112,11 +120,11 @@ describe("fetchPagedForOrgs", () => {
 
   it("abandons the whole read when one chunk fails", async () => {
     const ids = Array.from({ length: ID_CHUNK + 1 }, (_, i) => `id-${i}`);
-    let chunk = 0;
+    let batch = 0;
 
     const { data, error } = await fetchPagedForOrgs<string>(ids, () => {
-      chunk += 1;
-      return chunk === 1
+      batch += 1;
+      return batch === 1
         ? Promise.resolve({ data: [], error: null })
         : Promise.resolve({ data: null, error: { message: "boom" } });
     });

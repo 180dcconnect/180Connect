@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { fetchPaged } from "@/lib/supabase/fetch-paged";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { hasPermission } from "@/lib/auth/permissions";
@@ -122,77 +123,38 @@ export default async function DashboardPage({
     // past that — the 1794-row staging dataset already hit this, dropping the
     // two recently-claimed orgs and making recent-updates and needs-attention
     // appear empty. Paginate until the server returns fewer than a full page.
-    async function fetchAllOrganisations(): Promise<{
-      data: DashboardOrgRow[] | null;
-      error: { message: string } | null;
-    }> {
-      const all: DashboardOrgRow[] = [];
-      let from = 0;
-      const step = 1000;
-      while (true) {
-        const { data, error } = await supabase
+    const fetchAllOrganisations = () =>
+      fetchPaged<DashboardOrgRow>((from, to) =>
+        supabase
           .from("organisations")
           .select("id, legal_name, outreach_status, owner_id, updated_at, created_at")
           .order("created_at", { ascending: true })
           .order("id", { ascending: true })
-          .range(from, from + step - 1)
-          .overrideTypes<DashboardOrgRow[], { merge: false }>();
-        if (error) return { data: null, error };
-        if (!data || data.length === 0) break;
-        all.push(...data);
-        if (data.length < step) break;
-        from += step;
-      }
-      return { data: all, error: null };
-    }
+          .range(from, to)
+          .overrideTypes<DashboardOrgRow[], { merge: false }>(),
+      );
 
-    async function fetchAllOpenSuppressions(): Promise<{
-      data: OpenSuppression[] | null;
-      error: { message: string } | null;
-    }> {
-      const all: OpenSuppression[] = [];
-      let from = 0;
-      const step = 1000;
-      while (true) {
-        const { data, error } = await supabase
+    const fetchAllOpenSuppressions = () =>
+      fetchPaged<OpenSuppression>((from, to) =>
+        supabase
           .from("suppressions")
           .select("organisation_id, status")
           .in("status", ["pending", "active"])
           .order("organisation_id", { ascending: true })
-          .range(from, from + step - 1)
-          .overrideTypes<OpenSuppression[], { merge: false }>();
-        if (error) return { data: null, error };
-        if (!data || data.length === 0) break;
-        all.push(...data);
-        if (data.length < step) break;
-        from += step;
-      }
-      return { data: all, error: null };
-    }
+          .range(from, to)
+          .overrideTypes<OpenSuppression[], { merge: false }>(),
+      );
 
-    async function fetchAllTrackedReplies(): Promise<{
-      data: ReplyTrackingRow[] | null;
-      error: { message: string } | null;
-    }> {
-      const all: ReplyTrackingRow[] = [];
-      let from = 0;
-      const step = 1000;
-      while (true) {
-        const { data, error } = await supabase
+    const fetchAllTrackedReplies = () =>
+      fetchPaged<ReplyTrackingRow>((from, to) =>
+        supabase
           .from("reply_events")
           .select("id, organisation_id, response_time_seconds")
           .order("received_at", { ascending: true })
           .order("id", { ascending: true })
-          .range(from, from + step - 1)
-          .overrideTypes<ReplyTrackingRow[], { merge: false }>();
-        if (error) return { data: null, error };
-        if (!data || data.length === 0) break;
-        all.push(...data);
-        if (data.length < step) break;
-        from += step;
-      }
-      return { data: all, error: null };
-    }
+          .range(from, to)
+          .overrideTypes<ReplyTrackingRow[], { merge: false }>(),
+      );
 
     const [organisations, openSuppressions, replyTracking, rawActivity, rawUpdateNotes, rawUpdateMessages, rawUpdateReplies, rawUpdateAudit] =
       await Promise.all([

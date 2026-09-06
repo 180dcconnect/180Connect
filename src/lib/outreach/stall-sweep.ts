@@ -1,4 +1,5 @@
 import { reportError } from "../error-logging.ts";
+import { chunk, fetchPaged } from "../supabase/fetch-paged.ts";
 import { stalledClients, type StallCandidate } from "./stall-detection.ts";
 import type { ClientActivity, FollowUpThresholds } from "./follow-up-recommendations.ts";
 import { DEFAULT_FOLLOW_UP_THRESHOLDS } from "./follow-up-recommendations.ts";
@@ -9,7 +10,7 @@ import {
   type StallNotificationPayload,
 } from "./stall-notifications.ts";
 
-const FETCH_STEP = 1000;
+/** The activity RPC takes its ids in the body, so no URL-length ceiling applies. */
 const RPC_CHUNK = 500;
 
 export type StallSweepResult = {
@@ -147,25 +148,22 @@ export async function runStallSweep(now: Date = new Date()): Promise<StallSweepR
 
   const deps: StallSweepDeps = {
     async loadOrganisations() {
-      const all: OrgRow[] = [];
-      let from = 0;
-      while (true) {
-        const { data, error } = await admin
+      const { data, error } = await fetchPaged<OrgRow>((from, to) =>
+        admin
           .from("organisations")
           .select("id, legal_name, outreach_status, owner_id")
           .order("id", { ascending: true })
-          .range(from, from + FETCH_STEP - 1)
-          .overrideTypes<OrgRow[], { merge: false }>();
-        if (error) {
-          await reportError(error, { operation: "stall_sweep.organisations_list" });
-          throw error;
-        }
-        if (!data || data.length === 0) break;
-        all.push(...data);
-        if (data.length < FETCH_STEP) break;
-        from += FETCH_STEP;
+          .range(from, to)
+          .overrideTypes<OrgRow[], { merge: false }>(),
+      );
+      // The sweep throws rather than sweeping a partial list: it writes stall
+      // flags to audit_log, and a short read would record clients as unflagged
+      // that were never examined.
+      if (error) {
+        await reportError(error, { operation: "stall_sweep.organisations_list" });
+        throw error;
       }
-      return all;
+      return data ?? [];
     },
 
     async loadPreferences() {
@@ -185,10 +183,9 @@ export async function runStallSweep(now: Date = new Date()): Promise<StallSweepR
     async loadActivities(orgIds) {
       const activityByOrg = new Map<string, ClientActivity>();
       if (orgIds.length > 0) {
-        for (let i = 0; i < orgIds.length; i += RPC_CHUNK) {
-          const chunkIds = orgIds.slice(i, i + RPC_CHUNK);
+        for (const ids of chunk(orgIds, RPC_CHUNK)) {
           const { data, error } = await admin.rpc("get_clients_last_activity", {
-            p_organisation_ids: chunkIds,
+            p_organisation_ids: ids,
           });
           if (error) {
             await reportError(error, { operation: "stall_sweep.activity_chunk" });
@@ -207,26 +204,22 @@ export async function runStallSweep(now: Date = new Date()): Promise<StallSweepR
     },
 
     async loadOpenActionOrgIds() {
-      const openOrgIds = new Set<string>();
-      let actionFrom = 0;
-      while (true) {
-        const { data, error } = await admin
+      const { error, partial } = await fetchPaged<{ organisation_id: string }>((from, to) =>
+        admin
           .from("actions")
           .select("organisation_id")
           .eq("status", "open")
           .order("organisation_id", { ascending: true })
-          .range(actionFrom, actionFrom + FETCH_STEP - 1)
-          .overrideTypes<{ organisation_id: string }[], { merge: false }>();
-        if (error) {
-          await reportError(error, { operation: "stall_sweep.open_actions_list" });
-          break;
-        }
-        if (!data || data.length === 0) break;
-        for (const row of data) openOrgIds.add(row.organisation_id);
-        if (data.length < FETCH_STEP) break;
-        actionFrom += FETCH_STEP;
+          .range(from, to)
+          .overrideTypes<{ organisation_id: string }[], { merge: false }>(),
+      );
+      // Unlike the organisation read this one degrades: an open action only ever
+      // suppresses a stall flag, so a short list over-flags rather than under-,
+      // and the sweep is still worth running.
+      if (error) {
+        await reportError(error, { operation: "stall_sweep.open_actions_list" });
       }
-      return openOrgIds;
+      return new Set<string>(partial.map((row) => row.organisation_id));
     },
 
     async loadActiveAdminUserIds() {

@@ -148,6 +148,12 @@ export default async function AdminPage() {
               How many labelled outcomes exist in the ML dataset and how close that is to the training threshold.
             </p>
           </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/sending-limits">
+            <h2 className="font-bold">Outreach sending limit</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Set the branch mailbox&apos;s daily outreach sending cap.
+            </p>
+          </Link>
         </div>
       </section>
     </main>

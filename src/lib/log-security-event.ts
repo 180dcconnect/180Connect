@@ -22,6 +22,8 @@ export type SecurityEvent =
   | "ai.generation_rate_limit_unavailable"
   | "outreach.send_rate_limited"
   | "outreach.send_rate_limit_unavailable"
+  | "outreach.daily_send_limit_reached"
+  | "outreach.daily_send_limit_unavailable"
   | "session.expired"
   | "session.recovery_confined"
   | "outreach.suppression_blocked"

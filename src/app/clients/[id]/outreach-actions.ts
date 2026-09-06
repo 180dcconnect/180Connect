@@ -6,6 +6,7 @@ import { attachmentRpcFailure, MAX_COMBINED_ATTACHMENT_SIZE_BYTES } from "@/lib/
 import { canSendClientOutreach } from "@/lib/client-email-validation";
 import { reportError } from "@/lib/error-logging";
 import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
+import { dailySendLimitMessage } from "@/lib/outreach/daily-send-limit";
 import { discardDraftSchema } from "@/lib/outreach/discard-draft";
 import { draftAttachmentSchema } from "@/lib/outreach/draft-attachments";
 import { emailHtmlToPlainText, sanitizeEmailHtml } from "@/lib/outreach/email-html";
@@ -370,9 +371,24 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   // this draft; everyone else gets refused before any provider call. The claim
   // self-expires after send_claim_staleness_window(), so a crashed tab cannot lock
   // a draft forever.
+  //
+  // F128: the branch-wide daily cap is enforced inside this same RPC, under a
+  // lock that serializes every concurrent claim attempt — two CAMs racing to
+  // send the mailbox's last slot cannot both win, unlike the plain read-then-
+  // send count this used to be. A reached cap surfaces as errcode P0003 rather
+  // than a plain `false`, so it can be told apart from an ordinary lost claim.
   const { data: claimed, error: claimError } = await supabase
     .rpc("claim_outreach_send", { p_message_id: messageId });
   if (claimError) {
+    if ((claimError as { code?: string }).code === "P0003") {
+      await reportError(claimError, {
+        operation: "outreach.send.daily_limit_reached",
+        messageId,
+        userId: authorization.actor.id,
+      });
+      logSecurityEvent("outreach.daily_send_limit_reached", { userId: authorization.actor.id });
+      return { ok: false, message: dailySendLimitMessage() };
+    }
     await reportError(claimError, { operation: "outreach.send.claim", messageId });
     return { ok: false, message: "The send could not be started safely. Nothing was sent. Try again." };
   }

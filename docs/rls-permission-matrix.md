@@ -1114,6 +1114,22 @@ publication for live bell-panel delivery; publication membership grants nothing
 on its own — delivery is still filtered by the SELECT policy per subscriber
 (same mechanism as §3.8 / F075).
 
+**Producer: reply notifications** (F133 #128/#510 + F174 #170). The producer
+is F133's `notify_on_reply_event` AFTER INSERT trigger on `reply_events`
+(`supabase/migrations/20260912170300_notify_on_gmail_reply.sql`) — it runs in
+the same transaction as `capture_gmail_reply` (F131) inserting the reply row,
+notifying the client's *current* `owner_id` (looked up fresh, not the owner at
+whenever Gmail sync queued the job), or every active admin when the client is
+unowned / its owner is inactive. `notification_type` is
+`'client_reply_received'` (owner) / `'unowned_client_reply_received'` (admin
+fallback); `link_path` is the client's communication timeline — `/clients/<id>`
+with a `#timeline-heading` anchor, not a generic notifications list (F174 AC2).
+F174 deliberately adds no second producer — that would double-notify the same
+reply. This table carries no priority column — AC3's "high-priority by default"
+is decided app-side, by `notificationPriority()` in `src/lib/notifications.ts`
+mapping both F133 reply types to `'high'`, not by a new column every producer
+would otherwise have to fill in.
+
 ---
 
 ### 3.20 Saved filter views — own rows only

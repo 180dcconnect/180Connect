@@ -63,6 +63,39 @@ type MessageListRow = InboxMessageRow & {
 };
 
 /**
+ * Reads a whole table through PostgREST's 1000-row window.
+ *
+ * Every read on this page needs this, not only the messages one. The mailbox
+ * assembles a thread from four tables at once and drops any thread whose
+ * *organisation* row is missing (see buildInboxThreads) — so an unpaged
+ * `select` on `organisations` does not lose the 1001st client's name, it loses
+ * that client's mailbox entirely, silently, with a full-looking inbox as the
+ * only symptom. Same for `contacts` and `reply_events`.
+ *
+ * `order` is passed in because a paged read needs a stable sort to page
+ * against: without one, PostgREST may return the same row on two pages and
+ * skip another.
+ */
+async function fetchAllPages<T>(
+  buildPage: (
+    from: number,
+    to: number,
+  ) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>,
+): Promise<{ data: T[] | null; error: { message: string } | null }> {
+  const all: T[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await buildPage(from, from + PAGE_STEP - 1);
+    if (error) return { data: null, error };
+    if (!data || data.length === 0) break;
+    all.push(...(data as T[]));
+    if (data.length < PAGE_STEP) break;
+    from += PAGE_STEP;
+  }
+  return { data: all, error: null };
+}
+
+/**
  * Every outreach message, all four statuses, **without bodies**.
  *
  * The old queue fetched only `send_status = 'sent'`. Drafts and scheduled sends
@@ -70,26 +103,17 @@ type MessageListRow = InboxMessageRow & {
  * anything unsent, so without these rows the mailbox's Drafts and Scheduled
  * folders would be permanently empty on real data.
  */
-async function fetchMessages(
-  supabase: SupabaseClient,
-): Promise<{ data: MessageListRow[] | null; error: { message: string } | null }> {
-  const all: MessageListRow[] = [];
-  let from = 0;
-  while (true) {
-    const { data, error } = await supabase
+function fetchMessages(supabase: SupabaseClient) {
+  return fetchAllPages<MessageListRow>((from, to) =>
+    supabase
       .from("outreach_messages")
       .select(
         "id, subject, send_status, sent_at, scheduled_at, updated_at, created_at, organisation_id, sender:users!outreach_messages_sent_by_user_id_fkey(full_name)",
       )
       .order("created_at", { ascending: false })
-      .range(from, from + PAGE_STEP - 1);
-    if (error) return { data: null, error };
-    if (!data || data.length === 0) break;
-    all.push(...(data as unknown as MessageListRow[]));
-    if (data.length < PAGE_STEP) break;
-    from += PAGE_STEP;
-  }
-  return { data: all, error: null };
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
 }
 
 /**
@@ -144,18 +168,30 @@ export default async function InboxPage({
 
   const [messageResult, replyResult, orgResult, contactResult] = await Promise.all([
     fetchMessages(supabase),
-    supabase
-      .from("reply_events")
-      .select("id, reply_body, received_at, organisation_id, intent, contact_id")
-      .order("received_at", { ascending: false }),
-    supabase
-      .from("organisations")
-      .select(
-        "id, legal_name, organisation_type, city, country_code, contact_email, sector, sub_sector, owner:users!organisations_owner_id_fkey(full_name, email)",
-      ),
-    supabase
-      .from("contacts")
-      .select("id, organisation_id, first_name, last_name, email, job_title, phone, is_primary"),
+    fetchAllPages<InboxReplyRow>((from, to) =>
+      supabase
+        .from("reply_events")
+        .select("id, reply_body, received_at, organisation_id, intent, contact_id")
+        .order("received_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllPages<InboxOrganisationRow>((from, to) =>
+      supabase
+        .from("organisations")
+        .select(
+          "id, legal_name, organisation_type, city, country_code, contact_email, sector, sub_sector, owner:users!organisations_owner_id_fkey(full_name, email)",
+        )
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllPages<InboxContactRow>((from, to) =>
+      supabase
+        .from("contacts")
+        .select("id, organisation_id, first_name, last_name, email, job_title, phone, is_primary")
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
   ]);
 
   // Fail-soft per source: one dead query degrades the mailbox rather than

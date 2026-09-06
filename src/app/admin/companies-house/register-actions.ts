@@ -18,6 +18,12 @@ import {
 import { createDefaultIngestionStore } from "@/lib/ingestion/store";
 import { importSelection } from "@/lib/companies-register/import";
 import { promotePendingCompaniesHouseRecords } from "@/lib/standardize/write-organisations";
+import { ocrUnavailableReason } from "@/lib/cic-statement/ocr";
+import {
+  DEFAULT_BACKFILL as DEFAULT_CIC_BACKFILL,
+  MAX_BACKFILL as MAX_CIC_BACKFILL,
+  runCicBackfill,
+} from "@/lib/cic-statement/backfill";
 
 /**
  * Server Actions behind the Companies House import screen.
@@ -160,6 +166,12 @@ export type ImportState =
   | {
       kind: "done";
       message: string;
+      /** How many the filters matched in the register, before the cap. */
+      available: number;
+      /** The ceiling this run was held to. */
+      cap: number;
+      /** True when `available` exceeded `cap`, so most of the match was left. */
+      truncated: boolean;
       selected: number;
       written: number;
       unchanged: number;
@@ -211,12 +223,19 @@ export async function runCompaniesRegisterImport(
   try {
     // Counted again here rather than trusting the number the browser last saw:
     // a register refresh may have landed between the preview and the click.
-    if (countCompanies(parsed) === 0) {
+    //
+    // Kept, not discarded: this is the only number that knows how big the
+    // match really was. Everything after the cap reports 10,000 whether the
+    // filters matched 10,000 or 716,282, so truncation is invisible from
+    // downstream counts alone — which is exactly the bug this replaced.
+    const available = countCompanies(parsed);
+    if (available === 0) {
       return {
         kind: "error",
         message: "Those filters select no companies, so there is nothing to import.",
       };
     }
+    const truncated = available > cap;
 
     // F246/F247, fail-closed exactly as the ingestion runner does: if the data
     // handling rules cannot be read, nothing is imported.
@@ -243,13 +262,18 @@ export async function runCompaniesRegisterImport(
     await supabase
       .from("ingestion_runs")
       .update({
-        job_status: outcome.selected > cap ? "partial" : "completed",
+        // `outcome.selected` is measured after the cap, so comparing it to the
+        // cap can only ever be false. `available` is the pre-cap match.
+        job_status: truncated ? "partial" : "completed",
         completed_at: new Date().toISOString(),
         records_fetched: outcome.selected,
         records_inserted: outcome.written,
         records_skipped: outcome.unchanged,
         records_failed: 0,
         run_stats: {
+          available,
+          cap,
+          truncated,
           selected: outcome.selected,
           written: outcome.written,
           unchanged: outcome.unchanged,
@@ -270,6 +294,8 @@ export async function runCompaniesRegisterImport(
       detail: {
         filters: parsed as unknown as Record<string, unknown>,
         description: describeFilters(parsed),
+        available,
+        truncated,
         selected: outcome.selected,
         written: outcome.written,
         added: promoted.inserted,
@@ -280,7 +306,13 @@ export async function runCompaniesRegisterImport(
     revalidatePath("/admin/companies-house");
     revalidatePath("/clients");
 
+    // Truncation leads, because it changes what the other numbers mean: "500
+    // added" reads as the whole job unless it says the job was a tenth of what
+    // was asked for.
     const summary = [
+      truncated
+        ? `Imported the first ${cap.toLocaleString()} of ${available.toLocaleString()} matching companies`
+        : "",
       `${promoted.inserted.toLocaleString()} added to the client list`,
       promoted.needsReview > 0 ? `${promoted.needsReview.toLocaleString()} flagged for review` : "",
       promoted.doesNotMeet > 0
@@ -294,7 +326,14 @@ export async function runCompaniesRegisterImport(
 
     return {
       kind: "done",
-      message: summary ? `${summary}.` : "Nothing new to add.",
+      message: summary
+        ? truncated
+          ? `${summary}. Narrow the filters and run again for the rest.`
+          : `${summary}.`
+        : "Nothing new to add.",
+      available,
+      cap,
+      truncated,
       selected: outcome.selected,
       written: outcome.written,
       unchanged: outcome.unchanged,
@@ -407,5 +446,175 @@ export async function deleteCompaniesFilterPreset(id: string): Promise<PresetSta
       actorUserId: authorization.actor.id,
     });
     return { ok: false, message: "The filter set could not be deleted." };
+  }
+}
+
+/**
+ * ── CIC36 community interest statement backfill ──
+ *
+ * The companies-side twin of the charity register's profile backfill, and the
+ * door onto `lib/cic-statement/`. Gated and recorded the same way.
+ *
+ * One difference worth knowing before pressing it: this job is expensive. Each
+ * company costs two Companies House calls, a ~1.2MB download and several
+ * seconds of OCR, so MAX_CIC_BACKFILL is small and a full catch-up belongs to
+ * `npm run backfill:cic-statements`, which has no function-timeout ceiling.
+ * This button is for topping up after an import has added a few dozen CICs.
+ */
+
+export type CicBackfillState =
+  | { kind: "idle"; message: string }
+  | { kind: "error"; message: string }
+  | {
+      kind: "done";
+      message: string;
+      attempted: number;
+      written: number;
+      remaining: number;
+    };
+
+export async function runCicStatementBackfillNow(
+  _previous: CicBackfillState,
+  formData: FormData,
+): Promise<CicBackfillState> {
+  const authorization = await getCurrentActor(IMPORT_PERMISSION);
+  if (!authorization.ok) {
+    return { kind: "error", message: actorFailureMessage(authorization.reason) };
+  }
+
+  // Checked before a run row is opened: a missing language model is a
+  // deployment problem, and recording a failed ingestion run for it would put
+  // noise on Import Status that says nothing about the data.
+  const ocrProblem = ocrUnavailableReason();
+  if (ocrProblem) return { kind: "error", message: ocrProblem };
+
+  if (!process.env.COMPANIES_HOUSE_API_KEY?.trim()) {
+    return { kind: "error", message: "The Companies House API key is not configured." };
+  }
+
+  const requested = Number(formData.get("batchSize"));
+  const limit =
+    Number.isInteger(requested) && requested > 0
+      ? Math.min(requested, MAX_CIC_BACKFILL)
+      : DEFAULT_CIC_BACKFILL;
+
+  let runId: string | null = null;
+  try {
+    const supabase = requireAdminClient();
+
+    // Fails closed, exactly as the ingestion runner does: if the data handling
+    // rules cannot be read, nothing is fetched. The statement is externally
+    // authored text out of a document full of personal data, and storing it
+    // unfiltered is the one outcome that must be impossible.
+    const policy = await createDefaultIngestionStore()?.loadDataHandlingPolicy();
+    if (!policy) {
+      return {
+        kind: "error",
+        message: "The data handling rules could not be read, so nothing was fetched.",
+      };
+    }
+
+    const { data: run, error: runError } = await supabase
+      .from("ingestion_runs")
+      .insert({
+        api_source: "companies_house",
+        triggered_by: "manual",
+        triggered_by_user_id: authorization.actor.id,
+        job_status: "running",
+      })
+      .select("id")
+      .single();
+    if (runError) throw runError;
+    runId = run.id as string;
+
+    const outcome = await runCicBackfill(supabase, limit, policy);
+
+    await supabase
+      .from("ingestion_runs")
+      .update({
+        job_status: outcome.remaining > 0 ? "partial" : "completed",
+        completed_at: new Date().toISOString(),
+        records_fetched: outcome.attempted,
+        // Updates organisations in place and never inserts one — same reasoning
+        // as the charity profile backfill: counting these as "inserted" would
+        // put organisations on Import Status that were never created.
+        records_inserted: 0,
+        records_skipped: outcome.notCic,
+        records_failed: outcome.failed,
+        run_stats: {
+          job: "cic_statement_backfill",
+          attempted: outcome.attempted,
+          written: outcome.written,
+          notCic: outcome.notCic,
+          failed: outcome.failed,
+          remaining: outcome.remaining,
+        },
+      })
+      .eq("id", runId);
+
+    await supabase.from("audit_log").insert({
+      actor_user_id: authorization.actor.id,
+      action: "cic_statement_backfilled",
+      target_table: "ingestion_runs",
+      target_id: runId,
+      detail: {
+        attempted: outcome.attempted,
+        written: outcome.written,
+        notCic: outcome.notCic,
+        failed: outcome.failed,
+        remaining: outcome.remaining,
+        limit,
+      },
+    });
+
+    revalidatePath("/admin/companies-house");
+
+    if (outcome.attempted === 0) {
+      return {
+        kind: "done",
+        message: "Nothing queued — every company has already been asked about.",
+        attempted: 0,
+        written: 0,
+        remaining: outcome.remaining,
+      };
+    }
+
+    const parts = [
+      `Read ${outcome.written.toLocaleString()} ${outcome.written === 1 ? "statement" : "statements"} from ${outcome.attempted.toLocaleString()} ${outcome.attempted === 1 ? "company" : "companies"}`,
+    ];
+    if (outcome.notCic > 0) {
+      parts.push(`${outcome.notCic.toLocaleString()} had no CIC36 on file`);
+    }
+    if (outcome.failed > 0) {
+      parts.push(`${outcome.failed.toLocaleString()} failed and stayed queued`);
+    }
+    if (outcome.remaining > 0) {
+      parts.push(`${outcome.remaining.toLocaleString()} still queued`);
+    }
+
+    return {
+      kind: "done",
+      message: `${parts.join(". ")}.`,
+      attempted: outcome.attempted,
+      written: outcome.written,
+      remaining: outcome.remaining,
+    };
+  } catch (error) {
+    if (runId) {
+      const supabase = createAdminClient();
+      await supabase
+        ?.from("ingestion_runs")
+        .update({
+          job_status: "failed",
+          completed_at: new Date().toISOString(),
+          error_message: error instanceof Error ? error.message : String(error),
+        })
+        .eq("id", runId);
+    }
+    await reportError(error, { operation: "admin.cic_statement_backfill" });
+    return {
+      kind: "error",
+      message: "The backfill could not be run. The error has been reported.",
+    };
   }
 }

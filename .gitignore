@@ -60,3 +60,8 @@ yarn-error.log*
 next-env.d.ts
 supabase/snippets/
 data/register.sqlite
+data/companies-register.sqlite
+# OCR language model for the CIC36 statement job — 5.2MB, fetched by
+# `npm run tesseract:fetch` (wired into prebuild), same as the register files.
+data/eng.traineddata
+data/eng.traineddata.partial

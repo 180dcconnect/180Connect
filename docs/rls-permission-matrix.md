@@ -27,6 +27,15 @@ advisors 0028 / 0029 clean; see §7). Base role checks come from `create_users` 
 `SECURITY DEFINER` with `set search_path = ''`; `authenticated` is granted `EXECUTE`
 (policies need it), `anon` is not.
 
+Being `SECURITY DEFINER` is also why **the zero-argument helpers must be called as
+`(select app.is_active_user())` inside a policy**, never bare: Postgres cannot inline a
+SECURITY DEFINER function, so a bare call in a security qualifier runs once per row
+instead of once per statement. It changes no permission — the same rows are admitted
+either way — which is exactly why it is easy to lose. The rule, the measurements and
+which helpers are exempt are in
+[`supabase/MIGRATIONS.md`](../supabase/MIGRATIONS.md) §"Row-Level Security"; the guard
+is `tests.suite_rls_initplan` in `supabase/tests/rls_policies.test.sql`.
+
 ---
 
 ## 1. Roles
@@ -212,7 +221,7 @@ write that changes a column listed active in `RESTRICTED_EDIT_FIELDS`
 (`20260822160000_create_restricted_edit_fields.sql`), raising 42501 with a pointer to
 the suggestion flow. The restricted set is configuration, not code: an admin adds or
 retires fields at runtime through `add_restricted_edit_field` /
-`deactivate_restricted_edit_field` (both audited, `/admin/restricted-fields`), and both
+`deactivate_restricted_edit_field` (both audited, `/settings/restricted-fields`), and both
 enforcement points — the trigger and the suggestion RPC — follow the table. What F077
 added is the legitimate path for corrections: `suggest_organisation_edit(org_id,
 field_name, new_value)` (`20260822140000_create_edit_suggestions.sql`, rewritten by

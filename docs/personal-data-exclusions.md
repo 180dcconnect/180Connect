@@ -103,6 +103,31 @@ the cost of a rule matching nothing is nothing, and the day an adapter starts
 calling an officers or trustees endpoint, the exclusion is already in force
 with no code change and no review cycle to catch up on.
 
+## Filing documents (CIC36)
+
+The CIC36 statement job (`src/lib/cic-statement/`, see
+[`companies-register-import.md`](companies-register-import.md)) is the first
+thing here that reads a **document** rather than a JSON payload, and a CIC
+incorporation filing is dense with personal data: director names, dates of
+birth, service addresses, and an email address on the CIC36's own contact page.
+
+None of it is stored, by construction rather than by filtering:
+
+1. The PDF is never written to disk. It exists as bytes for as long as OCR takes.
+2. Only pages that identify themselves as the CIC36 statement are read at all —
+   the IN01, the PSC pages and the statement of guarantee are never OCR'd.
+3. Only the two statement boxes are taken from those pages. The extractor
+   returns `{ beneficiaries, activities }` or nothing; it has no path that
+   returns "the page".
+4. What survives goes through `applyDataHandling` before any write, so the
+   global `redact_email` rule catches an address a company typed into its own
+   statement.
+
+The residual risk is the one described under "Documented limits" below: a
+director who names themselves inside their own community interest statement is
+not caught, because the platform runs no NER. That is the same boundary a
+founder named on an About page already sits on. It is inherited deliberately.
+
 ## Documented limits
 
 This system catches personal data that shows up as a **named field** (an

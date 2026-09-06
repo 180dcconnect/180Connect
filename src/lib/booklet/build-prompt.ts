@@ -63,6 +63,17 @@ export type BookletOrganisationInput = {
   // the two to stay distinguishable. A charity with both gets both — they are
   // different claims, not two spellings of one.
   charity_activities: string | null;
+  // The registrar's industry classification for a company, already resolved to
+  // the register's own wording by the caller (sicTitles() in
+  // src/lib/companies-register/sqlite.ts) — this module takes no filesystem
+  // dependency. Null for a charity.
+  //
+  // Labelled as a classification in the prompt, never as a mission. It is a
+  // drawer the registrar filed the company in, not a statement of purpose:
+  // 118 of the 413 companies imported so far share "Other education n.e.c.",
+  // and a booklet that presented that as what an organisation does would be
+  // confidently wrong about every one of them.
+  sic_titles: string[] | null;
 };
 
 export type BookletEnrichmentInput = {
@@ -269,6 +280,7 @@ export function buildBookletPrompt(
     `- Website: ${displayValue(organisation.website)}`,
     `- Mission (enrichment): ${displayValue(enrichment?.mission_statement)}`,
     `- Activities as filed with the register: ${displayValue(organisation.charity_activities)}`,
+    `- Registered nature of business (SIC classification, not a mission): ${displayList(organisation.sic_titles)}`,
     `- Mission keywords: ${displayList(enrichment?.mission_keywords)}`,
     `- Sector: ${preferCanonical(organisation.sector, enrichment?.sector)}`,
     `- Sub-sector: ${preferCanonical(organisation.sub_sector, enrichment?.sub_sector)}`,

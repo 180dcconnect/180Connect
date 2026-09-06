@@ -30,21 +30,19 @@
 // renders the `main` this is slotted into.
 
 import { redirect } from "next/navigation";
-import Image from "next/image";
 
 import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
-import { GroupTabs } from "@/components/ui/group-tabs";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { parseFilters } from "@/lib/charity-register/filters";
 import { findBackfillTargets } from "@/lib/charity-register/annual-return-backfill";
 import { findProfileTargets } from "@/lib/charity-register/profile-backfill";
 import { labelValues, registerMeta } from "@/lib/charity-register/sqlite";
 import { LABEL_KIND } from "@/lib/charity-register/sqlite-query";
-import { DATA_IMPORTS_TABS } from "../import-group";
+import { DataImportsHeader } from "../data-imports-header";
 import { AnnualReturnCard } from "./annual-return-card";
 import { RegisterProfileCard } from "./profile-card";
 import { CharityLookupDialog } from "./lookup-dialog";
@@ -100,26 +98,34 @@ export default async function CharityCommissionPage() {
   // half is two reads of a few thousand rows. Degrades to null rather than
   // failing the page — the coverage card is the least important thing here, and
   // a missing register file is its normal empty case, not an error.
+  //
+  // The two reads run together. They are independent, and each is several
+  // thousand rows, so awaiting one before starting the other doubled the wait
+  // for no reason. `allSettled` keeps the "degrades to null" behaviour per
+  // read — one failing must not deny the other its card.
   let coverage = null;
+  let profileCoverage = null;
   if (admin) {
-    try {
-      coverage = (await findBackfillTargets(admin)).coverage;
-    } catch (error) {
-      await reportError(error, {
+    const [backfill, profile] = await Promise.allSettled([
+      findBackfillTargets(admin),
+      findProfileTargets(admin),
+    ]);
+
+    if (backfill.status === "fulfilled") {
+      coverage = backfill.value.coverage;
+    } else {
+      await reportError(backfill.reason, {
         operation: "admin.charity_commission.annual_return_coverage",
       });
     }
-  }
 
-  // The same read for the profile fields, degrading the same way and for the
-  // same reasons. Kept separate rather than folded into the one above: they
-  // answer different questions and either can be empty while the other is not.
-  let profileCoverage = null;
-  if (admin) {
-    try {
-      profileCoverage = (await findProfileTargets(admin)).coverage;
-    } catch (error) {
-      await reportError(error, {
+    // The same read for the profile fields, degrading the same way and for the
+    // same reasons. Kept separate rather than folded into the one above: they
+    // answer different questions and either can be empty while the other is not.
+    if (profile.status === "fulfilled") {
+      profileCoverage = profile.value.coverage;
+    } else {
+      await reportError(profile.reason, {
         operation: "admin.charity_commission.register_profile_coverage",
       });
     }
@@ -167,39 +173,16 @@ export default async function CharityCommissionPage() {
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
-      <Stage className="mx-auto max-w-5xl space-y-8">
+      <Stage className="mx-auto max-w-6xl space-y-8">
         <Rise>
-          <div className="flex items-center gap-4">
-            <a
-              href="https://register-of-charities.charitycommission.gov.uk"
-              target="_blank"
-              rel="noreferrer"
-              aria-label="Charity Commission register (opens in a new tab)"
-              className="shrink-0 transition-opacity hover:opacity-80"
-            >
-              <Image
-                src="/sources/charity-commission.png"
-                alt=""
-                width={112}
-                height={112}
-                className="h-20 w-auto sm:h-24 md:h-28"
-              />
-            </a>
-            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
-              Charity Commission
-            </h1>
-          </div>
-          <GroupTabs
-            className="mt-4"
-            tabs={DATA_IMPORTS_TABS}
-            current="/admin/charity-commission"
-          />
-          <RegisterRail
-            snapshotDate={snapshotDate}
-            registerSize={registerSize}
-            staleDays={staleDays}
-            canRefresh={Boolean(process.env.GITHUB_REGISTER_TOKEN?.trim())}
-          />
+          <DataImportsHeader current="/admin/charity-commission">
+            <RegisterRail
+              snapshotDate={snapshotDate}
+              registerSize={registerSize}
+              staleDays={staleDays}
+              canRefresh={Boolean(process.env.GITHUB_REGISTER_TOKEN?.trim())}
+            />
+          </DataImportsHeader>
         </Rise>
 
         <Group>

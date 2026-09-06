@@ -54,22 +54,15 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         // One entry for the four importer pages; each page carries a tab row
         // (see src/app/admin/import-group.ts) so the group is navigable without
         // spending four sidebar slots on pages that are cousins of each other.
-        { href: "/admin/import-status", label: "Data imports", icon: "database" },
+        { href: "/admin/import-status", label: "Data imports", icon: "import" },
         { href: "/admin/feedback", label: "Feedback", icon: "feedback" },
       ],
     });
   }
 
-  // Score settings, data handling rules and restricted fields are rare,
-  // deliberate configuration — separate section at the bottom of the admin
-  // group so daily-ops links stay visually grouped above them.
-  if (hasPermission(actor.role, "platform-settings:manage")) {
-    sections.push({
-      items: [
-        { href: "/admin/score-settings", label: "Platform settings", icon: "settings" },
-      ],
-    });
-  }
+  // Score settings, data handling rules and restricted fields live under
+  // /settings now, reached from the account menu — rare, deliberate
+  // configuration does not earn a row in the daily-ops rail.
 
   let onboarding: SidebarOnboarding | undefined = undefined;
 

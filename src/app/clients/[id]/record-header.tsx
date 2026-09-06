@@ -6,6 +6,7 @@ import { hasPermission } from "@/lib/auth/permissions";
 import { formatCityWithRegion, formatOrganisationType } from "@/lib/organisation-format";
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import type { OwnershipRequestStatus } from "@/lib/ownership-requests";
+import { buildCompleteness } from "@/lib/client-completeness";
 import { BackButton } from "@/components/ui/back-button";
 import { VerifiedCheck } from "@/components/verified-check";
 
@@ -53,6 +54,7 @@ import {
 } from "./load-record";
 import { Pill } from "./section-card";
 import { OwnerControl } from "./owner-control";
+import { CompletenessTicks } from "./completeness-ticks";
 import { PriorityDial } from "./priority-dial";
 import { RecordMenu } from "./record-menu";
 import { StatusSelect } from "./status-select";
@@ -310,6 +312,15 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
     ownershipDecisionNote = data?.decision_note ?? null;
   }
 
+  // How deep the dossier goes, in four ticks. Every input is already loaded
+  // above, so the strip adds nothing to this render's query budget.
+  const completeness = buildCompleteness({
+    identifierCount: identifiers.length,
+    filingCount: stats.filings,
+    headcountFilingCount: stats.headcountFilings,
+    grantCount: stats.grants,
+  });
+
   const financialScale = formatFinancialScale(latestFinancial);
   const lastContactedText = formatLastContacted(stats.lastContactedAt, stats.emailsSent);
   const dateAddedText = formatDateAdded(client.created_at);
@@ -337,6 +348,12 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
         />
       </div>
 
+      {/* `items-start`, deliberately. Stretching this row was tried and reverted:
+          the dial column runs a long way taller than the identity column, so
+          handing that slack to the identity column's last child inflated the
+          provenance panel into a ~300px grey box around two lines of text. Slack
+          under a short column reads as margin; slack *inside* a filled panel
+          reads as a mistake. The panel keeps its natural height. */}
       <div className="grid items-start gap-x-8 gap-y-4 px-5 pt-5 pb-1 lg:grid-cols-[minmax(0,1fr)_auto]">
         <div className="flex min-w-0 flex-col gap-3">
           <h1 className="font-body text-[clamp(2rem,4vw,2.75rem)] font-semibold leading-[1] tracking-[-0.03em] text-balance text-ink">
@@ -408,6 +425,12 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
             </div>
           )}
 
+          {/* What is held, and what is not. Sits under the docket because it is
+              the same question one step out: the docket says which registers
+              vouch for this record, the strip says how much of the record they
+              actually filled in. */}
+          <CompletenessTicks className="pt-2.5 sm:pt-3" completeness={completeness} />
+
           {/* Provenance, before anything else claims to be true. */}
           {sources.length > 0 &&
             (() => {
@@ -423,10 +446,10 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
                 ? formatShortDate(lastMs)
                 : null;
               return (
-                <p className="flex max-w-[58ch] gap-2.5 rounded-inset bg-paper px-3.5 py-2.5 mt-2.5 text-[13px] leading-[1.5] text-dim">
+                <p className="mt-5 flex max-w-[58ch] items-center gap-3 rounded-inset bg-paper px-4 py-3 text-[13.5px] leading-[1.6] text-dim">
                   <svg
                     aria-hidden="true"
-                    className="mt-0.5 size-[15px] shrink-0 text-faint"
+                    className="size-[17px] shrink-0 text-faint"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"

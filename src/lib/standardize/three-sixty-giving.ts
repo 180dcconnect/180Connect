@@ -21,6 +21,7 @@
 import { buildAdminClient } from "../supabase/admin-client-factory.ts";
 import { reportError } from "../error-logging.ts";
 import { normalizeCompanyNumber } from "../ingestion/sources/companieshouse.ts";
+import { reportRescoreFailure, rescoreOrganisation } from "../scoring/rescore.ts";
 import {
   standardizeThreeSixtyGivingOrganisationRecord,
   type RawThreeSixtyGivingOrganisationRecord,
@@ -130,6 +131,17 @@ export interface GrantWriteStore {
     status: "matched" | "rejected" | "error",
     matchedOrganisationId?: string,
   ): Promise<void>;
+  /**
+   * Recomputes the recipient's priority score now that it has one more grant.
+   *
+   * A grant is a scoring input — the partnership-history factor counts them —
+   * and nothing else was refreshing the score after this write, so 326 staging
+   * clients held matched grants while their stored score still read the
+   * no-history neutral for them. Best-effort by the same contract as every
+   * other rescore site: a stale score is recoverable by the next sweep, a
+   * failed grant import is not.
+   */
+  rescoreRecipient(organisationId: string): Promise<void>;
 }
 
 export function createDefaultGrantWriteStore(): GrantWriteStore | null {
@@ -217,6 +229,14 @@ export function createDefaultGrantWriteStore(): GrantWriteStore | null {
 
       if (error) throw error;
     },
+
+    async rescoreRecipient(organisationId) {
+      await reportRescoreFailure(
+        await rescoreOrganisation(organisationId),
+        "standardize.three_sixty_giving.rescore",
+        organisationId,
+      );
+    },
   };
 }
 
@@ -289,6 +309,7 @@ export async function promotePendingThreeSixtyGivingRecords(
     }
 
     await store.markRecordStatus(record.id, "matched", organisationId);
+    await store.rescoreRecipient(organisationId);
     counts.matched++;
   }
 

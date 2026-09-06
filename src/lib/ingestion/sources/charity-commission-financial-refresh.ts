@@ -33,6 +33,7 @@ import { reportError } from "../../error-logging.ts";
 import { buildFinancialPeriods } from "../../financials/charity-financial-periods.ts";
 import { fillPartBFor } from "../../charity-register/annual-return-backfill.ts";
 import { chunk } from "./charity-commission.ts";
+import { reportRescoreFailure, rescoreOrganisation } from "../../scoring/rescore.ts";
 import {
   charityCommissionHeaders,
   fetchFinancialHistory,
@@ -380,6 +381,17 @@ export async function runCharityCommissionFinancialRefresh(options?: {
     result.organisationsWritten += 1;
     result.periodsWritten += periods.length;
     written.add(target.organisationId);
+
+    // A newly filed year can move the charity into a different income band, and
+    // the size factor is the one input carrying real spread across the book —
+    // so a refresh that does not rescore leaves the queue ordered on last
+    // year's accounts. Best-effort, same contract as every other rescore site:
+    // the score is recoverable by the next sweep, the filings are not.
+    await reportRescoreFailure(
+      await rescoreOrganisation(target.organisationId),
+      "ingestion.charity_commission.financial_refresh.rescore",
+      target.organisationId,
+    );
   }
 
   // The half of the annual return this endpoint does not publish, taken off the

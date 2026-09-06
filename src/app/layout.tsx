@@ -23,9 +23,20 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+/**
+ * Lato is the body font (`--font-body`), so it loads on every page — and unlike
+ * the other three here it is not a variable font, so every weight and style
+ * listed is a separate file fetched up front.
+ *
+ * 300 was dropped because nothing uses it: `font-light` appears nowhere in
+ * `src/`. The rest are all reachable — `font-bold`/`font-semibold` in ~1,500
+ * places, `font-black`/`font-extrabold` in ~60, and the italic faces are needed
+ * for the `<em>` a CAM can type into an outreach email body via the rich-text
+ * editor. Six faces instead of eight.
+ */
 const lato = Lato({
   variable: "--font-lato",
-  weight: ["300", "400", "700", "900"],
+  weight: ["400", "700", "900"],
   style: ["normal", "italic"],
   subsets: ["latin"],
 });

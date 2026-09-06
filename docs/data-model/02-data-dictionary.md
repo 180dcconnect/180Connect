@@ -458,6 +458,10 @@
 | 08 System Analytics | LOGIN_ATTEMPT | blocked_until | timestamp |  | When this address may next attempt a login; null or past means allowed |
 | 08 System Analytics | LOGIN_ATTEMPT | created_at | timestamp |  | Row creation timestamp |
 | 08 System Analytics | LOGIN_ATTEMPT | updated_at | timestamp |  | Last time a failure was counted |
+| 08 System Analytics | OUTREACH_DAILY_SEND_LIMIT | id | boolean |  | Singleton primary key; always true |
+| 08 System Analytics | OUTREACH_DAILY_SEND_LIMIT | daily_limit | integer |  | Maximum outreach emails allowed per UTC calendar day; defaults to 250 |
+| 08 System Analytics | OUTREACH_DAILY_SEND_LIMIT | updated_by | uuid | USERS | Admin who last changed the limit; null for the seeded default |
+| 08 System Analytics | OUTREACH_DAILY_SEND_LIMIT | updated_at | timestamp |  | When the limit was last changed |
 | 09 CAM Analytics | CAM_ACTIVITY_SUMMARY | id | uuid |  | Primary key |
 | 09 CAM Analytics | CAM_ACTIVITY_SUMMARY | user_id | uuid |  | Links to USERS; the CAM the week covers |
 | 09 CAM Analytics | CAM_ACTIVITY_SUMMARY | week_start | date |  | Monday of the week the rollup covers |

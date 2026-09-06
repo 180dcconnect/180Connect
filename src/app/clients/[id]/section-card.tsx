@@ -60,11 +60,14 @@ export function SectionCard({
    */
   number?: number;
   /**
-   * Heading font family: 'serif' uses Source Serif 4 (for numbered sections on Financials);
-   * 'sans' uses the original body sans-serif font (for Overview tab and standard cards).
-   * Defaults to 'serif' when `number` is provided, and 'sans' otherwise.
+   * Heading font family:
+   * - 'body': Lato (`font-body`, the app's brand voice)
+   * - 'serif': Source Serif 4 (`font-serif`, for numbered sections on Financials)
+   * - 'mono': Geist Mono (`font-mono`)
+   * - 'sans': Geist Sans (`font-sans`)
+   * Defaults to 'serif' when `number` is provided, and 'body' otherwise.
    */
-  font?: "serif" | "sans";
+  font?: "body" | "serif" | "mono" | "sans";
   children?: ReactNode;
   className?: string;
   /** `danger` tints the card where outreach is blocked. */
@@ -75,7 +78,24 @@ export function SectionCard({
       ? "border-stop/25 bg-stop-wash/50"
       : "border-rule bg-white";
   const numbered = number !== undefined;
-  const isSerif = font === "serif" || (font === undefined && numbered);
+  const effectiveFont = font ?? (numbered ? "serif" : "body");
+  const isSerif = effectiveFont === "serif";
+
+  const fontClasses =
+    effectiveFont === "serif"
+      ? "font-serif text-[24px] font-medium tracking-[-0.05em]"
+      : effectiveFont === "mono"
+        ? "font-mono text-[18px] font-semibold tracking-[-0.01em]"
+        : effectiveFont === "sans"
+          ? "font-sans text-[18px] font-semibold tracking-[-0.01em]"
+          : "font-body text-[18px] font-semibold tracking-[-0.01em]";
+
+  const numberFontClasses =
+    isSerif
+      ? "font-serif text-[24px] font-medium"
+      : effectiveFont === "mono"
+        ? "font-mono text-[18px] font-medium"
+        : "font-body text-[20px] font-medium";
 
   return (
     <section
@@ -88,11 +108,7 @@ export function SectionCard({
             {numbered && (
               <span
                 aria-hidden="true"
-                className={`shrink-0 leading-none tabular-nums text-faint ${
-                  isSerif
-                    ? "font-serif text-[24px] font-medium"
-                    : "font-mono text-[18px] font-medium"
-                }`}
+                className={`shrink-0 leading-none tabular-nums text-faint ${numberFontClasses}`}
               >
                 {number}
               </span>
@@ -109,11 +125,9 @@ export function SectionCard({
             )}
             <h2
               id={headingId}
-              className={`scroll-mt-24 leading-[1.3] ${
-                isSerif
-                  ? "font-serif text-[24px] font-medium tracking-[-0.05em]"
-                  : "text-[18px] font-semibold tracking-[-0.01em]"
-              } ${tone === "danger" ? "text-stop" : "text-ink"}`}
+              className={`scroll-mt-24 leading-[1.3] ${fontClasses} ${
+                tone === "danger" ? "text-stop" : "text-ink"
+              }`}
             >
               {numbered && <span className="sr-only">Section {number}. </span>}
               {title}
@@ -122,7 +136,7 @@ export function SectionCard({
           {hint && (
             <p
               className={`mt-1 leading-[1.55] ${
-                isSerif
+                numbered
                   ? "text-[16px] text-black"
                   : "max-w-[54ch] text-[13px] text-dim"
               }`}

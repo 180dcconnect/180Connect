@@ -47,6 +47,24 @@ authoritative per-table rules live in the **Security Controls Register**,
    `app.owns_organisation(uuid)`, `app.organisation_is_unowned(uuid)`,
    `app.can_contact_organisation(uuid)`. AND `app.is_active_user()` into every policy so
    deactivation bites immediately.
+
+   **Wrap every zero-argument helper in `(select ...)`.** Write
+   `(select app.is_active_user())`, never `app.is_active_user()`. These helpers are
+   `STABLE SECURITY DEFINER`, and Postgres cannot inline a SECURITY DEFINER function:
+   inside a policy's security qualifier a bare call is invoked **once per row**, and
+   each call probes `users_pkey`. Wrapping it forces an `InitPlan` evaluated once per
+   statement. Measured on staging, the client-list query went from **629ms to 39ms**
+   on this change alone — same rows, same policies, no application code touched
+   (`20260918090000_hoist_rls_helper_initplans.sql`).
+
+   Helpers that **take an argument** — `app.owns_organisation(uuid)` and friends — are
+   genuinely row-correlated: leave those unwrapped. Same for a column comparison like
+   `author_id = auth.uid()`, where only the `auth.uid()` half is hoisted, as
+   `(select auth.uid())`.
+
+   Do not rely on Supabase's `auth_rls_initplan` advisor to catch a miss here: it
+   pattern-matches `auth.<fn>()` calls only and is blind to this project's `app.*`
+   wrappers. It reported a clean bill on all 74 policies that had this defect.
 4. **Conditional / single-column / reason-carrying writes are RPCs, not policies.**
    If a column must be writable by some but not by its own owner (e.g. `role`), grant
    it to nobody and expose a `SECURITY DEFINER` RPC that self-checks the role — see
@@ -78,23 +96,25 @@ grant select, insert, update, delete on public.<table> to authenticated;
 -- 2. RLS on
 alter table public.<table> enable row level security;
 
--- 3. policies to authenticated, built from helpers, gated on is_active
+-- 3. policies to authenticated, built from helpers, gated on is_active.
+--    Every zero-argument helper is wrapped in (select ...) so it is evaluated
+--    once per statement rather than once per row -- see step 3 above.
 create policy <table>_select on public.<table>
   for select to authenticated
-  using (app.is_active_user());                     -- shared read
+  using ((select app.is_active_user()));            -- shared read
 
 create policy <table>_insert on public.<table>
   for insert to authenticated
-  with check (app.can_write() and author_id = (select auth.uid()));
+  with check ((select app.can_write()) and author_id = (select auth.uid()));
 
 create policy <table>_modify_own on public.<table>
   for update to authenticated
-  using (app.is_active_user() and (author_id = (select auth.uid()) or app.is_admin()))
-  with check (app.is_active_user() and (author_id = (select auth.uid()) or app.is_admin()));
+  using ((select app.is_active_user()) and (author_id = (select auth.uid()) or (select app.is_admin())))
+  with check ((select app.is_active_user()) and (author_id = (select auth.uid()) or (select app.is_admin())));
 
 create policy <table>_delete_own on public.<table>
   for delete to authenticated
-  using (author_id = (select auth.uid()) or app.is_admin());
+  using (author_id = (select auth.uid()) or (select app.is_admin()));
 ```
 
 Pair it with a rollback, add the matrix row, run `supabase db reset` (replays the gate),

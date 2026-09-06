@@ -69,12 +69,20 @@ export const MANUAL_BACKFILL_BATCH_SIZE = 25;
 /**
  * Largest slice the admin button may take in one press.
  *
- * Arithmetic, not taste: at ~1s per organisation, 100 is around two minutes
- * of fetching inside a 300s ceiling — the most anyone should wait behind a
- * button, even one with a live count. Anything bigger belongs to the
- * 15-minute schedule, which drains BACKFILL_BATCH_SIZE a slice unattended.
+ * Arithmetic, not taste: at ~0.9s per organisation (a 600ms pace plus a few
+ * hundred milliseconds of request), 250 is around 225 seconds of fetching
+ * inside the 300s ceiling, leaving roughly 75 seconds for promotion and the
+ * writes. That is a thinner margin than BACKFILL_BATCH_SIZE keeps for itself,
+ * and deliberately so: this is the ceiling on a value an admin types, not the
+ * value the button defaults to, and an admin asking for the largest slice has
+ * asked to spend the budget. Raising it further would put the fetching alone
+ * past the ceiling, and an overrun loses the whole slice rather than part of
+ * it — the run is atomic from the queue's point of view.
+ *
+ * Anything bigger belongs to the 15-minute schedule, which drains
+ * BACKFILL_BATCH_SIZE a slice unattended.
  */
-export const MANUAL_BACKFILL_MAX = 100;
+export const MANUAL_BACKFILL_MAX = 250;
 
 const manualBatchSchema = z.object({
   batchSize: boundedInt(1, MANUAL_BACKFILL_MAX),

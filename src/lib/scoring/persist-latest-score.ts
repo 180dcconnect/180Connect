@@ -60,7 +60,11 @@ export async function persistLatestScore(
   // the MVP equal weights for callers that predate configurable scoring.
   weights: ScoutWeights = DEFAULT_WEIGHTS,
 ): Promise<PersistedScoreResult> {
-  const { score, band, factors, weights: applied } = computePriorityScore(org, [], weights);
+  // Regions default to BRANCH_PRIORITY_REGIONS inside computePriorityScore.
+  // Passing [] here (as this call used to) meant "no preference set", which
+  // pinned the geography factor to its neutral for every client the platform
+  // has ever scored.
+  const { score, band, factors, weights: applied } = computePriorityScore(org, undefined, weights);
   const scoreFactors: ScoreFactorsRecord = { factors, weights: applied };
   const { error } = await db
     .from("latest_scores")

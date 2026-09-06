@@ -2,8 +2,9 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { Building2, FolderOpen, Paperclip, StickyNote, UserRound } from "lucide-react";
 
+import { Pill } from "@/app/clients/[id]/section-card";
 import { formatExactTime } from "@/lib/display-format";
-import { intentLabel, statusClass, statusLabel } from "@/lib/inbox-labels";
+import { intentLabel, statusLabel, statusTone } from "@/lib/inbox-labels";
 import { formatDayCount, type RelationshipStats } from "@/lib/inbox-thread-context";
 import type { Attachment } from "@/lib/attachments";
 import type { DisplayNote } from "@/lib/note-history";
@@ -25,17 +26,24 @@ import { ThreadNotesBlock } from "./thread-notes-block";
  * that writes.
  *
  * Sticky, and therefore NOT wrapped in `Rise`: `position: sticky` stops working
- * under any ancestor carrying a `transform`, and the entrance variants apply
- * one. search-rail.tsx's header documents the same trap at length, as does the
- * client page's anchor rail.
+ * under any ancestor carrying a `transform` or a `filter`, and the entrance
+ * variants apply both. search-rail.tsx's header documents the same trap at
+ * length, as does the client page's anchor rail.
  */
 
 /**
- * The rail's card. Deliberately not SectionCard: that lives with the client
- * page, is sized for a 1.55fr column (`p-6`, prose-width hints), and its hover
- * lift belongs to something clickable. This keeps the same visual language —
- * bone ground, white card, hairline border at ink /6, `rounded-2xl`, the 11px
- * uppercase eyebrow (docs/design-system.md §Shape) — at rail scale.
+ * The rail's card: the app's card at rail scale.
+ *
+ * Deliberately not `SectionCard` — that one is sized for a 1.55fr column
+ * (`px-5 py-4.5`, prose-width hints) and its title is the page's section
+ * heading scale. This keeps the same three rules (`border-rule bg-white
+ * rounded-panel`, no shadow) one notch smaller.
+ *
+ * What went: a `size-6 rounded-lg bg-black/[0.04] ring-1` icon tile around a
+ * 14px glyph, and an `11px font-bold uppercase tracking-[0.12em]
+ * text-foreground/40` eyebrow — caps at 40% opacity, the app's most-copied
+ * mistake (docs/app-design-system.md §Type). Icons are inline in `text-faint`
+ * and titles are sentence case at a real weight.
  */
 function RailCard({
   title,
@@ -49,16 +57,13 @@ function RailCard({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-2xl border border-black/[0.06] bg-white p-4 shadow-sm">
+    <section className="rounded-panel border border-rule bg-white p-4">
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <span
-            aria-hidden="true"
-            className="flex size-6 shrink-0 items-center justify-center rounded-lg bg-black/[0.04] text-foreground/50 ring-1 ring-black/[0.05] [&_svg]:size-3.5"
-          >
+          <span aria-hidden="true" className="shrink-0 text-faint [&_svg]:size-[15px]">
             {icon}
           </span>
-          <h2 className="truncate text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+          <h2 className="truncate text-[13.5px] leading-[1.3] font-semibold tracking-[-0.01em] text-ink">
             {title}
           </h2>
         </div>
@@ -73,8 +78,8 @@ function RailCard({
 function Fact({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="shrink-0 text-[12px] text-foreground/45">{label}</dt>
-      <dd className="min-w-0 text-right text-[13px] font-bold text-foreground/80">{value}</dd>
+      <dt className="shrink-0 text-[12.5px] text-dim">{label}</dt>
+      <dd className="min-w-0 text-right text-[13px] font-semibold text-ink">{value}</dd>
     </div>
   );
 }
@@ -142,24 +147,20 @@ export function ThreadContextRail({
       className="space-y-4 lg:sticky lg:top-6"
     >
       <RailCard icon={<Building2 />} title="Client">
-        <p className="text-sm font-bold leading-tight text-foreground">{organisationName}</p>
-        <p className="mt-1 text-[12px] text-foreground/50">
+        <p className="text-sm leading-tight font-semibold text-ink">{organisationName}</p>
+        <p className="mt-1 text-[12.5px] text-dim">
           {[organisationType, location].filter(Boolean).join(" · ") || "No profile details yet"}
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <span
-            className={`rounded-full border px-2 py-0.5 text-[11px] leading-none ${statusClass(status)}`}
-          >
-            {statusLabel(status)}
-          </span>
+          <Pill tone={statusTone(status)}>{statusLabel(status)}</Pill>
           {replyIntent && (
-            <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] leading-none text-gray-600">
+            <Pill tone="lead" dot={false}>
               {intentLabel(replyIntent)}
-            </span>
+            </Pill>
           )}
         </div>
         <Link
-          className="mt-3 inline-block text-[12px] font-bold text-brand-hover underline underline-offset-2 hover:text-brand"
+          className="mt-3 inline-block text-[12.5px] font-semibold text-lead underline underline-offset-2"
           href={`/clients/${organisationId}`}
         >
           Open client page →
@@ -171,14 +172,14 @@ export function ThreadContextRail({
           <div className="flex items-center gap-2.5">
             <span
               aria-hidden="true"
-              className="grid size-8 shrink-0 place-items-center rounded-full bg-brand/12 text-[11px] font-bold text-brand-hover"
+              className="grid size-8 shrink-0 place-items-center rounded-full bg-lead-wash text-[11px] font-semibold text-lead"
             >
               {initialsOf(ownerName)}
             </span>
-            <p className="min-w-0 truncate text-[13px] font-bold text-foreground/80">{ownerName}</p>
+            <p className="min-w-0 truncate text-[13px] font-semibold text-ink">{ownerName}</p>
           </div>
         ) : (
-          <p className="text-[13px] leading-[1.6] text-foreground/45">
+          <p className="text-[13px] leading-[1.6] text-dim">
             Unassigned — no CAM has claimed this client.
           </p>
         )}
@@ -187,15 +188,15 @@ export function ThreadContextRail({
             through @/lib/timeline's buildOwnershipReassignedEntry, which is
             what knows how to resolve a uuid that no longer has a user. */}
         {handovers.length > 0 && (
-          <dl className="mt-3 space-y-2 border-t border-black/[0.05] pt-3">
+          <dl className="mt-3 space-y-2 border-t border-rule-soft pt-3">
             {handovers.map((entry) => (
               <div key={entry.id}>
-                <p className="text-[12px] leading-[1.5] text-foreground/60">
+                <p className="text-[12.5px] leading-[1.5] text-dim">
                   {entry.handover
                     ? `${entry.handover.fromName} → ${entry.handover.toName}`
                     : entry.summary}
                 </p>
-                <p className="mt-0.5 text-[11px] text-foreground/40">
+                <p className="mt-0.5 text-[11.5px] text-faint">
                   {dateOnly(entry.timestamp)}
                   {entry.handover?.reason ? ` · ${entry.handover.reason}` : ""}
                 </p>
@@ -224,7 +225,7 @@ export function ThreadContextRail({
               their court, and for how long. Same condition threadStatus calls
               "awaiting". */}
           {stats.awaitingSince && (
-            <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[12px] font-bold leading-[1.5] text-amber-800">
+            <p className="mt-3 rounded-inset bg-hold-wash px-3 py-2 text-[12.5px] leading-[1.5] font-semibold text-hold">
               Awaiting a reply for {formatDayCount(stats.daysSinceLastActivity)}.
             </p>
           )}
@@ -241,13 +242,16 @@ export function ThreadContextRail({
         />
       </RailCard>
 
-      <RailCard icon={<Paperclip />} title={`Files${attachments.length > 0 ? ` (${attachments.length})` : ""}`}>
+      <RailCard
+        icon={<Paperclip />}
+        title={`Files${attachments.length > 0 ? ` (${attachments.length})` : ""}`}
+      >
         {attachmentsError ? (
-          <p className="text-[13px] font-bold text-destructive" role="alert">
+          <p className="text-[13px] font-semibold text-stop" role="alert">
             Files could not be loaded.
           </p>
         ) : attachments.length === 0 ? (
-          <p className="text-[13px] leading-[1.6] text-foreground/45">
+          <p className="text-[13px] leading-[1.6] text-dim">
             No files attached to this client.
           </p>
         ) : (
@@ -259,14 +263,14 @@ export function ThreadContextRail({
                     page's AttachmentsSection uses — signed URLs are never
                     stored or built here. */}
                 <a
-                  className="block break-all text-[13px] font-bold text-brand-hover underline underline-offset-2 hover:text-brand"
+                  className="block break-all text-[13px] font-semibold text-lead underline underline-offset-2"
                   href={`/api/clients/${organisationId}/attachments/${attachment.id}/download`}
                   rel="noreferrer"
                   target="_blank"
                 >
                   {attachment.filename}
                 </a>
-                <p className="mt-0.5 text-[11px] text-foreground/40">
+                <p className="mt-0.5 text-[11.5px] text-faint">
                   {attachment.uploadedByName}
                   {attachment.sizeLabel ? ` · ${attachment.sizeLabel}` : ""}
                 </p>

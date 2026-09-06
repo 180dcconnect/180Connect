@@ -440,42 +440,12 @@ function BookletComposer({
               ]
             : [
                 {
-                  label: "Add a website",
-                  alwaysExpanded: true,
-                  expandedContent: (
-                    <div className="flex items-center justify-start overflow-x-clip py-1 pl-5">
-                      <GooeyEmailInput
-                        variant="dark"
-                        size="md"
-                        align="start"
-                        gap={56}
-                        duration={900}
-                        fillColor="#2f333b"
-                        shadow="0 0 0 1px rgba(255, 255, 255, 0.14) inset, 0 10px 28px -8px rgba(0, 0, 0, 0.55)"
-                        placeholder="https://example.org"
-                        restPlaceholder="Add a website"
-                        inputType="url"
-                        fieldLabel="Website URL for extra context (optional)"
-                        submitLabel="Check this website"
-                        buttonIcon="x"
-                        dropletLabel="Clear website"
-                        onDropletClick={() => onWebsiteUrlChange("")}
-                        value={websiteUrl}
-                        onValueChange={onWebsiteUrlChange}
-                        validate={() => null}
-                        validateAsync={checkWebsite}
-                        validationDelayMs={800}
-                      />
-                    </div>
-                  ),
-                },
-                {
                   label: "What should it focus on?",
                   alwaysExpanded: true,
                   // ~504px matches the widened capsule's left-packed stage (see the
                   // gooey dims), so label, field and counter share one edge.
                   expandedContent: (
-                    <div className="py-1 pl-5">
+                    <div className="py-1">
                       <div className="flex max-w-[504px] items-baseline justify-between gap-3 px-1 pb-1.5">
                         <p className="text-[13px] font-semibold text-[#f4f4ef]/80">
                           What should it focus on?{" "}
@@ -511,6 +481,36 @@ function BookletComposer({
                     </div>
                   ),
                 },
+                {
+                  label: "Add a website",
+                  alwaysExpanded: true,
+                  expandedContent: (
+                    <div className="flex items-center justify-start overflow-x-clip py-1">
+                      <GooeyEmailInput
+                        variant="dark"
+                        size="md"
+                        align="start"
+                        gap={56}
+                        duration={900}
+                        fillColor="#2f333b"
+                        shadow="0 0 0 1px rgba(255, 255, 255, 0.14) inset, 0 10px 28px -8px rgba(0, 0, 0, 0.55)"
+                        placeholder="https://example.org"
+                        restPlaceholder="Add a website"
+                        inputType="url"
+                        fieldLabel="Website URL for extra context (optional)"
+                        submitLabel="Check this website"
+                        buttonIcon="x"
+                        dropletLabel="Clear website"
+                        onDropletClick={() => onWebsiteUrlChange("")}
+                        value={websiteUrl}
+                        onValueChange={onWebsiteUrlChange}
+                        validate={() => null}
+                        validateAsync={checkWebsite}
+                        validationDelayMs={800}
+                      />
+                    </div>
+                  ),
+                },
               ]
         }
         onSubmit={() => void onGenerate()}
@@ -523,8 +523,8 @@ function BookletComposer({
           description:
             "Reads the client's profile and anything you added below. Takes a few seconds.",
           details: [
-            { label: "Website", value: websiteUrl.trim() || "None — profile only" },
             { label: "Focus", value: steer.trim() || "No steer" },
+            { label: "Website", value: websiteUrl.trim() || "None — profile only" },
           ],
           confirmLabel: "Generate",
         }}

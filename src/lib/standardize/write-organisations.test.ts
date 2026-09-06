@@ -7,6 +7,8 @@ import {
   promotePendingCompaniesHouseRecords,
   promotePendingCharityCommissionBulkRecords,
   promotePendingFindThatCharityRecords,
+  latestIncomeFromPeriods,
+  type ImportScoreInputs,
   type OrganisationWriteStore,
   type PendingRecord,
 } from "./write-organisations.ts";
@@ -50,13 +52,7 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
     organisationId: string;
     period: BulkFinancialPeriodRow;
   }[] = [];
-  const annotations: {
-    organisationId: string;
-    sector?: string | null;
-    registeredOn?: string | null;
-    charityReportingStatus?: string | null;
-    charityActivities?: string | null;
-  }[] = [];
+  const annotations: Parameters<OrganisationWriteStore["annotateOrganisation"]>[0][] = [];
   const financialPeriods: {
     organisationId: string;
     periodStart: string;
@@ -65,6 +61,8 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
     totalExpenditure: number | null;
     incomeBand: string | null;
   }[] = [];
+  const scoreInputs: (ImportScoreInputs | undefined)[] = [];
+
 
   const store: OrganisationWriteStore = {
     async loadPendingRecords() {
@@ -76,8 +74,9 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
     async loadDismissedMatches() {
       return [];
     },
-    async insertOrganisationAndLink(org) {
+    async insertOrganisationAndLink(org, _rawRecordId, scoreInputsForOrg) {
       inserted.push(org);
+      scoreInputs.push(scoreInputsForOrg);
       return { id: `org-${nextId++}` };
     },
     async flagPotentialDuplicate({ rawRecordId, matchedOrganisationId, matchedOn, source, matchFields }) {
@@ -121,8 +120,8 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
   // one fail, say) still gets the status update the real store would have
   // written for the ones that succeeded.
   const insert = store.insertOrganisationAndLink.bind(store);
-  store.insertOrganisationAndLink = async (org, rawRecordId) => {
-    const result = await insert(org, rawRecordId);
+  store.insertOrganisationAndLink = async (org, rawRecordId, scoreInputsForOrg) => {
+    const result = await insert(org, rawRecordId, scoreInputsForOrg);
     if ("id" in result) {
       statusUpdates.push({ rawRecordId, status: "validated", matchedOrganisationId: result.id });
     }
@@ -132,6 +131,7 @@ function fakeStore(overrides: Partial<OrganisationWriteStore> = {}) {
   return {
     store,
     inserted,
+    scoreInputs,
     flagged,
     statusUpdates,
     criteriaOutcomes,
@@ -171,6 +171,7 @@ function companiesHousePendingRecord(
   id: string,
   companyName: string,
   companyNumber = "01234567",
+  sicCodes?: unknown,
 ): PendingRecord {
   return {
     id,
@@ -180,6 +181,7 @@ function companiesHousePendingRecord(
     raw_payload: {
       company_number: companyNumber,
       company_name: companyName,
+      ...(sicCodes === undefined ? {} : { sic_codes: sicCodes }),
     },
   };
 }
@@ -582,6 +584,23 @@ describe("promotePendingCharityCommissionRecords — registry identifiers", () =
     ]);
   });
 
+  it("writes both uk_charity and uk_company identifiers for a dual-registered charity", async () => {
+    const { store, identifiers } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          pendingRecord("raw-1", "Oxfam", 5254841, { company_number: "01336352" }),
+        ];
+      },
+    });
+
+    await promotePendingCharityCommissionRecords(store);
+
+    assert.deepEqual(identifiers, [
+      { organisationId: "org-1", identifierType: "uk_charity", identifierValue: "5254841" },
+      { organisationId: "org-1", identifierType: "uk_company", identifierValue: "01336352" },
+    ]);
+  });
+
   it("writes no identifier for a record flagged as a duplicate candidate", async () => {
     const { store, identifiers } = fakeStore({
       async loadPendingRecords() {
@@ -664,6 +683,38 @@ describe("promotePendingCharityCommissionRecords — financial periods", () => {
         incomeBand: "under_10k",
       },
     ]);
+  });
+
+  it("scores the charity from the same filing it writes", async () => {
+    const { store, scoreInputs, financialPeriods } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          pendingRecord("raw-1", "Oxfam", 5254841, {
+            latest_income: "4314025",
+            latest_expenditure: "4191442",
+            latest_acc_fin_year_start_date: "2024-04-01T00:00:00",
+            latest_acc_fin_year_end_date: "2025-03-31T00:00:00",
+          }),
+        ];
+      },
+    });
+
+    await promotePendingCharityCommissionRecords(store);
+
+    assert.equal(scoreInputs[0]?.totalIncome, 4314025);
+    assert.equal(financialPeriods[0].totalIncome, 4314025);
+  });
+
+  it("scores with no income when the payload carries no filing", async () => {
+    const { store, scoreInputs } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Oxfam", 5254841)];
+      },
+    });
+
+    await promotePendingCharityCommissionRecords(store);
+
+    assert.equal(scoreInputs[0]?.totalIncome, null);
   });
 
   it("writes no financial period for a record whose payload carries no figures", async () => {
@@ -1484,6 +1535,35 @@ function bulkPendingRecord(
   };
 }
 
+describe("latestIncomeFromPeriods", () => {
+  it("takes the newest period that carries a figure", () => {
+    assert.equal(
+      latestIncomeFromPeriods([
+        { periodEnd: "2023-03-31", totalIncome: 80_000 },
+        { periodEnd: "2025-03-31", totalIncome: 250_000 },
+        { periodEnd: "2024-03-31", totalIncome: 120_000 },
+      ]),
+      250_000,
+    );
+  });
+
+  it("skips a newer period filed without a figure rather than reading null as the answer", () => {
+    // Same rule as score-client.ts's latestTotalIncome: a filed-but-empty
+    // latest year must not hide an older real one.
+    assert.equal(
+      latestIncomeFromPeriods([
+        { periodEnd: "2025-03-31", totalIncome: null },
+        { periodEnd: "2024-03-31", totalIncome: 120_000 },
+      ]),
+      120_000,
+    );
+  });
+
+  it("returns null for no periods at all", () => {
+    assert.equal(latestIncomeFromPeriods([]), null);
+  });
+});
+
 describe("promotePendingCharityCommissionBulkRecords", () => {
   it("inserts the charity and reads its own source, not the API's", async () => {
     const loaded: string[] = [];
@@ -1517,6 +1597,69 @@ describe("promotePendingCharityCommissionBulkRecords", () => {
     assert.equal(annotations[0].sector, "Education & Training");
     assert.equal(annotations[0].registeredOn, "1990-06-01");
     assert.equal(annotations[0].charityReportingStatus, "Submission Received");
+  });
+
+  // The gap this closes: the score was computed inside the insert, from the
+  // StandardOrganisation alone — which carries neither sector nor income — while
+  // the annotations that fill both columns ran afterwards and nothing rescored.
+  // 435 staging clients held a sector their score still read as neutral.
+  it("scores the charity from the sector and income it is about to write", async () => {
+    const { store, scoreInputs, annotations, bulkFinancialPeriods } = fakeStore({
+      async loadPendingRecords() {
+        return [bulkPendingRecord("raw-1", "Sheffield Example Trust")];
+      },
+    });
+
+    await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+
+    assert.equal(scoreInputs.length, 1);
+    // The same values the annotation and the financial-period write receive —
+    // the score and the columns describe one charity, not two.
+    assert.equal(scoreInputs[0]?.sector, annotations[0].sector);
+    assert.equal(scoreInputs[0]?.totalIncome, 250_000);
+    assert.equal(bulkFinancialPeriods[0].period.totalIncome, 250_000);
+  });
+
+  it("scores the latest filed year, not whichever return came first", async () => {
+    const { store, scoreInputs } = fakeStore({
+      async loadPendingRecords() {
+        const record = bulkPendingRecord("raw-1", "Sheffield Example Trust");
+        (record.raw_payload as { annual_returns: unknown[] }).annual_returns = [
+          {
+            fin_period_start_date: "2024-04-01T00:00:00",
+            fin_period_end_date: "2025-03-31T00:00:00",
+            total_gross_income: 250_000,
+          },
+          // Older, and deliberately listed after the newer one.
+          {
+            fin_period_start_date: "2022-04-01T00:00:00",
+            fin_period_end_date: "2023-03-31T00:00:00",
+            total_gross_income: 80_000,
+          },
+        ];
+        return [record];
+      },
+    });
+
+    await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+
+    assert.equal(scoreInputs[0]?.totalIncome, 250_000);
+  });
+
+  it("passes no income when the charity has filed nothing", async () => {
+    const { store, scoreInputs } = fakeStore({
+      async loadPendingRecords() {
+        const record = bulkPendingRecord("raw-1", "Sheffield Example Trust");
+        (record.raw_payload as { annual_returns: unknown[] }).annual_returns = [];
+        return [record];
+      },
+    });
+
+    await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+
+    // Null, not zero: the size factor's documented neutral is for "no figure",
+    // and a zero would band the charity as the smallest there is.
+    assert.equal(scoreInputs[0]?.totalIncome, null);
   });
 
   // The register's own description of the charity's work. Before this it was
@@ -1583,6 +1726,56 @@ describe("promotePendingCharityCommissionBulkRecords", () => {
     assert.deepEqual(identifiers, [
       { organisationId: "org-1", identifierType: "uk_charity", identifierValue: "1000001" },
     ]);
+  });
+
+  it("writes both uk_charity and uk_company identifiers for a dual-registered charity", async () => {
+    const { store, identifiers } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          bulkPendingRecord("raw-1", "Sheffield Example Trust", {
+            charity_company_registration_number: "01336352",
+          }),
+        ];
+      },
+    });
+
+    await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+
+    assert.deepEqual(identifiers, [
+      { organisationId: "org-1", identifierType: "uk_charity", identifierValue: "1000001" },
+      { organisationId: "org-1", identifierType: "uk_company", identifierValue: "01336352" },
+    ]);
+  });
+
+  it("flags a charity matching an existing organisation on company number", async () => {
+    const { store, inserted, flagged } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          bulkPendingRecord("raw-1", "Different Name Entirely", {
+            registered_charity_number: 9999999,
+            charity_company_registration_number: "01336352",
+          }),
+        ];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [
+          {
+            id: "org-existing",
+            legal_name: "Original Company Ltd",
+            postcode: "SW1A 1AA",
+            registrationNumbers: ["01336352"],
+          },
+        ];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+
+    assert.equal(inserted.length, 0);
+    assert.equal(counts.flagged, 1);
+    assert.equal(flagged[0].source, "charity_commission_bulk");
+    assert.equal(flagged[0].matchedOrganisationId, "org-existing");
+    assert.equal(flagged[0].matchedOn, "registration_number");
   });
 
   it("flags a charity already held from the API path rather than inserting it twice", async () => {
@@ -1655,5 +1848,128 @@ describe("promotePendingCharityCommissionBulkRecords", () => {
 
     await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
     assert.equal(bulkFinancialPeriods.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SIC codes (20260919090000_add_sic_codes.sql). Companies arrive with no
+// descriptive text at all, and SIC is the only thing either register publishes
+// about one. The codes already travelled the whole pipeline and were dropped at
+// standardize; these pin that they now land on the organisation.
+// ---------------------------------------------------------------------------
+
+describe("promotePendingCompaniesHouseRecords — SIC codes", () => {
+  it("annotates the inserted organisation with the codes from the payload", async () => {
+    const { store, annotations } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          companiesHousePendingRecord("raw-sic", "Acme CIC", "01234567", ["85590", "88990"]),
+        ];
+      },
+    });
+
+    await promotePendingCompaniesHouseRecords(store, criteriaPass);
+
+    assert.equal(annotations.length, 1);
+    // The id the fake's insert handed back — the annotation must land on the
+    // row that was just created, not on whatever was promoted before it.
+    assert.equal(annotations[0].organisationId, "org-1");
+    assert.deepEqual(annotations[0].sicCodes, ["85590", "88990"]);
+  });
+
+  it("preserves the register's order rather than sorting", async () => {
+    const { store, annotations } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          companiesHousePendingRecord("raw-order", "Acme CIC", "01234567", ["88990", "85590"]),
+        ];
+      },
+    });
+
+    await promotePendingCompaniesHouseRecords(store, criteriaPass);
+
+    // The first code is conventionally the company's principal activity, so
+    // sorting would quietly demote it.
+    assert.deepEqual(annotations[0].sicCodes, ["88990", "85590"]);
+  });
+
+  it("does not annotate at all when the payload carries no codes", async () => {
+    const { store, annotations } = fakeStore({
+      async loadPendingRecords() {
+        return [companiesHousePendingRecord("raw-none", "Acme Ltd")];
+      },
+    });
+
+    await promotePendingCompaniesHouseRecords(store, criteriaPass);
+
+    // Not "annotates with []" — an empty array would be stored as a present
+    // value and make "the register classified it as nothing" indistinguishable
+    // from "we never asked".
+    assert.equal(annotations.length, 0);
+  });
+
+  it("drops blanks and non-strings instead of throwing on a malformed payload", async () => {
+    const { store, annotations } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          companiesHousePendingRecord("raw-messy", "Acme CIC", "01234567", [
+            "85590",
+            "  ",
+            null,
+            42,
+            " 88990 ",
+          ]),
+        ];
+      },
+    });
+
+    const counts = await promotePendingCompaniesHouseRecords(store, criteriaPass);
+
+    // raw_payload is untyped JSON from the database: the declared string[] is a
+    // claim about well-formed payloads, not a guarantee. A legacy record must
+    // narrow the list, not fail the promote.
+    assert.equal(counts.failed, 0);
+    assert.deepEqual(annotations[0].sicCodes, ["85590", "88990"]);
+  });
+
+  it("survives a payload where sic_codes is not an array", async () => {
+    const { store, annotations } = fakeStore({
+      async loadPendingRecords() {
+        return [companiesHousePendingRecord("raw-string", "Acme CIC", "01234567", "85590")];
+      },
+    });
+
+    const counts = await promotePendingCompaniesHouseRecords(store, criteriaPass);
+
+    assert.equal(counts.failed, 0);
+    assert.equal(counts.inserted, 1);
+    assert.equal(annotations.length, 0);
+  });
+
+  it("never annotates a company short-circuited as a duplicate", async () => {
+    const { store, annotations } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          companiesHousePendingRecord("raw-dupe", "Acme CIC", "01234567", ["85590"]),
+        ];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [
+          {
+            id: "org-existing",
+            legal_name: "Acme CIC",
+            postcode: "",
+            registrationNumbers: ["01234567"],
+          },
+        ];
+      },
+    });
+
+    await promotePendingCompaniesHouseRecords(store, criteriaPass);
+
+    // This is the gap the migration's backfill exists to close: flagIfDuplicate
+    // returns before the insert, so a company already on the client list can
+    // never gain its codes from a re-import.
+    assert.equal(annotations.length, 0);
   });
 });

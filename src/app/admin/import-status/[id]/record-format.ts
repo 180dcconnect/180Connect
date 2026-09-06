@@ -74,9 +74,43 @@ const STATUS_MAP: Record<ProcessingStatus, StatusDetails> = {
   },
 };
 
-export function getStatusDetails(status: ProcessingStatus): StatusDetails {
+const GRANT_STATUS_MAP: Record<ProcessingStatus, StatusDetails> = {
+  validated: {
+    label: "Grant Saved",
+    tone: "success",
+    badgeClass: "bg-green-50 text-green-800 ring-green-600/20",
+    description: "Grant successfully recorded in 180Connect",
+  },
+  matched: {
+    label: "Matched to Client",
+    tone: "success",
+    badgeClass: "bg-green-50 text-green-800 ring-green-600/20",
+    description: "Successfully matched and linked to an active client profile in 180Connect",
+  },
+  pending: {
+    label: "Pending Match",
+    tone: "info",
+    badgeClass: "bg-blue-50 text-blue-800 ring-blue-600/20",
+    description: "Imported and queued for client matching",
+  },
+  rejected: {
+    label: "No Matching Client",
+    tone: "neutral",
+    badgeClass: "bg-black/[0.04] text-foreground/70 ring-black/[0.08]",
+    description: "Grant recipient does not match any current client organisation in 180Connect",
+  },
+  error: {
+    label: "Import Issue",
+    tone: "danger",
+    badgeClass: "bg-red-50 text-red-800 ring-red-600/20",
+    description: "Could not be processed due to missing or invalid grant data",
+  },
+};
+
+export function getStatusDetails(status: ProcessingStatus, source?: string | null): StatusDetails {
+  const map = source === "360giving" ? GRANT_STATUS_MAP : STATUS_MAP;
   return (
-    STATUS_MAP[status] ?? {
+    map[status] ?? {
       label: humaniseToken(status),
       tone: "neutral",
       badgeClass: "bg-black/[0.04] text-foreground/70 ring-black/[0.08]",
@@ -247,6 +281,56 @@ export function extractFilingType(payload: unknown): string | null {
   return null;
 }
 
+export type GrantDetails = {
+  funderName: string | null;
+  amountFormatted: string | null;
+  awardDate: string | null;
+  grantProgramme: string | null;
+  description: string | null;
+};
+
+export function extractGrantDetails(payload: unknown): GrantDetails | null {
+  if (typeof payload !== "object" || payload === null) return null;
+  const p = payload as Record<string, unknown>;
+
+  const fundingOrg = Array.isArray(p.fundingOrganization) ? p.fundingOrganization[0] : null;
+  const funderName =
+    typeof fundingOrg === "object" && fundingOrg !== null && typeof fundingOrg.name === "string"
+      ? fundingOrg.name.trim()
+      : typeof p.funder_name === "string"
+        ? p.funder_name.trim()
+        : null;
+
+  const amount =
+    typeof p.amountAwarded === "number"
+      ? p.amountAwarded
+      : typeof p.amount_awarded === "number"
+        ? p.amount_awarded
+        : null;
+  const currency = typeof p.currency === "string" ? p.currency : "GBP";
+  const amountFormatted =
+    amount !== null
+      ? new Intl.NumberFormat("en-GB", { style: "currency", currency, maximumFractionDigits: 0 }).format(amount)
+      : null;
+
+  const rawDate = typeof p.awardDate === "string" ? p.awardDate : typeof p.award_date === "string" ? p.award_date : null;
+  const awardDate = rawDate ? rawDate.slice(0, 10) : null;
+
+  const programmeArr = Array.isArray(p.grantProgramme) ? p.grantProgramme[0] : null;
+  const grantProgramme =
+    typeof programmeArr === "object" && programmeArr !== null && typeof programmeArr.title === "string"
+      ? programmeArr.title.trim()
+      : typeof p.grant_programme === "string"
+        ? p.grant_programme.trim()
+        : null;
+
+  const description = typeof p.description === "string" ? p.description.trim() : null;
+
+  if (!funderName && !amountFormatted && !awardDate && !description && !grantProgramme) return null;
+
+  return { funderName, amountFormatted, awardDate, grantProgramme, description };
+}
+
 export type RawRecordView = {
   id: string;
   sourceRecordId: string;
@@ -262,6 +346,7 @@ export type RawRecordView = {
   status: StatusDetails;
   matchedOrgId: string | null;
   matchedOrg: OrganisationPreview | null;
+  grantDetails: GrantDetails | null;
   redactedFieldCount: number;
   excludedFields: string[];
   receivedExact: string;
@@ -283,6 +368,7 @@ export function describeRawRecord(
   const website = orgPreview?.website || extractWebsiteUrl(row.raw_payload);
   const filingType = orgPreview?.organisationType ? humaniseEntityType(orgPreview.organisationType) : extractFilingType(row.raw_payload);
   const registryStatus = extractRegistryStatus(row.raw_payload);
+  const grantDetails = row.record_source === "360giving" ? extractGrantDetails(row.raw_payload) : null;
 
   let jsonStr = "{}";
   try {
@@ -303,9 +389,10 @@ export function describeRawRecord(
     filingType,
     registryStatus,
     processingStatus: row.processing_status,
-    status: getStatusDetails(row.processing_status),
+    status: getStatusDetails(row.processing_status, row.record_source),
     matchedOrgId: row.matched_organisation_id,
     matchedOrg: orgPreview,
+    grantDetails,
     redactedFieldCount: excluded.length,
     excludedFields: excluded,
     receivedExact: formatExactTime(received),
@@ -328,6 +415,8 @@ export function matchesRecordQuery(view: RawRecordView, query: string): boolean 
     view.filingType ?? "",
     view.missionOrActivities ?? "",
     view.matchedOrg?.sector ?? "",
+    view.grantDetails?.funderName ?? "",
+    view.grantDetails?.grantProgramme ?? "",
   ]
     .join(" ")
     .toLowerCase();

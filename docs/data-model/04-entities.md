@@ -34,7 +34,8 @@
 | is_seed | boolean |  | No | Flag for seed data | System/Human | Set in the seed data script | False by default |
 | registered_on | date |  | Yes | Date the organisation entered its register | API | Charity Commission date_of_registration | Lets the app distinguish "no accounts due yet" from "overdue" — without it both render as an empty Financials tab |
 | charity_reporting_status | text |  | Yes | The register's own reporting status for a charity | API | Charity Commission reporting_status | Values are the regulator's: New / Submission Received / … Deliberately text, not an enum, so an unseen value can't fail an ingestion run |
-| charity_activities | text |  | Yes | The charity's own description of its work, as filed with the register | API | Charity Commission publicextract.charity.charity_activities | Canonical register text, distinct from ENRICHMENT_RESULTS.mission_statement, which is LLM-derived — a reader showing both must not present them as the same kind of claim. Externally authored free text: treat as untrusted input anywhere it reaches a model. |
+| charity_activities | text |  | Yes | The charity's own description of its work, as filed with the register | API | Charity Commission publicextract.charity.charity_activities | Canonical register text, and the source of ENRICHMENT_RESULTS.mission_statement, which mirrors it. Both are the regulator's filed text; neither is generated. Externally authored free text: treat as untrusted input anywhere it reaches a model. |
+| sic_codes | text[] |  | Yes | Companies House industry classifications | API | Companies House sic_codes; titles resolved from the SIC2007 table in the companies register file | Companies have no filed purpose statement — SIC is the only descriptive text either register publishes. Generic by design: 118 of 413 imported CICs share code 85590. |
 
 ## ORGANISATION_IDENTIFIERS
 
@@ -123,8 +124,8 @@
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
 | organisation_id | uuid | ORGANISATIONS | No | Organisation this enrichment belongs to | System | Set when enrichment runs |  |
-| mission_statement | text |  | Yes | Organisation's mission or purpose | LLM | Extracted from website and published materials |  |
-| mission_keywords | text[] |  | Yes | Key themes extracted from the mission | LLM | Classified by LLM from mission text |  |
+| mission_statement | text |  | Yes | Organisation's mission or purpose | API | Charity Commission publicextract.charity.charity_activities, mirrored from ORGANISATIONS.charity_activities. Companies: no source publishes one — left null. | Register text as filed, never generated. Coverage tracks charity age: 99% for charities registered ≤2022, 38% for 2026 — the field is filed with the first annual return, so a new registration has none until it files. |
+| mission_keywords | text[] |  | Yes | Key themes extracted from the mission | API | Charity Commission publicextract.charity_classification — the regulator's What/How/Who taxonomy. |  |
 | news_hooks | text[] |  | Yes | Recent news items relevant to outreach | LLM | Extracted from news sources |  |
 | sector | text |  | Yes | Primary sector classification | LLM | Classified from mission and activity data |  |
 | sub_sector | text |  | Yes | Sub-sector classification | LLM | Classified from mission and activity data |  |

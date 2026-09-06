@@ -96,10 +96,10 @@ function ChoiceField<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <label className="block text-xs font-bold text-foreground/65">
+    <label className="block text-[12.5px] font-semibold text-dim">
       {label}
       <select
-        className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm disabled:opacity-60"
+        className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm text-ink focus:border-lead-mid focus:ring-1 focus:ring-lead-mid focus:outline-none disabled:opacity-60"
         disabled={disabled}
         onChange={(event) => onChange(event.target.value as T)}
         value={value}
@@ -185,7 +185,7 @@ export function ReplyDrawer({
         <OriginButton disabled size="sm" type="button" variant="outline">
           Generate reply draft
         </OriginButton>
-        <p className="mt-2.5 text-[13px] font-bold leading-[1.6] text-red-800" role="alert">
+        <p className="mt-2.5 text-[13px] leading-[1.6] font-semibold text-stop" role="alert">
           {blockedReason ?? "Outreach is unavailable on this client."}
         </p>
       </div>
@@ -195,11 +195,11 @@ export function ReplyDrawer({
   if (!open) {
     return (
       <button
-        className="inline-flex shrink-0 items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-bold text-white shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98]"
+        className="inline-flex shrink-0 items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-semibold text-white transition-transform hover:scale-[1.02] active:scale-[0.98]"
         onClick={() => setOpen(true)}
         type="button"
       >
-        <Sparkles aria-hidden="true" className="h-4 w-4" />
+        <Sparkles aria-hidden="true" className="size-4" />
         Generate reply draft
       </button>
     );
@@ -208,29 +208,30 @@ export function ReplyDrawer({
   return (
     <section
       aria-labelledby="reply-drawer-heading"
-      className="rounded-2xl border border-brand/20 bg-gradient-to-br from-brand/[0.07] via-white to-white p-6 shadow-sm"
+      className="rounded-panel border border-rule bg-white p-5"
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-2.5">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-brand/15 text-brand-hover">
-            <Sparkles aria-hidden="true" className="h-4 w-4" />
-          </span>
+          <Sparkles aria-hidden="true" className="size-[15px] shrink-0 text-faint" />
           <div>
-            <h2 className="text-lg font-bold" id="reply-drawer-heading">
+            <h2
+              className="text-[18px] leading-[1.3] font-semibold tracking-[-0.01em] text-ink"
+              id="reply-drawer-heading"
+            >
               Reply to this thread
             </h2>
-            <p className="text-xs text-foreground/55">
-              AI-generated follow-up, for your review before sending
+            <p className="mt-1 max-w-[54ch] text-[13px] leading-[1.55] text-dim">
+              Generated for your review. Nothing sends until you approve it.
             </p>
           </div>
         </div>
         <button
           aria-label="Close the reply drawer"
-          className="shrink-0 rounded-full border border-black/10 p-2 text-foreground/55 transition-colors hover:bg-black/[0.04]"
+          className="shrink-0 rounded-full border border-rule p-2 text-dim transition-colors hover:bg-paper"
           onClick={() => setOpen(false)}
           type="button"
         >
-          <X aria-hidden="true" className="h-4 w-4" />
+          <X aria-hidden="true" className="size-4" />
         </button>
       </div>
 
@@ -271,15 +272,15 @@ export function ReplyDrawer({
 
       <div className="mt-4">
         <OriginButton disabled={busy} onClick={generate} size="sm" type="button" variant="outline">
-          <RefreshCw aria-hidden="true" className="h-4 w-4" />
+          <RefreshCw aria-hidden="true" className="size-4" />
           {busy ? "Checking and generating…" : draft ? "Regenerate reply" : "Generate reply"}
         </OriginButton>
       </div>
 
       {warning && (
         <p
-          className={`mt-4 text-[13px] font-bold leading-[1.6] ${
-            warning.tone === "conflict" ? "text-amber-800" : "text-red-800"
+          className={`mt-4 text-[13px] leading-[1.6] font-semibold ${
+            warning.tone === "conflict" ? "text-hold" : "text-stop"
           }`}
           role="alert"
         >
@@ -295,10 +296,10 @@ export function ReplyDrawer({
       )}
 
       {error && !busy && (
-        <div className="mt-5 rounded-lg bg-red-50 p-3" role="alert">
-          <p className="text-sm font-bold text-red-800">{error}</p>
+        <div className="mt-5 rounded-inset bg-stop-wash p-3" role="alert">
+          <p className="text-sm font-semibold text-stop">{error}</p>
           <button
-            className="mt-2 rounded-lg border border-red-800/20 px-3 py-1 text-xs font-bold text-red-800"
+            className="mt-2 rounded-inset border border-stop/25 px-3 py-1 text-xs font-semibold text-stop"
             onClick={generate}
             type="button"
           >

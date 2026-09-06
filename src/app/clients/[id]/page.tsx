@@ -21,6 +21,7 @@ import { SuggestEditSection } from "./suggest-edit-section";
 import { TagsCard } from "./tags-card";
 import { SourcesCard } from "./sources-card";
 import { loadOperatingGeography } from "@/lib/operating-geography";
+import { sicTitles } from "@/lib/companies-register/sqlite";
 import {
   loadClient,
   loadFieldHistory,
@@ -116,6 +117,15 @@ export default async function ClientOverviewPage({
     sources,
   );
   const enrichment = enrichmentResult.data;
+  // Resolved here rather than in the panel because the panel is a client
+  // component and the companies-register file is a server-only read. The
+  // titles are the register's own wording (docs/companies-register-import.md:
+  // "the picker's labels are the register's wording, not ours"), so they are
+  // looked up rather than mapped in code, and a code the file cannot name
+  // falls back to itself inside sicTitles(). Empty for every charity, and for
+  // a company on a deployment whose register file is missing — in both cases
+  // the row simply does not render.
+  const natureOfBusiness = sicTitles(client.sic_codes ?? []);
   const clientTags = (clientTagsResult.data ?? [])
     .filter((row) => row.tags)
     .map((row) => ({
@@ -205,6 +215,7 @@ export default async function ClientOverviewPage({
               organisation={client}
               missionStatement={enrichment?.mission_statement ?? null}
               missionEnrichedAt={enrichment?.enriched_at ?? null}
+              sicTitles={natureOfBusiness}
               editableFields={restrictedFields.map((field) => field.field_name)}
               actorId={actor.id}
               actorRole={actor.role}
@@ -231,6 +242,29 @@ export default async function ClientOverviewPage({
             <FinancialScaleCard
               financial={latestFinancial}
               organisationId={client.id}
+            />
+          </Rise>
+        </Group>
+
+        <Group className="space-y-6">
+          <Rise>
+            <ScoreBreakdownCard
+              score={score?.priority_score ?? null}
+              factors={score?.score_factors ?? null}
+              error={scoreError}
+            />
+          </Rise>
+
+          {/* The Tags card's picker has to paint over the cards after it, and
+              each Rise is a `filter` animation — its own stacking context — so
+              a z-index inside the card cannot reach past its Rise. It goes
+              here, on the wrapper, where it can. */}
+          <Rise className="relative z-10">
+            <TagsCard
+              organisationId={client.id}
+              initialClientTags={clientTags}
+              availableTags={allTagsResult.data ?? []}
+              canEdit={canEdit}
             />
           </Rise>
 
@@ -333,29 +367,6 @@ export default async function ClientOverviewPage({
                 </div>
               </div>
             </SectionCard>
-          </Rise>
-        </Group>
-
-        <Group className="space-y-6">
-          <Rise>
-            <ScoreBreakdownCard
-              score={score?.priority_score ?? null}
-              factors={score?.score_factors ?? null}
-              error={scoreError}
-            />
-          </Rise>
-
-          {/* The Tags card's picker has to paint over the cards after it, and
-              each Rise is a `filter` animation — its own stacking context — so
-              a z-index inside the card cannot reach past its Rise. It goes
-              here, on the wrapper, where it can. */}
-          <Rise className="relative z-10">
-            <TagsCard
-              organisationId={client.id}
-              initialClientTags={clientTags}
-              availableTags={allTagsResult.data ?? []}
-              canEdit={canEdit}
-            />
           </Rise>
 
           <Rise>

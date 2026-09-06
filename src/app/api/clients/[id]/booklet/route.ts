@@ -22,6 +22,7 @@ import {
 } from "@/lib/booklet/scrape-website";
 import { MAX_STEER_CHARS } from "@/lib/booklet/build-prompt";
 import { validateWebsiteFormat } from "@/lib/website-validation";
+import { sicTitles } from "@/lib/companies-register/sqlite";
 import { deriveBookletSources } from "@/lib/booklet/sources";
 import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -118,13 +119,19 @@ export async function POST(
   // via the standardize step, ENRICHMENT_RESULTS from the LLM worker), and
   // build-prompt.ts prefers the canonical column. Reading only enrichment is what
   // made every register-imported charity report "Sector: Not provided".
-  const { data: organisation, error: organisationError } = await supabase
+  //
+  // `sic_codes` is selected rather than `sic_titles`: the column holds the
+  // registrar's codes, and their wording lives in the companies-register file.
+  // Resolving it here keeps build-prompt.ts a pure function over data it is
+  // handed — the same reason the financials and identifiers are gathered here
+  // rather than fetched inside it.
+  const { data: organisationRow, error: organisationError } = await supabase
     .from("organisations")
     .select(
-      "legal_name, trading_name, organisation_type, website, city, country_code, sector, sub_sector, registered_on, charity_reporting_status, charity_activities",
+      "legal_name, trading_name, organisation_type, website, city, country_code, sector, sub_sector, registered_on, charity_reporting_status, charity_activities, sic_codes",
     )
     .eq("id", organisationId)
-    .maybeSingle<BookletOrganisationInput>();
+    .maybeSingle<Omit<BookletOrganisationInput, "sic_titles"> & { sic_codes: string[] | null }>();
 
   if (organisationError) {
     await reportError(organisationError, {
@@ -136,9 +143,22 @@ export async function POST(
       { status: 500 },
     );
   }
-  if (!organisation) {
+  if (!organisationRow) {
     return NextResponse.json({ error: "That client could not be found." }, { status: 404 });
   }
+
+  // The register file is a read-only build artifact that ships inside the
+  // deployment, not an external fetch — so this stays inside the "trusted
+  // organisation data" boundary the comment above draws, even though it is the
+  // one read here that does not go to Postgres. sicTitles() returns [] when the
+  // file is absent, which the prompt renders as "Not provided".
+  const { sic_codes: sicCodes, ...organisationColumns } = organisationRow;
+  const organisation: BookletOrganisationInput = {
+    ...organisationColumns,
+    sic_titles: sicTitles(sicCodes ?? []).map(({ sic, title }) =>
+      title === sic ? sic : `${title} (${sic})`,
+    ),
+  };
 
   // Same tolerant pattern as the client detail page: a missing/errored row is
   // never fatal, the prompt just shows those fields as not provided or drops the

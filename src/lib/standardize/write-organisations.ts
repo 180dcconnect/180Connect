@@ -66,6 +66,7 @@ import {
   standardizeCharityCommissionRecord,
   type RawCharityCommissionRecord,
 } from "./charity-commission.ts";
+import { normalizeCompanyNumber } from "../ingestion/sources/companieshouse.ts";
 import {
   classifyCompaniesHouseSourceConfidence,
   standardizeCompaniesHouseRecord,
@@ -78,6 +79,7 @@ import {
 } from "./find-that-charity.ts";
 import { sourcePriority } from "./source-priority.ts";
 import type { StandardOrganisation } from "./types.ts";
+import type { ScoreableOrganisation } from "../scoring/score-client.ts";
 
 // F044: the six ORGANISATIONS fields FIELD_SOURCES tracks provenance for — must
 // stay identical to field_sources' check constraint and FIELD_DISCREPANCIES' MVP
@@ -236,6 +238,53 @@ export async function fetchAllPages<T>(
 }
 
 /**
+ * The scoring inputs a promote path reads off the raw payload before the
+ * organisation exists, and hands to `insertOrganisationAndLink` so the client's
+ * first score is computed from them.
+ *
+ * Only the two fields that live outside StandardOrganisation and are knowable at
+ * import time. Grant history is deliberately absent: 360Giving enrichment runs
+ * later, against organisations that already exist, and rescores them itself.
+ */
+export type ImportScoreInputs = {
+  /** ORGANISATIONS.sector, in the taxonomy score-by-sector.ts reads. */
+  sector?: string | null;
+  /** Latest filed total income, as the size factor bands it. */
+  totalIncome?: number | null;
+};
+
+/**
+ * Folds those inputs into the shape the rule engine scores. `org` supplies city
+ * and outreach_status; the extras supply what StandardOrganisation has no room
+ * for. A caller with nothing to add scores exactly as before.
+ */
+export function scoreableFrom(
+  org: StandardOrganisation,
+  scoreInputs?: ImportScoreInputs,
+): ScoreableOrganisation {
+  return {
+    ...org,
+    sector: scoreInputs?.sector ?? null,
+    total_income: scoreInputs?.totalIncome ?? null,
+  };
+}
+
+/**
+ * The most recent filed income across a set of periods — what the size factor
+ * bands. Mirrors score-client.ts's latestTotalIncome: newest period end that
+ * actually carries a figure, so a filed-but-empty latest year does not hide an
+ * older real one.
+ */
+export function latestIncomeFromPeriods(
+  periods: readonly { periodEnd: string; totalIncome: number | null }[],
+): number | null {
+  const withIncome = periods
+    .filter((period) => period.totalIncome !== null && period.totalIncome !== undefined)
+    .sort((a, b) => (a.periodEnd < b.periodEnd ? 1 : a.periodEnd > b.periodEnd ? -1 : 0));
+  return withIncome[0]?.totalIncome ?? null;
+}
+
+/**
  * Everything promotePending*Records functions need from the database,
  * behind an interface — same reasoning as runner.ts's IngestionStore: the
  * decision logic (map, validate, decide a status) is testable without a
@@ -264,6 +313,7 @@ export interface OrganisationWriteStore {
   insertOrganisationAndLink(
     org: StandardOrganisation,
     rawRecordId: string,
+    scoreInputs?: ImportScoreInputs,
   ): Promise<{ id: string } | { error: string }>;
   flagPotentialDuplicate(input: {
     rawRecordId: string;
@@ -353,6 +403,12 @@ export interface OrganisationWriteStore {
    * records will ever have, since ENRICHMENT_RESULTS is written by an enrichment
    * worker that has barely run (see 20260916130000_add_charity_activities.sql).
    *
+   * `sicCodes` is the companies-side equivalent of that last one, and the only
+   * descriptive text either register publishes about a company — a
+   * classification rather than a purpose statement, which is why it is
+   * surfaced as "nature of business" and never as a mission
+   * (20260919090000_add_sic_codes.sql).
+   *
    * Written after the insert rather than inside it because
    * link_raw_record_to_organisation takes a fixed column list; widening that RPC
    * is a migration and its own approval record, and this is an annotation, not
@@ -364,6 +420,7 @@ export interface OrganisationWriteStore {
     registeredOn?: string | null;
     charityReportingStatus?: string | null;
     charityActivities?: string | null;
+    sicCodes?: readonly string[] | null;
   }): Promise<{ ok: true } | { error: string }>;
 }
 
@@ -427,7 +484,7 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
       return (data ?? []).map((row) => row.candidate_organisation_id as string);
     },
 
-    async insertOrganisationAndLink(org, rawRecordId) {
+    async insertOrganisationAndLink(org, rawRecordId, scoreInputs) {
       // One PostgREST call = one transaction: the insert and the
       // validated+link update commit together or not at all. The RPC re-checks
       // that the record is still pending, so a concurrent promote cannot
@@ -441,9 +498,17 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
 
       // F058/F059 — a freshly promoted organisation gets its LATEST_SCORES row in
       // the same pass, so it never sits unscored until some future backfill runs.
-      // The rule engine degrades missing inputs (income, sector) to their documented
-      // neutrals, and the rescore hooks elsewhere refresh the row when real data
-      // arrives later. Best-effort: a scoring failure must not fail the promote —
+      //
+      // `scoreInputs` carries the sector and income the caller already read off
+      // the raw payload. Without them this scored the StandardOrganisation
+      // alone, which has neither field — so every imported client scored its
+      // neutrals and stayed there, because the annotations that fill those
+      // columns run *after* this and nothing rescored afterwards (435 staging
+      // clients held a sector while their score still read 0.5 for it). The
+      // caller passes what it is about to write, so the score and the columns
+      // describe the same charity. Any input the caller cannot supply still
+      // degrades to its documented neutral, and the rescore hooks elsewhere
+      // refresh the row when later data arrives. Best-effort: a scoring failure must not fail the promote —
       // an unscored client is F058 AC3's explicit state, not an error. It runs
       // after the RPC on purpose: scoring is an annotation, and folding it into
       // the atomic transaction would let a scoring bug un-promote a client.
@@ -454,7 +519,7 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
       const scored = await persistLatestScore(
         supabase as unknown as Parameters<typeof persistLatestScore>[0],
         organisationId,
-        org,
+        scoreableFrom(org, scoreInputs),
         scoutConfig.weights,
       );
       if (!scored.ok) {
@@ -618,12 +683,17 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
       registeredOn,
       charityReportingStatus,
       charityActivities,
+      sicCodes,
     }) {
-      const patch: Record<string, string> = {};
+      const patch: Record<string, string | string[]> = {};
       if (sector) patch.sector = sector;
       if (registeredOn) patch.registered_on = registeredOn;
       if (charityReportingStatus) patch.charity_reporting_status = charityReportingStatus;
       if (charityActivities) patch.charity_activities = charityActivities;
+      // An empty array is not a fact about the company — it is the register
+      // declining to classify it — and storing {} would make "we asked and
+      // there were none" indistinguishable from null everywhere downstream.
+      if (sicCodes && sicCodes.length > 0) patch.sic_codes = [...sicCodes];
       // Nothing to say is not an error, and an empty update would be a wasted
       // round trip per organisation across a whole import.
       if (Object.keys(patch).length === 0) return { ok: true };
@@ -729,11 +799,41 @@ export function charityCommissionIdentifier(raw: RawCharityCommissionRecord): So
   return { identifierType: "uk_charity", identifierValue: String(value) };
 }
 
+/**
+ * Charity Commission: company registration number if dual-registered.
+ * Read from charity_company_registration_number or company_number on the raw payload.
+ */
+export function charityCommissionCompanyIdentifier(
+  raw: RawCharityCommissionRecord,
+): SourceIdentifier | null {
+  const rawValue =
+    (raw as Record<string, unknown>).charity_co_reg_number ??
+    (raw as Record<string, unknown>).charity_company_registration_number ??
+    (raw as Record<string, unknown>).company_number;
+  if (typeof rawValue !== "string" && typeof rawValue !== "number") return null;
+  const value = normalizeCompanyNumber(String(rawValue));
+  if (!value) return null;
+  return { identifierType: "uk_company", identifierValue: value };
+}
+
+/**
+ * Charity Commission bulk extract: company registration number if dual-registered.
+ */
+export function charityCommissionBulkCompanyIdentifier(
+  raw: RawCharityCommissionBulkRecord,
+): SourceIdentifier | null {
+  const rawValue = raw.charity?.charity_company_registration_number;
+  if (typeof rawValue !== "string") return null;
+  const value = normalizeCompanyNumber(rawValue);
+  if (!value) return null;
+  return { identifierType: "uk_company", identifierValue: value };
+}
+
 /** Companies House: source_record_id IS the normalised company number. */
-function companiesHouseIdentifier(
+export function companiesHouseIdentifier(
   sourceRecordId: string | null | undefined,
 ): SourceIdentifier | null {
-  const value = sourceRecordId?.trim();
+  const value = sourceRecordId ? normalizeCompanyNumber(sourceRecordId) : "";
   if (!value) return null;
   return { identifierType: "uk_company", identifierValue: value };
 }
@@ -1019,6 +1119,14 @@ export async function promotePendingCharityCommissionRecords(
     const charityNumber = charityCommissionIdentifier(
       record.raw_payload as RawCharityCommissionRecord,
     );
+    const companyNumber = charityCommissionCompanyIdentifier(
+      record.raw_payload as RawCharityCommissionRecord,
+    );
+    const registrationNumbers = [
+      charityNumber?.identifierValue,
+      companyNumber?.identifierValue,
+    ].filter((n): n is string => Boolean(n));
+
     if (
       await flagIfDuplicate(
         store,
@@ -1027,13 +1135,22 @@ export async function promotePendingCharityCommissionRecords(
         org,
         existingOrganisations,
         "charity_commission",
-        charityNumber ? [charityNumber.identifierValue] : undefined,
+        registrationNumbers.length > 0 ? registrationNumbers : undefined,
       )
     ) {
       continue;
     }
 
-    const result = await store.insertOrganisationAndLink(org, record.id);
+    // The filing this record carries, read once: it feeds the first score
+    // below and the FINANCIAL_PERIODS write further down, so the size factor
+    // cannot disagree with the row the Financials tab shows.
+    const financialPeriod = charityCommissionFinancialPeriod(
+      record.raw_payload as RawCharityCommissionRecord,
+    );
+
+    const result = await store.insertOrganisationAndLink(org, record.id, {
+      totalIncome: financialPeriod?.totalIncome ?? null,
+    });
     if ("error" in result) {
       await reportError(new Error(result.error), {
         operation: "standardize.charity_commission.promote",
@@ -1055,6 +1172,15 @@ export async function promotePendingCharityCommissionRecords(
       charityNumber,
       record,
     );
+    if (companyNumber) {
+      await recordIdentifierOrReport(
+        store,
+        result.id,
+        "charity_commission",
+        companyNumber,
+        record,
+      );
+    }
     // Financial filing (latest_income/expenditure + financial-year dates from
     // the same payload, into FINANCIAL_PERIODS) — closes the "F041 built the
     // table, no one writes it" gap. Most bulk-search payloads carry no figures
@@ -1063,7 +1189,7 @@ export async function promotePendingCharityCommissionRecords(
       store,
       result.id,
       "charity_commission",
-      charityCommissionFinancialPeriod(record.raw_payload as RawCharityCommissionRecord),
+      financialPeriod,
       record,
     );
     counts.inserted++;
@@ -1076,7 +1202,7 @@ export async function promotePendingCharityCommissionRecords(
       id: result.id,
       legal_name: org.legal_name,
       postcode: org.postcode ?? "",
-      registrationNumbers: charityNumber ? [charityNumber.identifierValue] : undefined,
+      registrationNumbers: registrationNumbers.length > 0 ? registrationNumbers : undefined,
     });
   }
 
@@ -1166,6 +1292,7 @@ export async function promotePendingCompaniesHouseRecords(
       companyNumber,
       record,
     );
+    await annotateCompanyOrReport(store, result.id, raw, record);
     counts.inserted++;
     existingOrganisations.push({
       id: result.id,
@@ -1319,10 +1446,16 @@ export async function promotePendingCharityCommissionBulkRecords(
     // API path writes, so a charity imported by both routes matches on F042's
     // strongest key instead of appearing twice.
     const charityNumber = raw.charity?.registered_charity_number;
-    const identifier =
+    const charityIdentifier: SourceIdentifier | null =
       charityNumber === null || charityNumber === undefined
         ? null
         : { identifierType: "uk_charity" as const, identifierValue: String(charityNumber) };
+    const companyIdentifier = charityCommissionBulkCompanyIdentifier(raw);
+
+    const registrationNumbers = [
+      charityIdentifier?.identifierValue,
+      companyIdentifier?.identifierValue,
+    ].filter((n): n is string => Boolean(n));
 
     if (
       await flagIfDuplicate(
@@ -1332,13 +1465,24 @@ export async function promotePendingCharityCommissionBulkRecords(
         org,
         existingOrganisations,
         "charity_commission_bulk",
-        identifier ? [identifier.identifierValue] : undefined,
+        registrationNumbers.length > 0 ? registrationNumbers : undefined,
       )
     ) {
       continue;
     }
 
-    const result = await store.insertOrganisationAndLink(org, record.id);
+    // Sector and accounts, read once: they are what annotateOrganisationOrReport
+    // and recordBulkFinancialPeriodsOrReport write below, and passing them into
+    // the insert is what lets this charity's first score use them. Before this,
+    // the score was computed from the StandardOrganisation alone — neither field
+    // is on it — so a fully classified charity with five filed years still
+    // scored the neutrals for both.
+    const bulkPeriods = buildFinancialPeriodsFromBulk(raw.annual_returns ?? []);
+
+    const result = await store.insertOrganisationAndLink(org, record.id, {
+      sector: bulkSector(raw.matched_classifications),
+      totalIncome: latestIncomeFromPeriods(bulkPeriods),
+    });
     if ("error" in result) {
       await reportError(new Error(result.error), {
         operation: "standardize.charity_commission_bulk.promote",
@@ -1357,22 +1501,82 @@ export async function promotePendingCharityCommissionBulkRecords(
       store,
       result.id,
       "charity_commission_bulk",
-      identifier,
+      charityIdentifier,
       record,
     );
+    if (companyIdentifier) {
+      await recordIdentifierOrReport(
+        store,
+        result.id,
+        "charity_commission_bulk",
+        companyIdentifier,
+        record,
+      );
+    }
     await annotateOrganisationOrReport(store, result.id, raw, record);
-    await recordBulkFinancialPeriodsOrReport(store, result.id, raw, record);
+    await recordBulkFinancialPeriodsOrReport(store, result.id, bulkPeriods, record);
 
     counts.inserted++;
     existingOrganisations.push({
       id: result.id,
       legal_name: org.legal_name,
       postcode: org.postcode ?? "",
-      registrationNumbers: identifier ? [identifier.identifierValue] : [],
+      registrationNumbers: registrationNumbers.length > 0 ? registrationNumbers : [],
     });
   }
 
   return counts;
+}
+
+/**
+ * The company's SIC codes — best-effort, never fatal, same contract as the
+ * charity annotation below.
+ *
+ * `sic_codes` is read off the raw payload rather than off `org`, because
+ * StandardOrganisation deliberately has no such field: standardize-companies-house.ts
+ * documents SIC as read-only input for the F047 tier classifier. Keeping it out
+ * of StandardOrganisation also keeps it out of TRACKED_FIELD_SOURCES, which is
+ * `keyof StandardOrganisation` and drives the F044 per-field provenance
+ * allowlist and its DB check constraint. That is the right side of the line:
+ * provenance history answers "who changed this and to what", and a register
+ * classification nobody can edit has no such history to show — exactly the
+ * reason sector, registered_on and charity_activities sit outside it too.
+ *
+ * Note what this does *not* fix. flagIfDuplicate short-circuits above, so a
+ * company already on the client list never reaches here and never gains its
+ * codes from a re-import. Filling those in is the backfill in
+ * 20260919090000_add_sic_codes.sql, which reads the same payloads.
+ */
+async function annotateCompanyOrReport(
+  store: OrganisationWriteStore,
+  organisationId: string,
+  raw: RawCompaniesHouseRecord,
+  record: PendingRecord,
+): Promise<void> {
+  // Untyped JSON: the declared string[] is a claim about well-formed payloads,
+  // not a guarantee about what is in the table. A legacy record carrying a bare
+  // string, or nulls in the array, must narrow the list rather than throw here —
+  // this is an annotation, and losing the whole promote over it would be the
+  // wrong trade.
+  const codes = Array.isArray(raw.sic_codes)
+    ? raw.sic_codes
+        .filter((code): code is string => typeof code === "string")
+        .map((code) => code.trim())
+        .filter((code) => code.length > 0)
+    : [];
+
+  if (codes.length === 0) return;
+
+  try {
+    const result = await store.annotateOrganisation({ organisationId, sicCodes: codes });
+    if ("error" in result) throw new Error(result.error);
+  } catch (error) {
+    await reportError(error instanceof Error ? error : new Error(String(error)), {
+      operation: "standardize.companies_house.annotate",
+      rawRecordId: record.id,
+      organisationId,
+    });
+  }
 }
 
 /** Sector, registration date, reporting status and filed activities — best-effort, never fatal. */
@@ -1403,14 +1607,18 @@ async function annotateOrganisationOrReport(
   }
 }
 
-/** Up to five filed years per charity, from the annual returns in the payload. */
+/**
+ * Up to five filed years per charity, from the annual returns in the payload.
+ * Takes the already-built periods rather than the raw record: the promote loop
+ * needs the same list to score the charity's income, and building it twice
+ * invites the two copies to drift.
+ */
 async function recordBulkFinancialPeriodsOrReport(
   store: OrganisationWriteStore,
   organisationId: string,
-  raw: RawCharityCommissionBulkRecord,
+  periods: ReturnType<typeof buildFinancialPeriodsFromBulk>,
   record: PendingRecord,
 ): Promise<void> {
-  const periods = buildFinancialPeriodsFromBulk(raw.annual_returns ?? []);
   if (periods.length === 0) return;
   try {
     for (const period of periods) {

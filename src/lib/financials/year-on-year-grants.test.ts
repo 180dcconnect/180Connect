@@ -4,9 +4,9 @@ import { describe, it } from "node:test";
 import {
   buildMonotoneSplinePath,
   extractGrantYearPoints,
-} from "./year-on-year-grants-chart.tsx";
-import { calculateNiceYAxis } from "./chart-parts.ts";
-import type { FinancialSeries } from "@/lib/financials/financial-series.ts";
+} from "./year-on-year-grants.ts";
+import { calculateNiceYAxis } from "./financial-series.ts";
+import type { FinancialSeries } from "./financial-series.ts";
 
 const mockSeries = (
   years: { label: string; grantTotal: number }[] = [],
@@ -19,13 +19,17 @@ const mockSeries = (
     income: 100_000,
     expenditure: 90_000,
     net: 10_000,
-    incomeBand: "100k-500k",
+    incomeBand: "100k_1m",
     filingDate: null,
     source: null,
     grantTotal: y.grantTotal,
     grantShare: 0.2,
     grantsExcluded: 0,
     mix: [],
+    mixDetail: [],
+    spend: [],
+    spendDetail: [],
+    filedOn: null,
     hasEmployees: false,
     employees: null,
     hasVolunteers: false,
@@ -38,7 +42,12 @@ const mockSeries = (
   })),
   peak: 100_000,
   peakNet: 10_000,
+  hasIncome: true,
+  hasExpenditure: true,
   hasGrants,
+  hasMix: false,
+  hasSpend: false,
+  hasExcludedGrants: false,
 });
 
 describe("extractGrantYearPoints", () => {

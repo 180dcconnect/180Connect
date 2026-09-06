@@ -1,6 +1,6 @@
 import { TabSkeleton } from "./tab-skeleton";
 
-/** Overview: basic info, suggested edits, score and contactability, with tags and sources beside them. */
+/** Overview: basic info, operating areas, financial scale on the left; score, tags, contactability and sources on the right. */
 export default function Loading() {
-  return <TabSkeleton mainCards={4} sideCards={2} />;
+  return <TabSkeleton mainCards={3} sideCards={4} />;
 }

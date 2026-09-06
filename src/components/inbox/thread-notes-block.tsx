@@ -79,7 +79,7 @@ export function ThreadNotesBlock({
 
   if (error) {
     return (
-      <p className="text-[13px] font-bold text-destructive" role="alert">
+      <p className="text-[13px] font-semibold text-stop" role="alert">
         Notes could not be loaded.
       </p>
     );
@@ -88,15 +88,15 @@ export function ThreadNotesBlock({
   return (
     <div className="space-y-3">
       {notes.length === 0 ? (
-        <p className="text-[13px] leading-[1.6] text-foreground/45">No notes on this client yet.</p>
+        <p className="text-[13px] leading-[1.6] text-dim">No notes on this client yet.</p>
       ) : (
         <ul className="space-y-2.5">
           {notes.map((note) => (
             <li key={note.id}>
-              <p className="line-clamp-3 text-[13px] leading-[1.6] text-foreground/75">
+              <p className="line-clamp-3 text-[13px] leading-[1.6] text-ink">
                 {note.content}
               </p>
-              <p className="mt-0.5 text-[11px] text-foreground/40">
+              <p className="mt-0.5 text-[11.5px] text-faint">
                 {note.authorName} · {formatExactTime(new Date(note.createdAt))}
                 {note.edited ? " · edited" : ""}
               </p>
@@ -113,7 +113,7 @@ export function ThreadNotesBlock({
             </label>
             <textarea
               autoFocus
-              className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-[13px] leading-[1.6]"
+              className="w-full rounded-inset border border-rule bg-white px-3 py-2 text-[13px] leading-[1.6] text-ink placeholder:text-faint focus:border-lead-mid focus:ring-1 focus:ring-lead-mid focus:outline-none"
               disabled={saving}
               id="rail-note-content"
               maxLength={MAX_NOTE_LENGTH}
@@ -123,20 +123,20 @@ export function ThreadNotesBlock({
               value={content}
             />
             {failure && (
-              <p className="text-[12px] font-bold text-destructive" role="alert">
+              <p className="text-[12px] font-semibold text-stop" role="alert">
                 {failure}
               </p>
             )}
             <div className="flex items-center gap-2">
               <button
-                className="rounded-full bg-brand px-3 py-1.5 text-[12px] font-bold text-white disabled:opacity-60"
+                className="rounded-full bg-ink px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-60"
                 disabled={saving || refreshing || !content.trim()}
                 type="submit"
               >
                 {saving ? "Saving…" : "Save note"}
               </button>
               <button
-                className="rounded-full border border-black/10 px-3 py-1.5 text-[12px] font-bold text-foreground/60 disabled:opacity-60"
+                className="rounded-full border border-rule px-3 py-1.5 text-[12px] font-semibold text-dim disabled:opacity-60"
                 disabled={saving}
                 onClick={() => {
                   setAdding(false);
@@ -150,18 +150,18 @@ export function ThreadNotesBlock({
           </form>
         ) : (
           <button
-            className="inline-flex items-center gap-1.5 text-[12px] font-bold text-brand-hover transition-colors hover:text-brand"
+            className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-lead transition-colors hover:underline"
             onClick={() => setAdding(true)}
             type="button"
           >
-            <Plus aria-hidden="true" className="h-3.5 w-3.5" />
+            <Plus aria-hidden="true" className="size-3.5" />
             Add a note
           </button>
         ))}
 
       {totalCount > notes.length && (
         <Link
-          className="block text-[12px] font-bold text-brand-hover underline underline-offset-2 hover:text-brand"
+          className="block text-[12px] font-semibold text-lead underline underline-offset-2"
           href={`/clients/${organisationId}/activity`}
         >
           View all {totalCount} notes

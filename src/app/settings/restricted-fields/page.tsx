@@ -4,14 +4,12 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
-import { GroupTabs } from "@/components/ui/group-tabs";
-import { PLATFORM_SETTINGS_TABS } from "../import-group";
 import type { RestrictedFieldRow } from "@/lib/edit-suggestions";
 import { RestrictedFieldsPanel } from "./restricted-fields-panel";
 
 export default async function RestrictedFieldsPage() {
   const authorization = await getCurrentActor("approval:manage", {
-    route: "/admin/restricted-fields",
+    route: "/settings/restricted-fields",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
@@ -38,9 +36,6 @@ export default async function RestrictedFieldsPage() {
           take effect immediately and are audited. Retired fields keep their history;
           they simply stop being enforced.
         </p>
-
-        {/* Group navigation: the three platform-settings pages read as one section. */}
-        <GroupTabs className="mt-6" tabs={PLATFORM_SETTINGS_TABS} current="/admin/restricted-fields" />
 
         {error && (
           <div className="mt-5">

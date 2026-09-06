@@ -9,9 +9,6 @@ import {
 } from "@/lib/scoring/calculate-priority-score";
 import { toPercentages, type ScoutWeightsInput } from "@/lib/scoring/scout-weight-inputs";
 import { Stage, Rise } from "@/components/dashboard-stage";
-import { BackButton } from "@/components/ui/back-button";
-import { GroupTabs } from "@/components/ui/group-tabs";
-import { PLATFORM_SETTINGS_TABS } from "../import-group";
 import { ScoreSettingsPanel } from "./score-settings-panel";
 
 type VersionRow = {
@@ -30,7 +27,7 @@ type VersionRow = {
  */
 export default async function AdminScoreSettingsPage() {
   const authorization = await getCurrentActor("platform-settings:manage", {
-    route: "/admin/score-settings",
+    route: "/settings/score-settings",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
@@ -66,19 +63,11 @@ export default async function AdminScoreSettingsPage() {
               Score settings
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-[1.7] text-foreground/65">
-              Tune how client priority scores weigh each parameter (F096).
+              Tune how client priority scores weigh each parameter.
               Saving recalculates every existing client&apos;s score and records
               the change in the audit log.
             </p>
           </div>
-          <div className="flex items-center gap-4">
-            <BackButton
-              variant="editorial-minimal"
-              href="/admin"
-            />
-          </div>
-          {/* Group navigation: the three platform-settings pages read as one section. */}
-          <GroupTabs className="mt-6 w-full" tabs={PLATFORM_SETTINGS_TABS} current="/admin/score-settings" />
         </Rise>
 
         {error && (

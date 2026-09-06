@@ -3,17 +3,15 @@
 import {
   Inbox,
   Star,
-  Clock,
-  Send,
-  FileText,
-  Archive,
+  SendHorizontal,
+  StickyNote,
   Trash2,
-  Plus,
+  Pencil,
   Tag,
   CheckCircle2,
 } from "lucide-react";
 
-export type GmailFolder = "inbox" | "starred" | "snoozed" | "sent" | "drafts" | "archive" | "trash";
+export type GmailFolder = "inbox" | "starred" | "sent" | "drafts" | "trash";
 
 export type GmailSidebarProps = {
   activeFolder: GmailFolder;
@@ -63,26 +61,16 @@ export function GmailSidebar({
       count: starredCount > 0 ? starredCount : undefined,
     },
     {
-      id: "snoozed" as GmailFolder,
-      label: "Snoozed",
-      icon: Clock,
-    },
-    {
       id: "sent" as GmailFolder,
       label: "Sent",
-      icon: Send,
+      icon: SendHorizontal,
       count: sentCount > 0 ? sentCount : undefined,
     },
     {
       id: "drafts" as GmailFolder,
       label: "Drafts",
-      icon: FileText,
+      icon: StickyNote,
       count: draftsCount > 0 ? draftsCount : undefined,
-    },
-    {
-      id: "archive" as GmailFolder,
-      label: "Archive",
-      icon: Archive,
     },
     {
       id: "trash" as GmailFolder,
@@ -93,15 +81,15 @@ export function GmailSidebar({
   ];
 
   return (
-    <aside className="flex w-56 flex-col shrink-0 pr-3 select-none">
+    <aside className="flex w-56 flex-col shrink-0 pr-3 select-none h-full overflow-y-auto">
       {/* Compose Button (Gmail Style) */}
-      <div className="mb-4 px-1">
+      <div className="mb-4 px-1 flex items-center h-12">
         <button
           onClick={onOpenCompose}
           type="button"
-          className="flex items-center gap-3 rounded-2xl bg-[#c2e7ff] hover:bg-[#b3dcf8] active:scale-[0.98] transition-all px-5 py-3.5 shadow-sm text-slate-800 font-semibold text-sm hover:shadow-md cursor-pointer"
+          className="flex items-center gap-3 rounded-2xl bg-[#c2e7ff] hover:bg-[#b3dcf8] active:scale-[0.98] transition-all px-6 h-12 shadow-sm text-slate-800 font-semibold text-sm hover:shadow-md cursor-pointer"
         >
-          <Plus className="h-5 w-5 text-slate-900 stroke-[2.5]" />
+          <Pencil className="h-4.5 w-4.5 text-slate-900 stroke-[2.2]" />
           <span>Compose</span>
         </button>
       </div>

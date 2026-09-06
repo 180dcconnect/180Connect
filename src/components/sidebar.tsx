@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ComponentType } from "react";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
-import { ClipboardCheck, Database, Inbox, MessageSquareHeart, ShieldCheck, SquareKanban, UserPlus } from "lucide-react";
+import { ClipboardCheck, Inbox, ShieldCheck, SquareKanban, UserPlus } from "lucide-react";
 import { Cctv } from "@/components/animate-ui/icons/cctv";
 import { CloudDownload } from "@/components/animate-ui/icons/cloud-download";
 import { Compass } from "@/components/animate-ui/icons/compass";
@@ -83,7 +83,7 @@ const ICONS: Record<SidebarIconName, RailIcon> = {
   inbox: Inbox,
   review: ClipboardCheck,
   pipeline: SquareKanban,
-  database: Database,
+  database: CloudDownload,
   settings: Settings,
 };
 
@@ -104,7 +104,7 @@ const ICON_SPRING = { type: "spring", stiffness: 420, damping: 17, mass: 0.6 } a
 const ICON_MOTION: Partial<Record<SidebarIconName, Variants>> = {
   admin: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: -6 } },
   feedback: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: 6 } },
-  // `dashboard`, `clients`, `users`, `audit`, and `import` are deliberately absent:
+  // `dashboard`, `clients`, `users`, `audit`, `import`, and `database` are deliberately absent:
   // those glyphs animate their own interiors, so a wrapper transform on top would
   // read as two gestures.
 };

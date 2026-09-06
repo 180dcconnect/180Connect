@@ -87,6 +87,7 @@ export function CharityPreviewCard({
         </p>
         <p className="mt-1 text-[13px] text-dim">
           Registered charity {preview.registeredNumber}
+          {preview.companyIdentifier ? ` · company ${preview.companyIdentifier.identifierValue}` : ""}
           {registration.registeredOn ? ` · registered ${formatDate(registration.registeredOn)}` : ""}
         </p>
 

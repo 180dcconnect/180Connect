@@ -18,7 +18,7 @@ import {
 import { EASE } from "@/components/brand/motion";
 import { OriginButton } from "@/components/ui/origin-button";
 import { Checkbox } from "@/components/animate-ui/components/radix/checkbox";
-import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { GooeyEmailInput } from "@/components/ui/gooey-email-input";
 import {
   Dialog,
   DialogClose,
@@ -48,17 +48,22 @@ import {
 import {
   describeFilters,
   isUnfiltered,
-  normalisePostcodeArea,
   type CompanyRegisterFilters,
 } from "@/lib/companies-register/filters";
 import {
   COMPANY_STATUS_OPTIONS,
-  COMPANY_TYPE_LABELS,
   companyTypeLabel as typeLabel,
   DEFAULT_STATUSES,
   sicSectionOf,
   SIC_SECTIONS,
 } from "@/lib/companies-register/vocabulary";
+import {
+  CITY_REGION_PRESETS,
+  formatPostcodeAreaLabel,
+  resolveLocationInput,
+  type CityRegionPreset,
+  type CityRegionZone,
+} from "@/lib/companies-register/city-postcodes";
 import type { SicValue } from "@/lib/companies-register/sqlite";
 import {
   countCompaniesSelection,
@@ -84,7 +89,6 @@ import {
  * registered office — geography is postcode areas plus town).
  */
 
-const SUGGESTED_POSTCODE_AREAS = ["S", "DN"];
 
 function canonicalise(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -100,6 +104,17 @@ function canonicalise(value: unknown): unknown {
   }
   return value;
 }
+
+/**
+ * The server's ceiling on a single run, mirrored here so the confirmation can
+ * say what will actually happen before it happens.
+ *
+ * Deliberately a duplicated constant rather than an import: register-actions
+ * is a "use server" module, and pulling a value out of it into this client
+ * component would drag the server module into the browser bundle. The pair is
+ * pinned by a test in register-actions' own suite.
+ */
+const MAX_IMPORT = 10_000;
 
 const sameFilters = (a: CompanyRegisterFilters, b: CompanyRegisterFilters) =>
   JSON.stringify(canonicalise(a) ?? {}) === JSON.stringify(canonicalise(b) ?? {});
@@ -148,8 +163,8 @@ export function CompaniesFilterBuilder({
   const [pendingPreset, setPendingPreset] = useState<CompaniesPresetSummary | null>(null);
   const [presetState, setPresetState] = useState<PresetState>({ kind: "idle" });
   const [sicSearch, setSicSearch] = useState("");
-  const [nameDraft, setNameDraft] = useState("");
   const [postcodeDraft, setPostcodeDraft] = useState("");
+  const [selectedLocationZone, setSelectedLocationZone] = useState<CityRegionZone>("All");
   const [isPending, startTransition] = useTransition();
   const reduceMotion = useReducedMotion();
 
@@ -185,6 +200,11 @@ export function CompaniesFilterBuilder({
 
   const description = useMemo(() => describeFilters(filters), [filters]);
   const unfiltered = useMemo(() => isUnfiltered(filters), [filters]);
+  // The server caps every run at MAX_IMPORT and takes them in company-number
+  // order. Saying so before the click matters: the count above can read
+  // 716,282 while the run imports 10,000, and a confirmation that promises the
+  // larger number is simply wrong.
+  const overCap = count !== null && count > MAX_IMPORT;
 
   /**
    * Every filter mutation goes through here, because changing a filter
@@ -291,33 +311,38 @@ export function CompaniesFilterBuilder({
 
   const nameSummary = useMemo(() => {
     if (nameTokens.length === 0) return null;
-    if (filters.townContains?.trim()) {
-      const town = `in “${filters.townContains.trim()}”`;
-      if (nameTokens.length === 1) return `contains “${nameTokens[0]}” ${town}`;
-      return `${nameTokens.length} names ${town}`;
-    }
     if (nameTokens.length === 1) return `contains “${nameTokens[0]}”`;
     if (nameTokens.length <= 3) return `contains ${nameTokens.map((n) => `“${n}”`).join(" or ")}`;
     return `${nameTokens.length} names`;
-  }, [nameTokens, filters.townContains]);
+  }, [nameTokens]);
 
   const locationSummary = useMemo(() => {
-    const parts: string[] = [];
-    if ((filters.postcodeAreas?.length ?? 0) > 0) {
-      parts.push(summariseList(filters.postcodeAreas ?? [], "postcode areas")!);
-    }
-    if (filters.townContains?.trim()) parts.push(`town “${filters.townContains.trim()}”`);
-    return parts.length > 0 ? parts.join(" · ") : null;
-  }, [filters.postcodeAreas, filters.townContains]);
+    const postcodes = filters.postcodeAreas ?? [];
+    if (postcodes.length === 0) return null;
+    return summariseList(postcodes, "postcode areas");
+  }, [filters.postcodeAreas]);
 
-  const typeSummary = useMemo(
-    () =>
-      summariseList(
-        (filters.companyTypes ?? []).map((slug) => typeLabel(slug)),
-        "types",
-      ) ?? (filters.cicOnly ? "CICs only" : null),
-    [filters.companyTypes, filters.cicOnly],
-  );
+  const filteredCityPresets = useMemo(() => {
+    if (selectedLocationZone === "All") return CITY_REGION_PRESETS;
+    return CITY_REGION_PRESETS.filter((p) => p.zone === selectedLocationZone);
+  }, [selectedLocationZone]);
+
+  const toggleCityPreset = (preset: CityRegionPreset) => {
+    const current = filters.postcodeAreas ?? [];
+    const allSelected = preset.postcodeAreas.every((p) => current.includes(p));
+    const next = allSelected
+      ? current.filter((p) => !preset.postcodeAreas.includes(p))
+      : [...new Set([...current, ...preset.postcodeAreas])];
+    update({ postcodeAreas: next });
+  };
+
+  const handleLocationSubmit = (raw: string) => {
+    const areas = resolveLocationInput(raw);
+    if (areas.length === 0) return;
+    const current = filters.postcodeAreas ?? [];
+    const next = [...new Set([...current, ...areas])];
+    update({ postcodeAreas: next });
+  };
 
   const sicSummary = useMemo(() => {
     const codes = filters.sicCodes ?? [];
@@ -387,8 +412,8 @@ export function CompaniesFilterBuilder({
     changeFilters(() => ({ statuses: [...DEFAULT_STATUSES], names: [], nameContains: "" }));
     setPresetName("");
     setSicSearch("");
-    setNameDraft("");
     setPostcodeDraft("");
+    setSelectedLocationZone("All");
     setLoadedPreset(null);
     setPresetState({ kind: "idle" });
   };
@@ -680,76 +705,67 @@ export function CompaniesFilterBuilder({
           onCommit={commitCount}
           title="Name"
           summary={nameSummary}
-          snapshot={[filters.names, filters.nameContains, filters.townContains]}
+          snapshot={[filters.names, filters.nameContains]}
         >
           <div className="space-y-4 pt-1">
             <p className="text-xs text-foreground/55">
-              Filter companies by words in their registered name. Type a keyword and press Enter to add it.
+              Filter companies by words in their registered name. Type a keyword and tap the plus (or press Enter) to add it.
             </p>
-            <div className="flex max-w-md items-center gap-2">
-              <div className="relative flex-1">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground/35" />
-                <input
-                  value={nameDraft}
-                  onChange={(event) => setNameDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key !== "Enter") return;
-                    event.preventDefault();
-                    if (!nameDraft.trim()) return;
-                    addNameToken(nameDraft);
-                    setNameDraft("");
-                  }}
-                  placeholder="Add name, e.g. Hospice…"
-                  className="w-full rounded-lg border border-black/15 py-1.5 pl-8 pr-7 text-sm placeholder:text-foreground/35"
-                />
-                {nameDraft && (
-                  <button
-                    type="button"
-                    onClick={() => setNameDraft("")}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-foreground/40 hover:text-foreground cursor-pointer transition-colors"
-                    title="Clear search"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-            {nameTokens.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2">
-                {nameTokens.map((token) => (
-                  <span
-                    key={token}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-[#102a4e] px-3 py-1 text-xs font-semibold text-white shadow-xs"
-                  >
-                    <span>{token}</span>
+
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5">
+              <GooeyEmailInput
+                variant="light"
+                size="sm"
+                fieldWidth={240}
+                gap={48}
+                duration={640}
+                buttonIcon="plus"
+                placeholder="Add name, e.g. Hospice…"
+                inputType="text"
+                align="start"
+                className="shrink-0"
+                fieldLabel="Company name"
+                submitLabel="Add name"
+                successPlaceholder="Added!"
+                validate={(val) => {
+                  if (!val.trim()) return "Please enter a name";
+                  return null;
+                }}
+                onSubmit={async (name) => {
+                  addNameToken(name);
+                }}
+              />
+
+              {nameTokens.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {nameTokens.map((token) => (
+                    <span
+                      key={token}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-[#102a4e] px-3 py-1 text-xs font-semibold text-white shadow-xs"
+                    >
+                      <span>{token}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeNameToken(token)}
+                        aria-label={`Remove ${token}`}
+                        className="rounded-full p-0.5 hover:bg-white/20 transition-colors cursor-pointer"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </span>
+                  ))}
+
+                  {nameTokens.length > 1 && (
                     <button
                       type="button"
-                      onClick={() => removeNameToken(token)}
-                      aria-label={`Remove ${token}`}
-                      className="rounded-full p-0.5 hover:bg-white/20 transition-colors cursor-pointer"
+                      onClick={() => update({ names: [], nameContains: "" })}
+                      className="text-xs font-semibold text-foreground/50 hover:text-foreground transition-colors cursor-pointer ml-1"
                     >
-                      <X className="size-3" />
+                      Clear all
                     </button>
-                  </span>
-                ))}
-                {nameTokens.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => update({ names: [], nameContains: "" })}
-                    className="text-xs font-semibold text-foreground/50 hover:text-foreground transition-colors cursor-pointer ml-1"
-                  >
-                    Clear all
-                  </button>
-                )}
-              </div>
-            )}
-            <div className="flex max-w-md items-center gap-2">
-              <input
-                value={filters.townContains ?? ""}
-                onChange={(event) => update({ townContains: event.target.value })}
-                placeholder="Town, e.g. Sheffield — optional"
-                className="w-full rounded-lg border border-black/15 px-3 py-1.5 text-sm placeholder:text-foreground/35"
-              />
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </FilterSection>
@@ -758,82 +774,136 @@ export function CompaniesFilterBuilder({
           onCommit={commitCount}
           title="Location"
           summary={locationSummary}
-          hint="Where the company's registered office is. Type any postcode area and press Enter to add it."
+          hint="Where the company's registered office is. Select cities, regional groups, or type any city name or postcode."
           snapshot={[filters.postcodeAreas]}
         >
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            {[
-              ...SUGGESTED_POSTCODE_AREAS,
-              ...(filters.postcodeAreas ?? []).filter(
-                (area) => !SUGGESTED_POSTCODE_AREAS.includes(area),
-              ),
-            ].map((area) => (
-              <Chip
-                key={area}
-                selected={(filters.postcodeAreas ?? []).includes(area)}
-                onClick={() => update({ postcodeAreas: toggleIn(filters.postcodeAreas, area) })}
-                variant="navy"
-              >
-                {area}
-              </Chip>
-            ))}
-            <input
-              value={postcodeDraft}
-              onChange={(event) => setPostcodeDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter") return;
-                event.preventDefault();
-                const area = normalisePostcodeArea(postcodeDraft);
-                if (!area) return;
-                update({ postcodeAreas: toggleIn(filters.postcodeAreas, area) });
-                setPostcodeDraft("");
-              }}
-              placeholder="Add area, e.g. LS"
-              className="w-36 rounded-full border border-dashed border-black/20 px-3 py-1.5 text-xs font-semibold placeholder:text-foreground/35"
-            />
-          </div>
-        </FilterSection>
+          <div className="space-y-3 pt-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-foreground/75">
+                Cities &amp; regional groups
+              </p>
+              {(filters.postcodeAreas?.length ?? 0) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => update({ postcodeAreas: [] })}
+                  className="text-xs font-semibold text-foreground/50 hover:text-foreground transition-colors cursor-pointer"
+                >
+                  Clear all ({filters.postcodeAreas?.length})
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-foreground/55">
+              Click a city or region to toggle all its postcode areas, or type any city name or postcode below.
+            </p>
 
-        <FilterSection
-          onCommit={commitCount}
-          title="Company type"
-          summary={typeSummary}
-          hint="Legal forms as Companies House records them. Select none to include every type — or tick Community interest companies to narrow to CICs alone."
-          snapshot={[filters.companyTypes, filters.cicOnly]}
-        >
-          <div className="space-y-4 pt-1">
-            <label
-              htmlFor="cic-only"
-              className="flex items-center gap-2.5 text-xs font-semibold text-foreground/80 cursor-pointer select-none"
-            >
-              <Checkbox
-                id="cic-only"
-                size="sm"
-                checked={filters.cicOnly === true}
-                onCheckedChange={(checked) => update({ cicOnly: Boolean(checked) })}
-                className="border-black/20 data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white"
-              />
-              <span className="text-[14px]">Community interest companies only</span>
-              <InfoTooltip
-                content="CICs are social enterprises with a legal lock on their assets. Their legal form alone is strong evidence of mission fit, so they skip the human-review hold."
-                side="top"
-              />
-            </label>
-            <div className="flex flex-wrap gap-1.5">
-              <AnimatePresence initial={false} mode="popLayout">
-                {Object.keys(typeOptions).map((slug, index) => (
-                  <Chip
-                    key={slug}
-                    selected={(filters.companyTypes ?? []).includes(slug)}
-                    onClick={() => update({ companyTypes: toggleIn(filters.companyTypes, slug) })}
-                    variant="navy"
-                    index={index}
+            {/* Zone filter tabs */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(["All", "Yorkshire", "North", "Midlands", "London & South", "Wales & Scotland"] as const).map(
+                (zone) => (
+                  <button
+                    key={zone}
+                    type="button"
+                    onClick={() => setSelectedLocationZone(zone)}
+                    className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${
+                      selectedLocationZone === zone
+                        ? "bg-[#102a4e] text-white"
+                        : "bg-black/[0.04] text-foreground/65 hover:bg-black/[0.08] hover:text-foreground"
+                    }`}
                   >
-                    {typeOptions[slug]}
-                  </Chip>
-                ))}
+                    {zone}
+                  </button>
+                ),
+              )}
+            </div>
+
+            {/* City & region chips */}
+            <div className="relative flex flex-wrap gap-1.5 min-h-[32px]">
+              <AnimatePresence initial={false} mode="popLayout">
+                {filteredCityPresets.map((preset, index) => {
+                  const current = filters.postcodeAreas ?? [];
+                  const total = preset.postcodeAreas.length;
+                  const selectedCount = preset.postcodeAreas.filter((p) => current.includes(p)).length;
+                  const isAllSelected = total > 0 && selectedCount === total;
+                  const isPartial = selectedCount > 0 && !isAllSelected;
+
+                  return (
+                    <Chip
+                      key={preset.id}
+                      selected={isAllSelected}
+                      isPartial={isPartial}
+                      countLabel={total > 1 ? (isPartial ? `${selectedCount}/${total}` : `${total}`) : undefined}
+                      onClick={() => toggleCityPreset(preset)}
+                      variant="navy"
+                      index={index}
+                    >
+                      {preset.name}
+                    </Chip>
+                  );
+                })}
               </AnimatePresence>
             </div>
+
+            {/* Search / manual input */}
+            <div className="pt-2">
+              <p className="text-xs font-semibold text-foreground/75 mb-1.5">
+                Add city or postcode
+              </p>
+              <div className="flex max-w-md items-center gap-2">
+                <input
+                  value={postcodeDraft}
+                  onChange={(event) => setPostcodeDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter") return;
+                    event.preventDefault();
+                    if (!postcodeDraft.trim()) return;
+                    handleLocationSubmit(postcodeDraft);
+                    setPostcodeDraft("");
+                  }}
+                  placeholder="e.g. Manchester, Leeds, Sheffield, or M, LS, S1 2HE…"
+                  className="w-full rounded-lg border border-black/15 px-3 py-1.5 text-sm placeholder:text-foreground/35"
+                />
+              </div>
+            </div>
+
+            {/* Active postcode areas */}
+            {(filters.postcodeAreas?.length ?? 0) > 0 && (
+              <div className="space-y-1.5 pt-2 border-t border-black/[0.06]">
+                <p className="text-xs font-semibold text-foreground/75">
+                  Selected postcode areas ({filters.postcodeAreas?.length})
+                </p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {(filters.postcodeAreas ?? []).map((area) => (
+                    <span
+                      key={area}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-[#102a4e] px-2.5 py-1 text-xs font-semibold text-white shadow-xs"
+                    >
+                      <span>{formatPostcodeAreaLabel(area)}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          update({
+                            postcodeAreas: (filters.postcodeAreas ?? []).filter((a) => a !== area),
+                          })
+                        }
+                        aria-label={`Remove ${area}`}
+                        className="rounded-full p-0.5 hover:bg-white/20 transition-colors cursor-pointer"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </span>
+                  ))}
+                  {(filters.postcodeAreas?.length ?? 0) > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => update({ postcodeAreas: [] })}
+                      className="text-xs font-semibold text-foreground/50 hover:text-foreground transition-colors cursor-pointer ml-1"
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </FilterSection>
 
@@ -998,7 +1068,7 @@ export function CompaniesFilterBuilder({
                   </label>
                 ))}
               </div>
-              <p className="max-w-[52ch] text-[11px] leading-[1.55] text-foreground/45">
+              <p className="text-[11px] leading-[1.55] text-foreground/45">
                 Live companies only, unless you say otherwise. Clearing every box
                 shows non-live companies too — for review, not for outreach.
               </p>
@@ -1010,7 +1080,7 @@ export function CompaniesFilterBuilder({
       {/* ── Import, behind a confirmation that restates the count and criteria ── */}
       <section className="rounded-2xl border border-black/[0.07] bg-white p-5 shadow-xs sm:p-6">
         <h3 className="text-sm font-bold text-foreground">Import</h3>
-        <p className="mt-1.5 max-w-2xl text-sm leading-[1.6] text-foreground/65">
+        <p className="mt-1.5 text-sm leading-[1.6] text-foreground/65">
           Adds the selected companies to the client list. Companies already on
           the list are matched, not duplicated, so re-running a filter set is
           safe. A single import is capped at 10,000 companies.
@@ -1033,7 +1103,9 @@ export function CompaniesFilterBuilder({
               <OriginButton onClick={doImport} disabled={isPending} size="md" type="button">
                 {isPending
                   ? "Importing…"
-                  : `Yes, import ${count?.toLocaleString() ?? ""} companies`}
+                  : overCap
+                    ? `Yes, import the first ${MAX_IMPORT.toLocaleString()}`
+                    : `Yes, import ${count?.toLocaleString() ?? ""} companies`}
               </OriginButton>
               <button
                 type="button"
@@ -1057,8 +1129,16 @@ export function CompaniesFilterBuilder({
 
         {confirming && (
           <p className="mt-3 max-w-2xl rounded-xl bg-black/[0.03] p-3 text-xs leading-[1.6] text-foreground/70">
-            <strong className="font-bold text-foreground">{description}</strong> This
-            will be recorded against your name in the audit log.
+            <strong className="font-bold text-foreground">{description}</strong>{" "}
+            {overCap && (
+              <>
+                Only the first {MAX_IMPORT.toLocaleString()} of{" "}
+                {count?.toLocaleString()} will be imported, ordered by company
+                number — narrow the filters if you want a particular{" "}
+                {MAX_IMPORT.toLocaleString()}.{" "}
+              </>
+            )}
+            This will be recorded against your name in the audit log.
           </p>
         )}
 
@@ -1213,17 +1293,3 @@ export function CompaniesFilterBuilder({
     </div>
   );
 }
-
-/**
- * Every company-type option the screen offers, derived from the label table so
- * a new slug cannot silently miss its control. CICs lead: they are the
- * strongest mission signal in this register.
- */
-const typeOptions: Record<string, string> = Object.fromEntries(
-  [
-    "community-interest-company",
-    ...Object.keys(COMPANY_TYPE_LABELS).filter(
-      (slug) => slug !== "community-interest-company",
-    ),
-  ].map((slug) => [slug, COMPANY_TYPE_LABELS[slug]]),
-);

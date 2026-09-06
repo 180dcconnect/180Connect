@@ -85,6 +85,13 @@ async function main(): Promise<void> {
           -- #>> (not ->) returns the value as unquoted text whether the payload
           -- stores it as a JSON number or a JSON string.
           raw_payload #>> '{reg_charity_number}' as reg_charity_number,
+          raw_payload #>> '{charity,registered_charity_number}' as bulk_charity_number,
+          raw_payload #>> '{charity,charity_company_registration_number}' as bulk_company_number,
+          coalesce(
+            raw_payload #>> '{charity_co_reg_number}',
+            raw_payload #>> '{charity_company_registration_number}',
+            raw_payload #>> '{company_number}'
+          ) as api_company_number,
           row_number() over (
             partition by matched_organisation_id, record_source
             order by received_at desc
@@ -108,22 +115,41 @@ async function main(): Promise<void> {
         select
           organisation_id,
           'uk_charity'::text as identifier_type,
-          reg_charity_number as identifier_value,
+          coalesce(reg_charity_number, bulk_charity_number) as identifier_value,
           rn
         from latest
-        where record_source = 'charity_commission'
-          and reg_charity_number is not null
-          and trim(reg_charity_number) <> ''
+        where record_source in ('charity_commission', 'charity_commission_bulk')
+          and coalesce(reg_charity_number, bulk_charity_number) is not null
+          and trim(coalesce(reg_charity_number, bulk_charity_number)) <> ''
+        union all
+        select
+          organisation_id,
+          'uk_company'::text as identifier_type,
+          coalesce(bulk_company_number, api_company_number) as identifier_value,
+          rn
+        from latest
+        where record_source in ('charity_commission', 'charity_commission_bulk')
+          and coalesce(bulk_company_number, api_company_number) is not null
+          and trim(coalesce(bulk_company_number, api_company_number)) <> ''
       ) combined
       where rn = 1
     `);
 
     const rows: IdentifierCandidate[] = [];
     for (const candidate of candidates) {
-      const key = `${candidate.identifier_type}|${candidate.identifier_value}`;
+      const rawVal = candidate.identifier_value.trim();
+      if (!rawVal) continue;
+      const normalizedValue =
+        candidate.identifier_type === "uk_company"
+          ? (/^\d+$/.test(rawVal) ? rawVal.padStart(8, "0") : rawVal.toUpperCase().replace(/\s+/g, ""))
+          : rawVal;
+      const key = `${candidate.identifier_type}|${normalizedValue}`;
       if (takenValues.has(key)) continue;
       takenValues.add(key);
-      rows.push(candidate);
+      rows.push({
+        ...candidate,
+        identifier_value: normalizedValue,
+      });
     }
 
     if (rows.length === 0) {

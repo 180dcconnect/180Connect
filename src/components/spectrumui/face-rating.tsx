@@ -4,6 +4,18 @@ import React, { useCallback, useRef, useState } from "react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { cn } from "@/lib/utils"
 
+import {
+  RatingFace,
+  type RatingFaceProps,
+  RATING_COLORS,
+  RATING_LEVELS,
+  RATING_UNSET_COLOR,
+  EYE_SCALE_Y,
+  getMouthPath,
+} from "./rating-face"
+
+export { RatingFace, type RatingFaceProps, RATING_COLORS, RATING_LEVELS }
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface FaceRatingProps {
@@ -26,7 +38,9 @@ export interface FaceRatingProps {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const LEVELS = [1, 2, 3, 4, 5] as const
+const LEVELS = RATING_LEVELS
+const LEVEL_COLORS = RATING_COLORS
+const UNSET_COLOR = RATING_UNSET_COLOR
 
 const DEFAULT_LABELS: [string, string, string, string, string] = [
   "Terrible",
@@ -35,21 +49,6 @@ const DEFAULT_LABELS: [string, string, string, string, string] = [
   "Good",
   "Amazing",
 ]
-
-/** rose-500, orange-500, amber-400, lime-500, emerald-500 */
-const LEVEL_COLORS = ["#f43f5e", "#f97316", "#fbbf24", "#84cc16", "#10b981"]
-
-/** neutral-400 — face color while nothing is hovered or committed */
-const UNSET_COLOR = "#a3a3a3"
-
-/** Mouth control-point Y per level: deep frown → flat → big smile */
-const MOUTH_CONTROL_Y = [34, 41, 47, 54, 61]
-
-/** Mouth corner Y per level: corners droop when upset, lift when delighted */
-const MOUTH_CORNER_Y = [49.5, 48, 47, 46, 44.5]
-
-/** Eye squash per level: narrowed when upset, wide open when amazed */
-const EYE_SCALE_Y = [0.45, 0.6, 0.9, 1, 1.25]
 
 /** Softer, organic spring shared by the mouth morph and every color change */
 const MORPH_SPRING = { type: "spring", stiffness: 260, damping: 22 } as const
@@ -90,12 +89,7 @@ const SIZES = {
   },
 } as const
 
-/** All five mouths share one command structure (M x y Q x y x y) so
- *  motion interpolates them smoothly */
-function mouthPath(level: number) {
-  const corner = MOUTH_CORNER_Y[level - 1]
-  return `M 22 ${corner} Q 36 ${MOUTH_CONTROL_Y[level - 1]} 50 ${corner}`
-}
+const mouthPath = getMouthPath;
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -274,7 +268,7 @@ export function FaceRating({
               whileTap={shouldReduceMotion ? undefined : { scale: 0.9 }}
               transition={shouldReduceMotion ? { duration: 0 } : SPRING_SNAPPY}
               className={cn(
-                "relative inline-flex touch-manipulation select-none items-center justify-center rounded-full font-bold tabular-nums transition-all duration-200",
+                "relative inline-flex touch-manipulation select-none items-center justify-center rounded-full font-bold font-body tabular-nums transition-all duration-200",
                 "focus:outline-none focus-visible:ring-2 focus-visible:ring-black/10",
                 sizes.segment,
                 isActive
@@ -330,7 +324,7 @@ export function FaceRating({
               <motion.span
                 key={active}
                 className={cn(
-                  "font-medium text-neutral-500 dark:text-neutral-400",
+                  "font-medium font-body text-neutral-500 dark:text-neutral-400",
                   sizes.labelText,
                 )}
                 initial={{ opacity: 0, y: 4 }}

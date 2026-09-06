@@ -6,10 +6,24 @@
  * same testability (returns `{ sql, params }`, never opens a database).
  *
  * One structural difference: SIC filtering reads the normalised
- * `company_sic` table through an `exists` subquery rather than a join — a
- * company carrying two selected codes must appear once, not twice, and
- * `exists` stops at the first match. The composite index on
- * (sic, number) answers it without touching the company table.
+ * `company_sic` table, and it does so as `number in (select …)` rather than
+ * the `exists (select … where s.number = c.number)` the charity twin uses.
+ * Both are semi-joins, so both answer once for a company carrying two
+ * selected codes — but on a table this size the plans are not close:
+ *
+ *   exists →  SEARCH c USING INDEX company_status_norm
+ *             SEARCH s EXISTS USING COVERING INDEX company_sic_by_company
+ *   in     →  LIST SUBQUERY: SEARCH s USING COVERING INDEX company_sic_by_sic
+ *             SEARCH c USING sqlite_autoindex_company_1 (number=?)
+ *
+ * The correlated `exists` drives from `company` — all 716k live rows — and
+ * probes `company_sic` once per row, which is the wrong direction and never
+ * touches `company_sic_by_sic`. Written as `in`, SQLite reads only the rows
+ * carrying the selected codes and probes `company` by primary key. Measured
+ * on the September 2026 file (723,670 companies), three SIC codes plus the
+ * live-status default: **909ms → 88ms**, same count. The screen recounts on
+ * every filter change, so this is the difference between a live number and a
+ * visible stall.
  */
 
 import { parseFilters, type CompanyRegisterFilters } from "./filters.ts";
@@ -72,9 +86,11 @@ export function buildWhere(input: CompanyRegisterFilters): {
   }
 
   if (f.sicCodes?.length) {
+    // `in` and not a correlated `exists` — see the note at the top of this
+    // file. Both dedupe; only this one reads company_sic_by_sic.
     clauses.push(
-      `exists (select 1 from company_sic s where s.number = c.number ` +
-        `and s.sic in (${placeholders(f.sicCodes.length)}))`,
+      `c.number in (select s.number from company_sic s ` +
+        `where s.sic in (${placeholders(f.sicCodes.length)}))`,
     );
     params.push(...f.sicCodes);
   }
@@ -162,5 +178,28 @@ export function sicValuesQuery(): SqlQuery {
       `from company_sic s join sic_label l on l.sic = s.sic ` +
       `group by l.sic, l.title order by l.sic`,
     params: [],
+  };
+}
+
+/**
+ * The register's own wording for a handful of specific codes.
+ *
+ * Distinct from `sicValuesQuery`, which is the picker's "every code in the
+ * file, with how many companies carry it" — that one aggregates over
+ * `company_sic`, a 1.06M-row table, to answer a question about the whole file.
+ * This one answers "what do these three codes mean" for a single organisation
+ * on the client record, and so reads `sic_label` alone (720 rows, primary key
+ * on `sic`) and never touches `company_sic` at all.
+ *
+ * Codes the file does not carry simply do not come back; resolving that to a
+ * displayable fallback is the caller's job, because the fallback is a display
+ * decision and this layer only reports what the register says.
+ */
+export function sicTitlesQuery(codes: readonly string[]): SqlQuery {
+  return {
+    sql:
+      `select sic, title from sic_label ` +
+      `where sic in (${placeholders(codes.length)}) order by sic`,
+    params: [...codes],
   };
 }

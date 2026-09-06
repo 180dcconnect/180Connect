@@ -1,9 +1,18 @@
 /**
- * Realistic Mock Data Engine for the Gmail-style Outreach Inbox.
+ * TEMPORARY design data for the inbox: multi-turn conversations with UK
+ * charities, NGOs and foundations across the outreach stages, so the queue and
+ * the thread view can be designed against a full page while the live database
+ * holds only a handful of real threads.
  *
- * Provides comprehensive, multi-turn email conversations for UK charities,
- * NGOs, and foundations across various outreach stages, intents, and sectors.
+ * `mockQueueRows` at the foot of this file is the only entry point the queue
+ * uses, and it emits the REAL row type. Removal instructions are in the comment
+ * above it.
  */
+
+import { formatRelativeTime } from "./display-format.ts";
+import { buildInboxQueue, daysSince, type InboxQueueRow } from "./inbox-queue.ts";
+import type { FollowUpRecommendation } from "./outreach/follow-up-recommendations.ts";
+import { isRecentReply, type InboxThread, type InboxThreadStatus } from "./outreach-inbox.ts";
 
 export type MockAttachment = {
   id: string;
@@ -967,4 +976,73 @@ export function formatFileSize(bytes: number): string {
     return `${(bytes / 1000000).toFixed(1)} MB`;
   }
   return `${Math.round(bytes / 1000)} KB`;
+}
+
+/* ─── TEMPORARY: design fill for /inbox ────────────────────────────────────
+ *
+ * The queue page is being designed against a live database that has very few
+ * real threads in it, and a three-row page cannot be judged. `mockQueueRows`
+ * adapts the threads above into the REAL row type (`InboxQueueRow`) so the mock
+ * never touches the shape of anything else — the queue, the row component and
+ * the page all speak `InboxQueueRow`, and the mock bends to them.
+ *
+ * TO REMOVE: delete this block, delete the import and the merge in
+ * src/app/inbox/page.tsx, and delete the `getMockThreadById` fallback in
+ * src/app/inbox/[orgId]/page.tsx. Nothing else refers to it.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Deterministic spread of ownership and follow-up state across the mock set, so
+ * every scope and every bucket has something in it while the page is designed.
+ * Index-based rather than random: the same row is in the same pile on every
+ * render, or a screenshot means nothing.
+ */
+export function mockQueueRows(actorId: string, now: Date = new Date()): InboxQueueRow[] {
+  const threads: InboxThread[] = MOCK_INBOX_THREADS.map((mock) => {
+    // "draft" is a mailbox state, not an event; the queue only knows the three
+    // states threadStatus can produce.
+    const status: InboxThreadStatus =
+      mock.status === "replied" ? "replied" : mock.status === "awaiting" ? "awaiting" : "sent";
+    const newest = mock.messages[mock.messages.length - 1];
+    return {
+      orgId: mock.id,
+      orgName: mock.orgName,
+      href: `/inbox/${mock.id}`,
+      lastActivityAt: mock.lastActivityAt,
+      lastActorName: newest?.senderName ?? mock.camOwner.name,
+      lastEventLabel: status === "replied" ? "Reply received" : "Email sent",
+      subject: mock.subject,
+      snippet: mock.snippet,
+      status,
+      replyIntent: mock.replyIntent ?? null,
+      messageCount: mock.messages.length,
+      relativeTime: formatRelativeTime(new Date(mock.lastActivityAt), now),
+      isRecent: status === "replied" && isRecentReply(mock.lastActivityAt, now),
+    };
+  });
+
+  // Two of every three mock clients belong to the viewer, so "Mine" — the
+  // default scope — is the fullest view rather than the emptiest.
+  const owners = new Map<string, string | null>(
+    threads.map((thread, index) => [
+      thread.orgId,
+      index % 3 === 2 ? (index % 6 === 5 ? null : "mock-user-team") : actorId,
+    ]),
+  );
+
+  // Every fourth quiet thread is overdue a follow-up, alternating urgency, so
+  // the Follow-up due bucket is never empty on the design fill.
+  const recommendations: FollowUpRecommendation[] = threads
+    .filter((thread) => thread.status !== "replied")
+    .filter((_, index) => index % 2 === 0)
+    .map((thread, index) => ({
+      organisationId: thread.orgId,
+      legalName: thread.orgName,
+      statusLabel: "Initial outreach sent",
+      lastActivityAt: thread.lastActivityAt,
+      daysWaiting: daysSince(thread.lastActivityAt, now),
+      urgency: index % 2 === 0 ? "urgent" : "due",
+    }));
+
+  return buildInboxQueue(threads, owners, recommendations, actorId, now);
 }

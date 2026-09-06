@@ -97,6 +97,8 @@ const CHECKS: {
   key: FactorKey;
   /** The one name for this check, used here, on the card, and in the dial. */
   label: string;
+  /** Concise hint explaining what the criterion evaluates and its scoring relevance. */
+  hint: string;
   /** What the check looks at, in one sentence. */
   reads: string;
   /** What pushes this check up. */
@@ -111,6 +113,7 @@ const CHECKS: {
   {
     key: "sector",
     label: "Sector",
+    hint: "Alignment with branch focus areas and cause priorities",
     reads: "The sector the organisation works in.",
     raises:
       "Health and wellbeing rates highest, then education and youth, then poverty and community work.",
@@ -121,21 +124,23 @@ const CHECKS: {
   {
     key: "geography",
     label: "Geography",
+    hint: "Proximity to branch target operating regions",
     reads:
       "Whether the organisation sits in one of the branch's priority areas.",
     raises: "Being inside a priority area.",
     lowers: "Being outside every priority area.",
     blank:
-      "Nobody has set the branch's priority areas yet, so this check is asleep for every client — it is not something wrong with this record.",
+      "Nobody has set the branch's priority areas yet, so this check is asleep for every client. It is not something wrong with this record.",
     subject: "Location against the branch's priority regions",
   },
   {
     key: "size",
     label: "Size",
+    hint: "Operating income scale from latest filed accounts",
     reads: "The income on their most recent set of published accounts.",
     raises: "Income over £1m rates highest; £100k–£1m is solid.",
     lowers:
-      "Under £10k rates lowest — a small organisation is a smaller opportunity.",
+      "Under £10k rates lowest: a small organisation is a smaller opportunity.",
     blank:
       "No accounts with an income figure have been filed against this record.",
     subject: "Income size",
@@ -143,16 +148,18 @@ const CHECKS: {
   {
     key: "partnershipHistory",
     label: "Partnership history",
+    hint: "Track record of matched grant funding in 360Giving",
     reads: "How many grants we can match to them in the public 360Giving data.",
     raises: "Five or more matched grants rates highest.",
     lowers:
-      "Nothing here counts against a client — it either helps or stays neutral.",
+      "Nothing here counts against a client: it either helps or stays neutral.",
     blank: "No grants matched to this organisation.",
     subject: "Previous grant history",
   },
   {
     key: "previousContact",
     label: "Previous contact",
+    hint: "Stage reached in prior outreach and relationship history",
     reads:
       "The stage they reached with us last time, and how long ago that was.",
     raises:
@@ -293,7 +300,7 @@ function BreakdownTable({ factors }: { factors: ScoreFactorsRecord }) {
 
   return (
     <>
-      <p className="mt-3 text-[12.5px] leading-[1.5] text-dim">
+      <p className="mt-2.5 text-[12.5px] leading-[1.5] text-dim">
         <span className="font-semibold text-ink">
           {covered} of {CHECKS.length} checks found something.
         </span>{" "}
@@ -302,7 +309,7 @@ function BreakdownTable({ factors }: { factors: ScoreFactorsRecord }) {
           : `The rest count as half a mark each, which is what keeps a thin record near the middle of the range rather than at either end.`}
       </p>
       <ul className="mt-2.5 space-y-2">
-        {CHECKS.map(({ key, label, blank, subject }) => {
+        {CHECKS.map(({ key, label, hint, blank, subject }) => {
           const value = factors.factors[key];
           const percent = shares.get(key) ?? 0;
           const isNeutral = value === 0.5;
@@ -317,7 +324,7 @@ function BreakdownTable({ factors }: { factors: ScoreFactorsRecord }) {
                     when clicked, hence `cursor-default`. */}
                   <button
                     type="button"
-                    className="w-full cursor-default rounded-inset px-1.5 py-1 text-left transition-colors hover:bg-paper focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-lead-mid"
+                    className="w-full cursor-default rounded-inset px-2 py-1.5 text-left transition-colors hover:bg-paper focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-lead-mid"
                   >
                     <span className="flex items-baseline justify-between gap-3">
                       <span className="min-w-0 truncate text-[13.5px] font-medium text-ink">
@@ -329,6 +336,9 @@ function BreakdownTable({ factors }: { factors: ScoreFactorsRecord }) {
                         {percent.toFixed(0)}%
                       </span>
                     </span>
+                    <p className="mt-0.5 text-[11.5px] leading-[1.35] text-dim">
+                      {hint}
+                    </p>
                     <span
                       aria-hidden="true"
                       className="mt-1.5 block h-[5px] overflow-hidden rounded-full bg-paper-sunk"
@@ -353,7 +363,7 @@ function BreakdownTable({ factors }: { factors: ScoreFactorsRecord }) {
                   <span className="mt-0.5 block text-white/70">
                     {isNeutral
                       ? blank
-                      : `${value.toFixed(2)} out of 1.00 — contributes ${percent.toFixed(1)}% of the final score.`}
+                      : `Scored ${value.toFixed(2)} out of 1.00. Contributes ${percent.toFixed(1)}% of the final score.`}
                   </span>
                 </TooltipContent>
               </Tooltip>

@@ -94,10 +94,35 @@ work that is common to every source:
 | Client criteria (F047) | `checkClientCriteria` decides accepted / needs review / does not meet |
 | Duplicate detection (F042) | Matches on registration number and name+postcode; a match is flagged, not merged |
 | Write | Inserts the organisation and links it back to the raw record |
+| Score | Its first `latest_scores` row, under the active SCOUT weights |
 | Annotate | Field provenance, identifiers, sector, financial periods — all best-effort |
 
 "Best-effort" is load-bearing: the organisation is already committed by then, so
 a failed annotation is reported and does not roll back a good import.
+
+### Scoring, and why the promote path passes it fields twice
+
+The score is computed inside the insert, but from fields the annotate step is
+only *about* to write — sector, and the latest filed income. The promote path
+reads both off the raw payload first and hands them to
+`insertOrganisationAndLink` as `ImportScoreInputs`.
+
+That looks redundant and is not. `StandardOrganisation` carries neither field, so
+scoring the standardised record alone gave every imported client the documented
+neutral for both — and because nothing rescored after the annotations landed, it
+stayed there. On staging that was 435 clients holding a regulator-assigned sector
+while their stored score still read 0.5 for it, and 326 holding matched grants
+scored as having no history.
+
+The same reasoning drives the rescore hooks on the enrichment paths, which write
+a scoring input long after the import: 360Giving grant promotion
+(`promotePendingThreeSixtyGivingRecords`) and the weekly charity financial
+refresh both rescore the organisation they just wrote to. Companies House
+supplies neither sector nor income, so its clients score their neutrals for both
+until another source reaches them — a data gap, not a wiring one.
+
+Grant history is deliberately *not* an import-time input: 360Giving runs against
+organisations that already exist, and rescores them itself.
 
 ---
 

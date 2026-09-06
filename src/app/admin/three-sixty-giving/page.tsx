@@ -1,13 +1,11 @@
 import { redirect } from "next/navigation";
-import Image from "next/image";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
-import { GroupTabs } from "@/components/ui/group-tabs";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import type { IngestionRunRow } from "../import-status/run-format";
-import { DATA_IMPORTS_TABS } from "../import-group";
+import { DataImportsHeader } from "../data-imports-header";
 import { BackfillCard } from "./backfill-card";
 import { GrantsGuide } from "./guide";
 import { ThreeSixtyRecentRuns } from "./recent-runs";
@@ -107,38 +105,15 @@ export default async function ThreeSixtyGivingPage() {
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
-      <Stage className="mx-auto max-w-5xl space-y-8">
+      <Stage className="mx-auto max-w-6xl space-y-8">
         <Rise>
-          <div className="flex items-center gap-4">
-            <a
-              href="https://360giving.org"
-              target="_blank"
-              rel="noreferrer"
-              aria-label="360Giving website (opens in a new tab)"
-              className="shrink-0 transition-opacity hover:opacity-80"
-            >
-              <Image
-                src="/sources/360giving.png"
-                alt=""
-                width={140}
-                height={77}
-                className="h-10 w-auto"
-              />
-            </a>
-            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
-              360Giving
-            </h1>
-          </div>
-          <GroupTabs
-            className="mt-4"
-            tabs={DATA_IMPORTS_TABS}
-            current="/admin/three-sixty-giving"
-          />
-          <p className="mt-3 max-w-xl text-sm leading-[1.7] text-dim">
-            See which clients have won grants before, so you can spot
-            experienced fundraisers when choosing partners. Covers registered
-            charities and companies — other clients are skipped automatically.
-          </p>
+          <DataImportsHeader current="/admin/three-sixty-giving">
+            <p className="mt-3 max-w-xl text-sm leading-[1.7] text-dim">
+              See which clients have won grants before, so you can spot
+              experienced fundraisers when choosing partners. Covers registered
+              charities and companies — other clients are skipped automatically.
+            </p>
+          </DataImportsHeader>
         </Rise>
 
         <Group className="space-y-6">

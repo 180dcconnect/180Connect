@@ -26,10 +26,12 @@ export function RecordFeed({
   records,
   source,
   recordsSkipped,
+  isGrantSource = false,
 }: {
   records: RawRecordView[];
   source: string;
   recordsSkipped: number;
+  isGrantSource?: boolean;
 }) {
   const [activeFilter, setActiveFilter] = useState<"all" | ProcessingStatus>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -70,7 +72,7 @@ export function RecordFeed({
               Already Up to Date in 180Connect
             </h3>
             <p className="mt-0.5 text-xs leading-[1.6] text-foreground/80">
-              <strong className="text-foreground font-bold">{recordsSkipped.toLocaleString()} organisations</strong> from {source} were verified and found to be already up to date with no new changes on the official register.
+              <strong className="text-foreground font-bold">{recordsSkipped.toLocaleString()} {isGrantSource ? (recordsSkipped === 1 ? "grant" : "grants") : (recordsSkipped === 1 ? "organisation" : "organisations")}</strong> from {source} were verified and found to be already up to date with no new changes on record.
             </p>
           </div>
         </div>
@@ -90,22 +92,24 @@ export function RecordFeed({
                   : "bg-white text-foreground/70 ring-1 ring-black/[0.08] hover:bg-black/[0.02]"
               }`}
             >
-              All Organisations
+              {isGrantSource ? "All Grants" : "All Organisations"}
               <span className="opacity-60 tabular-nums">({counts.all})</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => setActiveFilter("validated")}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
-                activeFilter === "validated"
-                  ? "bg-green-800 text-white shadow-2xs"
-                  : "bg-white text-green-900 ring-1 ring-green-600/20 hover:bg-green-50/50"
-              }`}
-            >
-              Added to CRM
-              <span className="opacity-75 tabular-nums">({counts.validated})</span>
-            </button>
+            {counts.validated > 0 && (
+              <button
+                type="button"
+                onClick={() => setActiveFilter("validated")}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
+                  activeFilter === "validated"
+                    ? "bg-green-800 text-white shadow-2xs"
+                    : "bg-white text-green-900 ring-1 ring-green-600/20 hover:bg-green-50/50"
+                }`}
+              >
+                {isGrantSource ? "Saved Grants" : "Added to CRM"}
+                <span className="opacity-75 tabular-nums">({counts.validated})</span>
+              </button>
+            )}
 
             {counts.matched > 0 && (
               <button
@@ -113,11 +117,15 @@ export function RecordFeed({
                 onClick={() => setActiveFilter("matched")}
                 className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
                   activeFilter === "matched"
-                    ? "bg-amber-800 text-white shadow-2xs"
-                    : "bg-white text-amber-900 ring-1 ring-amber-600/20 hover:bg-amber-50/50"
+                    ? isGrantSource
+                      ? "bg-green-800 text-white shadow-2xs"
+                      : "bg-amber-800 text-white shadow-2xs"
+                    : isGrantSource
+                      ? "bg-white text-green-900 ring-1 ring-green-600/20 hover:bg-green-50/50"
+                      : "bg-white text-amber-900 ring-1 ring-amber-600/20 hover:bg-amber-50/50"
                 }`}
               >
-                Needs Review
+                {isGrantSource ? "Matched to Clients" : "Needs Review"}
                 <span className="opacity-75 tabular-nums">({counts.matched})</span>
               </button>
             )}
@@ -147,7 +155,7 @@ export function RecordFeed({
                     : "bg-white text-foreground/70 ring-1 ring-black/[0.08] hover:bg-black/[0.02]"
                 }`}
               >
-                Excluded
+                {isGrantSource ? "Unmatched" : "Excluded"}
                 <span className="opacity-75 tabular-nums">({counts.rejected})</span>
               </button>
             )}
@@ -251,9 +259,9 @@ export function RecordFeed({
                       <Link
                         href={`/clients/${record.matchedOrgId}`}
                         onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-bold text-white hover:bg-brand-hover transition-colors shadow-2xs"
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-lead px-3 py-1.5 text-xs font-bold text-white hover:bg-lead-hover transition-colors shadow-2xs"
                       >
-                        <span>View Client in CRM</span>
+                        <span>View Client</span>
                         <ExternalLink className="h-3 w-3" />
                       </Link>
                     )}
@@ -280,71 +288,133 @@ export function RecordFeed({
                       className="overflow-hidden border-t border-black/[0.05] bg-black/[0.015] px-4 py-5 sm:px-5"
                     >
                       <div className="space-y-4">
-                        {/* Business Summary Card */}
-                        <div className="rounded-xl border border-black/[0.06] bg-white p-4 shadow-2xs">
-                          <h5 className="text-xs font-bold uppercase tracking-[0.1em] text-foreground/45 mb-3 flex items-center gap-1.5">
-                            <Building2 className="h-3.5 w-3.5" />
-                            <span>Official Filing Overview</span>
-                          </h5>
+                        {record.grantDetails ? (
+                          <div className="rounded-xl border border-black/[0.06] bg-white p-4 shadow-2xs">
+                            <h5 className="text-xs font-bold uppercase tracking-[0.1em] text-foreground/45 mb-3 flex items-center gap-1.5">
+                              <Building2 className="h-3.5 w-3.5" />
+                              <span>Grant Details &amp; Funding Overview</span>
+                            </h5>
 
-                          <dl className="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-3">
-                            <div>
-                              <dt className="font-bold text-foreground/45">Organisation Type</dt>
-                              <dd className="mt-0.5 font-medium text-foreground">
-                                {record.filingType ?? "Standard Organisation"}
-                              </dd>
-                            </div>
-
-                            <div>
-                              <dt className="font-bold text-foreground/45">Register Status</dt>
-                              <dd className="mt-0.5 font-medium text-foreground">
-                                {record.registryStatus ?? "Active on Register"}
-                              </dd>
-                            </div>
-
-                            <div>
-                              <dt className="font-bold text-foreground/45">Official Number</dt>
-                              <dd className="mt-0.5 font-mono font-medium text-foreground">
-                                #{record.sourceRecordId}
-                              </dd>
-                            </div>
-
-                            {record.fullAddress && (
-                              <div className="sm:col-span-2">
-                                <dt className="font-bold text-foreground/45">Registered Office</dt>
-                                <dd className="mt-0.5 text-foreground/85">
-                                  {record.fullAddress}
-                                </dd>
-                              </div>
-                            )}
-
-                            {record.website && (
+                            <dl className="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-3">
                               <div>
-                                <dt className="font-bold text-foreground/45">Website</dt>
-                                <dd className="mt-0.5">
-                                  <a
-                                    href={record.website.startsWith("http") ? record.website : `https://${record.website}`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="inline-flex items-center gap-1 text-brand hover:underline"
-                                  >
-                                    <Globe className="h-3 w-3" />
-                                    <span className="truncate max-w-[200px]">{record.website}</span>
-                                  </a>
+                                <dt className="font-bold text-foreground/45">Funder</dt>
+                                <dd className="mt-0.5 font-medium text-foreground">
+                                  {record.grantDetails.funderName ?? "Unknown Funder"}
                                 </dd>
                               </div>
-                            )}
-                          </dl>
 
-                          {record.missionOrActivities && (
-                            <div className="mt-3.5 pt-3.5 border-t border-black/[0.05]">
-                              <p className="font-bold text-foreground/45 text-xs">Activities &amp; Purpose</p>
-                              <p className="mt-1 text-xs leading-[1.6] text-foreground/80">
-                                {record.missionOrActivities}
-                              </p>
-                            </div>
-                          )}
-                        </div>
+                              <div>
+                                <dt className="font-bold text-foreground/45">Amount Awarded</dt>
+                                <dd className="mt-0.5 font-medium text-foreground">
+                                  {record.grantDetails.amountFormatted ?? "Undisclosed"}
+                                </dd>
+                              </div>
+
+                              <div>
+                                <dt className="font-bold text-foreground/45">Award Date</dt>
+                                <dd className="mt-0.5 font-medium text-foreground">
+                                  {record.grantDetails.awardDate ?? "Undisclosed"}
+                                </dd>
+                              </div>
+
+                              <div>
+                                <dt className="font-bold text-foreground/45">Grant Programme</dt>
+                                <dd className="mt-0.5 font-medium text-foreground">
+                                  {record.grantDetails.grantProgramme ?? "General Grant"}
+                                </dd>
+                              </div>
+
+                              <div>
+                                <dt className="font-bold text-foreground/45">Recipient Client</dt>
+                                <dd className="mt-0.5 font-medium text-foreground">
+                                  {record.matchedOrg ? record.matchedOrg.legalName : record.name}
+                                </dd>
+                              </div>
+
+                              <div>
+                                <dt className="font-bold text-foreground/45">Official Grant ID</dt>
+                                <dd className="mt-0.5 font-mono font-medium text-foreground">
+                                  #{record.sourceRecordId}
+                                </dd>
+                              </div>
+                            </dl>
+
+                            {record.grantDetails.description && (
+                              <div className="mt-3.5 pt-3.5 border-t border-black/[0.05]">
+                                <p className="font-bold text-foreground/45 text-xs">Grant Description</p>
+                                <p className="mt-1 text-xs leading-[1.6] text-foreground/80">
+                                  {record.grantDetails.description}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          /* Business Summary Card */
+                          <div className="rounded-xl border border-black/[0.06] bg-white p-4 shadow-2xs">
+                            <h5 className="text-xs font-bold uppercase tracking-[0.1em] text-foreground/45 mb-3 flex items-center gap-1.5">
+                              <Building2 className="h-3.5 w-3.5" />
+                              <span>Official Filing Overview</span>
+                            </h5>
+
+                            <dl className="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-3">
+                              <div>
+                                <dt className="font-bold text-foreground/45">Organisation Type</dt>
+                                <dd className="mt-0.5 font-medium text-foreground">
+                                  {record.filingType ?? "Standard Organisation"}
+                                </dd>
+                              </div>
+
+                              <div>
+                                <dt className="font-bold text-foreground/45">Register Status</dt>
+                                <dd className="mt-0.5 font-medium text-foreground">
+                                  {record.registryStatus ?? "Active on Register"}
+                                </dd>
+                              </div>
+
+                              <div>
+                                <dt className="font-bold text-foreground/45">Official Number</dt>
+                                <dd className="mt-0.5 font-mono font-medium text-foreground">
+                                  #{record.sourceRecordId}
+                                </dd>
+                              </div>
+
+                              {record.fullAddress && (
+                                <div className="sm:col-span-2">
+                                  <dt className="font-bold text-foreground/45">Registered Office</dt>
+                                  <dd className="mt-0.5 text-foreground/85">
+                                    {record.fullAddress}
+                                  </dd>
+                                </div>
+                              )}
+
+                              {record.website && (
+                                <div>
+                                  <dt className="font-bold text-foreground/45">Website</dt>
+                                  <dd className="mt-0.5">
+                                    <a
+                                      href={record.website.startsWith("http") ? record.website : `https://${record.website}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="inline-flex items-center gap-1 text-brand hover:underline"
+                                    >
+                                      <Globe className="h-3 w-3" />
+                                      <span className="truncate max-w-[200px]">{record.website}</span>
+                                    </a>
+                                  </dd>
+                                </div>
+                              )}
+                            </dl>
+
+                            {record.missionOrActivities && (
+                              <div className="mt-3.5 pt-3.5 border-t border-black/[0.05]">
+                                <p className="font-bold text-foreground/45 text-xs">Activities &amp; Purpose</p>
+                                <p className="mt-1 text-xs leading-[1.6] text-foreground/80">
+                                  {record.missionOrActivities}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         {/* Privacy Redaction Notice (if applicable) */}
                         {record.redactedFieldCount > 0 && (
@@ -375,9 +445,13 @@ export function RecordFeed({
         </ul>
       ) : (
         <div className="rounded-2xl border border-black/[0.06] bg-white p-12 text-center shadow-xs">
-          <p className="text-sm font-bold text-foreground">No organisations match this search.</p>
+          <p className="text-sm font-bold text-foreground">
+            {isGrantSource ? "No grants match this search." : "No organisations match this search."}
+          </p>
           <p className="mt-1 text-xs text-foreground/60">
-            Try searching by organisation name, charity number, or selecting a different status filter tab.
+            {isGrantSource
+              ? "Try searching by funder name, recipient, grant ID, or selecting a different status filter tab."
+              : "Try searching by organisation name, charity number, or selecting a different status filter tab."}
           </p>
         </div>
       )}

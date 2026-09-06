@@ -40,6 +40,7 @@ import {
   countQuery,
   previewQuery,
   selectionQuery,
+  sicTitlesQuery,
   sicValuesQuery,
 } from "./sqlite-query.ts";
 import type { CompanyRegisterFilters } from "./filters.ts";
@@ -191,7 +192,8 @@ export function previewCompanies(
   const handle = open();
   if (!handle) return [];
   const { sql, params } = previewQuery(filters, limit);
-  return handle.db.prepare(sql).all(...params) as RegisterCompanyPreviewRow[];
+  const rows = handle.db.prepare(sql).all(...params) as RegisterCompanyPreviewRow[];
+  return rows.map((row) => ({ ...row }));
 }
 
 /** Every company the filters select, with its SIC codes attached. */
@@ -214,7 +216,7 @@ export function selectCompanies(
     "select sic from company_sic where number = ? order by sic",
   );
   return companies.map((company) => ({
-    company,
+    company: { ...company },
     sicCodes: (sicFor.all(company.number) as { sic: string }[]).map((row) => row.sic),
   }));
 }
@@ -230,7 +232,70 @@ export function sicValues(): SicValue[] {
   const handle = open();
   if (!handle) return [];
   const { sql, params } = sicValuesQuery();
-  return handle.db.prepare(sql).all(...params) as SicValue[];
+  const rows = handle.db.prepare(sql).all(...params) as SicValue[];
+  return rows.map((row) => ({ ...row }));
+}
+
+export type SicTitle = { sic: string; title: string };
+
+/**
+ * The register's wording for a set of SIC codes, in the order they were asked
+ * for, with the bare code standing in for anything the file cannot name.
+ *
+ * Why the fallback rather than dropping the code: the file keeps a filtered
+ * ~12% of the register (docs/companies-register-import.md), so `sic_label`
+ * knows only the 720 codes that survived the build. A company imported through
+ * the live single-company lookup can legitimately carry a code outside that
+ * set, and dropping it would silently shorten the list on a client record —
+ * showing four codes for one company and three for an identical one, with
+ * nothing to explain the difference. The register build makes the same choice
+ * for the same reason ("bare codes fall back to the code").
+ *
+ * Input order is preserved rather than sorted: the codes arrive in the order
+ * the registrar filed them, which is the order the company itself chose, and
+ * the first is conventionally its principal activity.
+ *
+ * Returns `[]` for no codes and for an absent file, like every reader here.
+ * A caller that needs to tell "no file" from "no codes" asks
+ * `companiesRegisterUnavailableReason()`, which is the one place that
+ * distinction is made.
+ */
+export function sicTitles(codes: readonly string[]): SicTitle[] {
+  const wanted = codes.map((code) => code.trim()).filter((code) => code.length > 0);
+  if (wanted.length === 0) return [];
+
+  const handle = open();
+  if (!handle) return [];
+
+  const { sql, params } = sicTitlesQuery(wanted);
+  const rows = handle.db.prepare(sql).all(...params) as SicTitle[];
+  const titles = new Map(rows.map((row) => [row.sic, row.title]));
+
+  return wanted.map((sic) => ({ sic, title: titles.get(sic) ?? sic }));
+}
+
+/**
+ * Whether the register records this company as a Community Interest Company.
+ *
+ * Three-valued on purpose. `null` means the file cannot say — it is not loaded,
+ * or it does not hold this company — and that is different from `false`. The
+ * build keeps a filtered ~12% of the register, so absence is not evidence: a
+ * caller that read a missing company as "not a CIC" would skip companies whose
+ * statements we could have read.
+ *
+ * Used to spend the expensive CIC36 job only where it can pay off; nothing here
+ * decides what an organisation *is*, only whether it is worth two API calls.
+ */
+export function isRegisteredCic(companyNumber: string): boolean | null {
+  const handle = open();
+  if (!handle) return null;
+
+  const row = handle.db
+    .prepare("select is_cic from company where number = ?")
+    .get(companyNumber) as { is_cic: number | null } | undefined;
+
+  if (!row) return null;
+  return row.is_cic === 1;
 }
 
 /** The SIC codes one company carries, in code order. */

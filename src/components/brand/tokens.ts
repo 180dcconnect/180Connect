@@ -89,3 +89,16 @@ export const SEARCH_GLASS_OPEN = "rgba(24, 22, 20, 0.72)";
  * stay readable over dense page content rather than photography.
  */
 export const SEARCH_GLASS_FROSTED = "rgba(24, 22, 20, 0.5)";
+
+/**
+ * Light tone for `BrandSearchBar` (`tone="light"`): the same pill on a light
+ * surface. A touch deeper than the sampled Gmail shade so it still reads
+ * against the shell background instead of camouflaging into it. Open is
+ * solid white like a focused Gmail field; frosted keeps a light tint under a
+ * 20px blur for the same reason as the dark frosted variant.
+ */
+export const SEARCH_GLASS_LIGHT = "#c9d6e9";
+
+export const SEARCH_GLASS_OPEN_LIGHT = "#ffffff";
+
+export const SEARCH_GLASS_FROSTED_LIGHT = "rgba(201, 214, 233, 0.6)";

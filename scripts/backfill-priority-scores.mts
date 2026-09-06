@@ -124,7 +124,7 @@ async function main(): Promise<void> {
         // reproduce this exact number later (see persist-latest-score.ts).
         const { score, band, factors, weights: applied } = computePriorityScore(
           row,
-          [],
+          undefined,
           weights,
         );
         scoredCount += 1;
@@ -158,7 +158,7 @@ async function main(): Promise<void> {
     await client.query("commit");
 
     const byBand = { high: 0, medium: 0, low: 0 } as Record<string, number>;
-    for (const row of rows) byBand[computePriorityScore(row, [], weights).band] += 1;
+    for (const row of rows) byBand[computePriorityScore(row, undefined, weights).band] += 1;
 
     console.log(`[backfill:scores] scored ${scoredCount} organisations`);
     console.log(

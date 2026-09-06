@@ -95,20 +95,12 @@ export default async function DashboardPage({
   searchParams: Promise<{ error?: string; preview_feedback?: string }>;
 }) {
   const { error, preview_feedback } = await searchParams;
-  let user;
 
-  try {
-    const supabase = await createClient();
-    const result = await supabase.auth.getUser();
-    user = result.data.user;
-  } catch {
-    redirect("/login");
-  }
-
-  if (!user) {
-    redirect("/login");
-  }
-
+  // No separate `auth.getUser()` pre-check: `getCurrentActor` already resolves
+  // the session and returns `unauthenticated` when there is none, so asking the
+  // Auth server first was a second network round trip to learn the same thing —
+  // and it bounced to /login on a transient failure rather than on a real
+  // absence of session.
   const actorResult = await getCurrentActor();
   if (!actorResult.ok) {
     logSecurityEvent("permission.denied", {

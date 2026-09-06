@@ -32,11 +32,37 @@ export function TimelineRealtimeRefresher({ organisationId }: { organisationId: 
     let cancelled = false;
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
+    // Whether a change arrived while nobody was looking at this tab.
+    let missedWhileHidden = false;
+
+    /**
+     * A hidden tab is not refreshed, it is marked stale.
+     *
+     * `router.refresh()` re-runs the whole server render for this record — the
+     * layout and whichever tab is open. That is the right cost to pay for a
+     * timeline someone is watching, and pure waste for one of the five client
+     * tabs a CAM left open this morning. Since every teammate's note, email,
+     * reply and status change on this record lands here, a background tab was
+     * re-rendering all day for a screen nobody would look at again without
+     * navigating (which refetches anyway).
+     *
+     * Nothing is lost by waiting: the flag is flushed on the way back, so
+     * returning to the tab shows the same timeline an immediate refresh would
+     * have produced.
+     */
+    function isVisible() {
+      return typeof document === "undefined" || document.visibilityState === "visible";
+    }
+
     // Coalesced, not per-event: one realtime burst (a batch reassignment
     // writes one audit row per client; a webhook retry can double-fire) would
     // otherwise trigger one full-page refetch per payload. Events arriving
     // within the window collapse into a single refresh.
     function scheduleRefresh() {
+      if (!isVisible()) {
+        missedWhileHidden = true;
+        return;
+      }
       if (refreshTimer) return;
       refreshTimer = setTimeout(() => {
         refreshTimer = null;
@@ -96,8 +122,20 @@ export function TimelineRealtimeRefresher({ organisationId }: { organisationId: 
 
     subscribe();
 
+    // Coming back to the tab is what pays off the deferral above. Only when
+    // something actually arrived while it was hidden — returning to a tab that
+    // nothing happened to costs nothing.
+    function flushOnReturn() {
+      if (missedWhileHidden && isVisible()) {
+        missedWhileHidden = false;
+        scheduleRefresh();
+      }
+    }
+    document.addEventListener("visibilitychange", flushOnReturn);
+
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", flushOnReturn);
       if (refreshTimer) clearTimeout(refreshTimer);
       if (channel) supabase.removeChannel(channel);
     };

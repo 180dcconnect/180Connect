@@ -183,9 +183,9 @@ export function CompaniesRegisterRail({
           <DialogHeader>
             <DialogTitle>Refresh the register?</DialogTitle>
             <DialogDescription className="leading-[1.65]">
-              Fetches the latest published snapshot from Companies House. It takes about
-              twenty minutes — you can close this page and carry on working while
-              it runs.
+              Fetches the latest published snapshot from Companies House. It usually
+              takes a few minutes — you can close this page and carry on working
+              while it runs.
               {stale && (
                 <>
                   {" "}

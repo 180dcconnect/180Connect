@@ -203,6 +203,18 @@ describe("matchesRunQuery", () => {
     assert.equal(matchesRunQuery(view, "companies charitybase"), false);
   });
 
+  it("matches date keys and date labels", () => {
+    assert.equal(matchesRunQuery(view, "2026-08-15"), true);
+    assert.equal(matchesRunQuery(view, "august"), true);
+  });
+
+  it("matches trigger type when present", () => {
+    const manualView = describeRun(run({ triggered_by: "manual" }), NOW);
+    assert.equal(matchesRunQuery(manualView, "manual"), true);
+    const scheduledView = describeRun(run({ triggered_by: "schedule" }), NOW);
+    assert.equal(matchesRunQuery(scheduledView, "scheduled"), true);
+  });
+
   it("matches everything on an empty query", () => {
     assert.equal(matchesRunQuery(view, "  "), true);
   });

@@ -166,6 +166,7 @@ export type IngestionRunRow = {
   started_at: string;
   completed_at: string | null;
   error_message: string | null;
+  triggered_by?: string | null;
 };
 
 /** One count, ready to render. Zeroes are kept — "0 failed" is reassuring. */
@@ -190,6 +191,8 @@ export type RunView = {
   duration: string;
   dayKey: string;
   dayLabel: string;
+  triggeredBy?: string | null;
+  triggerLabel?: string | null;
 };
 
 const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
@@ -241,6 +244,10 @@ export function describeRun(run: IngestionRunRow, now: Date): RunView {
     { label: "Flagged", value: run.records_flagged, tone: "warning" },
   ];
 
+  const triggeredBy = run.triggered_by ?? null;
+  const triggerLabel =
+    triggeredBy === "manual" ? "Manual" : triggeredBy === "schedule" ? "Scheduled" : null;
+
   return {
     id: run.id,
     source: formatSource(run.api_source),
@@ -262,6 +269,8 @@ export function describeRun(run: IngestionRunRow, now: Date): RunView {
     duration: finished ? formatDuration(finished.getTime() - started.getTime()) : "—",
     dayKey: dayKeyOf(started),
     dayLabel: formatDayLabel(started, now),
+    triggeredBy,
+    triggerLabel,
   };
 }
 
@@ -269,6 +278,15 @@ export function describeRun(run: IngestionRunRow, now: Date): RunView {
 export function matchesRunQuery(view: RunView, query: string): boolean {
   const term = query.trim().toLowerCase();
   if (!term) return true;
+
+  const monthName = (() => {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(view.dayKey)) {
+      const [y, m, d] = view.dayKey.split("-").map(Number);
+      return new Date(y, m - 1, d).toLocaleDateString("en-GB", { month: "long" });
+    }
+    return "";
+  })();
+
   const haystack = [
     view.source,
     view.statusLabel,
@@ -278,6 +296,12 @@ export function matchesRunQuery(view: RunView, query: string): boolean {
     view.humanError?.summary ?? "",
     view.humanError?.description ?? "",
     view.humanError?.actionHint ?? "",
+    view.dayLabel,
+    view.dayKey,
+    view.startedExact,
+    view.startedRelative,
+    monthName,
+    view.triggerLabel ?? "",
   ]
     .join(" ")
     .toLowerCase();

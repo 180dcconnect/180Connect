@@ -76,6 +76,13 @@ export type RecordStats = {
   outreach: number;
   financials: number;
   activity: number;
+  /** The two halves of `financials`, kept apart for the header's completeness
+   * strip: "no filed accounts" and "no grant history" are different gaps. */
+  filings: number;
+  grants: number;
+  /** Filed periods that actually state an employee count. A subset of
+   * `filings` — plenty of accounts are filed without staff numbers. */
+  headcountFilings: number;
   /** ISO timestamp of the most recent thing that happened to this record. */
   lastActivity: string | null;
   /** Timestamp of the most recent outreach message sent. */
@@ -108,7 +115,7 @@ export const loadClient = cache(async (id: string) => {
   const { data, error } = await supabase
     .from("organisations")
     .select(
-      "id, legal_name, organisation_type, website, contact_email, address_line_1, city, postcode, country_code, outreach_status, sector, sub_sector, created_at, geographic_reach",
+      "id, legal_name, organisation_type, website, contact_email, address_line_1, city, postcode, country_code, outreach_status, sector, sub_sector, created_at, geographic_reach, sic_codes",
     )
     .eq("id", id)
     .maybeSingle<OrganisationDetailRow>();
@@ -313,7 +320,7 @@ export const loadLatestFinancial = cache(async (id: string): Promise<LatestFinan
 export const loadRecordStats = cache(async (id: string): Promise<RecordStats> => {
   const supabase = await createClient();
 
-  const [sent, replies, notes, audit, messages, grants, filings, attachments] =
+  const [sent, replies, notes, audit, messages, grants, filings, headcountFilings, attachments] =
     await Promise.all([
     supabase
       .from("outreach_messages")
@@ -362,6 +369,14 @@ export const loadRecordStats = cache(async (id: string): Promise<RecordStats> =>
       .from("financial_periods")
       .select("id", { count: "exact", head: true })
       .eq("organisation_id", id),
+    // Same table, filtered — the header's Headcount tick. A filing that omits
+    // count_employees is not a filing with zero staff, so this has to be its
+    // own count rather than something read off the latest period.
+    supabase
+      .from("financial_periods")
+      .select("id", { count: "exact", head: true })
+      .eq("organisation_id", id)
+      .not("count_employees", "is", null),
     supabase
       .from("attachments")
       .select("id", { count: "exact", head: true })
@@ -376,6 +391,7 @@ export const loadRecordStats = cache(async (id: string): Promise<RecordStats> =>
     ["clients.stats_messages", messages],
     ["clients.stats_grants", grants],
     ["clients.stats_filings", filings],
+    ["clients.stats_headcount_filings", headcountFilings],
     ["clients.stats_attachments", attachments],
   ] as const) {
     if (result.error) await reportError(result.error, { operation, organisationId: id });
@@ -395,6 +411,9 @@ export const loadRecordStats = cache(async (id: string): Promise<RecordStats> =>
     outreach:
       (messages.count ?? 0) + (notes.count ?? 0) + (attachments.count ?? 0),
     financials: (grants.count ?? 0) + (filings.count ?? 0),
+    filings: filings.count ?? 0,
+    grants: grants.count ?? 0,
+    headcountFilings: headcountFilings.count ?? 0,
     // What the Activity tab lists: timeline events (notes + emails + replies + audit rows).
     activity:
       (notes.count ?? 0) +

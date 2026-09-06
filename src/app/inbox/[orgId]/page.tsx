@@ -331,32 +331,35 @@ export default async function InboxThreadPage({
   const canReplyInline = canContact && isStageTwoEligible(organisation.outreach_status);
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6">
-      <div className="mb-3 flex items-center gap-2 text-sm">
+    <div className="min-h-screen bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+      <div className="mx-auto w-full max-w-[1400px] space-y-6">
+      <div>
         <Link
           href="/inbox"
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 transition-colors"
+          className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-dim transition-colors hover:text-ink"
         >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          <span>Back to Inbox</span>
+          <ArrowLeft aria-hidden="true" className="size-3.5" />
+          <span>Back to the inbox</span>
         </Link>
       </div>
 
-      <div className="mb-6 flex items-start justify-between gap-4">
+      <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
         <div>
-          <h1 className="text-2xl font-bold leading-tight text-slate-900">{organisation.legal_name}</h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <h1 className="font-body text-[clamp(2rem,4vw,2.75rem)] leading-[1] font-semibold tracking-[-0.03em] text-ink">
+            {organisation.legal_name}
+          </h1>
+          <p className="mt-2 max-w-[54ch] text-[13px] leading-[1.55] text-dim">
             {entries.length === 0
               ? "No conversation history yet."
-              : `${entries.length} message${entries.length === 1 ? "" : "s"}, chronologically ordered.`}
+              : `${entries.length} message${entries.length === 1 ? "" : "s"}, oldest first.`}
           </p>
         </div>
 
         <Link
           href={`/clients/${orgId}`}
-          className="rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 shadow-2xs hover:bg-slate-50 transition-colors"
+          className="rounded-full border border-rule bg-white px-3.5 py-1.5 text-[12.5px] font-semibold text-ink transition-colors hover:bg-paper"
         >
-          View Full Client File →
+          Open the client record →
         </Link>
       </div>
 
@@ -381,10 +384,10 @@ export default async function InboxThreadPage({
 
           {canContact && !canReplyInline && (
             <a
-              className="inline-flex shrink-0 items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-bold text-white shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98]"
+              className="inline-flex shrink-0 items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-semibold text-white transition-transform hover:scale-[1.02] active:scale-[0.98]"
               href={`/clients/${orgId}/outreach`}
             >
-              <Sparkles aria-hidden="true" className="h-4 w-4" />
+              <Sparkles aria-hidden="true" className="size-4" />
               Continue outreach on the client page
             </a>
           )}
@@ -411,6 +414,7 @@ export default async function InboxThreadPage({
           stats={stats}
           status={status}
         />
+      </div>
       </div>
     </div>
   );

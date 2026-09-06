@@ -45,7 +45,7 @@ export async function saveScoutWeightsAction(
   formData: FormData,
 ): Promise<ScoreSettingsState> {
   const authorization = await getCurrentActor("platform-settings:manage", {
-    route: "/admin/score-settings",
+    route: "/settings/score-settings",
   });
   if (!authorization.ok) {
     return { status: "error", message: actorFailureMessage(authorization.reason) };
@@ -99,7 +99,7 @@ export async function saveScoutWeightsAction(
     return { status: "error", message };
   }
 
-  revalidatePath("/admin/score-settings");
+  revalidatePath("/settings/score-settings");
 
   // AC2: the new weights apply to existing clients now, not just future imports.
   const sweep = await rescoreAllOrganisations();

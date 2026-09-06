@@ -27,6 +27,7 @@ import {
 } from "../standardize/charity-commission.ts";
 import {
   buildCriteriaInput,
+  charityCommissionCompanyIdentifier,
   charityCommissionFinancialPeriod,
   charityCommissionIdentifier,
   type SourceFinancialPeriod,
@@ -42,6 +43,8 @@ export type CharityPreview = {
   /** The ORGANISATIONS row this would become. */
   organisation: StandardOrganisation;
   identifier: SourceIdentifier | null;
+  /** Company number identifier if dual-registered. */
+  companyIdentifier?: SourceIdentifier | null;
   /** The latest filed year, when the detail response carries one. */
   financialPeriod: SourceFinancialPeriod | null;
   /** Whether promotion would add it, hold it for review, or reject it. */
@@ -118,6 +121,7 @@ export async function previewCharity(
 
   const organisation = standardizeCharityCommissionRecord(raw);
   const identifier = charityCommissionIdentifier(raw);
+  const companyIdentifier = charityCommissionCompanyIdentifier(raw);
 
   return {
     status: "found",
@@ -128,6 +132,7 @@ export async function previewCharity(
       registeredNumber: identifier?.identifierValue ?? registeredNumber.trim(),
       organisation,
       identifier,
+      companyIdentifier,
       financialPeriod: charityCommissionFinancialPeriod(raw),
       criteria: checkClientCriteria(buildCriteriaInput(organisation)),
       registration: {

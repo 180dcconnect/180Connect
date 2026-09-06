@@ -6,7 +6,7 @@ import { ArrowRight, Check, ChevronLeft, Plus, SlidersHorizontal, X } from "luci
 import { useRouter } from "next/navigation";
 
 import { EASE, stagger } from "@/components/brand/motion";
-import { LIP, SEARCH_GLASS, SEARCH_GLASS_FROSTED, SEARCH_GLASS_OPEN } from "@/components/brand/tokens";
+import { LIP, SEARCH_GLASS, SEARCH_GLASS_FROSTED, SEARCH_GLASS_FROSTED_LIGHT, SEARCH_GLASS_LIGHT, SEARCH_GLASS_OPEN, SEARCH_GLASS_OPEN_LIGHT } from "@/components/brand/tokens";
 import { tagPillStyle } from "@/lib/tags/tag-colours";
 
 /** Cycles behind the prompt while the field is empty and unfocused. */
@@ -46,6 +46,114 @@ const glassItemIndexed = (step = 0.025, cap = 0.3): Variants => ({
 });
 
 const GLASS_OPTIONS = glassItemIndexed(0.025, 0.3);
+
+/**
+ * Which surface the bar sits on. Dark is the brand glass (the default —
+ * every existing host renders byte-identical output). Light wears the Gmail
+ * pill shade for hosts on a light surface. Lime accents stay lime in both:
+ * the disc, badges and selected states are the brand moment, and lime reads
+ * on light too — only running text and focus rings move to slate/lime-600 so
+ * they stay legible.
+ */
+export type SearchBarTone = "dark" | "light";
+
+const SEARCH_BAR_TONES: Record<
+  SearchBarTone,
+  {
+    glassClosed: string;
+    glassOpen: string;
+    glassFrosted: string;
+    rim: string;
+    innerRow: string;
+    ink: string;
+    bright: string;
+    muted: string;
+    muted60: string;
+    muted50: string;
+    faint: string;
+    faintPlaceholder: string;
+    hoverRow: string;
+    hoverRowSoft: string;
+    hoverBright: string;
+    hoverInk: string;
+    toggle: string;
+    outline: string;
+    ringFocus: string;
+    ringVisibleFocus: string;
+    caret: string;
+    fieldBg: string;
+    fieldRing: string;
+    fieldScheme: string;
+    selected: string;
+    selectedBtn: string;
+    accentText: string;
+    divider: string;
+    well: string;
+  }
+> = {
+  dark: {
+    glassClosed: SEARCH_GLASS,
+    glassOpen: SEARCH_GLASS_OPEN,
+    glassFrosted: SEARCH_GLASS_FROSTED,
+    rim: "ring-white/25",
+    innerRow: "bg-black/20",
+    ink: "text-[#f4f4ef]",
+    bright: "text-white",
+    muted: "text-[#f4f4ef]/55",
+    muted60: "text-[#f4f4ef]/60",
+    muted50: "text-[#f4f4ef]/50",
+    faint: "text-[#f4f4ef]/70",
+    faintPlaceholder: "placeholder:text-[#f4f4ef]/40",
+    hoverRow: "hover:bg-white/10",
+    hoverRowSoft: "hover:bg-white/8",
+    hoverBright: "hover:text-white",
+    hoverInk: "hover:text-[#f4f4ef]",
+    toggle: "bg-white/12 text-[#f4f4ef] hover:bg-white/20",
+    outline: "focus-visible:outline-[#e6f5c0]",
+    ringFocus: "focus:ring-[#e6f5c0]",
+    ringVisibleFocus: "focus-visible:ring-[#e6f5c0]",
+    caret: "caret-[#e6f5c0]",
+    fieldBg: "bg-white/10",
+    fieldRing: "ring-white/15",
+    fieldScheme: "[color-scheme:dark]",
+    selected: "bg-white/15 text-[#e6f5c0]",
+    selectedBtn: "bg-white/20 text-[#e6f5c0] ring-1 ring-[#e6f5c0]/50",
+    accentText: "text-[#e6f5c0]",
+    divider: "border-white/10",
+    well: "bg-black/25",
+  },
+  light: {
+    glassClosed: SEARCH_GLASS_LIGHT,
+    glassOpen: SEARCH_GLASS_OPEN_LIGHT,
+    glassFrosted: SEARCH_GLASS_FROSTED_LIGHT,
+    rim: "ring-transparent",
+    innerRow: "bg-white/50",
+    ink: "text-slate-900",
+    bright: "text-slate-900",
+    muted: "text-slate-500",
+    muted60: "text-slate-500",
+    muted50: "text-slate-500",
+    faint: "text-slate-600",
+    faintPlaceholder: "placeholder:text-slate-400",
+    hoverRow: "hover:bg-slate-900/5",
+    hoverRowSoft: "hover:bg-slate-900/5",
+    hoverBright: "hover:text-slate-900",
+    hoverInk: "hover:text-slate-900",
+    toggle: "bg-slate-900/8 text-slate-700 hover:bg-slate-900/12",
+    outline: "focus-visible:outline-lime-600",
+    ringFocus: "focus:ring-lime-600",
+    ringVisibleFocus: "focus-visible:ring-lime-600",
+    caret: "caret-lime-600",
+    fieldBg: "bg-slate-900/5",
+    fieldRing: "ring-slate-900/15",
+    fieldScheme: "[color-scheme:light]",
+    selected: "bg-lime-100 text-lime-800",
+    selectedBtn: "bg-lime-100 text-lime-800 ring-1 ring-lime-600/40",
+    accentText: "text-lime-800",
+    divider: "border-slate-900/10",
+    well: "bg-slate-900/5",
+  },
+};
 
 function rankOption(label: string, query: string): number {
   const l = label.toLowerCase();
@@ -111,7 +219,7 @@ const DEFAULT_PARAMS: Record<string, string> = {
  * it holds the first line instead of swapping under someone who asked for
  * stillness.
  */
-function StatusLine({ messages }: { messages: readonly string[] }) {
+function StatusLine({ messages, tone = "dark" }: { messages: readonly string[]; tone?: SearchBarTone }) {
   const reducedMotion = useReducedMotion();
   const [index, setIndex] = useState(0);
 
@@ -131,7 +239,7 @@ function StatusLine({ messages }: { messages: readonly string[] }) {
       <AnimatePresence initial={false} mode="wait">
         <motion.span
           key={message}
-          className="truncate text-[#f4f4ef]"
+          className={`truncate ${SEARCH_BAR_TONES[tone].ink}`}
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -6 }}
@@ -146,6 +254,7 @@ function StatusLine({ messages }: { messages: readonly string[] }) {
 
 export function BrandSearchBar({
   className = "",
+  tone = "dark",
   placeholder = "I want to learn about",
   subjects = DEFAULT_SUBJECTS,
   categories,
@@ -167,6 +276,9 @@ export function BrandSearchBar({
    submittingMessages,
 }: {
   className?: string;
+  /** Light wears the Gmail pill shade for hosts on a light surface. Dark
+   *  (default) is the brand glass — existing hosts are unaffected. */
+  tone?: SearchBarTone;
   placeholder?: string;
   /** Words that cycle behind the prompt. Name what *this* page holds. */
   subjects?: readonly string[];
@@ -409,6 +521,106 @@ export function BrandSearchBar({
   const FILTER_CATEGORIES: Record<string, FilterOption[]> = useMemo(() => categories || DEFAULT_CATEGORIES, [categories]);
   const FILTER_PARAMS: Record<string, string> = useMemo(() => paramNames || DEFAULT_PARAMS, [paramNames]);
 
+  const [datePickerMode, setDatePickerMode] = useState<"day" | "range" | "presets">("day");
+  const [customSingleDate, setCustomSingleDate] = useState<string>("");
+  const [customRangeFrom, setCustomRangeFrom] = useState<string>("");
+  const [customRangeTo, setCustomRangeTo] = useState<string>("");
+
+  const isDateCategory = useMemo(() => {
+    if (!activeFilter) return false;
+    const paramKey = FILTER_PARAMS[activeFilter] ?? "";
+    return paramKey === "date" || activeFilter.toLowerCase().includes("date");
+  }, [activeFilter, FILTER_PARAMS]);
+
+  const [prevDateCategoryFilter, setPrevDateCategoryFilter] = useState<string | null>(null);
+  if (prevDateCategoryFilter !== activeFilter) {
+    setPrevDateCategoryFilter(activeFilter);
+    if (activeFilter && isDateCategory) {
+      const current = selectedFilters.find((f) => f.category === activeFilter);
+      if (current?.value) {
+        if (current.value.includes("..")) {
+          const [from, to] = current.value.split("..");
+          setCustomRangeFrom(from);
+          setCustomRangeTo(to);
+          setDatePickerMode("range");
+        } else if (/^\d{4}-\d{2}-\d{2}$/.test(current.value)) {
+          setCustomSingleDate(current.value);
+          setDatePickerMode("day");
+        } else {
+          setDatePickerMode("presets");
+        }
+      }
+    }
+  }
+
+  const formatShortDateDisplay = (iso: string): string => {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+      const [y, m, d] = iso.split("-").map(Number);
+      return new Date(y, m - 1, d).toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
+    }
+    return iso;
+  };
+
+  const applySingleDate = (dateVal: string) => {
+    if (!dateVal || !activeFilter) return;
+    const isSelected = selectedFilters.some(
+      (f) => f.category === activeFilter && f.value === dateVal
+    );
+    if (isSelected) {
+      setSelectedFilters((prev) =>
+        prev.filter((f) => !(f.category === activeFilter && f.value === dateVal))
+      );
+    } else {
+      const label = formatShortDateDisplay(dateVal);
+      setSelectedFilters((prev) => [
+        ...prev.filter((f) => f.category !== activeFilter),
+        { category: activeFilter, label, value: dateVal },
+      ]);
+    }
+  };
+
+  const applyDateRange = (fromVal: string, toVal: string) => {
+    if (!fromVal || !toVal || !activeFilter) return;
+    const from = fromVal <= toVal ? fromVal : toVal;
+    const to = fromVal <= toVal ? toVal : fromVal;
+    const rangeVal = `${from}..${to}`;
+    const isSelected = selectedFilters.some(
+      (f) => f.category === activeFilter && f.value === rangeVal
+    );
+    if (isSelected) {
+      setSelectedFilters((prev) =>
+        prev.filter((f) => !(f.category === activeFilter && f.value === rangeVal))
+      );
+    } else {
+      const label = `${formatShortDateDisplay(from)} – ${formatShortDateDisplay(to)}`;
+      setSelectedFilters((prev) => [
+        ...prev.filter((f) => f.category !== activeFilter),
+        { category: activeFilter, label, value: rangeVal },
+      ]);
+    }
+  };
+
+  const applyDatePreset = (option: FilterOption) => {
+    if (!activeFilter) return;
+    const isSelected = selectedFilters.some(
+      (f) => f.category === activeFilter && f.value === option.value
+    );
+    if (isSelected) {
+      setSelectedFilters((prev) =>
+        prev.filter((f) => !(f.category === activeFilter && f.value === option.value))
+      );
+    } else {
+      setSelectedFilters((prev) => [
+        ...prev.filter((f) => f.category !== activeFilter),
+        { category: activeFilter, label: option.label, value: option.value },
+      ]);
+    }
+  };
+
   const submitSearch = (filters = selectedFilters, q = query, closePanel = true) => {
     if (isSearching) return;
     setIsSearching(true);
@@ -463,6 +675,8 @@ export function BrandSearchBar({
 
   const trimmedFilterQuery = filterQuery.trim();
 
+  const T = SEARCH_BAR_TONES[tone];
+
   const activeOptions = useMemo(() => {
     if (!activeFilter) return [];
     const all = FILTER_CATEGORIES[activeFilter] ?? [];
@@ -502,9 +716,9 @@ export function BrandSearchBar({
               : "100%",
             backgroundColor: open
               ? frosted
-                ? SEARCH_GLASS_FROSTED
-                : SEARCH_GLASS_OPEN
-              : SEARCH_GLASS,
+                ? T.glassFrosted
+                : T.glassOpen
+              : T.glassClosed,
           }}
           initial={false}
           transition={
@@ -552,7 +766,7 @@ export function BrandSearchBar({
           />
 
           <div
-            className="pointer-events-none absolute inset-0 z-30 rounded-[inherit] ring-1 ring-white/25 ring-inset"
+            className={`pointer-events-none absolute inset-0 z-30 rounded-[inherit] ring-1 ${T.rim} ring-inset`}
             aria-hidden="true"
           />
 
@@ -565,7 +779,7 @@ export function BrandSearchBar({
         transition={{ duration: 0.3, ease: EASE }}
       />
 
-      <div className="relative z-20 flex items-center pr-3 pl-7 rounded-[32px] bg-black/20" style={{ height: ROW }}>
+      <div className={`relative z-20 flex items-center pr-3 pl-7 rounded-[32px] ${T.innerRow}`} style={{ height: ROW }}>
         {promptButton ? (
           <button
             type="button"
@@ -582,7 +796,7 @@ export function BrandSearchBar({
               // Reported here rather than under the card, so the thing that
               // started the run is the thing that shows it running. Mounted per
               // run, so every run opens on the first line without a reset.
-              <StatusLine messages={statusMessages} />
+              <StatusLine messages={statusMessages} tone={tone} />
             ) : submitting ? (
               // A submitting host with no messages wants the spinner alone:
               // blank row, screen-reader label only. The row's height comes
@@ -595,7 +809,7 @@ export function BrandSearchBar({
                 className="font-body flex items-center gap-[0.4ch] text-[15px] whitespace-nowrap sm:text-base"
                 aria-hidden="true"
               >
-                <span className="text-[#f4f4ef]/55">{placeholder}</span>
+                <span className={T.muted}>{placeholder}</span>
                 <span className="relative">
                   <span className="invisible">
                     {subjects.reduce((a, b) => (b.length > a.length ? b : a), "")}
@@ -603,10 +817,10 @@ export function BrandSearchBar({
                   <AnimatePresence initial={false} mode="popLayout">
                     <motion.span
                       key={subjects[subject]}
-                      className="absolute inset-0 text-[#f4f4ef]"
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
+                      className={`absolute inset-0 ${T.ink}`}
+                      initial={{ opacity: 0, y: 10, filter: tone === "light" ? "blur(6px)" : undefined }}
+                      animate={{ opacity: 1, y: 0, filter: tone === "light" ? "blur(0px)" : undefined }}
+                      exit={{ opacity: 0, y: -10, filter: tone === "light" ? "blur(6px)" : undefined }}
                       transition={{ duration: 0.45, ease: EASE }}
                     >
                       {subjects[subject]}
@@ -633,7 +847,7 @@ export function BrandSearchBar({
                 inputRef.current?.blur();
               }
             }}
-            className="font-body w-full bg-transparent text-[15px] text-[#f4f4ef] caret-[#e6f5c0] outline-none focus-visible:outline-none sm:text-base [&::-webkit-search-cancel-button]:hidden"
+            className={`font-body w-full bg-transparent text-[15px] ${T.ink} ${T.caret} outline-none focus-visible:outline-none sm:text-base [&::-webkit-search-cancel-button]:hidden`}
           />
 
           {/* Sits over the empty field rather than in `placeholder`, which can
@@ -644,7 +858,7 @@ export function BrandSearchBar({
               className="font-body pointer-events-none absolute inset-0 flex items-center gap-[0.4ch] text-[15px] whitespace-nowrap sm:text-base"
               aria-hidden="true"
             >
-              <span className="text-[#f4f4ef]/55">{placeholder}</span>
+              <span className={T.muted}>{placeholder}</span>
               <span className="relative">
                 {/* Reserves the widest subject's width so the row never jumps
                     as the word swaps under an absolutely-positioned twin. */}
@@ -654,10 +868,10 @@ export function BrandSearchBar({
                 <AnimatePresence initial={false} mode="popLayout">
                   <motion.span
                     key={subjects[subject]}
-                    className="absolute inset-0 text-[#f4f4ef]"
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
+                    className={`absolute inset-0 ${T.ink}`}
+                    initial={{ opacity: 0, y: 10, filter: tone === "light" ? "blur(6px)" : undefined }}
+                    animate={{ opacity: 1, y: 0, filter: tone === "light" ? "blur(0px)" : undefined }}
+                    exit={{ opacity: 0, y: -10, filter: tone === "light" ? "blur(6px)" : undefined }}
                     transition={{ duration: 0.45, ease: EASE }}
                   >
                     {subjects[subject]}
@@ -687,7 +901,7 @@ export function BrandSearchBar({
                   submitSearch();
                   inputRef.current?.blur();
                 }}
-                className={`grid h-8 w-8 shrink-0 place-items-center rounded-full transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0] ${
+                className={`grid h-8 w-8 shrink-0 place-items-center rounded-full transition-all focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline} ${
                   isSearching
                     ? "bg-transparent"
                     : "bg-[#e6f5c0] text-[#1a1a1a] hover:bg-[#d4e5a0]"
@@ -732,7 +946,7 @@ export function BrandSearchBar({
                 setOpen(true);
                 setConfirming(true);
               }}
-              className={`grid h-8 w-8 shrink-0 place-items-center rounded-full transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0] ${
+              className={`grid h-8 w-8 shrink-0 place-items-center rounded-full transition-all focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline} ${
                 submitting
                   ? "bg-transparent"
                   : "bg-[#e6f5c0] text-[#1a1a1a] hover:bg-[#d4e5a0]"
@@ -761,7 +975,7 @@ export function BrandSearchBar({
                 setOpen(true);
               }
             }}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/12 text-[#f4f4ef] transition-colors hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+            className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${T.toggle} transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
           >
             {open ? <X className="h-5 w-5" /> : <SlidersHorizontal className="h-4 w-4" />}
           </button>
@@ -795,17 +1009,17 @@ export function BrandSearchBar({
                   role="group"
                   aria-label={confirm.title}
                 >
-                  <p className="font-body text-xl font-medium text-white">{confirm.title}</p>
+                  <p className={`font-body text-xl font-medium ${T.bright}`}>{confirm.title}</p>
                   {confirm.description && (
-                    <p className="mt-1.5 text-[13px] text-[#f4f4ef]/60">{confirm.description}</p>
+                    <p className={`mt-1.5 text-[13px] ${T.muted60}`}>{confirm.description}</p>
                   )}
 
                   {confirm.details && confirm.details.length > 0 && (
-                    <dl className="mt-4 flex flex-col gap-2 rounded-2xl bg-black/25 px-4 py-3">
+                    <dl className={`mt-4 flex flex-col gap-2 rounded-2xl ${T.well} px-4 py-3`}>
                       {confirm.details.map((detail) => (
                         <div className="flex items-baseline gap-4" key={detail.label}>
-                          <dt className="shrink-0 text-[12px] text-[#f4f4ef]/50">{detail.label}</dt>
-                          <dd className="min-w-0 flex-1 truncate text-right text-[13px] text-[#f4f4ef]">
+                          <dt className={`shrink-0 text-[12px] ${T.muted50}`}>{detail.label}</dt>
+                          <dd className={`min-w-0 flex-1 truncate text-right text-[13px] ${T.ink}`}>
                             {detail.value}
                           </dd>
                         </div>
@@ -817,7 +1031,7 @@ export function BrandSearchBar({
                     <button
                       type="button"
                       onClick={() => setConfirming(false)}
-                      className="rounded-full px-4 py-2 text-[13px] font-semibold text-[#f4f4ef]/70 transition-colors hover:bg-white/10 hover:text-[#f4f4ef] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+                      className={`rounded-full px-4 py-2 text-[13px] font-semibold ${T.faint} transition-colors ${T.hoverRow} ${T.hoverInk} focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
                     >
                       {confirm.cancelLabel ?? "Back"}
                     </button>
@@ -831,7 +1045,7 @@ export function BrandSearchBar({
                         setOpen(false);
                         onSubmit?.();
                       }}
-                      className="rounded-full bg-[#e6f5c0] px-5 py-2 text-[13px] font-semibold text-[#1a1a1a] transition-colors hover:bg-[#d4e5a0] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+                      className={`rounded-full bg-[#e6f5c0] px-5 py-2 text-[13px] font-semibold text-[#1a1a1a] transition-colors hover:bg-[#d4e5a0] focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
                     >
                       {confirm.confirmLabel ?? submitLabel}
                     </button>
@@ -851,7 +1065,7 @@ export function BrandSearchBar({
                       return (
                         <motion.li key={row.label} variants={GLASS_ITEM}>
                           {row.hint && (
-                            <p className="px-3 pt-1 text-[13px] text-[#f4f4ef]/60">
+                            <p className={`px-3 pt-1 text-[13px] ${T.muted60}`}>
                               {row.hint}
                             </p>
                           )}
@@ -896,15 +1110,15 @@ export function BrandSearchBar({
                                 }
                                 row.onSelect?.();
                               }}
-                              className="font-body flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+                              className={`font-body flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-colors ${T.hoverRow} focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
                             >
                               {row.icon}
                               <span className="min-w-0 flex-1">
-                                <span className="block text-lg font-medium text-white">
+                                <span className={`block text-lg font-medium ${T.bright}`}>
                                   {row.label}
                                 </span>
                                 {row.hint && (
-                                  <span className="mt-0.5 block text-[13px] text-[#f4f4ef]/60">
+                                  <span className={`mt-0.5 block text-[13px] ${T.muted60}`}>
                                     {row.hint}
                                   </span>
                                 )}
@@ -912,7 +1126,7 @@ export function BrandSearchBar({
                               {transformable && (
                                 <Plus
                                   aria-hidden="true"
-                                  className="h-4 w-4 shrink-0 text-[#f4f4ef]/70"
+                                  className={`h-4 w-4 shrink-0 ${T.faint}`}
                                 />
                               )}
                             </motion.button>
@@ -920,11 +1134,11 @@ export function BrandSearchBar({
                             <div className="font-body flex w-full items-center gap-3 rounded-2xl px-3 py-2">
                               {row.icon}
                               <span className="min-w-0 flex-1">
-                                <span className="block text-lg font-medium text-white">
+                                <span className={`block text-lg font-medium ${T.bright}`}>
                                   {row.label}
                                 </span>
                                 {row.hint && (
-                                  <span className="mt-0.5 block text-[13px] text-[#f4f4ef]/60">
+                                  <span className={`mt-0.5 block text-[13px] ${T.muted60}`}>
                                     {row.hint}
                                   </span>
                                 )}
@@ -955,7 +1169,7 @@ export function BrandSearchBar({
                             setActiveFilter(filter);
                             setFilterQuery("");
                           }}
-                          className="font-body flex w-full items-center justify-between rounded-2xl px-3 py-2 text-left text-lg font-medium text-white transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+                          className={`font-body flex w-full items-center justify-between rounded-2xl px-3 py-2 text-left text-lg font-medium ${T.bright} transition-colors ${T.hoverRow} ${T.hoverBright} focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
                         >
                           <span>{filter}</span>
                           {count > 0 && (
@@ -968,6 +1182,214 @@ export function BrandSearchBar({
                     );
                   })}
                 </motion.ul>
+              ) : isDateCategory ? (
+                <motion.div
+                  key="date-options"
+                  className="flex flex-col h-[280px] pt-3 overflow-hidden"
+                  variants={PANEL_STAGGER}
+                  initial="hidden"
+                  animate="show"
+                  exit={{ opacity: 0, transition: { duration: 0.15 } }}
+                >
+                  {/* Top Bar with Back button and Mode Switcher */}
+                  <motion.div variants={GLASS_ITEM} className={`px-4 pb-2.5 flex items-center justify-between gap-2 shrink-0 border-b ${T.divider}`}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveFilter(null);
+                        setFilterQuery("");
+                      }}
+                      className={`font-body flex items-center gap-1 shrink-0 rounded-xl px-2.5 py-1 text-[13px] font-medium ${T.muted60} transition-colors ${T.hoverRowSoft} ${T.hoverInk} focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Back
+                    </button>
+
+                    <div className={`flex items-center gap-1 ${T.fieldBg} p-0.5 rounded-xl`}>
+                      <button
+                        type="button"
+                        onClick={() => setDatePickerMode("day")}
+                        className={`font-body px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
+                          datePickerMode === "day"
+                            ? "bg-[#e6f5c0] text-[#1a1a1a] shadow-xs"
+                            : `${T.faint} ${T.hoverBright}`
+                        }`}
+                      >
+                        Specific day
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDatePickerMode("range")}
+                        className={`font-body px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
+                          datePickerMode === "range"
+                            ? "bg-[#e6f5c0] text-[#1a1a1a] shadow-xs"
+                            : `${T.faint} ${T.hoverBright}`
+                        }`}
+                      >
+                        Date range
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDatePickerMode("presets")}
+                        className={`font-body px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
+                          datePickerMode === "presets"
+                            ? "bg-[#e6f5c0] text-[#1a1a1a] shadow-xs"
+                            : `${T.faint} ${T.hoverBright}`
+                        }`}
+                      >
+                        Presets
+                      </button>
+                    </div>
+                  </motion.div>
+
+                  {/* Panel Content */}
+                  <div className="flex-1 p-4 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                    {datePickerMode === "day" && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="space-y-3"
+                      >
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <div className="relative flex-1">
+                              <input
+                                type="date"
+                                value={customSingleDate}
+                                onChange={(e) => setCustomSingleDate(e.target.value)}
+                                className={`font-body w-full ${T.fieldBg} text-sm font-semibold ${T.bright} rounded-xl px-3 py-2 outline-none ring-1 ${T.fieldRing} focus:ring-2 ${T.ringFocus} ${T.fieldScheme}`}
+                              />
+                            </div>
+                            {(() => {
+                              const isSelected = Boolean(
+                                customSingleDate &&
+                                selectedFilters.some((f) => f.category === activeFilter && f.value === customSingleDate)
+                              );
+                              return (
+                                <button
+                                  type="button"
+                                  disabled={!customSingleDate}
+                                  onClick={() => applySingleDate(customSingleDate)}
+                                  className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-all shadow-xs disabled:opacity-40 disabled:cursor-not-allowed ${
+                                    isSelected
+                                      ? `${T.selectedBtn}`
+                                      : "bg-[#e6f5c0] text-[#1a1a1a] hover:bg-[#d4e5a0]"
+                                  }`}
+                                >
+                                  {isSelected ? (
+                                    <>
+                                      <Check className={`h-3.5 w-3.5 ${T.accentText}`} />
+                                      <span>Selected</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Plus className="h-3.5 w-3.5" />
+                                      <span>Select day</span>
+                                    </>
+                                  )}
+                                </button>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {datePickerMode === "range" && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="space-y-3"
+                      >
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <span className={`block text-[11px] font-semibold ${T.muted50} mb-1`}>From</span>
+                            <input
+                              type="date"
+                              value={customRangeFrom}
+                              onChange={(e) => setCustomRangeFrom(e.target.value)}
+                              className={`font-body w-full ${T.fieldBg} text-xs sm:text-sm font-semibold ${T.bright} rounded-xl px-2.5 py-1.5 outline-none ring-1 ${T.fieldRing} focus:ring-2 ${T.ringFocus} ${T.fieldScheme}`}
+                            />
+                          </div>
+                          <div>
+                            <span className={`block text-[11px] font-semibold ${T.muted50} mb-1`}>To</span>
+                            <input
+                              type="date"
+                              value={customRangeTo}
+                              onChange={(e) => setCustomRangeTo(e.target.value)}
+                              className={`font-body w-full ${T.fieldBg} text-xs sm:text-sm font-semibold ${T.bright} rounded-xl px-2.5 py-1.5 outline-none ring-1 ${T.fieldRing} focus:ring-2 ${T.ringFocus} ${T.fieldScheme}`}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-end pt-1">
+                          {(() => {
+                            const rangeVal = `${customRangeFrom <= customRangeTo ? customRangeFrom : customRangeTo}..${customRangeFrom <= customRangeTo ? customRangeTo : customRangeFrom}`;
+                            const isSelected = Boolean(
+                              customRangeFrom &&
+                              customRangeTo &&
+                              selectedFilters.some((f) => f.category === activeFilter && f.value === rangeVal)
+                            );
+                            return (
+                              <button
+                                type="button"
+                                disabled={!customRangeFrom || !customRangeTo}
+                                onClick={() => applyDateRange(customRangeFrom, customRangeTo)}
+                                className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-all shadow-xs disabled:opacity-40 disabled:cursor-not-allowed ${
+                                  isSelected
+                                    ? `${T.selectedBtn}`
+                                    : "bg-[#e6f5c0] text-[#1a1a1a] hover:bg-[#d4e5a0]"
+                                }`}
+                              >
+                                {isSelected ? (
+                                  <>
+                                    <Check className={`h-3.5 w-3.5 ${T.accentText}`} />
+                                    <span>Selected</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Plus className="h-3.5 w-3.5" />
+                                    <span>Select range</span>
+                                  </>
+                                )}
+                              </button>
+                            );
+                          })()}
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {datePickerMode === "presets" && (
+                      <motion.ul
+                        variants={OPTION_LIST}
+                        initial="hidden"
+                        animate="show"
+                        className="flex flex-col gap-1"
+                      >
+                        {activeOptions.map((option, index) => {
+                          const isSelected = selectedFilters.some(
+                            (f) => f.category === activeFilter && f.value === option.value
+                          );
+                          return (
+                            <motion.li key={option.value} variants={GLASS_OPTIONS} custom={index}>
+                              <button
+                                type="button"
+                                onClick={() => applyDatePreset(option)}
+                                className={`font-body flex w-full items-center justify-between rounded-xl px-3 py-2 text-base font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline} ${
+                                  isSelected
+                                    ? `${T.selected}`
+                                    : `${T.bright} ${T.hoverRow} ${T.hoverBright}`
+                                }`}
+                              >
+                                <span>{option.label}</span>
+                                {isSelected && <Check className={`h-4 w-4 ${T.accentText}`} />}
+                              </button>
+                            </motion.li>
+                          );
+                        })}
+                      </motion.ul>
+                    )}
+                  </div>
+                </motion.div>
               ) : (
                 <motion.div
                   key="options"
@@ -984,7 +1406,7 @@ export function BrandSearchBar({
                         setActiveFilter(null);
                         setFilterQuery("");
                       }}
-                      className="font-body flex items-center gap-1 shrink-0 rounded-2xl px-3 py-2 text-[15px] font-medium text-[#f4f4ef]/50 transition-colors hover:bg-white/8 hover:text-[#f4f4ef] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]"
+                      className={`font-body flex items-center gap-1 shrink-0 rounded-2xl px-3 py-2 text-[15px] font-medium ${T.muted50} transition-colors ${T.hoverRowSoft} ${T.hoverInk} focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
                     >
                       <ChevronLeft className="h-4 w-4" />
                       Back
@@ -1002,7 +1424,7 @@ export function BrandSearchBar({
                           inputRef.current?.blur();
                         }
                       }}
-                      className="font-body flex-1 min-w-0 bg-white/10 text-[15px] text-[#f4f4ef] placeholder:text-[#f4f4ef]/40 rounded-xl px-4 py-2 outline-none focus-visible:ring-2 focus-visible:ring-[#e6f5c0] [&::-webkit-search-cancel-button]:hidden"
+                      className={`font-body flex-1 min-w-0 ${T.fieldBg} text-[15px] ${T.ink} ${T.faintPlaceholder} rounded-xl px-4 py-2 outline-none focus-visible:ring-2 ${T.ringVisibleFocus} [&::-webkit-search-cancel-button]:hidden`}
                     />
                   </motion.div>
 
@@ -1037,10 +1459,10 @@ export function BrandSearchBar({
                                 ]);
                               }
                             }}
-                            className={`font-body flex w-full items-center justify-between rounded-2xl px-3 py-2 text-lg font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0] ${
+                            className={`font-body flex w-full items-center justify-between rounded-2xl px-3 py-2 text-lg font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline} ${
                               isSelected
-                                ? "bg-white/15 text-[#e6f5c0]"
-                                : "text-white hover:bg-white/10 hover:text-white"
+                                ? `${T.selected}`
+                                : `${T.bright} ${T.hoverRow} ${T.hoverBright}`
                             }`}
                           >
                             <span className="flex items-center gap-2">
@@ -1054,7 +1476,7 @@ export function BrandSearchBar({
                               {option.label}
                             </span>
                             {isSelected && (
-                              <Check className="h-4 w-4 text-[#e6f5c0]" />
+                              <Check className={`h-4 w-4 ${T.accentText}`} />
                             )}
                           </button>
                         </motion.li>
@@ -1071,7 +1493,7 @@ export function BrandSearchBar({
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ duration: 0.2, ease: EASE }}
-                        className="font-body px-3 py-3 text-[15px] text-[#f4f4ef]/60"
+                        className={`font-body px-3 py-3 text-[15px] ${T.muted60}`}
                         role="status"
                       >
                         {trimmedFilterQuery
@@ -1124,9 +1546,11 @@ export function BrandSearchBar({
               <button
                 type="button"
                 onClick={() => {
-                  setSelectedFilters((prev) =>
-                    prev.filter((f) => f.value !== filter.value || f.category !== filter.category)
+                  const updated = selectedFilters.filter(
+                    (f) => !(f.value === filter.value && f.category === filter.category)
                   );
+                  setSelectedFilters(updated);
+                  submitSearch(updated, query, false);
                 }}
                 className={`hover:bg-black/10 focus:outline-none flex h-4 w-4 items-center justify-center rounded-full transition-colors ${
                   pill ? "bg-black/5 text-black/50" : "bg-black/5 text-black/60"

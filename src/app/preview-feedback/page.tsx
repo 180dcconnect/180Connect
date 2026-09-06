@@ -3,13 +3,17 @@
 import { useState } from "react";
 import Link from "next/link";
 import { FaceRating } from "@/components/spectrumui/face-rating";
+import { RatingFace, RATING_COLORS } from "@/components/spectrumui/rating-face";
 import { RATING_LABELS, averageRating } from "@/lib/feedback";
 import { Stage, Rise, Group } from "@/components/dashboard-stage";
 import { OriginButton } from "@/components/ui/origin-button";
+import {
+  RequestFeedbackButton,
+  type RequestFeedbackButtonVariant,
+  type RequestFeedbackButtonSize,
+} from "@/components/ui/request-feedback-button";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { X } from "lucide-react";
-
-const RATING_EMOJI = ["😡", "😕", "😐", "🙂", "😄"];
 
 const MOCK_SUBMISSIONS = [
   {
@@ -54,6 +58,19 @@ export default function PreviewFeedbackPage() {
   const [standaloneRating, setStandaloneRating] = useState(4);
   const [size, setSize] = useState<"sm" | "md" | "lg">("md");
   
+  // Request feedback button playground state
+  const [btnVariant, setBtnVariant] = useState<RequestFeedbackButtonVariant>("lead");
+  const [btnSize, setBtnSize] = useState<RequestFeedbackButtonSize>("md");
+  const [btnPill, setBtnPill] = useState(false);
+  const [btnLogs, setBtnLogs] = useState<string[]>([]);
+
+  const addBtnLog = (msg: string) => {
+    setBtnLogs((prev) => [
+      `[${new Date().toLocaleTimeString()}] ${msg}`,
+      ...prev.slice(0, 4),
+    ]);
+  };
+
   // Floating prompt preview state
   const [promptOpen, setPromptOpen] = useState(true);
   const [promptRating, setPromptRating] = useState(0);
@@ -215,13 +232,13 @@ export default function PreviewFeedbackPage() {
                         </div>
                       ) : (
                         <>
-                          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+                          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40 font-body">
                             Quick feedback
                           </p>
-                          <h3 className="mt-1.5 text-base font-extrabold tracking-tight text-foreground/90">
+                          <h3 className="mt-1.5 text-base font-extrabold tracking-tight text-foreground/90 font-body">
                             How&apos;s your experience?
                           </h3>
-                          <p className="mt-1 text-xs leading-[1.6] text-foreground/50">
+                          <p className="mt-1 text-xs leading-[1.6] text-foreground/50 font-body">
                             Rate your experience so far.
                           </p>
 
@@ -273,11 +290,115 @@ export default function PreviewFeedbackPage() {
           </Rise>
         </Group>
 
-        {/* Section 3: Admin Overview Showcase */}
+        {/* Section 3: Request Feedback Button with Thanos Snap & Reappearance */}
+        <Group className="space-y-4">
+          <Rise className="flex flex-wrap items-baseline justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold tracking-tight text-foreground">
+                  3. Request Feedback Button (Thanos Snap & Reappearance)
+                </h2>
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-amber-800">
+                  New Component
+                </span>
+              </div>
+              <p className="text-xs text-foreground/50">
+                Click “Request feedback round” → morphs to “Confirm” + “X” cancel → Thanos snap dissolve → reappears after 1s with spring entrance. Includes hover-animated @animate-ui MessageSquareQuote icon.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-bold text-foreground/50">Shape:</span>
+              <button
+                type="button"
+                onClick={() => setBtnPill(false)}
+                className={`rounded-lg px-2 py-1 text-xs font-bold transition-all ${
+                  !btnPill
+                    ? "bg-black text-white"
+                    : "bg-black/5 text-foreground hover:bg-black/10"
+                }`}
+              >
+                Rounded
+              </button>
+              <button
+                type="button"
+                onClick={() => setBtnPill(true)}
+                className={`rounded-lg px-2 py-1 text-xs font-bold transition-all ${
+                  btnPill
+                    ? "bg-black text-white"
+                    : "bg-black/5 text-foreground hover:bg-black/10"
+                }`}
+              >
+                Pill (Round)
+              </button>
+              <span className="ml-2 font-bold text-foreground/50">Variant:</span>
+              {(["lead", "brand", "solid", "subtle", "outline", "dark"] as const).map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setBtnVariant(v)}
+                  className={`rounded-lg px-2 py-1 text-xs font-bold transition-all ${
+                    btnVariant === v
+                      ? "bg-black text-white"
+                      : "bg-black/5 text-foreground hover:bg-black/10"
+                  }`}
+                >
+                  {v}
+                </button>
+              ))}
+              <span className="ml-2 font-bold text-foreground/50">Size:</span>
+              {(["xs", "sm", "md", "lg"] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setBtnSize(s)}
+                  className={`rounded-lg px-2 py-1 text-xs font-bold transition-all ${
+                    btnSize === s
+                      ? "bg-black text-white"
+                      : "bg-black/5 text-foreground hover:bg-black/10"
+                  }`}
+                >
+                  {s.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </Rise>
+
+          <Rise>
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-black/[0.06] bg-white p-8 shadow-sm space-y-5">
+              <div className="flex flex-col items-center justify-center gap-4 py-4 min-h-[80px]">
+                <RequestFeedbackButton
+                  variant={btnVariant}
+                  size={btnSize}
+                  pill={btnPill}
+                  onStartConfirm={() => addBtnLog("Entered confirmation mode ('Confirm' + 'X')")}
+                  onCancel={() => addBtnLog("User cancelled confirmation")}
+                  onConfirm={async () => {
+                    addBtnLog("Action confirmed — dispatching request & triggering Thanos snap…");
+                    await new Promise((r) => setTimeout(r, 400));
+                  }}
+                  onComplete={() => addBtnLog("Button reappeared smoothly with spring animation!")}
+                />
+              </div>
+
+              {btnLogs.length > 0 && (
+                <div className="w-full max-w-lg rounded-xl border border-black/[0.08] bg-black/[0.02] p-3 text-xs space-y-1">
+                  <p className="font-bold text-foreground/60 text-[11px] uppercase tracking-wider">
+                    Interaction Log
+                  </p>
+                  {btnLogs.map((log, i) => (
+                    <p key={i} className="font-mono text-[11.5px] text-foreground/75 truncate">
+                      {log}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Rise>
+        </Group>
+
+        {/* Section 4: Admin Overview Showcase */}
         <Group className="space-y-4">
           <Rise>
             <h2 className="text-lg font-bold tracking-tight text-foreground">
-              3. Admin Summary & Feed Preview
+              4. Admin Summary & Feed Preview
             </h2>
             <p className="text-xs text-foreground/50">
               How the collected feedback looks in the admin dashboard.
@@ -288,12 +409,16 @@ export default function PreviewFeedbackPage() {
             <div className="rounded-2xl border border-black/[0.06] bg-white px-6 py-5 shadow-sm">
               <div className="flex flex-wrap items-center gap-x-10 gap-y-4">
                 <div className="flex items-center gap-3">
-                  <span className="text-3xl">{avg !== null ? RATING_EMOJI[Math.round(avg) - 1] : "—"}</span>
+                  <RatingFace
+                    level={avg !== null ? Math.round(avg) : 0}
+                    size={38}
+                    aria-label={avg !== null ? `Average rating ${avg.toFixed(1)} out of 5` : undefined}
+                  />
                   <div>
-                    <p className="text-2xl font-extrabold tabular-nums tracking-tight">
+                    <p className="text-2xl font-extrabold tabular-nums tracking-tight font-body">
                       {avg !== null ? avg.toFixed(1) : "—"}
                     </p>
-                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40 font-body">
                       {MOCK_SUBMISSIONS.length} responses
                     </p>
                   </div>
@@ -307,11 +432,11 @@ export default function PreviewFeedbackPage() {
                         style={{
                           height: Math.max(4, (count / maxCount) * 40),
                           backgroundColor: count > 0
-                            ? ["#f43f5e", "#f97316", "#fbbf24", "#84cc16", "#10b981"][i]
+                            ? RATING_COLORS[i]
                             : "rgba(0,0,0,0.06)",
                         }}
                       />
-                      <span className="text-[10px] font-medium text-foreground/40">
+                      <span className="text-[10px] font-medium text-foreground/40 font-body">
                         {RATING_LABELS[i]}
                       </span>
                     </div>
@@ -327,20 +452,22 @@ export default function PreviewFeedbackPage() {
                 <div className="rounded-2xl border border-black/[0.06] bg-white px-5 py-4 shadow-sm">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex items-center gap-3">
-                      <span className="text-2xl" role="img" aria-label={RATING_LABELS[entry.rating - 1]}>
-                        {RATING_EMOJI[entry.rating - 1]}
-                      </span>
+                      <RatingFace
+                        level={entry.rating}
+                        size={32}
+                        aria-label={RATING_LABELS[entry.rating - 1]}
+                      />
                       <div>
-                        <p className="text-sm font-bold text-foreground/80">
+                        <p className="text-sm font-bold text-foreground/80 font-body">
                           {entry.author}
                         </p>
-                        <p className="text-xs text-foreground/40">
+                        <p className="text-xs text-foreground/40 font-body">
                           {entry.time} · <span className="text-foreground/25">{entry.context}</span>
                         </p>
                       </div>
                     </div>
                     <span
-                      className="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-bold tabular-nums"
+                      className="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-bold font-body tabular-nums"
                       style={{
                         color: ["#f43f5e", "#f97316", "#d97706", "#65a30d", "#059669"][entry.rating - 1],
                         backgroundColor: ["#f43f5e", "#f97316", "#d97706", "#65a30d", "#059669"].map(c => c + "12")[entry.rating - 1],
@@ -350,7 +477,7 @@ export default function PreviewFeedbackPage() {
                     </span>
                   </div>
                   {entry.comment && (
-                    <p className="mt-3 border-t border-black/[0.04] pt-3 text-sm leading-[1.7] text-foreground/60">
+                    <p className="mt-3 border-t border-black/[0.04] pt-3 text-sm leading-[1.7] text-foreground/60 font-body">
                       {entry.comment}
                     </p>
                   )}

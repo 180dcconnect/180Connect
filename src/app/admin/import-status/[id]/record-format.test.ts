@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   describeRawRecord,
+  extractGrantDetails,
   extractMissionOrActivities,
   extractRecordName,
   formatFullAddress,
@@ -101,12 +102,26 @@ describe("extractMissionOrActivities", () => {
 });
 
 describe("getStatusDetails", () => {
-  it("returns human-friendly business status labels", () => {
+  it("returns human-friendly business status labels for organisation registries", () => {
     assert.equal(getStatusDetails("validated").label, "Added to CRM");
     assert.equal(getStatusDetails("matched").label, "Duplicate Candidate");
     assert.equal(getStatusDetails("pending").label, "Pending Review");
     assert.equal(getStatusDetails("rejected").label, "Excluded by Criteria");
     assert.equal(getStatusDetails("error").label, "Import Issue");
+  });
+
+  it("returns grant-specific status labels for 360Giving", () => {
+    const matched = getStatusDetails("matched", "360giving");
+    assert.equal(matched.label, "Matched to Client");
+    assert.equal(matched.tone, "success");
+
+    const rejected = getStatusDetails("rejected", "360giving");
+    assert.equal(rejected.label, "No Matching Client");
+    assert.equal(rejected.tone, "neutral");
+
+    const pending = getStatusDetails("pending", "360giving");
+    assert.equal(pending.label, "Pending Match");
+    assert.equal(pending.tone, "info");
   });
 });
 
@@ -132,3 +147,68 @@ describe("matchesRecordQuery", () => {
     assert.equal(matchesRecordQuery(view, "high street"), true);
   });
 });
+
+describe("extractGrantDetails", () => {
+  it("extracts funder name, formatted amount, award date, and programme", () => {
+    const details = extractGrantDetails({
+      fundingOrganization: [{ name: "National Lottery Community Fund" }],
+      amountAwarded: 50000,
+      currency: "GBP",
+      awardDate: "2024-03-15T00:00:00Z",
+      grantProgramme: [{ title: "Community Grants" }],
+      description: "Supporting local youth mentorship program",
+    });
+
+    assert.equal(details?.funderName, "National Lottery Community Fund");
+    assert.equal(details?.amountFormatted, "£50,000");
+    assert.equal(details?.awardDate, "2024-03-15");
+    assert.equal(details?.grantProgramme, "Community Grants");
+    assert.equal(details?.description, "Supporting local youth mentorship program");
+  });
+
+  it("returns null for non-grant payloads", () => {
+    assert.equal(extractGrantDetails(null), null);
+    assert.equal(extractGrantDetails({}), null);
+  });
+});
+
+describe("describeRawRecord for 360Giving", () => {
+  it("formats a matched grant record with client match status and grant details", () => {
+    const grantRow = fakeRow({
+      record_source: "360giving",
+      processing_status: "matched",
+      source_record_id: "grant-999",
+      raw_payload: {
+        fundingOrganization: [{ name: "Esmee Fairbairn Foundation" }],
+        amountAwarded: 75000,
+        currency: "GBP",
+        awardDate: "2023-11-20",
+        recipientOrganization: [{ name: "Bashir Charity" }],
+      },
+    });
+
+    const view = describeRawRecord(
+      grantRow,
+      {
+        id: "org-1",
+        legalName: "Bashir Charity",
+        organisationType: "charity",
+        sector: "Community",
+        city: "Sheffield",
+        countryCode: "GB",
+        outreachStatus: "active",
+        website: "https://example.org",
+        ownerId: null,
+        ownerName: null,
+        ownerEmail: null,
+      },
+      NOW,
+    );
+
+    assert.equal(view.status.label, "Matched to Client");
+    assert.equal(view.status.tone, "success");
+    assert.equal(view.grantDetails?.funderName, "Esmee Fairbairn Foundation");
+    assert.equal(view.grantDetails?.amountFormatted, "£75,000");
+  });
+});
+

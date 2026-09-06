@@ -89,20 +89,20 @@ export function FeedbackPrompt({ pageContext }: { pageContext?: string }) {
                 <span className="text-2xl" role="img" aria-label="Thank you">
                   🙏
                 </span>
-                <p className="text-sm font-bold text-foreground/80">
+                <p className="text-sm font-bold text-foreground/80 font-body">
                   Thanks for your feedback!
                 </p>
-                <p className="text-xs text-foreground/50">
+                <p className="text-xs text-foreground/50 font-body">
                   We&apos;ll use it to make 180Connect better.
                 </p>
               </div>
             ) : (
               /* ── Rating form ─────────────────────────────────────── */
               <>
-                <h3 className="mt-1 text-base font-extrabold tracking-tight text-foreground/90">
+                <h3 className="mt-1 text-base font-extrabold tracking-tight text-foreground/90 font-body">
                   How&apos;s your experience?
                 </h3>
-                <p className="mt-1 text-xs leading-[1.6] text-foreground/50">
+                <p className="mt-1 text-xs leading-[1.6] text-foreground/50 font-body">
                   Rate your experience so far.
                 </p>
 

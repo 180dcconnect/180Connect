@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { notFound, redirect } from "next/navigation";
 
 import { getCurrentActor } from "@/lib/auth/actor";
@@ -11,18 +12,35 @@ import type { AssignedClientItem } from "./assigned-clients-card";
 
 type Params = Promise<{ id: string }>;
 
+/**
+ * The team member's row, once per request.
+ *
+ * `generateMetadata` and the page body both need this user, and Next calls them
+ * separately within the same request — so without `cache()` every profile view
+ * read the same row twice. The page needs the wider column list, so that is
+ * what is fetched; the title only reads two of them.
+ *
+ * Keyed on the id string, so the memoisation is exact (unlike a loader taking
+ * an options object, which would allocate a fresh key each call).
+ */
+const loadTeamMember = cache(async (id: string) => {
+  const supabase = await createClient();
+  return supabase
+    .from("users")
+    .select(
+      "id, email, full_name, role, is_active, deactivated_at, last_seen_at, created_at, invited_at, invite_accepted_at, invited_by_user_id",
+    )
+    .eq("id", id)
+    .maybeSingle();
+});
+
 export async function generateMetadata({
   params,
 }: {
   params: Params;
 }) {
   const { id } = await params;
-  const supabase = await createClient();
-  const { data: user } = await supabase
-    .from("users")
-    .select("full_name, email")
-    .eq("id", id)
-    .maybeSingle();
+  const { data: user } = await loadTeamMember(id);
 
   if (!user) return { title: "Team Member · 180Connect" };
   const name = user.full_name?.trim() || user.email;
@@ -48,13 +66,8 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
     notesResult,
     activitiesResult,
   ] = await Promise.all([
-    supabase
-      .from("users")
-      .select(
-        "id, email, full_name, role, is_active, deactivated_at, last_seen_at, created_at, invited_at, invite_accepted_at, invited_by_user_id",
-      )
-      .eq("id", id)
-      .maybeSingle(),
+    // Already resolved by generateMetadata for this same request.
+    loadTeamMember(id),
     supabase
       .from("organisations")
       .select(

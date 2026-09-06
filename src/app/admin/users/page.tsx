@@ -90,51 +90,52 @@ export default async function AdminUsersPage({
   // were a real team member.
   const DELETED_USER_PLACEHOLDER_ID = "00000000-0000-0000-0000-000000000001";
 
-  const { data: users, error } = await supabase
-    .from("users")
-    .select("id, email, full_name, role, is_active, deactivated_at, last_seen_at")
-    .or("invited_at.is.null,invite_accepted_at.not.is.null")
-    .neq("id", DELETED_USER_PLACEHOLDER_ID)
-    .order("full_name");
+  // All four reads at once. None depends on another's result, so awaiting them
+  // in sequence made this page four round trips deep for no reason; the errors
+  // are still reported individually below, exactly as before.
+  //
+  // Owned-client counts drive the reassignment gate's warning (F014 AC2), so the
+  // admin sees "owns 3 clients" before starting rather than being refused after.
+  // Fetched separately because PostgREST cannot aggregate across the reverse of
+  // this FK in one select. A failure there is not fatal: deactivate_user recounts
+  // authoritatively.
+  //
+  // F167: the count in the table links through to /clients?owner=, and that list
+  // hides actively-suppressed clients (F051 AC4). Counting them here too would
+  // send the admin to a list shorter than the number they clicked. Kept as a
+  // second count rather than a narrower `owned` query: the reassignment gate
+  // still has to see every client the leaver holds, suppressed or not.
+  const [
+    { data: users, error },
+    { data: pendingInvites, error: pendingError },
+    { data: owned, error: ownedError },
+    { data: suppressed, error: suppressedError },
+  ] = await Promise.all([
+    supabase
+      .from("users")
+      .select("id, email, full_name, role, is_active, deactivated_at, last_seen_at")
+      .or("invited_at.is.null,invite_accepted_at.not.is.null")
+      .neq("id", DELETED_USER_PLACEHOLDER_ID)
+      .order("full_name"),
+    supabase
+      .from("users")
+      .select("id, email, invited_at, role")
+      .not("invited_at", "is", null)
+      .is("invite_accepted_at", null)
+      .order("invited_at", { ascending: false }),
+    supabase.from("organisations").select("id, owner_id").not("owner_id", "is", null),
+    supabase.from("suppressions").select("organisation_id").eq("status", "active"),
+  ]);
 
   if (error) {
     await reportError(error, { operation: "admin.users.page_list" });
   }
-
-  const { data: pendingInvites, error: pendingError } = await supabase
-    .from("users")
-    .select("id, email, invited_at, role")
-    .not("invited_at", "is", null)
-    .is("invite_accepted_at", null)
-    .order("invited_at", { ascending: false });
-
   if (pendingError) {
     await reportError(pendingError, { operation: "admin.users.pending_invites_list" });
   }
-
-  // Owned-client counts drive the reassignment gate's warning (F014 AC2), so the admin
-  // sees "owns 3 clients" before starting rather than being refused after. Fetched
-  // separately because PostgREST cannot aggregate across the reverse of this FK in one
-  // select. A failure here is not fatal: deactivate_user recounts authoritatively.
-  const { data: owned, error: ownedError } = await supabase
-    .from("organisations")
-    .select("id, owner_id")
-    .not("owner_id", "is", null);
-
   if (ownedError) {
     await reportError(ownedError, { operation: "admin.users.page_owned_counts" });
   }
-
-  // F167: the count in the table links through to /clients?owner=, and that list
-  // hides actively-suppressed clients (F051 AC4). Counting them here too would send
-  // the admin to a list shorter than the number they clicked. Kept as a second count
-  // rather than a narrower `owned` query: the reassignment gate above still has to
-  // see every client the leaver holds, suppressed or not.
-  const { data: suppressed, error: suppressedError } = await supabase
-    .from("suppressions")
-    .select("organisation_id")
-    .eq("status", "active");
-
   if (suppressedError) {
     await reportError(suppressedError, { operation: "admin.users.page_suppressions" });
   }

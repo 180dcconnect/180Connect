@@ -44,6 +44,19 @@ describe("previewCharity", () => {
     assert.equal(result.preview.identifier?.identifierValue, "1218781");
   });
 
+  it("carries companyIdentifier when the response carries a company registration number", async () => {
+    const result = await previewCharity(
+      "1218781",
+      deps(async () => record({ company_number: "01336352" } as Partial<RawCharityCommissionRecord>)),
+    );
+    assert.equal(result.status, "found");
+    if (result.status !== "found") return;
+    assert.deepEqual(result.preview.companyIdentifier, {
+      identifierType: "uk_company",
+      identifierValue: "01336352",
+    });
+  });
+
   it("carries the latest filed year when the response has one", async () => {
     const result = await previewCharity("1218781", deps(async () => record()));
     assert.equal(result.status, "found");

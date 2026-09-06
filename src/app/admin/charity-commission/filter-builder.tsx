@@ -23,6 +23,7 @@ import { PriceRangeSlider } from "@/components/ui/range-slider";
 import { Checkbox } from "@/components/animate-ui/components/radix/checkbox";
 import { GooeyEmailInput } from "@/components/ui/gooey-email-input";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { useConsole } from "./import-console";
 import {
   Dialog,
   DialogClose,
@@ -62,7 +63,9 @@ import {
   countRegisterSelection,
   deleteFilterPreset,
   previewRegisterSelection,
+  runRegisterImport,
   saveFilterPreset,
+  type ImportState,
   type PreviewState,
 } from "./register-actions";
 import {
@@ -335,7 +338,7 @@ export function FilterSection({
           >
             <div className="pb-5">
               {hint && (
-                <p className="mb-3.5 max-w-[54ch] text-[13px] leading-[1.55] text-dim">
+                <p className="mb-3.5 text-[13px] leading-[1.55] text-dim">
                   {hint}
                 </p>
               )}
@@ -550,6 +553,9 @@ export function FilterBuilder({
   /** Loading a set over unsaved work asks first — this is the set it would load. */
   const [pendingPreset, setPendingPreset] = useState<PresetSummary | null>(null);
   const [presetState, setPresetState] = useState<PresetState>({ kind: "idle" });
+  const [importState, setImportState] = useState<ImportState>({ kind: "idle" });
+  const [confirming, setConfirming] = useState(false);
+  const consoleCtx = useConsole();
   const [laSearch, setLaSearch] = useState("");
   const [postcodeDraft, setPostcodeDraft] = useState("");
   const [selectedZone, setSelectedZone] = useState<RegionalZone>("All");
@@ -590,9 +596,10 @@ export function FilterBuilder({
 
   /**
    * Every filter mutation goes through here, because changing a filter
-   * invalidates the preview sample, which would otherwise sit on screen
-   * describing a selection that no longer exists. Clearing it here rather
-   * than in an effect keeps the invalidation on the event that caused it.
+   * invalidates two things that would otherwise sit on screen describing a
+   * selection that no longer exists: the preview sample, and the summary of a
+   * finished import. Clearing them here rather than in an effect keeps the
+   * invalidation on the event that caused it.
    */
   const changeFilters = (
     next: (current: CharityRegisterFilters) => CharityRegisterFilters,
@@ -600,6 +607,8 @@ export function FilterBuilder({
     setFilters(next);
     setPreview({ kind: "idle" });
     setShowPreview(false);
+    setImportState({ kind: "idle" });
+    setConfirming(false);
   };
 
   const update = (patch: Partial<CharityRegisterFilters>) =>
@@ -799,6 +808,8 @@ export function FilterBuilder({
     setPostcodeDraft("");
     setLoadedPreset(null);
     setPresetState({ kind: "idle" });
+    setImportState({ kind: "idle" });
+    setConfirming(false);
   };
 
   const doPreview = () => {
@@ -811,6 +822,14 @@ export function FilterBuilder({
       setPreview(await previewRegisterSelection(filters));
     });
   };
+
+  const doImport = () =>
+    startTransition(async () => {
+      const result = await runRegisterImport(filters);
+      setImportState(result);
+      setConfirming(false);
+      setCounting(false);
+    });
 
 
   const doSave = () =>
@@ -974,10 +993,18 @@ export function FilterBuilder({
                 type="button"
                 onClick={doPreview}
                 disabled={isPending || count === 0}
-                className="rounded-lg border border-black/[0.12] px-3 py-1.5 text-xs font-bold text-foreground/70 transition-colors hover:border-black/25 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                className="rounded-lg border border-black/[0.12] px-3 py-1.5 text-xs font-bold text-foreground/70 transition-colors hover:border-black/25 hover:text-foreground disabled:pointer-events-none disabled:opacity-40 cursor-pointer"
               >
                 {showPreview ? "Hide sample" : "See a sample"}
               </button>
+              <OriginButton
+                onClick={() => setConfirming(true)}
+                disabled={isPending || count === 0}
+                size="md"
+                type="button"
+              >
+                Import{count !== null && count > 0 ? ` ${count.toLocaleString()}` : ""}
+              </OriginButton>
             </div>
           </div>
 
@@ -987,6 +1014,35 @@ export function FilterBuilder({
               <span>
                 No filters set, so this is the entire register. Narrow it below.
               </span>
+            </p>
+          )}
+
+          {importState.kind === "done" && (
+            <div
+              className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-green-50 px-3 py-2 text-xs font-bold leading-[1.6] text-green-900"
+              role="status"
+            >
+              <span className="flex items-center gap-1.5">
+                <Check className="h-4 w-4 shrink-0 text-green-600" strokeWidth={2.4} />
+                {importState.message}
+              </span>
+              {consoleCtx && (
+                <button
+                  type="button"
+                  onClick={() => consoleCtx.closeComposer()}
+                  className="text-xs font-bold text-green-800 underline underline-offset-2 hover:text-green-950 cursor-pointer"
+                >
+                  View recent imports →
+                </button>
+              )}
+            </div>
+          )}
+          {importState.kind === "error" && (
+            <p
+              className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold leading-[1.6] text-red-900"
+              role="alert"
+            >
+              {importState.message}
             </p>
           )}
 
@@ -1623,6 +1679,128 @@ export function FilterBuilder({
           </div>
         </FilterSection>
       </section>
+
+      {/* ── Import, behind a confirmation that restates the count and criteria ── */}
+      <section className="rounded-2xl border border-black/[0.07] bg-white p-5 shadow-xs sm:p-6">
+        <h3 className="text-sm font-bold text-foreground">Import</h3>
+        <p className="mt-1.5 text-sm leading-[1.6] text-foreground/65">
+          Adds the selected charities to the client list, with their filed accounts
+          where the register has them. Charities already on the list are matched,
+          not duplicated, so re-running a filter set is safe. A single import is
+          capped at 10,000 charities.
+        </p>
+
+        {unfiltered && (
+          <p className="mt-4 flex items-start gap-2 rounded-xl bg-amber-50 p-3 text-xs leading-[1.6] text-amber-900">
+            <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
+            <span>
+              No filters are set, so this selects the entire register. That is
+              almost certainly not what you want — narrow it first.
+            </span>
+          </p>
+        )}
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <OriginButton
+            onClick={() => setConfirming(true)}
+            disabled={isPending || count === 0}
+            size="md"
+            type="button"
+          >
+            Import these charities
+          </OriginButton>
+        </div>
+
+        {importState.kind === "done" && (
+          <div
+            className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-green-50 p-4 text-sm font-bold text-green-900"
+            role="status"
+          >
+            <span>{importState.message}</span>
+            {consoleCtx && (
+              <button
+                type="button"
+                onClick={() => consoleCtx.closeComposer()}
+                className="text-xs font-bold text-green-800 underline underline-offset-2 hover:text-green-950 cursor-pointer"
+              >
+                View recent imports →
+              </button>
+            )}
+          </div>
+        )}
+        {importState.kind === "error" && (
+          <p
+            className="mt-4 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-900"
+            role="alert"
+          >
+            {importState.message}
+          </p>
+        )}
+      </section>
+
+      {/* ── Import confirmation dialog ── */}
+      <Dialog open={confirming} onOpenChange={setConfirming}>
+        <DialogContent className="rounded-2xl sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              Import {count?.toLocaleString() ?? ""}{" "}
+              {count === 1 ? "charity" : "charities"}?
+            </DialogTitle>
+            <DialogDescription className="leading-[1.65]">
+              {description}
+            </DialogDescription>
+          </DialogHeader>
+
+          <p className="text-sm leading-[1.65] text-foreground/65">
+            Adds the selected charities to the client list, with their filed accounts
+            where the register has them. Charities already on the list are matched,
+            not duplicated. This will be recorded against your name in the audit log.
+          </p>
+
+          {unfiltered && (
+            <p className="flex items-start gap-2 rounded-xl bg-amber-50 p-3 text-xs leading-[1.6] text-amber-900">
+              <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
+              <span>
+                No filters are set, so this selects the entire register. That is
+                almost certainly not what you want — narrow it first.
+              </span>
+            </p>
+          )}
+
+          {count !== null && count > 10000 && (
+            <p className="flex items-start gap-2 rounded-xl bg-amber-50 p-3 text-xs leading-[1.6] text-amber-900">
+              <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
+              <span>
+                A single import is capped at 10,000 charities. The first 10,000 will be imported.
+              </span>
+            </p>
+          )}
+
+          <DialogFooter className="gap-2 sm:gap-2">
+            <DialogClose asChild>
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2 text-sm font-bold text-foreground/60 transition-colors hover:bg-black/[0.04] hover:text-foreground cursor-pointer"
+              >
+                Cancel
+              </button>
+            </DialogClose>
+            <OriginButton
+              onClick={doImport}
+              disabled={isPending || count === 0}
+              size="md"
+              type="button"
+            >
+              <span className="inline-flex items-center gap-1.5">
+                {isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2.2} />}
+                {isPending
+                  ? "Importing…"
+                  : `Yes, import ${count !== null && count > 10000 ? "10,000" : (count?.toLocaleString() ?? "")}`}
+              </span>
+            </OriginButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Save a filter set ─────────────────────────────────────────────
           A dialog rather than a name box parked in the bar: naming is the last

@@ -5,6 +5,7 @@ import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
 import { averageRating, RATING_LABELS } from "@/lib/feedback";
 import { Group, Rise } from "@/components/dashboard-stage";
+import { RatingFace, RATING_COLORS } from "@/components/spectrumui/rating-face";
 import { RequestFeedbackButton } from "./request-feedback-button";
 
 type FeedbackRow = {
@@ -17,9 +18,6 @@ type FeedbackRow = {
 };
 
 type UserOption = { id: string; email: string; full_name: string | null };
-
-/** Face emoji per rating level 1–5 */
-const RATING_EMOJI = ["😡", "😕", "😐", "🙂", "😄"];
 
 function relativeTime(dateStr: string, now: Date): string {
   const date = new Date(dateStr);
@@ -104,12 +102,16 @@ export default async function FeedbackPage() {
               <div className="flex flex-wrap items-center gap-x-10 gap-y-4">
                 {/* Overall stats */}
                 <div className="flex items-center gap-3">
-                  <span className="text-3xl">{avg !== null ? RATING_EMOJI[Math.round(avg) - 1] : "—"}</span>
+                  <RatingFace
+                    level={avg !== null ? Math.round(avg) : 0}
+                    size={38}
+                    aria-label={avg !== null ? `Average rating ${avg.toFixed(1)} out of 5` : undefined}
+                  />
                   <div>
-                    <p className="text-2xl font-extrabold tabular-nums tracking-tight">
+                    <p className="text-2xl font-extrabold tabular-nums tracking-tight font-body">
                       {avg !== null ? avg.toFixed(1) : "—"}
                     </p>
-                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40 font-body">
                       {entries.length} response{entries.length === 1 ? "" : "s"}
                     </p>
                   </div>
@@ -124,12 +126,12 @@ export default async function FeedbackPage() {
                         style={{
                           height: Math.max(4, (count / maxCount) * 40),
                           backgroundColor: count > 0
-                            ? ["#f43f5e", "#f97316", "#fbbf24", "#84cc16", "#10b981"][i]
+                            ? RATING_COLORS[i]
                             : "rgba(0,0,0,0.06)",
                           transition: "height 0.3s ease",
                         }}
                       />
-                      <span className="text-[10px] font-medium text-foreground/40">
+                      <span className="text-[10px] font-medium text-foreground/40 font-body">
                         {RATING_LABELS[i]}
                       </span>
                     </div>
@@ -143,7 +145,7 @@ export default async function FeedbackPage() {
         {/* Feedback entries */}
         <Group className="space-y-3">
           <Rise>
-            <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
+            <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35 font-body">
               <span className="tabular-nums">{entries.length}</span> response
               {entries.length === 1 ? "" : "s"}
               {entries.length === 200 && " · showing most recent 200"}
@@ -156,14 +158,16 @@ export default async function FeedbackPage() {
                 <div className="rounded-2xl border border-black/[0.06] bg-white px-5 py-4 shadow-sm">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex items-center gap-3">
-                      <span className="text-2xl" role="img" aria-label={RATING_LABELS[entry.rating - 1]}>
-                        {RATING_EMOJI[entry.rating - 1]}
-                      </span>
+                      <RatingFace
+                        level={entry.rating}
+                        size={32}
+                        aria-label={RATING_LABELS[entry.rating - 1]}
+                      />
                       <div>
-                        <p className="text-sm font-bold text-foreground/80">
+                        <p className="text-sm font-bold text-foreground/80 font-body">
                           {people.get(entry.user_id) ?? "Unknown user"}
                         </p>
-                        <p className="text-xs text-foreground/40">
+                        <p className="text-xs text-foreground/40 font-body">
                           {relativeTime(entry.created_at, now)}
                           {entry.page_context && (
                             <span className="text-foreground/25"> · {entry.page_context}</span>
@@ -171,7 +175,7 @@ export default async function FeedbackPage() {
                         </p>
                       </div>
                     </div>
-                    <span className="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-bold tabular-nums" style={{
+                    <span className="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-bold tabular-nums font-body" style={{
                       color: ["#f43f5e", "#f97316", "#d97706", "#65a30d", "#059669"][entry.rating - 1],
                       backgroundColor: ["#f43f5e", "#f97316", "#d97706", "#65a30d", "#059669"].map(c => c + "12")[entry.rating - 1],
                     }}>
@@ -179,7 +183,7 @@ export default async function FeedbackPage() {
                     </span>
                   </div>
                   {entry.comment && (
-                    <p className="mt-3 border-t border-black/[0.04] pt-3 text-sm leading-[1.7] text-foreground/60">
+                    <p className="mt-3 border-t border-black/[0.04] pt-3 text-sm leading-[1.7] text-foreground/60 font-body">
                       {entry.comment}
                     </p>
                   )}
@@ -189,7 +193,7 @@ export default async function FeedbackPage() {
           ) : (
             <Rise>
               <div className="rounded-2xl border border-black/[0.06] bg-white px-5 py-10 shadow-sm">
-                <p className="text-center text-sm leading-[1.7] text-foreground/65">
+                <p className="text-center text-sm leading-[1.7] text-foreground/65 font-body">
                   No feedback has been submitted yet. The prompt appears on the
                   dashboard after a user has been active for at least 7 days, or
                   when you request a feedback round.

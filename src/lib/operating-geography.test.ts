@@ -2,7 +2,19 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { loadOperatingGeography } from "./operating-geography.ts";
+import { registerUnavailableReason } from "./charity-register/sqlite.ts";
 import type { OrganisationDetailRow } from "./client-basic-info.ts";
+
+/**
+ * The register file is a 188MB release asset fetched by `prebuild`, so it is
+ * present on a developer's machine and in a deployment but never in CI — the
+ * tests workflow runs `npm ci` then `npm test` and downloads nothing.
+ *
+ * Only the first case below reads it. Asserting against a file that is absent
+ * half the time makes the whole suite a coin flip, so that one case skips with
+ * a reason when there is no register, and the three pure cases always run.
+ */
+const noRegister = registerUnavailableReason();
 
 function baseOrg(overrides: Partial<OrganisationDetailRow> = {}): OrganisationDetailRow {
   return {
@@ -22,7 +34,9 @@ function baseOrg(overrides: Partial<OrganisationDetailRow> = {}): OrganisationDe
 }
 
 describe("loadOperatingGeography", () => {
-  it("resolves operational areas for a Charity Commission charity in register.sqlite", () => {
+  it("resolves operational areas for a Charity Commission charity in register.sqlite", {
+    skip: noRegister ? `no charity register available: ${noRegister}` : false,
+  }, () => {
     // 206476 is CHARLES S FRENCH CHARITABLE TRUST in data/register.sqlite
     const org = baseOrg({
       legal_name: "CHARLES S FRENCH CHARITABLE TRUST",

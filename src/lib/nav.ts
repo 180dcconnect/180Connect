@@ -57,7 +57,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     permission: "platform-settings:manage",
   },
   {
-    href: "/admin/score-settings",
+    href: "/settings/score-settings",
     label: "Platform settings",
     description:
       "Score weights, data handling rules and restricted client fields — rare, deliberate configuration.",

@@ -17,6 +17,7 @@ import {
   SeriesTable,
   SURPLUS,
 } from "./chart-parts";
+import { TimelineOverviewScrubber } from "./timeline-overview-scrubber";
 
 /**
  * The filed-accounts charts: what came in against what went out, the surplus or
@@ -49,7 +50,6 @@ const MAX_NET_STICKS = 10;
 
 export function FinancialHistoryChart({ series }: { series: FinancialSeries }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [hovered, setHovered] = useState<number | null>(null);
   const [hasEnteredView, setHasEnteredView] = useState(false);
   const { years, peak, peakNet } = series;
 
@@ -84,13 +84,17 @@ export function FinancialHistoryChart({ series }: { series: FinancialSeries }) {
 
   if (years.length === 0) return null;
 
-  const active = hovered !== null ? years[hovered] : null;
-  const isAnyHovered = hovered !== null;
   const safeYMax = yAxis.max > 0 ? yAxis.max : 1;
   const safePeakNet = peakNet > 0 ? peakNet : 1;
 
   return (
     <div ref={containerRef} className="mt-4 select-none">
+      {years.length > 1 && (
+        <div className="mb-4">
+          <TimelineOverviewScrubber years={years} />
+        </div>
+      )}
+
       <div className="flex items-center justify-end">
         <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5" aria-label="Chart legend">
           <li className="flex items-center gap-2 text-[12px] text-dim">
@@ -155,7 +159,6 @@ export function FinancialHistoryChart({ series }: { series: FinancialSeries }) {
             {/* Year columns */}
             <div className="relative flex h-full items-end gap-2">
               {years.map((year, index) => {
-                const isHovered = hovered === index;
                 const hasIncome = year.income !== null && year.income > 0;
                 const hasExpenditure = year.expenditure !== null && year.expenditure > 0;
 
@@ -170,19 +173,12 @@ export function FinancialHistoryChart({ series }: { series: FinancialSeries }) {
                 return (
                   <div
                     key={year.periodEnd}
-                    onMouseEnter={() => setHovered(index)}
-                    onMouseLeave={() => setHovered(null)}
-                    onFocus={() => setHovered(index)}
-                    onBlur={() => setHovered(null)}
-                    tabIndex={0}
                     aria-label={`${year.label}: income ${formatGbp(year.income)}, spending ${formatGbp(year.expenditure)}${
                       year.net !== null
                         ? `, ${year.net >= 0 ? "surplus" : "deficit"} ${formatGbp(Math.abs(year.net))}`
                         : ""
                     }`}
-                    className={`flex h-full flex-1 cursor-pointer flex-col items-center justify-end rounded-t-panel px-1 outline-none transition-all duration-150 ${
-                      isHovered ? "bg-paper/80 shadow-xs" : ""
-                    } ${isAnyHovered && !isHovered ? "opacity-45" : "opacity-100"} focus-visible:ring-2 focus-visible:ring-lead-mid`}
+                    className="flex h-full flex-1 flex-col items-center justify-end rounded-t-panel px-1 outline-none"
                   >
                     {/* Two barrels side by side: Income (left) and Spending (right) */}
                     <div className="flex items-end gap-1.5 pb-0.5 sm:gap-2">
@@ -194,8 +190,8 @@ export function FinancialHistoryChart({ series }: { series: FinancialSeries }) {
                               key={`inc-stick-${stickIdx}`}
                               initial={{ opacity: 0, scaleX: 0.6, originX: 0.5 }}
                               animate={{
-                                opacity: hasEnteredView ? (isHovered ? 1 : 0.9) : 0,
-                                scaleX: hasEnteredView ? (isHovered ? 1.08 : 1) : 0.6,
+                                opacity: hasEnteredView ? 1 : 0,
+                                scaleX: hasEnteredView ? 1 : 0.6,
                               }}
                               transition={{
                                 duration: 0.2,
@@ -219,8 +215,8 @@ export function FinancialHistoryChart({ series }: { series: FinancialSeries }) {
                               key={`exp-stick-${stickIdx}`}
                               initial={{ opacity: 0, scaleX: 0.6, originX: 0.5 }}
                               animate={{
-                                opacity: hasEnteredView ? (isHovered ? 1 : 0.9) : 0,
-                                scaleX: hasEnteredView ? (isHovered ? 1.08 : 1) : 0.6,
+                                opacity: hasEnteredView ? 1 : 0,
+                                scaleX: hasEnteredView ? 1 : 0.6,
                               }}
                               transition={{
                                 duration: 0.2,
@@ -253,7 +249,6 @@ export function FinancialHistoryChart({ series }: { series: FinancialSeries }) {
         </div>
         <div className="flex min-h-[82px] flex-1 min-w-0 items-start gap-2">
           {years.map((year, index) => {
-            const isHovered = hovered === index;
             const net = year.net;
             const hasNet = net !== null && Math.abs(net) > 0;
             const netStickCount = hasNet
@@ -264,11 +259,7 @@ export function FinancialHistoryChart({ series }: { series: FinancialSeries }) {
             return (
               <div
                 key={year.periodEnd}
-                onMouseEnter={() => setHovered(index)}
-                onMouseLeave={() => setHovered(null)}
-                className={`flex flex-1 cursor-pointer flex-col items-center justify-start rounded-b-panel px-1 pb-1 transition-all duration-150 ${
-                  isHovered ? "bg-paper/80 shadow-xs" : ""
-                } ${isAnyHovered && !isHovered ? "opacity-45" : "opacity-100"}`}
+                className="flex flex-1 flex-col items-center justify-start rounded-b-panel px-1 pb-1"
               >
                 {/* Net barrel: horizontal sticks stacked downwards from the zero line */}
                 <div className="flex min-h-[58px] flex-col justify-start gap-[2px]" aria-hidden="true">
@@ -278,8 +269,8 @@ export function FinancialHistoryChart({ series }: { series: FinancialSeries }) {
                         key={`net-stick-${stickIdx}`}
                         initial={{ opacity: 0, scaleX: 0.6, originX: 0.5 }}
                         animate={{
-                          opacity: hasEnteredView ? (isHovered ? 1 : 0.9) : 0,
-                          scaleX: hasEnteredView ? (isHovered ? 1.08 : 1) : 0.6,
+                          opacity: hasEnteredView ? 1 : 0,
+                          scaleX: hasEnteredView ? 1 : 0.6,
                         }}
                         transition={{
                           duration: 0.18,
@@ -313,47 +304,15 @@ export function FinancialHistoryChart({ series }: { series: FinancialSeries }) {
       <div className="mt-1 flex items-center">
         <div className="w-14 shrink-0 sm:w-16" aria-hidden="true" />
         <div className="flex flex-1 min-w-0 gap-2">
-          {years.map((year, index) => {
-            const isHovered = hovered === index;
-            return (
-              <span
-                key={year.periodEnd}
-                onMouseEnter={() => setHovered(index)}
-                onMouseLeave={() => setHovered(null)}
-                className={`flex-1 cursor-pointer text-center text-[11.5px] transition-colors ${
-                  isHovered ? "font-semibold text-ink" : "text-dim"
-                } ${isAnyHovered && !isHovered ? "opacity-45" : "opacity-100"}`}
-              >
-                {year.label}
-              </span>
-            );
-          })}
+          {years.map((year) => (
+            <span
+              key={year.periodEnd}
+              className="flex-1 text-center text-[11.5px] text-dim"
+            >
+              {year.label}
+            </span>
+          ))}
         </div>
-      </div>
-
-      {/* The tooltip is a fixed row rather than a floating card */}
-      <div className="mt-2 flex items-start">
-        <div className="w-14 shrink-0 sm:w-16" aria-hidden="true" />
-        <p className="min-h-[18px] flex-1 min-w-0 text-[12px] text-dim" aria-live="polite">
-          {active ? (
-            <>
-              <span className="font-semibold text-ink">
-                {active.label} · year ended{" "}
-                {new Date(active.periodEnd).toLocaleDateString("en-GB", {
-                  day: "numeric",
-                  month: "short",
-                  year: "numeric",
-                })}
-              </span>
-              {" — "}
-              income {formatGbp(active.income)}, spending {formatGbp(active.expenditure)}
-              {active.net !== null &&
-                `, ${active.net >= 0 ? "surplus" : "deficit"} ${formatGbp(Math.abs(active.net))}`}
-            </>
-          ) : (
-            "Hover a year for its filed figures."
-          )}
-        </p>
       </div>
 
       <SeriesTable

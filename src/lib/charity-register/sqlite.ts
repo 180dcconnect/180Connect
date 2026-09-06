@@ -91,6 +91,44 @@ export type RegisterMeta = {
 let cached: { db: DatabaseSync; path: string } | null = null;
 let missingReason: string | null = null;
 
+/**
+ * The operating-areas statements, prepared once per handle.
+ *
+ * `lookupCharityOperatingAreas` runs on every client profile view. Preparing its
+ * four statements per call re-parses and re-plans the same SQL every time, for a
+ * handle that is read-only and lives as long as the process. Keyed on the `db`
+ * so a re-opened handle cannot be answered with statements bound to a closed one.
+ */
+type LookupStatements = {
+  db: DatabaseSync;
+  byOrganisationNumber: DatabaseSyncStatement;
+  byRegisteredNumber: DatabaseSyncStatement;
+  byName: DatabaseSyncStatement;
+  areasFor: DatabaseSyncStatement;
+};
+
+let lookupStatementCache: LookupStatements | null = null;
+
+function lookupStatements(db: DatabaseSync): LookupStatements {
+  if (lookupStatementCache && lookupStatementCache.db === db) return lookupStatementCache;
+
+  const columns =
+    "select organisation_number, registered_charity_number, charity_name from charity";
+
+  lookupStatementCache = {
+    db,
+    byOrganisationNumber: db.prepare(`${columns} where organisation_number = ? limit 1`),
+    byRegisteredNumber: db.prepare(`${columns} where registered_charity_number = ? limit 1`),
+    byName: db.prepare(`${columns} where charity_name = ? collate nocase limit 1`),
+    areasFor: db.prepare(
+      "select l.kind, l.value from charity_label cl join label l on l.id = cl.label_id " +
+        "where cl.organisation_number = ? and l.kind in ('Local Authority', 'Region', 'Country') " +
+        "order by l.kind, l.value",
+    ),
+  };
+  return lookupStatementCache;
+}
+
 function open(): { db: DatabaseSync; path: string } | null {
   if (cached) return cached;
   if (missingReason) return null;
@@ -201,7 +239,8 @@ export function previewCharities(
   const handle = open();
   if (!handle) return [];
   const { sql, params } = previewQuery(filters, limit);
-  return handle.db.prepare(sql).all(...params) as RegisterPreviewRow[];
+  const rows = handle.db.prepare(sql).all(...params) as RegisterPreviewRow[];
+  return rows.map((row) => ({ ...row }));
 }
 
 /** Every charity the filters select, with its filed returns attached. */
@@ -224,8 +263,8 @@ export function selectCharities(
     "select * from charity_return where organisation_number = ? order by period_end",
   );
   return charities.map((charity) => ({
-    charity,
-    returns: returnsFor.all(charity.organisation_number) as Record<string, unknown>[],
+    charity: { ...charity },
+    returns: (returnsFor.all(charity.organisation_number) as Record<string, unknown>[]).map((r) => ({ ...r })),
   }));
 }
 
@@ -267,10 +306,44 @@ export type CharityOperatingAreas = {
 };
 
 /**
+ * Answers already given, capped.
+ *
+ * The register file is read-only and replaced only by a deployment, so an answer
+ * cannot go stale within the life of a process — the same charity asked twice is
+ * the same charity. This is worth having even now the lookup is indexed: a client
+ * profile is re-rendered on every realtime event on that record, and the file is
+ * 188MB, so the first read of a given row may still have to reach the disk.
+ *
+ * Bounded because the key space is the whole register. Oldest-first eviction via
+ * Map insertion order is enough here; there is no hot/cold distinction worth
+ * tracking for what is a modest working set of the clients a team is looking at.
+ */
+const OPERATING_AREAS_CACHE_LIMIT = 500;
+const operatingAreasCache = new Map<string | number, CharityOperatingAreas | null>();
+
+/**
  * Returns all declared operational areas (local authorities, regions, countries)
  * for a charity by registration number, organisation number, or name.
  */
 export function lookupCharityOperatingAreas(
+  identifierOrName: string | number,
+): CharityOperatingAreas | null {
+  if (operatingAreasCache.has(identifierOrName)) {
+    return operatingAreasCache.get(identifierOrName) ?? null;
+  }
+
+  const result = readCharityOperatingAreas(identifierOrName);
+
+  if (operatingAreasCache.size >= OPERATING_AREAS_CACHE_LIMIT) {
+    const oldest = operatingAreasCache.keys().next();
+    if (!oldest.done) operatingAreasCache.delete(oldest.value);
+  }
+  operatingAreasCache.set(identifierOrName, result);
+
+  return result;
+}
+
+function readCharityOperatingAreas(
   identifierOrName: string | number,
 ): CharityOperatingAreas | null {
   const handle = open();
@@ -284,38 +357,39 @@ export function lookupCharityOperatingAreas(
       }
     | undefined;
 
+  const statements = lookupStatements(handle.db);
+
   const numeric =
     typeof identifierOrName === "number"
       ? identifierOrName
       : Number(String(identifierOrName).replace(/\D/g, ""));
 
   if (numeric && Number.isFinite(numeric)) {
-    row = handle.db
-      .prepare(
-        "select organisation_number, registered_charity_number, charity_name " +
-          "from charity where registered_charity_number = ? or organisation_number = ? limit 1",
-      )
-      .get(numeric, numeric) as typeof row;
+    // Two statements rather than one `where registered_charity_number = ? or
+    // organisation_number = ?`: SQLite cannot use an index for either arm of
+    // that OR here, so it scanned all 171,800 rows on every call. Split, each
+    // arm is an index lookup — `organisation_number` by primary key, the
+    // registration number by `charity_reg_number` (sqlite-schema.ts).
+    //
+    // Registration number is tried first because that is the order the OR was
+    // written in, and the two are not interchangeable: only 64,112 charities
+    // have the same value for both, so a number can be one charity's
+    // registration number and a different charity's organisation number.
+    // Flipping the order would silently change which record is returned.
+    row = statements.byRegisteredNumber.get(numeric) as typeof row;
+    if (!row) row = statements.byOrganisationNumber.get(numeric) as typeof row;
   }
 
   if (!row && typeof identifierOrName === "string" && identifierOrName.trim()) {
-    row = handle.db
-      .prepare(
-        "select organisation_number, registered_charity_number, charity_name " +
-          "from charity where charity_name = ? collate nocase limit 1",
-      )
-      .get(identifierOrName.trim()) as typeof row;
+    row = statements.byName.get(identifierOrName.trim()) as typeof row;
   }
 
   if (!row) return null;
 
-  const labels = handle.db
-    .prepare(
-      "select l.kind, l.value from charity_label cl join label l on l.id = cl.label_id " +
-        "where cl.organisation_number = ? and l.kind in ('Local Authority', 'Region', 'Country') " +
-        "order by l.kind, l.value",
-    )
-    .all(row.organisation_number) as { kind: string; value: string }[];
+  const labels = statements.areasFor.all(row.organisation_number) as {
+    kind: string;
+    value: string;
+  }[];
 
   const localAuthorities: string[] = [];
   const regions: string[] = [];
@@ -375,11 +449,11 @@ export function lookupCharityReturns(
 
   return {
     organisationNumber: row.organisation_number,
-    returns: handle.db
+    returns: (handle.db
       .prepare(
         "select * from charity_return where organisation_number = ? order by period_end",
       )
-      .all(row.organisation_number) as Record<string, unknown>[],
+      .all(row.organisation_number) as Record<string, unknown>[]).map((r) => ({ ...r })),
   };
 }
 

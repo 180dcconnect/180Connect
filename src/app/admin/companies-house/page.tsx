@@ -23,7 +23,7 @@
 //   3. The composer, entered from that history rather than stacked under it.
 //      `ImportConsole` owns which of the two is showing and keeps both mounted.
 //
-// The single-company lookup sits below the console as its own card: it needs
+// The single-company lookup lives inside RecentRuns's header as a dialog: it needs
 // neither a staged register nor a loaded history, and it answers a different
 // question ("this exact company") than the composer does.
 //
@@ -31,26 +31,30 @@
 // renders the `main` this is slotted into.
 
 import { redirect } from "next/navigation";
-import Image from "next/image";
 
 import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { reportError } from "@/lib/error-logging";
+import { ocrUnavailableReason } from "@/lib/cic-statement/ocr";
+import {
+  MAX_BACKFILL as MAX_CIC_BACKFILL,
+  findCicTargets,
+} from "@/lib/cic-statement/backfill";
 import { InlineAlert } from "@/components/ui/inline-alert";
-import { GroupTabs } from "@/components/ui/group-tabs";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { parseFilters } from "@/lib/companies-register/filters";
 import {
   companiesRegisterMeta,
   sicValues,
 } from "@/lib/companies-register/sqlite";
-import { DATA_IMPORTS_TABS } from "../import-group";
+import { DataImportsHeader } from "../data-imports-header";
 import { CompaniesFilterBuilder, type CompaniesPresetSummary } from "./filter-builder";
 import { ImportConsole, NewImportButton } from "./import-console";
 import { CompaniesRecentRuns, type CompaniesHouseRun } from "./recent-runs";
 import { CompaniesRegisterRail } from "./register-rail";
-import { CompaniesHouseImportForm } from "./import-form";
+import { CicStatementCard } from "./cic-statement-card";
+import { CompaniesLookupDialog } from "./lookup-dialog";
 import { CompaniesHouseGuide } from "./guide";
 
 // The import runs inside a Server Action, not this page — but promotion of a
@@ -131,6 +135,29 @@ export default async function CompaniesHousePage() {
     ? Math.floor((now.getTime() - new Date(snapshotDate).getTime()) / 86_400_000)
     : null;
 
+  // Tolerant, the same way every other read on this page is: the card is one
+  // panel among several, and a failure here must not take the import console
+  // with it. It also covers the window where the code has shipped and the
+  // migration adding the two columns has not yet reached this environment —
+  // the select fails, the card is simply absent, and the rest of the screen
+  // works.
+  let cicCoverage: Awaited<ReturnType<typeof findCicTargets>>["coverage"] | null = null;
+  try {
+    const supabaseForCic = await createClient();
+    cicCoverage = (await findCicTargets(supabaseForCic)).coverage;
+  } catch (error) {
+    await reportError(error, { operation: "admin.companies_house.cic_coverage" });
+  }
+
+  // Both reasons the job cannot run, resolved server-side: the language model
+  // is a filesystem check and the API key is server-only, so neither can be
+  // answered from the client component that shows them.
+  const cicUnavailable =
+    ocrUnavailableReason() ??
+    (process.env.COMPANIES_HOUSE_API_KEY?.trim()
+      ? null
+      : "The Companies House API key is not configured, so filings cannot be fetched.");
+
   const staged = registerSize > 0;
   // Read once here rather than at each render site: process.env is server-only,
   // and both branches below need the same answer.
@@ -138,40 +165,17 @@ export default async function CompaniesHousePage() {
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
-      <Stage className="mx-auto max-w-5xl space-y-8">
+      <Stage className="mx-auto max-w-6xl space-y-8">
         <Rise>
-          <div className="flex items-center gap-4">
-            <a
-              href="https://find-and-update.company-information.service.gov.uk"
-              target="_blank"
-              rel="noreferrer"
-              aria-label="Companies House register (opens in a new tab)"
-              className="shrink-0 transition-opacity hover:opacity-80"
-            >
-              <Image
-                src="/sources/companies-house.png"
-                alt=""
-                width={112}
-                height={112}
-                className="h-20 w-auto sm:h-24 md:h-28"
-              />
-            </a>
-            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
-              Companies House
-            </h1>
-          </div>
-          <GroupTabs
-            className="mt-4"
-            tabs={DATA_IMPORTS_TABS}
-            current="/admin/companies-house"
-          />
-          <CompaniesRegisterRail
-            snapshotDate={snapshotDate}
-            sourceMonth={sourceMonth}
-            registerSize={registerSize}
-            staleDays={staleDays}
-            canRefresh={Boolean(process.env.GITHUB_REGISTER_TOKEN?.trim())}
-          />
+          <DataImportsHeader current="/admin/companies-house">
+            <CompaniesRegisterRail
+              snapshotDate={snapshotDate}
+              sourceMonth={sourceMonth}
+              registerSize={registerSize}
+              staleDays={staleDays}
+              canRefresh={Boolean(process.env.GITHUB_REGISTER_TOKEN?.trim())}
+            />
+          </DataImportsHeader>
         </Rise>
 
         <Group>
@@ -180,14 +184,20 @@ export default async function CompaniesHousePage() {
               home={
                 <>
                   {runsResult.error ? (
-                    <InlineAlert
-                      variant="page"
-                      message="Import history could not be loaded. This has been recorded — refresh and try again."
-                    />
+                    <>
+                      <InlineAlert
+                        variant="page"
+                        message="Import history could not be loaded. This has been recorded — refresh and try again."
+                      />
+                      <div className="px-1">
+                        <CompaniesLookupDialog configured={lookupConfigured} />
+                      </div>
+                    </>
                   ) : (
                     <CompaniesRecentRuns
                       runs={runs}
                       action={staged ? <NewImportButton /> : undefined}
+                      secondaryAction={<CompaniesLookupDialog configured={lookupConfigured} />}
                     />
                   )}
 
@@ -195,6 +205,17 @@ export default async function CompaniesHousePage() {
                     <InlineAlert
                       variant="page"
                       message="The register has not been loaded yet, so there is nothing to import from. Refresh it from the link above the history."
+                    />
+                  )}
+
+                  {cicCoverage && cicCoverage.companies > 0 && (
+                    <CicStatementCard
+                      companies={cicCoverage.companies}
+                      checked={cicCoverage.checked}
+                      withStatement={cicCoverage.withStatement}
+                      pending={cicCoverage.pending}
+                      maxBatchSize={MAX_CIC_BACKFILL}
+                      unavailableReason={cicUnavailable}
                     />
                   )}
 
@@ -209,10 +230,6 @@ export default async function CompaniesHousePage() {
                 />
               }
             />
-          </Rise>
-
-          <Rise>
-            <CompaniesHouseImportForm configured={lookupConfigured} />
           </Rise>
         </Group>
       </Stage>

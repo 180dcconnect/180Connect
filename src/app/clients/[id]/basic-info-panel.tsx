@@ -148,12 +148,27 @@ function rowActionLabel(isAdmin: boolean, missing: boolean): string {
   return missing ? "Suggest" : "Suggest edit";
 }
 
+/**
+ * Values a row may need that are neither on the organisation row nor derivable
+ * from it — resolved on the server and passed down.
+ *
+ * There is one today. `natureOfBusiness` is the register's wording for the
+ * organisation's SIC codes, and the wording lives in the companies-register
+ * SQLite file, which a client component cannot open. The codes themselves do
+ * arrive on the organisation row and do flow through Realtime; only their
+ * titles are frozen at render, which is the right trade for a classification
+ * that changes when the registrar reclassifies a company, not when a CAM edits
+ * anything.
+ */
+type FieldExtras = { natureOfBusiness: string | null };
+
 const FIELDS: {
   label: string;
   /** Live value, read from panel state so Realtime updates flow through. */
   read: (
     state: BasicInfoState,
     info: ReturnType<typeof buildBasicInfo>,
+    extras: FieldExtras,
   ) => string | null;
   /** The organisations column (or `mission_statement`) this row edits. */
   column: string | null;
@@ -163,6 +178,10 @@ const FIELDS: {
   options?: readonly { value: string; label: string }[];
   /** Where the value points, if anywhere. Opens in a new tab. */
   link?: (state: BasicInfoState) => string | null;
+  /** Drop the row entirely when it has no value, instead of showing the
+   *  "Not provided" prompt. Only right for a row no viewer could ever fill —
+   *  a prompt to supply something unobtainable is worse than silence. */
+  hideWhenEmpty?: boolean;
 }[] = [
   {
     label: "Registered name",
@@ -173,6 +192,28 @@ const FIELDS: {
     label: "Mission",
     read: (state) => state.missionStatement,
     column: "mission_statement",
+  },
+  {
+    // "Nature of business", not "Mission". A SIC code is the registrar's
+    // industry classification, and 118 of the 413 companies imported so far
+    // share 85590 "Other education n.e.c." — it says which drawer a company
+    // was filed in, not what it set out to do. Labelling it as a mission would
+    // put a classification where a reader expects a purpose statement, which
+    // is the same conflation the data model just stopped making when
+    // mission_statement was moved off LLM output onto register text.
+    //
+    // column: null — register-sourced and not correctable here, so no pencil,
+    // exactly like "Pipeline stage" below.
+    //
+    // hideWhenEmpty because a charity has no company registration and so can
+    // never have SIC codes. Every other row renders "Not provided" as a
+    // prompt — a gap a CAM could go and fill. This one would be a gap nobody
+    // can ever fill, on roughly two thousand of the two and a half thousand
+    // records in the book, which reads as broken rather than as informative.
+    label: "Nature of business",
+    read: (_state, _info, extras) => extras.natureOfBusiness,
+    column: null,
+    hideWhenEmpty: true,
   },
   {
     label: "Type",
@@ -256,6 +297,7 @@ export function BasicInfoPanel({
   organisation,
   missionStatement,
   missionEnrichedAt,
+  sicTitles = [],
   editableFields,
   actorId,
   actorRole,
@@ -265,6 +307,10 @@ export function BasicInfoPanel({
   organisation: OrganisationDetailRow;
   missionStatement: string | null;
   missionEnrichedAt: string | null;
+  /** The organisation's SIC codes with the register's own wording, resolved
+   *  server-side because the register file is not readable from the browser.
+   *  Empty for a charity, and for a deployment whose register file is absent. */
+  sicTitles?: readonly { sic: string; title: string }[];
   /**
    * Fields this viewer may write in place — the active RESTRICTED_EDIT_FIELDS
    * names. Empty for viewers, so they get no pencils.
@@ -373,6 +419,29 @@ export function BasicInfoPanel({
   }, [organisation.id]);
 
   const info = buildBasicInfo(state);
+
+  // Title first, code in parentheses, joined inline rather than one per line:
+  // the shared row renders its value in a single centred flex span, so a "\n"
+  // would collapse to a space and read as a run-on. The code is kept because
+  // it is the registrar's actual identifier — a CAM checking a company against
+  // Companies House searches the code, not the wording — but it goes second,
+  // since "Other education n.e.c." is the part a human reads.
+  const natureOfBusiness =
+    sicTitles.length > 0
+      ? sicTitles
+          // A code the register file cannot name comes back from sicTitles()
+          // with the code as its own title. Printing "85590 (85590)" would be
+          // absurd, so the parenthetical is dropped in that case.
+          .map(({ sic, title }) => (title === sic ? sic : `${title} (${sic})`))
+          .join(" · ")
+      : null;
+  const extras: FieldExtras = { natureOfBusiness };
+
+  // A hideWhenEmpty row with nothing to show is dropped before render rather
+  // than rendered blank — see the flag's definition on FIELDS.
+  const visibleFields = FIELDS.filter(
+    ({ read, hideWhenEmpty }) => !hideWhenEmpty || Boolean(read(state, info, extras)?.trim()),
+  );
   const fieldErrors = fieldErrorsFrom(result);
 
   /** Columns this viewer may write, in row order. */
@@ -404,7 +473,7 @@ export function BasicInfoPanel({
     // Compared against the stored value, not the displayed one: picking
     // "Social enterprise" on a row already holding `social_enterprise` is not a
     // change, and comparing the label would call it one.
-    const current = raw ? raw(state) : read(state, info);
+    const current = raw ? raw(state) : read(state, info, extras);
     if (isUnchanged(column, draft, current)) return [];
     return [{ fieldName: column, value }];
   });
@@ -422,7 +491,7 @@ export function BasicInfoPanel({
       ...current,
       [column]:
         current[column] ??
-        (row?.raw ? row.raw(state) : row?.read(state, info)) ??
+        (row?.raw ? row.raw(state) : row?.read(state, info, extras)) ??
         "",
     }));
   }
@@ -527,9 +596,9 @@ export function BasicInfoPanel({
           field names against short values, and stacking them doubled the card's
           height for no gain. */}
       <dl className="mt-3.5 flex flex-col">
-        {FIELDS.map(({ label, read, column, raw: readRaw, options, link }) => {
-          const rawValue = readRaw ? readRaw(state) : read(state, info);
-          const displayed = read(state, info);
+        {visibleFields.map(({ label, read, column, raw: readRaw, options, link }) => {
+          const rawValue = readRaw ? readRaw(state) : read(state, info, extras);
+          const displayed = read(state, info, extras);
           const href = link ? link(state) : null;
           const display = displayed?.trim() ? displayed.trim() : NOT_PROVIDED;
           const missing = display === NOT_PROVIDED;

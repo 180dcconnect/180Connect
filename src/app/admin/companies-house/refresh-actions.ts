@@ -8,9 +8,13 @@ import { reportError } from "@/lib/error-logging";
  * to rebuild the file.
  *
  * The twin of the charity register's refresh-actions: the rebuild streams ~2GB
- * of CSV and takes about twenty minutes, which no serverless function will
- * hold. So this does not do the work — it dispatches the workflow that does,
- * and reports back on it.
+ * of CSV, which no serverless function will hold. So this does not do the work
+ * — it dispatches the workflow that does, and reports back on it.
+ *
+ * Measured at ~3 minutes on a GitHub runner (2m 15s of build in a 3m 4s job,
+ * September 2026 file). The original estimate said twenty; the runners are
+ * faster than that, and the message below says "a few minutes" rather than a
+ * number so a slow month does not make it a lie.
  *
  * ── What it needs ──
  *
@@ -100,7 +104,7 @@ export async function refreshCompaniesRegister(): Promise<CompaniesRefreshState>
     return {
       kind: "started",
       message:
-        "Refresh started. It takes about twenty minutes, then the app redeploys " +
+        "Refresh started. It usually takes a few minutes, then the app redeploys " +
         "with the new register. You can leave this page.",
     };
   } catch (error) {

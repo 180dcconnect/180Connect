@@ -5,13 +5,16 @@ import type {
   DataSourceAdapter,
   SourceFetchResult,
 } from "../type.ts";
+// Credentials, timeout and retry policy live in their own module because the
+// CIC36 statement job talks to the same account on the same rate limit.
+import {
+  COMPANIES_HOUSE_URL,
+  authenticationHeaders,
+  fetchWithRetry,
+} from "./companies-house-http.ts";
 
-const COMPANIES_HOUSE_URL = "https://api.company-information.service.gov.uk";
 const ITEMS_PER_PAGE = 100;
 const SEARCH_RESULT_CEILING = 1000;
-const REQUEST_TIMEOUT_MS = 15_000;
-const MAX_ATTEMPTS = 3;
-const RETRY_BASE_DELAY_MS = 1_000;
 
 export type CompaniesHouseLookup =
   | { companyNumber: string }
@@ -29,16 +32,6 @@ type CompaniesHouseProfile = {
   [key: string]: unknown;
 };
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function authenticationHeaders(): Record<string, string> {
-  const apiKey = process.env.COMPANIES_HOUSE_API_KEY?.trim();
-  if (!apiKey) throw new Error("COMPANIES_HOUSE_API_KEY is not set.");
-  return {
-    Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
-  };
-}
-
 /** Case/punctuation/spacing-insensitive comparison; never used for display. */
 export function normalizeRegisteredName(value: string): string {
   return value
@@ -48,47 +41,8 @@ export function normalizeRegisteredName(value: string): string {
 }
 
 export function normalizeCompanyNumber(value: string): string {
-  return value.trim().toLocaleUpperCase("en-GB").replace(/\s+/g, "");
-}
-
-async function fetchWithRetry(
-  url: string,
-  headers: Record<string, string>,
-): Promise<Response> {
-  let lastError: unknown;
-
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    try {
-      const response = await fetch(url, {
-        headers,
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
-      const retryable = response.status === 429 || response.status >= 500;
-      if (!retryable || attempt === MAX_ATTEMPTS) return response;
-
-      const retryAfterHeader = response.headers.get("retry-after");
-      const retryAfter = Number(retryAfterHeader);
-      const delay = retryAfterHeader !== null && Number.isFinite(retryAfter)
-        ? retryAfter * 1000
-        : RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
-      console.warn(
-        `[companies_house] ${response.status} on attempt ${attempt}, retrying in ${delay}ms`,
-      );
-      await sleep(delay);
-    } catch (error) {
-      lastError = error;
-      if (attempt === MAX_ATTEMPTS) break;
-      const delay = RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
-      console.warn(
-        `[companies_house] request failed on attempt ${attempt}, retrying in ${delay}ms`,
-      );
-      await sleep(delay);
-    }
-  }
-
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("Companies House request failed.");
+  const trimmed = value.trim().toLocaleUpperCase("en-GB").replace(/\s+/g, "");
+  return /^\d+$/.test(trimmed) ? trimmed.padStart(8, "0") : trimmed;
 }
 
 async function readJson(response: Response): Promise<Record<string, unknown>> {

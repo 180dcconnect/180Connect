@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { MoreHorizontal } from "lucide-react";
 
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/animate-ui/components/radix/dropdown-menu";
 import {
@@ -37,6 +39,23 @@ import { RequestOwnershipForm } from "./request-ownership-form";
  * Menu item → dialog, rather than the forms living inline in the menu: two of
  * the three need a written reason that goes on file, and a reason field inside a
  * dropdown is a reason field people dismiss by clicking away from it.
+ *
+ * "View in inbox" is the exception to all of that: it navigates rather than
+ * acting, so it sits above a separator, away from the three things that change
+ * state. It needs no permission prop — /inbox/[orgId] is gated on `client:view`,
+ * the same permission the record page itself required to render, so anyone who
+ * can read this header can open the thread (app-shell.tsx gates the sidebar's
+ * Inbox link on exactly the same check). The thread page handles an
+ * organisation with no messages on its own, printing "No conversation history
+ * yet", so the item does not need hiding on a record nobody has emailed —
+ * an empty thread is a truthful answer to "what have we said to them", and it
+ * is where you go to find out.
+ *
+ * It is a real `<Link>` inside the item rather than a router push on select,
+ * because a menu row that navigates should support cmd-click and "open in new
+ * tab" like any other link. The styled item cannot take `asChild` — the
+ * primitive consumes it to render its own motion element — so the item drops
+ * its padding and the anchor fills the row instead.
  */
 
 type MenuDialog = "suppress" | "lift" | "ownership" | null;
@@ -70,9 +89,10 @@ export function RecordMenu({
   const showLift = isAdmin && suppressed;
   const showOwnership = canRequestOwnership;
 
-  // No actions available to this viewer on this record — render nothing rather
-  // than a menu that opens onto an empty list.
-  if (!showSuppress && !showLift && !showOwnership) return null;
+  // The menu always has at least "View in inbox", so there is no empty-list case
+  // to guard against any more. `hasActions` only decides whether the separator
+  // under it has anything to separate.
+  const hasActions = showSuppress || showLift || showOwnership;
 
   return (
     <>
@@ -84,6 +104,17 @@ export function RecordMenu({
           <MoreHorizontal aria-hidden="true" className="size-[15px]" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-[13rem]">
+          <DropdownMenuItem className="p-0">
+            <Link
+              className="flex w-full items-center px-2 py-1.5"
+              href={`/inbox/${organisationId}`}
+            >
+              View in inbox
+            </Link>
+          </DropdownMenuItem>
+
+          {hasActions && <DropdownMenuSeparator />}
+
           {showSuppress && (
             <DropdownMenuItem variant="destructive" onSelect={() => setDialog("suppress")}>
               Flag as Do Not Contact

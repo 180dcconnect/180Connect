@@ -102,13 +102,13 @@ export default async function AdminPage() {
         </Section>
 
         <Section label="Platform settings">
-          <Tile href="/admin/score-settings" title="Score settings">
+          <Tile href="/settings/score-settings" title="Score settings">
             Tune how much each parameter counts towards client priority scores.
           </Tile>
-          <Tile href="/admin/data-handling-rules" title="Data handling rules">
+          <Tile href="/settings/data-handling-rules" title="Data handling rules">
             Manage which fields from external sources are stored or excluded.
           </Tile>
-          <Tile href="/admin/restricted-fields" title="Restricted client fields">
+          <Tile href="/settings/restricted-fields" title="Restricted client fields">
             Choose which client fields CAMs must propose corrections to instead of editing.
           </Tile>
         </Section>

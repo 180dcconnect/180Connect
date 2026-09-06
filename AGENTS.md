@@ -22,6 +22,7 @@ npm test                         # unit tests (Node built-in test runner, not Je
 npm run seed                     # load 50 fake organisations into local DB
 npm run seed:clear               # remove all is_seed rows
 npm run register:build           # rebuild the charity register file (CI does this; ~12 min)
+npm run companies-register:build # rebuild the companies register file (CI does this; ~3 min)
 ```
 
 **Pre-push order:** `npm run lint` → `npx tsc --noEmit`
@@ -46,6 +47,13 @@ npm run register:build           # rebuild the charity register file (CI does th
 
 ## Branching & PRs
 
+- **The default branch is `dev`, not `main`.** Tooling that reports `main` as
+  the default — Claude Code's session header included — is reading a stale
+  repository setting someone set by mistake. Every PR targets `dev`; treat any
+  suggestion to PR into `main` as wrong. This matters beyond etiquette:
+  GitHub only exposes a workflow to `workflow_dispatch`, and only fires its
+  `schedule`, once the file exists on the **default** branch — so a workflow
+  that has not reached `dev` cannot be run at all.
 - Branch from `dev`, PR into `dev`. **Never commit straight to `main` or `dev`.**
 - `main` only receives weekly merges from `dev` (PM decision).
 - Branch naming: `feature/`, `fix/`, `chore/` + backlog ID where applicable.
@@ -90,3 +98,4 @@ Two systems, one per side of the login. Read the right one **before** touching U
 - [`docs/ingestion.md`](docs/ingestion.md) — the whole ingestion pipeline: the four stages, every source, what runs on a schedule
 - [`docs/charity-register-import.md`](docs/charity-register-import.md) — how charity imports work; criteria are data (a query over a register file), never code
 - [`docs/charity-import-guide.md`](docs/charity-import-guide.md) — the same thing for CAMs and admins: running an import, what the filters mean, refreshing the register
+- [`docs/companies-register-import.md`](docs/companies-register-import.md) — the Companies House twin: why the file is a filtered ~12% of the register, what the build keeps, what the screen chooses

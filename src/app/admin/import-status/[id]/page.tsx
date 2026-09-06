@@ -49,14 +49,28 @@ export default async function IngestionRunDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  // Fetch the ingestion run
-  const { data: runData, error: runError } = await supabase
-    .from("ingestion_runs")
-    .select(
-      "id, api_source, job_status, records_fetched, records_inserted, records_skipped, records_failed, records_flagged, started_at, completed_at, error_message",
-    )
-    .eq("id", id)
-    .maybeSingle();
+  // The run and its raw records together: both are keyed on the route's `id`,
+  // so the records read never needed the run to come back first. Only the
+  // matched-organisation lookup further down genuinely depends on a result.
+  const [
+    { data: runData, error: runError },
+    { data: rawRecords, error: rawError },
+  ] = await Promise.all([
+    supabase
+      .from("ingestion_runs")
+      .select(
+        "id, api_source, job_status, records_fetched, records_inserted, records_skipped, records_failed, records_flagged, started_at, completed_at, error_message",
+      )
+      .eq("id", id)
+      .maybeSingle(),
+    supabase
+      .from("raw_source_records")
+      .select(
+        "id, ingestion_run_id, record_source, source_record_id, raw_payload, received_at, processing_status, matched_organisation_id, checksum, ingestion_attempt, source_country, source_registry_name, excluded_fields, rule_version_applied",
+      )
+      .eq("ingestion_run_id", id)
+      .order("received_at", { ascending: false }),
+  ]);
 
   if (runError) {
     await reportError(runError, { operation: "admin.import_status.get_run", runId: id });
@@ -69,15 +83,6 @@ export default async function IngestionRunDetailPage({
   const runRow = runData as IngestionRunRow;
   const now = new Date();
   const runView = describeRun(runRow, now);
-
-  // Fetch raw records from this run
-  const { data: rawRecords, error: rawError } = await supabase
-    .from("raw_source_records")
-    .select(
-      "id, ingestion_run_id, record_source, source_record_id, raw_payload, received_at, processing_status, matched_organisation_id, checksum, ingestion_attempt, source_country, source_registry_name, excluded_fields, rule_version_applied",
-    )
-    .eq("ingestion_run_id", id)
-    .order("received_at", { ascending: false });
 
   if (rawError) {
     await reportError(rawError, { operation: "admin.import_status.get_raw_records", runId: id });
@@ -200,29 +205,47 @@ export default async function IngestionRunDetailPage({
         </Rise>
 
         {/* Individual Records Feed */}
-        <Group className="space-y-4">
-          <Rise className="flex items-baseline justify-between gap-4">
-            <div>
-              <h2 className="text-lg font-bold text-foreground">
-                Imported Organisations &amp; Filing Breakdown
-              </h2>
-              <p className="text-xs text-foreground/60">
-                Review organisations retrieved from the official register, check filing status, and view active client profiles in 180Connect.
-              </p>
-            </div>
-            <p className="text-xs font-bold uppercase tracking-wider text-foreground/40 tabular-nums">
-              {recordViews.length} organisation{recordViews.length === 1 ? "" : "s"} listed
-            </p>
-          </Rise>
+        {(() => {
+          const isGrantSource = runRow.api_source === "360giving";
+          return (
+            <Group className="space-y-4">
+              <Rise className="flex items-baseline justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-bold text-foreground">
+                    {isGrantSource
+                      ? "Imported Grants & Client Breakdown"
+                      : "Imported Organisations & Filing Breakdown"}
+                  </h2>
+                  <p className="text-xs text-foreground/60">
+                    {isGrantSource
+                      ? "Review grant records retrieved from 360Giving, verify which clients they were linked to, and view active client profiles in 180Connect."
+                      : "Review organisations retrieved from the official register, check filing status, and view active client profiles in 180Connect."}
+                  </p>
+                </div>
+                <p className="text-xs font-bold uppercase tracking-wider text-foreground/40 tabular-nums">
+                  {recordViews.length}{" "}
+                  {isGrantSource
+                    ? recordViews.length === 1
+                      ? "grant"
+                      : "grants"
+                    : recordViews.length === 1
+                      ? "organisation"
+                      : "organisations"}{" "}
+                  listed
+                </p>
+              </Rise>
 
-          <Rise>
-            <RecordFeed
-              records={recordViews}
-              source={formatSource(runRow.api_source)}
-              recordsSkipped={runRow.records_skipped}
-            />
-          </Rise>
-        </Group>
+              <Rise>
+                <RecordFeed
+                  records={recordViews}
+                  source={formatSource(runRow.api_source)}
+                  recordsSkipped={runRow.records_skipped}
+                  isGrantSource={isGrantSource}
+                />
+              </Rise>
+            </Group>
+          );
+        })()}
       </div>
     </div>
   );

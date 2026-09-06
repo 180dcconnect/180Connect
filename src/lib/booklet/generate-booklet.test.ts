@@ -21,6 +21,7 @@ const INPUT = {
     registered_on: null,
     charity_reporting_status: null,
     charity_activities: null,
+    sic_titles: null,
   },
   enrichment: null,
 };

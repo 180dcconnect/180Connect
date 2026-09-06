@@ -31,6 +31,12 @@ export type OrganisationDetailRow = {
   geographic_reach?: string | null;
   sector?: string | null;
   sub_sector?: string | null;
+  /** Companies House SIC2007 codes, register order. Null for a charity, which
+   *  has no company registration. Codes only — the register's own wording for
+   *  them is resolved server-side from the companies-register file and reaches
+   *  the panel as `sicTitles`, because the file is not readable from a client
+   *  component. */
+  sic_codes?: string[] | null;
   created_at?: string;
 };
 

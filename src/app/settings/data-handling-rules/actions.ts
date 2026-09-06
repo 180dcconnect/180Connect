@@ -76,7 +76,7 @@ export async function loadRules(): Promise<{
   error?: string;
 }> {
   const authorization = await getCurrentActor("user:manage", {
-    route: "/admin/data-handling-rules",
+    route: "/settings/data-handling-rules",
   });
   if (!authorization.ok) {
     return { rules: [], version: 0, error: "Not authorised." };
@@ -134,7 +134,7 @@ export async function loadFilterActivity(): Promise<FilterActivity> {
   };
 
   const authorization = await getCurrentActor("user:manage", {
-    route: "/admin/data-handling-rules",
+    route: "/settings/data-handling-rules",
   });
   if (!authorization.ok) return { ...empty, error: "Not authorised." };
 
@@ -185,7 +185,7 @@ export async function loadFilterActivity(): Promise<FilterActivity> {
 
 export async function createRule(formData: FormData): Promise<ActionResult> {
   const authorization = await getCurrentActor("user:manage", {
-    route: "/admin/data-handling-rules",
+    route: "/settings/data-handling-rules",
   });
   if (!authorization.ok) {
     return { ok: false, error: "Not authorised." };
@@ -228,7 +228,7 @@ export async function toggleRuleActive(
   reason?: string,
 ): Promise<ActionResult> {
   const authorization = await getCurrentActor("user:manage", {
-    route: "/admin/data-handling-rules",
+    route: "/settings/data-handling-rules",
   });
   if (!authorization.ok) {
     return { ok: false, error: "Not authorised." };

@@ -89,6 +89,16 @@ const COUNT_EXPLANATIONS: Record<string, string> = {
 
 export type RunDayGroup = { key: string; label: string; events: RunView[] };
 
+function formatOrdinalDate(label: string): string {
+  return label.replace(/^(\d+)/, (match) => {
+    const n = parseInt(match, 10);
+    const s = ["th", "st", "nd", "rd"];
+    const v = n % 100;
+    const suffix = s[(v - 20) % 10] || s[v] || s[0];
+    return `${n}${suffix}`;
+  });
+}
+
 export function ImportFeed({ groups }: { groups: RunDayGroup[] }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const reduceMotion = useReducedMotion();
@@ -101,11 +111,11 @@ export function ImportFeed({ groups }: { groups: RunDayGroup[] }) {
     <div className="space-y-8">
       {groups.map((group) => (
         <section key={group.key} className="space-y-3">
-          <div className="flex items-baseline justify-between gap-4 px-1">
-            <h2 className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-              {group.label}
+          <div className="flex items-baseline justify-between gap-4 px-1 pb-1">
+            <h2 className="font-body text-lg sm:text-xl font-bold tracking-tight text-foreground">
+              {formatOrdinalDate(group.label)}
             </h2>
-            <p className="text-[11px] font-bold uppercase tracking-[0.12em] tabular-nums text-foreground/25">
+            <p className="font-body text-xs font-semibold tabular-nums text-foreground/45">
               {group.events.length} run{group.events.length === 1 ? "" : "s"}
             </p>
           </div>
@@ -184,9 +194,14 @@ function RunRow({
                   {run.source}
                 </span>
                 <StatusBadge status={run.status} />
+                {run.triggerLabel && (
+                  <span className="rounded-[4px] bg-black/[0.04] px-1.5 py-0.5 text-[10.5px] font-medium tracking-wide text-foreground/55">
+                    {run.triggerLabel}
+                  </span>
+                )}
               </span>
               <span
-                className="shrink-0 whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.08em] tabular-nums text-foreground/35 sm:hidden"
+                className="shrink-0 whitespace-nowrap font-body text-xs font-semibold tabular-nums text-foreground/45 sm:hidden"
                 title={run.startedExact}
               >
                 {run.startedRelative}
@@ -223,7 +238,7 @@ function RunRow({
               <ArrowRight className="h-3 w-3" />
             </Link>
             <span
-              className="hidden text-right text-[11px] font-bold uppercase tracking-[0.08em] tabular-nums text-foreground/35 sm:block"
+              className="hidden text-right font-body text-xs font-semibold tabular-nums text-foreground/45 sm:block"
               title={run.startedExact}
             >
               {run.startedRelative}
@@ -250,8 +265,18 @@ function RunRow({
               className="overflow-hidden"
             >
               <div className="border-t border-black/[0.05] bg-black/[0.015] px-4 py-4 sm:px-5 sm:pl-[4.25rem]">
-                <dl className="grid gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+                <dl className="grid gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-5">
                   <Field label="Source" value={run.source} />
+                  <Field
+                    label="Trigger"
+                    value={
+                      run.triggerLabel === "Manual"
+                        ? "Manual import"
+                        : run.triggerLabel === "Scheduled"
+                          ? "Scheduled run"
+                          : "Standard"
+                    }
+                  />
                   <Field label="Started" value={run.startedExact} />
                   <Field label="Finished" value={run.finishedExact ?? "Still running"} />
                   <Field label="Took" value={run.duration} />
@@ -308,7 +333,7 @@ function RunRow({
                   </div>
                   <Link
                     href={`/admin/import-status/${run.id}`}
-                    className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-xs font-bold text-white hover:bg-brand-hover transition-colors shadow-2xs"
+                    className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-lead px-3.5 py-2 text-xs font-bold text-white hover:bg-lead-hover transition-colors shadow-2xs"
                   >
                     <span>View All Records in This Run</span>
                     <ExternalLink className="h-3.5 w-3.5" />

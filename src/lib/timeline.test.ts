@@ -12,6 +12,7 @@ import {
   buildReplyReceivedEntry,
   buildStatusChangedEntry,
   buildTimeline,
+  collectReferencedUserIds,
   type AuditRow,
   type NoteRow,
   type OutreachMessageRow,
@@ -279,6 +280,57 @@ describe("buildOwnershipReassignedEntry", () => {
       NAMES,
     );
     assert.equal(entry.handover?.reason, "No reason given");
+  });
+});
+
+describe("collectReferencedUserIds", () => {
+  it("always includes the actor", () => {
+    const ids = collectReferencedUserIds([auditRow({ actor_user_id: CAM_A })]);
+    assert.deepEqual([...ids], [CAM_A]);
+  });
+
+  it("includes detail.from/detail.to for ownership_reassigned, which are user ids", () => {
+    const ids = collectReferencedUserIds([
+      auditRow({
+        actor_user_id: "admin-1",
+        action: "ownership_reassigned",
+        detail: { from: CAM_A, to: CAM_B },
+      }),
+    ]);
+    assert.deepEqual([...ids].sort(), ["admin-1", CAM_A, CAM_B].sort());
+  });
+
+  it("does not treat status_changed's from/to as user ids — they are pipeline-status tokens", () => {
+    const ids = collectReferencedUserIds([
+      auditRow({
+        actor_user_id: CAM_A,
+        action: "status_changed",
+        detail: { from: "not_contacted", to: "initial_outreach_sent" },
+      }),
+    ]);
+    assert.deepEqual([...ids], [CAM_A]);
+  });
+
+  it("does not treat edit_suggestion_approved/rejected's from/to as user ids — they are field values", () => {
+    const ids = collectReferencedUserIds([
+      auditRow({
+        actor_user_id: CAM_A,
+        action: "edit_suggestion_approved",
+        detail: { field: "website", from: "old.example.org", to: "new.example.org", requested_by: CAM_B },
+      }),
+    ]);
+    assert.deepEqual([...ids].sort(), [CAM_A, CAM_B].sort());
+  });
+
+  it("includes requested_by regardless of action, since it is always a user id", () => {
+    const ids = collectReferencedUserIds([
+      auditRow({ actor_user_id: null, action: "edit_suggestion_rejected", detail: { requested_by: CAM_B } }),
+    ]);
+    assert.deepEqual([...ids], [CAM_B]);
+  });
+
+  it("returns an empty set for no rows", () => {
+    assert.deepEqual([...collectReferencedUserIds([])], []);
   });
 });
 

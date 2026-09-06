@@ -7,6 +7,7 @@ import {
   EmailReviewPanel,
   type EmailReviewDirtyState,
 } from "@/components/outreach/email-review-panel";
+import type { Attachment } from "@/lib/attachments";
 import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
 import { SectionCard } from "./section-card";
@@ -33,17 +34,6 @@ const STATUS_MESSAGES = [
   "Drafting the email…",
   "Polishing the subject line…",
 ];
-
-/**
- * F126: `datetime-local` inputs speak wall-clock time in the viewer's timezone,
- * but `toISOString()` speaks UTC — using it for the picker's `min` offset the
- * earliest choosable time by the viewer's UTC offset. This renders a Date in
- * the input's own local format instead.
- */
-function localDatetimeLocal(date: Date): string {
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
-}
 
 const EMAIL_LENGTH_LABELS: Record<EmailLength, string> = {
   short: "Short",
@@ -121,6 +111,7 @@ export function ComposeButton({
   hasSavedBooklet = false,
   historyHref,
   existingDraft = null,
+  clientAttachments = [],
 }: {
   blocked: boolean;
   ownershipBlocked?: boolean;
@@ -130,6 +121,7 @@ export function ComposeButton({
   hasSavedBooklet?: boolean;
   historyHref?: string;
   existingDraft?: ExistingDraft | null;
+  clientAttachments?: readonly Attachment[];
 }) {
   const [draft, setDraft] = useState<Draft | null>(
     existingDraft ? { ...existingDraft, sizeTemplate: undefined } : null,
@@ -411,6 +403,7 @@ export function ComposeButton({
            un-ticks the approval box. */
         <EmailReviewPanel
           className="mt-5"
+          clientAttachments={clientAttachments}
           description="Saved as a draft. Review and edit it, then approve below to send it from the branch mailbox."
           draft={draft}
           heading="Review generated draft"

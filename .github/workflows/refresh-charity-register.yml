@@ -51,12 +51,35 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # node:sqlite is built in from Node 22 and stable in 24, which is the
-          # version the Vercel project runs. No native module to compile.
+          # node:sqlite is built in from Node 22 and available without a flag
+          # from 23, which is why this is 24 rather than the 22 the test
+          # workflow uses. It also matches the Vercel project's runtime.
           node-version: "24"
+          cache: npm
+
+      # The build imports fflate to read the regulator's zip archives, so the
+      # dependencies have to be installed first. `npm ci` does not run
+      # `prebuild`, so this does not try to fetch the register it is about to
+      # build.
+      - run: npm ci
 
       - name: Build the register
         run: npm run register:build -- --out data/register.sqlite
+
+      - name: Check the file is plausible
+        # A build that produced something far too small means a truncated or
+        # partly-failed extract read. The asset ships straight to production, so
+        # it is worth refusing here rather than publishing a register that opens
+        # fine and quietly answers with a fraction of the charities. 179MB is the
+        # size measured on 2026-09-03; 100MB is a generous floor beneath it.
+        run: |
+          SIZE=$(stat -c%s data/register.sqlite)
+          MB=$((SIZE / 1048576))
+          echo "Register is ${MB} MB."
+          if [ "$MB" -lt 100 ]; then
+            echo "::error::Register is only ${MB} MB — expected ~180 MB. Refusing to publish."
+            exit 1
+          fi
 
       - name: Summarise
         env:

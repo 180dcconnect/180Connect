@@ -111,6 +111,9 @@ export default async function AdminPage() {
           <Tile href="/settings/restricted-fields" title="Restricted client fields">
             Choose which client fields CAMs must propose corrections to instead of editing.
           </Tile>
+          <Tile href="/admin/sending-limits" title="Outreach sending limit">
+            Set the branch mailbox&apos;s daily outreach sending cap.
+          </Tile>
         </Section>
 
         <Section label="Oversight & intelligence">

@@ -134,6 +134,30 @@ export type AuditRow = {
   created_at: string;
 };
 
+/**
+ * Which user ids the caller needs names for, so it can fetch them in one
+ * batch. detail.from/detail.to are only ever user ids for
+ * ownership_reassigned (buildOwnershipReassignedEntry looks them up below) —
+ * for status_changed they are pipeline-status tokens (formatOutreachStatus
+ * renders those directly) and for edit_suggestion_approved/rejected they are
+ * the field's own before/after values, arbitrary text, never a user
+ * reference. Treating either as a uuid breaks the `users` lookup outright
+ * (invalid input syntax for type uuid) the moment a client's history
+ * includes a status change or an edit decision.
+ */
+export function collectReferencedUserIds(rows: readonly AuditRow[]): Set<string> {
+  const ids = new Set<string>();
+  for (const row of rows) {
+    if (row.actor_user_id) ids.add(row.actor_user_id);
+    if (row.action === "ownership_reassigned") {
+      if (typeof row.detail.from === "string") ids.add(row.detail.from);
+      if (typeof row.detail.to === "string") ids.add(row.detail.to);
+    }
+    if (typeof row.detail.requested_by === "string") ids.add(row.detail.requested_by);
+  }
+  return ids;
+}
+
 /** `id` may be a real user id, or null (e.g. a "released" ownership's `to`). */
 function resolveName(id: string | null, names: ReadonlyMap<string, string | null>): string {
   if (!id) return UNKNOWN_ACTOR;

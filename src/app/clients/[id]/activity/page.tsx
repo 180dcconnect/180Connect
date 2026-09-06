@@ -2,7 +2,7 @@ import { History } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
-import { buildTimeline, type AuditRow, type NoteRow as TimelineNoteRow, type OutreachMessageRow as TimelineOutreachRow, type ReplyEventRow } from "@/lib/timeline";
+import { buildTimeline, collectReferencedUserIds, type AuditRow, type NoteRow as TimelineNoteRow, type OutreachMessageRow as TimelineOutreachRow, type ReplyEventRow } from "@/lib/timeline";
 import {
   stageEventsFromAudit,
   type MissionHistoryRow,
@@ -100,15 +100,11 @@ export default async function ClientActivityPage({
    * or a uuid audit_log carries no FK constraint to validate — reads as "A
    * former team member" in @/lib/timeline.ts, never as a raw id or blank.
    */
-  const referencedUserIds = new Set<string>();
-  for (const row of audit.data ?? []) {
-    if (row.actor_user_id) referencedUserIds.add(row.actor_user_id);
-    const detail = row.detail && typeof row.detail === "object" ? (row.detail as Record<string, unknown>) : null;
-    for (const key of ["from", "to", "requested_by"] as const) {
-      const value = detail?.[key];
-      if (typeof value === "string") referencedUserIds.add(value);
-    }
-  }
+  // See collectReferencedUserIds (@/lib/timeline.ts) for why this cannot treat
+  // every detail.from/detail.to as a user id: for status_changed they are
+  // pipeline-status tokens, and passing one to the uuid `users.id` filter fails
+  // the whole names lookup.
+  const referencedUserIds = collectReferencedUserIds((audit.data ?? []) as AuditRow[]);
 
   const timelineNames = new Map<string, string | null>();
   if (referencedUserIds.size > 0) {

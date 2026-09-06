@@ -71,6 +71,12 @@ import {
 } from "@/lib/onboarding";
 import { FeedbackPrompt } from "@/components/feedback-prompt";
 import { shouldPromptFeedback } from "@/lib/feedback";
+import {
+  formatResponseTime,
+  summariseTrackedReplies,
+  type ReplyTrackingRow,
+} from "@/lib/reply-analytics";
+import { StatCard } from "@/components/stat-card";
 
 /**
  * F021 — first screen after login. The sidebar (AppShell/F030) already wraps this
@@ -120,6 +126,7 @@ export default async function DashboardPage({
   let teamActivities: FormattedTeamActivity[] = [];
   let recentUpdates: FormattedRecentUpdate[] = [];
   let adminCounts: AdminQueueCounts | null = null;
+  let trackedReplies: ReplyTrackingRow[] = [];
   let loadFailed = false;
 
   // F210 — its own 12-month window, wider than the Performance section's 90
@@ -189,6 +196,20 @@ export default async function DashboardPage({
       return { data: all, error: null };
     }
 
+    // Every reply, for the turnaround summary — ordered so the pages are
+    // stable across the loop, and typed through overrideTypes because the
+    // select is narrower than the generated row type.
+    const fetchAllTrackedReplies = () =>
+      fetchAllRows<ReplyTrackingRow>((from, to) =>
+        supabase
+          .from("reply_events")
+          .select("id, organisation_id, response_time_seconds")
+          .order("received_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to)
+          .overrideTypes<ReplyTrackingRow[], { merge: false }>(),
+      );
+
     async function fetchAllOpenSuppressions(): Promise<{
       data: OpenSuppression[] | null;
       error: { message: string } | null;
@@ -236,10 +257,11 @@ export default async function DashboardPage({
       return { data: all, error: null };
     }
 
-    const [organisations, openSuppressions, rawActivity, rawUpdateNotes, rawUpdateMessages, rawUpdateReplies, rawUpdateAudit] =
+    const [organisations, openSuppressions, replyTracking, rawActivity, rawUpdateNotes, rawUpdateMessages, rawUpdateReplies, rawUpdateAudit] =
       await Promise.all([
         fetchAllOrganisations(),
         fetchAllOpenSuppressions(),
+        fetchAllTrackedReplies(),
         supabase.rpc("get_recent_team_activity", { p_limit: 10 }),
         supabase
           .from("notes")
@@ -281,6 +303,12 @@ export default async function DashboardPage({
     if (openSuppressions.error) {
       await reportError(openSuppressions.error, { operation: "dashboard.page_suppressions" });
       loadFailed = true;
+    }
+    if (replyTracking.error) {
+      await reportError(replyTracking.error, { operation: "dashboard.reply_tracking" });
+      loadFailed = true;
+    } else {
+      trackedReplies = replyTracking.data ?? [];
     }
     if (rawActivity.error) {
       await reportError(rawActivity.error, { operation: "dashboard.team_activity" });
@@ -638,7 +666,8 @@ export default async function DashboardPage({
     }
   }
 
-  const metrics = computeDashboardMetrics(rows);
+  const replyTracking = summariseTrackedReplies(trackedReplies, rows);
+  const metrics = computeDashboardMetrics(rows, replyTracking);
   // F160 — silence is measured from the client's last real activity (latest of
   // sent email, received reply, audited status change), aggregated per client by
   // get_clients_last_activity; the thresholds are this CAM's own preferences
@@ -715,6 +744,15 @@ export default async function DashboardPage({
   // F022 — the total is now shown as a curve rather than a single number, so the
   // dashboard says how the pipeline got here, not only where it is.
   const growth = organisationGrowthSeries(rows);
+
+  // The meters read as a share of the whole pipeline, so an empty pipeline has to
+  // draw an empty bar rather than divide by zero.
+  const share = (value: number) =>
+    metrics.totalCharities === 0 ? 0 : value / metrics.totalCharities;
+  const shareCaption = (value: number) =>
+    metrics.totalCharities === 0
+      ? "No records yet"
+      : `${Math.round(share(value) * 100)}% of the pipeline`;
 
   // F206 — this actor's own desk, off the rows already loaded. The strip is
   // suppressed entirely for an actor who owns nothing (a viewer, or a CAM on
@@ -983,6 +1021,38 @@ export default async function DashboardPage({
                     )}
                   </Rise>
                 </div>
+              </div>
+
+              {/* Contacted / responded / converted as counts, under the curve
+                  they break down. Kept beside the new segmentation dial rather
+                  than dropped with the old single-column layout: the response
+                  card is the only place the average turnaround is read. */}
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                <Rise>
+                  <StatCard
+                    label="Contacted"
+                    value={metrics.contacted}
+                    share={share(metrics.contacted)}
+                    caption={shareCaption(metrics.contacted)}
+                  />
+                </Rise>
+                <Rise>
+                  <StatCard
+                    label="Responses received"
+                    value={metrics.responsesReceived}
+                    share={share(metrics.respondingClients)}
+                    caption={`${metrics.respondingClients.toLocaleString()} responding ${metrics.respondingClients === 1 ? "client" : "clients"} · Avg ${formatResponseTime(replyTracking.averageResponseTimeSeconds)}`}
+                  />
+                </Rise>
+                <Rise>
+                  <StatCard
+                    label="Converted"
+                    value={metrics.converted}
+                    share={share(metrics.converted)}
+                    caption={shareCaption(metrics.converted)}
+                    emphasis
+                  />
+                </Rise>
               </div>
             </Group>
 

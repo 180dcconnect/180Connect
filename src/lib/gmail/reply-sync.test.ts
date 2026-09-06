@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { syncGmailReplies } from "./reply-sync.ts";
+import { resolveGmailReplyLookbackDays, syncGmailReplies } from "./reply-sync.ts";
 import type { GmailInboundMessage } from "./reply-message.ts";
 
 const config = { clientId: "client", clientSecret: "secret", refreshToken: "refresh" };
@@ -93,6 +93,13 @@ function fakeAdmin(options: {
 }
 
 describe("syncGmailReplies", () => {
+  it("uses a configurable positive reply lookback with a two-day default", () => {
+    assert.equal(resolveGmailReplyLookbackDays({}), 2);
+    assert.equal(resolveGmailReplyLookbackDays({ GMAIL_REPLY_LOOKBACK_DAYS: "30" }), 30);
+    assert.equal(resolveGmailReplyLookbackDays({ GMAIL_REPLY_LOOKBACK_DAYS: "0" }), 2);
+    assert.equal(resolveGmailReplyLookbackDays({ GMAIL_REPLY_LOOKBACK_DAYS: "not-a-number" }), 2);
+  });
+
   it("captures a reply that matches a sent thread and sender", async () => {
     const { admin, rpcCalls } = fakeAdmin({
       sentRows: [{ target_id: "outreach-1", detail: { organisation_id: "org-1", provider_thread_id: "thread-1", sent_to: "contact@charity.org" } }],
@@ -109,9 +116,9 @@ describe("syncGmailReplies", () => {
     assert.equal(rpcCalls[0].args.p_organisation_id, "org-1");
   });
 
-  it("flags a reply with no matching sent thread for manual review", async () => {
+  it("flags a CRM-related reply that cannot be matched safely for manual review", async () => {
     const { admin, rpcCalls } = fakeAdmin({
-      sentRows: [],
+      sentRows: [{ target_id: "outreach-1", detail: { organisation_id: "org-1", provider_thread_id: "thread-1", sent_to: "another@charity.org" } }],
       rpcResults: { flag_unmatched_gmail_reply: ["review-id-1"] },
     });
     const result = await syncGmailReplies({
@@ -121,6 +128,16 @@ describe("syncGmailReplies", () => {
     assert.deepEqual(result, { scanned: 1, captured: 0, duplicates: 0, ignored: 0, unmatched: 1, failed: 0 });
     assert.equal(rpcCalls[0].name, "flag_unmatched_gmail_reply");
     assert.equal(rpcCalls[0].args.p_sender_email, "contact@charity.org");
+  });
+
+  it("ignores genuine inbox mail that has no connection to CRM outreach", async () => {
+    const { admin, rpcCalls } = fakeAdmin({ sentRows: [] });
+    const result = await syncGmailReplies({
+      admin, config, sender, tokenProvider,
+      fetchImpl: fetchStub({ "gmail-1": inboundMessage() }),
+    });
+    assert.deepEqual(result, { scanned: 1, captured: 0, duplicates: 0, ignored: 1, unmatched: 0, failed: 0 });
+    assert.equal(rpcCalls.length, 0);
   });
 
   it("counts a replayed capture as a duplicate, not a capture", async () => {
@@ -136,7 +153,10 @@ describe("syncGmailReplies", () => {
   });
 
   it("counts a replayed unmatched flag as a duplicate too", async () => {
-    const { admin } = fakeAdmin({ sentRows: [], rpcResults: { flag_unmatched_gmail_reply: [null] } });
+    const { admin } = fakeAdmin({
+      sentRows: [{ target_id: "outreach-1", detail: { organisation_id: "org-1", provider_thread_id: "thread-1", sent_to: "another@charity.org" } }],
+      rpcResults: { flag_unmatched_gmail_reply: [null] },
+    });
     const result = await syncGmailReplies({
       admin, config, sender, tokenProvider,
       fetchImpl: fetchStub({ "gmail-1": inboundMessage() }),

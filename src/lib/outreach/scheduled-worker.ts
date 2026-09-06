@@ -36,11 +36,6 @@ import { resolveEmailSendLimit } from "./send-rate-limit.ts";
  * run without human attention.
  */
 
-/** How long a delivery claim blocks re-delivery. Mirrors the SQL constant
- * public.send_claim_staleness_window() (20260901110000) — short by design: it
- * only has to cover one Gmail round trip plus timeout. */
-const CLAIM_STALENESS_MS = 5 * 60 * 1000;
-
 /** Upper bound per cron invocation; anything still due rolls to the next run. */
 const BATCH_LIMIT = 50;
 
@@ -70,9 +65,17 @@ export type ScheduledOutreachDeps = {
   /** F227: false when the scheduler's fixed-window email quota is exhausted,
    * or the count cannot be verified (fail-closed). */
   underSendLimit(sentByUserId: string): Promise<boolean>;
-  /** Atomically claims a message for delivery. False = cancelled elsewhere,
-   * claimed by another worker, or raced away — never call Gmail on false. */
-  claim(messageId: string, nowIso: string): Promise<boolean>;
+  /**
+   * Atomically claims a message for delivery, via claim_scheduled_outreach_send
+   * (20260913100100). 'daily_limit_reached': F128's branch-wide cap is
+   * exhausted right now — every CAM shares the one branch mailbox, so this is
+   * checked inside the same claim as the per-message lock (splitting the two
+   * into separate calls cannot be made atomic — see that migration's header).
+   * Reported in the run summary, same treatment as the F227 block below.
+   * 'lost_claim': cancelled elsewhere, claimed by another worker, or raced
+   * away — silent, never call Gmail on it. 'claimed': proceed to deliver().
+   */
+  claim(messageId: string, nowIso: string): Promise<"claimed" | "daily_limit_reached" | "lost_claim">;
   deliver(input: { recipient: string; subject: string; text: string; html: string }): Promise<DeliveryOutcome>;
   /** Flips scheduled→sent. False means the flip matched no rows — reported,
    * not retried, since the email may already be out (F123's rule).
@@ -163,8 +166,25 @@ export async function deliverDueScheduledEmails(
     }
 
     // The atomic claim: only one concurrent runner (or a later cron firing
-    // while one is still in flight) gets true for the same message.
-    if (!(await deps.claim(message.id, nowIso))) continue;
+    // while one is still in flight) gets 'claimed' for the same message.
+    // F128: the branch-wide daily cap is enforced inside this same claim,
+    // under a lock that serializes every concurrent claim attempt (this
+    // worker, another run, or a manual send) — see claim_scheduled_
+    // outreach_send's migration header for why the cap check cannot be a
+    // separate call. Same transient treatment as the F227 block above: stays
+    // scheduled, not failed, since the cap resets at midnight UTC and needs
+    // no human attention.
+    const claim = await deps.claim(message.id, nowIso);
+    if (claim === "daily_limit_reached") {
+      logSecurityEvent("outreach.daily_send_limit_reached", { messageId: message.id });
+      await reportError(new Error("Scheduled delivery blocked: the branch-wide daily send limit has been reached."), {
+        operation: "outreach.scheduler.daily_limit_reached",
+        messageId: message.id,
+      });
+      summary.blocked += 1;
+      continue;
+    }
+    if (claim !== "claimed") continue;
 
     const outcome = await deps.deliver({
       recipient: message.recipient,
@@ -216,7 +236,6 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
   const { sendBranchOutreach } = await import("../gmail/branch-sender.ts");
   const admin = createAdminClient();
   if (!admin) throw new Error("Scheduled outreach is not configured.");
-  const staleClaimBefore = new Date(now.getTime() - CLAIM_STALENESS_MS).toISOString();
 
   return deliverDueScheduledEmails(
     {
@@ -292,19 +311,21 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
       },
 
       async claim(messageId, nowIso) {
-        // Conditional on still-scheduled AND unclaimed (or claim gone stale),
-        // like claim_outreach_send's draft equivalent. Zero rows = someone else
-        // won it or the CAM cancelled it between SELECT and here.
-        const { data: claimed, error } = await admin
-          .from("outreach_messages")
-          .update({ send_claimed_at: nowIso })
-          .eq("id", messageId)
-          .eq("send_status", "scheduled")
-          // Quoted per PostgREST or-expression rules — the raw ISO timestamp's
-          // colons would otherwise be read as field/op/value separators.
-          .or(`send_claimed_at.is.null,send_claimed_at.lt.${JSON.stringify(staleClaimBefore)}`)
-          .select("id");
-        return !error && (claimed?.length ?? 0) === 1;
+        // F128/F129: claim_scheduled_outreach_send (20260913100100) folds the
+        // per-message claim (conditional on still-scheduled AND unclaimed, or
+        // claim gone stale — same rule the raw UPDATE this replaces used) and
+        // the branch-wide daily-cap check into one atomic call, under a lock
+        // that serializes every concurrent claim attempt. A network/RPC-level
+        // error fails closed, same as an unresolvable count did before.
+        const { data, error } = await admin.rpc("claim_scheduled_outreach_send", {
+          p_message_id: messageId,
+          p_claimed_at: nowIso,
+        });
+        if (error) {
+          await reportError(error, { operation: "outreach.scheduler.claim", messageId });
+          return "lost_claim";
+        }
+        return data as "claimed" | "daily_limit_reached" | "lost_claim";
       },
 
       async deliver({ recipient, subject, text, html }) {

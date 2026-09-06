@@ -7,6 +7,8 @@ import { SendButton } from "@/components/ui/send-button";
 import { RichTextEmailEditor } from "@/components/rich-text-email-editor";
 import { validateClientEmail } from "@/lib/client-email-validation";
 import { emailHtmlToPlainText, isRichEmailHtml, plainTextToEditorHtml } from "@/lib/outreach/email-html";
+import { AttachmentPicker } from "@/app/clients/[id]/attachment-picker";
+import type { Attachment } from "@/lib/attachments";
 import {
   discardEmailDraft,
   saveEmailDraft,
@@ -92,9 +94,15 @@ export function EmailReviewPanel({
   onDirtyChange,
   onDraftCleared,
   onDraftSaved,
+  clientAttachments = [],
 }: {
   organisationId: string;
   draft: EmailReviewDraft;
+  /**
+   * Files already on the client record, offered for attaching (F217). Empty by
+   * default so a surface with nothing to attach need not pass it.
+   */
+  clientAttachments?: readonly Attachment[];
   heading: string;
   description: string;
   /** Optional line under the description — e.g. the size-tone template used. */
@@ -337,6 +345,12 @@ export function EmailReviewPanel({
           />
         </div>
       </div>
+
+      <AttachmentPicker
+        clientAttachments={clientAttachments}
+        messageId={draft.id}
+        organisationId={organisationId}
+      />
 
       <label className="flex items-start gap-2 text-xs font-semibold text-dim">
         <input

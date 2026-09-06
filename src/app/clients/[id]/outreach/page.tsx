@@ -18,6 +18,11 @@ import {
   resolveEmailSendLimit,
 } from "@/lib/outreach/send-rate-limit";
 import { formatAttachments, type AttachmentRow } from "@/lib/attachments";
+import {
+  averageResponseTime,
+  formatResponseTime,
+  type ReplyTrackingRow,
+} from "@/lib/reply-analytics";
 import { buildNoteList, type NoteRow } from "@/lib/note-history";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 
@@ -139,9 +144,11 @@ export default async function ClientOutreachPage({
       // opens no wider access path.
       supabase
         .from("reply_events")
-        .select("id, outreach_message_id, reply_body, received_at")
+        .select("id, outreach_message_id, reply_body, received_at, response_time_seconds", {
+          count: "exact",
+        })
         .eq("organisation_id", id)
-        .returns<ThreadReplyRow[]>(),
+        .returns<(ThreadReplyRow & Pick<ReplyTrackingRow, "response_time_seconds">)[]>(),
       // F071–F074: notes left against this client.
       supabase
         .from("notes")
@@ -171,6 +178,12 @@ export default async function ClientOutreachPage({
     if (error) await reportError(error, { operation, organisationId: id });
   }
 
+  const isSelf = owner.ownerId === actor.id;
+  // F137: the in-thread control must carry the same gate as the header's Stage
+  // control — RecordHeader's canSetStatus. Same rule, asserted in
+  // reply-status-contract.test.ts so the two cannot drift apart.
+  const canSetStatus = isAdmin || isSelf;
+
   const noteList = buildNoteList((notesResult.data ?? []) as unknown as NoteRow[], {
     id: actor.id,
     role: actor.role,
@@ -191,6 +204,11 @@ export default async function ClientOutreachPage({
     outreachHistory.sent,
     replyResult.data ?? [],
   );
+
+  // How fast this client answers, over the replies that recorded a turnaround.
+  // Null until at least one reply carries response_time_seconds — a client with
+  // replies from before that column existed reads "not available yet", not "0s".
+  const clientAverageResponseTime = averageResponseTime(replyResult.data ?? []);
 
   // F129: the reason comes from the newest SEND_EVENTS 'failed' record per
   // message — two queries, because send_events has no "latest per group" join,
@@ -392,6 +410,7 @@ export default async function ClientOutreachPage({
 
               <Rise>
                 <ComposeButton
+                  clientAttachments={attachments}
                   blocked={suppression.suppressed}
                   ownershipBlocked={!suppression.suppressed && ownershipConflict.hasConflict}
                   historyHref={
@@ -455,6 +474,21 @@ export default async function ClientOutreachPage({
               hint="Sent emails, client replies and everything still unsent."
               icon={<Mail />}
             >
+              {replyResult.error ? (
+                <p className="mt-3 text-sm font-medium text-stop" role="alert">
+                  Reply count could not be loaded. Refresh and try again.
+                </p>
+              ) : (
+                <p className="mt-3 text-sm text-dim">
+                  <span className="font-semibold text-ink">
+                    {(replyResult.count ?? 0).toLocaleString()}
+                  </span>{" "}
+                  {replyResult.count === 1 ? "reply" : "replies"} received
+                  {clientAverageResponseTime !== null
+                    ? ` · Average response ${formatResponseTime(clientAverageResponseTime)}`
+                    : " · Average response not available yet"}
+                </p>
+              )}
               {sendingVolume && (
                 <p
                   className={`mt-3 rounded-inset p-3 text-sm font-medium ${
@@ -476,6 +510,14 @@ export default async function ClientOutreachPage({
                 error={Boolean(outreachResult.error)}
                 thread={emailThread}
                 threadError={Boolean(outreachResult.error || replyResult.error)}
+                statusControl={
+                  canSetStatus
+                    ? {
+                        organisationId: client.id,
+                        currentStatus: client.outreach_status,
+                      }
+                    : undefined
+                }
                 // F136: a note written against a reply is linked to it, so only
                 // someone who may write to the record gets the composer.
                 noteOrganisationId={canEdit ? client.id : undefined}

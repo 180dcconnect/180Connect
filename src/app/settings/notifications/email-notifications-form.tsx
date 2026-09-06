@@ -46,7 +46,8 @@ export function EmailNotificationsForm({
         </h2>
         <p className="text-sm text-foreground/65">
           These arrive in-app either way. Checking a box here also sends an email, so
-          you don&apos;t miss it if you&apos;re not looking at 180Connect.
+          you don&apos;t miss it if you&apos;re not looking at 180Connect. Client replies
+          are on by default — uncheck a box to receive that type in-app only.
         </p>
 
         <div className="space-y-3 pt-2">

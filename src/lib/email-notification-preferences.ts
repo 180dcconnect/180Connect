@@ -8,11 +8,13 @@
  * (AC3), not here — so the default can never drift from what's actually
  * stored for a user who has never touched this setting.
  *
- * The tokens are F174's real producer types (src/lib/gmail/reply-sync.ts /
- * supabase/migrations/20260912170300_notify_on_gmail_reply.sql), not a
- * parallel vocabulary: the settings form stores exactly the
- * `notification_type` value the in-app producer emits, so "email me this
- * type" always lines up with a notification that actually exists.
+ * The token is F174's real producer type (supabase/migrations/
+ * 20260912170300_notify_on_gmail_reply.sql — the reply_events trigger emits
+ * `client_reply_received` for the client's owner), not a parallel
+ * vocabulary: the settings form stores exactly the `notification_type`
+ * value the in-app producer emits, so "email me this type" always lines up
+ * with a notification that actually exists. The email consumer lives in
+ * src/lib/gmail/reply-sync.ts via src/lib/notification-email.ts.
  */
 
 export type EmailNotificationTypeOption = {

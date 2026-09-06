@@ -20,6 +20,7 @@ import {
   markNotificationRead,
 } from "@/lib/notifications-actions";
 import {
+  notificationCategory,
   notificationPriority,
   notificationRelativeTime,
   type NotificationItem,
@@ -221,11 +222,14 @@ export function NotificationBell({ collapsed }: { collapsed: boolean }) {
           ) : (
             items.map((item) => {
               const unread = item.readAt === null;
-              // F174 AC3: a reply notification reads as urgent at a glance —
-              // destructive-red dot instead of the usual blue, plus its own
-              // small tag — not just its position in the (priority-sorted)
-              // list.
+              // F174 AC3 + F176 AC3: urgency and category are two
+              // orthogonal axes. A reply notification reads as urgent
+              // (destructive-red dot + "Reply" tag); a team-activity digest
+              // reads as low-stakes background (muted gray dot + "Team"
+              // tag). Priority wins for the dot when both could apply, but
+              // the two sets never overlap in practice.
               const highPriority = notificationPriority(item.notificationType) === "high";
+              const isTeamActivity = notificationCategory(item.notificationType) === "team_activity";
               return (
                 <button
                   key={item.id}
@@ -239,7 +243,11 @@ export function NotificationBell({ collapsed }: { collapsed: boolean }) {
                     {unread && (
                       <span
                         className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
-                          highPriority ? "bg-red-600" : "bg-blue-600"
+                          highPriority
+                            ? "bg-red-600"
+                            : isTeamActivity
+                              ? "bg-black/25"
+                              : "bg-blue-600"
                         }`}
                         aria-hidden="true"
                       />
@@ -248,6 +256,11 @@ export function NotificationBell({ collapsed }: { collapsed: boolean }) {
                     {highPriority && (
                       <span className="mt-0.5 shrink-0 rounded-full bg-red-600/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-700">
                         Reply
+                      </span>
+                    )}
+                    {isTeamActivity && (
+                      <span className="mt-0.5 shrink-0 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-black/45">
+                        Team
                       </span>
                     )}
                   </p>

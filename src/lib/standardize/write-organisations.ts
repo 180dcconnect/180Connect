@@ -306,7 +306,7 @@ export interface OrganisationWriteStore {
   /**
    * Inserts the standardised organisation AND settles the originating raw
    * record as 'validated' with its link — in one transaction, via the
-   * link_raw_record_to_organisation RPC (20260913190000). These two writes used
+   * link_raw_record_to_organisation RPC (20260922101000). These two writes used
    * to be separate calls (insertOrganisation + markRecordStatus), so a failure
    * between them left a client with no linked register — a provenance gap the
    * audit has to catch after the fact. Atomic here means it cannot happen at
@@ -404,13 +404,13 @@ export interface OrganisationWriteStore {
    * Financials tab instead of just showing one. `charityActivities` is the
    * charity's own filed description of its work — the only mission text most
    * records will ever have, since ENRICHMENT_RESULTS is written by an enrichment
-   * worker that has barely run (see 20260916130000_add_charity_activities.sql).
+   * worker that has barely run (see 20260922121000_add_charity_activities.sql).
    *
    * `sicCodes` is the companies-side equivalent of that last one, and the only
    * descriptive text either register publishes about a company — a
    * classification rather than a purpose statement, which is why it is
    * surfaced as "nature of business" and never as a mission
-   * (20260919090000_add_sic_codes.sql).
+   * (20260922130000_add_sic_codes.sql).
    *
    * Written after the insert rather than inside it because
    * link_raw_record_to_organisation takes a fixed column list; widening that RPC
@@ -1548,7 +1548,7 @@ export async function promotePendingCharityCommissionBulkRecords(
  * Note what this does *not* fix. flagIfDuplicate short-circuits above, so a
  * company already on the client list never reaches here and never gains its
  * codes from a re-import. Filling those in is the backfill in
- * 20260919090000_add_sic_codes.sql, which reads the same payloads.
+ * 20260922130000_add_sic_codes.sql, which reads the same payloads.
  */
 async function annotateCompanyOrReport(
   store: OrganisationWriteStore,

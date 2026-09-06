@@ -33,7 +33,7 @@ export const DATA_SOURCES = [
   // API source because the payload shape differs and dedup is keyed on
   // (record_source, source_record_id) — sharing a value would let a bulk row and
   // an API row for the same charity overwrite each other. See
-  // supabase/migrations/20260913160000_add_charity_commission_bulk_data_source.sql.
+  // supabase/migrations/20260922094000_add_charity_commission_bulk_data_source.sql.
   "charity_commission_bulk",
 ] as const;
 

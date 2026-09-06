@@ -1665,7 +1665,7 @@ describe("promotePendingCharityCommissionBulkRecords", () => {
   // The register's own description of the charity's work. Before this it was
   // carried the whole way through the pipeline and dropped here, leaving the
   // booklet and email prompts with no mission text for any imported charity —
-  // see 20260916130000_add_charity_activities.sql.
+  // see 20260922121000_add_charity_activities.sql.
   it("writes the charity's filed activities description", async () => {
     const { store, annotations } = fakeStore({
       async loadPendingRecords() {
@@ -1852,7 +1852,7 @@ describe("promotePendingCharityCommissionBulkRecords", () => {
 });
 
 // ---------------------------------------------------------------------------
-// SIC codes (20260919090000_add_sic_codes.sql). Companies arrive with no
+// SIC codes (20260922130000_add_sic_codes.sql). Companies arrive with no
 // descriptive text at all, and SIC is the only thing either register publishes
 // about one. The codes already travelled the whole pipeline and were dropped at
 // standardize; these pin that they now land on the organisation.

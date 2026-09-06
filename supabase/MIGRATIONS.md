@@ -55,7 +55,7 @@ authoritative per-table rules live in the **Security Controls Register**,
    each call probes `users_pkey`. Wrapping it forces an `InitPlan` evaluated once per
    statement. Measured on staging, the client-list query went from **629ms to 39ms**
    on this change alone — same rows, same policies, no application code touched
-   (`20260918090000_hoist_rls_helper_initplans.sql`).
+   (`20260922123000_hoist_rls_helper_initplans.sql`).
 
    Helpers that **take an argument** — `app.owns_organisation(uuid)` and friends — are
    genuinely row-correlated: leave those unwrapped. Same for a column comparison like

@@ -18,7 +18,7 @@ import { SectionCard } from "./section-card";
  * earlier version filled the card out to three registers with placeholder rows
  * while ingestion caught up; now that real provenance exists end to end, the
  * placeholders are gone, so an empty card means a genuine provenance gap —
- * which is the signal the ingestion-gap audit (20260913170000) watches for.
+ * which is the signal the ingestion-gap audit (20260922095000) watches for.
  */
 
 /**

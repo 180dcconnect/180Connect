@@ -1,7 +1,7 @@
 // Where one client's income sits among the clients we hold in the same sector.
 //
 // The quantiles themselves are computed in Postgres by
-// `get_sector_income_distribution` (migration 20260916090000): picking one
+// `get_sector_income_distribution` (migration 20260922113000): picking one
 // income per peer is a max-per-group, PostgREST cannot express DISTINCT ON, and
 // doing it in the app meant shipping ~1,750 rows across the wire on every visit
 // to the tab to produce six numbers. What stays here is the part that is a

@@ -61,7 +61,7 @@ const ENUM_FIELD_VALUES: Record<string, readonly string[]> = {
  * The admin's side of the inline editor: several fields, applied directly.
  *
  * An admin's edit is not a proposal, so there is no queue — but the write goes
- * through `apply_admin_field_edits` (20260914110000), a SECURITY DEFINER RPC
+ * through `apply_admin_field_edits` (20260922104000), a SECURITY DEFINER RPC
  * that applies the columns, records FIELD_SOURCES provenance (source='manual',
  * recorded_by=this admin — what the "What came from where" card and the Data
  * Sources card's Manual Input row read) and writes one audit_log row, all in

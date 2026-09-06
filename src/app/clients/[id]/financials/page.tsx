@@ -83,7 +83,7 @@ type GrantRowQuery = Pick<
 /**
  * The same-sector income distribution, in one round trip.
  *
- * All the work is `get_sector_income_distribution` (migration 20260916090000):
+ * All the work is `get_sector_income_distribution` (migration 20260922113000):
  * picking one income per peer is a max-per-group, PostgREST cannot express
  * DISTINCT ON, and the version of this that did the reduction in Node pulled
  * every same-sector organisation id and then every financial_periods row behind

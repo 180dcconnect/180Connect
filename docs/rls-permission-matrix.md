@@ -504,7 +504,7 @@ clock F160 measures silence against. Owner-scoped unless admin, matching the
 Needs Attention panel it feeds; ids the caller cannot access are dropped
 silently rather than erroring. EXECUTE granted to `authenticated` only.
 
-**Sector income distribution for the Financials peer strip (`20260916090000`).**
+**Sector income distribution for the Financials peer strip (`20260922113000`).**
 `get_sector_income_distribution(text, uuid, numeric)` is a read-only
 aggregation: for one sector, the peer count, the five-number summary
 (min/p25/median/p75/max) of each peer client's latest filed income, and how many
@@ -1076,9 +1076,9 @@ which source "owns" a field's current value.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `FIELD_SOURCES` | all active roles (widened 20260914110000, was admin only) | — (`service_role` only) | — (`service_role` only, via same RPC) | — (no grant) |
+| `FIELD_SOURCES` | all active roles (widened 20260922104000, was admin only) | — (`service_role` only) | — (`service_role` only, via same RPC) | — (no grant) |
 
-SELECT was admin-only until 20260914110000 — same reasoning as §3.16 originally
+SELECT was admin-only until 20260922104000 — same reasoning as §3.16 originally
 — which source produced a field's value is not CAM-visible data. The widening
 above reverses that call with sign-off; §3.16 (FIELD_DISCREPANCIES) keeps its
 admin-only read — conflict review is still an admin queue. There is one write path, `record_field_source`
@@ -1105,7 +1105,7 @@ superseded, newest-first per field, with `recorded_by` resolved to a name —
 satisfies AC1 (current source per field) and AC2 (conflicting values and their
 sources both visible) from a single query.
 
-**20260914110000 — widened, and the admin-only read call reversed.** Three
+**20260922104000 — widened, and the admin-only read call reversed.** Three
 write paths still recorded no provenance after F044 landed: admin direct edits,
 approved edit suggestions, and approved manual entries (the last left
 hand-created records with an empty provenance story — the gap the provenance

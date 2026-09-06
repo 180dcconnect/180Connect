@@ -237,7 +237,7 @@ unconstrained text.
 
 The discovery adapter (`createCompaniesHouseDiscoveryAdapter`), its weekly
 cron (`companies_house_discovery_weekly`, unscheduled by
-`20260917090000_retire_companies_house_discovery_cron.sql`), the
+`20260922122000_retire_companies_house_discovery_cron.sql`), the
 `/api/cron/companies-house-import` route, the zero-input import button and
 the discovery digest email. The tier constants in
 `companies-house-criteria-config.ts` stay — reclassified from "discovery
@@ -255,7 +255,7 @@ mission statement in the sense the charity side has one.
 The registrar's industry classification, five-digit SIC2007 only. Already
 travelled the whole pipeline: `import.ts` writes them into the payload as
 `sic_codes`, the live API returns the same field, and the standardiser read them
-for F047 tiering and then dropped them. `20260919090000_add_sic_codes.sql` gives
+for F047 tiering and then dropped them. `20260922130000_add_sic_codes.sql` gives
 them a column and backfills from the stored payloads, which is required rather
 than optional — `flagIfDuplicate` short-circuits a company already on the client
 list before the annotate step, so re-importing never fills this in.

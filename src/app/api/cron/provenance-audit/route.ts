@@ -3,7 +3,7 @@ import { reportError } from "@/lib/error-logging";
 
 /**
  * Daily provenance-gap audit, triggered by pg_cron via net.http_post
- * (supabase/migrations/20260913170000_create_provenance_audit_rpc.sql + the
+ * (supabase/migrations/20260922095000_create_provenance_audit_rpc.sql + the
  * paired schedule migration). Flags API-created clients with no contributing
  * register — a Data Sources card with nothing on it — and records the flagged
  * set in audit_log when it changes. Same CRON_SECRET check as every other cron

@@ -6,7 +6,7 @@
  *
  * There was a second digest here, for the weekly API discovery run. That job was
  * retired once the staged register covered it
- * (supabase/migrations/20260915110000_retire_charity_commission_discovery_cron.sql),
+ * (supabase/migrations/20260922110000_retire_charity_commission_discovery_cron.sql),
  * and its digest went with it rather than being left as a function nothing calls.
  * Imports are now deliberate acts on /admin/charity-commission, so they report
  * their result on screen to the person who ran them — an email telling an admin

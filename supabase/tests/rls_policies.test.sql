@@ -5320,7 +5320,7 @@ $$;
 
 -- ---------------------------------------------------------------------------
 -- The `(select ...)` wrapper on the zero-argument role helpers
--- (20260918090000_hoist_rls_helper_initplans).
+-- (20260922123000_hoist_rls_helper_initplans).
 --
 -- This is the one suite here that asserts on policy *text* rather than only on
 -- behaviour, and deliberately so. The wrapper is invisible from the outside:
@@ -5340,7 +5340,7 @@ $$;
 -- which is what proves the rewrite changed no access.
 --
 -- Covers every policy in `public` — all 97 at the time of writing, across the
--- two migrations 20260918090000 and 20260918091000. A new table that ships a
+-- two migrations 20260922123000 and 20260922124000. A new table that ships a
 -- bare helper call fails here, on its own migration, rather than becoming the
 -- next slow page nobody can explain.
 -- ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@ import { runCharityCommissionFinancialRefresh } from "@/lib/ingestion/sources/ch
 
 /**
  * Weekly Charity Commission financial refresh, triggered by pg_cron via
- * net.http_post (supabase/migrations/20260913140000_schedule_charity_commission_financials_cron.sql).
+ * net.http_post (supabase/migrations/20260922092000_schedule_charity_commission_financials_cron.sql).
  *
  * Keeps FINANCIAL_PERIODS current for charities we already hold — the discovery
  * job only ever sees newly registered charities, which by definition have filed

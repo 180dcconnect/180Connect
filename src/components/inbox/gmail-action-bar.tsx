@@ -13,8 +13,6 @@ import {
   ChevronRight,
   Search,
   X,
-  Columns2,
-  List,
 } from "lucide-react";
 
 export type SelectionState = "none" | "some" | "all";
@@ -37,8 +35,6 @@ export type GmailActionBarProps = {
   onToggleStarSelected: () => void;
   onDeleteSelected: () => void;
   onArchiveSelected: () => void;
-  isSplitView: boolean;
-  onToggleSplitView: () => void;
   pageIndex: number;
   pageSize: number;
   onPrevPage: () => void;
@@ -63,8 +59,6 @@ export function GmailActionBar({
   onToggleStarSelected,
   onDeleteSelected,
   onArchiveSelected,
-  isSplitView,
-  onToggleSplitView,
   pageIndex,
   pageSize,
   onPrevPage,
@@ -260,7 +254,7 @@ export function GmailActionBar({
           ) : null}
         </div>
 
-        {/* Right Toolbar: Pagination & Split View Toggle */}
+        {/* Right Toolbar: Pagination */}
         <div className="flex items-center gap-2 text-xs text-slate-600">
           <span className="font-medium text-slate-500">
             {startRange}–{endRange} of {totalCount}
@@ -286,32 +280,6 @@ export function GmailActionBar({
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>
-
-          <div className="h-4 w-px bg-slate-200 mx-1" />
-
-          {/* Split View Toggle */}
-          <button
-            type="button"
-            onClick={onToggleSplitView}
-            title={isSplitView ? "Switch to List View" : "Switch to Split Reading Pane"}
-            className={`p-1.5 rounded-lg border transition-colors cursor-pointer flex items-center gap-1 text-xs font-medium ${
-              isSplitView
-                ? "bg-blue-50 border-blue-200 text-blue-700"
-                : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
-            }`}
-          >
-            {isSplitView ? (
-              <>
-                <Columns2 className="h-3.5 w-3.5" />
-                <span>Split Pane</span>
-              </>
-            ) : (
-              <>
-                <List className="h-3.5 w-3.5" />
-                <span>List View</span>
-              </>
-            )}
-          </button>
         </div>
       </div>
     </div>

@@ -79,14 +79,14 @@ export function RecordTabs({
       <Liquid
         blur={5}
         contrast={18}
-        fill="var(--lead)"
-        shadow="0 2px 8px rgba(35, 64, 122, 0.25)"
-        className="relative inline-flex max-w-full items-center overflow-x-auto rounded-full border border-lead/10 bg-lead-wash/50 p-1 backdrop-blur-xl backdrop-saturate-150 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        fill="var(--ink)"
+        shadow="0 1px 2px rgba(20, 26, 34, 0.06)"
+        className="relative inline-flex max-w-full items-center overflow-x-auto rounded-full border border-black/10 bg-transparent p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         <Liquid.Item effect="move" move={{ springiness: 0.6, trail: 0.5, stretch: 0.25 }}>
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute top-1 bottom-1 left-1 rounded-full bg-lead transition-[transform,opacity] duration-300"
+            className="pointer-events-none absolute top-1 bottom-1 left-1 rounded-full bg-ink transition-[transform,opacity] duration-300"
             style={{
               width: `${TAB_WIDTH}px`,
               transform: `translateX(${Math.max(activeIndex, 0) * TAB_WIDTH}px)`,
@@ -106,17 +106,13 @@ export function RecordTabs({
                 aria-current={active ? "page" : undefined}
                 href={hrefFor(tab.segment)}
                 style={{ width: `${TAB_WIDTH}px` }}
-                className={`flex h-8 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold whitespace-nowrap transition-colors duration-200 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-lead-mid ${
-                  active ? "text-white" : "text-dim hover:text-ink"
+                className={`flex h-8 shrink-0 items-center justify-center rounded-full text-[13px] whitespace-nowrap transition-colors duration-200 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-lead-mid ${
+                  active ? "font-bold text-white" : "font-semibold text-dim hover:text-ink"
                 }`}
               >
                 {tab.label}
                 {count !== null && count > 0 && (
-                  <span
-                    className={`ml-1.5 font-mono text-[10.5px] tabular-nums ${
-                      active ? "text-white/65" : "text-faint"
-                    }`}
-                  >
+                  <span className="ml-1.5 font-mono text-[10.5px] tabular-nums text-faint">
                     {count}
                   </span>
                 )}

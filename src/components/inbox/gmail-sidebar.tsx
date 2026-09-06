@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatePresence, motion } from "motion/react";
 import {
   Inbox,
   Star,
@@ -98,7 +99,7 @@ export function GmailSidebar({
       <nav className="space-y-0.5">
         {folders.map((folder) => {
           const Icon = folder.icon;
-          const isActive = activeFolder === folder.id && selectedLabel === null;
+          const isActive = activeFolder === folder.id;
 
           return (
             <button
@@ -144,7 +145,7 @@ export function GmailSidebar({
       {/* Labels / Sectors */}
       <div className="px-3">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+          <span className="text-xs font-medium capitalize tracking-wider text-slate-500">
             Sectors & Labels
           </span>
           <Tag className="h-3.5 w-3.5 text-slate-400" />
@@ -165,14 +166,59 @@ export function GmailSidebar({
                     onSelectLabel(sector.name);
                   }
                 }}
-                className={`flex w-full items-center gap-3 rounded-r-full px-3 py-1.5 text-xs transition-colors cursor-pointer ${
+                className={`flex w-full items-center justify-between gap-2 rounded-r-full px-3 py-1.5 text-xs transition-colors cursor-pointer ${
                   isLabelActive
                     ? "bg-[#e8edf5] text-slate-900 font-bold"
                     : "text-slate-600 hover:bg-slate-100 font-medium"
                 }`}
               >
-                <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${sector.color}`} />
-                <span className="truncate text-left">{sector.name}</span>
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${sector.color}`} />
+                  <span className="truncate text-left">{sector.name}</span>
+                </div>
+
+                <AnimatePresence>
+                  {isLabelActive && (
+                    <motion.span
+                      key={`tick-${sector.name}`}
+                      initial={{ opacity: 0, scale: 0.5 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.5 }}
+                      transition={{ duration: 0.15 }}
+                      className="inline-flex items-center justify-center shrink-0"
+                      aria-hidden="true"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth="3.5"
+                        stroke="currentColor"
+                        className="h-3.5 w-3.5 text-emerald-600 shrink-0"
+                      >
+                        <motion.path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M4.5 12.75l6 6 9-13.5"
+                          initial={{ pathLength: 0 }}
+                          animate={{
+                            pathLength: 1,
+                            transition: {
+                              duration: 0.25,
+                              ease: "easeOut",
+                            },
+                          }}
+                          exit={{
+                            pathLength: 0,
+                            transition: {
+                              duration: 0.15,
+                            },
+                          }}
+                        />
+                      </svg>
+                    </motion.span>
+                  )}
+                </AnimatePresence>
               </button>
             );
           })}

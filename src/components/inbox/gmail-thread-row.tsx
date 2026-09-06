@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import {
   Star,
   Bookmark,
@@ -11,11 +12,17 @@ import {
   Clock,
 } from "lucide-react";
 import { type MockThread, formatGmailTimestamp } from "@/lib/inbox-mock-data";
+import {
+  getSectorColor,
+  getSectorTagStyle,
+} from "./before/gmail-sidebar";
 
 export type GmailThreadRowProps = {
   thread: MockThread;
   isSelected: boolean;
+  hasSelection?: boolean;
   isActive: boolean;
+  isSentView?: boolean;
   onSelect: (threadId: string, e: React.MouseEvent | React.ChangeEvent) => void;
   onOpen: (thread: MockThread) => void;
   onToggleStar: (threadId: string, e: React.MouseEvent) => void;
@@ -59,7 +66,9 @@ const INTENT_BADGES: Record<
 export function GmailThreadRow({
   thread,
   isSelected,
+  hasSelection = false,
   isActive,
+  isSentView = false,
   onSelect,
   onOpen,
   onToggleStar,
@@ -72,6 +81,35 @@ export function GmailThreadRow({
   const isUnread = !thread.isRead;
   const intentInfo = thread.replyIntent ? INTENT_BADGES[thread.replyIntent] : null;
 
+  const showCheckbox = isSelected || hasSelection;
+  const showStar = thread.isStarred || hasSelection;
+
+  // In Sent view: display who we sent it to, and show the sent message body as the snippet
+  const sentMessage = useMemo(() => {
+    if (!isSentView) return null;
+    return (
+      [...thread.messages].reverse().find((m) => !m.isFromClient) ??
+      thread.messages[0]
+    );
+  }, [thread.messages, isSentView]);
+
+  const displayRecipient = isSentView
+    ? `To: ${thread.primaryContact?.name || thread.orgName}`
+    : thread.orgName;
+
+  const displaySnippet = useMemo(() => {
+    const activeMessage = isSentView
+      ? sentMessage
+      : [...thread.messages].reverse().find((m) => m.isFromClient) ??
+        thread.messages[thread.messages.length - 1];
+
+    const bodyText = activeMessage?.body?.replace(/\s+/g, " ").trim();
+    if (bodyText && bodyText.length > thread.snippet.length) {
+      return bodyText;
+    }
+    return thread.snippet;
+  }, [thread.messages, thread.snippet, isSentView, sentMessage]);
+
   return (
     <div
       onClick={() => onOpen(thread)}
@@ -80,7 +118,7 @@ export function GmailThreadRow({
           ? "bg-[#e8f0fe] border-l-4 border-l-blue-600"
           : isSelected
             ? "bg-[#c2e7ff]/30"
-            : isUnread
+            : isUnread && !isSentView
               ? "bg-white font-semibold text-slate-900 shadow-xs"
               : "bg-slate-50/50 text-slate-700 hover:bg-slate-100/70"
       }`}
@@ -93,10 +131,18 @@ export function GmailThreadRow({
         {/* Checkbox */}
         <input
           type="checkbox"
-          aria-label={`Select thread from ${thread.orgName}`}
+          aria-label={
+            isSentView
+              ? `Select sent message to ${thread.primaryContact?.name || thread.orgName}`
+              : `Select thread from ${thread.orgName}`
+          }
           checked={isSelected}
           onChange={(e) => onSelect(thread.id, e)}
-          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+          className={`h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer transition-opacity duration-150 ${
+            showCheckbox
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100 focus:opacity-100"
+          }`}
         />
 
         {/* Star */}
@@ -104,7 +150,11 @@ export function GmailThreadRow({
           type="button"
           onClick={(e) => onToggleStar(thread.id, e)}
           title={thread.isStarred ? "Starred" : "Not starred"}
-          className="p-1 rounded-full hover:bg-slate-200/60 text-slate-400 transition-colors cursor-pointer"
+          className={`p-1 rounded-full hover:bg-slate-200/60 text-slate-400 transition-opacity duration-150 cursor-pointer ${
+            showStar
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100 focus:opacity-100"
+          }`}
         >
           <Star
             className={`h-4 w-4 ${
@@ -136,10 +186,11 @@ export function GmailThreadRow({
       <div className="w-48 shrink-0 min-w-0 flex items-center gap-2">
         <span
           className={`truncate ${
-            isUnread ? "font-bold text-slate-900" : "font-medium text-slate-700"
+            isUnread && !isSentView ? "font-bold text-slate-900" : "font-medium text-slate-700"
           }`}
+          title={displayRecipient}
         >
-          {thread.orgName}
+          {displayRecipient}
         </span>
         {thread.messages.length > 1 && (
           <span className="text-[11px] text-slate-400 shrink-0">
@@ -152,14 +203,14 @@ export function GmailThreadRow({
       <div className="flex-1 min-w-0 flex items-center gap-2">
         <span
           className={`truncate text-sm ${
-            isUnread ? "font-semibold text-slate-900" : "text-slate-800"
+            isUnread && !isSentView ? "font-semibold text-slate-900" : "text-slate-800"
           }`}
         >
           {thread.subject}
         </span>
         <span className="text-slate-400 shrink-0">-</span>
         <span className="truncate text-xs text-slate-500 font-normal">
-          {thread.snippet}
+          {displaySnippet}
         </span>
       </div>
 
@@ -175,7 +226,13 @@ export function GmailThreadRow({
         )}
 
         {/* Sector Tag */}
-        <span className="hidden md:inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+        <span
+          style={getSectorTagStyle(
+            getSectorColor(thread.sector, thread.labelColor),
+            false,
+          )}
+          className="hidden md:inline-flex items-center py-0.5 pl-2.5 pr-3.5 text-[10px] font-medium"
+        >
           {thread.sector}
         </span>
 
@@ -192,7 +249,7 @@ export function GmailThreadRow({
 
       {/* Timestamp & Hover Quick Action Buttons */}
       <div
-        className="w-28 shrink-0 text-right"
+        className="w-[62px] group-hover:w-[104px] shrink-0 text-right transition-[width] duration-150"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Normal state: Date / Time */}

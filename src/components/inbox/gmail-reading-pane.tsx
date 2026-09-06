@@ -29,6 +29,10 @@ import {
   type MockAttachment,
   formatFileSize,
 } from "@/lib/inbox-mock-data";
+import {
+  getSectorColor,
+  getSectorTagStyle,
+} from "./before/gmail-sidebar";
 
 export type GmailReadingPaneProps = {
   thread: MockThread;
@@ -346,7 +350,13 @@ export function GmailReadingPane({
             <h1 className="text-xl font-bold text-slate-900 leading-snug">
               {thread.subject}
             </h1>
-            <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+            <span
+              style={getSectorTagStyle(
+                getSectorColor(thread.sector, thread.labelColor),
+                false,
+              )}
+              className="shrink-0 py-1 pl-3 pr-4 text-xs font-semibold"
+            >
               {thread.sector}
             </span>
           </div>

@@ -9,6 +9,15 @@ export interface SendButtonProps
   pending?: boolean;
   /** Label shown while `pending`. */
   pendingLabel?: string;
+  /**
+   * Surface. `ink` is the original charcoal glass — the outreach review
+   * panel's send, and the default, so that placement is untouched. `lead`
+   * is the app's structural navy, for placements sitting on light glass
+   * where charcoal reads as a hole.
+   */
+  tone?: "ink" | "lead";
+  /** Corner treatment. `pill` is the original; `lg` squares it off to 8px. */
+  radius?: "pill" | "lg";
 }
 
 /**
@@ -36,18 +45,26 @@ const Button = ({
   label = "Send",
   pending = false,
   pendingLabel = "Sending…",
+  tone = "ink",
+  radius = "pill",
   className = "",
   type = "button",
   disabled,
   ...props
 }: SendButtonProps) => {
+  const surface =
+    tone === "lead"
+      ? "bg-lead text-white ring-white/20 hover:bg-[#1b3160]"
+      : "bg-[#1c1a18]/85 text-[#f4f4ef] ring-white/25 hover:bg-[#1c1a18]";
+  const corners = radius === "lg" ? "rounded-lg" : "rounded-full";
+
   return (
     <button
       type={type}
       disabled={disabled || pending}
       aria-busy={pending || undefined}
       data-pending={pending ? "" : undefined}
-      className={`group/send relative inline-flex h-10 cursor-pointer touch-manipulation items-center justify-center gap-2 overflow-hidden rounded-full bg-[#1c1a18]/85 px-5 text-sm font-semibold tracking-[-0.02em] text-[#f4f4ef] ring-1 ring-white/25 shadow-xs shadow-[inset_0_1px_0_rgba(255,255,255,0.3)] backdrop-blur-md transition-colors duration-200 select-none hover:bg-[#1c1a18] focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 ${className}`}
+      className={`group/send relative inline-flex h-10 cursor-pointer touch-manipulation items-center justify-center gap-2 overflow-hidden ${corners} ${surface} px-5 text-sm font-semibold tracking-[-0.02em] ring-1 shadow-xs shadow-[inset_0_1px_0_rgba(255,255,255,0.3)] backdrop-blur-md transition-colors duration-200 select-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 ${className}`}
       {...props}
     >
       <span className="send-plane flex items-center">

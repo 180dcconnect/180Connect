@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
 import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
-import { ArrowRight, Check, ChevronLeft, Plus, SlidersHorizontal, X } from "lucide-react";
+import { ArrowRight, Check, ChevronLeft, History, Mail, Plus, Search, SlidersHorizontal, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { EASE, stagger } from "@/components/brand/motion";
@@ -171,6 +171,64 @@ function rankOption(label: string, query: string): number {
 export type FilterOption = { label: string; value: string; colour?: string };
 
 /**
+ * One row in the as-you-type suggestions dropdown (opt-in via `suggestions`).
+ * The bar bolds the query's match inside `title` itself, so hosts pass plain
+ * strings. `subtitle` and `meta` render as the second line and the trailing
+ * detail, Gmail-style.
+ */
+export type SearchSuggestion = {
+  id: string;
+  title: string;
+  subtitle?: string;
+  meta?: string;
+};
+
+const RECENT_STORAGE_PREFIX = "brand-search-recent:";
+
+function readRecents(key: string): string[] {
+  try {
+    if (typeof window === "undefined") return [];
+    const raw = window.localStorage.getItem(`${RECENT_STORAGE_PREFIX}${key}`);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    // Read lazily on focus (never during render) so server and client agree.
+    return Array.isArray(parsed)
+      ? parsed.filter((entry): entry is string => typeof entry === "string").slice(0, 5)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecent(key: string | undefined, rawQuery: string): void {
+  const query = rawQuery.trim();
+  if (!key || !query || typeof window === "undefined") return;
+  try {
+    const next = [query, ...readRecents(key).filter(
+      (entry) => entry.toLowerCase() !== query.toLowerCase(),
+    )].slice(0, 5);
+    window.localStorage.setItem(`${RECENT_STORAGE_PREFIX}${key}`, JSON.stringify(next));
+  } catch {
+    // Private mode and friends: recents just don't persist.
+  }
+}
+
+/** Bolds the query's first match inside a suggestion title. Plain strings in,
+ *  highlighted output out — the host never formats. */
+function BoldMatch({ text, query }: { text: string; query: string }) {
+  const q = query.trim().toLowerCase();
+  if (!q) return <>{text}</>;
+  const index = text.toLowerCase().indexOf(q);
+  if (index < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, index)}
+      <strong className="font-extrabold">{text.slice(index, index + q.length)}</strong>
+      {text.slice(index + q.length)}
+    </>
+  );
+}
+
+/**
  * A single row in the open panel, for placements that offer actions rather
  * than filters. Tapping a row with `expandedContent` swaps the button for
  * that content in place (a transform, not an accordion) — the content should
@@ -267,8 +325,15 @@ export function BrandSearchBar({
    panelRows,
    compactRest = false,
    anchorLeft = false,
+   chipsBelow = true,
    onSubmit,
    submitLabel = "Submit",
+   onQueryChange,
+   suggestions,
+   onSuggestionSelect,
+   onSubmitQuery,
+   recentKey,
+   busy = false,
    openSignal,
    confirmSignal,
    confirm,
@@ -345,13 +410,51 @@ export function BrandSearchBar({
     */
    anchorLeft?: boolean;
    /**
+    * Show the selected-filter chips in a row under the pill. Hosts in a fixed
+    * toolbar (whose height must never shift) set this false: their active
+    * filters still surface at the bottom of the open dropdown instead.
+    */
+   chipsBelow?: boolean;
+   /**
     * Primary go action for the panel, rendered as the lime arrow disc beside
     * the open/close toggle — the search bar's own submit button, copied. Only
     * rendered when provided.
     */
-   onSubmit?: () => void;
-   /** Accessible label for the submit disc. */
-   submitLabel?: string;
+    onSubmit?: () => void;
+    /** Accessible label for the submit disc. */
+    submitLabel?: string;
+    /**
+     * Called with the query on every keystroke (the bar keeps owning the
+     * field). Hosts use it to compute `suggestions` — without it there is
+     * nothing to suggest from and the dropdown stays shut.
+     */
+    onQueryChange?: (query: string) => void;
+    /**
+     * As-you-type suggestions for the current query, Gmail-style. Rendered as
+     * a dropdown whenever the field is focused, non-empty, and the filter
+     * panel is closed. Omit entirely and the bar behaves exactly as before.
+     */
+    suggestions?: SearchSuggestion[];
+    /** A suggestion row was chosen (click or Enter on highlight): open it. */
+    onSuggestionSelect?: (id: string) => void;
+    /**
+     * Replaces the URL navigation on submit. Hosts that filter locally (no
+     * route to drive) take the query and filters here instead; the rolling
+     * square still plays its minimum beat first, exactly like a remote call.
+     */
+    onSubmitQuery?: (query: string, filters: (FilterOption & { category: string })[]) => void;
+    /**
+     * Enables recent searches: submitted queries persist under this key and
+     * resurface when the empty field is focused. One key per placement so
+     * hosts never read each other's history.
+     */
+    recentKey?: string;
+    /**
+     * The host's own work is running (a label filter resolving, a slow fetch).
+     * The lime disc appears and wears the rolling square for as long as it is
+     * true — the same signal as a submit, driven externally.
+     */
+    busy?: boolean;
    /**
     * Turns the submit disc into a two-step: the first click collapses the bar
     * and floats this under it, and `onSubmit` runs only once the CAM confirms.
@@ -403,6 +506,7 @@ export function BrandSearchBar({
   const [isSearching, setIsSearching] = useState(false);
 
   const rootRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
@@ -415,6 +519,9 @@ export function BrandSearchBar({
    * own content is what `fit-content` then measures. The widen therefore began
    * at almost its end value and read as a snap, with the delayed height drop
    * arriving as a second one. Two numbers make it one continuous tween.
+   *
+   * Measured in pixels once on mount. The frame's inline width is only there
+   * if the consumer passed one — most hosts let the flex row decide it.
    */
   const [restWidth, setRestWidth] = useState<number | null>(null);
   const [fullWidth, setFullWidth] = useState<number | null>(null);
@@ -466,7 +573,7 @@ export function BrandSearchBar({
       // Closed is read off the box itself rather than off `open`: this fires on
       // the font loader's schedule, and re-measuring an open bar would unlock
       // its width mid-panel.
-      if (cancelled || rootRef.current?.offsetHeight !== ROW) return;
+      if (cancelled || cardRef.current?.offsetHeight !== ROW) return;
       measure();
     });
     return () => {
@@ -621,13 +728,38 @@ export function BrandSearchBar({
     }
   };
 
+  // A host that filters locally takes the submission here instead of the
+  // URL navigation below. The answer is instant, but the submit still wears
+  // the rolling square for a beat first — a search that resolves in zero
+  // frames reads as broken, so the spinner gets a guaranteed minimum run.
+  const LOCAL_SUBMIT_SPIN_MS = 2000;
+
   const submitSearch = (filters = selectedFilters, q = query, closePanel = true) => {
-    if (isSearching) return;
-    setIsSearching(true);
+    if (isSearching || busy) return;
 
     if (closePanel) {
       setOpen(false);
     }
+    setFocused(false);
+
+    // A host that filters locally takes the submission here instead of the
+    // URL navigation below.
+    if (onSubmitQuery) {
+      if (q.trim()) saveRecent(recentKey, q);
+      inputRef.current?.blur();
+      setIsSearching(true);
+      setTimeout(() => {
+        startTransition(() => {
+          onSubmitQuery(q, filters);
+        });
+        setTimeout(() => {
+          setIsSearching(false);
+        }, 400);
+      }, LOCAL_SUBMIT_SPIN_MS);
+      return;
+    }
+
+    setIsSearching(true);
 
     const params = new URLSearchParams(window.location.search);
     params.delete("q");
@@ -663,6 +795,16 @@ export function BrandSearchBar({
     }
   };
 
+  // Removing a chip only stages the removal — nothing executes until the
+  // search button or Enter is pressed (the documented contract above the
+  // search execution note in design-system.md). Used by the in-dropdown chips;
+  // the under-pill row below does the same inline.
+  const removeFilter = (category: string, value: string) => {
+    setSelectedFilters((prev) =>
+      prev.filter((filter) => !(filter.value === value && filter.category === category)),
+    );
+  };
+
   const close = () => {
     setOpen(false);
     setConfirming(false);
@@ -673,9 +815,71 @@ export function BrandSearchBar({
     }, 300);
   };
 
+  const dismissSuggest = () => {
+    setHighlight(-1);
+    setFocused(false);
+    inputRef.current?.blur();
+  };
+
+  const activateRow = (row: ActiveRow) => {
+    if (row.kind === "suggestion") {
+      onSuggestionSelect?.(row.item.id);
+      dismissSuggest();
+      return;
+    }
+    setQuery(row.query);
+    onQueryChange?.(row.query);
+    submitSearch(selectedFilters, row.query);
+  };
+
+  const handleEnter = () => {
+    if (showSuggestions || showRecents) {
+      if (highlight >= 0 && highlight < activeRows.length) {
+        activateRow(activeRows[highlight]);
+        return;
+      }
+      if (showSuggestions) {
+        submitSearch();
+        inputRef.current?.blur();
+        return;
+      }
+      return;
+    }
+    submitSearch();
+    inputRef.current?.blur();
+  };
+
   const trimmedFilterQuery = filterQuery.trim();
 
   const T = SEARCH_BAR_TONES[tone];
+
+  // As-you-type suggestions live here, not in `open`: typing shows matches,
+  // the sliders toggle shows filters, and the two never fight. Everything
+  // below is inert unless the host passes `suggestions` (and `recentKey` for
+  // recents) — existing hosts render exactly as before.
+  const suggestId = useId();
+  const [focused, setFocused] = useState(false);
+  const [highlight, setHighlight] = useState(-1);
+  const [recents, setRecents] = useState<string[]>([]);
+  const suggestMode = !promptButton && suggestions !== undefined && !open;
+  const showSuggestions = suggestMode && typing && focused;
+  const showRecents =
+    suggestMode && !typing && focused && recentKey !== undefined && recents.length > 0;
+  const panelOut = open || showSuggestions || showRecents;
+
+  type ActiveRow =
+    | { kind: "suggestion"; item: SearchSuggestion }
+    | { kind: "recent"; query: string };
+  const activeRows: ActiveRow[] =
+    showSuggestions && suggestions
+      ? suggestions.map((item) => ({ kind: "suggestion" as const, item }))
+      : showRecents
+        ? recents.map((recent) => ({ kind: "recent" as const, query: recent }))
+        : [];
+
+  useEffect(() => {
+    setHighlight(-1);
+  }, [query, suggestions, open]);
 
   const activeOptions = useMemo(() => {
     if (!activeFilter) return [];
@@ -697,45 +901,42 @@ export function BrandSearchBar({
       <div ref={frameRef} className="relative h-[64px] w-full z-50">
         <motion.div
           ref={rootRef}
-          className={`absolute top-0 ${anchorLeft ? "left-0" : "left-1/2"} w-full overflow-hidden ${frosted ? "backdrop-blur-[20px]" : "backdrop-blur-[3px]"}`}
+          className={`absolute top-0 ${anchorLeft ? "left-0" : "left-1/2"} w-full flex flex-col pointer-events-auto`}
           style={{
-            boxShadow: LIP,
-            borderRadius: ROW / 2,
             ...(anchorLeft ? {} : { x: "-50%" }),
           }}
           animate={{
-            height: open ? "auto" : ROW,
-            // Pixels at both ends once measured (see restWidth/fullWidth), so
-            // the widen is a pure number tween with nothing to resolve on the
-            // frame it starts. The keyword pair is only the pre-measure
-            // fallback for the first frame.
             width: compactRest
               ? open
                 ? (fullWidth ?? "100%")
                 : (restWidth ?? "fit-content")
               : "100%",
-            backgroundColor: open
-              ? frosted
-                ? T.glassFrosted
-                : T.glassOpen
-              : T.glassClosed,
           }}
           initial={false}
           transition={
             compactRest
               ? {
-                  // Two beats in order, and closing runs them backwards: open
-                  // widens then drops, close lifts then narrows. Each delay is
-                  // the other axis's full duration, so only one is ever moving
-                  // and the box retraces its own path.
                   width: { duration: 0.42, ease: EASE, delay: open ? 0 : 0.42 },
-                  height: { duration: 0.42, ease: EASE, delay: open ? 0.42 : 0 },
-                  backgroundColor: { duration: 0.7, ease: EASE },
                 }
               : { duration: 0.7, ease: EASE }
           }
           onKeyDown={(e) => {
-            if (e.key === "Escape" && confirming) {
+            if (e.key === "Escape" && (showSuggestions || showRecents)) {
+              e.stopPropagation();
+              dismissSuggest();
+            } else if (
+              (e.key === "ArrowDown" || e.key === "ArrowUp") &&
+              (showSuggestions || showRecents) &&
+              activeRows.length > 0
+            ) {
+              e.preventDefault();
+              e.stopPropagation();
+              setHighlight((current) =>
+                e.key === "ArrowDown"
+                  ? (current + 1) % activeRows.length
+                  : (current - 1 + activeRows.length) % activeRows.length,
+              );
+            } else if (e.key === "Escape" && confirming) {
               e.stopPropagation();
               setConfirming(false);
             } else if (e.key === "Escape" && open) {
@@ -744,11 +945,40 @@ export function BrandSearchBar({
               inputRef.current?.blur();
             } else if (e.key === "Enter") {
               e.preventDefault();
-              submitSearch();
-              inputRef.current?.blur();
+              handleEnter();
             }
           }}
         >
+          {/* Card containing Search Row + Panels (Ends at "All results for...") */}
+          <motion.div
+            ref={cardRef}
+            className={`w-full overflow-hidden relative ${frosted ? "backdrop-blur-[20px]" : "backdrop-blur-[3px]"}`}
+            style={{
+              boxShadow: LIP,
+              borderRadius: ROW / 2,
+            }}
+            animate={{
+              height: panelOut ? "auto" : ROW,
+              // Pixels at both ends once measured (see restWidth/fullWidth), so
+              // the widen is a pure number tween with nothing to resolve on the
+              // frame it starts. The keyword pair is only the pre-measure
+              // fallback for the first frame.
+              backgroundColor: panelOut
+                ? frosted
+                  ? T.glassFrosted
+                  : T.glassOpen
+                : T.glassClosed,
+            }}
+            initial={false}
+            transition={
+              compactRest
+                ? {
+                    height: { duration: 0.42, ease: EASE, delay: open ? 0.42 : 0 },
+                    backgroundColor: { duration: 0.7, ease: EASE },
+                  }
+                : { duration: 0.7, ease: EASE }
+            }
+          >
           {/* The frost lives on its own childless layer, never on the container
               that holds the panel. `backdrop-filter` is defeated by any `filter`
               anywhere in its own subtree — a promoted `will-change: filter` layer
@@ -837,14 +1067,35 @@ export function BrandSearchBar({
             type="search"
             value={query}
             aria-label={`${placeholder}…`}
+            {...(suggestions !== undefined
+              ? {
+                  role: "combobox",
+                  "aria-autocomplete": "list",
+                  "aria-controls": suggestId,
+                  "aria-expanded": showSuggestions || showRecents,
+                  ...(highlight >= 0
+                    ? { "aria-activedescendant": `${suggestId}-opt-${highlight}` }
+                    : {}),
+                }
+              : {})}
             onChange={(e) => {
               setQuery(e.target.value);
+              onQueryChange?.(e.target.value);
+              // Suggest hosts trade the filter panel for matches mid-typing;
+              // mode="wait" above sequences the handoff. Other hosts keep the
+              // panel they opened.
+              if (suggestions !== undefined && open) setOpen(false);
             }}
+            onFocus={() => {
+              setFocused(true);
+              if (recentKey) setRecents(readRecents(recentKey));
+            }}
+            onBlur={() => setFocused(false)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                submitSearch();
-                inputRef.current?.blur();
+                e.stopPropagation();
+                handleEnter();
               }
             }}
             className={`font-body w-full bg-transparent text-[15px] ${T.ink} ${T.caret} outline-none focus-visible:outline-none sm:text-base [&::-webkit-search-cancel-button]:hidden`}
@@ -884,7 +1135,7 @@ export function BrandSearchBar({
         )}
 
         <AnimatePresence>
-          {(typing || selectedFilters.length > 0 || isSearching) && (
+          {(typing || selectedFilters.length > 0 || isSearching || busy) && (
             <motion.div
               initial={{ width: 0, opacity: 0, scale: 0.8 }}
               animate={{ width: 30, opacity: 1, scale: 1 }}
@@ -894,22 +1145,22 @@ export function BrandSearchBar({
             >
               <button
                 type="button"
-                aria-label={isSearching ? "Searching…" : "Search"}
-                title={isSearching ? "Searching…" : "Press Enter or click to search"}
-                disabled={isSearching}
+                aria-label={isSearching || busy ? "Searching…" : "Search"}
+                title={isSearching || busy ? "Searching…" : "Press Enter or click to search"}
+                disabled={isSearching || busy}
                 onClick={() => {
                   submitSearch();
                   inputRef.current?.blur();
                 }}
                 className={`grid h-8 w-8 shrink-0 place-items-center rounded-full transition-all focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline} ${
-                  isSearching
+                  isSearching || busy
                     ? "bg-transparent"
                     : "bg-[#e6f5c0] text-[#1a1a1a] hover:bg-[#d4e5a0]"
                 }`}
               >
-                {isSearching ? (
+                {isSearching || busy ? (
                   <div
-                    className="h-4.5 w-4.5 rounded-[4px] bg-[#e6f5c0] animate-spin shadow-[0_0_10px_rgba(230,245,192,0.65)]"
+                    className="h-4.5 w-4.5 rounded-[4px] bg-lead animate-spin shadow-[0_0_10px_var(--lead)]"
                     style={{ animationDuration: "2.5s" }}
                   />
                 ) : (
@@ -954,7 +1205,7 @@ export function BrandSearchBar({
             >
               {submitting ? (
                 <div
-                  className="h-4.5 w-4.5 rounded-[4px] bg-[#e6f5c0] animate-spin shadow-[0_0_10px_rgba(230,245,192,0.65)]"
+                  className="h-4.5 w-4.5 rounded-[4px] bg-lead animate-spin shadow-[0_0_10px_var(--lead)]"
                   style={{ animationDuration: "2.5s" }}
                 />
               ) : (
@@ -982,9 +1233,10 @@ export function BrandSearchBar({
         </div>
       </div>
 
-      <AnimatePresence initial={false}>
-        {open && (
+      <AnimatePresence initial={false} mode="wait">
+        {open ? (
           <motion.div
+            key="panel"
             id={listId}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1506,8 +1758,139 @@ export function BrandSearchBar({
               )}
             </AnimatePresence>
           </motion.div>
-        )}
+        ) : (showSuggestions || showRecents) ? (
+          <motion.div
+            key="suggest"
+            id={suggestId}
+            role="listbox"
+            aria-label={showSuggestions ? `Suggestions for ${query.trim()}` : "Recent searches"}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, transition: { duration: 0.15, ease: EASE } }}
+            transition={{ duration: 0.5, ease: EASE, delay: 0.2 }}
+            className="relative z-10 flex h-[280px] flex-col px-4 pt-1 pb-4"
+          >
+            {/* As-you-type suggestions (or recents on an empty field): the dropdown
+                half of the search. Typing shows matches, the toggle shows filters —
+                one presence with mode="wait" hands off between them instead of
+                overlapping, so opening filters mid-typing reads as one morph. */}
+            {activeRows.length === 0 ? (
+              <p className={`font-body px-3 py-3 text-[15px] ${T.muted60}`} role="status">
+                {`No matches for “${query.trim()}”.`}
+              </p>
+            ) : (
+              <ul className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                {activeRows.map((row, index) => (
+                  <li key={row.kind === "suggestion" ? row.item.id : `recent:${row.query}`}>
+                    <button
+                      type="button"
+                      role="option"
+                      id={`${suggestId}-opt-${index}`}
+                      aria-selected={highlight === index}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => activateRow(row)}
+                      onMouseMove={() => {
+                        if (highlight !== index) setHighlight(index);
+                      }}
+                      className={`font-body flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-colors ${T.hoverRow} ${
+                        highlight === index ? T.fieldBg : ""
+                      } focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
+                    >
+                      {row.kind === "suggestion" ? (
+                        <Mail aria-hidden="true" className={`h-4 w-4 shrink-0 ${T.faint}`} />
+                      ) : (
+                        <History aria-hidden="true" className={`h-4 w-4 shrink-0 ${T.faint}`} />
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <span className={`block truncate text-[15px] font-semibold ${T.bright}`}>
+                          {row.kind === "suggestion" ? (
+                            <BoldMatch text={row.item.title} query={query} />
+                          ) : (
+                            row.query
+                          )}
+                        </span>
+                        {row.kind === "suggestion" && row.item.subtitle && (
+                          <span className={`mt-0.5 block truncate text-[13px] ${T.muted60}`}>
+                            {row.item.subtitle}
+                          </span>
+                        )}
+                      </span>
+                      {row.kind === "suggestion" && row.item.meta && (
+                        <span className={`shrink-0 text-xs ${T.muted50}`}>{row.item.meta}</span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {showSuggestions && (
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => submitSearch()}
+                className={`font-body mt-1 flex w-full shrink-0 items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-[15px] font-medium transition-colors ${T.hoverRow} focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
+              >
+                <Search aria-hidden="true" className={`h-4 w-4 shrink-0 ${T.faint}`} />
+                <span className={`min-w-0 flex-1 truncate ${T.bright}`}>
+                  {`All results for ‘${query.trim()}’`}
+                </span>
+                <kbd
+                  aria-hidden="true"
+                  className={`shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-body font-semibold`}
+                >
+                  Press Enter
+                </kbd>
+              </button>
+            )}
+          </motion.div>
+        ) : null}
       </AnimatePresence>
+      </motion.div>
+
+      {/* Active filter pills float UNDER the white card on a transparent background, not inside the card */}
+      {selectedFilters.length > 0 && (panelOut || !chipsBelow) && (
+        <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2 px-3 bg-transparent">
+          <AnimatePresence>
+            {selectedFilters.map((filter) => {
+              const pill = tagPillStyle(filter.colour);
+              return (
+                <motion.span
+                  key={`${filter.category}-${filter.value}`}
+                  initial={{ opacity: 0, scale: 0.8, y: -6 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.8, y: -6 }}
+                  layout
+                  style={pill ?? undefined}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[14px] font-medium shadow-sm ${
+                    pill ? "" : "bg-[#f4f4ef] text-[#1a1a1a]"
+                  }`}
+                >
+                  {pill && (
+                    <span
+                      aria-hidden="true"
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: filter.colour }}
+                    />
+                  )}
+                  {filter.label}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${filter.label} filter`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => removeFilter(filter.category, filter.value)}
+                    className={`hover:bg-black/10 focus:outline-none flex h-4 w-4 items-center justify-center rounded-full transition-colors ${
+                      pill ? "bg-black/5 text-black/50" : "bg-black/5 text-black/60"
+                    }`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </motion.span>
+              );
+            })}
+          </AnimatePresence>
+        </div>
+      )}
       </motion.div>
 
       </div>
@@ -1516,7 +1899,10 @@ export function BrandSearchBar({
           a chip row above it would push the pill down by its own height the
           moment a filter is picked — the one element on the page that must not
           move. Hanging underneath, the chips grow into the content instead, and
-          the open panel simply covers them. */}
+          the open panel simply covers them. Fixed-toolbar hosts hide this row
+          (`chipsBelow={false}`) so picking a filter never shifts the layout —
+          their chips live at the bottom of the open dropdown instead. */}
+      {chipsBelow && (
       <div className="flex flex-wrap items-center gap-2 px-2 empty:hidden">
         <AnimatePresence>
         {selectedFilters.map((filter) => {
@@ -1545,13 +1931,7 @@ export function BrandSearchBar({
               {filter.label}
               <button
                 type="button"
-                onClick={() => {
-                  const updated = selectedFilters.filter(
-                    (f) => !(f.value === filter.value && f.category === filter.category)
-                  );
-                  setSelectedFilters(updated);
-                  submitSearch(updated, query, false);
-                }}
+                onClick={() => removeFilter(filter.category, filter.value)}
                 className={`hover:bg-black/10 focus:outline-none flex h-4 w-4 items-center justify-center rounded-full transition-colors ${
                   pill ? "bg-black/5 text-black/50" : "bg-black/5 text-black/60"
                 }`}
@@ -1568,7 +1948,7 @@ export function BrandSearchBar({
             onClick={() => {
               setSelectedFilters([]);
               setQuery("");
-              submitSearch([], "");
+              onQueryChange?.("");
             }}
             className="text-[13px] font-medium text-black/40 hover:text-black transition-colors ml-1"
           >
@@ -1576,6 +1956,7 @@ export function BrandSearchBar({
           </button>
         )}
       </div>
+      )}
     </div>
   );
 }

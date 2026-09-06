@@ -75,6 +75,8 @@ type PdfImage = {
 type PdfPage = {
   getOperatorList(): Promise<{ fnArray: number[]; argsArray: unknown[] }>;
   objs: { get(name: string, callback: (value: PdfImage) => void): void };
+  /** Releases this page's decoded image cache. Not optional at our volumes. */
+  cleanup(): boolean;
 };
 
 /** CRC-32, as PNG defines it. Table built once per process. */
@@ -206,33 +208,52 @@ export async function scannedPagesFromEnd(
   const pdf = await getDocumentProxy(pdfBytes);
   const images: PageImage[] = [];
 
-  for (let pageNumber = pdf.numPages; pageNumber >= 1; pageNumber--) {
-    if (images.length >= pageLimit) break;
+  // Every page proxy and the document itself must be released explicitly.
+  // pdf.js caches each decoded image on the page's `objs` store and keeps the
+  // document's worker alive until told otherwise, so a backfill walking
+  // hundreds of ~1.2MB filings in one process grows until the OS kills it.
+  // Learned the hard way: the first staging run was killed for memory at 398
+  // of 537 companies.
+  try {
+    for (let pageNumber = pdf.numPages; pageNumber >= 1; pageNumber--) {
+      if (images.length >= pageLimit) break;
 
-    const page = (await pdf.getPage(pageNumber)) as unknown as PdfPage;
-    const ops = await page.getOperatorList();
-
-    for (let i = 0; i < ops.fnArray.length; i++) {
-      if (ops.fnArray[i] !== OP_PAINT_IMAGE_XOBJECT) continue;
-      const args = ops.argsArray[i];
-      if (!Array.isArray(args) || typeof args[0] !== "string") continue;
-
+      const page = (await pdf.getPage(pageNumber)) as unknown as PdfPage;
       try {
-        const image = await resolveImage(page, args[0]);
-        const png = toPng(image);
-        if (!png) continue;
-        images.push({ pageNumber, width: image.width, height: image.height, png });
-      } catch {
-        // Deliberately swallowed, and deliberately not reported: a page that
-        // will not decode is expected background noise across hundreds of
-        // third-party documents, and one reportError per page would bury the
-        // failures that matter.
+        const ops = await page.getOperatorList();
+
+        for (let i = 0; i < ops.fnArray.length; i++) {
+          if (ops.fnArray[i] !== OP_PAINT_IMAGE_XOBJECT) continue;
+          const args = ops.argsArray[i];
+          if (!Array.isArray(args) || typeof args[0] !== "string") continue;
+
+          try {
+            const image = await resolveImage(page, args[0]);
+            const png = toPng(image);
+            if (!png) continue;
+            images.push({ pageNumber, width: image.width, height: image.height, png });
+          } catch {
+            // Deliberately swallowed, and deliberately not reported: a page
+            // that will not decode is expected background noise across
+            // hundreds of third-party documents, and one reportError per page
+            // would bury the failures that matter.
+          }
+          // One full-page scan per page is the shape of every filing seen.
+          // Taking only the first also means a page carrying a logo alongside
+          // the scan cannot push the real page out of the limit.
+          break;
+        }
+      } finally {
+        // Drops this page's decoded image cache. The PNG we keep is already a
+        // copy, so releasing the source costs us nothing.
+        page.cleanup();
       }
-      // One full-page scan per page is the shape of every filing seen. Taking
-      // only the first also means a page carrying a logo alongside the scan
-      // cannot push the real page out of the limit.
-      break;
     }
+  } finally {
+    // `loadingTask.destroy()`, not `pdf.cleanup()`: cleanup only drops cached
+    // page data, while this also tears down the worker and its transport.
+    // getDocumentProxy discards the loading task, but the proxy exposes it.
+    await pdf.loadingTask.destroy();
   }
 
   return images;

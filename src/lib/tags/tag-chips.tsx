@@ -20,7 +20,7 @@ import { tagPillStyle } from "@/lib/tags/tag-colours";
 export type TagChip = { id: string; name: string; colour?: string | null };
 
 /** The V notch: 8px deep, apex centred on the right edge. */
-const TAG_NOTCH_CLIP =
+export const TAG_NOTCH_CLIP =
   "polygon(0 0, 100% 0, calc(100% - 8px) 50%, 100% 100%, 0 100%)";
 
 export function TagChips({

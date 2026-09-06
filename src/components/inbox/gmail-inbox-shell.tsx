@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import {
   Inbox,
   MessageSquare,
@@ -19,7 +19,7 @@ import { GmailComposeModal } from "./gmail-compose-modal";
 
 export type GmailCategoryTab = "primary" | "inbound" | "awaiting" | "starred" | "sent";
 
-const PAGE_SIZE = 15;
+const PAGE_SIZE = 50;
 
 export function GmailInboxShell({
   initialThreads = MOCK_INBOX_THREADS,
@@ -33,10 +33,11 @@ export function GmailInboxShell({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
-  const [isSplitView, setIsSplitView] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
+  const [isAtBottom, setIsAtBottom] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
 
   // Filter threads based on folder, category tab, label, and search
   const filteredThreads = useMemo(() => {
@@ -45,18 +46,19 @@ export function GmailInboxShell({
       if (activeFolder === "starred") {
         if (!thread.isStarred) return false;
       } else if (activeFolder === "sent") {
-        if (thread.folder !== "sent" && thread.status !== "sent") return false;
+        if (thread.folder === "trash") return false;
+        const hasSent =
+          thread.folder === "sent" ||
+          thread.status === "sent" ||
+          thread.messages.some((m) => !m.isFromClient);
+        if (!hasSent) return false;
       } else if (activeFolder === "drafts") {
         if (thread.folder !== "drafts") return false;
-      } else if (activeFolder === "archive") {
-        if (thread.folder !== "archive") return false;
       } else if (activeFolder === "trash") {
         if (thread.folder !== "trash") return false;
-      } else if (activeFolder === "snoozed") {
-        if (thread.folder !== "snoozed") return false;
       } else {
-        // Inbox folder: exclude trash and archive
-        if (thread.folder === "trash" || thread.folder === "archive") return false;
+        // Inbox folder: exclude trash
+        if (thread.folder === "trash") return false;
       }
 
       // 2. Sector / Label filter
@@ -109,7 +111,14 @@ export function GmailInboxShell({
     [threads]
   );
   const sentCount = useMemo(
-    () => threads.filter((t) => t.folder === "sent" || t.status === "sent").length,
+    () =>
+      threads.filter(
+        (t) =>
+          t.folder !== "trash" &&
+          (t.folder === "sent" ||
+            t.status === "sent" ||
+            t.messages.some((m) => !m.isFromClient))
+      ).length,
     [threads]
   );
   const draftsCount = useMemo(
@@ -134,6 +143,32 @@ export function GmailInboxShell({
     () => threads.find((t) => t.id === activeThreadId),
     [threads, activeThreadId]
   );
+
+  const handleListScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    const atBottom =
+      scrollHeight <= clientHeight ||
+      scrollTop + clientHeight >= scrollHeight - 8;
+    setIsAtBottom((prev) => (prev !== atBottom ? atBottom : prev));
+  };
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+
+    const checkAtBottom = () => {
+      const atBottom =
+        el.scrollHeight <= el.clientHeight ||
+        el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+      setIsAtBottom((prev) => (prev !== atBottom ? atBottom : prev));
+    };
+
+    checkAtBottom();
+
+    const observer = new ResizeObserver(checkAtBottom);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [paginatedThreads, activeCategoryTab, activeFolder, selectedLabel, activeThreadId]);
 
   // Handlers
   function handleSelectThread(id: string) {
@@ -345,11 +380,13 @@ export function GmailInboxShell({
         onSelectFolder={(folder) => {
           setActiveFolder(folder);
           setActiveThreadId(null);
+          listRef.current?.scrollTo({ top: 0 });
         }}
         selectedLabel={selectedLabel}
         onSelectLabel={(label) => {
           setSelectedLabel(label);
           setActiveThreadId(null);
+          listRef.current?.scrollTo({ top: 0 });
         }}
         unreadCount={unreadCount}
         starredCount={starredCount}
@@ -360,9 +397,13 @@ export function GmailInboxShell({
       />
 
       {/* Main Mail Surface */}
-      <div className="flex-1 flex flex-col min-w-0 bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
-        {/* Full conversation reading view (when active in non-split mode) */}
-        {activeThread && !isSplitView ? (
+      <div
+        className={`flex-1 flex flex-col min-w-0 bg-white rounded-t-2xl border border-slate-200/90 shadow-sm overflow-hidden transition-[border-radius] duration-200 ${
+          activeThread || isAtBottom ? "rounded-b-2xl" : "rounded-b-none"
+        }`}
+      >
+        {/* Full conversation reading view */}
+        {activeThread ? (
           <GmailReadingPane
             thread={activeThread}
             onBack={() => setActiveThreadId(null)}
@@ -384,6 +425,7 @@ export function GmailInboxShell({
                 onSearchChange={(q) => {
                   setSearchQuery(q);
                   setPageIndex(0);
+                  listRef.current?.scrollTo({ top: 0 });
                 }}
                 selectionState={selectionState}
                 selectedCount={selectedIds.size}
@@ -400,137 +442,124 @@ export function GmailInboxShell({
                 onToggleStarSelected={handleToggleStarSelected}
                 onDeleteSelected={handleDeleteSelected}
                 onArchiveSelected={handleArchiveSelected}
-                isSplitView={isSplitView}
-                onToggleSplitView={() => setIsSplitView(!isSplitView)}
                 pageIndex={pageIndex}
                 pageSize={PAGE_SIZE}
-                onPrevPage={() => setPageIndex(Math.max(0, pageIndex - 1))}
-                onNextPage={() => setPageIndex(pageIndex + 1)}
+                onPrevPage={() => {
+                  setPageIndex(Math.max(0, pageIndex - 1));
+                  listRef.current?.scrollTo({ top: 0 });
+                }}
+                onNextPage={() => {
+                  setPageIndex(pageIndex + 1);
+                  listRef.current?.scrollTo({ top: 0 });
+                }}
               />
-
-              {/* Gmail Category Tabs (Only on Inbox folder) */}
-              {activeFolder === "inbox" && !selectedLabel && (
-                <div className="flex items-center gap-1 border-b border-slate-200 mt-2 px-1 text-xs select-none">
-                  <button
-                    type="button"
-                    onClick={() => setActiveCategoryTab("primary")}
-                    className={`flex items-center gap-2.5 px-6 py-3 border-b-2 font-bold transition-all cursor-pointer ${
-                      activeCategoryTab === "primary"
-                        ? "border-blue-600 text-blue-600 bg-blue-50/40"
-                        : "border-transparent text-slate-600 hover:bg-slate-50"
-                    }`}
-                  >
-                    <Inbox className="h-4 w-4" />
-                    <span>Primary</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveCategoryTab("inbound")}
-                    className={`flex items-center gap-2.5 px-6 py-3 border-b-2 font-bold transition-all cursor-pointer ${
-                      activeCategoryTab === "inbound"
-                        ? "border-emerald-600 text-emerald-700 bg-emerald-50/40"
-                        : "border-transparent text-slate-600 hover:bg-slate-50"
-                    }`}
-                  >
-                    <MessageSquare className="h-4 w-4 text-emerald-600" />
-                    <span>Inbound Replies</span>
-                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] text-emerald-800 font-bold">
-                      Action Needed
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveCategoryTab("awaiting")}
-                    className={`flex items-center gap-2.5 px-6 py-3 border-b-2 font-bold transition-all cursor-pointer ${
-                      activeCategoryTab === "awaiting"
-                        ? "border-amber-500 text-amber-700 bg-amber-50/40"
-                        : "border-transparent text-slate-600 hover:bg-slate-50"
-                    }`}
-                  >
-                    <Clock className="h-4 w-4 text-amber-500" />
-                    <span>Awaiting Response</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveCategoryTab("starred")}
-                    className={`flex items-center gap-2.5 px-6 py-3 border-b-2 font-bold transition-all cursor-pointer ${
-                      activeCategoryTab === "starred"
-                        ? "border-amber-500 text-amber-600 bg-amber-50/40"
-                        : "border-transparent text-slate-600 hover:bg-slate-50"
-                    }`}
-                  >
-                    <Star className="h-4 w-4 text-amber-400" />
-                    <span>Starred</span>
-                  </button>
-                </div>
-              )}
             </div>
 
-            {/* Split View Container OR Single List */}
-            <div className="flex-1 flex min-h-0 overflow-hidden">
-              {/* Thread List Table */}
-              <div
-                className={`flex-1 overflow-y-auto ${
-                  isSplitView && activeThread ? "max-w-md border-r border-slate-200" : ""
-                }`}
-              >
-                {paginatedThreads.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-20 text-center text-slate-500">
-                    <Inbox className="h-12 w-12 text-slate-300 stroke-[1.5] mb-3" />
-                    <p className="text-sm font-semibold text-slate-700">No messages in this view</p>
-                    <p className="text-xs text-slate-400 mt-1 max-w-sm">
-                      Try selecting another folder or clearing search filters.
-                    </p>
-                  </div>
-                ) : (
-                  paginatedThreads.map((thread) => (
-                    <GmailThreadRow
-                      key={thread.id}
-                      thread={thread}
-                      isSelected={selectedIds.has(thread.id)}
-                      isActive={activeThreadId === thread.id}
-                      onSelect={() => handleSelectThread(thread.id)}
-                      onOpen={handleOpenThread}
-                      onToggleStar={() => handleToggleStar(thread.id)}
-                      onToggleImportant={() => handleToggleImportant(thread.id)}
-                      onArchive={() => handleArchiveThread(thread.id)}
-                      onDelete={() => handleDeleteThread(thread.id)}
-                      onToggleRead={() => handleToggleRead(thread.id)}
-                      onSnooze={() => handleSnoozeThread(thread.id)}
-                    />
-                  ))
-                )}
-              </div>
+            {/* Gmail Category Tabs (Only on Inbox folder) */}
+            {activeFolder === "inbox" && !selectedLabel && (
+              <div className="flex items-center gap-1 border-b border-slate-200 px-1 text-xs select-none">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveCategoryTab("primary");
+                    listRef.current?.scrollTo({ top: 0 });
+                  }}
+                  className={`flex items-center gap-2.5 px-6 py-3 border-b-2 font-bold transition-all cursor-pointer ${
+                    activeCategoryTab === "primary"
+                      ? "border-blue-600 text-blue-600 bg-blue-50/40"
+                      : "border-transparent text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  <Inbox className="h-4 w-4" />
+                  <span>Primary</span>
+                </button>
 
-              {/* Split-Pane Reading View */}
-              {isSplitView && (
-                <div className="flex-1 overflow-hidden">
-                  {activeThread ? (
-                    <GmailReadingPane
-                      thread={activeThread}
-                      onBack={() => setActiveThreadId(null)}
-                      onToggleStar={handleToggleStar}
-                      onDelete={handleDeleteThread}
-                      onArchive={handleArchiveThread}
-                      onMarkUnread={(id) => {
-                        handleToggleRead(id);
-                        setActiveThreadId(null);
-                      }}
-                      onSendReply={handleSendReply}
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center h-full text-center text-slate-400 p-8">
-                      <Inbox className="h-10 w-10 text-slate-300 stroke-[1.5] mb-2" />
-                      <p className="text-sm font-medium text-slate-600">No conversation selected</p>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        Select a thread from the list on the left to preview it here.
-                      </p>
-                    </div>
-                  )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveCategoryTab("inbound");
+                    listRef.current?.scrollTo({ top: 0 });
+                  }}
+                  className={`flex items-center gap-2.5 px-6 py-3 border-b-2 font-bold transition-all cursor-pointer ${
+                    activeCategoryTab === "inbound"
+                      ? "border-emerald-600 text-emerald-700 bg-emerald-50/40"
+                      : "border-transparent text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  <MessageSquare className="h-4 w-4 text-emerald-600" />
+                  <span>Inbound Replies</span>
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] text-emerald-800 font-bold">
+                    Action Needed
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveCategoryTab("awaiting");
+                    listRef.current?.scrollTo({ top: 0 });
+                  }}
+                  className={`flex items-center gap-2.5 px-6 py-3 border-b-2 font-bold transition-all cursor-pointer ${
+                    activeCategoryTab === "awaiting"
+                      ? "border-amber-500 text-amber-700 bg-amber-50/40"
+                      : "border-transparent text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  <Clock className="h-4 w-4 text-amber-500" />
+                  <span>Awaiting Response</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveCategoryTab("starred");
+                    listRef.current?.scrollTo({ top: 0 });
+                  }}
+                  className={`flex items-center gap-2.5 px-6 py-3 border-b-2 font-bold transition-all cursor-pointer ${
+                    activeCategoryTab === "starred"
+                      ? "border-amber-500 text-amber-600 bg-amber-50/40"
+                      : "border-transparent text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  <Star className="h-4 w-4 text-amber-400" />
+                  <span>Starred</span>
+                </button>
+              </div>
+            )}
+
+            {/* Thread List Table */}
+            <div
+              ref={listRef}
+              onScroll={handleListScroll}
+              className="flex-1 min-h-0 overflow-y-auto"
+            >
+              {paginatedThreads.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-center text-slate-500">
+                  <Inbox className="h-12 w-12 text-slate-300 stroke-[1.5] mb-3" />
+                  <p className="text-sm font-semibold text-slate-700">No messages in this view</p>
+                  <p className="text-xs text-slate-400 mt-1 max-w-sm">
+                    Try selecting another folder or clearing search filters.
+                  </p>
                 </div>
+              ) : (
+                paginatedThreads.map((thread) => (
+                  <GmailThreadRow
+                    key={thread.id}
+                    thread={thread}
+                    isSelected={selectedIds.has(thread.id)}
+                    hasSelection={selectedIds.size > 0}
+                    isActive={activeThreadId === thread.id}
+                    isSentView={activeFolder === "sent"}
+                    onSelect={() => handleSelectThread(thread.id)}
+                    onOpen={handleOpenThread}
+                    onToggleStar={() => handleToggleStar(thread.id)}
+                    onToggleImportant={() => handleToggleImportant(thread.id)}
+                    onArchive={() => handleArchiveThread(thread.id)}
+                    onDelete={() => handleDeleteThread(thread.id)}
+                    onToggleRead={() => handleToggleRead(thread.id)}
+                    onSnooze={() => handleSnoozeThread(thread.id)}
+                  />
+                ))
               )}
             </div>
           </div>

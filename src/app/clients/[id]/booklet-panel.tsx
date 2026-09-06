@@ -406,6 +406,7 @@ function BookletComposer({
   return (
     <div className="mt-6 flex flex-col items-start gap-3">
       <BrandSearchBar
+        tone="light"
         frosted
         promptButton
         compactRest
@@ -423,14 +424,14 @@ function BookletComposer({
                   alwaysExpanded: true,
                   expandedContent: (
                     <div
-                      className="mx-3 mb-1 rounded-xl border border-red-400/30 bg-red-500/10 p-3"
+                      className="mx-3 mb-1 rounded-xl border border-stop/30 bg-stop-wash p-3"
                       role="alert"
                     >
-                      <p className="text-sm font-semibold text-red-100">{error}</p>
+                      <p className="text-sm font-semibold text-stop">{error}</p>
                       <button
                         type="button"
                         onClick={onRetry}
-                        className="mt-2 rounded-full border border-red-200/40 px-3 py-1 text-xs font-semibold text-red-100 transition-colors hover:bg-red-500/20"
+                        className="mt-2 rounded-full border border-stop/40 px-3 py-1 text-xs font-semibold text-stop transition-colors hover:bg-stop/10"
                       >
                         Try again
                       </button>
@@ -447,12 +448,12 @@ function BookletComposer({
                   expandedContent: (
                     <div className="py-1">
                       <div className="flex max-w-[504px] items-baseline justify-between gap-3 px-1 pb-1.5">
-                        <p className="text-[13px] font-semibold text-[#f4f4ef]/80">
+                        <p className="text-[13px] font-semibold text-slate-600">
                           What should it focus on?{" "}
-                          <span className="font-normal text-[#f4f4ef]/50">· optional</span>
+                          <span className="font-normal text-slate-400">· optional</span>
                         </p>
                         <p
-                          className="shrink-0 text-xs text-[#f4f4ef]/50 tabular-nums"
+                          className="shrink-0 text-xs text-slate-400 tabular-nums"
                           aria-live="polite"
                         >
                           {steer.length} / {MAX_STEER_CHARS}
@@ -460,14 +461,12 @@ function BookletComposer({
                       </div>
                       <div className="flex items-center justify-start overflow-x-clip">
                         <GooeyEmailInput
-                          variant="dark"
+                          variant="light"
                           size="lg"
                           fieldWidth={420}
                           align="start"
                           gap={60}
                           duration={900}
-                          fillColor="#2f333b"
-                          shadow="0 0 0 1px rgba(255, 255, 255, 0.14) inset, 0 10px 28px -8px rgba(0, 0, 0, 0.55)"
                           placeholder="e.g. Emphasise their youth work"
                           inputType="text"
                           fieldLabel="What the booklet should focus on (optional)"
@@ -487,13 +486,11 @@ function BookletComposer({
                   expandedContent: (
                     <div className="flex items-center justify-start overflow-x-clip py-1">
                       <GooeyEmailInput
-                        variant="dark"
+                        variant="light"
                         size="md"
                         align="start"
                         gap={56}
                         duration={900}
-                        fillColor="#2f333b"
-                        shadow="0 0 0 1px rgba(255, 255, 255, 0.14) inset, 0 10px 28px -8px rgba(0, 0, 0, 0.55)"
                         placeholder="https://example.org"
                         restPlaceholder="Add a website"
                         inputType="url"

@@ -9,10 +9,11 @@ import { GmailInboxShellBefore } from "@/components/inbox/before/gmail-inbox-she
  */
 export default function PreviewInboxBeforeStandalonePage() {
   return (
-    <div className="min-h-screen bg-[#f6f8fc] text-foreground">
-      <main className="w-full py-3 pr-2 sm:pr-4">
-        <GmailInboxShellBefore initialThreads={MOCK_INBOX_THREADS} />
+    <div className="h-[100dvh] overflow-hidden bg-[#f6f8fc] text-foreground flex flex-col">
+      <main className="h-full w-full py-2 pr-2 sm:pr-4 flex flex-col min-h-0">
+        <GmailInboxShellBefore initialThreads={MOCK_INBOX_THREADS} className="h-full" />
       </main>
     </div>
   );
 }
+

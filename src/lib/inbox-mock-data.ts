@@ -33,7 +33,7 @@ export type MockEmailMessage = {
   subject: string;
   body: string;
   isFromClient: boolean;
-  intent?: "interested" | "meeting_booked" | "more_info" | "referral" | null;
+  intent?: "interested" | "not_interested" | "more_info" | "referral" | null;
   attachments?: MockAttachment[];
 };
 
@@ -57,21 +57,31 @@ export type MockThread = {
     avatarUrl?: string;
   };
   status: "replied" | "awaiting" | "sent" | "draft";
-  replyIntent?: "interested" | "meeting_booked" | "more_info" | "referral" | null;
+  replyIntent?: "interested" | "not_interested" | "more_info" | "referral" | null;
   subject: string;
   snippet: string;
   lastActivityAt: string;
   isRead: boolean;
   isStarred: boolean;
   isImportant: boolean;
-  folder: "inbox" | "starred" | "snoozed" | "sent" | "drafts" | "archive" | "trash";
+  folder:
+    | "inbox"
+    | "starred"
+    | "snoozed"
+    | "scheduled"
+    | "sent"
+    | "drafts"
+    | "archive"
+    | "trash";
+  /** When a scheduled send is due. Only set on `folder: "scheduled"` threads. */
+  scheduledFor?: string;
   messages: MockEmailMessage[];
   attachments: MockAttachment[];
   notesCount: number;
   handoversCount: number;
 };
 
-export const MOCK_INBOX_THREADS: MockThread[] = [
+const BASE_MOCK_THREADS: MockThread[] = [
   {
     id: "mock-org-cruk",
     orgName: "Cancer Research UK",
@@ -83,7 +93,7 @@ export const MOCK_INBOX_THREADS: MockThread[] = [
     primaryContact: {
       name: "Dr. Marcus Vance",
       role: "Head of Strategic Partnerships",
-      email: "m.vance@cancerresearchuk.org",
+      email: "finance@cancerresearchuk.org",
       phone: "+44 20 7123 4567",
     },
     camOwner: {
@@ -122,7 +132,7 @@ export const MOCK_INBOX_THREADS: MockThread[] = [
         senderEmail: "ada.lovelace@180dc.org",
         senderRole: "Client Account Manager • 180DC",
         recipientName: "Dr. Marcus Vance",
-        recipientEmail: "m.vance@cancerresearchuk.org",
+        recipientEmail: "finance@cancerresearchuk.org",
         sentAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
         subject: "180 Degrees Consulting — Strategic Impact & Data Assessment",
         body: `Dear Dr. Vance,
@@ -155,7 +165,7 @@ ada.lovelace@180dc.org | +44 7700 900123`,
       {
         id: "msg-cruk-2",
         senderName: "Dr. Marcus Vance",
-        senderEmail: "m.vance@cancerresearchuk.org",
+        senderEmail: "finance@cancerresearchuk.org",
         senderRole: "Head of Strategic Partnerships",
         recipientName: "Ada Lovelace",
         recipientEmail: "ada.lovelace@180dc.org",
@@ -175,7 +185,7 @@ Best regards,
 
 Dr. Marcus Vance
 Head of Strategic Partnerships | Cancer Research UK
-m.vance@cancerresearchuk.org`,
+finance@cancerresearchuk.org`,
         isFromClient: true,
         intent: "interested",
         attachments: [
@@ -200,7 +210,7 @@ m.vance@cancerresearchuk.org`,
     primaryContact: {
       name: "Eleanor Wright",
       role: "Director of Emergency Operations & Logistics",
-      email: "eleanor.wright@redcross.org.uk",
+      email: "comms@redcross.org.uk",
       phone: "+44 20 7877 7000",
     },
     camOwner: {
@@ -208,7 +218,7 @@ m.vance@cancerresearchuk.org`,
       email: "arthur.dent@180dc.org",
     },
     status: "replied",
-    replyIntent: "meeting_booked",
+    replyIntent: "interested",
     subject: "Confirmed: Project Scoping Workshop for Emergency Dispatch Flow",
     snippet: "Hi Arthur, that calendar invite works perfectly. Looking forward to meeting the consulting team on Tuesday at 2 PM...",
     lastActivityAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
@@ -232,7 +242,7 @@ m.vance@cancerresearchuk.org`,
         senderName: "Arthur Dent",
         senderEmail: "arthur.dent@180dc.org",
         recipientName: "Eleanor Wright",
-        recipientEmail: "eleanor.wright@redcross.org.uk",
+        recipientEmail: "comms@redcross.org.uk",
         sentAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
         subject: "Introduction & Pro-Bono Strategy Support — 180 Degrees Consulting",
         body: `Hi Eleanor,\n\nI am reaching out regarding potential consulting support for British Red Cross supply chain logistics. We have a team ready to evaluate dispatch optimization.\n\nBest,\nArthur`,
@@ -241,14 +251,14 @@ m.vance@cancerresearchuk.org`,
       {
         id: "msg-brc-2",
         senderName: "Eleanor Wright",
-        senderEmail: "eleanor.wright@redcross.org.uk",
+        senderEmail: "comms@redcross.org.uk",
         recipientName: "Arthur Dent",
         recipientEmail: "arthur.dent@180dc.org",
         sentAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
         subject: "Confirmed: Project Scoping Workshop for Emergency Dispatch Flow",
         body: `Hi Arthur,\n\nThat calendar invite works perfectly. Looking forward to meeting the consulting team on Tuesday at 2 PM. I have shared our emergency logistics workflow document in advance.\n\nBest regards,\nEleanor Wright`,
         isFromClient: true,
-        intent: "meeting_booked",
+        intent: "interested",
         attachments: [
           {
             id: "att-brc-1",
@@ -271,7 +281,7 @@ m.vance@cancerresearchuk.org`,
     primaryContact: {
       name: "Dr. Sophia Chen",
       role: "Director of Research Funding & Innovation",
-      email: "s.chen@wellcome.org",
+      email: "partnerships@wellcome.org",
     },
     camOwner: {
       name: "Ada Lovelace",
@@ -295,7 +305,7 @@ m.vance@cancerresearchuk.org`,
         senderName: "Ada Lovelace",
         senderEmail: "ada.lovelace@180dc.org",
         recipientName: "Dr. Sophia Chen",
-        recipientEmail: "s.chen@wellcome.org",
+        recipientEmail: "partnerships@wellcome.org",
         sentAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
         subject: "Grant Impact Evaluation Framework — 180DC Collaboration",
         body: `Dear Dr. Chen,\n\nWe would love to share how 180DC helps research foundations build standardized impact measurement frameworks for grant recipients.\n\nWarm regards,\nAda`,
@@ -304,7 +314,7 @@ m.vance@cancerresearchuk.org`,
       {
         id: "msg-well-2",
         senderName: "Dr. Sophia Chen",
-        senderEmail: "s.chen@wellcome.org",
+        senderEmail: "partnerships@wellcome.org",
         recipientName: "Ada Lovelace",
         recipientEmail: "ada.lovelace@180dc.org",
         sentAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
@@ -326,7 +336,7 @@ m.vance@cancerresearchuk.org`,
     primaryContact: {
       name: "Tariq Al-Mansoor",
       role: "Head of Campaign Strategy",
-      email: "tariq.almansoor@amnesty.org.uk",
+      email: "contact@amnesty.org.uk",
     },
     camOwner: {
       name: "Ada Lovelace",
@@ -356,7 +366,7 @@ m.vance@cancerresearchuk.org`,
         senderName: "Ada Lovelace",
         senderEmail: "ada.lovelace@180dc.org",
         recipientName: "Tariq Al-Mansoor",
-        recipientEmail: "tariq.almansoor@amnesty.org.uk",
+        recipientEmail: "contact@amnesty.org.uk",
         sentAt: new Date(Date.now() - 9 * 60 * 60 * 1000).toISOString(),
         subject: "Follow-up: Scoping Draft for Volunteer Engagement Strategy",
         body: `Hi Tariq,\n\nFollowing our initial discussion last week, here is the detailed scope outlining the 3 workstreams for volunteer retention and digital campaign analytics.\n\nLet us know if this aligns with your steering committee's expectations!\n\nBest,\nAda`,
@@ -383,7 +393,7 @@ m.vance@cancerresearchuk.org`,
     primaryContact: {
       name: "Amara Diallo",
       role: "Global Supply & Ethical Procurement Lead",
-      email: "adiallo@oxfam.org.uk",
+      email: "office@oxfam.org.uk",
     },
     camOwner: {
       name: "Arthur Dent",
@@ -407,7 +417,7 @@ m.vance@cancerresearchuk.org`,
         senderName: "Arthur Dent",
         senderEmail: "arthur.dent@180dc.org",
         recipientName: "Amara Diallo",
-        recipientEmail: "adiallo@oxfam.org.uk",
+        recipientEmail: "office@oxfam.org.uk",
         sentAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
         subject: "Pro-bono Strategy Support: Supply Chain Optimization",
         body: `Dear Amara,\n\nWe would love to assist Oxfam GB in analyzing distribution networks for high street retail operations.\n\nBest,\nArthur`,
@@ -416,7 +426,7 @@ m.vance@cancerresearchuk.org`,
       {
         id: "msg-oxf-2",
         senderName: "Amara Diallo",
-        senderEmail: "adiallo@oxfam.org.uk",
+        senderEmail: "office@oxfam.org.uk",
         recipientName: "Arthur Dent",
         recipientEmail: "arthur.dent@180dc.org",
         sentAt: new Date(Date.now() - 14 * 60 * 60 * 1000).toISOString(),
@@ -438,7 +448,7 @@ m.vance@cancerresearchuk.org`,
     primaryContact: {
       name: "Chloe Bennett",
       role: "Head of Youth Mentorship Programmes",
-      email: "chloe.bennett@princes-trust.org.uk",
+      email: "support@princes-trust.org.uk",
     },
     camOwner: {
       name: "Ada Lovelace",
@@ -467,7 +477,7 @@ m.vance@cancerresearchuk.org`,
       {
         id: "msg-pt-1",
         senderName: "Chloe Bennett",
-        senderEmail: "chloe.bennett@princes-trust.org.uk",
+        senderEmail: "support@princes-trust.org.uk",
         recipientName: "Ada Lovelace",
         recipientEmail: "ada.lovelace@180dc.org",
         sentAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
@@ -497,7 +507,7 @@ m.vance@cancerresearchuk.org`,
     primaryContact: {
       name: "Dr. Oliver King",
       role: "Director of Conservation Policy",
-      email: "oking@wwf.org.uk",
+      email: "support@wwf.org.uk",
     },
     camOwner: {
       name: "Ada Lovelace",
@@ -520,7 +530,7 @@ m.vance@cancerresearchuk.org`,
         senderName: "Ada Lovelace",
         senderEmail: "ada.lovelace@180dc.org",
         recipientName: "Dr. Oliver King",
-        recipientEmail: "oking@wwf.org.uk",
+        recipientEmail: "support@wwf.org.uk",
         sentAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
         subject: "Strategic Partnership: Climate Impact Dashboard Scoping",
         body: `Dear Dr. King,\n\n180 Degrees Consulting is supporting environmental NGOs with data pipeline automation and corporate ESG benchmarking. We would love to discuss a semester engagement with WWF UK.\n\nSincerely,\nAda`,
@@ -539,7 +549,7 @@ m.vance@cancerresearchuk.org`,
     primaryContact: {
       name: "Rachel Green",
       role: "Network Operations Director",
-      email: "rachel.green@trusselltrust.org",
+      email: "events@trusselltrust.org",
     },
     camOwner: {
       name: "Arthur Dent",
@@ -561,7 +571,7 @@ m.vance@cancerresearchuk.org`,
       {
         id: "msg-tt-1",
         senderName: "Rachel Green",
-        senderEmail: "rachel.green@trusselltrust.org",
+        senderEmail: "events@trusselltrust.org",
         recipientName: "Arthur Dent",
         recipientEmail: "arthur.dent@180dc.org",
         sentAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
@@ -583,7 +593,7 @@ m.vance@cancerresearchuk.org`,
     primaryContact: {
       name: "Dr. Rebecca Foster",
       role: "Head of Community Services",
-      email: "r.foster@mind.org.uk",
+      email: "general@mind.org.uk",
     },
     camOwner: {
       name: "Ada Lovelace",
@@ -605,7 +615,7 @@ m.vance@cancerresearchuk.org`,
       {
         id: "msg-mind-1",
         senderName: "Dr. Rebecca Foster",
-        senderEmail: "r.foster@mind.org.uk",
+        senderEmail: "general@mind.org.uk",
         recipientName: "Ada Lovelace",
         recipientEmail: "ada.lovelace@180dc.org",
         sentAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
@@ -627,7 +637,7 @@ m.vance@cancerresearchuk.org`,
     primaryContact: {
       name: "James O'Connor",
       role: "Head of Digital Inclusion",
-      email: "james_oconnor@shelter.org.uk",
+      email: "media@shelter.org.uk",
     },
     camOwner: {
       name: "Arthur Dent",
@@ -650,7 +660,7 @@ m.vance@cancerresearchuk.org`,
         senderName: "Arthur Dent",
         senderEmail: "arthur.dent@180dc.org",
         recipientName: "James O'Connor",
-        recipientEmail: "james_oconnor@shelter.org.uk",
+        recipientEmail: "media@shelter.org.uk",
         sentAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
         subject: "Follow-up: Housing Advice Portal Optimization Scoping",
         body: `Hi James,\n\nChecking in to see if your team had a chance to review the revised project timeline sent on Monday.\n\nBest,\nArthur`,
@@ -669,7 +679,7 @@ m.vance@cancerresearchuk.org`,
     primaryContact: {
       name: "Hannah Abbott",
       role: "Global Partnerships Manager",
-      email: "h.abbott@savethechildren.org.uk",
+      email: "info@savethechildren.org.uk",
     },
     camOwner: {
       name: "Ada Lovelace",
@@ -691,7 +701,7 @@ m.vance@cancerresearchuk.org`,
       {
         id: "msg-stc-1",
         senderName: "Hannah Abbott",
-        senderEmail: "h.abbott@savethechildren.org.uk",
+        senderEmail: "info@savethechildren.org.uk",
         recipientName: "Ada Lovelace",
         recipientEmail: "ada.lovelace@180dc.org",
         sentAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(),
@@ -713,7 +723,7 @@ m.vance@cancerresearchuk.org`,
     primaryContact: {
       name: "David Miller",
       role: "Service Design Lead",
-      email: "dmiller@macmillan.org.uk",
+      email: "events@macmillan.org.uk",
     },
     camOwner: {
       name: "Arthur Dent",
@@ -742,7 +752,7 @@ m.vance@cancerresearchuk.org`,
       {
         id: "msg-mac-1",
         senderName: "David Miller",
-        senderEmail: "dmiller@macmillan.org.uk",
+        senderEmail: "events@macmillan.org.uk",
         recipientName: "Arthur Dent",
         recipientEmail: "arthur.dent@180dc.org",
         sentAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
@@ -772,7 +782,7 @@ m.vance@cancerresearchuk.org`,
     primaryContact: {
       name: "Liam Davies",
       role: "Rough Sleeping Initiatives Lead",
-      email: "liam.davies@mungos.org",
+      email: "finance@mungos.org",
     },
     camOwner: {
       name: "Ada Lovelace",
@@ -795,7 +805,7 @@ m.vance@cancerresearchuk.org`,
         senderName: "Ada Lovelace",
         senderEmail: "ada.lovelace@180dc.org",
         recipientName: "Liam Davies",
-        recipientEmail: "liam.davies@mungos.org",
+        recipientEmail: "finance@mungos.org",
         sentAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
         subject: "Winter Shelter Capacity Planning & Route Analytics",
         body: `Dear Liam,\n\n180DC is preparing our spring consulting cycle and would love to support St Mungo's shelter allocations.\n\nBest,\nAda`,
@@ -814,7 +824,7 @@ m.vance@cancerresearchuk.org`,
     primaryContact: {
       name: "Samira Patel",
       role: "Policy & Impact Analyst",
-      email: "samira.patel@crisis.org.uk",
+      email: "info@crisis.org.uk",
     },
     camOwner: {
       name: "Ada Lovelace",
@@ -836,7 +846,7 @@ m.vance@cancerresearchuk.org`,
       {
         id: "msg-cr-1",
         senderName: "Samira Patel",
-        senderEmail: "samira.patel@crisis.org.uk",
+        senderEmail: "info@crisis.org.uk",
         recipientName: "Ada Lovelace",
         recipientEmail: "ada.lovelace@180dc.org",
         sentAt: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000).toISOString(),
@@ -858,7 +868,7 @@ m.vance@cancerresearchuk.org`,
     primaryContact: {
       name: "Arthur Pendelton",
       role: "Digital Literacy & Community Lead",
-      email: "arthur.pendelton@ageuk.org.uk",
+      email: "general@ageuk.org.uk",
     },
     camOwner: {
       name: "Arthur Dent",
@@ -881,7 +891,7 @@ m.vance@cancerresearchuk.org`,
         senderName: "Arthur Dent",
         senderEmail: "arthur.dent@180dc.org",
         recipientName: "Arthur Pendelton",
-        recipientEmail: "arthur.pendelton@ageuk.org.uk",
+        recipientEmail: "general@ageuk.org.uk",
         sentAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
         subject: "Follow-up: Digital Inclusion Training Program Proposal",
         body: `Hi Arthur,\n\nSending over the team qualifications and past training workshops for Age UK regional branches.\n\nBest,\nArthur`,
@@ -900,14 +910,14 @@ m.vance@cancerresearchuk.org`,
     primaryContact: {
       name: "Claire Dubois",
       role: "Head of Strategic Initiatives",
-      email: "claire.dubois@unicef.org.uk",
+      email: "press@unicef.org.uk",
     },
     camOwner: {
       name: "Ada Lovelace",
       email: "ada.lovelace@180dc.org",
     },
     status: "replied",
-    replyIntent: "meeting_booked",
+    replyIntent: "interested",
     subject: "Confirmed: UNICEF UK & 180DC Semester Kickoff Session",
     snippet: "Hi Ada, our steering group approved the proposal. Meeting set for next Wednesday at 10 AM...",
     lastActivityAt: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000).toISOString(),
@@ -922,17 +932,1494 @@ m.vance@cancerresearchuk.org`,
       {
         id: "msg-uni-1",
         senderName: "Claire Dubois",
-        senderEmail: "claire.dubois@unicef.org.uk",
+        senderEmail: "press@unicef.org.uk",
         recipientName: "Ada Lovelace",
         recipientEmail: "ada.lovelace@180dc.org",
         sentAt: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000).toISOString(),
         subject: "Confirmed: UNICEF UK & 180DC Semester Kickoff Session",
         body: `Hi Ada,\n\nOur steering group approved the proposal. Meeting set for next Wednesday at 10 AM.\n\nWarmly,\nClaire`,
         isFromClient: true,
-        intent: "meeting_booked",
+        intent: "interested",
       },
     ],
   },
+];
+
+const SECTOR_COLORS: Record<MockThread["sector"], string> = {
+  "Health & Well-being": "#0ea5e9",
+  "Charities & NGOs": "#10b981",
+  "Youth & Education": "#8b5cf6",
+  "Environment": "#14b8a6",
+  "Grants & Foundations": "#f59e0b",
+};
+
+const SEED_ORGANISATIONS: Array<{
+  id: string;
+  name: string;
+  type: string;
+  city: string;
+  sector: MockThread["sector"];
+  contactName: string;
+  contactRole: string;
+  contactEmail: string;
+  camName: string;
+  camEmail: string;
+  status: "replied" | "awaiting" | "sent";
+  intent?: "interested" | "not_interested" | "more_info" | "referral";
+  subject: string;
+  snippet: string;
+  hoursAgo: number;
+  isRead: boolean;
+  isStarred?: boolean;
+}> = [
+  {
+    id: "mock-org-bhf",
+    name: "British Heart Foundation",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Simon Gillespie",
+    contactRole: "Director of Research Partnerships",
+    contactEmail: "info@bhf.org.uk",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: BHF & 180DC — Patient Outreach Data Modelling",
+    snippet: "We would be delighted to host the scoping call. Thursday at 2pm suits our cardiovascular health insights lead...",
+    hoursAgo: 2,
+    isRead: false,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-rspca",
+    name: "RSPCA UK",
+    type: "Registered Charity",
+    city: "Horsham",
+    sector: "Environment",
+    contactName: "Chris Sherwood",
+    contactRole: "Chief Executive",
+    contactEmail: "donations@rspca.org.uk",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Rescue Centre Operational Efficiency Review",
+    snippet: "Thanks Alan. Our regional logistics team has been looking into clinic scheduling and volunteer utilisation...",
+    hoursAgo: 4,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-nspcc",
+    name: "NSPCC",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Youth & Education",
+    contactName: "Sir Peter Wanless",
+    contactRole: "Chief Executive Officer",
+    contactEmail: "press@nspcc.org.uk",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "awaiting",
+    subject: "Childline Digital Service Delivery — 180DC Pro-Bono Scoping",
+    snippet: "Following up on our preliminary discussion regarding Childline's peak hours analysis and volunteer capacity...",
+    hoursAgo: 7,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-national-trust",
+    name: "National Trust",
+    type: "Charitable Trust",
+    city: "Swindon",
+    sector: "Environment",
+    contactName: "Hilary McGrady",
+    contactRole: "Director-General",
+    contactEmail: "general@nationaltrust.org.uk",
+    camName: "Katherine Johnson",
+    camEmail: "katherine.johnson@180dc.org",
+    status: "replied",
+    intent: "more_info",
+    subject: "Re: Land Conservation & Carbon Footprint Tracking",
+    snippet: "Could you clarify the student consultant time commitment and the quantitative deliverables for our South West estates?",
+    hoursAgo: 9,
+    isRead: false,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-barnardos",
+    name: "Barnardo's",
+    type: "Registered Charity",
+    city: "Ilford",
+    sector: "Youth & Education",
+    contactName: "Lynn Perry MBE",
+    contactRole: "Chief Executive",
+    contactEmail: "media@barnardos.org.uk",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "awaiting",
+    subject: "Youth Mental Health Support Pathways — Project Scope",
+    snippet: "We wanted to circle back on the early intervention metrics deck we shared last Tuesday ahead of your board meeting...",
+    hoursAgo: 13,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-guide-dogs",
+    name: "Guide Dogs UK",
+    type: "Registered Charity",
+    city: "Reading",
+    sector: "Health & Well-being",
+    contactName: "Andrew Lennox",
+    contactRole: "Chief Executive",
+    contactEmail: "hello@guidedogs.org.uk",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Canine Training Pipeline & Volunteer Matching Analytics",
+    snippet: "This aligns directly with our 2026 Strategy. We have waitlist data across 8 regional hubs that needs structuring...",
+    hoursAgo: 18,
+    isRead: false,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-alzheimers",
+    name: "Alzheimer's Society",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Kate Lee",
+    contactRole: "Chief Executive Officer",
+    contactEmail: "info@alzheimers.org.uk",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "sent",
+    subject: "Dementia Support Line Optimization — 180DC Partnership",
+    snippet: "Introducing 180 Degrees Consulting and exploring how our predictive triage modelling can support your frontline callers...",
+    hoursAgo: 22,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-battersea",
+    name: "Battersea Dogs & Cats Home",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Charities & NGOs",
+    contactName: "Peter Laurie",
+    contactRole: "Chief Executive",
+    contactEmail: "finance@battersea.org.uk",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Rehoming Duration Modeling & Donor Retention",
+    snippet: "Let us lock in next Tuesday at 11am with our operations director and head of rehoming. Looking forward to it...",
+    hoursAgo: 26,
+    isRead: true,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-woodland-trust",
+    name: "Woodland Trust",
+    type: "Charitable Trust",
+    city: "Grantham",
+    sector: "Environment",
+    contactName: "Darren Moorcroft",
+    contactRole: "Chief Executive Officer",
+    contactEmail: "team@woodlandtrust.org.uk",
+    camName: "Katherine Johnson",
+    camEmail: "katherine.johnson@180dc.org",
+    status: "awaiting",
+    subject: "Native Forest Canopy Recovery — Geospatial Impact Assessment",
+    snippet: "Checking in to see if your conservation science committee had an opportunity to review the GIS modelling proposal...",
+    hoursAgo: 31,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-wateraid",
+    name: "WaterAid UK",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Charities & NGOs",
+    contactName: "Tim Wainwright",
+    contactRole: "Chief Executive",
+    contactEmail: "hello@wateraid.org",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "replied",
+    intent: "referral",
+    subject: "Re: Clean Water Infrastructure Grant Allocation Study",
+    snippet: "I am copying our Head of Global Policy, Priya Sharma, who leads our East Africa water sustainability research...",
+    hoursAgo: 35,
+    isRead: false,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-comic-relief",
+    name: "Comic Relief",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Charities & NGOs",
+    contactName: "Samir Patel",
+    contactRole: "Chief Executive",
+    contactEmail: "events@comicrelief.com",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "sent",
+    subject: "Red Nose Day Donor Lifecycle & Micro-Grant ROI Study",
+    snippet: "Following up on Red Nose Day campaign data and exploring seasonal donor conversion frameworks with 180DC...",
+    hoursAgo: 40,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-teach-first",
+    name: "Teach First",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Youth & Education",
+    contactName: "Russell Hobby",
+    contactRole: "Chief Executive Officer",
+    contactEmail: "office@teachfirst.org.uk",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Teacher Placement Retention & Under-resourced Schools Data",
+    snippet: "The proposal is very compelling. We have longitudinal placement data from 2021-2025 that could benefit from fresh statistical eyes...",
+    hoursAgo: 45,
+    isRead: false,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-anthony-nolan",
+    name: "Anthony Nolan",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Henny Braund MBE",
+    contactRole: "Chief Executive",
+    contactEmail: "general@anthonynolan.org",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "awaiting",
+    subject: "Stem Cell Donor Registry Diversity & Matching Efficiency",
+    snippet: "Checking in regarding our pro-bono consultation on recruiting young male and minority ethnic stem cell donors...",
+    hoursAgo: 50,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-blood-cancer",
+    name: "Blood Cancer UK",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Gemma Peters",
+    contactRole: "Chief Executive",
+    contactEmail: "donations@bloodcancer.org.uk",
+    camName: "Katherine Johnson",
+    camEmail: "katherine.johnson@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Clinical Trial Access Mapping for Leukaemia & Lymphoma",
+    snippet: "Calendar invite sent for Wednesday 3pm. We will have our patient advocacy director and head of policy on the line...",
+    hoursAgo: 55,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-magic-breakfast",
+    name: "Magic Breakfast",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Youth & Education",
+    contactName: "Lindsey MacDonald",
+    contactRole: "Chief Executive",
+    contactEmail: "events@magicbreakfast.com",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: School Hunger Index & Supply Chain Distribution Review",
+    snippet: "We are expanding to 200 additional primary schools in the North East this autumn. Route optimisation would be immensely helpful...",
+    hoursAgo: 60,
+    isRead: false,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-sustrans",
+    name: "Sustrans",
+    type: "Registered Charity",
+    city: "Bristol",
+    sector: "Environment",
+    contactName: "Xavier Brice",
+    contactRole: "Chief Executive Officer",
+    contactEmail: "media@sustrans.org.uk",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "sent",
+    subject: "National Cycle Network Usage Trends & Low-Traffic Neighbourhoods",
+    snippet: "Sharing 180DC's urban transit telemetry capability deck and proposing an active travel adoption analysis for Bristol...",
+    hoursAgo: 65,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-bike-project",
+    name: "The Bike Project",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Charities & NGOs",
+    contactName: "Jem Stein",
+    contactRole: "Founder & Director",
+    contactEmail: "partnerships@thebikeproject.co.uk",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "replied",
+    intent: "more_info",
+    subject: "Re: Refurbishment Workshop Throughput & Refugee Mobility Study",
+    snippet: "Hi Alan, what would the workshop interview process look like? We want to ensure it is culturally sensitive to our refugee beneficiaries...",
+    hoursAgo: 70,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-social-bite",
+    name: "Social Bite",
+    type: "Community Interest Company",
+    city: "Edinburgh",
+    sector: "Charities & NGOs",
+    contactName: "Josh Littlejohn MBE",
+    contactRole: "Co-Founder & CEO",
+    contactEmail: "general@social-bite.co.uk",
+    camName: "Katherine Johnson",
+    camEmail: "katherine.johnson@180dc.org",
+    status: "awaiting",
+    subject: "Social Enterprise Café Scaling & Village Housing Expansion",
+    snippet: "Following up on the Scottish homelessness housing model financial sustainability workbook we sent across...",
+    hoursAgo: 75,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-jrf",
+    name: "Joseph Rowntree Foundation",
+    type: "Charitable Trust",
+    city: "York",
+    sector: "Grants & Foundations",
+    contactName: "Paul Kissack",
+    contactRole: "Group Chief Executive",
+    contactEmail: "office@jrf.org.uk",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Destitution in the UK Research — Data Synthesisation Support",
+    snippet: "We have granular household poverty figures across 300 local authorities. A statistical deep-dive into regional trends is timely...",
+    hoursAgo: 80,
+    isRead: false,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-esmee-fairbairn",
+    name: "Esmée Fairbairn Foundation",
+    type: "Charitable Trust",
+    city: "London",
+    sector: "Grants & Foundations",
+    contactName: "Caroline Mason CBE",
+    contactRole: "Chief Executive",
+    contactEmail: "hello@esmeefairbairn.org.uk",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "sent",
+    subject: "Fairer Future Grant Allocation Impact Evaluation — 180DC",
+    snippet: "Outlining our multidisciplinary student consultant approach to measuring regenerative agriculture and social justice impact...",
+    hoursAgo: 86,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-paul-hamlyn",
+    name: "Paul Hamlyn Foundation",
+    type: "Charitable Trust",
+    city: "London",
+    sector: "Grants & Foundations",
+    contactName: "Moira Sinclair",
+    contactRole: "Chief Executive",
+    contactEmail: "partnerships@phf.org.uk",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Youth Arts Funding Accessibility & Application Friction Study",
+    snippet: "Yes, let's schedule an introductory call next Monday. Our head of learning and evaluation would like to join...",
+    hoursAgo: 92,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-tudor-trust",
+    name: "The Tudor Trust",
+    type: "Charitable Trust",
+    city: "London",
+    sector: "Grants & Foundations",
+    contactName: "Dr. Matthew Freeman",
+    contactRole: "Head of Grants",
+    contactEmail: "comms@tudortrust.org.uk",
+    camName: "Katherine Johnson",
+    camEmail: "katherine.johnson@180dc.org",
+    status: "awaiting",
+    subject: "Grassroots Community Funding Criteria & Grantee Capacity Building",
+    snippet: "Checking in to see if you have any questions on the grantee survey methodology we proposed in our previous note...",
+    hoursAgo: 98,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-garfield-weston",
+    name: "Garfield Weston Foundation",
+    type: "Charitable Trust",
+    city: "London",
+    sector: "Grants & Foundations",
+    contactName: "Philippa Charles",
+    contactRole: "Director",
+    contactEmail: "events@garfieldweston.org",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "replied",
+    intent: "more_info",
+    subject: "Re: Community Centre Capital Works Grantee Post-Completion Audit",
+    snippet: "Thank you Ada. Please send over examples of previous capital grant evaluations completed by 180 Degrees Consulting...",
+    hoursAgo: 105,
+    isRead: false,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-robertson-trust",
+    name: "The Robertson Trust",
+    type: "Charitable Trust",
+    city: "Glasgow",
+    sector: "Grants & Foundations",
+    contactName: "Dr. Jim McCormick",
+    contactRole: "Chief Executive",
+    contactEmail: "enquiries@therobertsontrust.org.uk",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "sent",
+    subject: "Scottish Poverty and Trauma-Informed Grant Strategies",
+    snippet: "Proposing an outcome-measurement assessment for small Scottish community organisations receiving multi-year core grants...",
+    hoursAgo: 112,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-greenpeace",
+    name: "Greenpeace UK",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Environment",
+    contactName: "Will McCallum",
+    contactRole: "Executive Director",
+    contactEmail: "finance@greenpeace.org.uk",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Marine Protected Areas Campaign Volunteer Engagement",
+    snippet: "We are reviewing our digital grassroots mobiliser retention. Your statistical framework for activist journey mapping looks promising...",
+    hoursAgo: 120,
+    isRead: true,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-friends-of-earth",
+    name: "Friends of the Earth UK",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Environment",
+    contactName: "Hugh Knowles",
+    contactRole: "Co-Executive Director",
+    contactEmail: "donations@foe.co.uk",
+    camName: "Katherine Johnson",
+    camEmail: "katherine.johnson@180dc.org",
+    status: "awaiting",
+    subject: "Warm Homes Campaign — Fuel Poverty & Insulation Analytics",
+    snippet: "Reaching back out on our note regarding Council-level housing energy rating datasets and target constituency selection...",
+    hoursAgo: 128,
+    isRead: false,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-soil-association",
+    name: "Soil Association",
+    type: "Registered Charity",
+    city: "Bristol",
+    sector: "Environment",
+    contactName: "Helen Browning OBE",
+    contactRole: "Chief Executive",
+    contactEmail: "press@soilassociation.org",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "replied",
+    intent: "referral",
+    subject: "Re: Organic Farming Supply Chain Feasibility Assessment",
+    snippet: "I am introducing you to Dan Crossley who heads our Food for Life programme; this fits squarely within their school meals initiative...",
+    hoursAgo: 135,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-keep-britain-tidy",
+    name: "Keep Britain Tidy",
+    type: "Registered Charity",
+    city: "Wigan",
+    sector: "Environment",
+    contactName: "Allison Ogden-Newton OBE",
+    contactRole: "Chief Executive Officer",
+    contactEmail: "hello@keepbritaintidy.org",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "sent",
+    subject: "Great British Spring Clean Volunteer Participation Insights",
+    snippet: "Exploring demographic participation metrics and corporate sponsor conversion rates from the 2025 cleanup drive...",
+    hoursAgo: 142,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-marine-conservation",
+    name: "Marine Conservation Society",
+    type: "Registered Charity",
+    city: "Ross-on-Wye",
+    sector: "Environment",
+    contactName: "Sandy Luk",
+    contactRole: "Chief Executive",
+    contactEmail: "giving@mcsuk.org",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Great British Beach Clean Citizen Science Data Pipeline",
+    snippet: "Confirmed for Friday morning at 10am. We will walk through the plastic litter categorization protocol and database hurdles...",
+    hoursAgo: 150,
+    isRead: false,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-trees-for-cities",
+    name: "Trees for Cities",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Environment",
+    contactName: "David Elliott",
+    contactRole: "Chief Executive",
+    contactEmail: "general@treesforcities.org",
+    camName: "Katherine Johnson",
+    camEmail: "katherine.johnson@180dc.org",
+    status: "awaiting",
+    subject: "Urban Canopy Equity in Deprived Boroughs — 180DC Scope",
+    snippet: "Following up on the heat island mitigation mapping scope we sent across earlier this week...",
+    hoursAgo: 158,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-rnib",
+    name: "Royal National Institute of Blind People",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Matt Stringer",
+    contactRole: "Chief Executive Officer",
+    contactEmail: "general@rnib.org.uk",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Accessible Books Distribution & Digital Reading Tech Review",
+    snippet: "We would love to see your consultants review our Talking Books distribution metrics and user churn among elderly patrons...",
+    hoursAgo: 165,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-rnid",
+    name: "RNID (Action on Hearing Loss)",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Mark Atkinson",
+    contactRole: "Chief Executive",
+    contactEmail: "office@rnid.org.uk",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "sent",
+    subject: "Hearing Check Digital Tool Conversion & Audiology Referrals",
+    snippet: "Proposing an optimization of RNID's online 3-minute hearing check conversion funnel and NHS partnership uptake...",
+    hoursAgo: 172,
+    isRead: false,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-diabetes-uk",
+    name: "Diabetes UK",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Chris Askew OBE",
+    contactRole: "Chief Executive",
+    contactEmail: "admin@diabetes.org.uk",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "replied",
+    intent: "more_info",
+    subject: "Re: Type 2 Prevention Programme Community Outreach Study",
+    snippet: "Can you provide additional detail on how the team plans to handle anonymised patient demographic records from primary care?",
+    hoursAgo: 180,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-parkinsons",
+    name: "Parkinson's UK",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Caroline Rassell",
+    contactRole: "Chief Executive",
+    contactEmail: "hello@parkinsons.org.uk",
+    camName: "Katherine Johnson",
+    camEmail: "katherine.johnson@180dc.org",
+    status: "awaiting",
+    subject: "Local Support Group Sustainability & Volunteer Succession Planning",
+    snippet: "Checking in to see if the regional network leads have reviewed the branch health scorecard concept we shared...",
+    hoursAgo: 188,
+    isRead: true,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-stroke-assoc",
+    name: "Stroke Association",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Juliet Bouverie OBE",
+    contactRole: "Chief Executive",
+    contactEmail: "team@stroke.org.uk",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Post-Stroke Rehabilitation Community Navigators Audit",
+    snippet: "We are booked for Tuesday 11:30am. Our head of stroke support delivery and research lead will join the Teams call...",
+    hoursAgo: 195,
+    isRead: false,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-tht",
+    name: "Terrence Higgins Trust",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Richard Angell",
+    contactRole: "Chief Executive",
+    contactEmail: "press@tht.org.uk",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "sent",
+    subject: "HIV Testing Week Opt-Out Testing Scalability & Clinic Data",
+    snippet: "Outlining our analysis framework for assessing emergency department HIV opt-out testing uptake across London NHS trusts...",
+    hoursAgo: 205,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-rethink",
+    name: "Rethink Mental Illness",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Mark Winstanley",
+    contactRole: "Chief Executive",
+    contactEmail: "media@rethink.org",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Severe Mental Illness Carer Respite & Community Housing",
+    snippet: "Your focus on peer support networks in supported accommodation matches our current transformation agenda...",
+    hoursAgo: 215,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-action-children",
+    name: "Action for Children",
+    type: "Registered Charity",
+    city: "Watford",
+    sector: "Youth & Education",
+    contactName: "Paul Carberry",
+    contactRole: "Chief Executive",
+    contactEmail: "comms@actionforchildren.org.uk",
+    camName: "Katherine Johnson",
+    camEmail: "katherine.johnson@180dc.org",
+    status: "awaiting",
+    subject: "Foster Carer Recruitment & Early Retention Analysis",
+    snippet: "Following up on the predictive enquiry-to-approval funnel model we proposed for your South East fostering hub...",
+    hoursAgo: 225,
+    isRead: false,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-childrens-soc",
+    name: "The Children's Society",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Youth & Education",
+    contactName: "Mark Russell",
+    contactRole: "Chief Executive",
+    contactEmail: "enquiries@childrenssociety.org.uk",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "replied",
+    intent: "referral",
+    subject: "Re: Exploited Youth Early Intervention — Regional Evidence Review",
+    snippet: "I am connecting you with Sarah Jenkins from our Disrupting Exploitation programme; she oversees our multi-agency data pilot...",
+    hoursAgo: 235,
+    isRead: true,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-place2be",
+    name: "Place2Be",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Youth & Education",
+    contactName: "Catherine Roche",
+    contactRole: "Chief Executive",
+    contactEmail: "general@place2be.org.uk",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "sent",
+    subject: "School-Based Mental Health Counsellor Caseload Modelling",
+    snippet: "Exploring how 180DC can help evaluate counsellor clinical hours versus teacher consultation time in partner schools...",
+    hoursAgo: 245,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-coram",
+    name: "Coram",
+    type: "Charitable Trust",
+    city: "London",
+    sector: "Youth & Education",
+    contactName: "Dr. Carol Homden CBE",
+    contactRole: "Group Chief Executive",
+    contactEmail: "comms@coram.org.uk",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Coram Adoption Activity Days & Placement Matching Efficiency",
+    snippet: "We would be keen to explore whether your student team can evaluate child-to-adopter matching outcomes across regional agencies...",
+    hoursAgo: 255,
+    isRead: false,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-young-enterprise",
+    name: "Young Enterprise",
+    type: "Registered Charity",
+    city: "Oxford",
+    sector: "Youth & Education",
+    contactName: "Sharon Davies",
+    contactRole: "Chief Executive Officer",
+    contactEmail: "press@y-e.org.uk",
+    camName: "Katherine Johnson",
+    camEmail: "katherine.johnson@180dc.org",
+    status: "awaiting",
+    subject: "Company Programme Financial Capability Impact Measurement",
+    snippet: "Checking in to see if the evaluation steering group has reviewed the secondary school longitudinal impact survey...",
+    hoursAgo: 265,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-youth-music",
+    name: "Youth Music",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Youth & Education",
+    contactName: "Matt Griffiths",
+    contactRole: "Chief Executive",
+    contactEmail: "admin@youthmusic.org.uk",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Grassroots Music Project Evaluation & Inclusion Standards",
+    snippet: "Confirmed for next Monday at 2pm. We want to discuss how our NextGen fund monitoring can become less bureaucratic...",
+    hoursAgo: 275,
+    isRead: true,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-refugee-action",
+    name: "Refugee Action",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Charities & NGOs",
+    contactName: "Tim Naor Hilton",
+    contactRole: "Chief Executive",
+    contactEmail: "admin@refugee-action.org.uk",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "sent",
+    subject: "Asylum Support Casework Queue Optimization — 180DC Scope",
+    snippet: "Proposing a workflow triage analysis for the national asylum crisis hotline to decrease average wait times...",
+    hoursAgo: 285,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-refugee-council",
+    name: "Refugee Council",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Charities & NGOs",
+    contactName: "Enver Solomon",
+    contactRole: "Chief Executive",
+    contactEmail: "giving@refugeecouncil.org.uk",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "replied",
+    intent: "more_info",
+    subject: "Re: Resettlement Integration Outcomes & Housing Transition",
+    snippet: "Thanks Grace. Could you detail the statistical safeguards you apply when handling sensitive UKVI case reference numbers?",
+    hoursAgo: 295,
+    isRead: false,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-care-int",
+    name: "CARE International UK",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Charities & NGOs",
+    contactName: "Helen McEachern",
+    contactRole: "Chief Executive",
+    contactEmail: "team@careinternational.org",
+    camName: "Katherine Johnson",
+    camEmail: "katherine.johnson@180dc.org",
+    status: "awaiting",
+    subject: "Women's Economic Empowerment Emergency Grant Tracking",
+    snippet: "Following up on the micro-loan repayment and community savings group monitoring framework discussed last month...",
+    hoursAgo: 305,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-christian-aid",
+    name: "Christian Aid",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Charities & NGOs",
+    contactName: "Patrick Watt",
+    contactRole: "Chief Executive",
+    contactEmail: "enquiries@christian-aid.org",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Climate Resilient Agriculture in Sub-Saharan Africa",
+    snippet: "We would welcome a team of data-minded student consultants to help synthesize our 5-year climate adaptation field studies...",
+    hoursAgo: 315,
+    isRead: true,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-cafod",
+    name: "CAFOD",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Charities & NGOs",
+    contactName: "Christine Allen",
+    contactRole: "Director",
+    contactEmail: "support@cafod.org.uk",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "sent",
+    subject: "Parish Supporter Mobilisation & Digital Giving Retention",
+    snippet: "Exploring donor lifetime value trends across parish envelopes versus direct debit giving programs...",
+    hoursAgo: 325,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-islamic-relief",
+    name: "Islamic Relief UK",
+    type: "Registered Charity",
+    city: "Birmingham",
+    sector: "Charities & NGOs",
+    contactName: "Tufail Hussain",
+    contactRole: "UK Director",
+    contactEmail: "general@islamic-relief.org.uk",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Ramadan Campaign Logistics & Zakat Allocation Transparency",
+    snippet: "Calendar invitation confirmed for Thursday 3pm. We look forward to exploring how your students can assist our domestic food bank ops...",
+    hoursAgo: 335,
+    isRead: false,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-salvation-army",
+    name: "The Salvation Army UK",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Charities & NGOs",
+    contactName: "Commissioner Jenine Main",
+    contactRole: "Territorial Commander",
+    contactEmail: "comms@salvationarmy.org.uk",
+    camName: "Katherine Johnson",
+    camEmail: "katherine.johnson@180dc.org",
+    status: "awaiting",
+    subject: "Modern Slavery Victim Care Contract Performance Review",
+    snippet: "Checking in to see if your safehouse operations team is ready to schedule the initial consultation session...",
+    hoursAgo: 345,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-leonard-cheshire",
+    name: "Leonard Cheshire",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Ruth Owen OBE",
+    contactRole: "Chief Executive",
+    contactEmail: "admin@leonardcheshire.org",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Assistive Technology for Independent Living in Care Homes",
+    snippet: "We would welcome 180DC evaluating sensor-based technology adoption and staff training overheads across our 70 residential services...",
+    hoursAgo: 355,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-sue-ryder",
+    name: "Sue Ryder",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Heidi Travis",
+    contactRole: "Chief Executive",
+    contactEmail: "office@sueryder.org",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "sent",
+    subject: "Bereavement Support Online Community Moderation Analytics",
+    snippet: "Proposing an analysis of peer-to-peer user support dynamics and sentiment trends across Sue Ryder's online bereavement forum...",
+    hoursAgo: 365,
+    isRead: false,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-marie-curie",
+    name: "Marie Curie",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Matthew Reed",
+    contactRole: "Chief Executive",
+    contactEmail: "support@mariecurie.org.uk",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "replied",
+    intent: "referral",
+    subject: "Re: End of Life Nursing Capacity Allocation Model",
+    snippet: "I am introducing Dr. Elaine Foster, Clinical Operations Director; she leads the night nurse shift planning optimization work...",
+    hoursAgo: 375,
+    isRead: true,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-versus-arthritis",
+    name: "Versus Arthritis",
+    type: "Registered Charity",
+    city: "Chesterfield",
+    sector: "Health & Well-being",
+    contactName: "Deborah Alsina MBE",
+    contactRole: "Chief Executive",
+    contactEmail: "contact@versusarthritis.org",
+    camName: "Katherine Johnson",
+    camEmail: "katherine.johnson@180dc.org",
+    status: "awaiting",
+    subject: "Musculoskeletal Chronic Pain Virtual Exercise Hub Metrics",
+    snippet: "Reaching out regarding the user drop-off analysis on the Let's Move with Leon digital physical activity programme...",
+    hoursAgo: 385,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-asthma-lung",
+    name: "Asthma + Lung UK",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Sarah Woolnough",
+    contactRole: "Chief Executive Officer",
+    contactEmail: "office@asthmaandlung.org.uk",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Clean Air Public Campaign & Inhaler Recycling Scheme",
+    snippet: "We have confirmed next Thursday at 1pm. Our policy and clinical leads will be ready to discuss London low emission zone data...",
+    hoursAgo: 395,
+    isRead: false,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-autistica",
+    name: "Autistica",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Dr. James Cusack",
+    contactRole: "Chief Executive",
+    contactEmail: "volunteer@autistica.org.uk",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "sent",
+    subject: "Neurodiverse Employment Barrier Mapping — 180DC Scoping",
+    snippet: "Following up on our discussion regarding autistic workplace retention data and employer training certification models...",
+    hoursAgo: 405,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-big-issue",
+    name: "Big Issue Foundation",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Charities & NGOs",
+    contactName: "Paul Cheal",
+    contactRole: "Chief Executive",
+    contactEmail: "comms@bigissue.com",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Vendor Cashless Reader Adoption & Financial Inclusion",
+    snippet: "Cashless sales have grown by 300% since 2022. We want to understand vendor bank account opening roadblocks and digital confidence...",
+    hoursAgo: 415,
+    isRead: true,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-street-child",
+    name: "Street Child",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Youth & Education",
+    contactName: "Tom Dannatt",
+    contactRole: "Founder & CEO",
+    contactEmail: "support@street-child.org",
+    camName: "Katherine Johnson",
+    camEmail: "katherine.johnson@180dc.org",
+    status: "awaiting",
+    subject: "Conflict Zone Primary School Re-enrolment Cost Benchmarking",
+    snippet: "Checking in to see if the global operations team has had a chance to review our proposed unit-cost calculation framework...",
+    hoursAgo: 425,
+    isRead: false,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-war-child",
+    name: "War Child UK",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Charities & NGOs",
+    contactName: "Rob Williams OBE",
+    contactRole: "Chief Executive",
+    contactEmail: "office@warchild.org.uk",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "replied",
+    intent: "more_info",
+    subject: "Re: Gaming for Good Fundraising Streamer Retention Analytics",
+    snippet: "Thanks Ada. Could you share details of student consultants' familiarity with Twitch and Tiltify API telemetry and metrics?",
+    hoursAgo: 435,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-marys-meals",
+    name: "Mary's Meals UK",
+    type: "Registered Charity",
+    city: "Glasgow",
+    sector: "Charities & NGOs",
+    contactName: "Daniel Adams",
+    contactRole: "Executive Director",
+    contactEmail: "general@marysmeals.org",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "sent",
+    subject: "School Feeding Programme Cost-per-Meal Grain Logistics",
+    snippet: "Presenting a pro-bono proposal on Malawi and Zambia maize procurement and transport cost sensitivity modelling with 180DC...",
+    hoursAgo: 445,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-foodcycle",
+    name: "FoodCycle",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Charities & NGOs",
+    contactName: "Mary McGrath MBE",
+    contactRole: "Chief Executive",
+    contactEmail: "info@foodcycle.org.uk",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Surplus Food Collection Routing & Volunteer Chef Rostering",
+    snippet: "Yes! Thursday at 10am is booked. We are eager to improve our supermarket collection matching algorithm across 75 community projects...",
+    hoursAgo: 455,
+    isRead: false,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-fareshare",
+    name: "FareShare UK",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Charities & NGOs",
+    contactName: "George Wright",
+    contactRole: "Chief Executive Officer",
+    contactEmail: "enquiries@fareshare.org.uk",
+    camName: "Katherine Johnson",
+    camEmail: "katherine.johnson@180dc.org",
+    status: "awaiting",
+    subject: "Depot Chilled Storage Capacity & Food Waste Diversion Study",
+    snippet: "Following up on the national warehouse chilled pallet storage utilization models we shared with your logistics director...",
+    hoursAgo: 465,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-city-harvest",
+    name: "City Harvest London",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Charities & NGOs",
+    contactName: "Sarah Bilney",
+    contactRole: "Chief Executive",
+    contactEmail: "general@cityharvest.org.uk",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: London Van Fleet Route Optimisation & Emission Reduction",
+    snippet: "Our fleet delivers 1.2 million meals a month. Route optimisation to avoid central congestion zones could save £40k annually...",
+    hoursAgo: 475,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-hubbub",
+    name: "Hubbub UK",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Environment",
+    contactName: "Alex Robinson",
+    contactRole: "Chief Executive",
+    contactEmail: "support@hubbub.org.uk",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "sent",
+    subject: "Community Fridge Network Food Waste Reduction Analytics",
+    snippet: "Exploring how data tracking at 300 community fridges can measure household carbon abatement and local council savings...",
+    hoursAgo: 485,
+    isRead: false,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-rewilding-britain",
+    name: "Rewilding Britain",
+    type: "Charitable Trust",
+    city: "Machynlleth",
+    sector: "Environment",
+    contactName: "Rebecca Wrigley",
+    contactRole: "Chief Executive",
+    contactEmail: "giving@rewildingbritain.org.uk",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "replied",
+    intent: "referral",
+    subject: "Re: Rewilding Network Land Area Carbon Credit Feasibility",
+    snippet: "I am introducing Alistair Driver, our Director of Rewilding; he leads our land manager advice service across the UK...",
+    hoursAgo: 495,
+    isRead: true,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-wildlife-trusts",
+    name: "The Wildlife Trusts",
+    type: "Registered Charity",
+    city: "Newark",
+    sector: "Environment",
+    contactName: "Craig Bennett",
+    contactRole: "Chief Executive",
+    contactEmail: "partnerships@wildlifetrusts.org",
+    camName: "Katherine Johnson",
+    camEmail: "katherine.johnson@180dc.org",
+    status: "awaiting",
+    subject: "Peatland Restoration Monitoring & Volunteer Citizen Science",
+    snippet: "Checking in to see if the 46 regional trusts have finalized their responses to the joint data infrastructure initiative...",
+    hoursAgo: 505,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-scope",
+    name: "Scope UK",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Mark Hodgkinson",
+    contactRole: "Chief Executive",
+    contactEmail: "support@scope.org.uk",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Disability Price Tag & Living Cost Research Data Synthesis",
+    snippet: "We publish the Disability Price Tag report each year. Fresh modelling on energy and equipment costs for disabled households would be excellent...",
+    hoursAgo: 515,
+    isRead: false,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-centrepoint",
+    name: "Centrepoint",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Youth & Education",
+    contactName: "Seyi Obakin OBE",
+    contactRole: "Chief Executive",
+    contactEmail: "contact@centrepoint.org.uk",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "sent",
+    subject: "Youth Homelessness Helpline Demand Forecasting — 180DC",
+    snippet: "Proposing a predictive call-volume model based on local authority eviction notices and universal credit delays...",
+    hoursAgo: 525,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-royal-voluntary",
+    name: "Royal Voluntary Service",
+    type: "Registered Charity",
+    city: "Cardiff",
+    sector: "Health & Well-being",
+    contactName: "Catherine Johnstone CBE",
+    contactRole: "Chief Executive",
+    contactEmail: "team@royalvoluntaryservice.org.uk",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: NHS Volunteer Responders Shift Completion Analytics",
+    snippet: "Calendar confirmed for Tuesday 10am. We want to understand volunteer retention after the first 3 hospital check-in calls...",
+    hoursAgo: 535,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-mental-health-fdn",
+    name: "Mental Health Foundation",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Health & Well-being",
+    contactName: "Mark Rowland",
+    contactRole: "Chief Executive",
+    contactEmail: "media@mentalhealth.org.uk",
+    camName: "Katherine Johnson",
+    camEmail: "katherine.johnson@180dc.org",
+    status: "awaiting",
+    subject: "Mental Health Awareness Week Campaign Impact Measurement",
+    snippet: "Following up on the digital resource downloads and public perception survey analysis proposal...",
+    hoursAgo: 545,
+    isRead: false,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-bookmark-reading",
+    name: "Bookmark Reading Charity",
+    type: "Registered Charity",
+    city: "London",
+    sector: "Youth & Education",
+    contactName: "Graeme Hodge",
+    contactRole: "Chief Executive",
+    contactEmail: "giving@bookmarkreading.org",
+    camName: "Ada Lovelace",
+    camEmail: "ada.lovelace@180dc.org",
+    status: "replied",
+    intent: "more_info",
+    subject: "Re: Primary School Literacy Volunteer Scheduling Algorithm",
+    snippet: "Hi Ada, could you provide more clarity on how the volunteer-school matching algorithm accounts for DBS clearance timelines?",
+    hoursAgo: 555,
+    isRead: true,
+    isStarred: true,
+  },
+  {
+    id: "mock-org-clothworkers",
+    name: "The Clothworkers' Foundation",
+    type: "Charitable Trust",
+    city: "London",
+    sector: "Grants & Foundations",
+    contactName: "Jocelyn Stuart-Grumbar",
+    contactRole: "Chief Executive",
+    contactEmail: "fundraising@clothworkers.co.uk",
+    camName: "Alan Turing",
+    camEmail: "alan.turing@180dc.org",
+    status: "sent",
+    subject: "Capital Grants Impact Assessment for Disability Centres",
+    snippet: "Presenting a framework to assess the multi-year social return on capital grants awarded to independent hospices and day centres...",
+    hoursAgo: 565,
+    isRead: true,
+    isStarred: false,
+  },
+  {
+    id: "mock-org-rayne-fdn",
+    name: "The Rayne Foundation",
+    type: "Charitable Trust",
+    city: "London",
+    sector: "Grants & Foundations",
+    contactName: "Simon Belsham",
+    contactRole: "Chief Executive",
+    contactEmail: "hello@raynefoundation.org.uk",
+    camName: "Grace Hopper",
+    camEmail: "grace.hopper@180dc.org",
+    status: "replied",
+    intent: "interested",
+    subject: "Re: Arts in Healthcare & Elderly Isolation Funding Review",
+    snippet: "Your focus on bridging creative arts interventions with measured reductions in loneliness among elderly care home residents is compelling...",
+    hoursAgo: 575,
+    isRead: false,
+    isStarred: false,
+  },
+];
+
+function buildAdditionalThreads(seeds: typeof SEED_ORGANISATIONS): MockThread[] {
+  return seeds.map((org) => {
+    const isReplied = org.status === "replied";
+    const messages: MockEmailMessage[] = [];
+
+    if (isReplied) {
+      messages.push({
+        id: `msg-${org.id}-1`,
+        senderName: org.camName,
+        senderEmail: org.camEmail,
+        senderRole: "Client Account Manager • 180DC",
+        recipientName: org.contactName,
+        recipientEmail: org.contactEmail,
+        sentAt: new Date(Date.now() - (org.hoursAgo + 48) * 3600 * 1000).toISOString(),
+        subject: org.subject.replace(/^Re:\s*/, ""),
+        body: `Dear ${org.contactName},\n\nI hope this email finds you well.\n\nOn behalf of 180 Degrees Consulting, we have been following ${org.name}'s impactful initiatives in ${org.city}. We would welcome the opportunity to support your team with a pro-bono consulting project this semester.\n\nBest regards,\n${org.camName}\n180 Degrees Consulting`,
+        isFromClient: false,
+      });
+      messages.push({
+        id: `msg-${org.id}-2`,
+        senderName: org.contactName,
+        senderEmail: org.contactEmail,
+        recipientName: org.camName,
+        recipientEmail: org.camEmail,
+        sentAt: new Date(Date.now() - org.hoursAgo * 3600 * 1000).toISOString(),
+        subject: org.subject,
+        body: `Hi ${org.camName.split(" ")[0]},\n\n${org.snippet}\n\nKind regards,\n${org.contactName}\n${org.contactRole}\n${org.name}`,
+        isFromClient: true,
+        intent: org.intent ?? null,
+      });
+    } else {
+      messages.push({
+        id: `msg-${org.id}-1`,
+        senderName: org.camName,
+        senderEmail: org.camEmail,
+        senderRole: "Client Account Manager • 180DC",
+        recipientName: org.contactName,
+        recipientEmail: org.contactEmail,
+        sentAt: new Date(Date.now() - org.hoursAgo * 3600 * 1000).toISOString(),
+        subject: org.subject,
+        body: `Dear ${org.contactName},\n\n${org.snippet}\n\nWe would be glad to arrange a 20-minute introductory call to explore how our student consultants can assist ${org.name}.\n\nWarm regards,\n${org.camName}\n180 Degrees Consulting`,
+        isFromClient: false,
+      });
+    }
+
+    const attachments: MockAttachment[] =
+      org.hoursAgo % 3 === 0
+        ? [
+            {
+              id: `att-${org.id}-1`,
+              filename: `${org.name.replace(/[^a-zA-Z0-9]/g, "_")}_Scope.pdf`,
+              fileType: "pdf",
+              sizeBytes: 1800000 + ((org.hoursAgo * 12345) % 2000000),
+            },
+          ]
+        : [];
+
+    return {
+      id: org.id,
+      orgName: org.name,
+      orgType: org.type,
+      city: org.city,
+      country: "United Kingdom",
+      sector: org.sector,
+      labelColor: SECTOR_COLORS[org.sector],
+      primaryContact: {
+        name: org.contactName,
+        role: org.contactRole,
+        email: org.contactEmail,
+      },
+      camOwner: {
+        name: org.camName,
+        email: org.camEmail,
+      },
+      status: org.status,
+      replyIntent: org.intent ?? null,
+      subject: org.subject,
+      snippet: org.snippet,
+      lastActivityAt: new Date(Date.now() - org.hoursAgo * 3600 * 1000).toISOString(),
+      isRead: org.isRead,
+      isStarred: org.isStarred ?? false,
+      isImportant: isReplied,
+      folder: org.status === "sent" ? "sent" : "inbox",
+      attachments,
+      notesCount: org.hoursAgo % 4,
+      handoversCount: org.hoursAgo % 5 === 0 ? 1 : 0,
+      messages,
+    };
+  });
+}
+
+export const MOCK_INBOX_THREADS: MockThread[] = [
+  ...BASE_MOCK_THREADS,
+  ...buildAdditionalThreads(SEED_ORGANISATIONS),
 ];
 
 /**
@@ -976,6 +2463,91 @@ export function formatFileSize(bytes: number): string {
     return `${(bytes / 1000000).toFixed(1)} MB`;
   }
   return `${Math.round(bytes / 1000)} KB`;
+}
+
+/**
+ * Resolves one date-filter value to an inclusive millisecond range, using the
+ * same value vocabulary as the import-status date filter (`today`,
+ * `yesterday`, `7d`, `30d`, `this_month`, `last_month`, a single `YYYY-MM-DD`
+ * day, or a `from..to` range) so the two pickers agree. Returns null for
+ * anything unparseable — callers ignore those rather than matching nothing.
+ */
+export function resolveDateFilter(
+  value: string,
+  now: Date = new Date(),
+): { from: number; to: number } | null {
+  const startOfDay = (date: Date): Date =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const endOfDay = (date: Date): Date =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+  const addDays = (date: Date, days: number): Date => {
+    const next = new Date(date);
+    next.setDate(next.getDate() + days);
+    return next;
+  };
+
+  const today = startOfDay(now);
+  if (value === "today") {
+    return { from: today.getTime(), to: endOfDay(now).getTime() };
+  }
+  if (value === "yesterday") {
+    const day = addDays(today, -1);
+    return { from: day.getTime(), to: endOfDay(day).getTime() };
+  }
+  if (value === "7d" || value === "30d") {
+    const days = value === "7d" ? 7 : 30;
+    return { from: addDays(today, -days).getTime(), to: endOfDay(now).getTime() };
+  }
+  if (value === "this_month") {
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { from: first.getTime(), to: endOfDay(now).getTime() };
+  }
+  if (value === "last_month") {
+    const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const last = new Date(now.getFullYear(), now.getMonth(), 0);
+    return { from: first.getTime(), to: endOfDay(last).getTime() };
+  }
+  if (value.includes("..")) {
+    const [fromStr, toStr] = value.split("..");
+    const from = new Date(`${fromStr}T00:00:00`);
+    const to = new Date(`${toStr}T00:00:00`);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return null;
+    const [start, end] = from <= to ? [from, to] : [to, from];
+    return { from: startOfDay(start).getTime(), to: endOfDay(end).getTime() };
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const day = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(day.getTime())) return null;
+    return { from: startOfDay(day).getTime(), to: endOfDay(day).getTime() };
+  }
+  return null;
+}
+/**
+ * Ranked free-text search over threads for the preview inbox: the suggestion
+ * dropdown previews it live, Enter applies it to the list. Organisation name
+ * outranks subject, which outranks snippet and contact name; ties keep file
+ * order so screenshots are stable. A blank query matches nothing — the caller
+ * decides what an empty search means.
+ */
+export function searchThreads(threads: MockThread[], rawQuery: string): MockThread[] {
+  const query = rawQuery.trim().toLowerCase();
+  if (!query) return [];
+  return threads
+    .map((thread, index) => {
+      const org = thread.orgName.toLowerCase();
+      const subject = thread.subject.toLowerCase();
+      let score = 0;
+      if (org.startsWith(query)) score += 4;
+      else if (org.includes(query)) score += 3;
+      if (subject.startsWith(query)) score += 3;
+      else if (subject.includes(query)) score += 2;
+      if (thread.snippet.toLowerCase().includes(query)) score += 1;
+      if (thread.primaryContact.name.toLowerCase().includes(query)) score += 1;
+      return { thread, index, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((entry) => entry.thread);
 }
 
 /* ─── TEMPORARY: design fill for /inbox ────────────────────────────────────
@@ -1045,4 +2617,208 @@ export function mockQueueRows(actorId: string, now: Date = new Date()): InboxQue
     }));
 
   return buildInboxQueue(threads, owners, recommendations, actorId, now);
+}
+
+/* ------------------------------------------------------------------------ *
+ * Client context for the compose modal (booklet / profile).
+ *
+ * The real screen reads this from the database — `BookletPanel` takes a
+ * `SavedBooklet` from `booklet-actions.ts`. The preview inbox has no server, so
+ * the booklet is derived from the thread rather than stored on all 89 of them.
+ * Same field names as the real type, so swapping the mock for the query is a
+ * prop change.
+ * ------------------------------------------------------------------------ */
+
+/** Mirrors the fields of `SavedBooklet` the panel actually renders. */
+export type MockBooklet = {
+  id: string;
+  text: string;
+  websiteUrl: string | null;
+  generatedAt: string;
+};
+
+/** The latest booklet for a thread — what the compose modal's Booklet button shows. */
+export function getMockBooklet(thread: MockThread): MockBooklet {
+  const domain = thread.primaryContact.email.split("@")[1] ?? "example.org";
+
+  return {
+    id: `${thread.id}-booklet`,
+    websiteUrl: `https://${domain}`,
+    generatedAt: new Date(
+      new Date(thread.lastActivityAt).getTime() - 6 * 24 * 60 * 60 * 1000,
+    ).toISOString(),
+    text: `## ${thread.orgName}
+
+**${thread.orgType} · ${thread.city}, ${thread.country} · ${thread.sector}**
+
+### What they do
+${thread.orgName} works across ${thread.sector.toLowerCase()}, delivering frontline services alongside a smaller policy and research function. Headcount sits in the low hundreds, with a volunteer base several times that.
+
+### Why they are a fit
+The organisation has grown faster than its internal reporting, which is the pattern our scoping engagements handle best. Their published accounts show restricted income rising as a share of the total — a strong signal that grant administration and impact reporting are absorbing staff time that could be automated.
+
+### Who to talk to
+${thread.primaryContact.name}, ${thread.primaryContact.role}. Owns the relationship on their side and has been responsive to date.
+
+### Openers that have worked
+- Lead with donor retention analytics rather than "strategy" — it is the pain they name themselves.
+- Offer the 6-week scope, not the 12-week one. Shorter commitments clear their board faster.
+- Name a specific comparable engagement; abstract capability statements have not landed with organisations at this size.`,
+  };
+}
+
+/**
+ * Mirrors the CONTACTS table's columns. An organisation has many contacts —
+ * `contacts.organisation_id` is a plain FK with no uniqueness on it — so a
+ * company genuinely can carry several addresses, with `is_primary` marking the
+ * one the CAM leads with. `MockThread` only ever stored the primary, so the
+ * rest are derived here rather than added to all 89 threads by hand.
+ *
+ * EVERY ADDRESS HERE IS A ROLE ADDRESS, and must stay that way. The Technical
+ * Brief's risk register §5 bans storing personal email addresses "in any way or
+ * form", and F247 enforces it: `app.is_personal_email` splits a local part on
+ * `[._+-]` and calls the address personal unless one of the words is an active
+ * row in `public.personal_email_role_parts`. `p.wanless@nspcc.org.uk` is
+ * personal; `fundraising@nspcc.org.uk` is not. The names and job titles below
+ * are fine — CONTACTS has `first_name` / `last_name` / `job_title` columns and
+ * the deny-list covers trustee and officer names from ingestion sources, not a
+ * CAM's own named contact. It is only the address that is regulated, which is
+ * why a contact keeps their name and is reached on the org's role inbox.
+ */
+export type MockContact = {
+  id: string;
+  organisationId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  jobTitle: string;
+  isPrimary: boolean;
+};
+
+const SECONDARY_CONTACT_NAMES: ReadonlyArray<[string, string, string, string]> = [
+  ["Priya", "Raman", "Operations Director", "partnerships"],
+  ["Tom", "Beckett", "Finance Manager", "finance"],
+  ["Nadia", "Okonjo", "Programmes Lead", "fundraising"],
+  ["Callum", "Reid", "Development Manager", "giving"],
+  ["Yuki", "Tanaka", "Head of Partnerships", "partnerships"],
+];
+
+/** Stable per-thread index, so the same org always yields the same people. */
+function threadSeed(id: string): number {
+  let seed = 0;
+  for (let i = 0; i < id.length; i += 1) seed = (seed * 31 + id.charCodeAt(i)) >>> 0;
+  return seed;
+}
+
+/**
+ * Every address the outreach inbox knows for an organisation: the named
+ * primary, a second named contact reached on a different function inbox, and
+ * the general enquiries address. Primary first, which is the order
+ * `is_primary desc` gives.
+ *
+ * The second contact's local part is picked to differ from the primary's, so a
+ * company demonstrably carries more than one address — but if the two collide
+ * the general inbox is used instead, because inventing `tom.beckett@` to force
+ * a distinct row is exactly the thing the policy forbids.
+ */
+export function getMockContacts(thread: MockThread): MockContact[] {
+  const domain = thread.primaryContact.email.split("@")[1] ?? "example.org";
+  const primaryLocal = thread.primaryContact.email.split("@")[0];
+  const [primaryFirst, ...primaryRest] = thread.primaryContact.name.split(" ");
+  const [first, last, role, preferredLocal] =
+    SECONDARY_CONTACT_NAMES[threadSeed(thread.id) % SECONDARY_CONTACT_NAMES.length];
+  const secondLocal = preferredLocal === primaryLocal ? "enquiries" : preferredLocal;
+
+  const contacts: MockContact[] = [
+    {
+      id: `${thread.id}-contact-primary`,
+      organisationId: thread.id,
+      firstName: primaryFirst ?? thread.primaryContact.name,
+      lastName: primaryRest.join(" "),
+      email: thread.primaryContact.email,
+      jobTitle: thread.primaryContact.role,
+      isPrimary: true,
+    },
+    {
+      id: `${thread.id}-contact-second`,
+      organisationId: thread.id,
+      firstName: first,
+      lastName: last,
+      email: `${secondLocal}@${domain}`,
+      jobTitle: role,
+      isPrimary: false,
+    },
+  ];
+
+  if (primaryLocal !== "info" && secondLocal !== "info") {
+    contacts.push({
+      id: `${thread.id}-contact-general`,
+      organisationId: thread.id,
+      firstName: "",
+      lastName: "",
+      email: `info@${domain}`,
+      jobTitle: "General enquiries",
+      isPrimary: false,
+    });
+  }
+
+  return contacts;
+}
+
+export type RecipientMatch = {
+  contact: MockContact;
+  thread: MockThread;
+};
+
+/**
+ * Recipient lookup for the compose field. One query runs against three things
+ * at once — the organisation's name, the contact's name, and the address — so
+ * a CAM who only remembers the charity finds the address, and one who only
+ * remembers the address finds the charity.
+ *
+ * Organisation-name hits outrank contact-name hits, which outrank address
+ * hits; within a rank a prefix beats a substring, and the primary contact
+ * comes before their colleagues.
+ */
+export function searchRecipients(
+  rawQuery: string,
+  limit = 6,
+  threads: MockThread[] = MOCK_INBOX_THREADS,
+): RecipientMatch[] {
+  const query = rawQuery.trim().toLowerCase();
+  if (!query) return [];
+
+  const seen = new Set<string>();
+  const scored: Array<{ match: RecipientMatch; score: number; index: number }> = [];
+
+  threads.forEach((thread, index) => {
+    if (thread.folder === "trash") return;
+    const org = thread.orgName.toLowerCase();
+
+    getMockContacts(thread).forEach((contact) => {
+      // The same address can sit on more than one thread for an org; the
+      // first (highest-ranked) sighting is the one that gets listed.
+      const key = contact.email.toLowerCase();
+      if (seen.has(key)) return;
+
+      const name = `${contact.firstName} ${contact.lastName}`.trim().toLowerCase();
+      let score = 0;
+      if (org.startsWith(query)) score = 60;
+      else if (org.includes(query)) score = 50;
+      else if (name && name.startsWith(query)) score = 40;
+      else if (name && name.includes(query)) score = 30;
+      else if (key.startsWith(query)) score = 20;
+      else if (key.includes(query)) score = 10;
+      if (score === 0) return;
+
+      if (contact.isPrimary) score += 5;
+      seen.add(key);
+      scored.push({ match: { contact, thread }, score, index });
+    });
+  });
+
+  return scored
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, limit)
+    .map((entry) => entry.match);
 }

@@ -5,7 +5,15 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ComponentType } from "react";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
-import { ClipboardCheck, Inbox, ShieldCheck, SquareKanban, UserPlus } from "lucide-react";
+import {
+  ChartLine,
+  ClipboardCheck,
+  Inbox,
+  ListChecks,
+  ShieldCheck,
+  SquareKanban,
+  UserPlus,
+} from "lucide-react";
 import { Cctv } from "@/components/animate-ui/icons/cctv";
 import { CloudDownload } from "@/components/animate-ui/icons/cloud-download";
 import { Compass } from "@/components/animate-ui/icons/compass";
@@ -45,7 +53,9 @@ export type SidebarIconName =
   | "review"
   | "pipeline"
   | "database"
-  | "settings";
+  | "settings"
+  | "actions"
+  | "analytics";
 
 export type SidebarNavItem = {
   href: string;
@@ -85,6 +95,8 @@ const ICONS: Record<SidebarIconName, RailIcon> = {
   pipeline: SquareKanban,
   database: CloudDownload,
   settings: Settings,
+  actions: ListChecks,
+  analytics: ChartLine,
 };
 
 const MotionLink = motion.create(Link);

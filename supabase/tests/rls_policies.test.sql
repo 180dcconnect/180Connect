@@ -1580,6 +1580,8 @@ declare
   v_act_theirs  uuid := '00000000-0000-4000-c000-000000000022';
   v_assignee    uuid;
   v_status      public.action_status;
+  v_completed_at timestamptz;
+  v_completed_by uuid;
   v_count       bigint;
 begin
   if not tests.tables_exist('actions', 'organisations', 'users') then
@@ -1634,14 +1636,43 @@ begin
     'admin can assign an action to a CAM on any client'
   );
 
-  -- F171: the assignee closes their own item. status and completed_at move together
-  -- or the check constraint rejects the write.
-  perform tests.sqlstate_of(v_cam_a, format(
-    'update public.actions set status = ''completed'', completed_at = now() where id = %L',
-    v_action_a));
+  -- F171 (20260914090000): completion goes through the audited complete_action RPC,
+  -- never a direct UPDATE — status/completed_at carry no authenticated UPDATE grant
+  -- anymore, so the direct write is refused and the row stays open.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.actions set status = ''completed'', completed_at = now() where id = %L',
+      v_action_a)),
+    '42501',
+    'status/completed_at are RPC-only — direct UPDATE is closed (F171)'
+  );
   select status into v_status from public.actions where id = v_action_a;
+  return next is(v_status, 'open'::public.action_status,
+    'action still open after the refused direct write');
+
+  -- The assignee closes their own item through complete_action: status and
+  -- completed_at move together and the completer is recorded.
+  perform tests.login_as(v_cam_a);
+  perform public.complete_action(v_action_a);
+  select status, completed_at, completed_by_user_id
+    into v_status, v_completed_at, v_completed_by
+    from public.actions where id = v_action_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
   return next is(v_status, 'completed'::public.action_status,
-    'assignee can mark their own action complete (F171)');
+    'assignee can mark their own action complete (F171) via complete_action');
+  return next ok(v_completed_at is not null,
+    'complete_action sets completed_at');
+  return next is(v_completed_by, v_cam_a,
+    'complete_action records who completed it (F171 AC3)');
+  return next ok(
+    exists (
+      select 1 from public.audit_log
+       where target_table = 'actions' and target_id = v_action_a
+         and action = 'action_completed'
+    ),
+    'complete_action writes an action_completed audit_log row (F171 AC2)'
+  );
 
   -- The two that hold the F257 design up. A missing column privilege raises 42501
   -- regardless of the row policies, so this holds for admins too.
@@ -4764,6 +4795,7 @@ declare
   v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
   v_org_a       uuid := '00000000-0000-4000-b000-000000000002';  -- owned by cam_a
   v_att         uuid;
+  v_reply       uuid;
   v_count       bigint;
   v_rls         boolean;
 begin
@@ -4924,6 +4956,53 @@ begin
     '23505',
     'recording the same storage path twice is refused'
   );
+
+  -- -----------------------------------------------------------------------
+  -- F219: stable attachment-to-timeline links
+  -- -----------------------------------------------------------------------
+  if to_regprocedure('public.link_attachment_to_timeline(uuid,uuid,text,uuid)') is null then
+    return next skip(4, 'link_attachment_to_timeline not yet migrated (F219)');
+    return;
+  end if;
+
+  insert into public.reply_events (organisation_id, reply_body, received_at)
+  values (v_org_a, 'Please see the attached proposal.', now())
+  returning id into v_reply;
+
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.link_attachment_to_timeline(%L, %L, ''reply_event'', %L)',
+      v_att, v_org_a, v_reply)),
+    '42501',
+    'a viewer cannot change an attachment timeline link'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.link_attachment_to_timeline(%L, %L, ''reply_event'', %L)',
+      v_att, v_org_a, '99999999-9999-4999-8999-999999999999'::uuid)),
+    'P0002',
+    'an attachment cannot link to a missing or different-client event'
+  );
+
+  perform tests.login_as(v_cam_a);
+  perform public.link_attachment_to_timeline(v_att, v_org_a, 'reply_event', v_reply);
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select count(*) into v_count from public.attachments
+   where id = v_att
+     and timeline_context_type = 'reply_event'
+     and timeline_context_id = v_reply;
+  return next is(v_count, 1::bigint,
+    'a CAM links an attachment to a reply on the same client');
+
+  insert into public.notes (organisation_id, author_id, content)
+  values (v_org_a, v_cam_a, 'A later timeline event');
+  select count(*) into v_count from public.attachments
+   where id = v_att and timeline_context_id = v_reply;
+  return next is(v_count, 1::bigint,
+    'adding later timeline events does not change the stored attachment link');
 end;
 $$;
 

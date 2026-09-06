@@ -46,12 +46,10 @@ import {
   UNASSIGNED_OWNER,
   type TeamPipelineClient,
 } from "@/lib/admin/team-pipeline";
+import { chunk, fetchPaged } from "@/lib/supabase/fetch-paged";
 import { TeamPipelineTable } from "./team-pipeline-table";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
-
-/** PostgREST caps one response at 1000 rows — walk the range like /clients does. */
-const FETCH_STEP = 1000;
 
 type OrgRow = {
   id: string;
@@ -75,31 +73,24 @@ export default async function AdminTeamPipelinePage({
   const { filters, page } = parseTeamPipelineFilters(params);
 
   const supabase = await createClient();
-  const all: OrgRow[] = [];
-  let listError: { message: string } | null = null;
-  let from = 0;
-  while (true) {
-    const { data, error } = await supabase
+
+  // A failed read replaces the table with an alert below, so the rows are taken
+  // from `data` — the page never renders a silently short pipeline.
+  const organisations = await fetchPaged<OrgRow>((from, to) =>
+    supabase
       .from("organisations")
       .select(
         "id, legal_name, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
       )
       .order("legal_name", { ascending: true })
       .order("id", { ascending: true })
-      .range(from, from + FETCH_STEP - 1)
-      .overrideTypes<OrgRow[], { merge: false }>();
-    if (error) {
-      listError = error;
-      break;
-    }
-    if (!data || data.length === 0) break;
-    all.push(...data);
-    if (data.length < FETCH_STEP) break;
-    from += FETCH_STEP;
-  }
+      .range(from, to)
+      .overrideTypes<OrgRow[], { merge: false }>(),
+  );
+  const all = organisations.data ?? [];
 
-  if (listError) {
-    await reportError(listError, { operation: "admin.team_pipeline.page_list" });
+  if (organisations.error) {
+    await reportError(organisations.error, { operation: "admin.team_pipeline.page_list" });
   }
 
   const baseClients: TeamPipelineClient[] = all.map((row) => ({
@@ -117,44 +108,34 @@ export default async function AdminTeamPipelinePage({
   let clients: TeamPipelineClient[] = baseClients;
   if (baseClients.length > 0) {
     const now = new Date();
+    // The activity RPC takes its ids in the request body, so it is not bound by
+    // the URL-length ceiling that sizes ID_CHUNK.
     const RPC_CHUNK = 500;
-    const ACTION_STEP = 1000;
 
-    const [{ data: prefRows, error: prefError }, { data: openActions, error: openError }] =
-      await Promise.all([
+    const [{ data: prefRows, error: prefError }, openActions] = await Promise.all([
+      supabase
+        .from("outreach_preferences")
+        .select("user_id, first_follow_up_days, second_follow_up_days")
+        .overrideTypes<
+          { user_id: string; first_follow_up_days: number | null; second_follow_up_days: number | null }[],
+          { merge: false }
+        >(),
+      fetchPaged<{ organisation_id: string }>((from, to) =>
         supabase
-          .from("outreach_preferences")
-          .select("user_id, first_follow_up_days, second_follow_up_days")
-          .overrideTypes<
-            { user_id: string; first_follow_up_days: number | null; second_follow_up_days: number | null }[],
-            { merge: false }
-          >(),
-        (async () => {
-          const ids = new Set<string>();
-          let offset = 0;
-          while (true) {
-            const { data, error } = await supabase
-              .from("actions")
-              .select("organisation_id")
-              .eq("status", "open")
-              .order("organisation_id", { ascending: true })
-              .range(offset, offset + ACTION_STEP - 1)
-              .overrideTypes<{ organisation_id: string }[], { merge: false }>();
-            if (error) return { data: [...ids], error };
-            if (!data || data.length === 0) break;
-            for (const row of data) ids.add(row.organisation_id);
-            if (data.length < ACTION_STEP) break;
-            offset += ACTION_STEP;
-          }
-          return { data: [...ids], error: null as null };
-        })(),
-      ]);
+          .from("actions")
+          .select("organisation_id")
+          .eq("status", "open")
+          .order("organisation_id", { ascending: true })
+          .range(from, to)
+          .overrideTypes<{ organisation_id: string }[], { merge: false }>(),
+      ),
+    ]);
 
     if (prefError) {
       await reportError(prefError, { operation: "admin.team_pipeline.preferences_list" });
     }
-    if (openError) {
-      await reportError(openError, { operation: "admin.team_pipeline.open_actions_list" });
+    if (openActions.error) {
+      await reportError(openActions.error, { operation: "admin.team_pipeline.open_actions_list" });
     }
 
     const thresholdsByOwner = new Map<string, FollowUpThresholds>();
@@ -166,10 +147,12 @@ export default async function AdminTeamPipelinePage({
     }
 
     const activityByOrg = new Map<string, { lastEmailSentAt: string | null; lastReplyReceivedAt: string | null; lastStatusChangeAt: string | null }>();
-    for (let i = 0; i < baseClients.length; i += RPC_CHUNK) {
-      const chunkIds = baseClients.slice(i, i + RPC_CHUNK).map((c) => c.id);
+    for (const ids of chunk(
+      baseClients.map((client) => client.id),
+      RPC_CHUNK,
+    )) {
       const { data, error } = await supabase.rpc("get_clients_last_activity", {
-        p_organisation_ids: chunkIds,
+        p_organisation_ids: ids,
       });
       if (error) {
         await reportError(error, { operation: "admin.team_pipeline.activity_chunk" });
@@ -189,7 +172,9 @@ export default async function AdminTeamPipelinePage({
       }
     }
 
-    const openIds = new Set<string>(openActions ?? []);
+    // Partial again: an incomplete open-action list can only over-flag stalls,
+    // which is visible and correctable, where an empty table is neither.
+    const openIds = new Set<string>(openActions.partial.map((row) => row.organisation_id));
     const candidates = baseClients.map((c) => ({
       id: c.id,
       legal_name: c.legal_name,
@@ -290,7 +275,7 @@ export default async function AdminTeamPipelinePage({
           />
         }
       >
-        {listError ? (
+        {organisations.error ? (
           <Rise>
             <InlineAlert
               variant="page"

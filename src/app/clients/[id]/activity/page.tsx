@@ -1,17 +1,24 @@
-import { History } from "lucide-react";
+import { FileClock, History } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { buildTimeline, collectReferencedUserIds, type AuditRow, type NoteRow as TimelineNoteRow, type OutreachMessageRow as TimelineOutreachRow, type ReplyEventRow } from "@/lib/timeline";
+import {
+  CHANGE_HISTORY_ACTIONS,
+  buildChangeHistory,
+  type ChangeHistoryRow,
+} from "@/lib/change-history";
 import {
   stageEventsFromAudit,
   type MissionHistoryRow,
 } from "@/lib/field-sources";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 
+import { ChangeHistorySection } from "../change-history-section";
 import { SectionCard } from "../section-card";
 import { TimelineSection } from "../timeline-section";
 import { loadFieldHistory, requireActor } from "../load-record";
+import { hasPermission } from "@/lib/auth/permissions";
 import { WhatCameFromWhereCard } from "../what-came-from-where-card";
 
 /** The audit actions the client timeline surfaces. */
@@ -35,7 +42,8 @@ export default async function ClientActivityPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  await requireActor();
+  const actor = await requireActor();
+  const isAdmin = hasPermission(actor.role, "user:manage");
   const supabase = await createClient();
 
   /*
@@ -121,6 +129,50 @@ export default async function ClientActivityPage({
   }
 
   /*
+   * F186: the admin's field-level change history. Admin-only — the two
+   * field_discrepancy_* actions it adds on top of the timeline's four are
+   * invisible to every other role anyway (only audit_log_select_admin admits
+   * them), so no RLS change was needed. Fetched separately from the timeline's
+   * own audit read above: a different action set, and one query failing must
+   * not blank the other.
+   */
+  let changeHistoryRows: ChangeHistoryRow[] = [];
+  let changeHistoryDegraded = false;
+  if (isAdmin) {
+    const { data, error } = await supabase
+      .from("audit_log")
+      .select("id, actor_user_id, action, detail, created_at")
+      .eq("target_table", "organisations")
+      .eq("target_id", id)
+      .in("action", [...CHANGE_HISTORY_ACTIONS])
+      .order("created_at", { ascending: false });
+    if (error) {
+      changeHistoryDegraded = true;
+      await reportError(error, { operation: "clients.change_history", organisationId: id });
+    }
+    changeHistoryRows = (data ?? []) as unknown as ChangeHistoryRow[];
+    // The discrepancy actions carry no user reference in `detail`, so the
+    // timeline's own name map is enough for these rows too — except for actors
+    // this page has not already looked up.
+    const extraIds = [...collectReferencedUserIds(changeHistoryRows as unknown as AuditRow[])]
+      .filter((userId) => !timelineNames.has(userId));
+    if (extraIds.length > 0) {
+      const { data: extraUsers, error: extraError } = await supabase
+        .from("users")
+        .select("id, full_name")
+        .in("id", extraIds);
+      if (extraError) {
+        await reportError(extraError, {
+          operation: "clients.change_history_names",
+          organisationId: id,
+        });
+      }
+      for (const row of extraUsers ?? []) timelineNames.set(row.id, row.full_name);
+    }
+  }
+  const changeHistory = buildChangeHistory(changeHistoryRows, timelineNames);
+
+  /*
    * Mission history for the what-came-from-where card: ENRICHMENT_RESULTS is
    * append-only (latest row wins), so the mission's own table IS its history —
    * no second tracking layer. RLS (enrichment_results_select_active) already
@@ -166,9 +218,31 @@ export default async function ClientActivityPage({
               hint="Every email, reply, note and change for this client, in one place."
               icon={<History />}
             >
-              <TimelineSection entries={timeline} degraded={timelineDegraded} />
+              <TimelineSection
+                entries={timeline}
+                degraded={timelineDegraded}
+                organisationId={id}
+              />
             </SectionCard>
           </Rise>
+
+          {/* F186 — admin-only, and in the wide column: the from → to chips
+              wrap badly in the narrow one. */}
+          {isAdmin && (
+            <Rise>
+              <SectionCard
+                headingId="change-history-heading"
+                title="Change history"
+                hint="Every recorded change to this client's fields, including discrepancies resolved automatically and suggested edits that were declined."
+                icon={<FileClock />}
+              >
+                <ChangeHistorySection
+                  entries={changeHistory}
+                  degraded={changeHistoryDegraded}
+                />
+              </SectionCard>
+            </Rise>
+          )}
         </Group>
 
         <Group className="space-y-6">

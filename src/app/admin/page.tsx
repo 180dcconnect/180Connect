@@ -60,9 +60,16 @@ export default async function AdminPage() {
           <Tile href="/admin/cam-settings" title="CAM queue settings">
             View outreach preferences and queue configuration for team members.
           </Tile>
+          <Tile href="/admin/actions" title="Team actions">
+            Assign a client-linked action to a CAM and track outstanding vs completed work
+            across the team.
+          </Tile>
         </Section>
 
         <Section label="Approvals & data quality">
+          <Tile href="/admin/approvals" title="Approvals">
+            Review and decide pending suggested client edits across the team.
+          </Tile>
           <Tile href="/admin/review" title="Review queue">
             Review records held for validation and status changes flagged during sync.
           </Tile>
@@ -117,6 +124,9 @@ export default async function AdminPage() {
         </Section>
 
         <Section label="Oversight & intelligence">
+          <Tile href="/admin/dashboard" title="Admin dashboard">
+            Team-wide pipeline activity, funnel and sector performance.
+          </Tile>
           <Tile href="/admin/team-pipeline" title="Team pipeline">
             Every client&apos;s pipeline stage across the whole team, by stage or owning CAM.
           </Tile>

@@ -24,6 +24,13 @@ import {
   type ReplyTrackingRow,
 } from "@/lib/reply-analytics";
 import { buildNoteList, type NoteRow } from "@/lib/note-history";
+import {
+  buildTimeline,
+  buildTimelineLinkOptions,
+  type NoteRow as TimelineNoteRow,
+  type OutreachMessageRow as TimelineOutreachRow,
+  type ReplyEventRow as TimelineReplyRow,
+} from "@/lib/timeline";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 
 import { AddNoteForm } from "../add-note-form";
@@ -160,7 +167,7 @@ export default async function ClientOutreachPage({
       supabase
         .from("attachments")
         .select(
-          "id, filename, content_type, size_bytes, created_at, uploaded_by_user:users!attachments_uploaded_by_fkey(full_name)",
+          "id, filename, content_type, size_bytes, created_at, timeline_context_type, timeline_context_id, uploaded_by_user:users!attachments_uploaded_by_fkey(full_name)",
         )
         .eq("organisation_id", id)
         .order("created_at", { ascending: false }),
@@ -190,6 +197,23 @@ export default async function ClientOutreachPage({
   });
   const attachments = formatAttachments(
     (attachmentsResult.data ?? []) as unknown as AttachmentRow[],
+  );
+
+  // F219: an attachment is linked to the event it belongs to, so the picker
+  // needs the same option keys the RPC accepts. The linkable events are the
+  // emails, replies and notes this tab already loaded — the timeline is built
+  // here purely to derive those keys, not to render, so it needs no audit rows
+  // and no name lookup (the option label is event, date and subject only).
+  const timelineLinkOptions = buildTimelineLinkOptions(
+    buildTimeline(
+      {
+        notes: (notesResult.data ?? []) as unknown as TimelineNoteRow[],
+        outreachMessages: (outreachResult.data ?? []) as unknown as TimelineOutreachRow[],
+        replyEvents: (replyResult.data ?? []) as unknown as TimelineReplyRow[],
+        auditRows: [],
+      },
+      new Map<string, string | null>(),
+    ),
   );
 
   const savedBooklet = bookletResult.data?.[0] ?? null;
@@ -581,6 +605,8 @@ export default async function ClientOutreachPage({
                 organisationId={client.id}
                 attachments={attachments}
                 error={Boolean(attachmentsResult.error)}
+                canLink={canEdit}
+                timelineOptions={timelineLinkOptions}
               />
               {/* F081: upload sits inside the same card so the new file appears
                   in the list directly above it on refresh (AC4). */}

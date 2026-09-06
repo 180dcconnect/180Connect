@@ -28,11 +28,18 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     },
   ];
 
+  // F168: a personal work queue, gated the same way as the client data it
+  // links into (matrix §3.11 SELECT is shared across every active role) —
+  // no reason for it to need a narrower permission than /clients itself.
   if (hasPermission(actor.role, "client:view")) {
-    sections[0].items.push({ href: "/clients", label: "Clients", icon: "clients" });
-    // Outreach Inbox — same visibility as Clients: RLS grants every active
-    // user SELECT on outreach_messages/reply_events (matrix §3.4).
-    sections[0].items.push({ href: "/inbox", label: "Inbox", icon: "inbox" });
+    sections[0].items.push(
+      { href: "/actions", label: "My actions", icon: "actions" },
+      { href: "/clients", label: "Clients", icon: "clients" },
+      // Outreach Inbox — same visibility as Clients: RLS grants every active
+      // user SELECT on outreach_messages/reply_events (matrix §3.4).
+      { href: "/inbox", label: "Inbox", icon: "inbox" },
+      { href: "/analytics", label: "Analytics", icon: "analytics" },
+    );
   }
 
   if (hasPermission(actor.role, "client:edit")) {
@@ -50,6 +57,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         { href: "/admin/users", label: "Team management", icon: "users" },
         { href: "/admin/review", label: "Review queue", icon: "review" },
         { href: "/admin/team-pipeline", label: "Team pipeline", icon: "pipeline" },
+        { href: "/admin/analytics", label: "Team analytics", icon: "analytics" },
         { href: "/admin/audit-log", label: "Audit log", icon: "audit" },
         // One entry for the four importer pages; each page carries a tab row
         // (see src/app/admin/import-group.ts) so the group is navigable without

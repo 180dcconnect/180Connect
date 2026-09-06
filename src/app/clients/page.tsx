@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { fetchPaged } from "@/lib/supabase/fetch-paged";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
@@ -257,55 +258,29 @@ export default async function ClientsPage({
   // PostgREST caps a single response at 1000 rows — same truncation the
   // dashboard hit at 1794 orgs. Paginate organisations + suppressions so the
   // client count and filters reflect the full pipeline.
-  async function fetchAllOrganisations(): Promise<{
-    data: ClientListRow[] | null;
-    error: { message: string } | null;
-  }> {
-    const all: ClientListRow[] = [];
-    let from = 0;
-    const step = 1000;
-    while (true) {
-      const { data, error } = await supabase
+  const fetchAllOrganisations = () =>
+    fetchPaged<ClientListRow>((from, to) =>
+      supabase
         .from("organisations")
         .select(
           "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id), financial_periods(income_band, total_income, period_end), grants(id, amount_awarded, funder_name, award_date), latest_scores(priority_score, priority_band, scored_at)",
         )
         .order("legal_name", { ascending: true })
         .order("id", { ascending: true })
-        .range(from, from + step - 1)
-        .overrideTypes<ClientListRow[], { merge: false }>();
-      if (error) return { data: null, error };
-      if (!data || data.length === 0) break;
-      all.push(...data);
-      if (data.length < step) break;
-      from += step;
-    }
-    return { data: all, error: null };
-  }
+        .range(from, to)
+        .overrideTypes<ClientListRow[], { merge: false }>(),
+    );
 
-  async function fetchAllOpenSuppressions(): Promise<{
-    data: OpenSuppression[] | null;
-    error: { message: string } | null;
-  }> {
-    const all: OpenSuppression[] = [];
-    let from = 0;
-    const step = 1000;
-    while (true) {
-      const { data, error } = await supabase
+  const fetchAllOpenSuppressions = () =>
+    fetchPaged<OpenSuppression>((from, to) =>
+      supabase
         .from("suppressions")
         .select("organisation_id, status")
         .in("status", ["pending", "active"])
         .order("organisation_id", { ascending: true })
-        .range(from, from + step - 1)
-        .overrideTypes<OpenSuppression[], { merge: false }>();
-      if (error) return { data: null, error };
-      if (!data || data.length === 0) break;
-      all.push(...data);
-      if (data.length < step) break;
-      from += step;
-    }
-    return { data: all, error: null };
-  }
+        .range(from, to)
+        .overrideTypes<OpenSuppression[], { merge: false }>(),
+    );
 
   const [organisations, openSuppressions, team, allTags, outreachPrefs, savedViews] = await Promise.all([
     fetchAllOrganisations(),

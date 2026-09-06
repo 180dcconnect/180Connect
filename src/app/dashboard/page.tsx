@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { hasPermission } from "@/lib/auth/permissions";
+import { isActionOverdue } from "@/lib/actions";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import {
@@ -13,6 +14,7 @@ import {
   type DashboardOrgRow,
   type GrowthPoint,
   type OpenSuppression,
+  type OverdueActionCandidate,
 } from "@/lib/dashboard-metrics";
 import {
   computePerformance,
@@ -673,7 +675,39 @@ export default async function DashboardPage({
   // get_clients_last_activity; the thresholds are this CAM's own preferences
   // (defaults 7/14). Both reads fail soft: a failed activity query degrades the
   // panel back to its pre-F160 status-only list rather than hiding it.
-  let attentionItems = needsAttention(rows, actor.id);
+  // F172 AC3 — this actor's own open, overdue actions, regardless of the
+  // client's outreach status: an overdue action must surface here even for an
+  // otherwise-quiet (or already-converted) client, which is exactly what
+  // needsAttention's status-only candidate set would otherwise miss. Reuses
+  // isActionOverdue from @/lib/actions so "overdue" is decided the same way
+  // here as on the Actions tab itself (F168/F170/F172) — not re-derived.
+  // Fails soft: a failed query just means the panel falls back to its pre-F172
+  // status-only behaviour rather than hiding the whole panel. Gated on
+  // canViewClients the same as the rest of this data — a role that cannot see
+  // a client profile has nothing to link an overdue-action badge to.
+  let overdueActionCandidates: OverdueActionCandidate[] = [];
+  if (canViewClients) {
+    const supabase = await createClient();
+    const { data: overdueActionRows, error: overdueActionsError } = await supabase
+      .from("actions")
+      .select("organisation_id, title, due_date")
+      .eq("assignee_user_id", actor.id)
+      .eq("status", "open")
+      .not("due_date", "is", null);
+    if (overdueActionsError) {
+      await reportError(overdueActionsError, { operation: "dashboard.overdue_actions" });
+    }
+    const now = new Date();
+    overdueActionCandidates = (overdueActionRows ?? [])
+      .filter((row) => isActionOverdue(row.due_date, now))
+      .map((row) => ({
+        organisationId: row.organisation_id as string,
+        title: row.title as string,
+        dueDate: row.due_date as string,
+      }));
+  }
+
+  let attentionItems = needsAttention(rows, actor.id, overdueActionCandidates);
   // F160/F161 — the recommendations are now rendered as their own card
   // (Follow-ups due) as well as decorating the Needs Attention rows, so they are
   // hoisted out of the block that computes them.

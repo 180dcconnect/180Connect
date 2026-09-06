@@ -107,6 +107,7 @@ function sizeTemplateLabel(sizeTemplate: string | undefined): string {
 export function ComposeButton({
   blocked,
   ownershipBlocked = false,
+  adminOverrideOwnerName = null,
   organisationId,
   suppressionReason,
   ownershipWarning,
@@ -117,6 +118,11 @@ export function ComposeButton({
 }: {
   blocked: boolean;
   ownershipBlocked?: boolean;
+  // F018 (#21) AC3: set only when an admin is viewing a client owned by another
+  // CAM. Send/Schedule then require a last-resort confirmation naming the owner
+  // before outreach-actions.ts runs — the server-side rule itself never blocks
+  // admins, this dialog is the deliberate friction the ticket asks for.
+  adminOverrideOwnerName?: string | null;
   organisationId: string;
   suppressionReason?: string;
   ownershipWarning?: string;

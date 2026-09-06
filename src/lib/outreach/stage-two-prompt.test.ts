@@ -21,3 +21,24 @@ test("Stage 2 prompt only exposes a live news hook when enabled", () => {
   assert.doesNotMatch(buildStageTwoPrompt(context).prompt, /New programme launched/);
   assert.match(buildStageTwoPrompt(context, { newsEnabled: true }).prompt, /New programme launched/);
 });
+
+test("reply follow-up uses the actual reply and asks the model to answer it", () => {
+  const result = buildStageTwoPrompt({
+    organisationName: "Example Charity",
+    organisationType: "charity",
+    previousSubject: "Consulting support",
+    previousBody: "Could we arrange an introduction?",
+    replyBody: "Thanks. What would a typical project cost us?",
+  });
+
+  assert.match(
+    result.system,
+    /This is a direct response to a client's reply\. Address what the client actually asked or said, and keep the response grounded in that reply\. Do not describe this as an unanswered follow-up and do not ignore a question in the reply\./,
+  );
+  assert.doesNotMatch(result.system, /initial email received no response/i);
+  assert.match(result.prompt, /What would a typical project cost us\?/);
+  assert.match(
+    result.prompt,
+    /Answer the client's reply directly\. If it contains a question, address it using only the supplied context; if the answer is not available, acknowledge the question and propose a sensible next step without inventing an answer\./,
+  );
+});

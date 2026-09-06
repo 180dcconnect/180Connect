@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { summariseTrackedReplies } from "./reply-analytics.ts";
+import {
+  averageResponseTime,
+  formatResponseTime,
+  summariseTrackedReplies,
+} from "./reply-analytics.ts";
 
 describe("summariseTrackedReplies (F138)", () => {
   const organisations = [
@@ -49,5 +53,46 @@ describe("summariseTrackedReplies (F138)", () => {
     assert.equal(summary.totalReplies, 0);
     assert.equal(summary.byClient.size, 0);
     assert.equal(summary.byCam.size, 0);
+    assert.equal(summary.averageResponseTimeSeconds, null);
+  });
+
+  it("aggregates one stored response time per outreach attempt", () => {
+    const summary = summariseTrackedReplies(
+      [
+        { id: "reply-1", organisation_id: "client-a", response_time_seconds: 3600 },
+        { id: "reply-2", organisation_id: "client-a", response_time_seconds: null },
+        { id: "reply-3", organisation_id: "client-b", response_time_seconds: 1800 },
+      ],
+      organisations,
+    );
+    assert.equal(summary.averageResponseTimeSeconds, 2700);
+    assert.deepEqual(summary.responseTimeByClient.get("client-a"), {
+      attempts: 1,
+      totalSeconds: 3600,
+      averageSeconds: 3600,
+    });
+    assert.deepEqual(summary.responseTimeByCam.get("cam-1"), {
+      attempts: 2,
+      totalSeconds: 5400,
+      averageSeconds: 2700,
+    });
+  });
+});
+
+describe("response-time display", () => {
+  it("ignores missing and invalid tracking data when averaging", () => {
+    assert.equal(averageResponseTime([
+      { response_time_seconds: 60 },
+      { response_time_seconds: null },
+      { response_time_seconds: -1 },
+      { response_time_seconds: 180 },
+    ]), 120);
+  });
+
+  it("formats minutes, hours, and days for analytics display", () => {
+    assert.equal(formatResponseTime(30 * 60), "30 min");
+    assert.equal(formatResponseTime(90 * 60), "1 hr 30 min");
+    assert.equal(formatResponseTime(49 * 60 * 60), "2 days 1 hr");
+    assert.equal(formatResponseTime(null), "Not available");
   });
 });

@@ -8,6 +8,7 @@ import {
   restrictedFieldLabel,
   restrictedFieldRpcFailure,
   validateDeactivateRestrictedFieldInput,
+  validateDecideEditInput,
   SENSITIVE_FIELD_LABELS,
   SENSITIVE_ORG_FIELDS,
   suggestEditAvailability,
@@ -390,5 +391,67 @@ describe("restrictedFieldRpcFailure (F020)", () => {
 
   it("handles an empty error safely", () => {
     assert.equal(restrictedFieldRpcFailure({}).status, 500);
+  });
+});
+
+describe("validateDecideEditInput (F181)", () => {
+  const validUuid = "11111111-2222-4333-8444-555555555555";
+
+  it("accepts valid approval without reason", () => {
+    const result = validateDecideEditInput({
+      suggestionId: validUuid,
+      approve: true,
+    });
+    assert.equal(result.success, true);
+    if (result.success) {
+      assert.equal(result.data.suggestionId, validUuid);
+      assert.equal(result.data.approve, true);
+      assert.equal(result.data.reason, undefined);
+    }
+  });
+
+  it("accepts valid rejection with trimmed reason", () => {
+    const result = validateDecideEditInput({
+      suggestionId: validUuid,
+      approve: false,
+      reason: "   Incorrect official address verified with Companies House.   ",
+    });
+    assert.equal(result.success, true);
+    if (result.success) {
+      assert.equal(result.data.suggestionId, validUuid);
+      assert.equal(result.data.approve, false);
+      assert.equal(
+        result.data.reason,
+        "Incorrect official address verified with Companies House.",
+      );
+    }
+  });
+
+  it("rejects invalid or missing suggestion UUID", () => {
+    const missing = validateDecideEditInput({ approve: true });
+    assert.equal(missing.success, false);
+
+    const invalid = validateDecideEditInput({
+      suggestionId: "not-a-uuid",
+      approve: true,
+    });
+    assert.equal(invalid.success, false);
+  });
+
+  it("rejects non-boolean approval flag", () => {
+    const invalid = validateDecideEditInput({
+      suggestionId: validUuid,
+      approve: "yes",
+    });
+    assert.equal(invalid.success, false);
+  });
+
+  it("rejects overly long reason exceeding 500 characters", () => {
+    const invalid = validateDecideEditInput({
+      suggestionId: validUuid,
+      approve: false,
+      reason: "x".repeat(501),
+    });
+    assert.equal(invalid.success, false);
   });
 });

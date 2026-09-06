@@ -12,7 +12,9 @@ import {
   organisationGrowthSeries,
   type DashboardOrgRow,
   type OpenSuppression,
+  type OverdueActionCandidate,
 } from "@/lib/dashboard-metrics";
+import { isActionOverdue } from "@/lib/actions";
 import { formatTeamActivities, type FormattedTeamActivity, type RawTeamActivityRow } from "@/lib/team-activity";
 import { followUpRecommendations, DEFAULT_FOLLOW_UP_THRESHOLDS, type FollowUpRecommendation } from "@/lib/outreach/follow-up-recommendations";
 import {
@@ -42,6 +44,7 @@ import {
 import { FeedbackPrompt } from "@/components/feedback-prompt";
 import { shouldPromptFeedback } from "@/lib/feedback";
 import {
+  formatResponseTime,
   summariseTrackedReplies,
   type ReplyTrackingRow,
 } from "@/lib/reply-analytics";
@@ -179,7 +182,7 @@ export default async function DashboardPage({
       while (true) {
         const { data, error } = await supabase
           .from("reply_events")
-          .select("id, organisation_id")
+          .select("id, organisation_id, response_time_seconds")
           .order("received_at", { ascending: true })
           .order("id", { ascending: true })
           .range(from, from + step - 1)
@@ -318,12 +321,44 @@ export default async function DashboardPage({
 
   const replyTracking = summariseTrackedReplies(trackedReplies, rows);
   const metrics = computeDashboardMetrics(rows, replyTracking);
+
+  // F172 AC3 — this actor's own open, overdue actions, regardless of the
+  // client's outreach status: an overdue action must surface here even for
+  // an otherwise-quiet (or already-converted) client, which is exactly what
+  // needsAttention's status-only candidate set would otherwise miss. Reuses
+  // isActionOverdue from @/lib/actions so "overdue" is decided the same way
+  // here as on the Actions tab itself (F168/F170/F172) — not re-derived.
+  // Fails soft: a failed query just means the panel falls back to its
+  // pre-F172 status-only behaviour rather than hiding the whole panel. Gated
+  // on canViewClients the same as the rest of this data — a role that can't
+  // see a client profile has nothing to link an overdue-action badge to.
+  let overdueActionCandidates: OverdueActionCandidate[] = [];
+  if (canViewClients) {
+    const supabase = await createClient();
+    const { data: overdueActionRows, error: overdueActionsError } = await supabase
+      .from("actions")
+      .select("organisation_id, title, due_date")
+      .eq("assignee_user_id", actor.id)
+      .eq("status", "open")
+      .not("due_date", "is", null);
+    if (overdueActionsError) {
+      await reportError(overdueActionsError, { operation: "dashboard.overdue_actions" });
+    }
+    const now = new Date();
+    overdueActionCandidates = (overdueActionRows ?? [])
+      .filter((row) => isActionOverdue(row.due_date, now))
+      .map((row) => ({
+        organisationId: row.organisation_id as string,
+        title: row.title as string,
+        dueDate: row.due_date as string,
+      }));
+  }
   // F160 — silence is measured from the client's last real activity (latest of
   // sent email, received reply, audited status change), aggregated per client by
   // get_clients_last_activity; the thresholds are this CAM's own preferences
   // (defaults 7/14). Both reads fail soft: a failed activity query degrades the
   // panel back to its pre-F160 status-only list rather than hiding it.
-  let attentionItems = needsAttention(rows, actor.id);
+  let attentionItems = needsAttention(rows, actor.id, overdueActionCandidates);
   if (!loadFailed && attentionItems.length > 0) {
     const supabase = await createClient();
     const myClients = rows
@@ -589,7 +624,7 @@ export default async function DashboardPage({
                     label="Responses received"
                     value={metrics.responsesReceived}
                     share={share(metrics.respondingClients)}
-                    caption={`${metrics.respondingClients.toLocaleString()} responding ${metrics.respondingClients === 1 ? "client" : "clients"}`}
+                    caption={`${metrics.respondingClients.toLocaleString()} responding ${metrics.respondingClients === 1 ? "client" : "clients"} · Avg ${formatResponseTime(replyTracking.averageResponseTimeSeconds)}`}
                   />
                 </Rise>
                 <Rise>

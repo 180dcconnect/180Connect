@@ -29,9 +29,9 @@ export async function SettingsShell({ children }: { children: React.ReactNode })
   // has a rail row now that this shell wraps its page too.
   personal.items.push({ href: "/settings/accessibility", label: "Accessibility" });
 
-  // F179: every role receives notifications (matrix §3.19 is shared across
+  // F178: every role receives notifications (matrix §3.19 is shared across
   // all active roles), so this row is unconditional too, same as Accessibility.
-  personal.items.push({ href: "/settings/notifications", label: "Notification emails" });
+  personal.items.push({ href: "/settings/notifications", label: "Notifications" });
 
   // Outreach preferences steer a CAM's own queue, so the row is only shown to
   // someone who can act on that queue — a viewer has no outreach to target.

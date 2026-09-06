@@ -3,33 +3,32 @@
 import { revalidatePath } from "next/cache";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
-import {
-  parseAccountSettings,
-  type NotificationFrequency,
-} from "@/lib/account-settings";
+import { parseAccountSettings } from "@/lib/account-settings";
 import { reportError } from "@/lib/error-logging";
 
 export type AccountSettingsState = {
   status: "idle" | "error" | "success";
   message?: string;
   /**
-   * The name and notification frequency as actually stored, echoed back on success.
-   * The view row renders this rather than re-deriving it from the keystrokes, so
-   * the screen cannot disagree with the database about what normalisation did.
+   * The name as actually stored, echoed back on success. The view row renders
+   * this rather than re-deriving it from the keystrokes, so the screen cannot
+   * disagree with the database about what normalisation did.
    */
   fullName?: string;
-  notificationFrequency?: NotificationFrequency;
 };
 
 /**
- * Saves the caller's own account details (F200 / F201).
+ * Saves the caller's own display name (F200 / F201).
  *
- * `full_name` and `notification_frequency` are written, and `user_id` comes from
- * the session rather than the form — the request cannot name a different row to
- * update, and `users_update_self_or_admin` would reject it if it tried. Email and role are
- * not read from the form at all (AC2): they are displayed read-only on this
- * screen and changed elsewhere — email through login credentials, role through
- * the admin RPC (F012).
+ * Only `full_name` is written here. `notification_frequency` used to be saved
+ * from this screen too, but F178 moved that setting to /settings/notifications,
+ * which is now the single place it is written — this action deliberately stops
+ * at the name so the column cannot be updated from a stale profile form.
+ * `user_id` comes from the session rather than the form — the request cannot
+ * name a different row to update, and `users_update_self_or_admin` would reject
+ * it if it tried. Email and role are not read from the form at all (AC2): they
+ * are displayed read-only on this screen and changed elsewhere — email through
+ * login credentials, role through the admin RPC (F012).
  */
 export async function saveAccountSettingsAction(
   _previousState: AccountSettingsState,
@@ -44,7 +43,6 @@ export async function saveAccountSettingsAction(
 
   const parsed = parseAccountSettings({
     fullName: formData.get("full_name"),
-    notificationFrequency: formData.get("notification_frequency"),
   });
   if (!parsed.ok) {
     return { status: "error", message: parsed.message };
@@ -55,7 +53,6 @@ export async function saveAccountSettingsAction(
     .from("users")
     .update({
       full_name: parsed.value.fullName,
-      notification_frequency: parsed.value.notificationFrequency,
     })
     .eq("id", authorization.actor.id);
 
@@ -65,7 +62,7 @@ export async function saveAccountSettingsAction(
     // than we want on screen (DoD: no stack traces or internals in user-facing
     // errors). The detail goes to the error log instead.
     await reportError(error, {
-      operation: "account_settings.update_profile_and_notifications",
+      operation: "account_settings.update_profile",
       userId: authorization.actor.id,
     });
     return {
@@ -86,6 +83,5 @@ export async function saveAccountSettingsAction(
     status: "success",
     message: "Account details saved.",
     fullName: parsed.value.fullName,
-    notificationFrequency: parsed.value.notificationFrequency,
   };
 }

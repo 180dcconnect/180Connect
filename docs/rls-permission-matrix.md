@@ -194,9 +194,10 @@ granted columns only` already covers it, same as `notification_frequency` (F201/
 F178). No RPC: choosing which notification types to also receive by email changes
 no ownership/status/role/approval state, so a self-scoped column grant plus the
 existing `users_update_self_or_admin` policy is enough (`docs/audit-log-pattern.md`
-§1 reasoning). Defaults to `{reply_received}` — F179 AC3's "sent by email by
-default... unless the CAM has explicitly opted out" is the column default itself,
-not application logic that could drift from it.
+§1 reasoning). Defaults to `{client_reply_received}` — the *one* reply type this
+feature emails (the owning CAM's F174 token, §3.19) — so F179 AC3's "sent by
+email by default... unless the CAM has explicitly opted out" is the column
+default itself, not application logic that could drift from it.
 
 ### 3.2 Canonical organisation data — shared read, admin write
 
@@ -410,6 +411,28 @@ by omission of UPDATE/DELETE grants, same mechanism as `AUDIT_LOG`.
 The CAM INSERT check on `OUTREACH_MESSAGES` is the database-layer expression of
 "Send to an organisation owned by another CAM: Admin yes, CAM no". This is the
 policy the acceptance criteria's "misuse attempt" test must target.
+
+F018 (#21, `20260915000000`) extends that rule from INSERT-time to the whole
+send lifecycle. The three send-path SECURITY DEFINER RPCs —
+`claim_outreach_send`, `schedule_outreach_send`, `mark_outreach_sent` —
+re-check authorisation inside their definer bodies under the same predicate:
+**admin, or the client's owner, or (only while the client is unowned) the
+draft's author.** Previously a draft's author could claim/schedule/record a
+send regardless of who owned the client, so a draft generated before a client
+was reassigned stayed sendable by its original author — including via direct
+API call. The predicate is coalesced: with an unowned client,
+`org_owner_id = actor` is NULL, and an uncoalesced NULL would make
+`IF NOT (...)` silently allow. Ownership is the sanctioned route to contacting
+a client another CAM works on (PM decision, Bashir, Aug 2026) — there is
+deliberately no per-CAM grant table; request ownership instead. The app layer
+enforces the same rule at the actions themselves (`assertContactPermission` in
+`src/lib/outreach/contact-permission.ts`, called by `sendReviewedEmail` /
+`scheduleReviewedEmail`) so the refusal carries the owner-naming message, and
+an admin sending on another CAM's client is asked to confirm a last-resort
+override dialog naming the owner first. Scheduled sends are checked at
+schedule time only: a schedule permitted when queued is delivered even if
+ownership changes before it fires (grandfathered, same PM decision) — the
+service-role worker never had an `auth.uid()` to check against.
 
 Both INSERT policies additionally require `app.can_contact_organisation(organisation_id)`
 (F050, #52) — a suppressed org (F251 §3.14) blocks every insert, admin included. Fixed
@@ -669,7 +692,7 @@ outgoing one's open actions *before* the handover, not only after.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `ACTIONS` | all roles | admin: any. cam: `created_by_user_id = auth.uid()` **and** `assignee_user_id = auth.uid()` **and** org is unowned or owned by self | admin any row; cam where `assignee_user_id = auth.uid()` — **work columns only** | admin any row; cam own-created **and** own-assigned **and** `status = 'open'` |
+| `ACTIONS` | all roles | admin: any. cam: `created_by_user_id = auth.uid()` **and** `assignee_user_id = auth.uid()` **and** org is unowned or owned by self | admin any row; cam where `assignee_user_id = auth.uid()` — **`title`/`description`/`due_date`/`remind_at` only** (`status`/`completed_at` RPC-only, F171 below) | admin any row; cam own-created **and** own-assigned **and** `status = 'open'` |
 
 `assignee_user_id` carries **no UPDATE grant for any role, admins included**, and neither
 do `organisation_id` or `is_seed`. `authenticated` is one shared Postgres role, so column
@@ -710,6 +733,30 @@ admin to work out which of fifty clients was the problem.
 A CAM assigning work to *another* CAM is F169 and stays admin-only — that is what the
 `assignee_user_id = auth.uid()` predicate on INSERT enforces. Viewers create nothing
 (§4.3), enforced by `app.is_cam()`.
+
+**Completion RPC** (F171 Mark Action Complete, #167,
+`supabase/migrations/20260914090000_create_complete_action_rpc.sql`):
+`status`/`completed_at` carried a plain `authenticated` UPDATE grant until this
+migration — completing an action was an ordinary, un-audited write, same as
+editing its title. F171 AC2 ("keeps a record of it for audit purposes, F221")
+and AC3 ("shows who completed it") cannot be met by a policy: a policy cannot
+also insert into `AUDIT_LOG` (no INSERT grant to `authenticated` at all, §3.8),
+and cannot capture "the person who ran this UPDATE" as a stored column. So this
+migration revokes direct UPDATE on `status`/`completed_at` and reopens
+completion only through `complete_action(action_id)` — `SECURITY DEFINER`,
+self-checks the caller is the action's own assignee **or** an admin (the same
+combined reach `actions_update_admin`/`actions_update_assignee` already had
+directly, so nothing regresses), requires the action be `open`, sets
+`completed_at`/`completed_by_user_id` and writes `audit_log`
+(`action_completed`) in the same transaction. `completed_by_user_id` is a new
+column rather than an assumption that the assignee always did it — since an
+admin can complete someone else's action too, "who" genuinely isn't always
+`assignee_user_id`.
+
+This closes `status` for every transition, not just completion: nothing in
+F171 or elsewhere builds a "cancel" flow, so that exit stays theoretically
+reachable only by a future audited RPC of its own, the same way this one now
+owns completion.
 
 Deletion requires the CAM to have **raised** the action and to **still hold** it, and it
 must still be open. A completed or cancelled action is handover history and only an admin
@@ -1077,16 +1124,71 @@ publication for live bell-panel delivery; publication membership grants nothing
 on its own — delivery is still filtered by the SELECT policy per subscriber
 (same mechanism as §3.8 / F075).
 
-**Producer + email delivery: replies** (F179, #175,
-`supabase/migrations/20260913090000_add_email_notification_preferences.sql` +
-`src/lib/gmail/reply-sync.ts` + `src/lib/notification-email.ts`).
-`capture_gmail_reply` (F131) now also calls `create_notification` for the
-client's current owner — the in-app half of "email in addition to in-app"
-(AC1). Postgres cannot send email, so the email half is entirely outside the
-database: `reply-sync.ts` calls it right after `capture_gmail_reply`
-succeeds, looks up the recipient's `email_notification_types` (own-row
-column, above), and if `reply_received` is in that set (true by default —
-AC3), sends via `sendGmailMessage` (F241) directly.
+**Producer: reply notifications** (F133 #128/#510 + F174 #170). The producer
+is F133's `notify_on_reply_event` AFTER INSERT trigger on `reply_events`
+(`supabase/migrations/20260912170300_notify_on_gmail_reply.sql`) — it runs in
+the same transaction as `capture_gmail_reply` (F131) inserting the reply row,
+notifying the client's *current* `owner_id` (looked up fresh, not the owner at
+whenever Gmail sync queued the job), or every active admin when the client is
+unowned / its owner is inactive. `notification_type` is
+`'client_reply_received'` (owner) / `'unowned_client_reply_received'` (admin
+fallback); `link_path` is the client's communication timeline — `/clients/<id>`
+with a `#timeline-heading` anchor, not a generic notifications list (F174 AC2).
+F174 deliberately adds no second producer — that would double-notify the same
+reply. This table carries no priority column — AC3's "high-priority by default"
+is decided app-side, by `notificationPriority()` in `src/lib/notifications.ts`
+mapping both F133 reply types to `'high'`, not by a new column every producer
+would otherwise have to fill in.
+
+**Producer: reminder notifications** (F175, #171,
+`src/lib/outreach/reminder-sweep.ts` +
+`supabase/migrations/20260916000000_schedule_reminder_notifications_cron.sql`).
+A daily pg_cron job (`reminder_notifications_daily`, same shape as F183's
+`stall_detection_daily`) recomputes F160's team-wide follow-up recommendations
+and calls `create_notification` (service_role — an already-granted caller,
+no new grant needed) for each client's owner when one becomes due.
+`notification_type = 'follow_up_due'`; `link_path` is the client profile
+(AC2). The audit_log row this sweep writes per notification
+(`reminder_notification_sent`, `target_table: organisations`) is *not* a
+business-entity change either — it exists purely so the next sweep can tell
+"already notified for this exact staleness episode" from "the CAM has since
+acted and this is a new one" (AC3), the same self-referential comparison
+`stall_swept` already uses to decide whether the stalled set changed.
+
+---
+
+**Producer: team activity digests** (F176, #172,
+`src/lib/team-activity-sweep.ts` +
+`supabase/migrations/20260916010000_schedule_team_activity_digest_cron.sql`).
+An hourly pg_cron job (`team_activity_digest_hourly`, same shape as F183's
+`stall_detection_daily`) reads new `AUDIT_LOG` rows since its own last run —
+the same action allowlist `get_recent_team_activity` already exposes to the
+dashboard (§3.7-adjacent; F029) — and calls `create_notification`
+(service_role — an already-granted caller, no new grant needed) **once per
+active user**, summarising every teammate's action since their last digest,
+never one notification per event (AC2, this ticket's own answer to its
+"Noise control rules" blocker: batched, not a per-type on/off switch, since
+F178 preferences are not a dependency here). `notification_type =
+'team_activity_digest'`; `link_path` is `/dashboard`, where the same events
+render individually in the existing Team Activity feed. The sweep's own
+watermark (`team_activity_digest_swept`, `target_table` null) is not a
+business-entity change either — same reasoning as F175's
+`reminder_notification_sent` marker.
+
+**Email delivery: replies only** (F179, #175,
+`supabase/migrations/20260917090000_add_email_notification_types.sql` +
+`src/lib/gmail/reply-sync.ts` + `src/lib/notification-email.ts`). Postgres
+cannot send email, so the email half is entirely application-side — and it
+deliberately adds **no** second notification producer. F174's trigger above is
+the one in-app producer; F179 emails *in addition to* that row (AC1), never a
+second row. After `capture_gmail_reply` returns the new `reply_events` id,
+`syncGmailReplies` looks up the client's *current* active owner (the same
+lookup F174's trigger does) and consults that owner's `email_notification_types`
+(own-row column, §3.1). Only `'client_reply_received'` — F174's owner token —
+is emailable in this ticket, and it is the column default (AC3), so a CAM who
+never opens the settings page still gets reply emails unless they explicitly
+uncheck it there. Unowned/inactive-owner replies fall to the admin fallback
+notifications (`'unowned_client_reply_received'`), which stay in-app only.
 
 **Deliberately not `sendBranchOutreach`.** That function's own header says it
 is "the only transport entry point for client outreach (F124)" and sits
@@ -1094,11 +1196,12 @@ behind the approval/scheduling pipeline (`OUTREACH_MESSAGES`, human-reviewed
 before send). A platform notification email to a CAM is not outreach to a
 client and must never be reachable through — or mistakable for — that path;
 `src/lib/notification-email.ts` calls the lower `sendGmailMessage` transport
-directly, with its own `180Connect <...>` display name, and touches no
-outreach table at all. This is also this ticket's own testing note ("verify
-no outreach email can be sent without human approval"): satisfied by
-construction, since the notification-email path has no code route into
-`OUTREACH_MESSAGES` or the approval RPCs to begin with.
+directly (F241, with its own `180Connect <...>` display name; `sendGmailMessage`
+still enforces its F223 sender-match defence-in-depth against the configured
+branch mailbox) and touches no outreach table at all. This is also this
+ticket's own testing note ("verify no outreach email can be sent without human
+approval"): satisfied by construction, since the notification-email path has no
+code route into `OUTREACH_MESSAGES` or the approval RPCs to begin with.
 
 ---
 
@@ -1360,6 +1463,33 @@ count rather than silently cascading them away — and takes an EXCLUSIVE lock
 on `ORG_TAGS` across the check-and-delete transaction, closing the race where
 an assignment committed between a separate count and delete would vanish to
 the `ON DELETE CASCADE`. No audit row: same §1 reasoning as colour.
+
+---
+
+### 3.24 Outreach daily send limit — RPC-only write, shared read
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `OUTREACH_DAILY_SEND_LIMIT` | any active user | — (seeded once by migration) | — (`SECURITY DEFINER` RPC only) | **none** |
+
+F128's branch-wide daily cap on outreach sends, distinct from §3.10a's per-user AI
+throttle and from F227's per-CAM `EMAIL_SEND_RATE_LIMIT` env var: every CAM sends
+from the same one branch mailbox, so a per-CAM limit alone never bounds the
+mailbox's total volume. A singleton row (`id` pinned `true`), the same shape as
+`DATA_HANDLING_RULE_VERSIONS`.
+
+SELECT is open to any active user, not admin-only — unlike §3.10a — because the
+send path itself (`sendReviewedEmail`, running as the sending CAM, and the
+scheduled worker, running as `service_role`) must read the current limit on every
+send to enforce it. The value carries no sensitive information; hiding it from a
+CAM would only mean a less informative block message.
+
+The only write path is `set_outreach_daily_send_limit`
+(`20260913100000_create_outreach_daily_send_limit.sql`), which re-checks
+`app.is_admin()` in its body (`SECURITY DEFINER` bypasses RLS) and writes the
+`audit_log` row (`outreach_daily_send_limit_changed`) in the same transaction —
+docs/audit-log-pattern.md. No-op writes (same value) are skipped, same as
+`set_data_handling_rule_active`.
 
 ---
 

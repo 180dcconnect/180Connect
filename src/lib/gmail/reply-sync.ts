@@ -5,13 +5,21 @@ import { logApiHealth } from "../api-health-log.ts";
 import { reportError } from "../error-logging.ts";
 import { createAdminClient } from "../supabase/admin.ts";
 import { getGmailAccessToken, resolveGmailConfig, resolveGmailSender, type GmailConfig } from "./client.ts";
-import { matchInboundReply, parseInboundReply, type GmailInboundMessage, type SentThreadReference } from "./reply-message.ts";
+import { isPotentialCrmReply, matchInboundReply, parseInboundReply, type GmailInboundMessage, type SentThreadReference } from "./reply-message.ts";
 import { sendNotificationEmail } from "../notification-email.ts";
 import { wantsEmailNotification } from "../email-notification-preferences.ts";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
 const TIMEOUT_MS = 15_000;
 const MAX_MESSAGES = 100;
+const DEFAULT_LOOKBACK_DAYS = 2;
+
+export function resolveGmailReplyLookbackDays(
+  source: Record<string, string | undefined> = process.env,
+): number {
+  const configured = Number(source.GMAIL_REPLY_LOOKBACK_DAYS?.trim());
+  return Number.isInteger(configured) && configured > 0 ? configured : DEFAULT_LOOKBACK_DAYS;
+}
 
 export type ReplySyncResult = {
   scanned: number;
@@ -28,25 +36,36 @@ type Dependencies = {
   sender: string;
   fetchImpl?: typeof fetch;
   tokenProvider?: () => Promise<string>;
+  lookbackDays?: number;
+  /** Test seam: where reply notification emails go. Defaults to the real transport. */
+  sendNotification?: typeof sendNotificationEmail;
 };
 
 /**
  * F179 AC1/AC3 — the email half of "in addition to in-app". Runs after
- * capture_gmail_reply has already created the in-app notification (same
- * migration); this only decides whether to *also* email the owner, and does
- * so with the lower-level Gmail transport directly (notification-email.ts),
- * never sendBranchOutreach's approval-gated outreach path — see that file's
- * header for why that boundary matters.
+ * capture_gmail_reply has already created the in-app notification (that
+ * half is F174's notify_on_reply_event trigger on reply_events, merged at
+ * 20260912170300 — this function adds no second in-app row, only the email
+ * on top), and sends with the lower-level Gmail transport directly
+ * (notification-email.ts), never sendBranchOutreach's approval-gated
+ * outreach path — see that file's header for why that boundary matters.
+ *
+ * Owning CAM only, matching F179's user story: the client's current owner
+ * gets the email when they are active and `client_reply_received` (F174's
+ * owner token, the column default) is in their email_notification_types.
+ * Unowned / inactive-owner replies fall to F174's admin fallback
+ * notifications, which stay in-app only on this ticket.
  *
  * Best-effort by construction: any failure here (a lookup error, Gmail being
  * unavailable) is reported and swallowed. The reply is already captured and
  * the in-app notification already exists regardless of whether this email
  * goes out — a CAM never loses the underlying signal over an email hiccup.
  */
-async function notifyReplyOwnerByEmail(
+export async function notifyReplyOwnerByEmail(
   admin: SupabaseClient,
   organisationId: string,
   replyBody: string,
+  send: typeof sendNotificationEmail = sendNotificationEmail,
 ): Promise<void> {
   try {
     const { data: org, error: orgError } = await admin
@@ -64,9 +83,9 @@ async function notifyReplyOwnerByEmail(
       .maybeSingle<{ email: string; is_active: boolean; email_notification_types: string[] | null }>();
     if (ownerError) throw ownerError;
     if (!owner?.is_active || !owner.email) return;
-    if (!wantsEmailNotification(owner.email_notification_types, "reply_received")) return;
+    if (!wantsEmailNotification(owner.email_notification_types, "client_reply_received")) return;
 
-    const result = await sendNotificationEmail({
+    const result = await send({
       to: owner.email,
       subject: `${org.legal_name || "A client"} replied`,
       text: replyBody.slice(0, 2000),
@@ -107,11 +126,13 @@ export async function syncGmailReplies(deps?: Dependencies): Promise<ReplySyncRe
   const sender = deps?.sender ?? resolveGmailSender();
   if (!admin || !config || !sender) throw new Error("Reply sync is not configured.");
   const fetchImpl = deps?.fetchImpl ?? fetch;
+  const sendNotification = deps?.sendNotification ?? sendNotificationEmail;
 
   try {
     const token = await (deps?.tokenProvider ? deps.tokenProvider() : getGmailAccessToken(config, fetchImpl));
     const listUrl = new URL(`${GMAIL_API}/messages`);
-    listUrl.searchParams.set("q", "in:inbox newer_than:2d");
+    const lookbackDays = deps?.lookbackDays ?? resolveGmailReplyLookbackDays();
+    listUrl.searchParams.set("q", `in:inbox newer_than:${lookbackDays}d`);
     listUrl.searchParams.set("maxResults", String(MAX_MESSAGES));
     const listed = await gmailJson<{ messages?: { id: string }[] }>(listUrl.toString(), token, fetchImpl, "users.messages.list.replies");
 
@@ -134,6 +155,10 @@ export async function syncGmailReplies(deps?: Dependencies): Promise<ReplySyncRe
         );
         const reply = parseInboundReply(message);
         if (!reply) { result.ignored += 1; continue; }
+        if (!isPotentialCrmReply(reply, threads, sender)) {
+          result.ignored += 1;
+          continue;
+        }
         const match = matchInboundReply(reply, threads, sender);
         if (!match || typeof match.detail.organisation_id !== "string") {
           const { data, error } = await admin.rpc("flag_unmatched_gmail_reply", {
@@ -165,7 +190,7 @@ export async function syncGmailReplies(deps?: Dependencies): Promise<ReplySyncRe
           // F179: best-effort, never allowed to affect the capture count
           // above or fail this message — see notifyReplyOwnerByEmail's own
           // try/catch.
-          await notifyReplyOwnerByEmail(admin, match.detail.organisation_id, reply.body);
+          await notifyReplyOwnerByEmail(admin, match.detail.organisation_id, reply.body, sendNotification);
         }
       } catch (error) {
         result.failed += 1;

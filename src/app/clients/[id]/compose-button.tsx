@@ -3,10 +3,20 @@
 import { useState } from "react";
 import Link from "next/link";
 import { History, Sparkles } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/animate-ui/components/radix/dialog";
 import { OriginButton } from "@/components/ui/origin-button";
 import { RichTextEmailEditor } from "@/components/rich-text-email-editor";
 import { discardEmailDraft, saveEmailDraft, scheduleReviewedEmail, sendReviewedEmail } from "./outreach-actions";
+import { AttachmentPicker } from "./attachment-picker";
 import { validateClientEmail } from "@/lib/client-email-validation";
+import type { Attachment } from "@/lib/attachments";
 import { emailHtmlToPlainText, isRichEmailHtml, plainTextToEditorHtml } from "@/lib/outreach/email-html";
 import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
@@ -126,21 +136,29 @@ function sizeTemplateLabel(sizeTemplate: string | undefined): string {
 export function ComposeButton({
   blocked,
   ownershipBlocked = false,
+  adminOverrideOwnerName = null,
   organisationId,
   suppressionReason,
   ownershipWarning,
   hasSavedBooklet = false,
   historyHref,
   existingDraft = null,
+  clientAttachments = [],
 }: {
   blocked: boolean;
   ownershipBlocked?: boolean;
+  // F018 (#21) AC3: set only when an admin is viewing a client owned by another
+  // CAM. Send/Schedule then require a last-resort confirmation naming the owner
+  // before outreach-actions.ts runs — the server-side rule itself never blocks
+  // admins, this dialog is the deliberate friction the ticket asks for.
+  adminOverrideOwnerName?: string | null;
   organisationId: string;
   suppressionReason?: string;
   ownershipWarning?: string;
   hasSavedBooklet?: boolean;
   historyHref?: string;
   existingDraft?: ExistingDraft | null;
+  clientAttachments?: readonly Attachment[];
 }) {
   const [draft, setDraft] = useState<Draft | null>(
     existingDraft ? { ...existingDraft, sizeTemplate: undefined } : null,
@@ -165,6 +183,9 @@ export function ComposeButton({
   // uncontrolled editor to reinitialize with the new content.
   const [generation, setGeneration] = useState(0);
   const [approved, setApproved] = useState(false);
+  // F018 AC3: which action the admin's override dialog was raised for — null
+  // when no confirmation is pending.
+  const [overrideAction, setOverrideAction] = useState<"send" | "schedule" | null>(null);
   const [sendMessage, setSendMessage] = useState<string | null>(null);
   // F129: distinguishes a failed send attempt (red alert) from the standing
   // "not sent yet" notice (amber).
@@ -266,7 +287,17 @@ export function ComposeButton({
     }
   }
 
+  // F018 AC3: an admin sending on a client owned by another CAM confirms first.
   async function send() {
+    if (!draft) return;
+    if (adminOverrideOwnerName) {
+      setOverrideAction("send");
+      return;
+    }
+    await performSend();
+  }
+
+  async function performSend() {
     if (!draft) return;
     setSending(true);
     setSendMessage(null);
@@ -345,7 +376,17 @@ export function ComposeButton({
 
   // F126: same review gate as send() — the approval checkbox is required either
   // way, since scheduling is a commitment to deliver this exact content later.
+  // F018 AC3: same admin override confirmation as send().
   async function schedule() {
+    if (!draft || !scheduledAt) return;
+    if (adminOverrideOwnerName) {
+      setOverrideAction("schedule");
+      return;
+    }
+    await performSchedule();
+  }
+
+  async function performSchedule() {
     if (!draft || !scheduledAt) return;
     setSending(true);
     setSendMessage(null);
@@ -363,6 +404,19 @@ export function ComposeButton({
       setScheduledAt("");
     }
     setSending(false);
+  }
+
+  /**
+   * F018 AC3: the last-resort override confirmation. Confirming runs the
+   * action the dialog was raised for; dismissing it must leave everything
+   * exactly as it was.
+   */
+  function resolveOverride(confirmed: boolean) {
+    const action = overrideAction;
+    setOverrideAction(null);
+    if (!confirmed) return;
+    if (action === "send") void performSend();
+    if (action === "schedule") void performSchedule();
   }
 
   const historyLink = historyHref && (
@@ -641,6 +695,11 @@ export function ComposeButton({
               />
             </div>
           </div>
+          <AttachmentPicker
+            clientAttachments={clientAttachments}
+            messageId={draft.id}
+            organisationId={organisationId}
+          />
           <label className="flex items-start gap-2 text-xs font-bold text-foreground/70">
             <input checked={approved} className="mt-0.5" onChange={(event) => setApproved(event.target.checked)} type="checkbox" />
             I have reviewed the recipient, subject and body and approve this email for sending.
@@ -707,6 +766,38 @@ export function ComposeButton({
         </div>
         );
       })()}
+
+      {/* F018 (#21) AC3: last-resort admin override. Deliberately names the
+          owning CAM and frames the override as exceptional — an admin can
+          always reach this client, but the default should be coordination,
+          not override. */}
+      {adminOverrideOwnerName && (
+        <Dialog
+          onOpenChange={(open) => {
+            if (!open) resolveOverride(false);
+          }}
+          open={overrideAction !== null}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>This client is owned by another CAM</DialogTitle>
+              <DialogDescription>
+                {adminOverrideOwnerName} owns this client and is responsible for its outreach.
+                You can continue as an admin, but this is a last resort — coordinate with them
+                first, or reassign ownership if the client needs a new CAM.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <OriginButton onClick={() => resolveOverride(false)} type="button" variant="outline">
+                Cancel
+              </OriginButton>
+              <OriginButton disabled={sending} onClick={() => resolveOverride(true)} type="button">
+                {overrideAction === "schedule" ? "Schedule anyway" : "Send anyway"}
+              </OriginButton>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </section>
   );
 }

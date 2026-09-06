@@ -20,7 +20,7 @@
 
 import { z } from "zod";
 import type { AppRole } from "./auth/permissions.ts";
-import { nonEmptyTrimmed, safeValidate } from "./validation.ts";
+import { nonEmptyTrimmed, safeValidate, type ValidationResult } from "./validation.ts";
 
 /**
  * The seeded restricted fields (#23, signed off 22 Aug 2026): the externally
@@ -324,6 +324,25 @@ export function decideEditRpcFailure(error: {
     default:
       return { status: 500, error: DECIDE_GENERIC_FAILURE };
   }
+}
+
+const decideEditSchema = z.object({
+  suggestionId: z.string().trim().uuid("Select a valid suggestion."),
+  approve: z.boolean(),
+  reason: z.string().trim().max(500, "Reason must be 500 characters or fewer.").optional(),
+});
+
+export type DecideEditInput = {
+  suggestionId: string;
+  approve: boolean;
+  reason?: string;
+};
+
+/** Validates decision payload for approve/reject on suggested client edits. */
+export function validateDecideEditInput(
+  input: unknown,
+): ValidationResult<DecideEditInput> {
+  return safeValidate(decideEditSchema, input);
 }
 
 /**

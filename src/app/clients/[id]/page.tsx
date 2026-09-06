@@ -56,6 +56,12 @@ import {
   type OutreachMessageRow as TimelineOutreachRow,
   type ReplyEventRow,
 } from "@/lib/timeline";
+import {
+  CHANGE_HISTORY_ACTIONS,
+  buildChangeHistory,
+  type ChangeHistoryRow,
+} from "@/lib/change-history";
+import { ChangeHistorySection } from "./change-history-section";
 import { TimelineSection } from "./timeline-section";
 import { TimelineRealtimeRefresher } from "./timeline-realtime";
 import { RequestOwnershipForm } from "./request-ownership-form";
@@ -360,6 +366,14 @@ export default async function ClientDetailPage({
     actorRole: authorization.actor.role,
   });
 
+  // F018 (#21) AC3: an admin may still send to a client owned by another CAM as
+  // a last-resort override — but ComposeButton must first confirm it with a
+  // dialog naming the owner. Null for every other viewer/shape: CAMs are
+  // blocked outright (ownershipConflict above) and unowned clients need no
+  // override.
+  const adminOverrideOwnerName =
+    isAdmin && ownerId && ownerId !== authorization.actor.id ? ownerName : null;
+
   // F163: admin's CAM picker. Only fetched for an admin — a CAM can't reach the
   // assign form, so the query would be wasted on every other page view.
   let team: { id: string; full_name: string | null }[] = [];
@@ -627,6 +641,29 @@ export default async function ClientDetailPage({
     await reportError(auditError, { operation: "clients.timeline_audit", organisationId: id });
   }
 
+  // F186: the admin's field-level change history. Admin-only — the extra
+  // actions it needs (the two field_discrepancy_* tokens) are invisible to
+  // every other role anyway (only audit_log_select_admin admits them), and
+  // admins read every row here through that same policy, so no RLS change
+  // was needed. Fetched independently of the timeline's four actions above:
+  // a different action set, and one query failing must not blank the other.
+  let changeHistoryRows: ChangeHistoryRow[] = [];
+  let changeHistoryDegraded = false;
+  if (isAdmin) {
+    const { data, error } = await supabase
+      .from("audit_log")
+      .select("id, actor_user_id, action, detail, created_at")
+      .eq("target_table", "organisations")
+      .eq("target_id", id)
+      .in("action", [...CHANGE_HISTORY_ACTIONS])
+      .order("created_at", { ascending: false });
+    if (error) {
+      changeHistoryDegraded = true;
+      await reportError(error, { operation: "clients.change_history", organisationId: id });
+    }
+    changeHistoryRows = (data ?? []) as unknown as ChangeHistoryRow[];
+  }
+
   // Degraded, not fatal: the four sources fail independently (each error is
   // reported above), so whatever loaded still renders. `timelineDegraded`
   // only downgrades the section to a warning above the surviving entries —
@@ -637,10 +674,19 @@ export default async function ClientDetailPage({
     timelineNotesError || timelineMessagesError || replyError || auditError,
   );
 
-  // See collectReferencedUserIds (src/lib/timeline.ts) for why this can't
-  // treat every detail.from/detail.to as a user id.
-  const referencedUserIds = collectReferencedUserIds((auditRows ?? []) as AuditRow[]);
-
+  // actor_user_id and detail.from/detail.to are bare uuids (detail is jsonb,
+  // not a foreign key PostgREST can embed), so they're resolved by hand in one
+  // batch rather than per-row. collectReferencedUserIds (src/lib/timeline.ts)
+  // is action-aware: detail.from/detail.to are only user ids for
+  // ownership_reassigned — for status_changed they are pipeline tokens and for
+  // edit decisions they are field values, and treating either as a uuid breaks
+  // the `users` lookup outright (see #533). The change-history rows carry the
+  // same action set plus the two discrepancy actions, whose detail holds no
+  // user reference at all, so the same collector is safe for both arrays.
+  const referencedUserIds = new Set([
+    ...collectReferencedUserIds((auditRows ?? []) as AuditRow[]),
+    ...collectReferencedUserIds((changeHistoryRows ?? []) as unknown as AuditRow[]),
+  ]);
   const timelineNames = new Map<string, string | null>();
   if (referencedUserIds.size > 0) {
     const { data: referencedUsers, error: namesError } = await supabase
@@ -664,6 +710,8 @@ export default async function ClientDetailPage({
     },
     timelineNames,
   );
+
+  const changeHistory = buildChangeHistory(changeHistoryRows, timelineNames);
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
@@ -839,6 +887,7 @@ export default async function ClientDetailPage({
                 <ComposeButton
                   blocked={suppressed}
                   ownershipBlocked={!suppressed && ownershipConflict.hasConflict}
+                  adminOverrideOwnerName={adminOverrideOwnerName}
                   historyHref={
                     hasPermission(authorization.actor.role, "platform-settings:manage")
                       ? `/admin/ai-generations?client=${client.id}`
@@ -851,6 +900,7 @@ export default async function ClientDetailPage({
                   }
                   hasSavedBooklet={savedBooklet !== null}
                   existingDraft={existingDraft}
+                  clientAttachments={attachments}
                 />
                 {/* F126: what is queued for later, with cancel — shown in the same
                     card as the compose flow that created the schedule. */}
@@ -1064,6 +1114,7 @@ export default async function ClientDetailPage({
                   hint="Where this client sits in the outreach pipeline. Shown on the client list too."
                 >
                   <StatusSelect
+                    key={`profile-${client.outreach_status}`}
                     organisationId={client.id}
                     currentStatus={client.outreach_status}
                   />
@@ -1105,6 +1156,27 @@ export default async function ClientDetailPage({
                   error={Boolean(outreachError)}
                   thread={emailThread}
                   threadError={Boolean(outreachError || replyError)}
+                  replyDraftControls={
+                    hasPermission(authorization.actor.role, "client:contact")
+                      ? {
+                          organisationId: client.id,
+                          blocked: suppressed,
+                          ownershipBlocked: !suppressed && ownershipConflict.hasConflict,
+                          suppressionReason: suppressed ? latest?.reason : undefined,
+                          ownershipWarning: ownershipConflict.hasConflict
+                            ? ownershipConflict.warning
+                            : undefined,
+                        }
+                      : undefined
+                  }
+                  statusControl={
+                    isAdmin || ownerId === authorization.actor.id
+                      ? {
+                          organisationId: client.id,
+                          currentStatus: client.outreach_status,
+                        }
+                      : undefined
+                  }
                   noteOrganisationId={canEdit ? client.id : undefined}
                 />
 
@@ -1168,6 +1240,24 @@ export default async function ClientDetailPage({
           </SectionCard>
         </Rise>
         <TimelineRealtimeRefresher organisationId={client.id} />
+
+        {/* F186: admin-only. The timeline tells everyone what happened; this
+            is the audit view of what changed on the record itself — field
+            transitions, discrepancy resolutions, declined suggestions — which
+            only an admin may read (audit_log_select_admin). Full-width like
+            the timeline it sits beside: a change history squeezed into a
+            narrow column is where from → to chips go to wrap badly. */}
+        {isAdmin && (
+          <Rise>
+            <SectionCard
+              headingId="change-history-heading"
+              title="Change history"
+              hint="Every recorded change to this client's fields, including discrepancies resolved automatically and suggested edits that were declined."
+            >
+              <ChangeHistorySection entries={changeHistory} degraded={changeHistoryDegraded} />
+            </SectionCard>
+          </Rise>
+        )}
       </Stage>
     </div>
   );

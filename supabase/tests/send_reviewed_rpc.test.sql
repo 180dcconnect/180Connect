@@ -335,6 +335,94 @@ $$;
 
 select * from tests.suite_send_reviewed();
 
+-- ---------------------------------------------------------------------------
+-- F128 (#355) review fix, PR #516: the daily send cap, enforced atomically
+-- inside claim_outreach_send. Isolated from suite_send_reviewed's fixtures in
+-- its own org/CAM and its own daily_limit value, computed relative to
+-- whatever that suite already sent today rather than a fixed number, so this
+-- suite is correct regardless of how many "sent today" rows precede it.
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.seed_daily_limit()
+returns void language plpgsql as $$
+declare
+  v_cam       uuid := '00000000-0000-4000-a000-000000000010';
+  v_org       uuid := '00000000-0000-4000-c000-000000000010';
+  v_today     timestamptz := date_trunc('day', now() at time zone 'utc') at time zone 'utc';
+  v_baseline  bigint;
+begin
+  insert into auth.users (id, instance_id, aud, role, email)
+  values (v_cam, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'cam-limit@180dc.org')
+  on conflict (id) do nothing;
+
+  insert into public.users (id, email, full_name, role, is_active)
+  values (v_cam, 'cam-limit@180dc.org', 'Test CAM Limit', 'cam', true)
+  on conflict (id) do update set role = excluded.role, is_active = excluded.is_active;
+
+  insert into public.organisations (id, legal_name, entry_method, organisation_type, owner_id)
+  values (v_org, 'Daily Limit Client', 'manual', 'other', v_cam)
+  on conflict (id) do nothing;
+
+  -- One message already sent today, one merely CLAIMED today (still a draft —
+  -- Gmail was never actually called for it), and one untouched draft to
+  -- attempt claiming against the cap.
+  insert into public.outreach_messages (
+    id, organisation_id, sent_by_user_id, subject, body, send_status, sent_at, send_claimed_at
+  ) values
+    ('00000000-0000-4000-d000-000000000010', v_org, v_cam, 'Sent today',    'Body', 'sent',  now(), null),
+    ('00000000-0000-4000-d000-000000000011', v_org, v_cam, 'In flight',     'Body', 'draft', null,  now()),
+    ('00000000-0000-4000-d000-000000000012', v_org, v_cam, 'Still waiting', 'Body', 'draft', null,  null)
+  on conflict (id) do nothing;
+
+  -- The exact count of "sent or in-flight today" rows across the WHOLE table
+  -- right now (this suite's own two fixture rows above, plus whatever
+  -- suite_send_reviewed already sent today ahead of this one) becomes the cap
+  -- — so the next claim attempt below is always exactly at the limit,
+  -- independent of how many earlier suites ran first.
+  select count(*) into v_baseline
+    from public.outreach_messages
+   where (send_status = 'sent' and sent_at >= v_today)
+      or (send_claimed_at is not null and send_claimed_at >= v_today);
+
+  update public.outreach_daily_send_limit set daily_limit = v_baseline, updated_by = null where id = true;
+end;
+$$;
+
+create or replace function tests.suite_daily_send_limit()
+returns setof text language plpgsql as $$
+declare
+  v_cam   uuid := '00000000-0000-4000-a000-000000000010';
+  v_draft uuid := '00000000-0000-4000-d000-000000000012';
+begin
+  if to_regprocedure('public.claim_outreach_send(uuid)') is null
+     or to_regclass('public.outreach_daily_send_limit') is null then
+    return next skip(1, 'F128 daily-limit RPCs not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed_daily_limit();
+
+  return next is(
+    tests.sqlstate_of(v_cam, format('select public.claim_outreach_send(%L)', v_draft)),
+    'P0003',
+    'F128: a draft that is merely claimed (not yet sent) today already counts against the daily cap'
+  );
+
+  -- A definite send failure releases the claim (outreach-actions.ts's
+  -- unclaim step) — that frees the slot the count was holding for it.
+  update public.outreach_messages set send_claimed_at = null
+   where id = '00000000-0000-4000-d000-000000000011';
+
+  return next is(
+    tests.bool_as(v_cam, format('select public.claim_outreach_send(%L)', v_draft)),
+    true,
+    'freeing an in-flight claim opens a slot for the next draft to claim'
+  );
+end;
+$$;
+
+select * from tests.suite_daily_send_limit();
+
 -- Emits the deferred plan (no_plan above) — without this pg_prove reports
 -- "No plan found in TAP output" even when every subtest passed.
 select * from finish();

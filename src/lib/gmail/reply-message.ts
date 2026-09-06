@@ -39,6 +39,21 @@ export function emailAddressOf(value: string): string {
   return (match ? match[1] : value).trim().toLowerCase();
 }
 
+/** Keep unrelated inbox traffic out of CRM storage and review queues. */
+export function isPotentialCrmReply(
+  reply: ParsedInboundReply,
+  rows: readonly SentThreadReference[],
+  branchSender: string,
+): boolean {
+  if (emailAddressOf(reply.to) !== emailAddressOf(branchSender)) return false;
+  return rows.some((row) =>
+    row.detail.provider_thread_id === reply.providerThreadId ||
+    (reply.hasReplyHeaders &&
+      typeof row.detail.sent_to === "string" &&
+      emailAddressOf(row.detail.sent_to) === emailAddressOf(reply.from)),
+  );
+}
+
 function decodeBase64Url(value: string): string {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
   return Buffer.from(normalized, "base64").toString("utf8");
@@ -124,10 +139,10 @@ export function matchInboundReply(
   rows: readonly SentThreadReference[],
   branchSender: string,
 ): SentThreadReference | null {
-  if (reply.to !== branchSender.toLowerCase()) return null;
+  if (emailAddressOf(reply.to) !== emailAddressOf(branchSender)) return null;
   const candidates = rows.filter((row) => row.detail.provider_thread_id === reply.providerThreadId);
   const exact = candidates.find((row) =>
-    typeof row.detail.sent_to === "string" && row.detail.sent_to.toLowerCase() === reply.from,
+    typeof row.detail.sent_to === "string" && emailAddressOf(row.detail.sent_to) === emailAddressOf(reply.from),
   );
   if (exact) return exact;
   const legacy = candidates.length === 1 && typeof candidates[0].detail.sent_to !== "string";
@@ -139,7 +154,7 @@ export function matchInboundReply(
   // address shared by two client records—to whichever row happened to come first.
   if (!reply.hasReplyHeaders) return null;
   const senderMatches = rows.filter((row) =>
-    typeof row.detail.sent_to === "string" && row.detail.sent_to.toLowerCase() === reply.from,
+    typeof row.detail.sent_to === "string" && emailAddressOf(row.detail.sent_to) === emailAddressOf(reply.from),
   );
   const organisationIds = new Set(
     senderMatches

@@ -138,6 +138,12 @@
 | 04 Entities | FINANCIAL_PERIODS | income_band | enum |  |  |
 | 04 Entities | FINANCIAL_PERIODS | filing_date | date |  |  |
 | 04 Entities | FINANCIAL_PERIODS | financial_source | enum |  |  |
+| 04 Entities | FINANCIAL_PERIODS | count_employees | integer |  |  |
+| 04 Entities | FINANCIAL_PERIODS | count_volunteers | integer |  |  |
+| 04 Entities | FINANCIAL_PERIODS | receives_govt_grants | boolean |  |  |
+| 04 Entities | FINANCIAL_PERIODS | receives_govt_contracts | boolean |  |  |
+| 04 Entities | FINANCIAL_PERIODS | count_govt_grants | integer |  |  |
+| 04 Entities | FINANCIAL_PERIODS | count_govt_contracts | integer |  |  |
 | 04 Entities | FINANCIAL_PERIODS | created_at | timestamp |  |  |
 | 04 Entities | GRANTS | id | uuid |  |  |
 | 04 Entities | GRANTS | organisation_id | uuid | ORGANISATIONS |  |
@@ -452,6 +458,10 @@
 | 08 System Analytics | LOGIN_ATTEMPT | blocked_until | timestamp |  | When this address may next attempt a login; null or past means allowed |
 | 08 System Analytics | LOGIN_ATTEMPT | created_at | timestamp |  | Row creation timestamp |
 | 08 System Analytics | LOGIN_ATTEMPT | updated_at | timestamp |  | Last time a failure was counted |
+| 08 System Analytics | OUTREACH_DAILY_SEND_LIMIT | id | boolean |  | Singleton primary key; always true |
+| 08 System Analytics | OUTREACH_DAILY_SEND_LIMIT | daily_limit | integer |  | Maximum outreach emails allowed per UTC calendar day; defaults to 250 |
+| 08 System Analytics | OUTREACH_DAILY_SEND_LIMIT | updated_by | uuid | USERS | Admin who last changed the limit; null for the seeded default |
+| 08 System Analytics | OUTREACH_DAILY_SEND_LIMIT | updated_at | timestamp |  | When the limit was last changed |
 | 09 CAM Analytics | CAM_ACTIVITY_SUMMARY | id | uuid |  | Primary key |
 | 09 CAM Analytics | CAM_ACTIVITY_SUMMARY | user_id | uuid |  | Links to USERS; the CAM the week covers |
 | 09 CAM Analytics | CAM_ACTIVITY_SUMMARY | week_start | date |  | Monday of the week the rollup covers |
@@ -550,3 +560,25 @@
 | 04 Entities | RESTRICTED_EDIT_FIELDS | reason | text |  | Why the field is restricted |
 | 04 Entities | RESTRICTED_EDIT_FIELDS | added_by | uuid | USERS | Admin who added/re-added the restriction |
 | 04 Entities | RESTRICTED_EDIT_FIELDS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | BOOKLET_GENERATIONS | activity | text |  | Activity identifier for observability |
+| 04 Entities | BOOKLET_GENERATIONS | input_tokens | integer |  | Prompt tokens the AI provider reported for this call |
+| 04 Entities | BOOKLET_GENERATIONS | output_tokens | integer |  | Response tokens the provider reported |
+| 04 Entities | BOOKLET_GENERATIONS | total_tokens | integer |  | Total tokens as the provider reported them |
+| 04 Entities | BOOKLET_GENERATIONS | cost_usd | decimal(12,6) |  | Cost in US dollars, priced at generation time |
+| 04 Entities | AI_GENERATIONS | activity | text |  | Activity identifier for observability |
+| 04 Entities | FINANCIAL_PERIODS | income_donations_legacies | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_charitable_activities | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_other_trading | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_investment | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_endowments | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_other | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_govt_grants | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_govt_contracts | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_charitable_activities | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_raising_funds | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_governance | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_grants_institutions | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_investment_management | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_other | numeric |  |  |
+| 04 Entities | ORGANISATIONS | registered_on | date |  |  |
+| 04 Entities | ORGANISATIONS | charity_reporting_status | text |  |  |

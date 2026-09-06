@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isAutomatedInbound, matchInboundReply, parseInboundReply, type GmailHeader, type ParsedInboundReply } from "./reply-message.ts";
+import { isAutomatedInbound, isPotentialCrmReply, matchInboundReply, parseInboundReply, type GmailHeader, type ParsedInboundReply } from "./reply-message.ts";
 
 const encoded = (value: string) => Buffer.from(value).toString("base64url");
 const headers = (extra: GmailHeader[] = []): GmailHeader[] => [
@@ -63,6 +63,42 @@ test("matches only the sent thread, branch recipient, and client sender", () => 
   assert.equal(matchInboundReply({ ...reply, providerThreadId: "unrelated", hasReplyHeaders: false }, [row], "branch@180dc.org"), null);
   assert.equal(matchInboundReply({ ...reply, from: "other@example.org" }, [row], "branch@180dc.org"), null);
   assert.equal(matchInboundReply({ ...reply, to: "personal@180dc.org" }, [row], "branch@180dc.org"), null);
+});
+
+test("normalises case, whitespace, and display names in audit-log recipient matching", () => {
+  const reply: ParsedInboundReply = {
+    providerMessageId: "reply-case", providerThreadId: "thread-case",
+    from: "contact@charity.org", to: "branch@180dc.org", subject: "Re: Hello",
+    body: "Hello", receivedAt: "2026-08-25T16:00:00.000Z", hasReplyHeaders: true,
+  };
+  const row = {
+    target_id: "outreach-case",
+    detail: {
+      organisation_id: "org-case", provider_thread_id: "thread-case",
+      sent_to: " Charity Contact <CONTACT@CHARITY.ORG> ",
+    },
+  };
+
+  assert.equal(matchInboundReply(reply, [row], " Branch Mailbox <BRANCH@180DC.ORG> "), row);
+});
+
+test("treats only messages connected to CRM outreach as potential replies", () => {
+  const reply: ParsedInboundReply = {
+    providerMessageId: "reply-relevance", providerThreadId: "different-thread",
+    from: "contact@charity.org", to: "branch@180dc.org", subject: "Re: Hello",
+    body: "Hello", receivedAt: "2026-08-25T16:00:00.000Z", hasReplyHeaders: true,
+  };
+  const row = {
+    target_id: "outreach-relevance", created_at: "2026-08-25T15:00:00Z",
+    detail: {
+      organisation_id: "org-relevance", provider_thread_id: "crm-thread",
+      sent_to: "Charity Contact <CONTACT@CHARITY.ORG>",
+    },
+  };
+
+  assert.equal(isPotentialCrmReply(reply, [row], "branch@180dc.org"), true);
+  assert.equal(isPotentialCrmReply({ ...reply, from: "unrelated@example.org" }, [row], "branch@180dc.org"), false);
+  assert.equal(isPotentialCrmReply({ ...reply, hasReplyHeaders: false }, [row], "branch@180dc.org"), false);
 });
 
 test("falls back to a unique client email match but flags ambiguous senders", () => {

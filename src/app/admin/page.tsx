@@ -38,10 +38,23 @@ export default async function AdminPage() {
               Assign roles, and suspend, deactivate or reactivate access.
             </p>
           </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/actions">
+            <h2 className="font-bold">Team actions</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Assign a client-linked action to a CAM and track outstanding vs completed
+              work across the team.
+            </p>
+          </Link>
           <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/offboard">
             <h2 className="font-bold">Work handover & offboarding</h2>
             <p className="mt-1 text-sm text-foreground/65">
               Reassign an outgoing CAM&apos;s clients and open actions to another team member.
+            </p>
+          </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/dashboard">
+            <h2 className="font-bold">Admin dashboard</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Team-wide pipeline activity, funnel and sector performance.
             </p>
           </Link>
           <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/team-pipeline">
@@ -96,10 +109,10 @@ export default async function AdminPage() {
               Decide who gets a client when a CAM asks for one another CAM owns.
             </p>
           </Link>
-          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/edit-suggestions">
-            <h2 className="font-bold">Suggested client edits</h2>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/approvals">
+            <h2 className="font-bold">Approvals</h2>
             <p className="mt-1 text-sm text-foreground/65">
-              Approve or reject CAM-proposed corrections to sensitive client fields.
+              Review and decide pending suggested client edits across the team.
             </p>
           </Link>
           <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/restricted-fields">
@@ -146,6 +159,12 @@ export default async function AdminPage() {
             <h2 className="font-bold">ML readiness</h2>
             <p className="mt-1 text-sm text-foreground/65">
               How many labelled outcomes exist in the ML dataset and how close that is to the training threshold.
+            </p>
+          </Link>
+          <Link className="rounded-xl border border-black/10 p-5 hover:border-brand" href="/admin/sending-limits">
+            <h2 className="font-bold">Outreach sending limit</h2>
+            <p className="mt-1 text-sm text-foreground/65">
+              Set the branch mailbox&apos;s daily outreach sending cap.
             </p>
           </Link>
         </div>

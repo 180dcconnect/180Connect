@@ -19,6 +19,7 @@ import { createCompaniesHouseAdapter } from "@/lib/ingestion/sources/companiesho
 import type { RawCharityCommissionRecord } from "@/lib/standardize/charity-commission";
 import type { RawCompaniesHouseRecord } from "@/lib/standardize/companies-house";
 import { createClient } from "@/lib/supabase/server";
+import { fetchPaged } from "@/lib/supabase/fetch-paged";
 
 export type ImportDuplicateInfo = {
   organisationId: string;
@@ -68,31 +69,36 @@ async function lookupCompany(
 async function loadExistingOrganisationsForImport(
   supabase: Awaited<ReturnType<typeof createClient>>,
 ): Promise<ExistingOrganisationForImportMatch[]> {
-  const organisationRows: { id: string; legal_name: string; postcode: string | null; website: string | null }[] = [];
-  const identifierRows: { organisation_id: string; identifier_value: string }[] = [];
-  const pageSize = 1_000;
-
-  for (let from = 0; ; from += pageSize) {
-    const result = await supabase
+  // `.order("id")` is not decoration: an unordered `.range()` lets Postgres
+  // return rows in any order it likes, so a page boundary can repeat or skip a
+  // row and the duplicate check would then miss a match it holds in the table.
+  const organisations = await fetchPaged<{
+    id: string;
+    legal_name: string;
+    postcode: string | null;
+    website: string | null;
+  }>((from, to) =>
+    supabase
       .from("organisations")
       .select("id, legal_name, postcode, website")
-      .range(from, from + pageSize - 1);
-    if (result.error) throw result.error;
-    const page = result.data ?? [];
-    organisationRows.push(...page);
-    if (page.length < pageSize) break;
-  }
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  if (organisations.error) throw organisations.error;
 
-  for (let from = 0; ; from += pageSize) {
-    const result = await supabase
-      .from("organisation_identifiers")
-      .select("organisation_id, identifier_value")
-      .range(from, from + pageSize - 1);
-    if (result.error) throw result.error;
-    const page = result.data ?? [];
-    identifierRows.push(...page);
-    if (page.length < pageSize) break;
-  }
+  const identifiers = await fetchPaged<{ organisation_id: string; identifier_value: string }>(
+    (from, to) =>
+      supabase
+        .from("organisation_identifiers")
+        .select("organisation_id, identifier_value")
+        .order("organisation_id", { ascending: true })
+        .order("identifier_value", { ascending: true })
+        .range(from, to),
+  );
+  if (identifiers.error) throw identifiers.error;
+
+  const organisationRows = organisations.data ?? [];
+  const identifierRows = identifiers.data ?? [];
 
   const numbersByOrg = new Map<string, string[]>();
   for (const row of identifierRows) {

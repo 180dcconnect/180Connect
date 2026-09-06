@@ -28,8 +28,18 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     },
   ];
 
+  // F168: a personal work queue, gated the same way as the client data it
+  // links into (matrix §3.11 SELECT is shared across every active role) —
+  // no reason for it to need a narrower permission than /clients itself.
   if (hasPermission(actor.role, "client:view")) {
-    sections[0].items.push({ href: "/clients", label: "Clients", icon: "clients" });
+    sections[0].items.push(
+      { href: "/actions", label: "My actions", icon: "actions" },
+      { href: "/clients", label: "Clients", icon: "clients" },
+    );
+  }
+
+  if (hasPermission(actor.role, "client:view")) {
+    sections[0].items.push({ href: "/analytics", label: "Analytics", icon: "analytics" });
   }
 
   if (hasPermission(actor.role, "client:edit")) {
@@ -45,6 +55,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
       items: [
         { href: "/admin", label: "Overview", icon: "admin" },
         { href: "/admin/users", label: "Team management", icon: "users" },
+        { href: "/admin/analytics", label: "Team analytics", icon: "analytics" },
         { href: "/admin/audit-log", label: "Audit log", icon: "audit" },
         { href: "/admin/import-status", label: "Import status", icon: "import" },
         // Not duplicated here: every admin already has tags:manage, so the

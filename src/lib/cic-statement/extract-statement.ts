@@ -63,7 +63,34 @@ const MAX_FIELD_CHARS = 1_500;
 
 /** How far below a heading to keep reading, as a fraction of page height. Both
  *  sections run to the bottom of their box; nothing useful sits above a heading. */
-const SECTION_A_MARKER = /activities\s+will\s+provide\s+benefit\s+to/i;
+/**
+ * The prompt Section A's answer continues from.
+ *
+ * Two wordings, because the form has two. Version 9 asks in the third person
+ * ("…the company's activities will provide benefit to …"), while 12 and 13
+ * print a first-person declaration the applicant completes in place:
+ * "We/I, the undersigned, declare that the company will carry on its
+ * activities for the benefit of *men in Wealden and beyond*."
+ *
+ * Knowing only the first wording cost us 73 of 389 statements on staging: with
+ * no marker to anchor on, `sectionA` fell back to everything below the heading
+ * and stored the regulator's printed declaration as though the company had
+ * written it.
+ */
+const SECTION_A_MARKERS = [
+  // Tried in this order, and the first to match anywhere on the page wins.
+  // Version 13 prints *both* — the declaration near the top and the real
+  // prompt beside the box — so alternating them in one pattern anchored on the
+  // declaration and cut the answer down to "the community, efit to charities…".
+  /activities\s+will\s+provide\s+benefit\s+to/i,
+  /activities\s+for\s+the\s+benefit\s+of/i,
+] as const;
+
+/** Either wording, for page detection where precedence does not matter. */
+const SECTION_A_MARKER = new RegExp(
+  SECTION_A_MARKERS.map((pattern) => pattern.source).join("|"),
+  "i",
+);
 const SECTION_A_HEADING = /SECTION\s*A\b/i;
 const SECTION_B_HEADING = /SECTION\s*B\b/i;
 const STATEMENT_HEADING = /COMMUNITY\s+INTEREST\s+STATEMENT/i;
@@ -76,13 +103,20 @@ const BOILERPLATE = [
   /\(?Please provide the day to day\s*activities of the company\.?\)?/gi,
   /\(?Tell us here what the company\s*is being set up to do\)?/gi,
   /How will the activity benefit the community\??/gi,
-  // [VW] because OCR reads the footer's "Version" as "Wersion" often enough to
-  // matter — it is small, grey, and the one line guaranteed to sit under every
-  // box we read.
-  // The separator between "Version 13" and "Last Updated" comes back as a
-  // hyphen, an en dash, a tilde, a comma or a guillemet depending on how the
-  // footer scanned, so the class is deliberately loose.
-  /[VW]ersion\s*\d+\s*[-–«~.,]*\s*Last Updated on\s*\S+/gi,
+  // The version footer: small, grey, and the one line guaranteed to sit under
+  // every box we read.
+  //
+  // Anchored on "Last Updated" and eaten backwards, because "Version" is the
+  // single worst-scanned word on the form — staging held Yersion, Yarsion,
+  // Wersion, Werslon and Yerslon, with the number itself sometimes read as
+  // "©". Matching the word directly caught almost none of them: 78 of 389
+  // statements still carried a footer.
+  //
+  // Only tokens that look like part of a version stamp are consumed, so a
+  // company writing "Last Updated" in its own prose keeps its words. Full
+  // stops and commas are deliberately outside the separator class — including
+  // them swallowed the preceding sentence's own punctuation.
+  /(?:\s*(?:[YVW][ae]r[sz][il]?on|\d+|[-–«~©]+))+\s*Last\s+Updated\b[^\n]{0,18}/gi,
   /The company name will need to be consistent throughout the application/gi,
   /Please indicate how it is proposed that the company'?s activities will benefit the community,?\s*(or)?\s*(a section of the community\.?)?/gi,
   /Electronically filed document for Company Number:?\s*\w*/gi,
@@ -96,6 +130,25 @@ const BOILERPLATE = [
   /\d?\s*A company is not eligible to be formed as a community interest company[^]*?completing this form\.?/gi,
   /\d?\s*This form will be placed on the public record[^]*?other documents\.?/gi,
   /\d?\s*On articles of association generally, see \[Part 5\][^]*?of your company\.?/gi,
+  // The declaration block itself, for scans where the words come back out of
+  // reading order ("carry on its | for the benefit of") and no marker matches.
+  // Stripped rather than anchored past: what remains is either the company's
+  // own completion or, if they left the box empty, too short to store — and
+  // `capped` returning null is the honest outcome there.
+  /SECTION\s*A\s*:?\s*COMMUNITY\s+INTEREST\s+STATEMENT/gi,
+  /\bWe\s*\/?\s*[lI1]?,?\s*the undersigned,?\s*declare that the company will\s*(carry on its)?/gi,
+  // The bracketed instruction, stripped as separate fragments rather than one
+  // sentence: OCR fractures it ("or section of iE", ", which itis") so a
+  // contiguous pattern matched almost none of them. A fixed-width window is
+  // wrong here too — the company's answer frequently begins on the same line,
+  // immediately after "or section of", and a greedy match ate it.
+  /\[?\s*Insert a short description of the community,?\s*(?:,\s*)?(?:or section of)?/gi,
+  /\bwhich it\s?is intended that the\b[^\n]{0,45}/gi,
+  /\bor\s+a?\s*section\.?\s*of the community[.?²³]*/gi,
+  // Page furniture that only shows up once the fallback drags in the whole page.
+  /Docusign Envelope ID:?\s*\S+/gi,
+  /Company Name in full/gi,
+  /Through?o[au]t the application/gi,
 ];
 
 /**
@@ -112,6 +165,19 @@ const BOILERPLATE = [
  * A run of two or more such tokens is a border. One on its own is left alone —
  * "a" and "I" are words, and a lone colon or full stop is punctuation.
  */
+/**
+ * Border glyphs that are never text, stripped as standalone tokens.
+ *
+ * Runs first, before boilerplate: a rule read as `|` lands *inside* the form's
+ * printed phrases ("or a section of the | community", "[Insert a short
+ * description of the community, or section of | the community"), and every
+ * boilerplate pattern failed to match because of it. Removing these makes the
+ * phrases contiguous again.
+ *
+ * No run guard needed — unlike `i`/`l`/`I`, none of these is ever a word.
+ */
+const RULE_GLYPH_TOKEN = /(?:^|\s)[|{}<>]+(?=\s|$)/g;
+
 const RULE_NOISE_TOKEN = String.raw`(?:[|{}\[\]<>:;.,·—–_\\/*]+|[ilI])`;
 const RULE_NOISE_RUN = new RegExp(
   `(?:^|\\s)(?:${RULE_NOISE_TOKEN}(?:\\s+|$)){2,}`,
@@ -160,7 +226,7 @@ function tidy(value: string): string {
   // one sentence only matches once the line breaks are gone — which is why an
   // earlier ordering left "Please indicate how it is proposed that…" sitting in
   // the stored text.
-  let text = flattened;
+  let text = flattened.replace(RULE_GLYPH_TOKEN, " ").replace(/\s{2,}/g, " ");
   for (const pattern of BOILERPLATE) text = text.replace(pattern, " ");
   // After boilerplate, not before: the furniture cut is anchored to the end of
   // the string, and a boilerplate pattern removed later would leave a tail
@@ -288,18 +354,21 @@ function sectionA(page: OcrPage): string | null {
   // statement.
   let afterMarker = -1;
   let marker: OcrWord | undefined;
-  for (let index = 0; index < page.words.length && afterMarker === -1; index++) {
-    for (let span = 2; span <= 8 && index + span <= page.words.length; span++) {
-      const phrase = page.words
-        .slice(index, index + span)
-        .map((w) => w.text)
-        .join(" ");
-      if (SECTION_A_MARKER.test(phrase)) {
-        marker = page.words[index];
-        afterMarker = index + span;
-        break;
+  for (const pattern of SECTION_A_MARKERS) {
+    for (let index = 0; index < page.words.length && afterMarker === -1; index++) {
+      for (let span = 2; span <= 8 && index + span <= page.words.length; span++) {
+        const phrase = page.words
+          .slice(index, index + span)
+          .map((w) => w.text)
+          .join(" ");
+        if (pattern.test(phrase)) {
+          marker = page.words[index];
+          afterMarker = index + span;
+          break;
+        }
       }
     }
+    if (afterMarker !== -1) break;
   }
 
   // Some filings print Section A's text above the prompt rather than below it,

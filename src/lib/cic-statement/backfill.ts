@@ -58,6 +58,20 @@ export const DEFAULT_BACKFILL = 25;
  */
 const PAGES_TO_SCAN = 8;
 
+/**
+ * Companies to read before replacing the Tesseract worker.
+ *
+ * tesseract.js keeps its own WASM heap, and `recognize` grows it: at eight
+ * pages a company, a few hundred companies on one worker is a few thousand
+ * page recognitions into a heap that is never handed back. Two staging runs
+ * were killed for memory — the second after only 75 companies, which is what
+ * ruled out the pdf.js side as the whole story.
+ *
+ * Restarting costs about a second (the language data is already on disk), so
+ * this is cheap next to the ~5s a company already takes.
+ */
+const RECYCLE_OCR_EVERY = 25;
+
 /** The source name for data-handling rules and run records. This job reads a
  *  Companies House document with Companies House credentials; it is not a new
  *  source, and inventing one would need a DATA_SOURCES migration to say
@@ -266,7 +280,7 @@ export async function runCicBackfill(
     return { attempted: 0, written: 0, notCic: 0, failed: 0, remaining: targets.length };
   }
 
-  const ocr = await startOcr();
+  let ocr = await startOcr();
   let written = 0;
   let notCic = 0;
   let failed = 0;
@@ -274,6 +288,13 @@ export async function runCicBackfill(
   try {
     for (const [index, target] of slice.entries()) {
       onProgress?.(index + 1, slice.length, target.companyNumber);
+
+      // Replaced rather than reused past this point. Closing before opening
+      // the replacement keeps only one worker alive at a time.
+      if (index > 0 && index % RECYCLE_OCR_EVERY === 0) {
+        await ocr.close();
+        ocr = await startOcr();
+      }
 
       const result = await readStatementForCompany(target.companyNumber, ocr);
 

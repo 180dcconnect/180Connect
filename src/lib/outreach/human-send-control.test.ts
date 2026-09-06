@@ -93,6 +93,9 @@ describe("F250 human-send architecture", () => {
     for (const relative of [
       "../../app/clients/[id]/compose-button.tsx",
       "../../components/outreach/reply-composer.tsx",
+      // The inbox's compose window. It creates the draft row and then mounts
+      // the panel; it deliberately does not call the send action itself.
+      "../../components/inbox/gmail-compose-modal.tsx",
     ]) {
       assert.match(
         await source(relative),

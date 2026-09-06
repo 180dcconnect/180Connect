@@ -260,6 +260,7 @@ export default async function InboxPage({
           className="h-full"
           initialThreadId={threadParam ?? null}
           initialThreads={threads}
+          realThreads={real}
           key={threadParam ?? "inbox"}
         />
       </main>

@@ -190,10 +190,18 @@ const FOLDER_EMPTY_STATES: Record<GmailFolder, { icon: LucideIcon; title: string
 export function GmailInboxShell({
   initialThreads = MOCK_INBOX_THREADS,
   initialThreadId,
+  realThreads,
   className = "h-[calc(100vh-1.5rem)]",
 }: {
   initialThreads?: InboxThreadView[];
   initialThreadId?: string | null;
+  /**
+   * The subset of `initialThreads` that came from Supabase rather than the
+   * design fill. Compose can only send to these — their ids are organisation
+   * ids — so it is passed through rather than derived here, where the two
+   * kinds are already merged and indistinguishable by design.
+   */
+  realThreads?: InboxThreadView[];
   className?: string;
 }) {
   const reduceMotion = useReducedMotion();
@@ -1060,6 +1068,7 @@ export function GmailInboxShell({
       <GmailComposeModal
         isOpen={isComposeOpen}
         onClose={() => setIsComposeOpen(false)}
+        directory={realThreads}
         onSend={handleSendNewOutreach}
       />
     </div>

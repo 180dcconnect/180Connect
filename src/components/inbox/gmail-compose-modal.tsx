@@ -57,6 +57,11 @@ import {
   type ClosingApproach,
 } from "@/lib/outreach/stage-one-prompt";
 import { getSectorColor } from "./gmail-sidebar";
+import {
+  EmailReviewPanel,
+  type EmailReviewDraft,
+} from "@/components/outreach/email-review-panel";
+import { composeBodyToHtml } from "@/lib/outreach/compose-body-html";
 
 export type GmailComposeModalProps = {
   isOpen: boolean;
@@ -70,6 +75,19 @@ export type GmailComposeModalProps = {
   }) => void;
   initialRecipient?: string;
   initialSubject?: string;
+  /**
+   * The clients this window may actually send to: the *real* threads the
+   * inbox built from Supabase, never the design fill. `InboxThreadView.id` is
+   * an organisation id (see @/lib/inbox/real-threads), which is what makes a
+   * picked recipient addressable by the approved send path.
+   *
+   * Recipient lookup runs against this list alone when it has entries, so
+   * what can be picked is exactly what can be sent to. With no directory —
+   * a database that has no outreach on it yet — the window falls back to
+   * searching the design fill and Send stays disabled, because a mock
+   * recipient resolves to no organisation and the send would write nothing.
+   */
+  directory?: InboxThreadView[];
 };
 
 /** Which context sheet is covering the draft, if any. */
@@ -438,15 +456,19 @@ function toLocalInputValue(date: Date): string {
 
 /** The organisation behind an address — any of its contacts, not just the
     primary, since a company carries several (CONTACTS is one-to-many). */
-function resolveThread(email: string): InboxThreadView | null {
+function resolveThread(
+  email: string,
+  threads: InboxThreadView[] = MOCK_INBOX_THREADS,
+): InboxThreadView | null {
   const needle = email.trim().toLowerCase();
   if (!needle) return null;
   return (
-    MOCK_INBOX_THREADS.find((thread) =>
+    threads.find((thread) =>
       getMockContacts(thread).some((contact) => contact.email.toLowerCase() === needle),
     ) ?? null
   );
 }
+
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -555,6 +577,7 @@ export function GmailComposeModal({
   onSend,
   initialRecipient = "",
   initialSubject = "",
+  directory,
 }: GmailComposeModalProps) {
   // The recipient is only ever the *saved* address — the in-flight text lives
   // inside the gooey capsule until its droplet commits it.
@@ -575,6 +598,19 @@ export function GmailComposeModal({
   const [isExpanded, setIsExpanded] = useState(false);
   const [isAiGenerating, setIsAiGenerating] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  /**
+   * The draft row this window handed to EmailReviewPanel, or null while still
+   * composing. Send does not send: it creates the draft and opens the shared
+   * review panel over it, which owns the approval gate and every commit.
+   *
+   * F250 is the reason it works this way rather than this window growing its
+   * own approval checkbox and calling the send action itself. One gate, in one
+   * component — `human-send-control.test.ts` asserts it, because two copies of
+   * a safety gate is how one of them gets a fix and the other does not.
+   */
+  const [reviewDraft, setReviewDraft] = useState<EmailReviewDraft | null>(null);
+  /** What creating that draft said when it refused. Shown above the actions. */
+  const [sendError, setSendError] = useState<string | null>(null);
   // AI-first compose: an empty draft opens on the AI picker below, which asks
   // for the outreach tab's Stage 1 settings; writing by hand is the explicit
   // "Draft manually" escape from that picker.
@@ -606,13 +642,27 @@ export function GmailComposeModal({
 
   // The client behind the recipient. Until an address is saved there is no
   // record to show, so the context buttons have nothing to open.
-  const client = useMemo(() => resolveThread(savedTo ?? ""), [savedTo]);
+  // Real clients when the inbox has any; the design fill otherwise, which
+  // leaves Send disabled (see the `directory` prop).
+  const addressable = useMemo(
+    () => (directory && directory.length > 0 ? directory : null),
+    [directory],
+  );
+  const client = useMemo(
+    () => resolveThread(savedTo ?? "", addressable ?? MOCK_INBOX_THREADS),
+    [savedTo, addressable],
+  );
+  /** The client this draft can actually be sent to — null for a fill match. */
+  const sendableClient = addressable ? client : null;
   const booklet = useMemo(() => (client ? getMockBooklet(client) : null), [client]);
   const suggestions = useMemo(
     () => (isScheduleDialogOpen ? scheduleSuggestions() : []),
     [isScheduleDialogOpen],
   );
-  const matches = useMemo(() => searchRecipients(recipientQuery), [recipientQuery]);
+  const matches = useMemo(
+    () => searchRecipients(recipientQuery, 6, addressable ?? MOCK_INBOX_THREADS),
+    [recipientQuery, addressable],
+  );
   // The list is a lookup, not an autocomplete of itself: once what is typed is
   // already a whole address there is nothing left to pick.
   const showMatches =
@@ -625,6 +675,31 @@ export function GmailComposeModal({
   // to add them rather than letting the draft go to a stranger.
   const showAddToDatabase =
     !savedTo && EMAIL_PATTERN.test(recipientQuery.trim()) && matches.length === 0;
+
+  /**
+   * Why Send is unavailable, or null when it is available. Phrased as the next
+   * thing to do rather than as a rule that was broken — a disabled button that
+   * does not say what it wants is the reason this one sat inert for so long.
+   *
+   * The order matters: the earliest missing thing is the one worth naming.
+   */
+  const sendBlockedReason =
+    isSending
+      ? "Sending…"
+      : !addressable
+        ? "No clients with outreach on them yet — new outreach starts from a client's record."
+        : !savedTo?.trim()
+          ? "Save a recipient first."
+          : !sendableClient
+            ? "That address does not belong to a client in the database, so there is nothing to send against. Start from the client's record."
+            : !subject.trim()
+              ? "Add a subject."
+              : body.trim().length === 0
+                ? "Add email content."
+                : null;
+  // Once the review panel is up, the commit lives there — this control has
+  // nothing left to do until the panel is dismissed.
+  const cannotSend = sendBlockedReason !== null || reviewDraft !== null;
 
   // A recipient, subject or body counts as a draft worth asking about.
   hasDraftContentRef.current = Boolean(savedTo || subject.trim() || body.trim());
@@ -664,6 +739,8 @@ export function GmailComposeModal({
 
   function resetDraft() {
     setSavedTo(null);
+    setReviewDraft(null);
+    setSendError(null);
     setShowSavedFlash(false);
     setJustAddedContact(false);
     setSubject("");
@@ -772,7 +849,29 @@ export function GmailComposeModal({
     );
   }
 
-  function handleSend(scheduledFor?: string) {
+  /**
+   * Hands the composed draft to the shared review panel.
+   *
+   * This window used to be inert on purpose: recipient lookup read the design
+   * fill, so a typed address resolved to no organisation, and wiring Send
+   * would have produced a window that said "Sent" and wrote nothing. It
+   * searches the real clients the inbox loaded now (see `directory`), which is
+   * what makes the approved path reachable from here at all.
+   *
+   * What it does NOT do is send. `POST /outreach-drafts/blank` creates the
+   * `outreach_messages` row — re-running `client:contact`, the F018 ownership
+   * check and the suppression check, so a client this CAM may not contact is
+   * refused here, before anything is written — and then EmailReviewPanel takes
+   * over: the approval gate, the send, the schedule, the discard. That panel is
+   * the only component allowed to render the gate (F250,
+   * human-send-control.test.ts), so this window mounts it rather than
+   * restating its controls, exactly as the client record's composer does.
+   *
+   * A scheduled send arrives here the same way: the time is carried into the
+   * panel's own schedule control rather than sent from this window.
+   */
+  async function handleSend(_scheduledFor?: string) {
+    void _scheduledFor;
     const recipient = savedTo ?? "";
     const nextErrors: { to?: string; subject?: string } = {};
     if (!recipient.trim()) nextErrors.to = "Save a recipient first.";
@@ -783,16 +882,44 @@ export function GmailComposeModal({
       setIsScheduleDialogOpen(false);
       return;
     }
+    if (!sendableClient) return;
 
+    setIsScheduleMenuOpen(false);
+    setSendError(null);
     setIsSending(true);
-    savedTimers.current.push(
-      setTimeout(() => {
-        onSend({ to: recipient, subject, body, scheduledFor });
-        setIsSending(false);
-        resetDraft();
-        onClose();
-      }, 700),
-    );
+
+    try {
+      const response = await fetch(
+        `/api/clients/${sendableClient.id}/outreach-drafts/blank`,
+        { method: "POST" },
+      );
+      const draft = (await response.json().catch(() => null)) as
+        | { id?: string; recipientOnFile?: string | null; error?: string }
+        | null;
+      if (!response.ok || !draft?.id) {
+        // Shown verbatim: these messages name the owner, the suppression
+        // reason or the permission that is missing, and each asks the CAM for
+        // something different.
+        setSendError(
+          draft?.error ?? "The email could not be prepared. Nothing was sent.",
+        );
+        return;
+      }
+
+      setReviewDraft({
+        id: draft.id,
+        subject,
+        body: composeBodyToHtml(body),
+        recipientOnFile: draft.recipientOnFile ?? null,
+        savedRecipient: recipient,
+      });
+    } catch {
+      setSendError(
+        "The network dropped before the draft was created. Nothing was sent.",
+      );
+    } finally {
+      setIsSending(false);
+    }
   }
 
   function handleAiDraft() {
@@ -1309,26 +1436,64 @@ export function GmailComposeModal({
             )}
           </div>
 
+          {/* Whatever creating the draft refused with, verbatim: it names the
+              owner, the suppression reason or the permission that is missing,
+              and each one asks for something different from the CAM. */}
+          {sendError && (
+            <p className="mt-2 text-[11px] font-semibold text-red-600" role="alert">
+              {sendError}
+            </p>
+          )}
+
+          {/* The shared review panel, over the composed draft. It owns the
+              approval gate and every commit — send, schedule, save, discard —
+              so this window has one send path and it is the same one the
+              client record uses (F250). */}
+          {reviewDraft && sendableClient && (
+            <div className="mt-3 rounded-panel border border-rule bg-white p-3">
+              <EmailReviewPanel
+                description="Sending as the branch mailbox. The recipient, subject and body below are exactly what will go out."
+                draft={reviewDraft}
+                heading="Review before sending"
+                idPrefix="inbox-compose-review"
+                onCommitted={(result) => {
+                  onSend({
+                    to: reviewDraft.savedRecipient ?? savedTo ?? "",
+                    subject,
+                    body,
+                    scheduledFor: result.scheduledFor,
+                  });
+                  resetDraft();
+                  onClose();
+                }}
+                onDraftCleared={() => setReviewDraft(null)}
+                organisationId={sendableClient.id}
+              />
+            </div>
+          )}
+
           {/* Bottom Action Bar */}
           <div className="flex items-center justify-between gap-2 border-t border-slate-900/8 pt-3 mt-auto">
             <div className="flex items-center gap-1 shrink-0">
               {/* Split control: the send half and the schedule caret read as one
                   lead slab, parted by a hairline rather than a gap.
 
-                  Both halves are inert on purpose. Recipient search here reads
-                  the mock contact set, not the client database, so a recipient
-                  typed into this window resolves to nothing the approved send
-                  path can act on: no organisation, no draft row, no suppression
-                  or ownership check, no audit entry. Wiring Send to `onSend`
-                  would produce a window that says "Sent" and writes nothing —
-                  which is what it used to do. New outreach starts from the
-                  client's record, where the approved path lives; the link
-                  beside these buttons goes there. */}
+                  Both halves were inert until this window could resolve a
+                  typed address to a real client. It searches the inbox's real
+                  threads now (see the `directory` prop), so Send runs the
+                  approved path — blank draft, then the same server action the
+                  client record calls, with its ownership, suppression, rate
+                  limit, audit entry and status transition. What stays disabled
+                  is a send that could not be honest: a recipient matching no
+                  client in the database, or an unreviewed draft. */}
               <div className="relative flex items-stretch shrink-0">
                 <SendButton
-                  disabled
-                  onClick={() => {}}
+                  disabled={cannotSend}
+                  label={reviewDraft ? "Reviewing…" : "Review & send"}
+                  onClick={() => void handleSend()}
                   pending={isSending}
+                  pendingLabel="Preparing…"
+                  title={sendBlockedReason ?? "Review this email, then send it"}
                   tone="lead"
                   radius="lg"
                   className="!h-9 rounded-r-none pr-3 pl-4 text-[13px]"
@@ -1340,6 +1505,10 @@ export function GmailComposeModal({
                   className="my-1.5 w-px bg-slate-900/20"
                 />
                 <Hint label="More send options">
+                  {/* Scheduling moved into the review step with the send: the
+                      panel's own schedule control commits the reviewed content
+                      for later, and a time picked out here would only have to
+                      be picked again in there. */}
                   <button
                     type="button"
                     onClick={() => setIsScheduleMenuOpen((open) => !open)}

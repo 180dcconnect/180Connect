@@ -167,12 +167,25 @@ waiting on a decision.*
    Then show the legitimate route: **Request this client** on the same card.
    CAMs ask; only an admin moves ownership.
 
-2. **`/inbox` (F131, F132, F134).** The replies are here, threaded, each one
+2. **Compose from the inbox — worth showing, and it is real.** Hit Compose in
+   `/inbox`, type "Riverbank" into the recipient capsule and pick the address.
+   Recipient lookup reads the actual clients in the database, so the picked
+   address resolves to an organisation — that is what makes **Review & send**
+   live. It creates the draft row (running the ownership and suppression
+   checks) and then opens the *same* review panel the client record uses: the
+   approval tick, then the send. There is one approval gate in the app and this
+   window borrows it rather than keeping its own.
+
+   Two things to say if asked: an address matching no client leaves the button
+   disabled with the reason on hover, and scheduling lives in the review step
+   with the send, not on the caret.
+
+3. **`/inbox` (F131, F132, F134).** The replies are here, threaded, each one
    attached to the client it came from rather than sitting in a mailbox
    somewhere. Open **Riverbank** — the full thread, our email and their reply
    in order (F134).
 
-3. **Three replies, three different meanings** — this is the part worth
+4. **Three replies, three different meanings** — this is the part worth
    dwelling on:
    - **Riverbank** — interested. A yes.
    - **Brightside Disability Sport** — "what does this cost us in staff time?"
@@ -181,22 +194,22 @@ waiting on a decision.*
      **Soft no**, not Hard no. The difference is whether we come back in the
      spring.
 
-4. **The reply moved the status on its own (F158/F149).** Riverbank reads
+5. **The reply moved the status on its own (F158/F149).** Riverbank reads
    **Responded**, and nobody clicked it. Open the **Activity** tab: the status
    change is in the timeline, attributed to reply detection, not to a person.
    Then say the guard out loud — a reply arriving after a CAM has already
    closed an engagement does **not** silently reopen it. A deliberate human
    decision stands.
 
-5. **A note off the back of a reply (F136).** The Riverbank note is the
+6. **A note off the back of a reply (F136).** The Riverbank note is the
    diagnosis pulled out of their email: a third of regular givers lapse inside
    eighteen months. That is the project.
 
-6. **Response time (F138/F139).** `/analytics` — the CAM's own numbers: emails
+7. **Response time (F138/F139).** `/analytics` — the CAM's own numbers: emails
    sent, replies, conversion, and average turnaround. Same readings the team
    view rolls up.
 
-7. **`/admin/approvals` (F181)** — switch to the **admin** window. Four
+8. **`/admin/approvals` (F181)** — switch to the **admin** window. Four
    suggested client edits waiting, from three different CAMs, each with the
    proposer's reason next to the change. Approve the Northlight mailbox
    correction: the value lands on the live record. Reject one and give a
@@ -267,6 +280,16 @@ Two honest options for the demo:
 - **Show the ingredients and name it as next.** Open a client record, show the
   mission statement on it, and say searching across those is the next piece of
   work. Don't demo it as though it runs.
+
+**A real send needs the branch mailbox configured.** The inbox composer and
+the client record both send through the branch Gmail mailbox. On a local dev
+server with no `GMAIL_*` variables set, a send is refused with *"The branch
+outreach mailbox is not configured"* — the draft, the checks and the review
+step all work, only delivery does not. Demo from the staging deployment if you
+want the send to complete, and note that the demo clients' addresses are all
+`@example.org`, which accepts no mail: the app will correctly record the send,
+and the message will bounce. Send to your own address if you want to show mail
+arriving.
 
 One smaller gap, only if someone asks: **F018 AC3's admin override
 confirmation dialog** is not in the UI on this branch. Admins are correctly

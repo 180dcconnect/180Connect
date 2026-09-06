@@ -4,13 +4,7 @@ import { useEffect, useRef, useState, useTransition, type FormEvent } from "reac
 import { Pencil } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { OriginButton } from "@/components/ui/origin-button";
-import {
-  MAX_FULL_NAME_LENGTH,
-  NOTIFICATION_FREQUENCIES,
-  NOTIFICATION_FREQUENCY_LABELS,
-  NOTIFICATION_FREQUENCY_DESCRIPTIONS,
-  type NotificationFrequency,
-} from "@/lib/account-settings";
+import { MAX_FULL_NAME_LENGTH } from "@/lib/account-settings";
 import { saveAccountSettingsAction, type AccountSettingsState } from "./actions";
 
 const initialState: AccountSettingsState = { status: "idle" };
@@ -23,8 +17,12 @@ const ROW =
 
 /**
  * The profile and account settings screen (F200 / F201):
- * - Displays name, notification delivery, role/email
- * - Lets user update display name and notification delivery frequency in place
+ * - Displays name, role and email
+ * - Lets the user update their display name in place
+ *
+ * Notification delivery frequency is deliberately not here (F178): it lives on
+ * its own screen (/settings/notifications), which is the one place it is set —
+ * the rail's Notifications row sits right next to this page.
  *
  * Read-first rather than a form that happens to be pre-filled. Someone opening
  * this screen is nearly always checking their details, not changing them, and a
@@ -35,12 +33,10 @@ const ROW =
  */
 export function ProfilePanel({
   initialFullName,
-  initialNotificationFrequency = "immediate",
   email,
   role,
 }: {
   initialFullName: string;
-  initialNotificationFrequency?: NotificationFrequency;
   email: string | null;
   role: string;
 }) {
@@ -54,8 +50,6 @@ export function ProfilePanel({
   const [editing, setEditing] = useState(false);
   const [savedName, setSavedName] = useState(initialFullName);
   const [draft, setDraft] = useState(initialFullName);
-  const [savedFrequency, setSavedFrequency] = useState<NotificationFrequency>(initialNotificationFrequency);
-  const [draftFrequency, setDraftFrequency] = useState<NotificationFrequency>(initialNotificationFrequency);
   const inputRef = useRef<HTMLInputElement>(null);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -65,9 +59,8 @@ export function ProfilePanel({
       const result = await saveAccountSettingsAction(state, formData);
       setState(result);
       if (result.status === "success") {
-        // The stored values, echoed back by the action — not the raw keystrokes.
+        // The stored name, echoed back by the action — not the raw keystrokes.
         setSavedName(result.fullName ?? draft);
-        setSavedFrequency(result.notificationFrequency ?? draftFrequency);
         setEditing(false);
       }
     });
@@ -79,14 +72,12 @@ export function ProfilePanel({
 
   function startEditing() {
     setDraft(savedName);
-    setDraftFrequency(savedFrequency);
     setState(initialState);
     setEditing(true);
   }
 
   function cancel() {
     setDraft(savedName);
-    setDraftFrequency(savedFrequency);
     setEditing(false);
   }
 
@@ -127,44 +118,6 @@ export function ProfilePanel({
               </p>
             </div>
 
-            <fieldset className="border-t border-black/[0.06] pt-6">
-              <legend className={FIELD_LABEL}>Notification delivery frequency (F201 / F178)</legend>
-              <p className="mt-1 text-sm leading-[1.7] text-foreground/65">
-                Choose how often the platform delivers notifications, digest alerts, and follow-up reminders.
-              </p>
-              <div className="mt-3 space-y-2">
-                {NOTIFICATION_FREQUENCIES.map((freq) => (
-                  <label
-                    key={freq}
-                    htmlFor={`freq-${freq}`}
-                    className={`flex cursor-pointer select-none items-start gap-3 rounded-xl border p-3.5 transition-colors ${
-                      draftFrequency === freq
-                        ? "border-brand bg-brand/5"
-                        : "border-black/[0.08] bg-white hover:border-black/20"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      id={`freq-${freq}`}
-                      name="notification_frequency"
-                      value={freq}
-                      checked={draftFrequency === freq}
-                      onChange={() => setDraftFrequency(freq)}
-                      className="mt-1 text-brand focus:ring-brand"
-                    />
-                    <div className="space-y-0.5">
-                      <p className="text-sm font-semibold text-foreground">
-                        {NOTIFICATION_FREQUENCY_LABELS[freq]}
-                      </p>
-                      <p className="text-xs text-foreground/60">
-                        {NOTIFICATION_FREQUENCY_DESCRIPTIONS[freq]}
-                      </p>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-
             <div className="pt-2 flex flex-wrap items-center gap-3">
               <OriginButton type="submit" loading={pending} disabled={pending} size="sm">
                 {pending ? "Saving..." : "Save changes"}
@@ -202,18 +155,6 @@ export function ProfilePanel({
               </span>
             </div>
 
-            <div className={`${ROW} border-b border-black/[0.06]`}>
-              <div>
-                <dt className={FIELD_LABEL}>Notification delivery</dt>
-                <dd className="mt-1 text-sm font-medium text-foreground">
-                  {NOTIFICATION_FREQUENCY_LABELS[savedFrequency]}
-                </dd>
-                <p className="mt-0.5 text-xs text-foreground/55">
-                  {NOTIFICATION_FREQUENCY_DESCRIPTIONS[savedFrequency]}
-                </p>
-              </div>
-            </div>
-
             <dl>
               <div className={`${ROW} border-b border-black/[0.06]`}>
                 <dt className={FIELD_LABEL}>Email</dt>
@@ -230,7 +171,8 @@ export function ProfilePanel({
 
       <p className="mt-4 px-1 text-sm leading-[1.7] text-foreground/65">
         Your email is changed through your login details, and your role is set by
-        an administrator — neither can be edited here.
+        an administrator — neither can be edited here. Notification delivery
+        frequency is set under Notifications in the menu.
       </p>
 
       {/* Success lives outside the row so it survives the switch back to view

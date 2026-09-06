@@ -260,10 +260,11 @@ describe("syncGmailReplies", () => {
       sentRows: [{ target_id: "outreach-1", detail: { organisation_id: "org-1", provider_thread_id: "thread-1", sent_to: "contact@charity.org" } }],
       rpcResults: { capture_gmail_reply: [new Error("boom")] },
     });
+    const send = await sendStub(sends);
     const result = await quiet(() => syncGmailReplies({
       admin, config, sender, tokenProvider,
       fetchImpl: fetchStub({ "gmail-1": inboundMessage() }),
-      sendNotification: await sendStub(sends),
+      sendNotification: send,
     }));
     assert.deepEqual(result, { scanned: 1, captured: 0, duplicates: 0, ignored: 0, unmatched: 0, failed: 1 });
     assert.deepEqual(sends, []);

@@ -49,7 +49,7 @@
 --   Documentation | Matrix §3.1/§3.19 updated alongside this migration.
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260917090000_add_email_notification_types.down.sql
+-- ../rollback/20260920090000_add_email_notification_types.down.sql
 
 alter table public.users
   add column email_notification_types text[] not null default '{client_reply_received}';

@@ -1176,7 +1176,7 @@ business-entity change either — same reasoning as F175's
 `reminder_notification_sent` marker.
 
 **Email delivery: replies only** (F179, #175,
-`supabase/migrations/20260917090000_add_email_notification_types.sql` +
+`supabase/migrations/20260920090000_add_email_notification_types.sql` +
 `src/lib/gmail/reply-sync.ts` + `src/lib/notification-email.ts`). Postgres
 cannot send email, so the email half is entirely application-side — and it
 deliberately adds **no** second notification producer. F174's trigger above is

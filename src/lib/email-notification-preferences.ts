@@ -2,7 +2,7 @@
  * F179 (#175) — Email Notifications. Pure core: which notification types a
  * user wants emailed, and the small catalogue the settings form offers.
  *
- * `email_notification_types` (users, 20260917090000_add_email_notification_types.sql)
+ * `email_notification_types` (users, 20260920090000_add_email_notification_types.sql)
  * is the durable list; this file only decides how to read it and what's
  * selectable. Defaults to `{client_reply_received}` at the column level
  * (AC3), not here — so the default can never drift from what's actually

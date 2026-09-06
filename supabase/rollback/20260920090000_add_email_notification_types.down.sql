@@ -1,4 +1,4 @@
--- Rollback for 20260917090000_add_email_notification_types.sql (F179, #175).
+-- Rollback for 20260920090000_add_email_notification_types.sql (F179, #175).
 --
 -- Drops the users.email_notification_types column. Data loss on rollback:
 -- every user's stored email-notification preference is lost. No NOTIFICATIONS

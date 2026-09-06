@@ -6,6 +6,8 @@ import { reportError } from "../error-logging.ts";
 import { createAdminClient } from "../supabase/admin.ts";
 import { getGmailAccessToken, resolveGmailConfig, resolveGmailSender, type GmailConfig } from "./client.ts";
 import { isPotentialCrmReply, matchInboundReply, parseInboundReply, type GmailInboundMessage, type SentThreadReference } from "./reply-message.ts";
+import { sendNotificationEmail } from "../notification-email.ts";
+import { wantsEmailNotification } from "../email-notification-preferences.ts";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
 const TIMEOUT_MS = 15_000;
@@ -35,7 +37,69 @@ type Dependencies = {
   fetchImpl?: typeof fetch;
   tokenProvider?: () => Promise<string>;
   lookbackDays?: number;
+  /** Test seam: where reply notification emails go. Defaults to the real transport. */
+  sendNotification?: typeof sendNotificationEmail;
 };
+
+/**
+ * F179 AC1/AC3 — the email half of "in addition to in-app". Runs after
+ * capture_gmail_reply has already created the in-app notification (that
+ * half is F174's notify_on_reply_event trigger on reply_events, merged at
+ * 20260912170300 — this function adds no second in-app row, only the email
+ * on top), and sends with the lower-level Gmail transport directly
+ * (notification-email.ts), never sendBranchOutreach's approval-gated
+ * outreach path — see that file's header for why that boundary matters.
+ *
+ * Owning CAM only, matching F179's user story: the client's current owner
+ * gets the email when they are active and `client_reply_received` (F174's
+ * owner token, the column default) is in their email_notification_types.
+ * Unowned / inactive-owner replies fall to F174's admin fallback
+ * notifications, which stay in-app only on this ticket.
+ *
+ * Best-effort by construction: any failure here (a lookup error, Gmail being
+ * unavailable) is reported and swallowed. The reply is already captured and
+ * the in-app notification already exists regardless of whether this email
+ * goes out — a CAM never loses the underlying signal over an email hiccup.
+ */
+export async function notifyReplyOwnerByEmail(
+  admin: SupabaseClient,
+  organisationId: string,
+  replyBody: string,
+  send: typeof sendNotificationEmail = sendNotificationEmail,
+): Promise<void> {
+  try {
+    const { data: org, error: orgError } = await admin
+      .from("organisations")
+      .select("owner_id, legal_name")
+      .eq("id", organisationId)
+      .maybeSingle<{ owner_id: string | null; legal_name: string }>();
+    if (orgError) throw orgError;
+    if (!org?.owner_id) return;
+
+    const { data: owner, error: ownerError } = await admin
+      .from("users")
+      .select("email, is_active, email_notification_types")
+      .eq("id", org.owner_id)
+      .maybeSingle<{ email: string; is_active: boolean; email_notification_types: string[] | null }>();
+    if (ownerError) throw ownerError;
+    if (!owner?.is_active || !owner.email) return;
+    if (!wantsEmailNotification(owner.email_notification_types, "client_reply_received")) return;
+
+    const result = await send({
+      to: owner.email,
+      subject: `${org.legal_name || "A client"} replied`,
+      text: replyBody.slice(0, 2000),
+    });
+    if (!result.ok) {
+      await reportError(new Error(result.reason), {
+        operation: "gmail.reply_sync.notify_email",
+        organisationId,
+      });
+    }
+  } catch (error) {
+    await reportError(error, { operation: "gmail.reply_sync.notify_email", organisationId });
+  }
+}
 
 async function gmailJson<T>(url: string, token: string, fetchImpl: typeof fetch, operation: string): Promise<T> {
   const startedAt = Date.now();
@@ -62,6 +126,7 @@ export async function syncGmailReplies(deps?: Dependencies): Promise<ReplySyncRe
   const sender = deps?.sender ?? resolveGmailSender();
   if (!admin || !config || !sender) throw new Error("Reply sync is not configured.");
   const fetchImpl = deps?.fetchImpl ?? fetch;
+  const sendNotification = deps?.sendNotification ?? sendNotificationEmail;
 
   try {
     const token = await (deps?.tokenProvider ? deps.tokenProvider() : getGmailAccessToken(config, fetchImpl));
@@ -118,8 +183,15 @@ export async function syncGmailReplies(deps?: Dependencies): Promise<ReplySyncRe
           p_sender_email: reply.from,
         });
         if (error) throw error;
-        if (data === null) result.duplicates += 1;
-        else result.captured += 1;
+        if (data === null) {
+          result.duplicates += 1;
+        } else {
+          result.captured += 1;
+          // F179: best-effort, never allowed to affect the capture count
+          // above or fail this message — see notifyReplyOwnerByEmail's own
+          // try/catch.
+          await notifyReplyOwnerByEmail(admin, match.detail.organisation_id, reply.body, sendNotification);
+        }
       } catch (error) {
         result.failed += 1;
         await reportError(error, { operation: "gmail.reply_sync.message", providerMessageId: item.id });

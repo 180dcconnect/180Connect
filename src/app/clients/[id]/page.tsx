@@ -55,6 +55,7 @@ import { NotesSection } from "./notes-section";
 import { AddNoteForm } from "./add-note-form";
 import {
   buildTimeline,
+  buildTimelineLinkOptions,
   collectReferencedUserIds,
   type AuditRow,
   type NoteRow as TimelineNoteRow,
@@ -92,9 +93,11 @@ type SavedBookletRow = {
 const BOOKLET_HISTORY_LIMIT = 20;
 
 // Shared by the full attachment list and the F220 text-search query below, so
-// the two result shapes can never drift apart column-wise.
+// the two result shapes can never drift apart column-wise. F219's
+// timeline_context_* columns are included so the same rows feed the
+// link-to-timeline control without a second query.
 const ATTACHMENT_LIST_SELECT =
-  "id, filename, content_type, size_bytes, created_at, text_extraction_status, text_extraction_failure_reason, extracted_text, extracted_page_count, extracted_text_truncated, uploaded_by_user:users!attachments_uploaded_by_fkey(full_name)";
+  "id, filename, content_type, size_bytes, created_at, timeline_context_type, timeline_context_id, text_extraction_status, text_extraction_failure_reason, extracted_text, extracted_page_count, extracted_text_truncated, uploaded_by_user:users!attachments_uploaded_by_fkey(full_name)";
 type LatestSuppression = {
   status: "pending" | "active" | "rejected" | "lifted";
   reason: string;
@@ -751,9 +754,11 @@ export default async function ClientDetailPage({
       outreachMessages: (timelineMessageRows ?? []) as unknown as TimelineOutreachRow[],
       replyEvents: (replyRows ?? []) as unknown as ReplyEventRow[],
       auditRows: (auditRows ?? []) as unknown as AuditRow[],
+      attachments: (attachmentRows ?? []) as unknown as AttachmentRow[],
     },
     timelineNames,
   );
+  const timelineLinkOptions = buildTimelineLinkOptions(timeline);
 
   const changeHistory = buildChangeHistory(changeHistoryRows, timelineNames);
 
@@ -1094,6 +1099,8 @@ export default async function ClientDetailPage({
                   }
                   error={Boolean(attachmentsError)}
                   canExtract={canEdit}
+                  canLink={canEdit}
+                  timelineOptions={timelineLinkOptions}
                 />
                 {/* F081: upload sits inside the same card so the new file
                     appears in the list directly above it on refresh (AC4). */}
@@ -1287,7 +1294,11 @@ export default async function ClientDetailPage({
             title="Timeline"
             hint="Every email, reply, note and change for this client, in one place."
           >
-            <TimelineSection entries={timeline} degraded={timelineDegraded} />
+            <TimelineSection
+              entries={timeline}
+              degraded={timelineDegraded}
+              organisationId={client.id}
+            />
           </SectionCard>
         </Rise>
         <TimelineRealtimeRefresher organisationId={client.id} />

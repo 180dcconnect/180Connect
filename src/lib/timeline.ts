@@ -25,6 +25,7 @@ import {
   isSensitiveOrgField,
   SENSITIVE_FIELD_LABELS,
 } from "./edit-suggestions.ts";
+import type { AttachmentRow, TimelineContextType } from "./attachments.ts";
 
 export type TimelineEventType =
   | "email_sent"
@@ -34,7 +35,8 @@ export type TimelineEventType =
   | "status_changed"
   | "ownership_reassigned"
   | "edit_applied"
-  | "edit_rejected";
+  | "edit_rejected"
+  | "attachment_added";
 
 /** F076 AC1 — each entry labelled from this defined, finite set. */
 export const TIMELINE_EVENT_LABEL: Record<TimelineEventType, string> = {
@@ -46,6 +48,7 @@ export const TIMELINE_EVENT_LABEL: Record<TimelineEventType, string> = {
   ownership_reassigned: "Ownership changed",
   edit_applied: "Suggested edit applied",
   edit_rejected: "Suggested edit rejected",
+  attachment_added: "File shared",
 };
 
 /**
@@ -77,6 +80,17 @@ export const TIMELINE_EVENT_STYLE: Record<TimelineEventType, TimelineStyle> = {
   ownership_reassigned: { tone: "warn", fill: "hollow" },
   edit_applied: { tone: "brand", fill: "ring" },
   edit_rejected: { tone: "warn", fill: "ring" },
+  attachment_added: { tone: "neutral", fill: "ring" },
+};
+
+export type TimelineSource = {
+  type: Exclude<TimelineContextType, "client">;
+  id: string;
+};
+
+export type TimelineAttachment = {
+  id: string;
+  filename: string;
 };
 
 export type TimelineEntry = {
@@ -85,6 +99,8 @@ export type TimelineEntry = {
   timestamp: string;
   actorName: string;
   summary: string;
+  source?: TimelineSource;
+  attachments?: TimelineAttachment[];
   /**
    * Only set for `ownership_reassigned` (F257 AC5) — the UI shows these as
    * distinct labelled fields (outgoing CAM, incoming CAM, reason), not folded
@@ -189,6 +205,7 @@ export function buildNoteEntries(row: NoteRow): TimelineEntry[] {
       timestamp: row.created_at,
       actorName,
       summary: row.content,
+      source: { type: "note", id: row.id },
     },
   ];
 
@@ -218,6 +235,7 @@ export function buildEmailSentEntry(row: OutreachMessageRow): TimelineEntry | nu
     timestamp: row.sent_at,
     actorName: senderName ? senderName : UNKNOWN_ACTOR,
     summary: row.subject,
+    source: { type: "outreach_message", id: row.id },
   };
 }
 
@@ -229,6 +247,7 @@ export function buildReplyReceivedEntry(row: ReplyEventRow): TimelineEntry {
     timestamp: row.received_at,
     actorName: "The client",
     summary: row.reply_body,
+    source: { type: "reply_event", id: row.id },
   };
 }
 
@@ -252,6 +271,7 @@ export function buildStatusChangedEntry(
     summary: `Status changed from ${from ? formatOutreachStatus(from) : "—"} to ${
       to ? formatOutreachStatus(to) : "—"
     }.`,
+    source: { type: "audit_log", id: row.id },
   };
 }
 
@@ -278,6 +298,7 @@ export function buildOwnershipReassignedEntry(
     actorName: resolveName(row.actor_user_id, names),
     summary: `Ownership moved from ${fromName} to ${toName}.`,
     handover: { fromName, toName, reason },
+    source: { type: "audit_log", id: row.id },
   };
 }
 
@@ -317,6 +338,7 @@ export function buildEditSuggestionEntry(
     timestamp: row.created_at,
     actorName: resolveName(row.actor_user_id, names),
     summary,
+    source: { type: "audit_log", id: row.id },
   };
 }
 
@@ -325,7 +347,34 @@ export type TimelineSources = {
   outreachMessages: readonly OutreachMessageRow[];
   replyEvents: readonly ReplyEventRow[];
   auditRows: readonly AuditRow[];
+  attachments?: readonly AttachmentRow[];
 };
+
+export type TimelineLinkOption = { key: string; label: string };
+
+/** Options shown in the Attachments area; keys map directly to the RPC contract. */
+export function buildTimelineLinkOptions(
+  entries: readonly TimelineEntry[],
+): TimelineLinkOption[] {
+  const options: TimelineLinkOption[] = [
+    { key: "client", label: "General client file" },
+  ];
+  for (const entry of entries) {
+    if (!entry.source) continue;
+    const date = new Date(entry.timestamp).toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+    const summary = entry.summary.replace(/\s+/g, " ").trim();
+    options.push({
+      key: `${entry.source.type}:${entry.source.id}`,
+      label: `${TIMELINE_EVENT_LABEL[entry.type]} · ${date} · ${summary.slice(0, 70)}`,
+    });
+  }
+  return options;
+}
 
 /**
  * Merges every source into one feed, newest first — the same order every
@@ -364,6 +413,38 @@ export function buildTimeline(
     ) {
       entries.push(buildEditSuggestionEntry(row, names));
     }
+  }
+
+  // F219: attach files to the stable source id, never to an array position or
+  // timestamp. New events can therefore be inserted without changing a link.
+  // A client-level upload (and a defensive fallback for a missing source)
+  // becomes its own visible File shared event.
+  for (const row of sources.attachments ?? []) {
+    const target = row.timeline_context_type === "client"
+      ? undefined
+      : entries.find(
+          (entry) =>
+            entry.source?.type === row.timeline_context_type &&
+            entry.source.id === row.timeline_context_id,
+        );
+
+    const linkedFile = { id: row.id, filename: row.filename };
+    if (target) {
+      target.attachments = [...(target.attachments ?? []), linkedFile];
+      continue;
+    }
+
+    entries.push({
+      id: `attachment-${row.id}`,
+      type: "attachment_added",
+      timestamp: row.created_at,
+      actorName: row.uploaded_by_user?.full_name?.trim() || UNKNOWN_ACTOR,
+      summary:
+        row.timeline_context_type === "client"
+          ? "Uploaded to this client's files."
+          : "The linked event is temporarily unavailable.",
+      attachments: [linkedFile],
+    });
   }
 
   return entries.sort((a, b) =>

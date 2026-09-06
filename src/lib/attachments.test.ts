@@ -8,6 +8,7 @@ import {
   MAX_ATTACHMENTS_PER_DRAFT,
   MAX_COMBINED_ATTACHMENT_SIZE_BYTES,
   attachmentRpcFailure,
+  attachmentTimelineRpcFailure,
   attachmentUploadFailureMessage,
   buildAttachmentStoragePath,
   formatAttachments,
@@ -48,6 +49,8 @@ function row(overrides: Partial<AttachmentRow> = {}): AttachmentRow {
     extracted_text: "Extracted agreement text",
     extracted_page_count: 2,
     extracted_text_truncated: false,
+    timeline_context_type: "client",
+    timeline_context_id: null,
     uploaded_by_user: { full_name: "Alex CAM" },
     ...overrides,
   };
@@ -79,6 +82,8 @@ describe("formatAttachments", () => {
     assert.equal(attachment?.filename, "signed-agreement.pdf");
     assert.equal(attachment?.sizeLabel, "240.0 KB");
     assert.equal(attachment?.uploadedByName, "Alex CAM");
+    assert.equal(attachment?.timelineContextType, "client");
+    assert.equal(attachment?.timelineContextId, null);
   });
 
   it("returns an empty list for a client with no attachments", () => {
@@ -178,6 +183,20 @@ describe("normaliseAttachmentSearchQuery", () => {
 
   it("caps a pathological query at a sane length", () => {
     assert.equal(normaliseAttachmentSearchQuery("a ".repeat(500)).length <= 200, true);
+  });
+});
+
+describe("attachmentTimelineRpcFailure (F219)", () => {
+  it("passes through deliberate permission, validation, and missing-target errors", () => {
+    assert.equal(attachmentTimelineRpcFailure({ code: "42501", message: "not allowed" }).status, 403);
+    assert.equal(attachmentTimelineRpcFailure({ code: "22023", message: "choose an event" }).status, 400);
+    assert.equal(attachmentTimelineRpcFailure({ code: "P0002", message: "not found" }).status, 404);
+  });
+
+  it("does not expose an unexpected database error", () => {
+    const failure = attachmentTimelineRpcFailure({ code: "42P01", message: "secret table detail" });
+    assert.equal(failure.status, 500);
+    assert.ok(!failure.error.includes("secret"));
   });
 });
 

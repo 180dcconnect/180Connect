@@ -1,0 +1,31 @@
+-- Schema change approval record (SOP §7):
+--   Change        | Revoke EXECUTE on mark_organisation_responded(uuid) from
+--                 | public, anon and authenticated.
+--   Reason        | 20260912170000 (F149) granted EXECUTE to service_role but
+--                 | never revoked it from public first. Postgres grants
+--                 | EXECUTE to PUBLIC on function creation by default, so
+--                 | omitting a grant to authenticated does not restrict
+--                 | anything — verified against a local reset that both anon
+--                 | and authenticated could call this SECURITY DEFINER
+--                 | function directly over the REST RPC endpoint with any
+--                 | organisation id, bypassing every ownership/authorisation
+--                 | check set_outreach_status enforces (including from an
+--                 | unauthenticated request carrying only the anon key).
+--                 | Found while building F154 AC3's mark_organisation_no_
+--                 | response, which follows the same shape and needed the
+--                 | same revoke get_clients_last_activity (20260910100000)
+--                 | already carries.
+--   Compatibility | Privilege tightening only. No behaviour change for the
+--                 | intended caller (service_role, via capture_gmail_reply /
+--                 | the cron sweep) — only removes an unintended one.
+--   Data migration| None.
+--   Security      | Closes a live privilege gap. Cannot be fixed by editing
+--                 | 20260912170000 in place (already applied to dev/staging;
+--                 | fix-forward per MIGRATIONS.md).
+--   Documentation | Reviewed as part of the F154 PR.
+--
+-- IRREVERSIBLE: reverting this migration would re-grant EXECUTE to anon and
+-- authenticated, reopening the gap it closes. If this function's caller
+-- shape ever genuinely needs to change, that should be a deliberate,
+-- reviewed grant in its own migration — not an automatic rollback.
+revoke execute on function public.mark_organisation_responded(uuid) from public, anon, authenticated;

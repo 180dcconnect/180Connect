@@ -1,14 +1,17 @@
 import Link from "next/link";
 import type { Attachment } from "@/lib/attachments";
 import { textExtractionFailureCopy } from "@/lib/attachments";
+import { LinkAttachmentForm, type TimelineLinkOption } from "./link-attachment-form";
 import { extractAttachmentTextForm } from "./attachment-actions";
 
 /**
- * F080 — list / empty / error states for a client's attachments (AC1, AC3).
- * No client-side state, so this stays a server component: the "Open" link is a
- * plain anchor to the download route, which does the signed-URL exchange and
- * redirects — and the text search below is a plain GET form whose results come
- * back through the page's searchParams (server-side, no JS required).
+ * F080 — list / empty / error states for a client's attachments (AC1, AC3),
+ * with F219's per-row "link to a timeline event" control and F220's extraction
+ * states, retry, and text search layered on top. No client-side state, so this
+ * stays a server component: the "Open" link is a plain anchor to the download
+ * route (which does the signed-URL exchange and redirects), the timeline link
+ * and extraction actions are server actions, and the text search below is a
+ * plain GET form whose results come back through the page's searchParams.
  *
  * F220 follow-up — attachment text search: the search box submits
  * `?attachmentSearch=…` to the same client page, whose server component runs
@@ -26,6 +29,8 @@ export function AttachmentsSection({
   search,
   error,
   canExtract,
+  canLink,
+  timelineOptions,
 }: {
   organisationId: string;
   attachments: readonly Attachment[];
@@ -35,6 +40,8 @@ export function AttachmentsSection({
   search?: { query: string; failed?: boolean } | null;
   error: boolean;
   canExtract: boolean;
+  canLink: boolean;
+  timelineOptions: readonly TimelineLinkOption[];
 }) {
   if (error) {
     return (
@@ -140,6 +147,18 @@ export function AttachmentsSection({
                     {new Date(attachment.createdAt).toLocaleDateString("en-GB")}
                     {attachment.sizeLabel ? ` · ${attachment.sizeLabel}` : ""}
                   </p>
+                  {canLink && (
+                    <LinkAttachmentForm
+                      organisationId={organisationId}
+                      attachmentId={attachment.id}
+                      currentKey={
+                        attachment.timelineContextType === "client"
+                          ? "client"
+                          : `${attachment.timelineContextType}:${attachment.timelineContextId}`
+                      }
+                      options={timelineOptions}
+                    />
+                  )}
                   {attachment.textExtractionStatus === "succeeded" && attachment.extractedText && (
                     <details className="mt-2 max-w-2xl text-xs text-foreground/65">
                       <summary className="cursor-pointer font-bold text-brand-hover">

@@ -19,13 +19,27 @@ export type AttachmentRow = {
   content_type: string | null;
   size_bytes: number | null;
   created_at: string;
+  // F220: extraction state and outcome columns (record_attachment_text_extraction).
   text_extraction_status: "pending" | "succeeded" | "failed" | "not_applicable";
   text_extraction_failure_reason: string | null;
   extracted_text: string | null;
   extracted_page_count: number | null;
   extracted_text_truncated: boolean;
+  // F219: the timeline event (if any) an attachment is linked to.
+  timeline_context_type: TimelineContextType;
+  timeline_context_id: string | null;
   uploaded_by_user: { full_name: string | null } | null;
 };
+
+export const TIMELINE_CONTEXT_TYPES = [
+  "client",
+  "note",
+  "outreach_message",
+  "reply_event",
+  "audit_log",
+] as const;
+
+export type TimelineContextType = (typeof TIMELINE_CONTEXT_TYPES)[number];
 
 export type Attachment = {
   id: string;
@@ -42,6 +56,8 @@ export type Attachment = {
   extractedText: string | null;
   extractedPageCount: number | null;
   extractedTextTruncated: boolean;
+  timelineContextType: AttachmentRow["timeline_context_type"];
+  timelineContextId: string | null;
 };
 
 const UNKNOWN_UPLOADER = "A former team member";
@@ -137,6 +153,8 @@ export function formatAttachments(rows: readonly AttachmentRow[]): Attachment[] 
       extractedText: row.extracted_text,
       extractedPageCount: row.extracted_page_count,
       extractedTextTruncated: row.extracted_text_truncated,
+      timelineContextType: row.timeline_context_type,
+      timelineContextId: row.timeline_context_id,
     }))
     .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
 }
@@ -332,5 +350,25 @@ export function attachmentRpcFailure(error: { code?: string; message?: string })
       return { status: 404, error: error.message };
     default:
       return { status: 500, error: GENERIC_RECORD_FAILURE };
+  }
+}
+
+/** Safe UI mapping for the F219 SECURITY DEFINER linking RPC. */
+export function attachmentTimelineRpcFailure(error: {
+  code?: string;
+  message?: string;
+}): RpcFailure {
+  if (!error.message?.trim()) {
+    return { status: 500, error: "The timeline link could not be saved. Refresh and try again." };
+  }
+  switch (error.code) {
+    case "42501":
+      return { status: 403, error: error.message };
+    case "22023":
+      return { status: 400, error: error.message };
+    case "P0002":
+      return { status: 404, error: error.message };
+    default:
+      return { status: 500, error: "The timeline link could not be saved. Refresh and try again." };
   }
 }

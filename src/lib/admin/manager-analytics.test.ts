@@ -5,9 +5,11 @@ import type { DashboardOrgRow } from "../dashboard-metrics.ts";
 import type { CamReplyRow, SentMessageRow } from "../cam-analytics.ts";
 import {
   conversionsOverTime,
+  describeUncountedClients,
   perCamAnalytics,
   sortByNeed,
   teamTotals,
+  uncountedClients,
   type OutcomeRow,
 } from "./manager-analytics.ts";
 
@@ -233,5 +235,77 @@ describe("teamTotals and sortByNeed (F212)", () => {
     assert.equal(totals.cams, 0);
     assert.equal(totals.conversions, 0);
     assert.equal(totals.camsNeedingSupport, 0);
+  });
+});
+
+describe("uncountedClients", () => {
+  it("counts clients whose owner is no longer an active CAM", () => {
+    const cams = [{ id: "cam-active" }];
+    const rows = [
+      org({ owner_id: "cam-active" }),
+      org({ owner_id: "cam-deactivated" }),
+      org({ owner_id: "cam-deactivated" }),
+    ];
+
+    const uncounted = uncountedClients(rows, cams);
+
+    assert.equal(uncounted.formerOwners, 2);
+    assert.equal(uncounted.unassigned, 0);
+    assert.equal(uncounted.total, 2);
+  });
+
+  it("counts clients with no owner separately from a departed owner's", () => {
+    const uncounted = uncountedClients(
+      [org({ owner_id: null }), org({ owner_id: "gone" }), org({ owner_id: "here" })],
+      [{ id: "here" }],
+    );
+
+    assert.equal(uncounted.unassigned, 1);
+    assert.equal(uncounted.formerOwners, 1);
+    assert.equal(uncounted.total, 2);
+  });
+
+  it("reports nothing uncounted when every owner is active", () => {
+    const uncounted = uncountedClients([org({ owner_id: "here" })], [{ id: "here" }]);
+
+    assert.equal(uncounted.total, 0);
+    assert.equal(describeUncountedClients(uncounted), null);
+  });
+
+  it("names offboarding for a deactivated owner and claiming for none", () => {
+    const message = describeUncountedClients({
+      unassigned: 3,
+      formerOwners: 2,
+      total: 5,
+    });
+
+    assert.ok(message);
+    assert.match(message, /5 clients are not counted below/);
+    assert.match(message, /2 still owned by a deactivated user/);
+    assert.match(message, /offboarding/i);
+    assert.match(message, /3 with no owner yet/);
+  });
+
+  it("says \"client is\" for a single uncounted client", () => {
+    const message = describeUncountedClients({ unassigned: 1, formerOwners: 0, total: 1 });
+
+    assert.ok(message);
+    assert.match(message, /1 client is not counted below/);
+  });
+
+  it("leaves the per-CAM totals themselves untouched", () => {
+    // The uncounted rows are reported beside the table, never folded into it:
+    // "how is the team doing" and "what is nobody looking after" stay separate.
+    const cams = [{ id: "cam-active", name: "Active" }];
+    const rows = [
+      org({ owner_id: "cam-active", outreach_status: "converted" }),
+      org({ owner_id: "cam-deactivated", outreach_status: "converted" }),
+    ];
+
+    const totals = teamTotals(perCamAnalytics(rows, [], [], cams));
+
+    assert.equal(totals.clientsOwned, 1);
+    assert.equal(totals.conversions, 1);
+    assert.equal(uncountedClients(rows, cams).formerOwners, 1);
   });
 });

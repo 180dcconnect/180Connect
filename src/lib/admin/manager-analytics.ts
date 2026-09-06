@@ -222,6 +222,67 @@ export type TeamAnalyticsTotals = {
 };
 
 /** F212 AC1 — the team headline, summed from the same per-CAM rows shown below it. */
+export type UncountedClients = {
+  /** No owner at all — nobody's personal analytics to appear in. */
+  unassigned: number;
+  /** Owned by a user who is no longer an active CAM or admin. */
+  formerOwners: number;
+  total: number;
+};
+
+/**
+ * Clients that no row in the per-CAM table accounts for.
+ *
+ * teamTotals sums the per-CAM rows, and perCamAnalytics only buckets by the
+ * owners it was given — the active CAMs and admins. Deactivating a user does
+ * not reassign their clients (that is /admin/offboard, a separate manual step),
+ * so between someone leaving and their clients being handed over, those clients
+ * belong to nobody in the table and silently left every team figure.
+ *
+ * Counting them here rather than folding them into the totals keeps two
+ * different questions apart: "how is the team performing" is about people who
+ * are still here, while "what is nobody looking after" is a handover problem.
+ * The page states the second out loud instead of quietly dropping the rows —
+ * the same reason summariseTrackedReplies carries its own `unassigned` count.
+ */
+export function uncountedClients(
+  rows: readonly DashboardOrgRow[],
+  cams: readonly { id: string }[],
+): UncountedClients {
+  const known = new Set(cams.map((cam) => cam.id));
+  let unassigned = 0;
+  let formerOwners = 0;
+
+  for (const row of rows) {
+    if (!row.owner_id) unassigned += 1;
+    else if (!known.has(row.owner_id)) formerOwners += 1;
+  }
+
+  return { unassigned, formerOwners, total: unassigned + formerOwners };
+}
+
+/**
+ * The sentence the page shows when anything is uncounted. Says which of the two
+ * problems it is, because they need different actions: an unassigned client
+ * needs claiming, a former owner's client needs offboarding.
+ */
+export function describeUncountedClients(uncounted: UncountedClients): string | null {
+  if (uncounted.total === 0) return null;
+
+  const parts: string[] = [];
+  if (uncounted.formerOwners > 0) {
+    parts.push(
+      `${uncounted.formerOwners.toLocaleString()} still owned by a deactivated user — reassign them from Work handover & offboarding`,
+    );
+  }
+  if (uncounted.unassigned > 0) {
+    parts.push(`${uncounted.unassigned.toLocaleString()} with no owner yet`);
+  }
+
+  const clients = uncounted.total === 1 ? "client is" : "clients are";
+  return `${uncounted.total.toLocaleString()} ${clients} not counted below: ${parts.join("; ")}.`;
+}
+
 export function teamTotals(rows: readonly CamAnalyticsRow[]): TeamAnalyticsTotals {
   return rows.reduce<TeamAnalyticsTotals>(
     (totals, row) => ({

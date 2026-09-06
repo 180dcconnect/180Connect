@@ -9,6 +9,13 @@ import {
 } from "@/lib/edit-suggestions";
 import { reportError } from "@/lib/error-logging";
 import { createClient } from "@/lib/supabase/server";
+import { z } from "zod";
+import { safeValidate } from "@/lib/validation";
+import {
+  TIMELINE_CONTEXT_TYPES,
+  attachmentTimelineRpcFailure,
+  type TimelineContextType,
+} from "@/lib/attachments";
 
 /**
  * #79 + #23 (F077/F020) — submit a suggested edit for one of a client's restricted
@@ -79,4 +86,89 @@ export async function suggestEditAction(
     fieldName: parsed.data.fieldName,
     message: "Suggestion submitted for admin review.",
   };
+}
+
+export type LinkAttachmentState =
+  | { kind: "idle" }
+  | { kind: "success"; message: string }
+  | { kind: "error"; message: string };
+
+const linkAttachmentSchema = z.object({
+  organisationId: z.uuid(),
+  attachmentId: z.uuid(),
+  contextKey: z.string().trim().min(1).max(100),
+});
+
+/** F219 — persist a file's link to a verified event on this client's timeline. */
+export async function linkAttachmentToTimelineAction(
+  _previous: LinkAttachmentState,
+  formData: FormData,
+): Promise<LinkAttachmentState> {
+  const authorization = await getCurrentActor("client:edit", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { kind: "error", message: actorFailureMessage(authorization.reason) };
+  }
+
+  const parsed = safeValidate(linkAttachmentSchema, {
+    organisationId: formData.get("organisationId"),
+    attachmentId: formData.get("attachmentId"),
+    contextKey: formData.get("contextKey"),
+  });
+  if (!parsed.success) {
+    return { kind: "error", message: "Choose a valid timeline event." };
+  }
+
+  const [rawType, rawId] = parsed.data.contextKey.split(":", 2);
+  if (!TIMELINE_CONTEXT_TYPES.includes(rawType as TimelineContextType)) {
+    return { kind: "error", message: "Choose a valid timeline event." };
+  }
+  const contextType = rawType as TimelineContextType;
+  const contextId = contextType === "client" ? null : rawId;
+  const context = safeValidate(
+    z.object({
+      contextId: contextType === "client" ? z.null() : z.uuid(),
+    }),
+    { contextId },
+  );
+  if (!context.success) {
+    return { kind: "error", message: "Choose a valid timeline event." };
+  }
+
+  const supabase = await createClient();
+  let error: { code?: string; message: string } | null;
+  try {
+    ({ error } = await supabase.rpc("link_attachment_to_timeline", {
+      p_attachment_id: parsed.data.attachmentId,
+      p_organisation_id: parsed.data.organisationId,
+      p_context_type: contextType,
+      p_context_id: context.data.contextId,
+    }));
+  } catch (thrown) {
+    await reportError(thrown, {
+      operation: "clients.link_attachment_to_timeline",
+      actorUserId: authorization.actor.id,
+      organisationId: parsed.data.organisationId,
+      attachmentId: parsed.data.attachmentId,
+    });
+    return {
+      kind: "error",
+      message: "The timeline link could not be saved. Refresh and try again.",
+    };
+  }
+
+  if (error) {
+    const failure = attachmentTimelineRpcFailure(error);
+    if (failure.status === 500) {
+      await reportError(error, {
+        operation: "clients.link_attachment_to_timeline",
+        actorUserId: authorization.actor.id,
+        organisationId: parsed.data.organisationId,
+        attachmentId: parsed.data.attachmentId,
+      });
+    }
+    return { kind: "error", message: failure.error };
+  }
+
+  revalidatePath(`/clients/${parsed.data.organisationId}`);
+  return { kind: "success", message: "Timeline link saved." };
 }

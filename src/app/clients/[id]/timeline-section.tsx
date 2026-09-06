@@ -81,9 +81,11 @@ function EventDot({ type }: { type: TimelineEntry["type"] }) {
 export function TimelineSection({
   entries,
   degraded,
+  organisationId,
 }: {
   entries: TimelineEntry[];
   degraded: boolean;
+  organisationId: string;
 }) {
   if (entries.length === 0) {
     if (degraded) {
@@ -147,6 +149,22 @@ export function TimelineSection({
                 </a>
               )}
             </>
+          )}
+          {entry.attachments && entry.attachments.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {entry.attachments.map((attachment) => (
+                <li key={attachment.id}>
+                  <a
+                    className="text-sm font-semibold text-brand underline underline-offset-2"
+                    href={`/api/clients/${organisationId}/attachments/${attachment.id}/download`}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    {attachment.filename}
+                  </a>
+                </li>
+              ))}
+            </ul>
           )}
         </li>
       ))}

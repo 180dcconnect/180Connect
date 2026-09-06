@@ -10,6 +10,7 @@ import {
   reviewManualEntryFields,
 } from "@/lib/manual-entry";
 import { createClient } from "@/lib/supabase/server";
+import { fetchPaged } from "@/lib/supabase/fetch-paged";
 import { checkWebsiteReachability } from "@/lib/website-reachability";
 
 export type ManualEntryCheck = {
@@ -139,29 +140,32 @@ export async function checkAvailableManualEntryDependencies(
     }
 
     const websitePromise = checkWebsiteReachability(parsed.data.website);
-    const organisationRows: ExistingOrganisationRow[] = [];
-    const identifierRows: IdentifierRow[] = [];
-    const pageSize = 1_000;
-    for (let from = 0; ; from += pageSize) {
-      const result = await supabase
+    // Ordered for the same reason as the import path: an unordered `.range()`
+    // may repeat or skip a row across a page boundary, and this list is what
+    // the duplicate check is made against.
+    const organisations = await fetchPaged<ExistingOrganisationRow>((from, to) =>
+      supabase
         .from("organisations")
         .select("id, legal_name, postcode")
-        .range(from, from + pageSize - 1);
-      if (result.error) throw result.error;
-      const page = (result.data ?? []) as ExistingOrganisationRow[];
-      organisationRows.push(...page);
-      if (page.length < pageSize) break;
-    }
-    for (let from = 0; ; from += pageSize) {
-      const result = await supabase
+        .order("id", { ascending: true })
+        .range(from, to)
+        .overrideTypes<ExistingOrganisationRow[], { merge: false }>(),
+    );
+    if (organisations.error) throw organisations.error;
+
+    const identifiers = await fetchPaged<IdentifierRow>((from, to) =>
+      supabase
         .from("organisation_identifiers")
         .select("organisation_id, identifier_value")
-        .range(from, from + pageSize - 1);
-      if (result.error) throw result.error;
-      const page = (result.data ?? []) as IdentifierRow[];
-      identifierRows.push(...page);
-      if (page.length < pageSize) break;
-    }
+        .order("organisation_id", { ascending: true })
+        .order("identifier_value", { ascending: true })
+        .range(from, to)
+        .overrideTypes<IdentifierRow[], { merge: false }>(),
+    );
+    if (identifiers.error) throw identifiers.error;
+
+    const organisationRows = organisations.data ?? [];
+    const identifierRows = identifiers.data ?? [];
     const websiteStatus = await websitePromise;
 
     const numbersByOrganisation = new Map<string, string[]>();

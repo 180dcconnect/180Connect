@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   mapNotificationRows,
+  notificationCategory,
   notificationPriority,
   notificationRelativeTime,
   sortNotificationsByPriority,
@@ -146,5 +147,17 @@ describe("sortNotificationsByPriority (F174 AC3)", () => {
     const before = items.map((i) => i.id);
     sortNotificationsByPriority(items);
     assert.deepEqual(items.map((i) => i.id), before);
+  });
+});
+
+describe("notificationCategory (F176 AC3)", () => {
+  it("categorises a team activity digest as team_activity", () => {
+    assert.equal(notificationCategory("team_activity_digest"), "team_activity");
+  });
+
+  it("defaults every other type to personal, including unrecognised ones", () => {
+    assert.equal(notificationCategory("team_activity"), "personal");
+    assert.equal(notificationCategory("reply_received"), "personal");
+    assert.equal(notificationCategory("some_future_type"), "personal");
   });
 });

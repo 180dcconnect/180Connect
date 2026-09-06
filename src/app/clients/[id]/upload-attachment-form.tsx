@@ -14,14 +14,16 @@ import { recordUploadedAttachment } from "./attachment-actions";
 const ATTACHMENTS_BUCKET = "client-attachments";
 
 /**
- * F081 — uploads directly from the browser to the private client-attachments
- * bucket (so the loading state below reflects the real transfer, not a proxy
- * through this app's server — see 20260823090000_create_attachments.sql's
- * header for the two-step shape), then POSTs the metadata to
- * /api/clients/[id]/attachments, which calls record_attachment. AC4
- * ("appears immediately… without a page reload") is router.refresh()
- * re-running the server fetch that feeds AttachmentsSection — same pattern
- * AddNoteForm uses, not a hand-rolled optimistic insert.
+ * F081/F220 — uploads directly from the browser to the private
+ * client-attachments bucket (so the loading state below reflects the real
+ * transfer, not a proxy through this app's server — see
+ * 20260823090000_create_attachments.sql's header for the two-step shape),
+ * then records the metadata through the colocated server action
+ * recordUploadedAttachment (which calls the record_attachment RPC and, for a
+ * PDF, extracts its text in the same request — F220). AC4 ("appears
+ * immediately… without a page reload") is router.refresh() re-running the
+ * server fetch that feeds AttachmentsSection — same pattern AddNoteForm
+ * uses, not a hand-rolled optimistic insert.
  *
  * AC2 asks for "progress or a loading state" — this is a loading state (a
  * spinner plus the filename, via OriginButton's own `loading` prop), not a

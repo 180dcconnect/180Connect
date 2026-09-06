@@ -182,6 +182,57 @@ describe("perCamAnalytics (F212)", () => {
     assert.ok(blake);
     assert.deepEqual(blake.flags, []);
   });
+  /** `count` timed replies of `seconds` each, spread across `orgs`. */
+  const timedReplies = (orgs: readonly DashboardOrgRow[], count: number, seconds: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      id: nextId("reply"),
+      organisation_id: orgs[index % orgs.length].id,
+      response_time_seconds: seconds,
+    }));
+
+  it("flags a CAM whose clients reply far slower than the team's typical", () => {
+    // Both CAMs convert nothing, so only the response-time comparison can fire.
+    const ada = owned("cam-a", 10, "no_response");
+    const blake = owned("cam-b", 10, "no_response");
+    const rows = perCamAnalytics(
+      [...ada, ...blake],
+      NO_MESSAGES,
+      [
+        ...timedReplies(ada, 5, 3_600),
+        // Median of (3600, 20000) is 11800; 1.5x that is 17700.
+        ...timedReplies(blake, 5, 20_000),
+      ],
+      cams,
+    );
+
+    const slow = rows.find((row) => row.camId === "cam-b");
+    assert.ok(slow);
+    assert.ok(slow.flags.some((flag) => flag.kind === "slow_response"));
+
+    const fast = rows.find((row) => row.camId === "cam-a");
+    assert.ok(fast);
+    assert.deepEqual(fast.flags, []);
+  });
+
+  it("does not call a CAM slow on a response-time sample it has said not to trust", () => {
+    const ada = owned("cam-a", 10, "no_response");
+    const blake = owned("cam-b", 10, "no_response");
+    const rows = perCamAnalytics(
+      [...ada, ...blake],
+      NO_MESSAGES,
+      [
+        ...timedReplies(ada, 5, 3_600),
+        // One reply short of the threshold, however slow it is.
+        ...timedReplies(blake, 4, 200_000),
+      ],
+      cams,
+    );
+
+    const blakeRow = rows.find((row) => row.camId === "cam-b");
+    assert.ok(blakeRow);
+    assert.equal(blakeRow.typical.hasEnoughData, false);
+    assert.deepEqual(blakeRow.flags, []);
+  });
 });
 
 describe("teamTotals and sortByNeed (F212)", () => {

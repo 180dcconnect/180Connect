@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { createClient } from "@/lib/supabase/server";
+import { fetchPaged } from "@/lib/supabase/fetch-paged";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -34,8 +35,6 @@ import {
  * dependencies may never be finished.
  */
 
-const FETCH_STEP = 1000;
-
 type CamRow = { id: string; full_name: string | null; role: string };
 
 export default async function AdminAnalyticsPage() {
@@ -46,71 +45,59 @@ export default async function AdminAnalyticsPage() {
 
   const supabase = await createClient();
 
-  async function fetchPaged<T>(
-    build: (from: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
-  ): Promise<{ data: T[] | null; error: { message: string } | null }> {
-    const all: T[] = [];
-    let from = 0;
-    while (true) {
-      const { data, error } = await build(from);
-      if (error) return { data: null, error };
-      if (!data || data.length === 0) break;
-      all.push(...data);
-      if (data.length < FETCH_STEP) break;
-      from += FETCH_STEP;
-    }
-    return { data: all, error: null };
-  }
-
   const [organisations, openSuppressions, messages, replies, outcomes, cams] = await Promise.all([
-    fetchPaged<DashboardOrgRow>((from) =>
+    fetchPaged<DashboardOrgRow>((from, to) =>
       supabase
         .from("organisations")
         .select("id, legal_name, outreach_status, owner_id, updated_at, created_at")
         .order("created_at", { ascending: true })
         .order("id", { ascending: true })
-        .range(from, from + FETCH_STEP - 1)
+        .range(from, to)
         .overrideTypes<DashboardOrgRow[], { merge: false }>(),
     ),
-    fetchPaged<OpenSuppression>((from) =>
+    fetchPaged<OpenSuppression>((from, to) =>
       supabase
         .from("suppressions")
         .select("organisation_id, status")
         .in("status", ["pending", "active"])
         .order("organisation_id", { ascending: true })
-        .range(from, from + FETCH_STEP - 1)
+        .range(from, to)
         .overrideTypes<OpenSuppression[], { merge: false }>(),
     ),
-    fetchPaged<SentMessageRow>((from) =>
+    fetchPaged<SentMessageRow>((from, to) =>
       supabase
         .from("outreach_messages")
         .select("id, organisation_id, sent_by_user_id, sent_at")
         .eq("send_status", "sent")
         .order("sent_at", { ascending: true })
         .order("id", { ascending: true })
-        .range(from, from + FETCH_STEP - 1)
+        .range(from, to)
         .overrideTypes<SentMessageRow[], { merge: false }>(),
     ),
-    fetchPaged<CamReplyRow>((from) =>
+    fetchPaged<CamReplyRow>((from, to) =>
       supabase
         .from("reply_events")
         .select("id, organisation_id, response_time_seconds")
         .order("received_at", { ascending: true })
         .order("id", { ascending: true })
-        .range(from, from + FETCH_STEP - 1)
+        .range(from, to)
         .overrideTypes<CamReplyRow[], { merge: false }>(),
     ),
-    fetchPaged<OutcomeRow>((from) =>
+    fetchPaged<OutcomeRow>((from, to) =>
       supabase
         .from("outcomes")
         .select("id, organisation_id, outcome_type, created_at")
         .eq("outcome_type", "converted")
         .order("created_at", { ascending: true })
         .order("id", { ascending: true })
-        .range(from, from + FETCH_STEP - 1)
+        .range(from, to)
         .overrideTypes<OutcomeRow[], { merge: false }>(),
     ),
-    fetchPaged<CamRow>((from) =>
+    // Admins are included alongside CAMs because an admin can own clients too,
+    // and a row of outreach that belongs to nobody in the table would make the
+    // team totals disagree with the rows they are summed from. The table is
+    // labelled "team member" rather than "CAM" for the same reason.
+    fetchPaged<CamRow>((from, to) =>
       supabase
         .from("users")
         .select("id, full_name, role")
@@ -118,7 +105,7 @@ export default async function AdminAnalyticsPage() {
         .eq("is_active", true)
         .order("full_name", { ascending: true })
         .order("id", { ascending: true })
-        .range(from, from + FETCH_STEP - 1)
+        .range(from, to)
         .overrideTypes<CamRow[], { merge: false }>(),
     ),
   ]);
@@ -189,7 +176,7 @@ export default async function AdminAnalyticsPage() {
                 label="Clients owned"
                 value={totals.clientsOwned}
                 share={totals.clientsOwned === 0 ? 0 : totals.contacted / totals.clientsOwned}
-                caption={`${totals.contacted.toLocaleString()} contacted · ${totals.cams} CAM${totals.cams === 1 ? "" : "s"}`}
+                caption={`${totals.contacted.toLocaleString()} contacted · ${totals.cams} team member${totals.cams === 1 ? "" : "s"}`}
               />
             </Rise>
             <Rise>
@@ -230,23 +217,39 @@ export default async function AdminAnalyticsPage() {
           </Rise>
           <Rise>
             {conversionSeries.some((point) => point.value > 0) ? (
-              <ProgressMetricCard
-                size="lg"
-                title="Conversions"
-                total={totals.conversions.toLocaleString()}
-                unit="conversions"
-                accent="brand"
-                data={conversionSeries}
-                period="Past 30 days"
-                periodOptions={[
-                  { label: "Past 7 days", points: 7 },
-                  { label: "Past 30 days", points: 30 },
-                  { label: "Past quarter", points: 90 },
-                ]}
-                allowCustomRange
-                showFooter={false}
-                className="rounded-2xl border-black/[0.06] shadow-sm"
-              />
+              <>
+                {/*
+                  `total` is deliberately NOT passed. ProgressMetricCard treats an
+                  explicit total as final (`total ?? fmtCompact(stats.sum)`), so
+                  passing the all-time figure would pin the headline while the
+                  period selector moved the chart underneath it — picking "Past 7
+                  days" would show a week of bars above a number counting every
+                  conversion ever. Omitted, it sums the selected window, and the
+                  headline and the chart always describe the same period.
+                */}
+                <ProgressMetricCard
+                  size="lg"
+                  title="Conversions"
+                  unit="conversions"
+                  accent="brand"
+                  data={conversionSeries}
+                  period="Past 30 days"
+                  periodOptions={[
+                    { label: "Past 7 days", points: 7 },
+                    { label: "Past 30 days", points: 30 },
+                    { label: "Past quarter", points: 90 },
+                  ]}
+                  allowCustomRange
+                  showFooter={false}
+                  className="rounded-2xl border-black/[0.06] shadow-sm"
+                />
+                <p className="mt-3 text-[11px] text-foreground/40">
+                  Dated by when the conversion was recorded. Clients that had already
+                  converted when tracking was switched on all carry that day&rsquo;s date, so a
+                  single tall bar early in the series is the backfill rather than a real
+                  surge. All-time conversions: {totals.conversions.toLocaleString()}.
+                </p>
+              </>
             ) : (
               <EmptyState message="No conversions recorded in the last quarter. This chart fills in as clients convert." />
             )}
@@ -256,7 +259,7 @@ export default async function AdminAnalyticsPage() {
         <Group className="space-y-4">
           <Rise>
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="font-body text-xl font-semibold tracking-[-0.02em]">By CAM</h2>
+              <h2 className="font-body text-xl font-semibold tracking-[-0.02em]">By team member</h2>
               <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
                 {totals.camsNeedingSupport > 0
                   ? `${totals.camsNeedingSupport} may need support`
@@ -266,13 +269,13 @@ export default async function AdminAnalyticsPage() {
           </Rise>
           <Rise>
             {perCam.length === 0 ? (
-              <EmptyState message="No active CAMs yet. Invite one from the team page and their numbers appear here." />
+              <EmptyState message="No active team members yet. Invite one from the team page and their numbers appear here." />
             ) : (
               <div className="overflow-x-auto rounded-2xl border border-black/[0.06] bg-white shadow-sm">
                 <table className="w-full min-w-[44rem] text-sm">
                   <thead>
                     <tr className="border-b border-black/[0.06] text-left text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-                      <th scope="col" className="px-5 py-3 font-bold">CAM</th>
+                      <th scope="col" className="px-5 py-3 font-bold">Team member</th>
                       <th scope="col" className="px-5 py-3 font-bold">Clients</th>
                       <th scope="col" className="px-5 py-3 font-bold">Contacted</th>
                       <th scope="col" className="px-5 py-3 font-bold">Replies</th>

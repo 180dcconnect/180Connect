@@ -32,11 +32,10 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   // links into (matrix §3.11 SELECT is shared across every active role) —
   // no reason for it to need a narrower permission than /clients itself.
   if (hasPermission(actor.role, "client:view")) {
-    sections[0].items.push({ href: "/actions", label: "My actions", icon: "actions" });
-  }
-
-  if (hasPermission(actor.role, "client:view")) {
-    sections[0].items.push({ href: "/clients", label: "Clients", icon: "clients" });
+    sections[0].items.push(
+      { href: "/actions", label: "My actions", icon: "actions" },
+      { href: "/clients", label: "Clients", icon: "clients" },
+    );
   }
 
   if (hasPermission(actor.role, "client:edit")) {

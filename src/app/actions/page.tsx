@@ -13,6 +13,11 @@ import { ActionsList } from "./actions-list";
  * user, whoever/whatever put it there (AC1), each linking to its client
  * (AC2), completed work excluded from this default view (AC3).
  *
+ * AC3 is enforced in the query itself — `status = 'open'`, the filter
+ * actions_assignee_status_idx (assignee_user_id, status) was created for —
+ * and repeated defensively in formatMyActions, matching the codebase's
+ * "don't trust the query alone" convention (see @/lib/actions).
+ *
  * `assignee_user_id` is what "my" means here — not `created_by_user_id`
  * (which only tells you who raised the action, shown per-row instead; see
  * @/lib/actions's ActionOrigin). RLS (actions_select_active, matrix §3.11)
@@ -38,7 +43,11 @@ export default async function ActionsPage() {
         "organisation:organisations!actions_organisation_id_fkey(legal_name), " +
         "created_by_user:users!actions_created_by_user_id_fkey(full_name)",
     )
-    .eq("assignee_user_id", authorization.actor.id);
+    .eq("assignee_user_id", authorization.actor.id)
+    .eq("status", "open")
+    // Stable tie-break for the client-side due-date sort in formatMyActions:
+    // actions due the same day keep oldest-created-first order.
+    .order("created_at", { ascending: true });
 
   if (actionsError) {
     await reportError(actionsError, {

@@ -236,6 +236,100 @@ describe("extractStatement", () => {
     );
   });
 
+  it("strips the form's table rules where OCR read them as characters", () => {
+    // A photocopied border comes back as glyphs, and the stored statement
+    // opened with a hedge of them. Real case, staging: CREWKERNE BUSINESS
+    // GROUP CIC.
+    const { beneficiaries } = extractStatement([
+      {
+        page: {
+          text: [
+            "SECTION A",
+            "the company's activities will provide benefit to ...",
+            "i i ... i : i { : ] | Our business community here in Crewkerne and our local population | | | | . . .",
+          ].join("\n"),
+          words: wordsFrom([
+            "SECTION A",
+            "the company's activities will provide benefit to ...",
+            "i i ... i : i { : ] | Our business community here in Crewkerne and our local population | | | | . . .",
+          ]),
+          meanConfidence: 88,
+        },
+        width: 1654,
+      },
+    ]);
+
+    assert.ok(beneficiaries);
+    assert.match(beneficiaries, /^Our business community here in Crewkerne/);
+    assert.doesNotMatch(beneficiaries, /[|{}\][]/);
+    // And no residue on the end, where a lone glyph has no neighbour to make a
+    // run with.
+    assert.doesNotMatch(beneficiaries, /\s\S{0,3}\.{2,}$/);
+  });
+
+  it("leaves single letters and punctuation that are actually words alone", () => {
+    // The rule stripper matches bare `i`, `l` and `I`, so it must not fire on
+    // "i.e.", a colon after a heading word, or a first-person sentence. Only a
+    // run of two or more such tokens is a border.
+    const lines = [
+      "SECTION A",
+      "the company's activities will provide benefit to ...",
+      "adults, i.e. people over 18, and their families. Our aims: training and",
+      "employability support. I am the sole director and I will deliver it.",
+    ];
+    const { beneficiaries } = extractStatement([
+      {
+        page: { text: lines.join("\n"), words: wordsFrom(lines), meanConfidence: 95 },
+        width: 1654,
+      },
+    ]);
+
+    assert.ok(beneficiaries);
+    assert.match(beneficiaries, /i\.e\. people over 18/);
+    assert.match(beneficiaries, /Our aims: training/);
+    assert.match(beneficiaries, /I am the sole director and I will deliver it\./);
+  });
+
+  it("drops the form's COMPANY NAME field where it bled into the answer", () => {
+    // Real case, staging: THE BABBLING BREW C.I.C. stored
+    // "…and the local area. COMPANY NAME The Babbling Brew or".
+    const lines = [
+      "SECTION A",
+      "the company's activities will provide benefit to ...",
+      "local young families in Kendal and the local area.",
+      "COMPANY NAME The Babbling Brew or",
+    ];
+    const { beneficiaries } = extractStatement([
+      {
+        page: { text: lines.join("\n"), words: wordsFrom(lines), meanConfidence: 95 },
+        width: 1654,
+      },
+    ]);
+
+    assert.ok(beneficiaries);
+    assert.match(beneficiaries, /local young families in Kendal and the local area\.$/);
+    assert.doesNotMatch(beneficiaries, /COMPANY NAME|Babbling Brew/);
+  });
+
+  it("keeps an ellipsis the form's own box clipped mid-sentence", () => {
+    // The trailing trim must not eat this: attached to the word, it is the
+    // company's text running out of box, not a border glyph.
+    const lines = [
+      "SECTION A",
+      "the company's activities will provide benefit to ...",
+      "young people seeking employability support across West Yorkshire and Leeds...",
+    ];
+    const { beneficiaries } = extractStatement([
+      {
+        page: { text: lines.join("\n"), words: wordsFrom(lines), meanConfidence: 95 },
+        width: 1654,
+      },
+    ]);
+
+    assert.ok(beneficiaries);
+    assert.match(beneficiaries, /Leeds\.\.\.$/);
+  });
+
   it("returns nothing at all when no page carries a statement", () => {
     const statement = extractStatement([
       {

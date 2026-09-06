@@ -98,6 +98,42 @@ const BOILERPLATE = [
   /\d?\s*On articles of association generally, see \[Part 5\][^]*?of your company\.?/gi,
 ];
 
+/**
+ * The form's printed table rules, read as text.
+ *
+ * Tesseract sees a thin vertical line as a glyph, and picks `|`, `{`, `]`, `:`
+ * or a bare `i`/`l` depending on how the rule scanned. On a clean digital
+ * filing this never fires; on a photocopy the borders come back as words and
+ * the stored statement opens with a hedge of them:
+ *
+ *   "Community benefited: i i ... i : i { : ] | Our business community here in
+ *    Crewkerne and our local population | | | | . . ."
+ *
+ * A run of two or more such tokens is a border. One on its own is left alone —
+ * "a" and "I" are words, and a lone colon or full stop is punctuation.
+ */
+const RULE_NOISE_TOKEN = String.raw`(?:[|{}\[\]<>:;.,·—–_\\/*]+|[ilI])`;
+const RULE_NOISE_RUN = new RegExp(
+  `(?:^|\\s)(?:${RULE_NOISE_TOKEN}(?:\\s+|$)){2,}`,
+  "gu",
+);
+
+/**
+ * Form furniture that follows the answer rather than sitting inside it.
+ *
+ * Section A's box is followed by the form's own "COMPANY NAME" field, and on a
+ * scan where the box border is faint the label and the typed company name are
+ * read as a continuation of the statement — one filing stored
+ * "…local young families in Kendal and the local area. COMPANY NAME The
+ * Babbling Brew or". Everything from the label on is dropped.
+ *
+ * Deliberately case-sensitive: the form prints its labels in capitals, while a
+ * company writing "our company name" in prose must survive. The existing
+ * BOILERPLATE entry for "The company name will need to be consistent…" covers
+ * the sentence-case instruction separately.
+ */
+const FORM_FURNITURE_AFTER_ANSWER = /\bCOMPANY NAME\b[^]*$/;
+
 /** True when this page is part of the CIC36 statement rather than the articles,
  *  the memorandum, or a PSC page. */
 export function isStatementPage(page: OcrPage): boolean {
@@ -126,6 +162,11 @@ function tidy(value: string): string {
   // the stored text.
   let text = flattened;
   for (const pattern of BOILERPLATE) text = text.replace(pattern, " ");
+  // After boilerplate, not before: the furniture cut is anchored to the end of
+  // the string, and a boilerplate pattern removed later would leave a tail
+  // behind it.
+  text = text.replace(FORM_FURNITURE_AFTER_ANSWER, " ");
+  text = text.replace(RULE_NOISE_RUN, " ");
   return text.replace(/\s{2,}/g, " ").trim();
 }
 
@@ -136,6 +177,11 @@ function capped(value: string): string | null {
     // so the punctuation is what is left behind — as are stray marks the form
     // uses to point into the box.
     .replace(/^[\s.,;:•·—–\-*|\[\]()]+/u, "")
+    // …and the same at the end, where a single border glyph survives the run
+    // stripper because it had no neighbour. `[A-Za-z][.·]{2,}` catches the
+    // "a..." that a rule read as a letter leaves behind. A word with the
+    // ellipsis attached ("Leeds...") is the form's own clipping and stays.
+    .replace(/(?:\s+(?:[|{}\[\]<>:;.,·—–_\\/*]+|[A-Za-z][.·]{2,}))+$/u, "")
     .trim();
   if (text.length < 25) return null;
   if (text.length <= MAX_FIELD_CHARS) return text;

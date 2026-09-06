@@ -6,20 +6,22 @@ import {
   Mail,
   MailOpen,
   Trash2,
-  Archive,
   Star,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Search,
   X,
 } from "lucide-react";
+import { SECTOR_TAG_CLIP } from "./gmail-sidebar";
 
 export type SelectionState = "none" | "some" | "all";
 
+export type ActiveLabelFilter = {
+  name: string;
+  bg: string;
+};
+
 export type GmailActionBarProps = {
-  searchQuery: string;
-  onSearchChange: (query: string) => void;
   selectionState: SelectionState;
   selectedCount: number;
   totalCount: number;
@@ -34,16 +36,16 @@ export type GmailActionBarProps = {
   onMarkAsUnread: () => void;
   onToggleStarSelected: () => void;
   onDeleteSelected: () => void;
-  onArchiveSelected: () => void;
   pageIndex: number;
   pageSize: number;
   onPrevPage: () => void;
   onNextPage: () => void;
+  activeLabels?: ActiveLabelFilter[];
+  onRemoveLabel?: (name: string) => void;
+  onClearAllLabels?: () => void;
 };
 
 export function GmailActionBar({
-  searchQuery,
-  onSearchChange,
   selectionState,
   selectedCount,
   totalCount,
@@ -58,11 +60,13 @@ export function GmailActionBar({
   onMarkAsUnread,
   onToggleStarSelected,
   onDeleteSelected,
-  onArchiveSelected,
   pageIndex,
   pageSize,
   onPrevPage,
   onNextPage,
+  activeLabels = [],
+  onRemoveLabel,
+  onClearAllLabels,
 }: GmailActionBarProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
@@ -70,36 +74,11 @@ export function GmailActionBar({
   const endRange = Math.min((pageIndex + 1) * pageSize, totalCount);
 
   return (
-    <div className="space-y-3">
-      {/* Top Search Bar (Gmail Style) */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-2xl">
-          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
-            <Search className="h-4 w-4 text-slate-500" />
-          </div>
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search mail, organisations, contacts, or project briefs..."
-            className="w-full rounded-full border border-slate-200 bg-[#eaf1fb] focus:bg-white py-2.5 pl-10 pr-10 text-sm text-slate-900 placeholder:text-slate-500 focus:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-100 shadow-xs transition-all"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => onSearchChange("")}
-              className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-        </div>
-      </div>
-
+    <div>
       {/* Gmail Action Toolbar */}
-      <div className="flex items-center justify-between border-b border-slate-200 bg-white px-2 py-1.5 text-slate-600 rounded-t-xl">
+      <div className="flex items-center justify-between bg-white px-2 py-1.5 text-slate-600 rounded-t-xl gap-2 min-h-[40px]">
         {/* Left Toolbar: Selection & Bulk Actions */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
           {/* Checkbox Dropdown */}
           <div className="relative flex items-center">
             <div className="flex items-center rounded hover:bg-slate-100 p-1">
@@ -204,15 +183,6 @@ export function GmailActionBar({
             <div className="flex items-center gap-1 ml-2 border-l border-slate-200 pl-2">
               <button
                 type="button"
-                onClick={onArchiveSelected}
-                title="Archive selected"
-                className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
-              >
-                <Archive className="h-4 w-4" />
-              </button>
-
-              <button
-                type="button"
                 onClick={onDeleteSelected}
                 title="Delete selected"
                 className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-red-600 transition-colors cursor-pointer"
@@ -254,8 +224,48 @@ export function GmailActionBar({
           ) : null}
         </div>
 
+        {/* Middle Toolbar: Active Sector / Label Tags */}
+        {activeLabels && activeLabels.length > 0 && (
+          <div className="flex-1 flex items-center justify-center gap-1.5 px-2 min-w-0 overflow-x-auto py-0.5">
+            {activeLabels.map((label) => (
+              <button
+                key={label.name}
+                type="button"
+                onClick={() => onRemoveLabel?.(label.name)}
+                aria-label={`Remove filter for ${label.name}`}
+                title={`Active filter: ${label.name} — click to remove`}
+                className="inline-flex items-center gap-1 shrink-0 group/tag cursor-pointer animate-in fade-in zoom-in-95 duration-150"
+              >
+                <span
+                  style={{
+                    clipPath: SECTOR_TAG_CLIP,
+                    backgroundColor: label.bg,
+                    color: "#ffffff",
+                  }}
+                  className="inline-flex items-center py-0.5 pl-2.5 pr-3 font-body text-xs font-semibold text-white shadow-xs group-hover/tag:brightness-110 transition-all"
+                >
+                  <span className="truncate max-w-[140px]">{label.name}</span>
+                </span>
+                <span className="size-4 -ml-0.5 inline-flex items-center justify-center rounded-full text-slate-400 group-hover/tag:text-slate-700 group-hover/tag:bg-slate-200/80 transition-colors">
+                  <X className="size-3" strokeWidth={2.5} />
+                </span>
+              </button>
+            ))}
+            {activeLabels.length > 1 && onClearAllLabels && (
+              <button
+                type="button"
+                onClick={onClearAllLabels}
+                className="text-[11px] font-medium text-slate-400 hover:text-slate-700 hover:underline px-1.5 py-0.5 rounded cursor-pointer transition-colors shrink-0"
+                title="Clear all active filters"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Right Toolbar: Pagination */}
-        <div className="flex items-center gap-2 text-xs text-slate-600">
+        <div className="flex items-center gap-2 text-xs text-slate-600 shrink-0">
           <span className="font-medium text-slate-500">
             {startRange}–{endRange} of {totalCount}
           </span>

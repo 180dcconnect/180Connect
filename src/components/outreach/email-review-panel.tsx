@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { CalendarClock } from "lucide-react";
 
 import { OriginButton } from "@/components/ui/origin-button";
+import { ScheduleSendDialog } from "@/components/outreach/schedule-send-dialog";
 import { SendButton } from "@/components/ui/send-button";
 import { RichTextEmailEditor } from "@/components/rich-text-email-editor";
 import { validateClientEmail } from "@/lib/client-email-validation";
@@ -72,17 +74,6 @@ export function hydrateEmailBody(raw: string): string {
   return isRichEmailHtml(raw) ? raw : plainTextToEditorHtml(raw);
 }
 
-/**
- * F126: `datetime-local` inputs speak wall-clock time in the viewer's timezone,
- * but `toISOString()` speaks UTC — using it for the picker's `min` offset the
- * earliest choosable time by the viewer's UTC offset. This renders a Date in
- * the input's own local format instead.
- */
-function localDatetimeLocal(date: Date): string {
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
-}
-
 export function EmailReviewPanel({
   organisationId,
   draft,
@@ -93,6 +84,7 @@ export function EmailReviewPanel({
   className = "",
   onDirtyChange,
   onDraftCleared,
+  onCommitted,
   onDraftSaved,
   clientAttachments = [],
 }: {
@@ -114,6 +106,12 @@ export function EmailReviewPanel({
   onDirtyChange?: (state: EmailReviewDirtyState) => void;
   /** Sent or discarded — the draft row is gone and the parent should clear it. */
   onDraftCleared?: () => void;
+  /**
+   * Sent or scheduled, successfully. `onDraftCleared` fires for a discard too,
+   * so a caller that wants to say "sent — view it in the inbox" cannot use it:
+   * it cannot tell a delivered email from a thrown-away one. This can.
+   */
+  onCommitted?: (result: { kind: "sent" | "scheduled"; scheduledFor?: string }) => void;
   /** Saved without sending — the parent's dirty baseline should move up to here. */
   onDraftSaved?: (saved: { recipient: string; subject: string; body: string }) => void;
 }) {
@@ -138,8 +136,10 @@ export function EmailReviewPanel({
   const [savingDraft, setSavingDraft] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [discarding, setDiscarding] = useState(false);
-  // F126: when set, the reviewed email is queued for this time instead of sent now.
-  const [scheduledAt, setScheduledAt] = useState("");
+  // F126: the schedule dialog picks the time; this only tracks whether it is
+  // open, and whether a chosen time is mid-commit.
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
 
   // The parent reads this to decide whether regenerating would discard work.
   // Reported through an effect rather than from each setter so it can never
@@ -166,7 +166,10 @@ export function EmailReviewPanel({
     // default — and the draft stays open, so retrying is one click away.
     setSendFailed(!result.ok);
     setSendMessage(result.message);
-    if (result.ok) onDraftCleared?.();
+    if (result.ok) {
+      onCommitted?.({ kind: "sent" });
+      onDraftCleared?.();
+    }
     setSending(false);
   }
 
@@ -217,24 +220,36 @@ export function EmailReviewPanel({
 
   // F126: same review gate as send() — the approval checkbox is required either
   // way, since scheduling is a commitment to deliver this exact content later.
-  async function schedule() {
-    if (!scheduledAt) return;
-    setSending(true);
+  /**
+   * F126: same review gate as send() — the approval checkbox is required either
+   * way, since scheduling is a commitment to deliver this exact content later.
+   *
+   * `recipient` is passed for the same reason send() passes it: scheduleSchema
+   * is reviewedEmailSchema.extend({ scheduledAt }), so the reviewed recipient
+   * has always been part of the payload it validates. Omitting it made every
+   * schedule attempt fail on "Add a valid recipient email address before
+   * sending" — a rejection with nothing on screen to explain it, since the
+   * recipient field was filled in.
+   */
+  async function schedule(when: Date): Promise<boolean> {
+    setScheduling(true);
     setSendMessage(null);
     const result = await scheduleReviewedEmail({
       organisationId,
       messageId: draft.id,
+      recipient,
       subject,
       body,
       explicitlyApproved: approved,
-      scheduledAt: new Date(scheduledAt).toISOString(),
+      scheduledAt: when.toISOString(),
     });
+    setSendFailed(!result.ok);
     setSendMessage(result.message);
-    if (result.ok) {
-      setScheduledAt("");
-      onDraftCleared?.();
-    }
-    setSending(false);
+    setScheduling(false);
+    if (!result.ok) return false;
+    onCommitted?.({ kind: "scheduled", scheduledFor: when.toISOString() });
+    onDraftCleared?.();
+    return true;
   }
 
   const recipientValidation = validateClientEmail(recipient);
@@ -404,27 +419,31 @@ export function EmailReviewPanel({
 
       {/* F126: schedule the reviewed email for later instead of sending now.
           Same approval gate as Send — a scheduled email is a commitment to
-          deliver this exact content, so it cannot bypass human review. */}
+          deliver this exact content, so it cannot bypass human review.
+
+          The dialog (shared with the inbox compose window) replaced a bare
+          `datetime-local` beside a button. An instant typed into an input never
+          said the thing that matters: once scheduled, the message cannot be
+          edited. Its confirm step does. */}
       <div className="flex flex-wrap items-end gap-2">
-        <label className="text-xs font-semibold text-dim">
-          Or schedule for later
-          <input
-            className="mt-1 block rounded-inset border border-rule bg-white px-3 py-2 text-sm"
-            min={localDatetimeLocal(new Date())}
-            onChange={(event) => setScheduledAt(event.target.value)}
-            type="datetime-local"
-            value={scheduledAt}
-          />
-        </label>
         <OriginButton
-          disabled={cannotCommit || !scheduledAt}
-          onClick={schedule}
+          disabled={cannotCommit}
+          onClick={() => setScheduleOpen(true)}
           type="button"
           variant="outline"
         >
-          Schedule reviewed email
+          <CalendarClock aria-hidden="true" className="size-4" />
+          Schedule for later
         </OriginButton>
       </div>
+
+      <ScheduleSendDialog
+        committing={scheduling}
+        doneMessage="It will send automatically. You can cancel it from Queued and failed on the client's record before then."
+        onClose={() => setScheduleOpen(false)}
+        onConfirm={schedule}
+        open={scheduleOpen}
+      />
 
       <p
         className={`text-xs font-semibold ${sendFailed ? "text-stop" : "text-hold"}`}

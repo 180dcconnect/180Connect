@@ -89,6 +89,10 @@ const SEARCH_BAR_TONES: Record<
     accentText: string;
     divider: string;
     well: string;
+    disc: string;
+    discHover: string;
+    /** Rolling-square spinner: fill + glow. Lime on dark glass, lead on light. */
+    spinner: string;
   }
 > = {
   dark: {
@@ -121,13 +125,16 @@ const SEARCH_BAR_TONES: Record<
     accentText: "text-[#e6f5c0]",
     divider: "border-white/10",
     well: "bg-black/25",
+    disc: "bg-[#e6f5c0] text-[#1a1a1a]",
+    discHover: "hover:bg-[#d4e5a0]",
+    spinner: "bg-[#e6f5c0] shadow-[0_0_10px_#e6f5c0]",
   },
   light: {
     glassClosed: SEARCH_GLASS_LIGHT,
     glassOpen: SEARCH_GLASS_OPEN_LIGHT,
     glassFrosted: SEARCH_GLASS_FROSTED_LIGHT,
     rim: "ring-transparent",
-    innerRow: "bg-white/50",
+    innerRow: "bg-[#d8e1ef]",
     ink: "text-slate-900",
     bright: "text-slate-900",
     muted: "text-slate-500",
@@ -152,6 +159,9 @@ const SEARCH_BAR_TONES: Record<
     accentText: "text-lime-800",
     divider: "border-slate-900/10",
     well: "bg-slate-900/5",
+    disc: "bg-lead text-white",
+    discHover: "hover:bg-[#1b3160]",
+    spinner: "bg-lead shadow-[0_0_10px_var(--lead)]",
   },
 };
 
@@ -321,6 +331,7 @@ export function BrandSearchBar({
    defaultFilters = [],
    startOpen = false,
    frosted = false,
+   clearRowOnOpen = false,
    promptButton = false,
    panelRows,
    compactRest = false,
@@ -383,6 +394,14 @@ export function BrandSearchBar({
     * texture. Opt-in per instance — the clients-list bar keeps its look.
     */
    frosted?: boolean;
+   /**
+    * Let the prompt row take the open glass colour while the panel is out,
+    * instead of holding its fixed `innerRow` shade. For hosts where the whole
+    * open pill should read as one surface (the inbox search: top row goes
+    * white with the panel). Off by default — the booklet composer keeps its
+    * pinned top row.
+    */
+   clearRowOnOpen?: boolean;
    /**
     * Render the prompt row as a button that opens the panel instead of a
     * text input — for placements where the bar triggers options rather than
@@ -1009,7 +1028,7 @@ export function BrandSearchBar({
         transition={{ duration: 0.3, ease: EASE }}
       />
 
-      <div className={`relative z-20 flex items-center pr-3 pl-7 rounded-[32px] ${T.innerRow}`} style={{ height: ROW }}>
+      <div className={`relative z-20 flex items-center pr-3 pl-7 rounded-[32px] transition-colors duration-300 ${clearRowOnOpen && panelOut ? "bg-transparent" : T.innerRow}`} style={{ height: ROW }}>
         {promptButton ? (
           <button
             type="button"
@@ -1155,12 +1174,12 @@ export function BrandSearchBar({
                 className={`grid h-8 w-8 shrink-0 place-items-center rounded-full transition-all focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline} ${
                   isSearching || busy
                     ? "bg-transparent"
-                    : "bg-[#e6f5c0] text-[#1a1a1a] hover:bg-[#d4e5a0]"
+                    : `${T.disc} ${T.discHover}`
                 }`}
               >
                 {isSearching || busy ? (
                   <div
-                    className="h-4.5 w-4.5 rounded-[4px] bg-lead animate-spin shadow-[0_0_10px_var(--lead)]"
+                    className={`h-4.5 w-4.5 rounded-[4px] animate-spin ${T.spinner}`}
                     style={{ animationDuration: "2.5s" }}
                   />
                 ) : (
@@ -1200,12 +1219,12 @@ export function BrandSearchBar({
               className={`grid h-8 w-8 shrink-0 place-items-center rounded-full transition-all focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline} ${
                 submitting
                   ? "bg-transparent"
-                  : "bg-[#e6f5c0] text-[#1a1a1a] hover:bg-[#d4e5a0]"
+                  : `${T.disc} ${T.discHover}`
               }`}
             >
               {submitting ? (
                 <div
-                  className="h-4.5 w-4.5 rounded-[4px] bg-lead animate-spin shadow-[0_0_10px_var(--lead)]"
+                  className={`h-4.5 w-4.5 rounded-[4px] animate-spin ${T.spinner}`}
                   style={{ animationDuration: "2.5s" }}
                 />
               ) : (

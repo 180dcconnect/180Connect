@@ -3,13 +3,15 @@ import { describe, it } from "node:test";
 import {
   MOCK_INBOX_THREADS,
   getMockThreadById,
+  getMockContacts,
+  searchRecipients,
+} from "./inbox-mock-data.ts";
+import {
   formatGmailTimestamp,
   formatFileSize,
   resolveDateFilter,
   searchThreads,
-  getMockContacts,
-  searchRecipients,
-} from "./inbox-mock-data.ts";
+} from "./inbox-thread-view.ts";
 
 describe("inbox-mock-data", () => {
   it("provides populated mock threads with required fields", () => {

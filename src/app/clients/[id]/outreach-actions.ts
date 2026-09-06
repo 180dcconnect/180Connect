@@ -20,7 +20,7 @@ import { emailHtmlToPlainText, sanitizeEmailHtml } from "@/lib/outreach/email-ht
 import { HUMAN_REVIEW_REQUIRED_MESSAGE, humanReviewDecision } from "@/lib/outreach/human-review";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { saveDraftSchema } from "@/lib/outreach/save-draft";
-import { reviewedEmailSchema } from "@/lib/outreach/send-reviewed";
+import { reviewedEmailSchema, scheduleSchema } from "@/lib/outreach/send-reviewed";
 import { emailLimitMessage, resolveEmailSendLimit } from "@/lib/outreach/send-rate-limit";
 import { checkSuppressionBeforeSend, suppressionBlockedMessage } from "@/lib/outreach/suppression-check";
 import { buildScoreSnapshot } from "@/lib/scoring/build-score-snapshot";
@@ -37,7 +37,6 @@ export type ReviewedSendResult =
   | { ok: true; message: string }
   | { ok: false; message: string };
 
-const scheduleSchema = reviewedEmailSchema.extend({ scheduledAt: z.iso.datetime() });
 
 /**
  * Releases an outreach_send claim after a definite, pre-Gmail-call refusal —
@@ -193,7 +192,6 @@ export async function scheduleReviewedEmail(input: unknown): Promise<ReviewedSen
   }
 
   revalidatePath(`/clients/${organisationId}`, "layout");
-  revalidatePath(`/inbox/${organisationId}`);
   revalidatePath("/inbox");
   return { ok: true, message: `Email scheduled for ${scheduledAtIso.toLocaleString("en-GB")}.` };
 }
@@ -226,7 +224,6 @@ export async function cancelScheduledEmail(input: unknown): Promise<ReviewedSend
   }
 
   revalidatePath(`/clients/${parsed.data.organisationId}`, "layout");
-  revalidatePath(`/inbox/${parsed.data.organisationId}`);
   revalidatePath("/inbox");
   return { ok: true, message: "Scheduled send cancelled. The email is a draft again." };
 }
@@ -577,7 +574,6 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   }
 
   revalidatePath(`/clients/${organisationId}`, "layout");
-  revalidatePath(`/inbox/${organisationId}`);
   revalidatePath("/inbox");
   return { ok: true, message: "Email sent from the Sheffield outreach mailbox." };
 }
@@ -646,7 +642,6 @@ export async function retryFailedEmail(input: unknown): Promise<RetryFailedResul
   }
   // The row just changed state regardless of how the resend below goes.
   revalidatePath(`/clients/${organisationId}`, "layout");
-  revalidatePath(`/inbox/${organisationId}`);
   revalidatePath("/inbox");
 
   // The reviewed recipient wins; fall back to the on-file record only for rows
@@ -790,7 +785,6 @@ export async function saveEmailDraft(input: unknown): Promise<SaveDraftResult> {
   }
 
   revalidatePath(`/clients/${organisationId}`, "layout");
-  revalidatePath(`/inbox/${organisationId}`);
   revalidatePath("/inbox");
   return { ok: true, message: "Draft saved." };
 }
@@ -863,7 +857,6 @@ export async function discardEmailDraft(input: unknown): Promise<DiscardDraftRes
   }
 
   revalidatePath(`/clients/${organisationId}`, "layout");
-  revalidatePath(`/inbox/${organisationId}`);
   revalidatePath("/inbox");
   return { ok: true, message: "Draft discarded." };
 }

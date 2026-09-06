@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { History, PenLine, Sparkles } from "lucide-react";
+import { ArrowUpRight, Check, History, Inbox, PenLine, Sparkles } from "lucide-react";
 import {
   EmailReviewPanel,
   type EmailReviewDirtyState,
@@ -11,6 +11,8 @@ import type { Attachment } from "@/lib/attachments";
 import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
 import { SectionCard } from "./section-card";
+import { AiSettingsPicker, type AiSettingEntry } from "@/components/outreach/ai-settings-picker";
+import { formatScheduleLong } from "@/components/outreach/schedule-send-dialog";
 
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
@@ -126,6 +128,16 @@ export function ComposeButton({
   const [draft, setDraft] = useState<Draft | null>(
     existingDraft ? { ...existingDraft, sizeTemplate: undefined } : null,
   );
+  // A hand-written draft has no size-tone template and nothing to regenerate,
+  // so the card has to remember which kind is open. A reopened saved draft
+  // (existingDraft) counts as written: it may have been edited by hand since,
+  // and offering "Regenerate" on it would risk replacing work with a guess.
+  const [manual, setManual] = useState(existingDraft !== null);
+  // Set once the draft has actually left, so the card can say so and offer the
+  // thread — see `committed` below.
+  const [committed, setCommitted] = useState<
+    { kind: "sent" | "scheduled"; scheduledFor?: string } | null
+  >(null);
   // Regeneration updates the same outreach_messages row in place (F111 AC2),
   // so `draft.id` does not change and cannot key the review panel's remount.
   // This does, incremented on every successful (re)generate, so the panel
@@ -155,6 +167,92 @@ export function ComposeButton({
   const [tone, setTone] = useState<EmailTone>("balanced");
   const [opening, setOpening] = useState<OpeningApproach>("mission_led");
   const [closing, setClosing] = useState<ClosingApproach>("soft_cta");
+
+  // The five dials for the drill-down picker — same shape the compose modal
+  // builds for its own AI picker, one entry per setting.
+  const aiSettings: AiSettingEntry[] = [
+    {
+      key: "length",
+      label: "Email length",
+      hint: "How long the email body should be.",
+      options: EMAIL_LENGTHS.map((value) => ({ value, label: EMAIL_LENGTH_LABELS[value] })),
+      selected: length,
+      onSelect: (value) => setLength(value as EmailLength),
+    },
+    {
+      key: "tone",
+      label: "Email tone",
+      hint: "How friendly or formal the email reads — separate from its length and voice.",
+      options: EMAIL_TONES.map((value) => ({ value, label: EMAIL_TONE_LABELS[value] })),
+      selected: tone,
+      onSelect: (value) => setTone(value as EmailTone),
+    },
+    {
+      key: "voice",
+      label: "Email voice",
+      hint: "Who the email is written as — our collective style or plainer wording.",
+      options: EMAIL_VOICES.map((value) => ({ value, label: EMAIL_VOICE_LABELS[value] })),
+      selected: voice,
+      onSelect: (value) => setVoice(value as EmailVoice),
+    },
+    {
+      key: "opening",
+      label: "Opening approach",
+      options: OPENING_APPROACHES.map((value) => ({ value, label: OPENING_APPROACH_LABELS[value] })),
+      selected: opening,
+      onSelect: (value) => setOpening(value as OpeningApproach),
+    },
+    {
+      key: "closing",
+      label: "Closing approach",
+      options: CLOSING_APPROACHES.map((value) => ({ value, label: CLOSING_APPROACH_LABELS[value] })),
+      selected: closing,
+      onSelect: (value) => setClosing(value as ClosingApproach),
+    },
+  ];
+
+  /**
+   * "Draft manually" — an empty draft row, then the same review panel.
+   *
+   * The panel's rich-text editor IS the manual composer; there was never a
+   * second editor to build. What was missing was a row to save into, since the
+   * panel saves, sends, schedules and discards by message id. The blank route
+   * creates one behind the same ownership and suppression checks generation
+   * runs behind.
+   */
+  async function draftManually() {
+    setBusy(true);
+    setError(null);
+    setWarning(null);
+    try {
+      const response = await fetch(`/api/clients/${organisationId}/outreach-drafts/blank`, {
+        method: "POST",
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        // An ownership conflict or a suppression is a standing fact about the
+        // client, not a failed request — it belongs in the warning line, in the
+        // tone that says which.
+        if (response.status === 409) {
+          setWarning({
+            text: payload.error ?? "Outreach is unavailable on this client.",
+            tone: payload.kind === "ownership_conflict" ? "conflict" : "block",
+          });
+        } else {
+          setError(payload.error ?? "The draft could not be created. Try again.");
+        }
+        return;
+      }
+      setManual(true);
+      setDraft(payload as Draft);
+      setGeneration((current) => current + 1);
+      dirty.current = null;
+    } catch {
+      setError("Could not reach the server. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function generate() {
     // F111 — Regenerate Email Draft (#108), "Important usability": regenerating
@@ -216,6 +314,7 @@ export function ComposeButton({
       // Bumping `generation` remounts EmailReviewPanel, which is what resets
       // the reviewed content, the approval checkbox and any send message —
       // the panel initialises all of them from the draft it is handed.
+      setManual(false);
       setDraft(payload as Draft);
       setGeneration((current) => current + 1);
       dirty.current = null;
@@ -260,7 +359,9 @@ export function ComposeButton({
     <SectionCard
       action={
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {(draft || error) && !busy && (
+          {/* Nothing to regenerate on a hand-written draft — pressing it would
+              replace the CAM's own words with a guess. */}
+          {(draft || error) && !busy && !manual && !committed && (
             <button
               className="shrink-0 rounded-full border border-rule px-4 py-2 text-xs font-semibold text-lead transition-colors hover:bg-lead-wash"
               onClick={generate}
@@ -278,78 +379,46 @@ export function ComposeButton({
       title="Introductory email"
     >
 
-      <div className="mt-4 space-y-3">
-        <p className="text-xs text-dim" aria-live="polite">
-          {hasSavedBooklet
-            ? "The client's saved booklet is included as additional context."
-            : "Generate the client booklet first to include its insights in this email."}
-        </p>
-        <label className="block max-w-xs text-xs font-semibold text-dim">
-          Email length
-          <select
-            className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm disabled:opacity-60"
+      {!draft && !busy && !committed && (
+        <div className="mt-4">
+          <p className="text-xs text-dim" aria-live="polite">
+            {hasSavedBooklet
+              ? "The client's saved booklet is included as additional context."
+              : "Generate the client booklet first to include its insights in this email."}
+          </p>
+          {/* AI-first, like the compose window: the settings ARE the empty
+              state, and both ways in sit on them. What used to be here was a
+              dashed box below the card holding "Generate Stage 1 email", which
+              put the action a card away from the dials it reads — and offered
+              no way to write the email by hand at all. */}
+          <AiSettingsPicker
             disabled={busy}
-            onChange={(event) => setLength(event.target.value as EmailLength)}
-            value={length}
-          >
-            {EMAIL_LENGTHS.map((value) => (
-              <option key={value} value={value}>
-                {EMAIL_LENGTH_LABELS[value]}
-              </option>
-            ))}
-          </select>
-          <span className="mt-1 block font-normal text-dim">How long the email body should be.</span>
-        </label>
-        <label className="block max-w-xs text-xs font-semibold text-dim">
-          Closing approach
-          <select className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm disabled:opacity-60" disabled={busy} onChange={(event) => setClosing(event.target.value as ClosingApproach)} value={closing}>
-            {CLOSING_APPROACHES.map((value) => (
-              <option key={value} value={value}>
-                {CLOSING_APPROACH_LABELS[value]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block max-w-xs text-xs font-semibold text-dim">
-          Opening approach
-          <select className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm disabled:opacity-60" disabled={busy} onChange={(event) => setOpening(event.target.value as OpeningApproach)} value={opening}>
-            {OPENING_APPROACHES.map((value) => (
-              <option key={value} value={value}>
-                {OPENING_APPROACH_LABELS[value]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block max-w-xs text-xs font-semibold text-dim">
-          Email tone
-          <select className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm disabled:opacity-60" disabled={busy} onChange={(event) => setTone(event.target.value as EmailTone)} value={tone}>
-            {EMAIL_TONES.map((value) => (
-              <option key={value} value={value}>
-                {EMAIL_TONE_LABELS[value]}
-              </option>
-            ))}
-          </select>
-          <span className="mt-1 block font-normal text-dim">
-            How friendly or formal the email reads — separate from its length and voice.
-          </span>
-        </label>
-        <label className="block max-w-xs text-xs font-semibold text-dim">
-          Email voice
-          <select
-            className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm disabled:opacity-60"
-            disabled={busy}
-            onChange={(event) => setVoice(event.target.value as EmailVoice)}
-            value={voice}
-          >
-            {EMAIL_VOICES.map((value) => (
-              <option key={value} value={value}>
-                {EMAIL_VOICE_LABELS[value]}
-              </option>
-            ))}
-          </select>
-          <span className="mt-1 block font-normal text-dim">Who the email is written as — our collective style or plainer wording.</span>
-        </label>
-      </div>
+            footer={
+              <>
+                <button
+                  className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-lead px-4 py-2 text-[12px] font-bold text-white shadow-[0_12px_28px_-12px_rgba(35,64,122,0.75)] transition-colors hover:bg-[#1b3160]"
+                  onClick={generate}
+                  title="Generate the first draft from the settings above"
+                  type="button"
+                >
+                  <Sparkles aria-hidden="true" className="h-3.5 w-3.5" />
+                  Generate draft
+                </button>
+                <button
+                  className="pointer-events-auto inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-white/80 px-3 py-2 text-[12px] font-semibold text-slate-700 shadow-[0_8px_20px_-10px_rgba(15,23,42,0.4)] backdrop-blur-sm transition-colors hover:bg-white hover:text-slate-900"
+                  onClick={draftManually}
+                  title="Write the email yourself, with no AI draft"
+                  type="button"
+                >
+                  <PenLine aria-hidden="true" className="h-3.5 w-3.5" />
+                  Draft manually
+                </button>
+              </>
+            }
+            settings={aiSettings}
+          />
+        </div>
+      )}
 
       {warning && (
         <p
@@ -358,22 +427,6 @@ export function ComposeButton({
         >
           {warning.text}
         </p>
-      )}
-
-      {!draft && !busy && !error && (
-        <div className="mt-6 flex flex-col items-center gap-3 rounded-inset border border-dashed border-brand/25 bg-white/60 px-6 py-8 text-center">
-          <p className="max-w-sm text-sm text-dim">
-            Generate a personalised introductory email from this client&rsquo;s profile.
-          </p>
-          <button
-            className="flex items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-ink/90"
-            onClick={generate}
-            type="button"
-          >
-            <Sparkles aria-hidden="true" className="h-4 w-4" />
-            Generate Stage 1 email
-          </button>
-        </div>
       )}
 
       {busy && (
@@ -396,6 +449,52 @@ export function ComposeButton({
         </div>
       )}
 
+      {/* Sent or scheduled. The card used to collapse straight back to its
+          empty state here, which left the CAM with no confirmation and no way
+          to go and look at what had just gone out. `onCommitted` is what makes
+          this possible: onDraftCleared fires for a discard too, so it cannot
+          tell a delivered email from a thrown-away one.
+
+          "View in inbox" resolves because a thread IS an organisation — the
+          mailbox keys on organisation_id, and a just-sent message means the
+          inbox now has a real thread for this client. */}
+      {committed && !busy && (
+        <div className="mt-5 rounded-inset border border-go/20 bg-go-wash p-4" role="status">
+          <p className="flex items-center gap-2 text-[13px] font-semibold text-ink">
+            <Check aria-hidden="true" className="h-4 w-4 shrink-0 text-go" />
+            {committed.kind === "sent"
+              ? "Email sent from the Sheffield outreach mailbox."
+              : `Scheduled for ${formatScheduleLong(new Date(committed.scheduledFor!))}.`}
+          </p>
+          <p className="mt-1.5 text-xs text-dim">
+            {committed.kind === "sent"
+              ? "The thread is in the inbox, with any reply that comes back."
+              : "It sends automatically. Cancel it from Queued and failed below before then."}
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Link
+              className="inline-flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-ink/90"
+              href={`/inbox?thread=${organisationId}`}
+            >
+              <Inbox aria-hidden="true" className="h-3.5 w-3.5" />
+              View in inbox
+              <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" />
+            </Link>
+            <button
+              className="inline-flex items-center gap-1.5 rounded-full border border-rule px-4 py-2 text-xs font-semibold text-lead transition-colors hover:bg-lead-wash"
+              onClick={() => {
+                setCommitted(null);
+                setManual(false);
+              }}
+              type="button"
+            >
+              <PenLine aria-hidden="true" className="h-3.5 w-3.5" />
+              Write another
+            </button>
+          </div>
+        </div>
+      )}
+
       {draft && !busy && (
         /* key={generation}: a regeneration updates the same outreach_messages
            row in place (F111 AC2), so draft.id cannot key this — the counter
@@ -404,11 +503,18 @@ export function ComposeButton({
         <EmailReviewPanel
           className="mt-5"
           clientAttachments={clientAttachments}
-          description="Saved as a draft. Review and edit it, then approve below to send it from the branch mailbox."
+          description={
+            manual
+              ? "Saved as a draft. Write it, then approve below to send it from the branch mailbox."
+              : "Saved as a draft. Review and edit it, then approve below to send it from the branch mailbox."
+          }
           draft={draft}
-          heading="Review generated draft"
+          heading={manual ? "Write the email" : "Review generated draft"}
           key={generation}
-          meta={`Size tone template: ${sizeTemplateLabel(draft.sizeTemplate)}`}
+          // A hand-written email had no size-tone template applied to it, so
+          // there is nothing truthful to report here.
+          meta={manual ? undefined : `Size tone template: ${sizeTemplateLabel(draft.sizeTemplate)}`}
+          onCommitted={setCommitted}
           onDirtyChange={(state) => {
             dirty.current = state;
           }}

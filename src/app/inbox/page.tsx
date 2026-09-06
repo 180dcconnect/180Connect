@@ -1,163 +1,127 @@
 /**
- * /inbox — the outreach queue.
+ * /inbox — the outreach mailbox.
  *
- * Not a mailbox. The question this page answers is "what needs me, and how
- * long has it needed me", so it opens on the signed-in CAM's own clients and
- * sorts by neglect rather than by arrival. The buckets and their order live in
- * @/lib/inbox-queue; this route only fetches and hands over.
+ * Replaced a bucketed queue ("what needs me, and how long has it needed me")
+ * with the Gmail-style shell the team has been reviewing: folders, category
+ * tabs, a thread list and a reading pane. The queue's vocabulary did not
+ * survive the change — its scope tabs and neglect buckets are gone, and the
+ * shell's own folders and tabs answer the same questions.
  *
- * Three sources, each failing soft on its own (a dead reply query must not
+ * A thread is still one ORGANISATION's whole outreach history, because
+ * outreach_messages stores no gmail_thread_id. That is what makes
+ * `?thread=<organisationId>` a valid deep link from anywhere in the app — the
+ * client record menu, the dashboard's reply queue, and the "View in inbox"
+ * link the Introductory email card shows after a send all use it.
+ *
+ * Four sources, each failing soft on its own (a dead reply query must not
  * blank the sent history), then:
  *
- *   rows → buildInboxThreads (one thread per organisation, F075/F076 vocabulary)
- *        → buildInboxQueue   (bucket, ownership, days waiting)
+ *   rows → buildRealInboxThreads (one thread per organisation)
+ *        → mergeWithMockFill     (design fill behind the real rows)
+ *        → sortInboxThreads
  *
- * Filtering is server-side and lives in the URL (`?scope=`, `?bucket=`), the
- * same choice /clients made with `?owner=`: it survives a refresh and a paste
- * into Slack, and it keeps the filter next to the rows rather than shipping the
- * whole queue to the browser to hide most of it.
+ * Deliberately no `body` in the message query. The list renders subjects and
+ * one-line snippets; selecting every email's HTML for every organisation would
+ * move megabytes per request to render none of it. Bodies arrive per thread
+ * from /api/inbox/[orgId]/thread when the reading pane opens one.
  *
- * Read-only by design. Every send goes through the approved path — the thread's
- * reply drawer, behind preflight, ownership conflict and human review — so the
- * only interactive thing on this page is a link.
+ * Sending still never happens from this list. The reading pane's reply goes
+ * through ReplyComposer → EmailReviewPanel → the approved server actions (PRD
+ * §12.1), which re-check suppression, ownership, rate limits and human review
+ * server-side regardless of which page called them.
  */
 
 import { redirect } from "next/navigation";
 
-import { Stage, Group, Rise } from "@/components/dashboard-stage";
-import { InboxScopeTabs } from "@/components/inbox/inbox-scope-tabs";
-import { QueueList } from "@/components/inbox/queue-list";
+import { GmailInboxShell } from "@/components/inbox/gmail-inbox-shell";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
-import { BUCKET_HINT, bucketLabel } from "@/lib/inbox-labels";
+import { MOCK_INBOX_THREADS } from "@/lib/inbox-mock-data";
 import {
-  buildInboxQueue,
-  countByBucket,
-  countByScope,
-  filterByBucket,
-  filterByScope,
-  parseBucket,
-  parseScope,
-  sortQueueRows,
-  INBOX_BUCKETS,
-  type InboxQueueRow,
-} from "@/lib/inbox-queue";
-// TEMPORARY — design fill while the queue's visual language is being settled.
-// Delete this import and the single merge below to remove every trace of it.
-import { mockQueueRows } from "@/lib/inbox-mock-data";
-import {
-  buildInboxThreads,
-  type InboxMessageRow,
-  type InboxReplyRow,
-} from "@/lib/outreach-inbox";
-import {
-  followUpRecommendations,
-  DEFAULT_FOLLOW_UP_THRESHOLDS,
-  FOLLOW_UP_TRIGGER_STATUSES,
-  type FollowUpRecommendation,
-} from "@/lib/outreach/follow-up-recommendations";
+  buildRealInboxThreads,
+  mergeWithMockFill,
+  sortInboxThreads,
+  type InboxContactRow,
+  type InboxOrganisationRow,
+  type InboxPendingRow,
+} from "@/lib/inbox/real-threads";
+import type { InboxMessageRow, InboxReplyRow } from "@/lib/outreach-inbox";
 import { createClient } from "@/lib/supabase/server";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
+/** PostgREST caps a response at 1000 rows, so history is paged the same way
+    the dashboard pages its own reads. */
+const PAGE_STEP = 1000;
+
+type MessageListRow = InboxMessageRow & {
+  send_status: string;
+  scheduled_at: string | null;
+  updated_at: string | null;
+  created_at: string | null;
+};
+
 /**
- * Fetch cap — all sent messages ever. PostgREST caps a response at 1000 rows,
- * so the history is paged the same way the dashboard pages its own reads.
+ * Every outreach message, all four statuses, **without bodies**.
+ *
+ * The old queue fetched only `send_status = 'sent'`. Drafts and scheduled sends
+ * have to come too now: @/lib/timeline's `buildEmailSentEntry` returns null for
+ * anything unsent, so without these rows the mailbox's Drafts and Scheduled
+ * folders would be permanently empty on real data.
  */
-async function fetchAllSent(
+async function fetchMessages(
   supabase: SupabaseClient,
-): Promise<{ data: InboxMessageRow[] | null; error: { message: string } | null }> {
-  const all: InboxMessageRow[] = [];
+): Promise<{ data: MessageListRow[] | null; error: { message: string } | null }> {
+  const all: MessageListRow[] = [];
   let from = 0;
-  const step = 1000;
   while (true) {
     const { data, error } = await supabase
       .from("outreach_messages")
       .select(
-        "id, subject, send_status, sent_at, organisation_id, sender:users!outreach_messages_sent_by_user_id_fkey(full_name)",
+        "id, subject, send_status, sent_at, scheduled_at, updated_at, created_at, organisation_id, sender:users!outreach_messages_sent_by_user_id_fkey(full_name)",
       )
-      .eq("send_status", "sent")
-      .order("sent_at", { ascending: false })
-      .range(from, from + step - 1);
+      .order("created_at", { ascending: false })
+      .range(from, from + PAGE_STEP - 1);
     if (error) return { data: null, error };
     if (!data || data.length === 0) break;
-    all.push(...(data as unknown as InboxMessageRow[]));
-    if (data.length < step) break;
-    from += step;
+    all.push(...(data as unknown as MessageListRow[]));
+    if (data.length < PAGE_STEP) break;
+    from += PAGE_STEP;
   }
   return { data: all, error: null };
 }
 
-type OrganisationRow = {
-  id: string;
-  legal_name: string;
-  owner_id: string | null;
-  outreach_status: string;
-};
-
 /**
- * F160 recommendations for the clients that actually have threads.
+ * organisation_id → row count. A `head: true` count would be one query per
+ * client, so this reads the key column alone and tallies in memory: one
+ * column, no bodies, no joins.
  *
- * Same assembly the dashboard uses (`get_clients_last_activity` + the actor's
- * own thresholds), narrowed to organisations already on this page: the queue
- * only ever decorates a thread, so measuring silence for a client with no
- * outreach at all would be work nobody reads. Fails soft to an empty list —
- * losing the follow-up badge is survivable, losing the queue is not.
+ * `column` differs per table because the two do not agree on how they name an
+ * organisation. notes has an `organisation_id` FK; audit_log is polymorphic
+ * (`target_table` + `target_id`, no FK — see the client activity tab), so its
+ * organisation is `target_id` with `target_table` filtered to organisations.
  */
-async function fetchFollowUps(
-  supabase: SupabaseClient,
-  actorId: string,
-  organisations: readonly OrganisationRow[],
-): Promise<FollowUpRecommendation[]> {
-  const candidates = organisations
-    .filter((row) => FOLLOW_UP_TRIGGER_STATUSES.has(row.outreach_status))
-    .map((row) => ({
-      id: row.id,
-      legal_name: row.legal_name,
-      outreach_status: row.outreach_status,
-    }));
-  if (candidates.length === 0) return [];
-
-  const [preferences, activity] = await Promise.all([
-    supabase
-      .from("outreach_preferences")
-      .select("first_follow_up_days, second_follow_up_days")
-      .eq("user_id", actorId)
-      .maybeSingle(),
-    supabase.rpc("get_clients_last_activity", {
-      p_organisation_ids: candidates.map((row) => row.id),
-    }),
-  ]);
-
-  if (preferences.error) {
-    await reportError(preferences.error, { operation: "inbox.follow_up_preferences" });
+async function countByOrganisation(
+  operation: string,
+  column: "organisation_id" | "target_id",
+  result: PromiseLike<{
+    data: Record<string, unknown>[] | null;
+    error: { message: string } | null;
+  }>,
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  const { data, error } = await result;
+  if (error) {
+    await reportError(error, { operation });
+    return counts;
   }
-  if (activity.error) {
-    await reportError(activity.error, { operation: "inbox.follow_up_activity" });
-    return [];
+  for (const row of data ?? []) {
+    const key = row[column];
+    if (typeof key !== "string") continue;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-
-  const activityByOrganisation = new Map(
-    ((activity.data ?? []) as {
-      organisation_id: string;
-      last_email_sent_at: string | null;
-      last_reply_received_at: string | null;
-      last_status_change_at: string | null;
-    }[]).map((row) => [
-      row.organisation_id,
-      {
-        lastEmailSentAt: row.last_email_sent_at,
-        lastReplyReceivedAt: row.last_reply_received_at,
-        lastStatusChangeAt: row.last_status_change_at,
-      },
-    ]),
-  );
-
-  return followUpRecommendations(candidates, activityByOrganisation, {
-    first: preferences.data?.first_follow_up_days ?? DEFAULT_FOLLOW_UP_THRESHOLDS.first,
-    second: preferences.data?.second_follow_up_days ?? DEFAULT_FOLLOW_UP_THRESHOLDS.second,
-  });
+  return counts;
 }
 
 export default async function InboxPage({
@@ -174,120 +138,95 @@ export default async function InboxPage({
   }
 
   const params = await searchParams;
-  const asParam = (value: string | string[] | undefined) =>
-    Array.isArray(value) ? value[0] : value;
-  const scope = parseScope(asParam(params.scope));
-  const bucket = parseBucket(asParam(params.bucket));
+  const threadParam = Array.isArray(params.thread) ? params.thread[0] : params.thread;
 
   const supabase = await createClient();
 
-  const [sentResult, replyResult, orgResult] = await Promise.all([
-    fetchAllSent(supabase),
+  const [messageResult, replyResult, orgResult, contactResult] = await Promise.all([
+    fetchMessages(supabase),
     supabase
       .from("reply_events")
-      .select("id, reply_body, received_at, organisation_id, intent")
+      .select("id, reply_body, received_at, organisation_id, intent, contact_id")
       .order("received_at", { ascending: false }),
-    supabase.from("organisations").select("id, legal_name, owner_id, outreach_status"),
+    supabase
+      .from("organisations")
+      .select(
+        "id, legal_name, organisation_type, city, country_code, contact_email, sector, sub_sector, owner:users!organisations_owner_id_fkey(full_name, email)",
+      ),
+    supabase
+      .from("contacts")
+      .select("id, organisation_id, first_name, last_name, email, job_title, phone, is_primary"),
   ]);
 
-  // Fail-soft per source: one dead query degrades the page rather than blanking it.
-  for (const [source, result] of [
-    ["inbox.sent", sentResult],
+  // Fail-soft per source: one dead query degrades the mailbox rather than
+  // blanking it.
+  for (const [operation, result] of [
+    ["inbox.messages", messageResult],
     ["inbox.replies", replyResult],
     ["inbox.organisations", orgResult],
+    ["inbox.contacts", contactResult],
   ] as const) {
     if (result.error) {
-      await reportError(result.error, { operation: source });
+      await reportError(result.error, { operation });
     }
   }
 
-  const organisations = (orgResult.data ?? []) as OrganisationRow[];
-  const orgNames = new Map(organisations.map((row) => [row.id, row.legal_name]));
-  const ownerIds = new Map(organisations.map((row) => [row.id, row.owner_id]));
+  const messages = (messageResult.data ?? []) as MessageListRow[];
+  const sent = messages.filter((row) => row.send_status === "sent");
+  const pending: InboxPendingRow[] = messages
+    .filter((row) => row.send_status === "draft" || row.send_status === "scheduled")
+    .map((row) => ({
+      id: row.id,
+      organisation_id: row.organisation_id,
+      subject: row.subject,
+      send_status: row.send_status as "draft" | "scheduled",
+      scheduled_at: row.scheduled_at,
+      updated_at: row.updated_at,
+      created_at: row.created_at,
+    }));
 
-  const threads = buildInboxThreads(
-    (sentResult.data ?? []) as InboxMessageRow[],
-    (replyResult.data ?? []) as unknown as InboxReplyRow[],
-    orgNames,
-  );
-  const followUps = await fetchFollowUps(supabase, actor.id, organisations);
-
-  const liveRows = buildInboxQueue(threads, ownerIds, followUps, actor.id);
-
-  // TEMPORARY — see the import above. Mock threads fill out the page while the
-  // design is settled; a real thread always wins on a clashing organisation id.
-  const liveIds = new Set(liveRows.map((row) => row.orgId));
-  const rows: InboxQueueRow[] = sortQueueRows([
-    ...liveRows,
-    ...mockQueueRows(actor.id).filter((row) => !liveIds.has(row.orgId)),
+  const [noteCounts, handoverCounts] = await Promise.all([
+    countByOrganisation(
+      "inbox.counts.notes",
+      "organisation_id",
+      supabase.from("notes").select("organisation_id"),
+    ),
+    countByOrganisation(
+      "inbox.counts.handovers",
+      "target_id",
+      supabase
+        .from("audit_log")
+        .select("target_id")
+        .eq("target_table", "organisations")
+        .eq("action", "ownership_reassigned"),
+    ),
   ]);
 
-  const scopeCounts = countByScope(rows);
-  const scoped = filterByScope(rows, scope);
-  const bucketCounts = countByBucket(scoped);
-  const visible = filterByBucket(scoped, bucket);
+  const real = buildRealInboxThreads({
+    messages: sent as unknown as InboxMessageRow[],
+    replies: (replyResult.data ?? []) as unknown as InboxReplyRow[],
+    pending,
+    organisations: (orgResult.data ?? []) as unknown as InboxOrganisationRow[],
+    contacts: (contactResult.data ?? []) as unknown as InboxContactRow[],
+    noteCounts,
+    handoverCounts,
+  });
 
-  // One list when a bucket is chosen, otherwise a section per bucket so the
-  // page reads as a set of piles rather than one undifferentiated column.
-  const groups = bucket
-    ? [{ bucket, rows: visible }]
-    : INBOX_BUCKETS.map((key) => ({
-        bucket: key,
-        rows: visible.filter((row) => row.bucket === key),
-      })).filter((group) => group.rows.length > 0);
+  // Design fill sits behind the real rows and never shadows one — see
+  // mergeWithMockFill. Deleting @/lib/inbox-mock-data is the only work
+  // removing it takes.
+  const threads = sortInboxThreads(mergeWithMockFill(real, MOCK_INBOX_THREADS));
 
   return (
-    <div className="min-h-screen bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
-      <Stage className="mx-auto w-full max-w-[1400px] space-y-6">
-        <Rise className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
-          <div>
-            <h1 className="font-body text-[clamp(2rem,4vw,2.75rem)] leading-[1] font-semibold tracking-[-0.03em] text-ink">
-              Inbox
-            </h1>
-            <p className="mt-2 max-w-[54ch] text-[13px] leading-[1.55] text-dim">
-              Outreach that is waiting on somebody. Replies first, then clients
-              that have gone quiet past your follow-up threshold.
-            </p>
-          </div>
-        </Rise>
-
-        <Rise>
-          <InboxScopeTabs
-            scope={scope}
-            bucket={bucket}
-            scopeCounts={scopeCounts}
-            bucketCounts={bucketCounts}
-          />
-        </Rise>
-
-        {groups.length === 0 ? (
-          <Rise>
-            <QueueList
-              rows={[]}
-              emptyTitle="Nothing waiting"
-              emptyHint={
-                scope === "mine"
-                  ? "No outreach of yours needs an answer or a follow-up. Try the Team or All scope to see the rest of the pipeline."
-                  : "No threads match this view."
-              }
-            />
-          </Rise>
-        ) : (
-          groups.map((group) => (
-            <Group key={group.bucket} className="space-y-3">
-              <Rise className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                <h2 className="text-[18px] leading-[1.3] font-semibold tracking-[-0.01em] text-ink">
-                  {bucketLabel(group.bucket)}
-                </h2>
-                <p className="max-w-[54ch] text-[13px] leading-[1.55] text-dim">
-                  {BUCKET_HINT[group.bucket]}
-                </p>
-              </Rise>
-              <QueueList rows={group.rows} />
-            </Group>
-          ))
-        )}
-      </Stage>
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-[#f6f8fc] text-foreground">
+      <main className="flex h-full w-full min-h-0 flex-col py-2 pr-2 sm:pr-4">
+        <GmailInboxShell
+          className="h-full"
+          initialThreadId={threadParam ?? null}
+          initialThreads={threads}
+          key={threadParam ?? "inbox"}
+        />
+      </main>
     </div>
   );
 }

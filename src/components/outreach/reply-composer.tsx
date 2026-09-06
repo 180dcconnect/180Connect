@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { RefreshCw, Sparkles, X } from "lucide-react";
+import { Sparkles } from "lucide-react";
 
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
-import { OriginButton } from "@/components/ui/origin-button";
 import { EmailReviewPanel } from "@/components/outreach/email-review-panel";
+import { AiSettingsPicker, type AiSettingEntry } from "@/components/outreach/ai-settings-picker";
 import {
   CLOSING_APPROACHES,
   EMAIL_LENGTHS,
@@ -18,30 +18,31 @@ import {
 } from "@/lib/outreach/stage-one-prompt";
 
 /**
- * Reply to a thread without leaving it (/inbox/[orgId]).
+ * Reply to a thread without leaving it — the inbox reading pane's composer.
  *
- * Replaces the CTA that used to deep-link into the client page's outreach
- * section: a CAM who has just read four messages should not have to lose them
- * to answer. Generation and review are the same two halves the client page
- * uses — the stage-two endpoint and EmailReviewPanel — so nothing about the
- * send path is new here. That panel calls the approved server actions (PRD
- * §12.1, Gmail API on the CAM's own authorised account), which re-check
- * suppression, ownership, rate limits and human review server-side regardless
- * of which page called them.
+ * Was ReplyDrawer (src/components/inbox/reply-drawer.tsx) on the old
+ * /inbox/[orgId] page. The drawer chrome is gone because the reading pane now
+ * owns opening and closing; what survives is the part that matters — the same
+ * two halves the client page uses, the stage-two endpoint and EmailReviewPanel,
+ * so nothing about the send path is new here. That panel calls the approved
+ * server actions (PRD §12.1, Gmail API on the CAM's own authorised account),
+ * which re-check suppression, ownership, rate limits and human review
+ * server-side regardless of which page called them.
+ *
+ * This replaced a reply box in the reading pane that only ever mutated local
+ * state: it looked like a send, wrote nothing, and skipped every one of those
+ * checks. A reply surface that cannot actually send is worse than none.
  *
  * Eligibility is NOT widened for the inbox. `/api/clients/[id]/outreach-drafts/
  * stage-two` enforces `isStageTwoEligible` (outreach_status ===
- * "initial_outreach_sent"), so a drawer offered outside that window would be a
- * button whose only possible outcome is a 409. The route decides eligibility
- * server-side and renders the old deep-link instead when it fails — same rule
- * the client page's FollowUpButton follows, so the two surfaces cannot disagree
- * about when a follow-up is available.
+ * "initial_outreach_sent"), so a composer offered outside that window would be
+ * a button whose only possible outcome is a 409 — the caller decides whether to
+ * render it, the same rule the client page's FollowUpButton follows.
  *
  * No existing-draft hydration, deliberately. Each generation inserts a NEW
  * outreach_messages row, and an abandoned draft row cannot be told apart from a
- * live one by status alone — page.tsx documents the mirror-image hazard on the
- * Stage 1 card. Reopening saved drafts stays a client-page job; this drawer
- * only ever edits the draft it just generated.
+ * live one by status alone. Reopening saved drafts stays a client-page job;
+ * this composer only ever edits the draft it just generated.
  */
 
 const STATUS_MESSAGES = [
@@ -79,55 +80,21 @@ const CLOSING_APPROACH_LABELS: Record<ClosingApproach, string> = {
 type Draft = { id: string; subject: string; body: string };
 type Warning = { text: string; tone: "block" | "conflict" };
 
-/** One labelled `select`. Four of these is the whole generation form. */
-function ChoiceField<T extends string>({
-  label,
-  value,
-  options,
-  labels,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: T;
-  options: readonly T[];
-  labels: Record<T, string>;
-  disabled: boolean;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <label className="block text-[12.5px] font-semibold text-dim">
-      {label}
-      <select
-        className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm text-ink focus:border-lead-mid focus:ring-1 focus:ring-lead-mid focus:outline-none disabled:opacity-60"
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value as T)}
-        value={value}
-      >
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {labels[option]}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-export function ReplyDrawer({
+export function ReplyComposer({
   organisationId,
   recipientOnFile,
   blocked = false,
   blockedReason,
+  className = "",
 }: {
   organisationId: string;
   /** The client's email as held on the record — the mismatch-warning baseline. */
   recipientOnFile: string | null;
-  /** Suppressed or owned by another CAM: the trigger renders dead, not hidden. */
+  /** Suppressed, owned by another CAM, or a mock thread with no draft row to write. */
   blocked?: boolean;
   blockedReason?: string;
+  className?: string;
 }) {
-  const [open, setOpen] = useState(false);
   // Every generation inserts a new draft row, so this id is enough to remount
   // the review panel with the new content — unlike the Stage 1 card, which
   // regenerates in place and needs a separate counter for that.
@@ -139,6 +106,42 @@ export function ReplyDrawer({
   const [voice, setVoice] = useState<EmailVoice>("180dc");
   const [tone, setTone] = useState<EmailTone>("balanced");
   const [closing, setClosing] = useState<ClosingApproach>("soft_cta");
+
+  // Four dials rather than the Stage 1 card's five: a reply has no opening
+  // approach to choose, the message it answers is the opening.
+  const aiSettings: AiSettingEntry[] = [
+    {
+      key: "length",
+      label: "Email length",
+      hint: "How long the reply body should be.",
+      options: EMAIL_LENGTHS.map((value) => ({ value, label: EMAIL_LENGTH_LABELS[value] })),
+      selected: length,
+      onSelect: (value) => setLength(value as EmailLength),
+    },
+    {
+      key: "tone",
+      label: "Email tone",
+      hint: "How friendly or formal the reply reads — separate from its length and voice.",
+      options: EMAIL_TONES.map((value) => ({ value, label: EMAIL_TONE_LABELS[value] })),
+      selected: tone,
+      onSelect: (value) => setTone(value as EmailTone),
+    },
+    {
+      key: "voice",
+      label: "Email voice",
+      hint: "Who the reply is written as — our collective style or plainer wording.",
+      options: EMAIL_VOICES.map((value) => ({ value, label: EMAIL_VOICE_LABELS[value] })),
+      selected: voice,
+      onSelect: (value) => setVoice(value as EmailVoice),
+    },
+    {
+      key: "closing",
+      label: "Closing approach",
+      options: CLOSING_APPROACHES.map((value) => ({ value, label: CLOSING_APPROACH_LABELS[value] })),
+      selected: closing,
+      onSelect: (value) => setClosing(value as ClosingApproach),
+    },
+  ];
 
   async function generate() {
     setBusy(true);
@@ -181,101 +184,39 @@ export function ReplyDrawer({
 
   if (blocked) {
     return (
-      <div>
-        <OriginButton disabled size="sm" type="button" variant="outline">
-          Generate reply draft
-        </OriginButton>
-        <p className="mt-2.5 text-[13px] leading-[1.6] font-semibold text-stop" role="alert">
-          {blockedReason ?? "Outreach is unavailable on this client."}
-        </p>
-      </div>
-    );
-  }
-
-  if (!open) {
-    return (
-      <button
-        className="inline-flex shrink-0 items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-semibold text-white transition-transform hover:scale-[1.02] active:scale-[0.98]"
-        onClick={() => setOpen(true)}
-        type="button"
+      <p
+        className={`text-[13px] leading-[1.6] font-semibold text-stop ${className}`}
+        role="alert"
       >
-        <Sparkles aria-hidden="true" className="size-4" />
-        Generate reply draft
-      </button>
+        {blockedReason ?? "Outreach is unavailable on this client."}
+      </p>
     );
   }
 
   return (
-    <section
-      aria-labelledby="reply-drawer-heading"
-      className="rounded-panel border border-rule bg-white p-5"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-center gap-2.5">
-          <Sparkles aria-hidden="true" className="size-[15px] shrink-0 text-faint" />
-          <div>
-            <h2
-              className="text-[18px] leading-[1.3] font-semibold tracking-[-0.01em] text-ink"
-              id="reply-drawer-heading"
-            >
-              Reply to this thread
-            </h2>
-            <p className="mt-1 max-w-[54ch] text-[13px] leading-[1.55] text-dim">
-              Generated for your review. Nothing sends until you approve it.
-            </p>
-          </div>
-        </div>
+    <section aria-labelledby="reply-composer-heading" className={className}>
+      <h3
+        className="text-[13px] font-semibold tracking-[-0.01em] text-ink"
+        id="reply-composer-heading"
+      >
+        Reply to this thread
+      </h3>
+      <p className="mt-1 text-[12px] leading-[1.55] text-dim">
+        Generated for your review. Nothing sends until you approve it.
+      </p>
+
+      {!draft && !busy && <AiSettingsPicker disabled={busy} settings={aiSettings} />}
+
+      {!busy && (
         <button
-          aria-label="Close the reply drawer"
-          className="shrink-0 rounded-full border border-rule p-2 text-dim transition-colors hover:bg-paper"
-          onClick={() => setOpen(false)}
+          className="mt-3 flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-ink/90"
+          onClick={generate}
           type="button"
         >
-          <X aria-hidden="true" className="size-4" />
+          <Sparkles aria-hidden="true" className="h-4 w-4" />
+          {draft ? "Regenerate reply" : "Generate reply"}
         </button>
-      </div>
-
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <ChoiceField
-          disabled={busy}
-          label="Email length"
-          labels={EMAIL_LENGTH_LABELS}
-          onChange={setLength}
-          options={EMAIL_LENGTHS}
-          value={length}
-        />
-        <ChoiceField
-          disabled={busy}
-          label="Closing approach"
-          labels={CLOSING_APPROACH_LABELS}
-          onChange={setClosing}
-          options={CLOSING_APPROACHES}
-          value={closing}
-        />
-        <ChoiceField
-          disabled={busy}
-          label="Email tone"
-          labels={EMAIL_TONE_LABELS}
-          onChange={setTone}
-          options={EMAIL_TONES}
-          value={tone}
-        />
-        <ChoiceField
-          disabled={busy}
-          label="Email voice"
-          labels={EMAIL_VOICE_LABELS}
-          onChange={setVoice}
-          options={EMAIL_VOICES}
-          value={voice}
-        />
-      </div>
-
-      <div className="mt-4">
-        <OriginButton disabled={busy} onClick={generate} size="sm" type="button" variant="outline">
-          <RefreshCw aria-hidden="true" className="size-4" />
-          {busy ? "Checking and generating…" : draft ? "Regenerate reply" : "Generate reply"}
-        </OriginButton>
-      </div>
+      )}
 
       {warning && (
         <p

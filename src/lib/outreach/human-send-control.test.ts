@@ -84,7 +84,7 @@ describe("F250 human-send architecture", () => {
   it("routes every send surface through the shared review panel", async () => {
     for (const relative of [
       "../../app/clients/[id]/compose-button.tsx",
-      "../../components/inbox/reply-drawer.tsx",
+      "../../components/outreach/reply-composer.tsx",
     ]) {
       assert.match(
         await source(relative),

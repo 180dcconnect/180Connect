@@ -38,3 +38,20 @@ export const reviewedEmailSchema = z.object({
 });
 
 export type ReviewedEmailInput = z.infer<typeof reviewedEmailSchema>;
+
+/**
+ * F126: the payload for scheduleReviewedEmail — the reviewed email plus when it
+ * should go out.
+ *
+ * Lives here beside `reviewedEmailSchema` rather than in the "use server" file
+ * so its rules are unit-testable, and so the fact that scheduling requires the
+ * reviewed RECIPIENT is visible next to the schema it extends. That was not
+ * obvious while this lived inline: EmailReviewPanel scheduled without a
+ * recipient for a while, and every attempt failed on "Add a valid recipient
+ * email address before sending" with a filled-in recipient field on screen.
+ */
+export const scheduleSchema = reviewedEmailSchema.extend({
+  scheduledAt: z.iso.datetime(),
+});
+
+export type ScheduleReviewedEmailInput = z.infer<typeof scheduleSchema>;

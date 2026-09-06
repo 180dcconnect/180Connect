@@ -340,6 +340,10 @@ function initialWebsiteContext(saved: SavedBooklet): WebsiteContextResult | null
  * than filters. Used for the first generation and, revealed by the header's
  * Regenerate button, for every regeneration after it.
  *
+ * `frosted` on the light tone: the open panel is a lighter shade of the closed
+ * pill (`SEARCH_GLASS_FROSTED_LIGHT`) rather than plain white, which read as a
+ * hole in the card. The pill's top row keeps the full closed shade.
+ *
  * The panel holds one row for now — "Add a website" — an inline URL field
  * rather than a navigation. More options (tone, length, audience) slot in as
  * further rows without touching the bar itself.

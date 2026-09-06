@@ -93,12 +93,17 @@ export const SEARCH_GLASS_FROSTED = "rgba(24, 22, 20, 0.5)";
 /**
  * Light tone for `BrandSearchBar` (`tone="light"`): the same pill on a light
  * surface. A touch deeper than the sampled Gmail shade so it still reads
- * against the shell background instead of camouflaging into it. Open is
- * solid white like a focused Gmail field; frosted keeps a light tint under a
- * 20px blur for the same reason as the dark frosted variant.
+ * against the shell background instead of camouflaging into it.
+ *
+ * Open is solid white like a focused Gmail field. Frosted is the opt-in the
+ * booklet composer wants: not white but a *lighter shade of the closed pill* —
+ * `#c9d6e9` at 0.35 composites to roughly `#ecf0f7` over the white card, under
+ * a 20px blur. The pill's top row is pinned to a fixed shade (`innerRow`,
+ * `#d8e1ef`) that sits between the closed pill and this panel, so it does not
+ * shift when the panel opens under it.
  */
 export const SEARCH_GLASS_LIGHT = "#c9d6e9";
 
 export const SEARCH_GLASS_OPEN_LIGHT = "#ffffff";
 
-export const SEARCH_GLASS_FROSTED_LIGHT = "rgba(201, 214, 233, 0.6)";
+export const SEARCH_GLASS_FROSTED_LIGHT = "rgba(201, 214, 233, 0.35)";

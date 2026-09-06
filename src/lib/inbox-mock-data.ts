@@ -1,87 +1,23 @@
 /**
- * TEMPORARY design data for the inbox: multi-turn conversations with UK
- * charities, NGOs and foundations across the outreach stages, so the queue and
- * the thread view can be designed against a full page while the live database
- * holds only a handful of real threads.
+ * Design fill for the inbox: multi-turn conversations with UK charities, NGOs
+ * and foundations across the outreach stages, so the mailbox reads as a full
+ * page while the live database holds only a handful of real threads.
  *
- * `mockQueueRows` at the foot of this file is the only entry point the queue
- * uses, and it emits the REAL row type. Removal instructions are in the comment
- * above it.
+ * These are merged in BEHIND the real threads `/inbox` builds from Supabase —
+ * `mergeWithMockFill` in ./inbox/real-threads.ts lets a real organisation win
+ * any id clash. They speak the same `InboxThreadView` shape the real ones do
+ * (./inbox-thread-view.ts), so nothing downstream can tell which is which, and
+ * deleting this file is the only work removing the fill takes.
  */
 
-import { formatRelativeTime } from "./display-format.ts";
-import { buildInboxQueue, daysSince, type InboxQueueRow } from "./inbox-queue.ts";
-import type { FollowUpRecommendation } from "./outreach/follow-up-recommendations.ts";
-import { isRecentReply, type InboxThread, type InboxThreadStatus } from "./outreach-inbox.ts";
+import {
+  SECTOR_COLORS,
+  type InboxAttachmentView,
+  type InboxEmailMessage,
+  type InboxThreadView,
+} from "./inbox-thread-view.ts";
 
-export type MockAttachment = {
-  id: string;
-  filename: string;
-  fileType: "pdf" | "docx" | "xlsx" | "pptx" | "png";
-  sizeBytes: number;
-  downloadUrl?: string;
-};
-
-export type MockEmailMessage = {
-  id: string;
-  senderName: string;
-  senderEmail: string;
-  senderRole?: string;
-  recipientName: string;
-  recipientEmail: string;
-  sentAt: string; // ISO timestamp
-  subject: string;
-  body: string;
-  isFromClient: boolean;
-  intent?: "interested" | "not_interested" | "more_info" | "referral" | null;
-  attachments?: MockAttachment[];
-};
-
-export type MockThread = {
-  id: string; // Organisation ID
-  orgName: string;
-  orgType: string;
-  city: string;
-  country: string;
-  sector: "Charities & NGOs" | "Health & Well-being" | "Youth & Education" | "Environment" | "Grants & Foundations";
-  labelColor: string;
-  primaryContact: {
-    name: string;
-    role: string;
-    email: string;
-    phone?: string;
-  };
-  camOwner: {
-    name: string;
-    email: string;
-    avatarUrl?: string;
-  };
-  status: "replied" | "awaiting" | "sent" | "draft";
-  replyIntent?: "interested" | "not_interested" | "more_info" | "referral" | null;
-  subject: string;
-  snippet: string;
-  lastActivityAt: string;
-  isRead: boolean;
-  isStarred: boolean;
-  isImportant: boolean;
-  folder:
-    | "inbox"
-    | "starred"
-    | "snoozed"
-    | "scheduled"
-    | "sent"
-    | "drafts"
-    | "archive"
-    | "trash";
-  /** When a scheduled send is due. Only set on `folder: "scheduled"` threads. */
-  scheduledFor?: string;
-  messages: MockEmailMessage[];
-  attachments: MockAttachment[];
-  notesCount: number;
-  handoversCount: number;
-};
-
-const BASE_MOCK_THREADS: MockThread[] = [
+const BASE_MOCK_THREADS: InboxThreadView[] = [
   {
     id: "mock-org-cruk",
     orgName: "Cancer Research UK",
@@ -943,22 +879,193 @@ finance@cancerresearchuk.org`,
       },
     ],
   },
-];
+  {
+    id: "mock-org-steeze",
+    orgName: "Steeze",
+    orgType: "Private Company",
+    city: "London",
+    country: "United Kingdom",
+    sector: "Youth & Education",
+    labelColor: "#8b5cf6",
+    primaryContact: {
+      name: "Layla Adeyemi",
+      role: "Co-founder & Creative Director",
+      email: "hello@steeze.ng",
+      phone: "+44 20 3488 1170",
+    },
+    camOwner: {
+      name: "Arthur Dent",
+      email: "arthur.dent@180dc.org",
+    },
+    status: "sent",
+    replyIntent: null,
+    subject: "180 Degrees Consulting — pro bono support for Steeze",
+    snippet:
+      "Hi Layla, reaching out from 180DC London. We've been following what Steeze is building around fashion and young people and think we could help you scope the next stage...",
+    lastActivityAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+    isRead: true,
+    isStarred: false,
+    isImportant: false,
+    folder: "sent",
+    attachments: [],
+    notesCount: 0,
+    handoversCount: 0,
+    messages: [
+      {
+        id: "msg-steeze-1",
+        senderName: "Arthur Dent",
+        senderEmail: "arthur.dent@180dc.org",
+        senderRole: "Client Account Manager • 180DC",
+        recipientName: "Layla Adeyemi",
+        recipientEmail: "hello@steeze.ng",
+        sentAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+        subject: "180 Degrees Consulting — pro bono support for Steeze",
+        body: `Hi Layla,
 
-const SECTOR_COLORS: Record<MockThread["sector"], string> = {
-  "Health & Well-being": "#0ea5e9",
-  "Charities & NGOs": "#10b981",
-  "Youth & Education": "#8b5cf6",
-  "Environment": "#14b8a6",
-  "Grants & Foundations": "#f59e0b",
-};
+I'm writing from 180 Degrees Consulting, a pro bono consultancy for social enterprises. Our London team has been following how Steeze uses fashion to build confidence and creative skills in kids, and we'd love to help.
+
+We staff 6-week scoping projects at no cost — recent work has covered growth strategy, partnerships, and impact measurement for early-stage founders like you.
+
+Would you be open to a short call in the next couple of weeks?
+
+Best,
+Arthur Dent
+Client Account Manager | 180 Degrees Consulting
+arthur.dent@180dc.org`,
+        isFromClient: false,
+        intent: null,
+      },
+    ],
+  },
+  {
+    id: "mock-org-avalanche",
+    orgName: "Avalanche",
+    orgType: "Community Interest Company",
+    city: "Sheffield",
+    country: "United Kingdom",
+    sector: "Youth & Education",
+    labelColor: "#8b5cf6",
+    primaryContact: {
+      name: "Bashir Bob",
+      role: "Founder",
+      email: "hello@avalanche-sheffield.org",
+      phone: "+44 114 553 0092",
+    },
+    camOwner: {
+      name: "Ada Lovelace",
+      email: "ada.lovelace@180dc.org",
+    },
+    status: "sent",
+    replyIntent: null,
+    subject: "180DC x Avalanche — scoping your youth programmes",
+    snippet:
+      "Hi Bashir, following up on our note — we'd like to help Avalanche map out which programmes to scale first and what the delivery model looks like...",
+    lastActivityAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+    isRead: true,
+    isStarred: false,
+    isImportant: false,
+    folder: "scheduled",
+    scheduledFor: (() => {
+      const due = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+      due.setHours(9, 0, 0, 0);
+      return due.toISOString();
+    })(),
+    attachments: [],
+    notesCount: 0,
+    handoversCount: 0,
+    messages: [
+      {
+        id: "msg-avalanche-1",
+        senderName: "Ada Lovelace",
+        senderEmail: "ada.lovelace@180dc.org",
+        senderRole: "Client Account Manager • 180DC",
+        recipientName: "Bashir Bob",
+        recipientEmail: "hello@avalanche-sheffield.org",
+        sentAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+        subject: "180DC x Avalanche — scoping your youth programmes",
+        body: `Hi Bashir,
+
+Thanks for the quick chat last week. As promised, here's a note on how 180 Degrees Consulting could support Avalanche.
+
+Our Sheffield team can run a pro bono scoping engagement to help you decide which of your action-sports programmes to grow first, size the demand, and pin down a delivery model that holds up as you add sites.
+
+Let me know a couple of times that work and I'll set up the kickoff.
+
+Best,
+Ada Lovelace
+Client Account Manager | 180 Degrees Consulting
+ada.lovelace@180dc.org`,
+        isFromClient: false,
+        intent: null,
+      },
+    ],
+  },
+  {
+    id: "mock-org-loop",
+    orgName: "Loop",
+    orgType: "Social Enterprise",
+    city: "Manchester",
+    country: "United Kingdom",
+    sector: "Youth & Education",
+    labelColor: "#8b5cf6",
+    primaryContact: {
+      name: "Priya Nair",
+      role: "Founder & CEO",
+      email: "hello@loopmoney.org.uk",
+      phone: "+44 161 884 2210",
+    },
+    camOwner: {
+      name: "Arthur Dent",
+      email: "arthur.dent@180dc.org",
+    },
+    status: "sent",
+    replyIntent: null,
+    subject: "180 Degrees Consulting — supporting Loop's schools rollout",
+    snippet:
+      "Hi Priya, we'd love to help Loop think through the schools rollout — pricing, the partnerships pipeline, and what to measure...",
+    lastActivityAt: new Date(Date.now() - 11 * 24 * 60 * 60 * 1000).toISOString(),
+    isRead: true,
+    isStarred: false,
+    isImportant: false,
+    folder: "sent",
+    attachments: [],
+    notesCount: 0,
+    handoversCount: 0,
+    messages: [
+      {
+        id: "msg-loop-1",
+        senderName: "Arthur Dent",
+        senderEmail: "arthur.dent@180dc.org",
+        senderRole: "Client Account Manager • 180DC",
+        recipientName: "Priya Nair",
+        recipientEmail: "hello@loopmoney.org.uk",
+        sentAt: new Date(Date.now() - 11 * 24 * 60 * 60 * 1000).toISOString(),
+        subject: "180 Degrees Consulting — supporting Loop's schools rollout",
+        body: `Hi Priya,
+
+I'm reaching out from 180 Degrees Consulting. We run pro bono projects for social enterprises, and Loop's work on financial literacy for teenagers is exactly the kind of mission we like to back.
+
+If it's useful, our Manchester team could help you scope the schools rollout — pricing for MATs, the partnerships pipeline, and an impact framework you can put in front of funders.
+
+Happy to send over a one-pager or jump on a call.
+
+Best,
+Arthur Dent
+Client Account Manager | 180 Degrees Consulting
+arthur.dent@180dc.org`,
+        isFromClient: false,
+        intent: null,
+      },
+    ],
+  },
+];
 
 const SEED_ORGANISATIONS: Array<{
   id: string;
   name: string;
   type: string;
   city: string;
-  sector: MockThread["sector"];
+  sector: InboxThreadView["sector"];
   contactName: string;
   contactRole: string;
   contactEmail: string;
@@ -2326,10 +2433,10 @@ const SEED_ORGANISATIONS: Array<{
   },
 ];
 
-function buildAdditionalThreads(seeds: typeof SEED_ORGANISATIONS): MockThread[] {
+function buildAdditionalThreads(seeds: typeof SEED_ORGANISATIONS): InboxThreadView[] {
   return seeds.map((org) => {
     const isReplied = org.status === "replied";
-    const messages: MockEmailMessage[] = [];
+    const messages: InboxEmailMessage[] = [];
 
     if (isReplied) {
       messages.push({
@@ -2371,7 +2478,7 @@ function buildAdditionalThreads(seeds: typeof SEED_ORGANISATIONS): MockThread[] 
       });
     }
 
-    const attachments: MockAttachment[] =
+    const attachments: InboxAttachmentView[] =
       org.hoursAgo % 3 === 0
         ? [
             {
@@ -2417,207 +2524,30 @@ function buildAdditionalThreads(seeds: typeof SEED_ORGANISATIONS): MockThread[] 
   });
 }
 
-export const MOCK_INBOX_THREADS: MockThread[] = [
+export const MOCK_INBOX_THREADS: InboxThreadView[] = [
   ...BASE_MOCK_THREADS,
   ...buildAdditionalThreads(SEED_ORGANISATIONS),
 ];
 
+/** Every thread in this file is keyed by this prefix; real threads are keyed by
+    an organisation UUID. Surfaces that can only act on a real client — the
+    reading pane's reply composer, say — ask this rather than sniffing the id
+    themselves, so the rule lives next to the ids it describes. */
+export const DESIGN_FILL_ID_PREFIX = "mock-org-";
+
+/** True for a thread that is design fill: there is no organisation behind it,
+    so nothing that writes to the database can run against it. */
+export function isDesignFillThread(threadId: string): boolean {
+  return threadId.startsWith(DESIGN_FILL_ID_PREFIX);
+}
+
 /**
  * Finds a mock thread by orgId.
  */
-export function getMockThreadById(orgId: string): MockThread | undefined {
+export function getMockThreadById(orgId: string): InboxThreadView | undefined {
   return MOCK_INBOX_THREADS.find((t) => t.id === orgId);
 }
 
-/**
- * Returns formatted relative time similar to Gmail.
- */
-export function formatGmailTimestamp(isoDate: string): string {
-  const date = new Date(isoDate);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / (60 * 1000));
-  const diffHours = Math.floor(diffMs / (60 * 60 * 1000));
-  const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000));
-
-  if (diffMins < 60) {
-    return `${Math.max(1, diffMins)}m ago`;
-  }
-  if (diffHours < 24 && date.getDate() === now.getDate()) {
-    return date.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit" });
-  }
-  if (diffDays === 1 || (diffHours < 48 && date.getDate() === now.getDate() - 1)) {
-    return "Yesterday";
-  }
-  if (diffDays < 7) {
-    return date.toLocaleDateString("en-GB", { weekday: "short" });
-  }
-  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-}
-
-/**
- * Formats file size in readable KB / MB.
- */
-export function formatFileSize(bytes: number): string {
-  if (bytes >= 1000000) {
-    return `${(bytes / 1000000).toFixed(1)} MB`;
-  }
-  return `${Math.round(bytes / 1000)} KB`;
-}
-
-/**
- * Resolves one date-filter value to an inclusive millisecond range, using the
- * same value vocabulary as the import-status date filter (`today`,
- * `yesterday`, `7d`, `30d`, `this_month`, `last_month`, a single `YYYY-MM-DD`
- * day, or a `from..to` range) so the two pickers agree. Returns null for
- * anything unparseable — callers ignore those rather than matching nothing.
- */
-export function resolveDateFilter(
-  value: string,
-  now: Date = new Date(),
-): { from: number; to: number } | null {
-  const startOfDay = (date: Date): Date =>
-    new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const endOfDay = (date: Date): Date =>
-    new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
-  const addDays = (date: Date, days: number): Date => {
-    const next = new Date(date);
-    next.setDate(next.getDate() + days);
-    return next;
-  };
-
-  const today = startOfDay(now);
-  if (value === "today") {
-    return { from: today.getTime(), to: endOfDay(now).getTime() };
-  }
-  if (value === "yesterday") {
-    const day = addDays(today, -1);
-    return { from: day.getTime(), to: endOfDay(day).getTime() };
-  }
-  if (value === "7d" || value === "30d") {
-    const days = value === "7d" ? 7 : 30;
-    return { from: addDays(today, -days).getTime(), to: endOfDay(now).getTime() };
-  }
-  if (value === "this_month") {
-    const first = new Date(now.getFullYear(), now.getMonth(), 1);
-    return { from: first.getTime(), to: endOfDay(now).getTime() };
-  }
-  if (value === "last_month") {
-    const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const last = new Date(now.getFullYear(), now.getMonth(), 0);
-    return { from: first.getTime(), to: endOfDay(last).getTime() };
-  }
-  if (value.includes("..")) {
-    const [fromStr, toStr] = value.split("..");
-    const from = new Date(`${fromStr}T00:00:00`);
-    const to = new Date(`${toStr}T00:00:00`);
-    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return null;
-    const [start, end] = from <= to ? [from, to] : [to, from];
-    return { from: startOfDay(start).getTime(), to: endOfDay(end).getTime() };
-  }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    const day = new Date(`${value}T00:00:00`);
-    if (Number.isNaN(day.getTime())) return null;
-    return { from: startOfDay(day).getTime(), to: endOfDay(day).getTime() };
-  }
-  return null;
-}
-/**
- * Ranked free-text search over threads for the preview inbox: the suggestion
- * dropdown previews it live, Enter applies it to the list. Organisation name
- * outranks subject, which outranks snippet and contact name; ties keep file
- * order so screenshots are stable. A blank query matches nothing — the caller
- * decides what an empty search means.
- */
-export function searchThreads(threads: MockThread[], rawQuery: string): MockThread[] {
-  const query = rawQuery.trim().toLowerCase();
-  if (!query) return [];
-  return threads
-    .map((thread, index) => {
-      const org = thread.orgName.toLowerCase();
-      const subject = thread.subject.toLowerCase();
-      let score = 0;
-      if (org.startsWith(query)) score += 4;
-      else if (org.includes(query)) score += 3;
-      if (subject.startsWith(query)) score += 3;
-      else if (subject.includes(query)) score += 2;
-      if (thread.snippet.toLowerCase().includes(query)) score += 1;
-      if (thread.primaryContact.name.toLowerCase().includes(query)) score += 1;
-      return { thread, index, score };
-    })
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score || a.index - b.index)
-    .map((entry) => entry.thread);
-}
-
-/* ─── TEMPORARY: design fill for /inbox ────────────────────────────────────
- *
- * The queue page is being designed against a live database that has very few
- * real threads in it, and a three-row page cannot be judged. `mockQueueRows`
- * adapts the threads above into the REAL row type (`InboxQueueRow`) so the mock
- * never touches the shape of anything else — the queue, the row component and
- * the page all speak `InboxQueueRow`, and the mock bends to them.
- *
- * TO REMOVE: delete this block, delete the import and the merge in
- * src/app/inbox/page.tsx, and delete the `getMockThreadById` fallback in
- * src/app/inbox/[orgId]/page.tsx. Nothing else refers to it.
- * ───────────────────────────────────────────────────────────────────────── */
-
-/**
- * Deterministic spread of ownership and follow-up state across the mock set, so
- * every scope and every bucket has something in it while the page is designed.
- * Index-based rather than random: the same row is in the same pile on every
- * render, or a screenshot means nothing.
- */
-export function mockQueueRows(actorId: string, now: Date = new Date()): InboxQueueRow[] {
-  const threads: InboxThread[] = MOCK_INBOX_THREADS.map((mock) => {
-    // "draft" is a mailbox state, not an event; the queue only knows the three
-    // states threadStatus can produce.
-    const status: InboxThreadStatus =
-      mock.status === "replied" ? "replied" : mock.status === "awaiting" ? "awaiting" : "sent";
-    const newest = mock.messages[mock.messages.length - 1];
-    return {
-      orgId: mock.id,
-      orgName: mock.orgName,
-      href: `/inbox/${mock.id}`,
-      lastActivityAt: mock.lastActivityAt,
-      lastActorName: newest?.senderName ?? mock.camOwner.name,
-      lastEventLabel: status === "replied" ? "Reply received" : "Email sent",
-      subject: mock.subject,
-      snippet: mock.snippet,
-      status,
-      replyIntent: mock.replyIntent ?? null,
-      messageCount: mock.messages.length,
-      relativeTime: formatRelativeTime(new Date(mock.lastActivityAt), now),
-      isRecent: status === "replied" && isRecentReply(mock.lastActivityAt, now),
-    };
-  });
-
-  // Two of every three mock clients belong to the viewer, so "Mine" — the
-  // default scope — is the fullest view rather than the emptiest.
-  const owners = new Map<string, string | null>(
-    threads.map((thread, index) => [
-      thread.orgId,
-      index % 3 === 2 ? (index % 6 === 5 ? null : "mock-user-team") : actorId,
-    ]),
-  );
-
-  // Every fourth quiet thread is overdue a follow-up, alternating urgency, so
-  // the Follow-up due bucket is never empty on the design fill.
-  const recommendations: FollowUpRecommendation[] = threads
-    .filter((thread) => thread.status !== "replied")
-    .filter((_, index) => index % 2 === 0)
-    .map((thread, index) => ({
-      organisationId: thread.orgId,
-      legalName: thread.orgName,
-      statusLabel: "Initial outreach sent",
-      lastActivityAt: thread.lastActivityAt,
-      daysWaiting: daysSince(thread.lastActivityAt, now),
-      urgency: index % 2 === 0 ? "urgent" : "due",
-    }));
-
-  return buildInboxQueue(threads, owners, recommendations, actorId, now);
-}
 
 /* ------------------------------------------------------------------------ *
  * Client context for the compose modal (booklet / profile).
@@ -2638,7 +2568,7 @@ export type MockBooklet = {
 };
 
 /** The latest booklet for a thread — what the compose modal's Booklet button shows. */
-export function getMockBooklet(thread: MockThread): MockBooklet {
+export function getMockBooklet(thread: InboxThreadView): MockBooklet {
   const domain = thread.primaryContact.email.split("@")[1] ?? "example.org";
 
   return {
@@ -2671,7 +2601,7 @@ ${thread.primaryContact.name}, ${thread.primaryContact.role}. Owns the relations
  * Mirrors the CONTACTS table's columns. An organisation has many contacts —
  * `contacts.organisation_id` is a plain FK with no uniqueness on it — so a
  * company genuinely can carry several addresses, with `is_primary` marking the
- * one the CAM leads with. `MockThread` only ever stored the primary, so the
+ * one the CAM leads with. `InboxThreadView` only ever stored the primary, so the
  * rest are derived here rather than added to all 89 threads by hand.
  *
  * EVERY ADDRESS HERE IS A ROLE ADDRESS, and must stay that way. The Technical
@@ -2721,7 +2651,7 @@ function threadSeed(id: string): number {
  * the general inbox is used instead, because inventing `tom.beckett@` to force
  * a distinct row is exactly the thing the policy forbids.
  */
-export function getMockContacts(thread: MockThread): MockContact[] {
+export function getMockContacts(thread: InboxThreadView): MockContact[] {
   const domain = thread.primaryContact.email.split("@")[1] ?? "example.org";
   const primaryLocal = thread.primaryContact.email.split("@")[0];
   const [primaryFirst, ...primaryRest] = thread.primaryContact.name.split(" ");
@@ -2767,7 +2697,7 @@ export function getMockContacts(thread: MockThread): MockContact[] {
 
 export type RecipientMatch = {
   contact: MockContact;
-  thread: MockThread;
+  thread: InboxThreadView;
 };
 
 /**
@@ -2783,7 +2713,7 @@ export type RecipientMatch = {
 export function searchRecipients(
   rawQuery: string,
   limit = 6,
-  threads: MockThread[] = MOCK_INBOX_THREADS,
+  threads: InboxThreadView[] = MOCK_INBOX_THREADS,
 ): RecipientMatch[] {
   const query = rawQuery.trim().toLowerCase();
   if (!query) return [];

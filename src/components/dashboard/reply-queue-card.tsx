@@ -69,7 +69,7 @@ export function ReplyQueueCard({
           {visible.map((client) => (
             <li key={client.organisationId}>
               <Link
-                href={`/inbox/${client.organisationId}`}
+                href={`/inbox?thread=${client.organisationId}`}
                 className="group flex items-center gap-3 px-5 py-3 transition-colors hover:bg-black/[0.02] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand"
               >
                 <span className="min-w-0 flex-1 truncate text-[14px] font-bold">

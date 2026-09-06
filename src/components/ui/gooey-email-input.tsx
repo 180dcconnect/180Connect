@@ -484,7 +484,7 @@ export function GooeyEmailInput({
                     exit={{ opacity: 0, y: -10, scale: 1.03 }}
                     transition={{ duration: 0.32, ease: "easeOut" }}
                   >
-                    <span className="truncate text-sm font-semibold text-white">
+                    <span className={`truncate text-sm font-semibold ${theme.text}`}>
                       {restPlaceholder}
                     </span>
                   </motion.span>

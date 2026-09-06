@@ -69,58 +69,68 @@ export function RecordTabs({
   const activeIndex = TABS.findIndex((tab) => isActive(tab.segment));
 
   return (
-    // The sticky bar floats over the record. The backdrop blur is constrained
-    // to the tab group pill itself so the frosted glass effect does not span
-    // end-to-end across the whole row.
+    // The sticky bar floats over the record. A frosted-glass layer sits behind
+    // the tab group pill — sized to the pill, never end-to-end across the row —
+    // so content scrolling under the sticky bar blurs out beneath the tabs.
     <nav
       aria-label="Sections of this client record"
       className="sticky top-0 z-30 py-2"
     >
-      <Liquid
-        blur={5}
-        contrast={18}
-        fill="var(--ink)"
-        shadow="0 1px 2px rgba(20, 26, 34, 0.06)"
-        className="relative inline-flex max-w-full items-center overflow-x-auto rounded-full border border-black/10 bg-transparent p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        <Liquid.Item effect="move" move={{ springiness: 0.6, trail: 0.5, stretch: 0.25 }}>
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute top-1 bottom-1 left-1 rounded-full bg-ink transition-[transform,opacity] duration-300"
-            style={{
-              width: `${TAB_WIDTH}px`,
-              transform: `translateX(${Math.max(activeIndex, 0) * TAB_WIDTH}px)`,
-              opacity: activeIndex === -1 ? 0 : 1,
-            }}
-          />
-        </Liquid.Item>
+      <div className="relative inline-flex max-w-full rounded-full">
+        {/* Frosted-glass backdrop, sized to the pill and no wider. It is a
+            sibling of the liquid-gooey layer, not a descendant — a
+            `backdrop-filter` is defeated by any `filter` in its own subtree,
+            and Liquid paints the droplet with one. */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-0 rounded-full border border-black/10 bg-card/60 shadow-[0_1px_2px_rgba(20,26,34,0.06)] backdrop-blur-md"
+        />
+        <Liquid
+          blur={5}
+          contrast={18}
+          fill="var(--ink)"
+          shadow="0 1px 2px rgba(20, 26, 34, 0.06)"
+          className="relative z-10 inline-flex max-w-full items-center overflow-x-auto rounded-full bg-transparent p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          <Liquid.Item effect="move" move={{ springiness: 0.6, trail: 0.5, stretch: 0.25 }}>
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1 bottom-1 left-1 rounded-full bg-ink transition-[transform,opacity] duration-300"
+              style={{
+                width: `${TAB_WIDTH}px`,
+                transform: `translateX(${Math.max(activeIndex, 0) * TAB_WIDTH}px)`,
+                opacity: activeIndex === -1 ? 0 : 1,
+              }}
+            />
+          </Liquid.Item>
 
-        <div className="relative z-10 flex items-center">
-          {TABS.map((tab, index) => {
-            const active = index === activeIndex;
-            const count = tab.count ? counts[tab.count] : null;
+          <div className="relative z-10 flex items-center">
+            {TABS.map((tab, index) => {
+              const active = index === activeIndex;
+              const count = tab.count ? counts[tab.count] : null;
 
-            return (
-              <Link
-                key={tab.segment || "overview"}
-                aria-current={active ? "page" : undefined}
-                href={hrefFor(tab.segment)}
-                style={{ width: `${TAB_WIDTH}px` }}
-                className={`flex h-8 shrink-0 items-center justify-center rounded-full text-[13px] whitespace-nowrap transition-colors duration-200 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-lead-mid ${
-                  active ? "font-bold text-white" : "font-semibold text-dim hover:text-ink"
-                }`}
-              >
-                {tab.label}
-                {count !== null && count > 0 && (
-                  <span className="ml-1.5 font-mono text-[10.5px] tabular-nums text-faint">
-                    {count}
-                  </span>
-                )}
-              </Link>
-            );
-          })}
-        </div>
-      </Liquid>
+              return (
+                <Link
+                  key={tab.segment || "overview"}
+                  aria-current={active ? "page" : undefined}
+                  href={hrefFor(tab.segment)}
+                  style={{ width: `${TAB_WIDTH}px` }}
+                  className={`flex h-8 shrink-0 items-center justify-center rounded-full text-[13px] whitespace-nowrap transition-colors duration-200 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-lead-mid ${
+                    active ? "font-bold text-white" : "font-semibold text-dim hover:text-ink"
+                  }`}
+                >
+                  {tab.label}
+                  {count !== null && count > 0 && (
+                    <span className="ml-1.5 font-mono text-[10.5px] tabular-nums text-faint">
+                      {count}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        </Liquid>
+      </div>
     </nav>
   );
 }

@@ -42,14 +42,15 @@ import { RequestOwnershipForm } from "./request-ownership-form";
  *
  * "View in inbox" is the exception to all of that: it navigates rather than
  * acting, so it sits above a separator, away from the three things that change
- * state. It needs no permission prop — /inbox/[orgId] is gated on `client:view`,
- * the same permission the record page itself required to render, so anyone who
- * can read this header can open the thread (app-shell.tsx gates the sidebar's
- * Inbox link on exactly the same check). The thread page handles an
- * organisation with no messages on its own, printing "No conversation history
- * yet", so the item does not need hiding on a record nobody has emailed —
- * an empty thread is a truthful answer to "what have we said to them", and it
- * is where you go to find out.
+ * state. It needs no permission prop — /inbox is gated on `client:view`, the
+ * same permission the record page itself required to render, so anyone who can
+ * read this header can open the thread (app-shell.tsx gates the sidebar's
+ * Inbox link on exactly the same check).
+ *
+ * `?thread=<organisationId>` rather than a path segment: the mailbox is one
+ * page, and a thread is a selection within it. A client nobody has emailed has
+ * no thread to select, so the link lands on the mailbox itself — a truthful
+ * answer to "what have we said to them", and where you go to find out.
  *
  * It is a real `<Link>` inside the item rather than a router push on select,
  * because a menu row that navigates should support cmd-click and "open in new
@@ -107,7 +108,7 @@ export function RecordMenu({
           <DropdownMenuItem className="p-0">
             <Link
               className="flex w-full items-center px-2 py-1.5"
-              href={`/inbox/${organisationId}`}
+              href={`/inbox?thread=${organisationId}`}
             >
               View in inbox
             </Link>

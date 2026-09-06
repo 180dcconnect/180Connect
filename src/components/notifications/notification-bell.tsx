@@ -20,6 +20,7 @@ import {
   markNotificationRead,
 } from "@/lib/notifications-actions";
 import {
+  isNotificationUnread,
   notificationCategory,
   notificationPriority,
   notificationRelativeTime,
@@ -112,7 +113,7 @@ export function NotificationBell({ collapsed }: { collapsed: boolean }) {
   }, [reload]);
 
   const handleClick = async (item: NotificationItem) => {
-    if (!item.readAt) {
+    if (isNotificationUnread(item)) {
       // Optimistic: the badge should drop before the RPC round-trips. If the
       // RPC reports no transition (failure or already-read elsewhere), refetch
       // so client state can't drift from what Postgres actually holds.
@@ -221,7 +222,7 @@ export function NotificationBell({ collapsed }: { collapsed: boolean }) {
             </p>
           ) : (
             items.map((item) => {
-              const unread = item.readAt === null;
+              const unread = isNotificationUnread(item);
               // F174 AC3 + F176 AC3: urgency and category are two
               // orthogonal axes. A reply notification reads as urgent
               // (destructive-red dot + "Reply" tag); a team-activity digest

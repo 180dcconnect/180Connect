@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  isNotificationUnread,
   mapNotificationRows,
   notificationCategory,
   notificationPriority,
@@ -159,5 +160,19 @@ describe("notificationCategory (F176 AC3)", () => {
     assert.equal(notificationCategory("team_activity"), "personal");
     assert.equal(notificationCategory("reply_received"), "personal");
     assert.equal(notificationCategory("some_future_type"), "personal");
+  });
+});
+
+describe("isNotificationUnread (F177 AC3)", () => {
+  it("is unread when readAt is null", () => {
+    const [item] = mapNotificationRows([row({ read_at: null })]);
+    assert.ok(item);
+    assert.equal(isNotificationUnread(item), true);
+  });
+
+  it("is not unread once readAt is set", () => {
+    const [item] = mapNotificationRows([row({ read_at: "2026-08-21T12:01:00Z" })]);
+    assert.ok(item);
+    assert.equal(isNotificationUnread(item), false);
   });
 });

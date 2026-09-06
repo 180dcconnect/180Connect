@@ -36,7 +36,12 @@ import { ScoreBreakdownCard, type LatestScoreDetailRow } from "./score-breakdown
 import { TagsSection } from "./tags-section";
 import { BookletPanel } from "./booklet-panel";
 import { deriveSourcesFromSavedRow } from "@/lib/booklet/sources";
-import { formatAttachments, type AttachmentRow } from "@/lib/attachments";
+import {
+  formatAttachments,
+  normaliseAttachmentSearchQuery,
+  type Attachment,
+  type AttachmentRow,
+} from "@/lib/attachments";
 import { AttachmentsSection } from "./attachments-section";
 import { UploadAttachmentForm } from "./upload-attachment-form";
 import {
@@ -85,6 +90,11 @@ type SavedBookletRow = {
 // need its entire history loaded on every page view; recent history is what a
 // CAM actually compares against.
 const BOOKLET_HISTORY_LIMIT = 20;
+
+// Shared by the full attachment list and the F220 text-search query below, so
+// the two result shapes can never drift apart column-wise.
+const ATTACHMENT_LIST_SELECT =
+  "id, filename, content_type, size_bytes, created_at, text_extraction_status, text_extraction_failure_reason, extracted_text, extracted_page_count, extracted_text_truncated, uploaded_by_user:users!attachments_uploaded_by_fkey(full_name)";
 type LatestSuppression = {
   status: "pending" | "active" | "rejected" | "lifted";
   reason: string;
@@ -141,13 +151,15 @@ type FailedEmailRow = { id: string; subject: string; updated_at: string };
  */
 export default async function ClientDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ attachmentSearch?: string | string[] | undefined }>;
 }) {
   const authorization = await getCurrentActor("client:view", { route: "/clients/[id]" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
-  const { id } = await params;
+  const [{ id }, query] = await Promise.all([params, searchParams]);
   const supabase = await createClient();
 
   const { data: client, error: clientError } = await supabase
@@ -272,11 +284,14 @@ export default async function ClientDetailPage({
   // role, same reasoning as the sources query above. No write path exists yet
   // (F081) — see 20260823090000_create_attachments.sql's header — so this is
   // empty for every client today; that is AC3's correct state, not a bug.
+  //
+  // F220 follow-up: ?attachmentSearch= drives the second query below, which
+  // runs through the attachments.extracted_text_search GIN index (the index
+  // has no consumer without it) scoped to this organisation, so "searchable"
+  // means a real search, not just a stored column.
   const { data: attachmentRows, error: attachmentsError } = await supabase
     .from("attachments")
-    .select(
-      "id, filename, content_type, size_bytes, created_at, text_extraction_status, extracted_text, extracted_page_count, extracted_text_truncated, uploaded_by_user:users!attachments_uploaded_by_fkey(full_name)",
-    )
+    .select(ATTACHMENT_LIST_SELECT)
     .eq("organisation_id", id)
     .order("created_at", { ascending: false });
 
@@ -289,6 +304,35 @@ export default async function ClientDetailPage({
   const attachments = formatAttachments(
     (attachmentRows ?? []) as unknown as AttachmentRow[],
   );
+
+  const attachmentSearchQuery = normaliseAttachmentSearchQuery(
+    typeof query.attachmentSearch === "string" ? query.attachmentSearch : null,
+  );
+  let attachmentSearchMatches: Attachment[] | null = null;
+  let attachmentSearchFailed = false;
+  if (attachmentSearchQuery && !attachmentsError) {
+    const { data: matchedRows, error: searchError } = await supabase
+      .from("attachments")
+      .select(ATTACHMENT_LIST_SELECT)
+      .eq("organisation_id", id)
+      .textSearch("extracted_text_search", attachmentSearchQuery)
+      .order("created_at", { ascending: false });
+    if (searchError) {
+      attachmentSearchFailed = true;
+      await reportError(searchError, {
+        operation: "clients.attachment_text_search",
+        organisationId: id,
+        query: attachmentSearchQuery,
+      });
+    } else {
+      attachmentSearchMatches = formatAttachments(
+        (matchedRows ?? []) as unknown as AttachmentRow[],
+      );
+    }
+  }
+  // Failed search degrades to the full list with an inline note, never to a
+  // blanked card — same independent-failure convention as the other sections.
+  const displayedAttachments = attachmentSearchMatches ?? attachments;
 
   // Most recent suppression row for this org, whatever its status — pending shows a
   // waiting state, active shows the suppressed state, rejected/lifted/none all fall
@@ -1041,7 +1085,13 @@ export default async function ClientDetailPage({
               >
                 <AttachmentsSection
                   organisationId={client.id}
-                  attachments={attachments}
+                  attachments={displayedAttachments}
+                  totalCount={attachments.length}
+                  search={
+                    attachmentSearchQuery
+                      ? { query: attachmentSearchQuery, failed: attachmentSearchFailed }
+                      : null
+                  }
                   error={Boolean(attachmentsError)}
                   canExtract={canEdit}
                 />

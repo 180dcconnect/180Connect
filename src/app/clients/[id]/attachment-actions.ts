@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
-import { attachmentRpcFailure } from "@/lib/attachments";
+import { attachmentRpcFailure, textExtractionFailureCopy } from "@/lib/attachments";
 import { reportError } from "@/lib/error-logging";
 import { extractPdfText } from "@/lib/pdf-text-extraction";
 import { createClient } from "@/lib/supabase/server";
@@ -97,7 +97,7 @@ async function runExtraction(
   revalidatePath(`/clients/${organisationId}`);
   return {
     ok: true, attachmentId, extractionStatus: status,
-    message: result.ok ? "PDF text extracted and ready to use." : "Text could not be extracted from this PDF. It may be scanned or image-only.",
+    message: result.ok ? "PDF text extracted and ready to use." : textExtractionFailureCopy(result.reason),
   };
 }
 

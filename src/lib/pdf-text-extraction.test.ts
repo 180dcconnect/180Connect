@@ -35,6 +35,25 @@ test("extractPdfText identifies an image-only/empty PDF", async () => {
   assert.deepEqual(result, { ok: false, reason: "no_extractable_text" });
 });
 
+test("extractPdfText does not warn when a PDF uses a non-embedded standard-14 font", async () => {
+  // pdfWithText declares /BaseFont /Helvetica with no embedded FontFile, which
+  // is exactly the path that used to log "Ensure that the `standardFontDataUrl`
+  // API parameter is provided" per extraction (review follow-up on #544).
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args.join(" "));
+  try {
+    const result = await extractPdfText(pdfWithText("Annual report supports local families"));
+    assert.equal(result.ok, true);
+    if (result.ok) assert.match(result.text, /supports local families/);
+  } finally {
+    console.warn = originalWarn;
+  }
+  // Let any trailing worker-side warn surface before asserting silence.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(warnings, []);
+});
+
 test("extractPdfText identifies unsupported or corrupt bytes", async () => {
   const result = await extractPdfText(new TextEncoder().encode("not a pdf"));
   assert.deepEqual(result, { ok: false, reason: "invalid_pdf" });

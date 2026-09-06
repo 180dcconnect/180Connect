@@ -20,6 +20,7 @@ import {
   markNotificationRead,
 } from "@/lib/notifications-actions";
 import {
+  notificationPriority,
   notificationRelativeTime,
   type NotificationItem,
 } from "@/lib/notifications";
@@ -220,6 +221,11 @@ export function NotificationBell({ collapsed }: { collapsed: boolean }) {
           ) : (
             items.map((item) => {
               const unread = item.readAt === null;
+              // F174 AC3: a reply notification reads as urgent at a glance —
+              // destructive-red dot instead of the usual blue, plus its own
+              // small tag — not just its position in the (priority-sorted)
+              // list.
+              const highPriority = notificationPriority(item.notificationType) === "high";
               return (
                 <button
                   key={item.id}
@@ -232,11 +238,18 @@ export function NotificationBell({ collapsed }: { collapsed: boolean }) {
                   <p className="flex items-start gap-2 text-sm font-semibold text-black">
                     {unread && (
                       <span
-                        className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-blue-600"
+                        className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
+                          highPriority ? "bg-red-600" : "bg-blue-600"
+                        }`}
                         aria-hidden="true"
                       />
                     )}
                     <span className="min-w-0">{item.title}</span>
+                    {highPriority && (
+                      <span className="mt-0.5 shrink-0 rounded-full bg-red-600/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-700">
+                        Reply
+                      </span>
+                    )}
                   </p>
                   {item.body && (
                     <p className="mt-0.5 line-clamp-2 pl-4 text-xs text-black/60">

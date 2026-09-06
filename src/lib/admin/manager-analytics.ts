@@ -221,6 +221,73 @@ export type TeamAnalyticsTotals = {
   camsNeedingSupport: number;
 };
 
+export type UncountedClients = {
+  /** No owner at all — nobody's personal analytics to appear in. */
+  unassigned: number;
+  /** Owned by someone who is not in the per-CAM table: deactivated, or not a CAM or admin. */
+  untabled: number;
+  total: number;
+};
+
+/**
+ * Clients that no row in the per-CAM table accounts for.
+ *
+ * teamTotals sums the per-CAM rows, and perCamAnalytics only buckets by the
+ * owners it was given — the active CAMs and admins. Deactivating a user does
+ * not reassign their clients (that is /admin/offboard, a separate manual step),
+ * so between someone leaving and their clients being handed over, those clients
+ * belong to nobody in the table and silently left every team figure.
+ *
+ * Counting them here rather than folding them into the totals keeps two
+ * different questions apart: "how is the team performing" is about people who
+ * are still here, while "what is nobody looking after" is a handover problem.
+ * The page states the second out loud instead of quietly dropping the rows —
+ * the same reason summariseTrackedReplies carries its own `unassigned` count.
+ *
+ * A deactivated owner is the common case but not the only one: `cams` holds
+ * active CAMs and admins, so a client assigned to an active *viewer* is also
+ * untabled. The copy says "not in the table below" rather than naming a cause,
+ * because calling an active viewer deactivated would be a plain falsehood on
+ * an oversight page.
+ */
+export function uncountedClients(
+  rows: readonly DashboardOrgRow[],
+  cams: readonly { id: string }[],
+): UncountedClients {
+  const known = new Set(cams.map((cam) => cam.id));
+  let unassigned = 0;
+  let untabled = 0;
+
+  for (const row of rows) {
+    if (!row.owner_id) unassigned += 1;
+    else if (!known.has(row.owner_id)) untabled += 1;
+  }
+
+  return { unassigned, untabled, total: unassigned + untabled };
+}
+
+/**
+ * The sentence the page shows when anything is uncounted. Says which of the two
+ * problems it is, because they need different actions: an unassigned client
+ * needs claiming, an untabled owner's client needs offboarding or reassigning.
+ */
+export function describeUncountedClients(uncounted: UncountedClients): string | null {
+  if (uncounted.total === 0) return null;
+
+  const parts: string[] = [];
+  if (uncounted.untabled > 0) {
+    parts.push(
+      `${uncounted.untabled.toLocaleString()} owned by someone not in the table below — usually a deactivated user; reassign them from Work handover & offboarding`,
+    );
+  }
+  if (uncounted.unassigned > 0) {
+    parts.push(`${uncounted.unassigned.toLocaleString()} with no owner yet`);
+  }
+
+  const clients = uncounted.total === 1 ? "client is" : "clients are";
+  return `${uncounted.total.toLocaleString()} ${clients} not counted below: ${parts.join("; ")}.`;
+}
+
 /** F212 AC1 — the team headline, summed from the same per-CAM rows shown below it. */
 export function teamTotals(rows: readonly CamAnalyticsRow[]): TeamAnalyticsTotals {
   return rows.reduce<TeamAnalyticsTotals>(

@@ -19,9 +19,11 @@ import { formatResponseTime } from "@/lib/reply-analytics";
 import { formatRate, type CamReplyRow, type SentMessageRow } from "@/lib/cam-analytics";
 import {
   conversionsOverTime,
+  describeUncountedClients,
   perCamAnalytics,
   sortByNeed,
   teamTotals,
+  uncountedClients,
   type OutcomeRow,
 } from "@/lib/admin/manager-analytics";
 
@@ -138,6 +140,11 @@ export default async function AdminAnalyticsPage() {
     perCamAnalytics(rows, messages.data ?? [], replies.data ?? [], camList),
   );
   const totals = teamTotals(perCam);
+  // Clients no row in the table accounts for — a deactivated owner's, or none
+  // at all. Stated on the page rather than dropped: teamTotals sums the per-CAM
+  // rows, so without this they left every figure with nothing to show they had
+  // ever existed.
+  const uncountedMessage = describeUncountedClients(uncountedClients(rows, camList));
   const conversionSeries = conversionsOverTime(outcomes.data ?? [], 90);
 
   const share = (value: number) =>
@@ -170,6 +177,11 @@ export default async function AdminAnalyticsPage() {
           <Rise>
             <h2 className="font-body text-xl font-semibold tracking-[-0.02em]">Across the team</h2>
           </Rise>
+          {uncountedMessage && (
+            <Rise>
+              <InlineAlert variant="page" tone="warning" message={uncountedMessage} />
+            </Rise>
+          )}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Rise>
               <StatCard

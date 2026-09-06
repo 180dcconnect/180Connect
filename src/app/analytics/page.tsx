@@ -43,10 +43,14 @@ import {
  */
 
 export default async function AnalyticsPage() {
+  // One client for the whole request. It was created twice before — once to
+  // read the user and again to run the queries — which is two cookie parses and
+  // two client objects for no gain.
+  const supabase = await createClient();
+
   let user;
 
   try {
-    const supabase = await createClient();
     const result = await supabase.auth.getUser();
     user = result.data.user;
   } catch {
@@ -75,32 +79,19 @@ export default async function AnalyticsPage() {
   let loadFailed = false;
 
   if (canViewClients) {
-    const supabase = await createClient();
-
     // The `.eq("owner_id", …)` below is a payload optimisation, NOT the security
     // boundary: RLS on organisations is shared-read for every active user, so it
     // is myClients() in JS that actually guarantees F206 AC2. Both are kept.
-    const [organisations, openSuppressions] = await Promise.all([
-      fetchPaged<DashboardOrgRow>((from, to) =>
-        supabase
-          .from("organisations")
-          .select("id, legal_name, outreach_status, owner_id, updated_at, created_at")
-          .eq("owner_id", actor.id)
-          .order("created_at", { ascending: true })
-          .order("id", { ascending: true })
-          .range(from, to)
-          .overrideTypes<DashboardOrgRow[], { merge: false }>(),
-      ),
-      fetchPaged<OpenSuppression>((from, to) =>
-        supabase
-          .from("suppressions")
-          .select("organisation_id, status")
-          .in("status", ["pending", "active"])
-          .order("organisation_id", { ascending: true })
-          .range(from, to)
-          .overrideTypes<OpenSuppression[], { merge: false }>(),
-      ),
-    ]);
+    const organisations = await fetchPaged<DashboardOrgRow>((from, to) =>
+      supabase
+        .from("organisations")
+        .select("id, legal_name, outreach_status, owner_id, updated_at, created_at")
+        .eq("owner_id", actor.id)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to)
+        .overrideTypes<DashboardOrgRow[], { merge: false }>(),
+    );
 
     if (organisations.error || !organisations.data) {
       loadFailed = true;
@@ -108,29 +99,29 @@ export default async function AnalyticsPage() {
         operation: "analytics.organisations",
       });
     }
-    if (openSuppressions.error || !openSuppressions.data) {
-      loadFailed = true;
-      await reportError(openSuppressions.error ?? new Error("No suppressions returned"), {
-        operation: "analytics.suppressions",
-      });
-    }
 
-    // Suppression filter first, ownership filter second — the same order
-    // /dashboard and /clients use, so the counts on this page agree with theirs.
-    ownedRows = myClients(
-      filterActiveSuppressed(organisations.data ?? [], openSuppressions.data ?? []),
-      actor.id,
-    );
+    // Everything else is scoped to the ids this CAM owns. Suppressions,
+    // outreach_messages and reply_events are all shared-read under RLS, so
+    // reading them whole and discarding the rest in JS returns the same numbers
+    // — but the transfer would then grow with the rest of the team's activity
+    // rather than with this CAM's, and these are the three fastest-growing
+    // tables in the schema. Costs one extra round-trip, because the ids are not
+    // known until the query above returns; a CAM who owns nothing runs none of
+    // the three at all.
+    const candidateIds = (organisations.data ?? []).map((row) => row.id);
 
-    // Messages and replies are fetched only for the clients this CAM owns.
-    // Both tables are shared-read under RLS, so pulling them whole and filtering
-    // in JS returns the same numbers — but the transfer would then grow with the
-    // rest of the team's activity rather than with this CAM's. Sequential on
-    // purpose: the id list is the output of the query above.
-    const ownedIds = ownedRows.map((row) => row.id);
-
-    const [messages, replies] = await Promise.all([
-      fetchPagedForOrgs<SentMessageRow>(ownedIds, (ids, from, to) =>
+    const [openSuppressions, messages, replies] = await Promise.all([
+      fetchPagedForOrgs<OpenSuppression>(candidateIds, (ids, from, to) =>
+        supabase
+          .from("suppressions")
+          .select("organisation_id, status")
+          .in("organisation_id", ids)
+          .in("status", ["pending", "active"])
+          .order("organisation_id", { ascending: true })
+          .range(from, to)
+          .overrideTypes<OpenSuppression[], { merge: false }>(),
+      ),
+      fetchPagedForOrgs<SentMessageRow>(candidateIds, (ids, from, to) =>
         supabase
           .from("outreach_messages")
           .select("id, organisation_id, sent_by_user_id, sent_at")
@@ -141,7 +132,7 @@ export default async function AnalyticsPage() {
           .range(from, to)
           .overrideTypes<SentMessageRow[], { merge: false }>(),
       ),
-      fetchPagedForOrgs<CamReplyRow>(ownedIds, (ids, from, to) =>
+      fetchPagedForOrgs<CamReplyRow>(candidateIds, (ids, from, to) =>
         supabase
           .from("reply_events")
           .select("id, organisation_id, response_time_seconds")
@@ -153,6 +144,12 @@ export default async function AnalyticsPage() {
       ),
     ]);
 
+    if (openSuppressions.error || !openSuppressions.data) {
+      loadFailed = true;
+      await reportError(openSuppressions.error ?? new Error("No suppressions returned"), {
+        operation: "analytics.suppressions",
+      });
+    }
     if (messages.error || !messages.data) {
       loadFailed = true;
       await reportError(messages.error ?? new Error("No sent messages returned"), {
@@ -166,8 +163,23 @@ export default async function AnalyticsPage() {
       });
     }
 
-    sentMessages = messages.data ?? [];
-    myReplies = replies.data ?? [];
+    // Suppression filter first, ownership filter second — the same order
+    // /dashboard and /clients use, so the counts on this page agree with theirs.
+    ownedRows = myClients(
+      filterActiveSuppressed(organisations.data ?? [], openSuppressions.data ?? []),
+      actor.id,
+    );
+
+    // The three reads above are scoped to `candidateIds`, which is every client
+    // this CAM owns *before* the suppression filter — the filter needs the
+    // suppression rows, so it cannot run first. A suppressed client's rows are
+    // therefore still in hand and have to be dropped here. computeCamOutreach
+    // already keys off ownedRows, but typicalResponseTime takes the replies as
+    // given, so an actively-suppressed client would otherwise still move the
+    // CAM's typical response time.
+    const ownedIds = new Set(ownedRows.map((row) => row.id));
+    sentMessages = (messages.data ?? []).filter((row) => ownedIds.has(row.organisation_id));
+    myReplies = (replies.data ?? []).filter((row) => ownedIds.has(row.organisation_id));
   }
 
   const replySummary = summariseTrackedReplies(myReplies, ownedRows);

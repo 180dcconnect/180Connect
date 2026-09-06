@@ -257,6 +257,26 @@ export default async function AdminDashboardPage() {
           </Rise>
         ) : (
           <>
+            {/* Degraded, not fatal: a failed suppressions or latest_scores walk
+                would otherwise leave the figures silently wrong — a suppression
+                read failure keeps actively-suppressed clients in every total, a
+                score failure drops scored clients into "unscored". Only the
+                org-list failure above is a hard error. */}
+            {(suppressionError || scoreError) && (
+              <Rise>
+                <InlineAlert
+                  variant="page"
+                  tone="warning"
+                  message={
+                    suppressionError && scoreError
+                      ? "Some figures are incomplete — suppression status and priority scores could not be fully loaded, so totals, bands and mean scores may be inaccurate. This has been recorded — refresh and try again."
+                      : suppressionError
+                        ? "Suppression status could not be fully loaded, so totals may include actively-suppressed clients. This has been recorded — refresh and try again."
+                        : "Priority scores could not be fully loaded, so band and mean-score figures are incomplete. This has been recorded — refresh and try again."
+                  }
+                />
+              </Rise>
+            )}
             {/* Growth curve — same 30-day cumulative as CAM dashboard, last point = total */}
             <Group className="space-y-4">
               <Rise>

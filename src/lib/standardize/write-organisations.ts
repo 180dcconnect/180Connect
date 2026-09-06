@@ -43,6 +43,7 @@
 import { buildAdminClient } from "../supabase/admin-client-factory.ts";
 import { checkClientCriteria, type ClientCriteriaResult } from "../client-criteria.ts";
 import { reportError } from "../error-logging.ts";
+import { fetchPaged } from "../supabase/fetch-paged.ts";
 import { persistLatestScore } from "../scoring/persist-latest-score.ts";
 import { getActiveScoutConfig } from "../scoring/configured-weights.ts";
 import { checkWebsiteReachability } from "../website-reachability.ts";
@@ -170,7 +171,6 @@ async function flagIfDuplicate(
 }
 
 const WEBSITE_VALIDATION_CONCURRENCY = 5;
-const PAGE_SIZE = 1000;
 
 // entity_match_candidates.match_method/match_score are placeholders this binary
 // matcher approximates, not a computed confidence — see the migration header
@@ -190,25 +190,28 @@ const MATCH_SCORE_BY_MATCHED_ON: Record<DuplicateMatch["matchedOn"], number> = {
 
 /**
  * Repeatedly calls fetchPage(from, to) until a page comes back shorter than
- * PAGE_SIZE, concatenating every row. Exists because PostgREST (Supabase's
+ * FETCH_STEP, concatenating every row. Exists because PostgREST (Supabase's
  * query layer) caps an unbounded .select() at 1000 rows by default —
  * without paging, a caller silently stops seeing rows past row 1000 once a
  * table grows past that, and unlike a batch-scoped bug, that never
  * self-corrects on a later run. fetchPage is injected (rather than this
  * function taking a Supabase query builder directly) so it's testable with
  * a plain fake, same as everything else in this file.
+ *
+ * The walk itself is supabase/fetch-paged.ts, shared with every page that reads
+ * a whole table. This wrapper keeps the injected-fetchPage shape those tests
+ * are written against, and converts a failure into a throw.
  */
 export async function fetchAllPages<T>(
   fetchPage: (from: number, to: number) => Promise<{ data: T[] | null; error: unknown }>,
 ): Promise<T[]> {
-  const all: T[] = [];
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await fetchPage(from, from + PAGE_SIZE - 1);
-    if (error) throw error;
-    all.push(...(data ?? []));
-    if (!data || data.length < PAGE_SIZE) break;
-  }
-  return all;
+  // Widened to `unknown` so a caller's own error object is rethrown as it came,
+  // rather than flattened into PostgREST's `{ message }` shape.
+  const { data, error } = await fetchPaged<T, unknown>((from, to) =>
+    fetchPage(from, to).then((page) => ({ data: page.data, error: page.error ?? null })),
+  );
+  if (error) throw error;
+  return data ?? [];
 }
 
 /**

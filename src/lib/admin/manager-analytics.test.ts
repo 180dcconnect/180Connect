@@ -1,0 +1,362 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import type { DashboardOrgRow } from "../dashboard-metrics.ts";
+import type { CamReplyRow, SentMessageRow } from "../cam-analytics.ts";
+import {
+  conversionsOverTime,
+  describeUncountedClients,
+  perCamAnalytics,
+  sortByNeed,
+  teamTotals,
+  uncountedClients,
+  type OutcomeRow,
+} from "./manager-analytics.ts";
+
+let sequence = 0;
+const nextId = (prefix: string) => `${prefix}-${(sequence += 1)}`;
+
+function org(overrides: Partial<DashboardOrgRow> = {}): DashboardOrgRow {
+  const id = overrides.id ?? nextId("org");
+  return {
+    id,
+    legal_name: `Charity ${id}`,
+    outreach_status: "initial_outreach_sent",
+    owner_id: null,
+    updated_at: "2026-09-01T00:00:00.000Z",
+    created_at: "2026-08-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function outcome(overrides: Partial<OutcomeRow> = {}): OutcomeRow {
+  return {
+    id: nextId("outcome"),
+    organisation_id: nextId("org"),
+    outcome_type: "converted",
+    created_at: "2026-09-01T12:00:00.000Z",
+    ...overrides,
+  };
+}
+
+/** `count` clients for `owner`, all at the given status. */
+const owned = (owner: string, count: number, status: string) =>
+  Array.from({ length: count }, () => org({ owner_id: owner, outreach_status: status }));
+
+const NOW = new Date("2026-09-03T00:00:00.000Z");
+const NO_MESSAGES: SentMessageRow[] = [];
+const NO_REPLIES: CamReplyRow[] = [];
+
+describe("conversionsOverTime (F210)", () => {
+  it("emits one point per day across the window, zero on quiet days", () => {
+    const series = conversionsOverTime([], 7, NOW);
+
+    assert.equal(series.length, 7);
+    assert.equal(series[0].date, "2026-08-28");
+    assert.equal(series[6].date, "2026-09-03");
+    assert.ok(series.every((point) => point.value === 0));
+  });
+
+  it("counts new conversions on the day they were recorded", () => {
+    const series = conversionsOverTime(
+      [
+        outcome({ created_at: "2026-09-01T09:00:00.000Z" }),
+        outcome({ created_at: "2026-09-01T18:00:00.000Z" }),
+        outcome({ created_at: "2026-09-03T01:00:00.000Z" }),
+      ],
+      7,
+      NOW,
+    );
+
+    assert.equal(series.find((point) => point.date === "2026-09-01")?.value, 2);
+    assert.equal(series.find((point) => point.date === "2026-09-03")?.value, 1);
+    assert.equal(series.find((point) => point.date === "2026-09-02")?.value, 0);
+  });
+
+  it("counts conversions only, ignoring the other outcome types", () => {
+    const series = conversionsOverTime(
+      [
+        outcome({ outcome_type: "no_response", created_at: "2026-09-01T09:00:00.000Z" }),
+        outcome({ outcome_type: "soft_no", created_at: "2026-09-01T09:00:00.000Z" }),
+        outcome({ outcome_type: "reply", created_at: "2026-09-01T09:00:00.000Z" }),
+      ],
+      7,
+      NOW,
+    );
+
+    assert.ok(series.every((point) => point.value === 0));
+  });
+
+  it("drops outcomes outside the window and unparseable timestamps", () => {
+    const series = conversionsOverTime(
+      [
+        outcome({ created_at: "2026-01-01T09:00:00.000Z" }),
+        outcome({ created_at: "not a date" }),
+      ],
+      7,
+      NOW,
+    );
+
+    assert.ok(series.every((point) => point.value === 0));
+  });
+
+  it("returns nothing for a window of less than a day", () => {
+    assert.deepEqual(conversionsOverTime([outcome()], 0, NOW), []);
+  });
+});
+
+describe("perCamAnalytics (F212)", () => {
+  const cams = [
+    { id: "cam-a", name: "Ada" },
+    { id: "cam-b", name: "Blake" },
+  ];
+
+  it("keeps a CAM who owns nothing in the list rather than dropping them", () => {
+    const rows = perCamAnalytics(owned("cam-a", 2, "converted"), NO_MESSAGES, NO_REPLIES, cams);
+
+    assert.deepEqual(
+      rows.map((row) => row.camName),
+      ["Ada", "Blake"],
+    );
+    assert.equal(rows[1].totals.clientsOwned, 0);
+    assert.deepEqual(rows[1].flags, []);
+  });
+
+  it("never lets one CAM's clients contribute to another's row", () => {
+    const rows = perCamAnalytics(
+      [...owned("cam-a", 3, "converted"), ...owned("cam-b", 1, "converted")],
+      NO_MESSAGES,
+      NO_REPLIES,
+      cams,
+    );
+
+    assert.equal(rows[0].totals.conversions, 3);
+    assert.equal(rows[1].totals.conversions, 1);
+  });
+
+  it("flags a CAM who owns clients but has contacted none", () => {
+    const rows = perCamAnalytics(owned("cam-a", 3, "not_contacted"), NO_MESSAGES, NO_REPLIES, cams);
+
+    assert.deepEqual(
+      rows[0].flags.map((flag) => flag.kind),
+      ["no_outreach"],
+    );
+  });
+
+  it("flags a CAM converting at under half the team median", () => {
+    const rows = perCamAnalytics(
+      [
+        // Ada: 8 of 10 contacted convert.
+        ...owned("cam-a", 8, "converted"),
+        ...owned("cam-a", 2, "no_response"),
+        // Blake: 1 of 10.
+        ...owned("cam-b", 1, "converted"),
+        ...owned("cam-b", 9, "no_response"),
+      ],
+      NO_MESSAGES,
+      NO_REPLIES,
+      cams,
+    );
+
+    const blake = rows.find((row) => row.camId === "cam-b");
+    assert.ok(blake);
+    assert.ok(blake.flags.some((flag) => flag.kind === "low_conversion"));
+
+    const ada = rows.find((row) => row.camId === "cam-a");
+    assert.ok(ada);
+    assert.equal(ada.flags.length, 0);
+  });
+
+  it("does not judge a CAM who has barely started", () => {
+    // Two contacted clients is not a conversion rate worth comparing.
+    const rows = perCamAnalytics(
+      [
+        ...owned("cam-a", 8, "converted"),
+        ...owned("cam-a", 2, "no_response"),
+        ...owned("cam-b", 2, "no_response"),
+      ],
+      NO_MESSAGES,
+      NO_REPLIES,
+      cams,
+    );
+
+    const blake = rows.find((row) => row.camId === "cam-b");
+    assert.ok(blake);
+    assert.deepEqual(blake.flags, []);
+  });
+  /** `count` timed replies of `seconds` each, spread across `orgs`. */
+  const timedReplies = (orgs: readonly DashboardOrgRow[], count: number, seconds: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      id: nextId("reply"),
+      organisation_id: orgs[index % orgs.length].id,
+      response_time_seconds: seconds,
+    }));
+
+  it("flags a CAM whose clients reply far slower than the team's typical", () => {
+    // Both CAMs convert nothing, so only the response-time comparison can fire.
+    const ada = owned("cam-a", 10, "no_response");
+    const blake = owned("cam-b", 10, "no_response");
+    const rows = perCamAnalytics(
+      [...ada, ...blake],
+      NO_MESSAGES,
+      [
+        ...timedReplies(ada, 5, 3_600),
+        // Median of (3600, 20000) is 11800; 1.5x that is 17700.
+        ...timedReplies(blake, 5, 20_000),
+      ],
+      cams,
+    );
+
+    const slow = rows.find((row) => row.camId === "cam-b");
+    assert.ok(slow);
+    assert.ok(slow.flags.some((flag) => flag.kind === "slow_response"));
+
+    const fast = rows.find((row) => row.camId === "cam-a");
+    assert.ok(fast);
+    assert.deepEqual(fast.flags, []);
+  });
+
+  it("does not call a CAM slow on a response-time sample it has said not to trust", () => {
+    const ada = owned("cam-a", 10, "no_response");
+    const blake = owned("cam-b", 10, "no_response");
+    const rows = perCamAnalytics(
+      [...ada, ...blake],
+      NO_MESSAGES,
+      [
+        ...timedReplies(ada, 5, 3_600),
+        // One reply short of the threshold, however slow it is.
+        ...timedReplies(blake, 4, 200_000),
+      ],
+      cams,
+    );
+
+    const blakeRow = rows.find((row) => row.camId === "cam-b");
+    assert.ok(blakeRow);
+    assert.equal(blakeRow.typical.hasEnoughData, false);
+    assert.deepEqual(blakeRow.flags, []);
+  });
+});
+
+describe("teamTotals and sortByNeed (F212)", () => {
+  const cams = [
+    { id: "cam-a", name: "Ada" },
+    { id: "cam-b", name: "Blake" },
+  ];
+
+  it("sums the per-CAM rows and counts who is flagged", () => {
+    const rows = perCamAnalytics(
+      [
+        ...owned("cam-a", 8, "converted"),
+        ...owned("cam-a", 2, "no_response"),
+        ...owned("cam-b", 1, "converted"),
+        ...owned("cam-b", 9, "no_response"),
+      ],
+      NO_MESSAGES,
+      NO_REPLIES,
+      cams,
+    );
+
+    const totals = teamTotals(rows);
+
+    assert.equal(totals.cams, 2);
+    assert.equal(totals.clientsOwned, 20);
+    assert.equal(totals.conversions, 9);
+    assert.equal(totals.camsNeedingSupport, 1);
+  });
+
+  it("puts flagged CAMs at the top", () => {
+    const rows = perCamAnalytics(
+      [
+        ...owned("cam-a", 8, "converted"),
+        ...owned("cam-a", 2, "no_response"),
+        ...owned("cam-b", 1, "converted"),
+        ...owned("cam-b", 9, "no_response"),
+      ],
+      NO_MESSAGES,
+      NO_REPLIES,
+      cams,
+    );
+
+    assert.equal(sortByNeed(rows)[0].camId, "cam-b");
+  });
+
+  it("reports zeros for an empty team rather than throwing", () => {
+    const totals = teamTotals([]);
+
+    assert.equal(totals.cams, 0);
+    assert.equal(totals.conversions, 0);
+    assert.equal(totals.camsNeedingSupport, 0);
+  });
+});
+
+describe("uncountedClients", () => {
+  it("counts clients whose owner is not in the per-CAM table", () => {
+    const cams = [{ id: "cam-active" }];
+    const rows = [
+      org({ owner_id: "cam-active" }),
+      org({ owner_id: "cam-deactivated" }),
+      org({ owner_id: "cam-deactivated" }),
+    ];
+
+    const uncounted = uncountedClients(rows, cams);
+
+    assert.equal(uncounted.untabled, 2);
+    assert.equal(uncounted.unassigned, 0);
+    assert.equal(uncounted.total, 2);
+  });
+
+  it("counts clients with no owner separately from a departed owner's", () => {
+    const uncounted = uncountedClients(
+      [org({ owner_id: null }), org({ owner_id: "gone" }), org({ owner_id: "here" })],
+      [{ id: "here" }],
+    );
+
+    assert.equal(uncounted.unassigned, 1);
+    assert.equal(uncounted.untabled, 1);
+    assert.equal(uncounted.total, 2);
+  });
+
+  it("reports nothing uncounted when every owner is active", () => {
+    const uncounted = uncountedClients([org({ owner_id: "here" })], [{ id: "here" }]);
+
+    assert.equal(uncounted.total, 0);
+    assert.equal(describeUncountedClients(uncounted), null);
+  });
+
+  it("names offboarding for an untabled owner and claiming for none", () => {
+    const message = describeUncountedClients({
+      unassigned: 3,
+      untabled: 2,
+      total: 5,
+    });
+
+    assert.ok(message);
+    assert.match(message, /5 clients are not counted below/);
+    assert.match(message, /2 owned by someone not in the table below/);
+    assert.match(message, /offboarding/i);
+    assert.match(message, /3 with no owner yet/);
+  });
+
+  it("says \"client is\" for a single uncounted client", () => {
+    const message = describeUncountedClients({ unassigned: 1, untabled: 0, total: 1 });
+
+    assert.ok(message);
+    assert.match(message, /1 client is not counted below/);
+  });
+
+  it("leaves the per-CAM totals themselves untouched", () => {
+    // The uncounted rows are reported beside the table, never folded into it:
+    // "how is the team doing" and "what is nobody looking after" stay separate.
+    const cams = [{ id: "cam-active", name: "Active" }];
+    const rows = [
+      org({ owner_id: "cam-active", outreach_status: "converted" }),
+      org({ owner_id: "cam-deactivated", outreach_status: "converted" }),
+    ];
+
+    const totals = teamTotals(perCamAnalytics(rows, [], [], cams));
+
+    assert.equal(totals.clientsOwned, 1);
+    assert.equal(totals.conversions, 1);
+    assert.equal(uncountedClients(rows, cams).untabled, 1);
+  });
+});

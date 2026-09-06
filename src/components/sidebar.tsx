@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ComponentType } from "react";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
-import { MessageSquareHeart, ShieldCheck, UserPlus } from "lucide-react";
+import { ListChecks, MessageSquareHeart, ShieldCheck, UserPlus } from "lucide-react";
 import { Cctv } from "@/components/animate-ui/icons/cctv";
 import { CloudDownload } from "@/components/animate-ui/icons/cloud-download";
 import { Compass } from "@/components/animate-ui/icons/compass";
@@ -31,7 +31,7 @@ export type SidebarOnboarding = {
   show?: boolean;
 };
 
-export type SidebarIconName = "dashboard" | "admin" | "users" | "add" | "audit" | "import" | "clients" | "feedback";
+export type SidebarIconName = "dashboard" | "admin" | "users" | "add" | "audit" | "import" | "clients" | "feedback" | "actions";
 
 export type SidebarNavItem = {
   href: string;
@@ -66,6 +66,7 @@ const ICONS: Record<SidebarIconName, RailIcon> = {
   audit: Cctv,
   import: CloudDownload,
   feedback: ThumbsUp,
+  actions: ListChecks,
 };
 
 const MotionLink = motion.create(Link);

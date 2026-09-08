@@ -137,7 +137,7 @@ async function findListedCharity(registeredNumber: string): Promise<ListedCharit
  *
  * The single-charity lookup is all that remains of the API path: bulk discovery
  * was retired once the staged register covered it (see
- * supabase/migrations/20260922110000_retire_charity_commission_discovery_cron.sql).
+ * supabase/migrations/20260923120000_retire_charity_commission_discovery_cron.sql).
  * A named charity is the one case where hitting the API still beats the
  * snapshot — the answer is immediate and needs no refresh.
  */

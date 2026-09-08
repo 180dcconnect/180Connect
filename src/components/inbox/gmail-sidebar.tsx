@@ -95,6 +95,16 @@ export type GmailSidebarProps = {
   labelCounts: Record<string, number>;
   customLabels?: SidebarLabel[];
   onAddCustomLabel?: (label: SidebarLabel) => void;
+  /**
+   * Create a real tag (TAGS) for the typed name and colour. When provided it
+   * replaces the local-only `onAddCustomLabel` path: the panel waits for the
+   * server, shows what it refused with, and only selects + closes on success.
+   * `colour` is a palette hex or null.
+   */
+  onCreateLabel?: (
+    name: string,
+    colour: string | null,
+  ) => Promise<{ ok: boolean; message?: string }>;
 };
 
 /** A label created without a colour falls back to lead — the app's deep
@@ -119,10 +129,14 @@ export function GmailSidebar({
   labelCounts,
   customLabels = [],
   onAddCustomLabel,
+  onCreateLabel,
 }: GmailSidebarProps) {
   // User-created labels, added through the + next to the heading.
   const [localCustomLabels, setLocalCustomLabels] = useState<SidebarLabel[]>([]);
-  const effectiveCustomLabels = onAddCustomLabel ? customLabels : localCustomLabels;
+  const [isCreatingLabel, setIsCreatingLabel] = useState(false);
+  const serverBacked = Boolean(onCreateLabel);
+  const effectiveCustomLabels =
+    onAddCustomLabel || serverBacked ? customLabels : localCustomLabels;
   // Portals need the DOM: nothing portal-shaped renders on the server (or the
   // first client pass), so SSR and hydration agree. A plain `typeof document`
   // guard would flip mid-hydration; the external store stays false until commit.
@@ -183,7 +197,8 @@ export function GmailSidebar({
     };
   }, [isCreateOpen, closeCreatePanel]);
 
-  function createLabel() {
+  async function createLabel() {
+    if (isCreatingLabel) return;
     const name = draftName.trim();
     if (!name) return;
     const taken = new Set(labels.map((label) => label.name.toLowerCase()));
@@ -191,6 +206,29 @@ export function GmailSidebar({
       setCreateError("A label with this name already exists.");
       return;
     }
+
+    // Server-backed: the tag is real (TAGS). Wait for it, and only select +
+    // close once it exists — a failed create must not leave a phantom label
+    // selected with nothing behind it.
+    if (onCreateLabel) {
+      setIsCreatingLabel(true);
+      setCreateError(null);
+      try {
+        const result = await onCreateLabel(name, draftColour ?? null);
+        if (!result.ok) {
+          setCreateError(result.message ?? "That label could not be created.");
+          return;
+        }
+        onToggleLabel(name);
+        closeCreatePanel();
+      } catch {
+        setCreateError("That label could not be created. Try again.");
+      } finally {
+        setIsCreatingLabel(false);
+      }
+      return;
+    }
+
     const newLabel = { name, bg: draftColour ?? DEFAULT_LABEL_BG };
     if (onAddCustomLabel) {
       onAddCustomLabel(newLabel);
@@ -491,11 +529,14 @@ export function GmailSidebar({
                   <OriginButton
                     size="xs"
                     variant="ink"
-                    disabled={!draftName.trim() || createError !== null}
+                    loading={isCreatingLabel}
+                    disabled={
+                      !draftName.trim() || createError !== null || isCreatingLabel
+                    }
                     onClick={createLabel}
                     className="shrink-0"
                   >
-                    Create
+                    {isCreatingLabel ? "Creating…" : "Create"}
                   </OriginButton>
                 </div>
               </div>

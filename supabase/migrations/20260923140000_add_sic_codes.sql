@@ -5,7 +5,7 @@
 --
 -- WHY THIS MIGRATION EXISTS
 --
--- 20260922121000_add_charity_activities.sql closed this hole for charities: the
+-- 20260923131000_add_charity_activities.sql closed this hole for charities: the
 -- Charity Commission publishes the charity's own description of its work, we
 -- already ingested it, and it was being dropped at the standardize step. The
 -- identical hole is open for companies, and it is worse, because no register
@@ -86,7 +86,7 @@
 --   Approved by   | Bashir (Project Leader).
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260922130000_add_sic_codes.down.sql
+-- ../rollback/20260923140000_add_sic_codes.down.sql
 
 alter table public.organisations
   add column if not exists sic_codes text[];

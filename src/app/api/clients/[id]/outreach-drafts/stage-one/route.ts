@@ -247,6 +247,7 @@ export async function POST(
       subSector: organisation.sub_sector?.trim() || enrichment?.sub_sector,
       newsHooks: enrichment?.news_hooks,
       booklet: savedBooklet?.booklet_text ?? null,
+      senderName: authorization.actor.fullName,
     },
     callModel,
     { length: preferences.data.length, register: preferences.data.register, opening: preferences.data.opening, closing: preferences.data.closing },

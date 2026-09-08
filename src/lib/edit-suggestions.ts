@@ -521,7 +521,7 @@ export type EditSuggestionRow = {
   decided_by: string | null;
   decided_at: string | null;
   rejection_reason: string | null;
-  /** The requester's own note, added 20260922090000. Null on older rows. */
+  /** The requester's own note, added 20260923100000. Null on older rows. */
   reason: string | null;
   created_at: string;
   organisations: { legal_name: string } | null;

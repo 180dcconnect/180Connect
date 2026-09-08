@@ -3,10 +3,10 @@ import { describe, it } from "node:test";
 import {
   MOCK_INBOX_THREADS,
   getMockThreadById,
-  getMockContacts,
+  deriveFillContacts,
   mockFillThreads,
-  searchRecipients,
 } from "./inbox-mock-data.ts";
+import { searchRecipients } from "./inbox/recipients.ts";
 import {
   formatGmailTimestamp,
   formatFileSize,
@@ -142,7 +142,7 @@ describe("mock recipients carry no personal email addresses", () => {
     for (const thread of MOCK_INBOX_THREADS) {
       const addresses = [
         thread.primaryContact.email,
-        ...getMockContacts(thread).map((contact) => contact.email),
+        ...deriveFillContacts(thread).map((contact) => contact.email),
         ...thread.messages.flatMap((message) => [
           message.senderEmail,
           message.recipientEmail,
@@ -163,7 +163,7 @@ describe("mock recipients carry no personal email addresses", () => {
 
   it("never surfaces a personal address through recipient search", () => {
     for (const query of ["oxfam", "cancer", "trust", "info", "a"]) {
-      for (const match of searchRecipients(query, 20)) {
+      for (const match of searchRecipients(query, 20, MOCK_INBOX_THREADS)) {
         assert.equal(
           isPersonalEmail(match.contact.email),
           false,
@@ -174,7 +174,7 @@ describe("mock recipients carry no personal email addresses", () => {
   });
 
   it("still gives an organisation more than one address to choose from", () => {
-    const contacts = getMockContacts(MOCK_INBOX_THREADS[0]);
+    const contacts = deriveFillContacts(MOCK_INBOX_THREADS[0]);
     assert.ok(contacts.length >= 2);
     assert.equal(new Set(contacts.map((c) => c.email)).size, contacts.length);
     assert.equal(contacts.filter((c) => c.isPrimary).length, 1);

@@ -1,4 +1,4 @@
--- Rollback for: 20260922110000_retire_charity_commission_discovery_cron.sql
+-- Rollback for: 20260923120000_retire_charity_commission_discovery_cron.sql
 -- Apply manually against the target DB to reverse the paired migration.
 --
 -- Reschedules the weekly Charity Commission discovery job. Note this only

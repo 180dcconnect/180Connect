@@ -64,7 +64,7 @@
 --                 | reflects it. Reviewed by Bashir (Project Leader).
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260922093000_add_charity_financial_breakdown.down.sql
+-- ../rollback/20260923103000_add_charity_financial_breakdown.down.sql
 
 alter table public.financial_periods
   add column if not exists income_donations_legacies      numeric,

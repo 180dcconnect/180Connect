@@ -36,6 +36,7 @@ import {
   SECTOR_COLORS,
   type InboxContactView,
   type InboxEmailMessage,
+  type InboxThreadTag,
   type InboxThreadView,
 } from "../inbox-thread-view.ts";
 
@@ -101,8 +102,26 @@ export type BuildRealInboxThreadsInput = {
   /** organisation_id → count. Absent means zero. */
   noteCounts?: ReadonlyMap<string, number>;
   handoverCounts?: ReadonlyMap<string, number>;
+  /**
+   * organisation_id → its tags (TAGS/ORG_TAGS). Absent means "none", same as an
+   * empty array. Read from Supabase in the page; kept out of the four core
+   * queries because a thread with no tags is the common case and this is a
+   * cheap join done once.
+   */
+  orgTags?: ReadonlyMap<string, readonly InboxThreadTag[]>;
   now?: Date;
 };
+
+/** Tags in a stable, human order: by name, case-insensitive. A thread row and
+    the sidebar filter both read this, so the order has to be the same every
+    render without a sort key being stored. */
+export function sortThreadTags(
+  tags: readonly InboxThreadTag[],
+): InboxThreadTag[] {
+  return [...tags].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+  );
+}
 
 type Sector = InboxThreadView["sector"];
 
@@ -336,6 +355,77 @@ function asReplyIntent(intent: string | null): InboxThreadView["replyIntent"] {
 }
 
 /**
+ * A client the compose window may address — every organisation, whether or not
+ * anyone has emailed it yet.
+ *
+ * Deliberately NOT an `InboxThreadView`. A thread is one organisation's
+ * outreach history, and an organisation nobody has written to has no history,
+ * so it is not a thread and never appears in the mailbox list. It is still
+ * somebody you can write to — which is the entire point of Compose.
+ *
+ * Handing the compose window `realThreads` conflated the two: its recipient
+ * lookup searched the thread list, so the only clients it could find were the
+ * ones already emailed, and starting the FIRST email to a client from the
+ * inbox was impossible. The lookup searches this instead.
+ */
+export type AddressableClient = {
+  id: string;
+  orgName: string;
+  orgType: string;
+  city: string;
+  country: string;
+  sector: Sector;
+  primaryContact: InboxThreadView["primaryContact"];
+  camOwner: InboxThreadView["camOwner"];
+  contacts: InboxContactView[];
+};
+
+/**
+ * Every organisation that can actually receive an email, ordered by name.
+ *
+ * An organisation with no address anywhere — no contact row carrying one, no
+ * `contact_email` — is dropped: offering it would produce a recipient that
+ * cannot be written into a To: field, and a Send that could not be honoured.
+ * Visibility is already settled by the time rows arrive here; these are read
+ * through the caller's own RLS-scoped session, so this list is only ever the
+ * clients that session may see.
+ */
+export function buildAddressableClients({
+  organisations,
+  contacts,
+}: {
+  organisations: readonly InboxOrganisationRow[];
+  contacts: readonly InboxContactRow[];
+}): AddressableClient[] {
+  const clients: AddressableClient[] = [];
+
+  for (const organisation of organisations) {
+    const own = contactsFor(organisation, contacts);
+    if (own.length === 0) continue;
+
+    const sector = deriveSector(organisation.sector, organisation.sub_sector);
+    clients.push({
+      id: organisation.id,
+      orgName: organisation.legal_name,
+      orgType: organisation.organisation_type
+        ? formatOrganisationType(organisation.organisation_type)
+        : "Organisation",
+      city: organisation.city ?? "",
+      country: organisation.country_code ?? "",
+      sector,
+      primaryContact: primaryContactFor(organisation, contacts),
+      camOwner: {
+        name: organisation.owner?.full_name?.trim() || "Unassigned",
+        email: organisation.owner?.email?.trim() || "",
+      },
+      contacts: own,
+    });
+  }
+
+  return clients.sort((a, b) => a.orgName.localeCompare(b.orgName));
+}
+
+/**
  * The list view. Every organisation with outreach on it — sent, replied to,
  * drafted or scheduled — becomes one thread row.
  *
@@ -352,6 +442,7 @@ export function buildRealInboxThreads({
   contacts,
   noteCounts,
   handoverCounts,
+  orgTags,
   now = new Date(),
 }: BuildRealInboxThreadsInput): InboxThreadView[] {
   const events = eventsByOrganisation(messages, replies);
@@ -418,6 +509,7 @@ export function buildRealInboxThreads({
       attachments: [],
       notesCount: noteCounts?.get(organisation.id) ?? 0,
       handoversCount: handoverCounts?.get(organisation.id) ?? 0,
+      tags: sortThreadTags(orgTags?.get(organisation.id) ?? []),
     });
   }
 

@@ -89,6 +89,65 @@ function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
   return NextResponse.json({ error: actorFailureMessage(reason) }, { status });
 }
 
+/**
+ * The client's latest saved booklet, for surfaces that show it without being
+ * able to run a server component — the inbox compose window's booklet sheet.
+ *
+ * `client:view`, not `client:contact`: this reads what is already stored and
+ * calls no external API, so it carries none of POST's cost. The read runs on
+ * the caller's own RLS-scoped session, so `client_booklets`' own SELECT policy
+ * decides what comes back — a client this CAM may not see yields nothing here
+ * regardless of what the id says.
+ *
+ * `booklet: null` (200) is the honest answer for a client with none saved yet;
+ * it is not an error, and the caller renders it as "no booklet saved".
+ */
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const authorization = await getCurrentActor("client:view", { route: "/clients/[id]" });
+  if (!authorization.ok) return denied(authorization.reason);
+
+  const { id: organisationId } = await params;
+  if (!isUuid(organisationId)) {
+    return NextResponse.json({ error: "That client could not be found." }, { status: 400 });
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("client_booklets")
+    .select("id, booklet_text, website_url, generated_at")
+    .eq("organisation_id", organisationId)
+    .order("generated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{
+      id: string;
+      booklet_text: string;
+      website_url: string | null;
+      generated_at: string;
+    }>();
+
+  if (error) {
+    await reportError(error, { operation: "clients.read_saved_booklet" });
+    return NextResponse.json(
+      { error: "The booklet could not be loaded. Try again." },
+      { status: 500 },
+    );
+  }
+
+  return NextResponse.json({
+    booklet: data
+      ? {
+          id: data.id,
+          text: data.booklet_text,
+          websiteUrl: data.website_url,
+          generatedAt: data.generated_at,
+        }
+      : null,
+  });
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },

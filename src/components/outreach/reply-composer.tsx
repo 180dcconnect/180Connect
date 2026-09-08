@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Sparkles } from "lucide-react";
+
+import { LoaderPinwheel } from "@/components/animate-ui/icons/loader-pinwheel";
 
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
 import { EmailReviewPanel } from "@/components/outreach/email-review-panel";
@@ -9,12 +10,11 @@ import { AiSettingsPicker, type AiSettingEntry } from "@/components/outreach/ai-
 import {
   CLOSING_APPROACHES,
   EMAIL_LENGTHS,
-  EMAIL_TONES,
-  EMAIL_VOICES,
+  EMAIL_REGISTER_LABELS,
+  EMAIL_REGISTERS,
   type ClosingApproach,
   type EmailLength,
-  type EmailTone,
-  type EmailVoice,
+  type EmailRegister,
 } from "@/lib/outreach/stage-one-prompt";
 
 /**
@@ -58,19 +58,6 @@ const EMAIL_LENGTH_LABELS: Record<EmailLength, string> = {
   detailed: "Detailed",
 };
 
-const EMAIL_VOICE_LABELS: Record<EmailVoice, string> = {
-  "180dc": "180DC Sheffield",
-  consultative: "Consultative",
-  plain_language: "Plain language",
-};
-
-const EMAIL_TONE_LABELS: Record<EmailTone, string> = {
-  balanced: "Balanced",
-  warm: "Warm",
-  formal: "Formal",
-  concise: "Concise",
-};
-
 const CLOSING_APPROACH_LABELS: Record<ClosingApproach, string> = {
   soft_cta: "Soft invitation",
   meeting_request: "Request a short call",
@@ -101,13 +88,15 @@ export function ReplyComposer({
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Spins the generate icon for as long as the button is hovered — the icon
+  // alone is a smaller hover target than the button around it.
+  const [aiHover, setAiHover] = useState(false);
   const [warning, setWarning] = useState<Warning | null>(null);
   const [length, setLength] = useState<EmailLength>("standard");
-  const [voice, setVoice] = useState<EmailVoice>("180dc");
-  const [tone, setTone] = useState<EmailTone>("balanced");
+  const [register, setRegister] = useState<EmailRegister>("professional");
   const [closing, setClosing] = useState<ClosingApproach>("soft_cta");
 
-  // Four dials rather than the Stage 1 card's five: a reply has no opening
+  // Three dials rather than the Stage 1 card's four: a reply has no opening
   // approach to choose, the message it answers is the opening.
   const aiSettings: AiSettingEntry[] = [
     {
@@ -119,20 +108,12 @@ export function ReplyComposer({
       onSelect: (value) => setLength(value as EmailLength),
     },
     {
-      key: "tone",
-      label: "Email tone",
-      hint: "How friendly or formal the reply reads — separate from its length and voice.",
-      options: EMAIL_TONES.map((value) => ({ value, label: EMAIL_TONE_LABELS[value] })),
-      selected: tone,
-      onSelect: (value) => setTone(value as EmailTone),
-    },
-    {
-      key: "voice",
-      label: "Email voice",
-      hint: "Who the reply is written as — our collective style or plainer wording.",
-      options: EMAIL_VOICES.map((value) => ({ value, label: EMAIL_VOICE_LABELS[value] })),
-      selected: voice,
-      onSelect: (value) => setVoice(value as EmailVoice),
+      key: "register",
+      label: "Email register",
+      hint: "How formal and how warm the reply reads. Every reply is written as \u201cwe\u201d either way.",
+      options: EMAIL_REGISTERS.map((value) => ({ value, label: EMAIL_REGISTER_LABELS[value] })),
+      selected: register,
+      onSelect: (value) => setRegister(value as EmailRegister),
     },
     {
       key: "closing",
@@ -167,7 +148,7 @@ export function ReplyComposer({
       const response = await fetch(`/api/clients/${organisationId}/outreach-drafts/stage-two`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ length, voice, tone, closing }),
+        body: JSON.stringify({ length, register, closing }),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -211,9 +192,11 @@ export function ReplyComposer({
         <button
           className="mt-3 flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-ink/90"
           onClick={generate}
+          onMouseEnter={() => setAiHover(true)}
+          onMouseLeave={() => setAiHover(false)}
           type="button"
         >
-          <Sparkles aria-hidden="true" className="h-4 w-4" />
+          <LoaderPinwheel animate={aiHover} size={16} aria-hidden="true" />
           {draft ? "Regenerate reply" : "Generate reply"}
         </button>
       )}

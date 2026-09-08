@@ -2,14 +2,17 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowUpRight, Check, History, Inbox, PenLine, Sparkles } from "lucide-react";
+import { ArrowUpRight, Check, History, Inbox, PenLine } from "lucide-react";
+import { LoaderPinwheel } from "@/components/animate-ui/icons/loader-pinwheel";
 import {
   EmailReviewPanel,
   type EmailReviewDirtyState,
 } from "@/components/outreach/email-review-panel";
 import type { Attachment } from "@/lib/attachments";
 import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_REGISTER_LABELS, EMAIL_REGISTERS, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailRegister, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
-import { AiLoadingState } from "@/components/ui/ai-loading-state";
+import { AiThinkingState } from "@/components/ui/ai-thinking-state";
+import { StreamingDraftText } from "@/components/ui/streaming-draft-text";
+import { useStageOneDraftStream } from "@/components/outreach/use-stage-one-draft-stream";
 import { SectionCard } from "./section-card";
 import { AiSettingsPicker, type AiSettingEntry } from "@/components/outreach/ai-settings-picker";
 import { formatScheduleLong } from "@/components/outreach/schedule-send-dialog";
@@ -29,13 +32,6 @@ type Draft = {
   savedRecipient?: string | null;
 };
 type ExistingDraft = Draft & { savedRecipient: string | null };
-
-const STATUS_MESSAGES = [
-  "Checking outreach permissions…",
-  "Reading client profile…",
-  "Drafting the email…",
-  "Polishing the subject line…",
-];
 
 const EMAIL_LENGTH_LABELS: Record<EmailLength, string> = {
   short: "Short",
@@ -145,6 +141,26 @@ export function ComposeButton({
   const dirty = useRef<EmailReviewDirtyState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Spins the generate icon for as long as the button is hovered — the icon
+  // alone is a smaller hover target than the button around it.
+  const [aiHover, setAiHover] = useState(false);
+  // Token stream for the draft: thinking steps and live text while it flows,
+  // resolving like the old JSON POST so the flow below is unchanged.
+  const draftStream = useStageOneDraftStream();
+  // A finished draft waits here while its reveal plays out (ticks, then
+  // words). The review editor takes it in commitStagedDraft, once the last
+  // word has resolved — handing over mid-reveal would cut the text off.
+  const [stagedDraft, setStagedDraft] = useState<Draft | null>(null);
+
+  function commitStagedDraft() {
+    if (!stagedDraft) return;
+    setManual(false);
+    setDraft(stagedDraft);
+    setGeneration((current) => current + 1);
+    dirty.current = null;
+    setStagedDraft(null);
+    setBusy(false);
+  }
   const [warning, setWarning] = useState<Warning | null>(
     blocked
       ? {
@@ -274,36 +290,32 @@ export function ComposeButton({
         return;
       }
 
-      const response = await fetch(`/api/clients/${organisationId}/outreach-drafts/stage-one`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...(draft ? { draftId: draft.id } : {}),
-          length,
-          register,
-          opening,
-          closing,
-        }),
+      const outcome = await draftStream.start({
+        organisationId,
+        ...(draft ? { draftId: draft.id } : {}),
+        length,
+        register,
+        opening,
+        closing,
       });
-      const payload = await response.json();
-      if (!response.ok) {
-        setError(payload.error ?? "The email draft could not be generated. Try again.");
+      if (!outcome.ok) {
+        if (outcome.error === "cancelled") {
+          setBusy(false);
+          return;
+        }
+        setError(outcome.error);
         // A 409 means the draft this session was tracking no longer exists as one
         // (sent or removed elsewhere) — drop it so "Try again" starts a fresh draft
         // instead of retrying an update that can only ever fail the same way.
-        if (response.status === 409) setDraft(null);
+        if (outcome.status === 409) setDraft(null);
+        setBusy(false);
         return;
       }
-      // Bumping `generation` remounts EmailReviewPanel, which is what resets
-      // the reviewed content, the approval checkbox and any send message —
-      // the panel initialises all of them from the draft it is handed.
-      setManual(false);
-      setDraft(payload as Draft);
-      setGeneration((current) => current + 1);
-      dirty.current = null;
+      // Bumping `generation` remounts EmailReviewPanel — but only in
+      // commitStagedDraft, after the reveal below has played out.
+      setStagedDraft(outcome.result as Draft);
     } catch {
       setError("Could not reach the server. Check your connection and try again.");
-    } finally {
       setBusy(false);
     }
   }
@@ -379,16 +391,18 @@ export function ComposeButton({
             footer={
               <>
                 <button
-                  className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-lead px-4 py-2 text-[12px] font-bold text-white shadow-[0_12px_28px_-12px_rgba(35,64,122,0.75)] transition-colors hover:bg-[#1b3160]"
+                  className="pointer-events-auto inline-flex items-center gap-1.5 rounded-lg bg-lead px-4 py-2 text-[12px] font-bold text-white shadow-[0_12px_28px_-12px_rgba(35,64,122,0.75)] transition-colors hover:bg-[#1b3160]"
                   onClick={generate}
+                  onMouseEnter={() => setAiHover(true)}
+                  onMouseLeave={() => setAiHover(false)}
                   title="Generate the first draft from the settings above"
                   type="button"
                 >
-                  <Sparkles aria-hidden="true" className="h-3.5 w-3.5" />
+                  <LoaderPinwheel animate={aiHover} size={14} aria-hidden="true" />
                   Generate draft
                 </button>
                 <button
-                  className="pointer-events-auto inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-white/80 px-3 py-2 text-[12px] font-semibold text-slate-700 shadow-[0_8px_20px_-10px_rgba(15,23,42,0.4)] backdrop-blur-sm transition-colors hover:bg-white hover:text-slate-900"
+                  className="pointer-events-auto inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-white/80 px-3 py-2 text-[12px] font-semibold text-slate-700 shadow-[0_8px_20px_-10px_rgba(15,23,42,0.4)] backdrop-blur-sm transition-colors hover:bg-white hover:text-slate-900"
                   onClick={draftManually}
                   title="Write the email yourself, with no AI draft"
                   type="button"
@@ -413,10 +427,17 @@ export function ComposeButton({
       )}
 
       {busy && (
-        <AiLoadingState
-          messages={STATUS_MESSAGES}
-          reducedMotionLabel="Generating the draft — this can take several seconds…"
-        />
+        <>
+          <AiThinkingState stage={draftStream.displayStage} startedAt={draftStream.startedAt} />
+          {draftStream.displayStage === "done" && (
+            <StreamingDraftText
+              subject={draftStream.subject}
+              body={draftStream.body}
+              streaming={draftStream.status === "streaming"}
+              onRevealComplete={commitStagedDraft}
+            />
+          )}
+        </>
       )}
 
       {error && !busy && (

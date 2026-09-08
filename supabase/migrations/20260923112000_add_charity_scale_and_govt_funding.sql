@@ -1,7 +1,7 @@
 -- Migration: add_charity_scale_and_govt_funding
 -- Sequence: no new step in Data Model tab "11 Supabase Migration Sequence" — this
 --   widens an existing table, it does not add one. Same shape as
---   20260922093000_add_charity_financial_breakdown.sql.
+--   20260923103000_add_charity_financial_breakdown.sql.
 -- Story: Charity Commission bulk register import — the annual return carries more
 --   than money, and two of those figures decide how a consulting engagement is
 --   scoped before anyone opens a conversation.
@@ -18,7 +18,7 @@
 --   receives_govt_grants / receives_govt_contracts / count_govt_grants /
 --   count_govt_contracts
 --     We already store the government income *amounts*
---     (20260922093000). The flags and counts say whether that money is one
+--     (20260923103000). The flags and counts say whether that money is one
 --     standing relationship or fifteen small awards — a different funding
 --     profile, and a different conversation.
 --
@@ -63,7 +63,7 @@
 --   Approved by   | Bashir (Project Leader).
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260922102000_add_charity_scale_and_govt_funding.down.sql
+-- ../rollback/20260923112000_add_charity_scale_and_govt_funding.down.sql
 
 alter table public.financial_periods
   add column if not exists count_employees        integer,

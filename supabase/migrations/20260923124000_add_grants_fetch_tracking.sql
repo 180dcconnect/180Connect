@@ -74,7 +74,7 @@
 --   Approved by   | Bashir (Project Leader).
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260922114000_add_grants_fetch_tracking.down.sql
+-- ../rollback/20260923124000_add_grants_fetch_tracking.down.sql
 
 alter table public.organisations
   add column if not exists grants_fetched_at timestamptz;

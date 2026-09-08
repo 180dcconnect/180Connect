@@ -1,4 +1,4 @@
--- Rollback for: 20260922124000_hoist_rls_helper_initplans_remaining.sql
+-- Rollback for: 20260923134000_hoist_rls_helper_initplans_remaining.sql
 -- Apply manually against the target DB to reverse the paired migration.
 --
 -- Restores the bare helper calls in all 82 policies. This is a pure performance

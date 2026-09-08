@@ -1,4 +1,4 @@
--- Rollback for: 20260922103000_add_ingestion_run_stats.sql
+-- Rollback for: 20260923113000_add_ingestion_run_stats.sql
 -- Apply manually against the target DB to reverse the paired migration.
 --
 -- Destructive: drops the recorded funnels. They are not recoverable from

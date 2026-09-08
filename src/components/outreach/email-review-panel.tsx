@@ -4,7 +4,10 @@ import { useEffect, useState } from "react";
 import { CalendarClock } from "lucide-react";
 
 import { OriginButton } from "@/components/ui/origin-button";
-import { ScheduleSendDialog } from "@/components/outreach/schedule-send-dialog";
+import {
+  ScheduleSendDialog,
+  formatScheduleLong,
+} from "@/components/outreach/schedule-send-dialog";
 import { SendButton } from "@/components/ui/send-button";
 import { RichTextEmailEditor } from "@/components/rich-text-email-editor";
 import { validateClientEmail } from "@/lib/client-email-validation";
@@ -87,6 +90,7 @@ export function EmailReviewPanel({
   onCommitted,
   onDraftSaved,
   clientAttachments = [],
+  initialScheduledAt = null,
 }: {
   organisationId: string;
   draft: EmailReviewDraft;
@@ -114,6 +118,18 @@ export function EmailReviewPanel({
   onCommitted?: (result: { kind: "sent" | "scheduled"; scheduledFor?: string }) => void;
   /** Saved without sending — the parent's dirty baseline should move up to here. */
   onDraftSaved?: (saved: { recipient: string; subject: string; body: string }) => void;
+  /**
+   * An instant the caller already asked to schedule for, as ISO.
+   *
+   * The inbox compose window has its own schedule dialog in front of this
+   * panel, and that time used to be discarded on arrival: the CAM picked a
+   * time, was told "Scheduled for …", and then had to find "Schedule for
+   * later" in here and pick the same time a second time. Passing it here makes
+   * the panel commit to that time instead — the primary action becomes
+   * Schedule send, behind the identical approval gate, and "Schedule for
+   * later" stays available for changing it.
+   */
+  initialScheduledAt?: string | null;
 }) {
   const [recipient, setRecipient] = useState(
     draft.savedRecipient ?? draft.recipientOnFile ?? "",
@@ -139,6 +155,11 @@ export function EmailReviewPanel({
   // F126: the schedule dialog picks the time; this only tracks whether it is
   // open, and whether a chosen time is mid-commit.
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  // The time this panel commits to when Schedule send is pressed. Seeded from
+  // the caller's own dialog; the panel's own dialog replaces it.
+  const [scheduledAt, setScheduledAt] = useState<Date | null>(
+    initialScheduledAt ? new Date(initialScheduledAt) : null,
+  );
   const [scheduling, setScheduling] = useState(false);
 
   // The parent reads this to decide whether regenerating would discard work.
@@ -232,6 +253,7 @@ export function EmailReviewPanel({
    * recipient field was filled in.
    */
   async function schedule(when: Date): Promise<boolean> {
+    setScheduledAt(when);
     setScheduling(true);
     setSendMessage(null);
     const result = await scheduleReviewedEmail({
@@ -392,13 +414,28 @@ export function EmailReviewPanel({
         {/* The one action on this screen that actually leaves the building, so
             it is the one place the paper-plane button is spent. Everything
             beside it stays an OriginButton. */}
-        <SendButton
-          disabled={cannotCommit}
-          label="Send reviewed email"
-          onClick={send}
-          pending={sending}
-          type="button"
-        />
+        {scheduledAt ? (
+          /* A time is already chosen (the inbox compose window's dialog picked
+             it, or this panel's own did), so the primary action commits THAT
+             rather than sending now — pressing "Send reviewed email" here
+             would quietly ignore the CAM's answer to "when?". */
+          <SendButton
+            disabled={cannotCommit || scheduling}
+            label={`Schedule send · ${formatScheduleLong(scheduledAt)}`}
+            onClick={() => void schedule(scheduledAt)}
+            pending={scheduling}
+            pendingLabel="Scheduling…"
+            type="button"
+          />
+        ) : (
+          <SendButton
+            disabled={cannotCommit}
+            label="Send reviewed email"
+            onClick={send}
+            pending={sending}
+            type="button"
+          />
+        )}
         {/* F120: same drafts-only reach as Save — a sent email is never
             reachable here, so there is no "discard a sent email" case to guard. */}
         <button
@@ -433,8 +470,18 @@ export function EmailReviewPanel({
           variant="outline"
         >
           <CalendarClock aria-hidden="true" className="size-4" />
-          Schedule for later
+          {scheduledAt ? "Change the time" : "Schedule for later"}
         </OriginButton>
+        {scheduledAt && (
+          <OriginButton
+            disabled={sending || scheduling}
+            onClick={() => setScheduledAt(null)}
+            type="button"
+            variant="outline"
+          >
+            Send now instead
+          </OriginButton>
+        )}
       </div>
 
       <ScheduleSendDialog

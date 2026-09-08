@@ -1,4 +1,4 @@
--- Rollback for: 20260922094000_add_charity_commission_bulk_data_source.sql
+-- Rollback for: 20260923104000_add_charity_commission_bulk_data_source.sql
 -- Apply manually against the target DB to reverse the paired migration.
 --
 -- Refuses rather than silently orphans: any raw_source_records row already

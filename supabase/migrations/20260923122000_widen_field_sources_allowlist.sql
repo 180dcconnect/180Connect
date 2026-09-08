@@ -16,7 +16,7 @@
 -- logged and 793 charities on staging got no per-field provenance at all.
 --
 -- This migration fixes the constraint. The matching list inside
--- record_field_source() is fixed in 20260922104000, which recreates that
+-- record_field_source() is fixed in 20260923114000, which recreates that
 -- function — the two must stay identical, and the function's comment says so.
 --
 -- WHY NOT DERIVE THE LIST FROM data_source_name
@@ -44,7 +44,7 @@
 --   Approved by   | Bashir (Project Leader).
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260922112000_widen_field_sources_allowlist.down.sql
+-- ../rollback/20260923122000_widen_field_sources_allowlist.down.sql
 
 alter table public.field_sources
   drop constraint if exists field_sources_source_check;

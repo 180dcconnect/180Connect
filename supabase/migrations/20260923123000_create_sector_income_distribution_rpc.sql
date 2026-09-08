@@ -63,7 +63,7 @@
 --   Approved by   | Bashir (Project Leader), 3 Sep 2026.
 --
 -- Reversibility: paired rollback in
---   ../rollback/20260922113000_create_sector_income_distribution_rpc.down.sql
+--   ../rollback/20260923123000_create_sector_income_distribution_rpc.down.sql
 
 -- Keeps the peer-set filter off a sequential scan of organisations. Partial:
 -- 71% of rows on staging have no sector at all, and none of them are ever a

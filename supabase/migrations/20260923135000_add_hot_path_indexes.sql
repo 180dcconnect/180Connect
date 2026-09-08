@@ -17,7 +17,7 @@
 --
 --    The index supplies the rows already ordered, so the sort disappears
 --    entirely. Note this is the *post-RLS-hoist* measurement (migrations
---    20260922123000/091000): before those, this sort was noise next to the
+--    20260923133000/091000): before those, this sort was noise next to the
 --    per-row security-qualifier cost, which is why it is fixed in that order.
 --
 -- 2. raw_source_records (matched_organisation_id)

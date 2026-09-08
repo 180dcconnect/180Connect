@@ -52,7 +52,7 @@
 --   Approved by   | Bashir (Project Leader).
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260922122000_retire_companies_house_discovery_cron.down.sql
+-- ../rollback/20260923132000_retire_companies_house_discovery_cron.down.sql
 
 -- `if exists`-style guard: unschedule throws if the job is already gone, which
 -- would fail a replay of this migration against a database that never had it.

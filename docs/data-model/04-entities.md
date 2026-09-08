@@ -391,3 +391,17 @@
 | created_by_user_id | uuid | USERS | Yes | User who created the preset | System | auth.uid() at save time | FK → users.id, ON DELETE SET NULL |
 | created_at | timestamptz |  | No | Row creation timestamp | System | Auto-generated (now()) | now() |
 | updated_at | timestamptz |  | No | Last updated timestamp | System | Auto-updated on change (now()) | now() |
+
+## INBOX_THREAD_STATE
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated gen_random_uuid() | PK, gen_random_uuid() |
+| user_id | uuid | USERS | No | Whose view of the mailbox this is | System | From the session | on delete cascade. unique (user_id, organisation_id) |
+| organisation_id | uuid | ORGANISATIONS | No | The thread this state belongs to | System | From the opened thread | A thread is one organisation — OUTREACH_MESSAGES has no gmail_thread_id. on delete cascade. unique (user_id, organisation_id) |
+| is_starred | boolean |  | No | Whether this viewer starred the thread | User | Star control in the mailbox | Default false |
+| read_state | enum |  | Yes | Override of the server-derived read flag | User | Mark read / unread | read \| unread. NULL = no override, use the server's derivation |
+| is_trashed | boolean |  | No | Whether this viewer moved the thread to trash | User | Delete control | Default false. Capped at 200 per user. check that trashed_at is non-null exactly when is_trashed |
+| trashed_at | timestamptz |  | Yes | When it was trashed | System | Set by trigger, never by the client | Orders both the cap and the 30-day purge. check that trashed_at is non-null exactly when is_trashed |
+| created_at | timestamptz |  | No | Row creation timestamp | System | Default now() | now() |
+| updated_at | timestamptz |  | No | Last updated timestamp | System | set_updated_at() trigger | now() |

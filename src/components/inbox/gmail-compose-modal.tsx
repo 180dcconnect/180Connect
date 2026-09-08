@@ -9,7 +9,6 @@ import {
   Minimize2,
   PenLine,
   Trash2,
-  Sparkles,
   Loader2,
   Check,
   BookOpen,
@@ -22,7 +21,16 @@ import {
   type LucideIcon,
   CalendarClock,
   UserPlus,
+  Paperclip,
+  MoreVertical,
+  SpellCheck2,
+  FileText,
+  Tag,
 } from "lucide-react";
+import { LoaderPinwheel } from "@/components/animate-ui/icons/loader-pinwheel";
+import { AiThinkingState } from "@/components/ui/ai-thinking-state";
+import { StreamingDraftText } from "@/components/ui/streaming-draft-text";
+import { useStageOneDraftStream } from "@/components/outreach/use-stage-one-draft-stream";
 import { GooeyEmailInput } from "@/components/ui/gooey-email-input";
 import { SendButton } from "@/components/ui/send-button";
 import {
@@ -32,25 +40,37 @@ import {
 } from "@/components/animate-ui/components/radix/tooltip";
 import { EASE, stagger } from "@/components/brand/motion";
 import { LIP } from "@/components/brand/tokens";
+import type { AddressableClient } from "@/lib/inbox/real-threads";
+import type { InboxThreadTag } from "@/lib/inbox-thread-view";
+import { mockFillThreads } from "@/lib/inbox-mock-data";
+import { attachDraftFile } from "@/app/clients/[id]/outreach-actions";
 import {
-  type InboxThreadView,
-} from "@/lib/inbox-thread-view";
+  assignTagsBatchAction,
+  createAndAssignTagAction,
+} from "@/lib/tags/tag-actions";
+import { createClient as createBrowserSupabase } from "@/lib/supabase/browser";
 import {
-  mockFillThreads,
-  getMockBooklet,
-  getMockContacts,
+  ALLOWED_ATTACHMENT_MIME_TYPES,
+  attachmentUploadFailureMessage,
+  buildAttachmentStoragePath,
+  formatFileSize,
+  validateAttachmentFile,
+  validateDraftAttachmentSet,
+} from "@/lib/attachments";
+import {
+  fillAsAddressableClients,
+  resolveRecipientThread,
   searchRecipients,
   type RecipientMatch,
-} from "@/lib/inbox-mock-data";
+} from "@/lib/inbox/recipients";
 import {
   EMAIL_LENGTHS,
-  EMAIL_TONES,
-  EMAIL_VOICES,
+  EMAIL_REGISTER_LABELS,
+  EMAIL_REGISTERS,
   OPENING_APPROACHES,
   CLOSING_APPROACHES,
   type EmailLength,
-  type EmailTone,
-  type EmailVoice,
+  type EmailRegister,
   type OpeningApproach,
   type ClosingApproach,
 } from "@/lib/outreach/stage-one-prompt";
@@ -60,6 +80,12 @@ import {
   type EmailReviewDraft,
 } from "@/components/outreach/email-review-panel";
 import { composeBodyToHtml } from "@/lib/outreach/compose-body-html";
+import {
+  formatScheduleLong,
+  formatScheduleTime,
+  scheduleSuggestions,
+  toLocalInputValue,
+} from "@/components/outreach/schedule-send-dialog";
 
 export type GmailComposeModalProps = {
   isOpen: boolean;
@@ -74,34 +100,40 @@ export type GmailComposeModalProps = {
   initialRecipient?: string;
   initialSubject?: string;
   /**
-   * The clients this window may actually send to: the *real* threads the
-   * inbox built from Supabase, never the design fill. `InboxThreadView.id` is
-   * an organisation id (see @/lib/inbox/real-threads), which is what makes a
-   * picked recipient addressable by the approved send path.
+   * The clients this window may actually send to: every organisation the
+   * viewer can see that has an address on it, built from Supabase — never the
+   * design fill. `AddressableClient.id` is an organisation id (see
+   * @/lib/inbox/real-threads), which is what makes a picked recipient
+   * addressable by the approved send path.
    *
-   * Recipient lookup runs against this list alone when it has entries, so
-   * what can be picked is exactly what can be sent to. With no directory —
-   * a database that has no outreach on it yet — the window falls back to
-   * searching the design fill and Send stays disabled, because a mock
-   * recipient resolves to no organisation and the send would write nothing.
+   * NOT the inbox's thread list. That list holds only organisations with
+   * outreach history, so passing it here meant the only clients Compose could
+   * find were ones already emailed — the first email to a client could not be
+   * started from the inbox at all.
+   *
+   * Recipient lookup runs against this list alone when it has entries, so what
+   * can be picked is exactly what can be sent to. With no directory — an empty
+   * database — the window falls back to searching the design fill and Send
+   * stays disabled, because a fill recipient resolves to no organisation and
+   * the send would write nothing.
    */
-  directory?: InboxThreadView[];
+  directory?: AddressableClient[];
+  /**
+   * Every tag (TAGS) the mailbox knows about, for the "Add label" control —
+   * labels in this app ARE tags (F188-F194), the same ones the client record
+   * manages. Empty disables the control.
+   */
+  tags?: InboxThreadTag[];
+  /**
+   * organisation_id → the tags currently on that organisation, so the picker
+   * can mark them "On record" rather than offering to add them again. Built
+   * from the loaded threads; a client with no thread simply resolves to none.
+   */
+  assignedTagsByClientId?: ReadonlyMap<string, readonly InboxThreadTag[]>;
 };
 
 /** Which context sheet is covering the draft, if any. */
 type ContextPanel = "booklet" | "profile" | null;
-
-const AI_DRAFT_BODY = `Dear Partner,
-
-I hope this email finds you well.
-
-I am writing from 180 Degrees Consulting regarding our upcoming semester pro-bono consulting projects. Our team provides end-to-end strategic consulting across operational scaling, fundraising analytics, and volunteer coordination at zero cost to registered charities.
-
-Would you have 15 minutes next week for a brief introductory call to discuss your current strategic priorities?
-
-Warm regards,
-Ada Lovelace
-Client Account Manager | 180 Degrees Consulting`;
 
 /** The things the AI needs to write the email — the same five dials the client
     record's outreach tab offers for its Stage 1 email, plus the booklet and
@@ -109,8 +141,7 @@ Client Account Manager | 180 Degrees Consulting`;
     Kept as one record so a selection is never left half-updated. */
 type AiOptions = {
   length: EmailLength;
-  tone: EmailTone;
-  voice: EmailVoice;
+  register: EmailRegister;
   opening: OpeningApproach;
   closing: ClosingApproach;
 };
@@ -272,11 +303,14 @@ function AiContextPage({
   onOpenBooklet,
   onOpenProfile,
   onBack,
+  onAddRecipient,
 }: {
   hasClient: boolean;
   onOpenBooklet: () => void;
   onOpenProfile: () => void;
   onBack: () => void;
+  /** No client yet: takes the CAM to the To field to pick one. */
+  onAddRecipient: () => void;
 }) {
   return (
     <motion.div
@@ -344,9 +378,19 @@ function AiContextPage({
           <motion.li
             variants={AI_ROW}
             role="status"
-            className="px-3 py-2 font-body text-[15px] text-slate-500"
+            className="flex flex-col items-start gap-2 px-3 py-2"
           >
-            Save a recipient above to unlock their booklet and profile.
+            <button
+              type="button"
+              onClick={onAddRecipient}
+              className="font-body flex cursor-pointer items-center gap-1.5 rounded-full bg-lead px-4 py-2 text-[13px] font-semibold text-white shadow-xs transition-colors hover:bg-[#1b3160] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime-600"
+            >
+              <UserPlus className="h-3.5 w-3.5" />
+              Add recipient
+            </button>
+            <span className="font-body text-[15px] text-slate-500">
+              Save a recipient above to unlock their booklet and profile.
+            </span>
           </motion.li>
         )}
       </motion.ul>
@@ -357,8 +401,7 @@ function AiContextPage({
 
 const DEFAULT_AI_OPTIONS: AiOptions = {
   length: "standard",
-  tone: "balanced",
-  voice: "180dc",
+  register: "professional",
   opening: "mission_led",
   closing: "soft_cta",
 };
@@ -385,77 +428,27 @@ const CLOSING_APPROACH_LABELS: Record<ClosingApproach, string> = {
     out so the pill is back in one piece before it turns navy. */
 const GOOEY_MERGE_MS = 960;
 
-/** The three presets Gmail offers before "Pick date & time": the next two
-    slots tomorrow, then the following Monday morning. */
-function scheduleSuggestions(now: Date = new Date()): Array<{
-  id: string;
-  label: string;
-  when: Date;
-}> {
-  const at = (daysAhead: number, hour: number) => {
-    const date = new Date(now);
-    date.setDate(date.getDate() + daysAhead);
-    date.setHours(hour, 0, 0, 0);
-    return date;
-  };
+/* The schedule presets, the two time formats and the `datetime-local` value
+   helper used to be copied out here, beside identical copies in
+   schedule-send-dialog.tsx — which is where they were lifted from when the
+   client record grew the same dialog. Four duplicated pure functions is four
+   places for the presets to drift apart, so this window imports them (see the
+   top of this file) rather than keeping its own. The one behavioural
+   difference the copy had was a bug: it offered "Monday morning" even on a
+   Sunday, when that is the same instant as "Tomorrow morning". */
 
-  // Days until the next Monday that is not today.
-  const toMonday = ((8 - now.getDay()) % 7) || 7;
 
-  return [
-    { id: "tomorrow-am", label: "Tomorrow morning", when: at(1, 8) },
-    { id: "tomorrow-pm", label: "Tomorrow afternoon", when: at(1, 13) },
-    { id: "monday-am", label: "Monday morning", when: at(toMonday, 8) },
-  ];
-}
-
-function formatScheduleTime(date: Date): string {
-  return date.toLocaleString("en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-/** Spelled-out form for the confirmation step: "Friday, 6 September at 09:00". */
-function formatScheduleLong(date: Date): string {
-  const day = date.toLocaleDateString("en-GB", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
-  const time = date.toLocaleTimeString("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-  return `${day} at ${time}`;
-}
-
-/** `datetime-local` wants wall-clock text, not an ISO instant. */
-function toLocalInputValue(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-/** The organisation behind an address — any of its contacts, not just the
-    primary, since a company carries several (CONTACTS is one-to-many). */
-function resolveThread(
-  email: string,
-  threads: InboxThreadView[] = mockFillThreads(),
-): InboxThreadView | null {
-  const needle = email.trim().toLowerCase();
-  if (!needle) return null;
-  return (
-    threads.find((thread) =>
-      getMockContacts(thread).some((contact) => contact.email.toLowerCase() === needle),
-    ) ?? null
-  );
-}
 
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** The half of `client_booklets` the booklet sheet renders. */
+type SavedBookletView = {
+  id: string;
+  text: string;
+  websiteUrl: string | null;
+  generatedAt: string;
+};
 
 function contactDisplayName(match: RecipientMatch): string {
   const name = `${match.contact.firstName} ${match.contact.lastName}`.trim();
@@ -563,6 +556,8 @@ export function GmailComposeModal({
   initialRecipient = "",
   initialSubject = "",
   directory,
+  tags,
+  assignedTagsByClientId,
 }: GmailComposeModalProps) {
   // The recipient is only ever the *saved* address — the in-flight text lives
   // inside the gooey capsule until its droplet commits it.
@@ -573,10 +568,6 @@ export function GmailComposeModal({
   const [isRecipientFocused, setIsRecipientFocused] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(0);
   const [showSavedFlash, setShowSavedFlash] = useState(false);
-  // A well-formed address that no client owns: the panel below offers to pull
-  // them into the database. This flag flips the panel to its confirmed state
-  // for a beat before the address is saved as the recipient.
-  const [justAddedContact, setJustAddedContact] = useState(false);
   const [subject, setSubject] = useState(initialSubject);
   const [body, setBody] = useState("");
   const [isMinimized, setIsMinimized] = useState(false);
@@ -600,6 +591,21 @@ export function GmailComposeModal({
   // for the outreach tab's Stage 1 settings; writing by hand is the explicit
   // "Draft manually" escape from that picker.
   const [aiOptions, setAiOptions] = useState<AiOptions>(DEFAULT_AI_OPTIONS);
+  // The saved booklet for the resolved client, read from client_booklets.
+  // `failed` is kept apart from "none saved": one is worth retrying, the other
+  // is a fact about the client.
+  // The outreach_messages row Stage 1 generation created, if the CAM used it.
+  // Send reuses this row rather than asking for a second blank one.
+  const [generatedDraft, setGeneratedDraft] = useState<
+    { id: string; recipientOnFile: string | null } | null
+  >(null);
+  // The last booklet read, tagged with the client it belongs to — see the
+  // derivation below the fetch.
+  const [bookletResult, setBookletResult] = useState<{
+    clientId: string;
+    booklet: SavedBookletView | null;
+    failed: boolean;
+  } | null>(null);
   const [isWritingManually, setIsWritingManually] = useState(false);
   // True while the AI options menu is being shown on request, even if a draft
   // already exists — any "use AI" affordance opens the menu first; it never
@@ -618,12 +624,60 @@ export function GmailComposeModal({
   // the window closes. `pendingWhen` carries the picked time across the steps.
   const [scheduleStep, setScheduleStep] = useState<"pick" | "confirm" | "done">("pick");
   const [pendingWhen, setPendingWhen] = useState<Date | null>(null);
+  /** The time this draft is destined for, carried into the review panel. The
+      panel commits it — this window never schedules anything itself. */
+  const [pendingScheduleIso, setPendingScheduleIso] = useState<string | null>(null);
   const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
+  // Files chosen in this window but not yet anywhere: they are uploaded to the
+  // client's attachment store and linked to the draft only once Send has
+  // created that draft (see handleSend). Held as raw File objects until then.
+  const [stagedFiles, setStagedFiles] = useState<File[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  // Gmail keeps spell-check on by default; the ⋮ menu lets a CAM turn the
+  // squiggles off for a draft full of names and acronyms.
+  const [spellCheckOn, setSpellCheckOn] = useState(true);
+  const [isKebabOpen, setIsKebabOpen] = useState(false);
+  const [isLabelPickerOpen, setIsLabelPickerOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const savedTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   // Live draft state for the X / Escape handler, which is registered once per
   // open: kept on a ref so a keystroke doesn't tear down and re-add the window
   // listener, but closing still asks whenever anything is on the page.
   const hasDraftContentRef = useRef(false);
+  // Handle to the To field, so the Email-context panel's "Add recipient"
+  // button can put the caret there without the panel knowing the field.
+  const recipientInputRef = useRef<HTMLInputElement>(null);
+  // Each AI button spins only its own pinwheel while hovered — one shared
+  // flag had every AI icon on the dialog spinning together.
+  const [draftPillHover, setDraftPillHover] = useState(false);
+  const [generateHover, setGenerateHover] = useState(false);
+  const [aiToolbarHover, setAiToolbarHover] = useState(false);
+  // Token stream for the draft: thinking steps and live text while it flows,
+  // resolving like the old JSON POST so handleAiDraft's flow is unchanged.
+  const draftStream = useStageOneDraftStream();
+  // A finished draft waits here while its reveal plays out. The editor takes
+  // it in commitStagedDraft, once the last word has resolved.
+  const [stagedGenerated, setStagedGenerated] = useState<{
+    id: string;
+    subject: string;
+    body: string;
+    recipientOnFile: string | null;
+  } | null>(null);
+
+  function commitStagedGenerated() {
+    if (!stagedGenerated) return;
+    setGeneratedDraft({
+      id: stagedGenerated.id,
+      recipientOnFile: stagedGenerated.recipientOnFile,
+    });
+    if (stagedGenerated.subject) {
+      setSubject(stagedGenerated.subject);
+      setErrors((prev) => ({ ...prev, subject: undefined }));
+    }
+    if (stagedGenerated.body) setBody(stagedGenerated.body);
+    setStagedGenerated(null);
+    setIsAiGenerating(false);
+  }
 
   // The client behind the recipient. Until an address is saved there is no
   // record to show, so the context buttons have nothing to open.
@@ -633,21 +687,94 @@ export function GmailComposeModal({
     () => (directory && directory.length > 0 ? directory : null),
     [directory],
   );
+  // Only built when there is no real directory to search.
+  const fillDirectory = useMemo(
+    () => (addressable ? [] : fillAsAddressableClients(mockFillThreads())),
+    [addressable],
+  );
   const client = useMemo(
-    () => resolveThread(savedTo ?? "", addressable ?? mockFillThreads()),
-    [savedTo, addressable],
+    () => resolveRecipientThread(savedTo ?? "", addressable ?? fillDirectory),
+    [savedTo, addressable, fillDirectory],
   );
   /** The client this draft can actually be sent to — null for a fill match. */
   const sendableClient = addressable ? client : null;
-  const booklet = useMemo(() => (client ? getMockBooklet(client) : null), [client]);
+
+  // "Add label" = assign a tag to this client. The menu shows the client's
+  // current tags apart from the rest. Locally-added assignments (made in this
+  // window) are merged so a just-added label leaves the "assignable" list at
+  // once, without waiting for the page to re-fetch.
+  const [locallyAssignedTags, setLocallyAssignedTags] = useState<InboxThreadTag[]>(
+    [],
+  );
+  const assignedTags = useMemo<InboxThreadTag[]>(() => {
+    if (!sendableClient) return [];
+    const fromServer = assignedTagsByClientId?.get(sendableClient.id) ?? [];
+    const byId = new Map<string, InboxThreadTag>();
+    for (const tag of [...fromServer, ...locallyAssignedTags]) byId.set(tag.id, tag);
+    return [...byId.values()];
+  }, [sendableClient, assignedTagsByClientId, locallyAssignedTags]);
+  const assignableTags = useMemo<InboxThreadTag[]>(() => {
+    const assignedIds = new Set(assignedTags.map((tag) => tag.id));
+    return (tags ?? []).filter((tag) => !assignedIds.has(tag.id));
+  }, [tags, assignedTags]);
   const suggestions = useMemo(
     () => (isScheduleDialogOpen ? scheduleSuggestions() : []),
     [isScheduleDialogOpen],
   );
   const matches = useMemo(
-    () => searchRecipients(recipientQuery, 6, addressable ?? mockFillThreads()),
-    [recipientQuery, addressable],
+    () => searchRecipients(recipientQuery, 6, addressable ?? fillDirectory),
+    [recipientQuery, addressable, fillDirectory],
   );
+
+  /**
+   * The client's saved booklet (F085/F086), fetched when the sheet is opened
+   * for a real client.
+   *
+   * This used to render `getMockBooklet(client)` — invented prose about the
+   * organisation's headcount, income mix and "openers that have worked",
+   * generated from the thread's own fields. On the design fill that was
+   * harmless set dressing; on a real charity it was fiction presented to a CAM
+   * as research, for an organisation they were about to email. So there is now
+   * only one source: `client_booklets`, through the same RLS-scoped read the
+   * client record uses. No saved booklet means the sheet says so.
+   */
+  const clientId = sendableClient?.id ?? null;
+  useEffect(() => {
+    if (!clientId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/clients/${clientId}/booklet`);
+        if (cancelled) return;
+        if (!response.ok) {
+          setBookletResult({ clientId, booklet: null, failed: true });
+          return;
+        }
+        const payload = (await response.json()) as { booklet: SavedBookletView | null };
+        if (cancelled) return;
+        setBookletResult({ clientId, booklet: payload.booklet ?? null, failed: false });
+      } catch {
+        if (!cancelled) setBookletResult({ clientId, booklet: null, failed: true });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
+
+  /* Derived, not stored: a result that belongs to a different client is a
+     result for a recipient the CAM has since changed, so it reads as loading
+     rather than briefly showing the previous client's booklet. Deriving it
+     also keeps the effect above free of any synchronous setState, which the
+     React Compiler rejects as a cascading render. */
+  const booklet = bookletResult?.clientId === clientId ? bookletResult.booklet : null;
+  const bookletState: "idle" | "loading" | "loaded" | "failed" = !clientId
+    ? "idle"
+    : bookletResult?.clientId !== clientId
+      ? "loading"
+      : bookletResult.failed
+        ? "failed"
+        : "loaded";
   // The list is a lookup, not an autocomplete of itself: once what is typed is
   // already a whole address there is nothing left to pick.
   const showMatches =
@@ -687,7 +814,9 @@ export function GmailComposeModal({
   const cannotSend = sendBlockedReason !== null || reviewDraft !== null;
 
   // A recipient, subject or body counts as a draft worth asking about.
-  hasDraftContentRef.current = Boolean(savedTo || subject.trim() || body.trim());
+  hasDraftContentRef.current = Boolean(
+    savedTo || subject.trim() || body.trim() || stagedFiles.length > 0,
+  );
 
   // Escape backs out of a context sheet first, and only then closes the draft.
   useEffect(() => {
@@ -725,9 +854,11 @@ export function GmailComposeModal({
   function resetDraft() {
     setSavedTo(null);
     setReviewDraft(null);
+    setGeneratedDraft(null);
+    setPendingScheduleIso(null);
+    setBookletResult(null);
     setSendError(null);
     setShowSavedFlash(false);
-    setJustAddedContact(false);
     setSubject("");
     setBody("");
     setAiOptions(DEFAULT_AI_OPTIONS);
@@ -742,6 +873,115 @@ export function GmailComposeModal({
     setCustomWhen(null);
     setScheduleStep("pick");
     setPendingWhen(null);
+    setStagedFiles([]);
+    setAttachError(null);
+    setIsKebabOpen(false);
+    setIsLabelPickerOpen(false);
+    setLocallyAssignedTags([]);
+    setSpellCheckOn(true);
+  }
+
+  /** Adds picked files to the staging list, refusing any the client-side
+      checks reject — the same size/type gate the client record's picker uses
+      (validateAttachmentFile) plus the running combined-size cap. The real
+      enforcement is still the bucket + attach_file_to_draft; this only keeps
+      an obviously-bad file from being carried all the way to Send. */
+  function stageFiles(picked: FileList | null) {
+    if (!picked || picked.length === 0) return;
+    setAttachError(null);
+    let runningCount = stagedFiles.length;
+    let runningBytes = stagedFiles.reduce((sum, file) => sum + file.size, 0);
+    const accepted: File[] = [];
+    for (const file of Array.from(picked)) {
+      const fileError = validateAttachmentFile(file);
+      if (fileError) {
+        setAttachError(fileError);
+        continue;
+      }
+      const setError = validateDraftAttachmentSet(
+        { count: runningCount, totalSizeBytes: runningBytes },
+        { sizeBytes: file.size },
+      );
+      if (setError) {
+        setAttachError(setError);
+        continue;
+      }
+      accepted.push(file);
+      runningCount += 1;
+      runningBytes += file.size;
+    }
+    if (accepted.length > 0) setStagedFiles((prev) => [...prev, ...accepted]);
+  }
+
+  function removeStagedFile(index: number) {
+    setStagedFiles((prev) => prev.filter((_, position) => position !== index));
+    setAttachError(null);
+  }
+
+  /**
+   * Uploads every staged file to the client's attachment store and links it to
+   * the just-created draft. Returns an error string to abort the send, or null
+   * on success. Called from handleSend once a draft id exists — there is
+   * nothing to attach a file to before then.
+   */
+  async function uploadStagedFiles(
+    organisationId: string,
+    draftId: string,
+  ): Promise<string | null> {
+    if (stagedFiles.length === 0) return null;
+    const supabase = createBrowserSupabase();
+    // Work off a local queue and drop each file from the staging list the
+    // moment it is safely on the draft. A retry after a mid-way failure then
+    // only re-processes what is left — the ones already uploaded are not
+    // uploaded again.
+    const queue = [...stagedFiles];
+    while (queue.length > 0) {
+      const file = queue[0];
+      const storagePath = buildAttachmentStoragePath(
+        organisationId,
+        file.name,
+        crypto.randomUUID(),
+      );
+      const { error: uploadError } = await supabase.storage
+        .from("client-attachments")
+        .upload(storagePath, file, { contentType: file.type || undefined });
+      if (uploadError) {
+        return attachmentUploadFailureMessage(uploadError);
+      }
+
+      const recordResponse = await fetch(
+        `/api/clients/${organisationId}/attachments`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: file.name,
+            storagePath,
+            contentType: file.type || undefined,
+            sizeBytes: file.size,
+          }),
+        },
+      );
+      const recordBody = (await recordResponse.json().catch(() => null)) as
+        | { id?: string; error?: string }
+        | null;
+      if (!recordResponse.ok || !recordBody?.id) {
+        return recordBody?.error ?? `“${file.name}” could not be attached.`;
+      }
+
+      const attachResult = await attachDraftFile({
+        organisationId,
+        messageId: draftId,
+        attachmentId: recordBody.id,
+      });
+      if (!attachResult.ok) {
+        return attachResult.message;
+      }
+
+      queue.shift();
+      setStagedFiles((prev) => prev.filter((staged) => staged !== file));
+    }
+    return null;
   }
 
   /** Closes the schedule dialog and rewinds it to its first step, so it never
@@ -777,7 +1017,7 @@ export function GmailComposeModal({
     if (!pendingWhen) return;
     setScheduleStep("done");
     savedTimers.current.push(
-      setTimeout(() => handleSend(pendingWhen.toISOString()), 1200),
+      setTimeout(() => void handleSend(pendingWhen.toISOString()), 1200),
     );
   }
 
@@ -820,20 +1060,6 @@ export function GmailComposeModal({
     );
   }
 
-  /** "Add to database" on the no-match panel: show the confirmed state for a
-      beat, then commit the typed address as the recipient. Mock-only here — no
-      contact row is actually written. */
-  function handleAddToDatabase() {
-    const email = recipientQuery.trim();
-    setJustAddedContact(true);
-    savedTimers.current.push(
-      setTimeout(() => {
-        setJustAddedContact(false);
-        handleSaveRecipient(email);
-      }, 900),
-    );
-  }
-
   /**
    * Hands the composed draft to the shared review panel.
    *
@@ -855,8 +1081,7 @@ export function GmailComposeModal({
    * A scheduled send arrives here the same way: the time is carried into the
    * panel's own schedule control rather than sent from this window.
    */
-  async function handleSend(_scheduledFor?: string) {
-    void _scheduledFor;
+  async function handleSend(scheduledFor?: string) {
     const recipient = savedTo ?? "";
     const nextErrors: { to?: string; subject?: string } = {};
     if (!recipient.trim()) nextErrors.to = "Save a recipient first.";
@@ -872,59 +1097,131 @@ export function GmailComposeModal({
     setIsScheduleMenuOpen(false);
     setSendError(null);
     setIsSending(true);
+    // Carried into the review panel, which is where a schedule is actually
+    // committed. Set before the await so the panel mounts already knowing.
+    setPendingScheduleIso(scheduledFor ?? null);
 
     try {
-      const response = await fetch(
-        `/api/clients/${sendableClient.id}/outreach-drafts/blank`,
-        { method: "POST" },
-      );
-      const draft = (await response.json().catch(() => null)) as
-        | { id?: string; recipientOnFile?: string | null; error?: string }
-        | null;
-      if (!response.ok || !draft?.id) {
-        // Shown verbatim: these messages name the owner, the suppression
-        // reason or the permission that is missing, and each asks the CAM for
-        // something different.
-        setSendError(
-          draft?.error ?? "The email could not be prepared. Nothing was sent.",
+      // A draft generated in this window already IS an outreach_messages row;
+      // asking for a blank one would strand it and review the wrong record.
+      let draftId = generatedDraft?.id ?? null;
+      let recipientOnFile = generatedDraft?.recipientOnFile ?? null;
+
+      if (!draftId) {
+        const response = await fetch(
+          `/api/clients/${sendableClient.id}/outreach-drafts/blank`,
+          { method: "POST" },
         );
+        const draft = (await response.json().catch(() => null)) as
+          | { id?: string; recipientOnFile?: string | null; error?: string }
+          | null;
+        if (!response.ok || !draft?.id) {
+          // Shown verbatim: these messages name the owner, the suppression
+          // reason or the permission that is missing, and each asks the CAM for
+          // something different.
+          setSendError(
+            draft?.error ?? "The email could not be prepared. Nothing was sent.",
+          );
+          setPendingScheduleIso(null);
+          return;
+        }
+        draftId = draft.id;
+        recipientOnFile = draft.recipientOnFile ?? null;
+      }
+
+      // Staged files become real only now, once there is a draft to hang them
+      // on. A failure here stops before the review panel: the draft exists but
+      // is unsent, and the CAM is told which file did not make it.
+      const attachFailure = await uploadStagedFiles(sendableClient.id, draftId);
+      if (attachFailure) {
+        setSendError(attachFailure);
+        setPendingScheduleIso(null);
+        setGeneratedDraft({ id: draftId, recipientOnFile });
         return;
       }
 
       setReviewDraft({
-        id: draft.id,
+        id: draftId,
         subject,
         body: composeBodyToHtml(body),
-        recipientOnFile: draft.recipientOnFile ?? null,
+        recipientOnFile,
         savedRecipient: recipient,
       });
     } catch {
       setSendError(
         "The network dropped before the draft was created. Nothing was sent.",
       );
+      setPendingScheduleIso(null);
     } finally {
       setIsSending(false);
     }
   }
 
-  function handleAiDraft() {
+  /**
+   * Generates the Stage 1 draft — the real one.
+   *
+   * This used to be a 900ms `setTimeout` that pasted a constant
+   * (`AI_DRAFT_BODY`) into the body with the recipient's first name swapped
+   * into the greeting. Every dial in the settings menu above was decorative:
+   * length, register, opening and closing changed nothing about the text that
+   * appeared. It now posts them to `/outreach-drafts/stage-one`, the same
+   * route the client record's Introductory email card calls, so the draft is
+   * generated from the client's own saved booklet and profile under the same
+   * rate limit, the same suppression and ownership checks, and the same F112
+   * audit row.
+   *
+   * The route CREATES an outreach_messages row and returns its id, so that id
+   * is kept: `handleSend` reuses it rather than posting for a second blank
+   * draft, and passing it back as `draftId` makes a second click a
+   * regeneration of the same row (F111 AC2) instead of a pile of orphans.
+   */
+  async function handleAiDraft() {
+    if (!sendableClient) {
+      setSendError(
+        "Pick a client from the database first — the draft is generated from their booklet and profile.",
+      );
+      return;
+    }
     setIsAiGenerating(true);
+    setSendError(null);
     // A generated draft returns to the review editor — the menu was only
     // needed to pick the settings.
     setShowAiOptions(false);
-    savedTimers.current.push(
-      setTimeout(() => {
-        // Personalise the greeting when the recipient resolves to a client;
-        // without one the draft falls back to the generic partner opening.
-        const first = client?.primaryContact.name.trim().split(/\s+/)[0];
-        setBody(first ? AI_DRAFT_BODY.replace("Dear Partner,", `Dear ${first},`) : AI_DRAFT_BODY);
-        if (!subject) {
-          setSubject("Pro-Bono Strategic Consulting Support — 180 Degrees Consulting");
-          setErrors((prev) => ({ ...prev, subject: undefined }));
+    try {
+      const outcome = await draftStream.start({
+        organisationId: sendableClient.id,
+        ...(generatedDraft ? { draftId: generatedDraft.id } : {}),
+        length: aiOptions.length,
+        register: aiOptions.register,
+        opening: aiOptions.opening,
+        closing: aiOptions.closing,
+      });
+      if (!outcome.ok) {
+        if (outcome.error === "cancelled") {
+          setIsAiGenerating(false);
+          return;
         }
+        // A 409 means the row this window was tracking is no longer a draft
+        // (sent or removed elsewhere) — drop it so a retry starts a fresh one
+        // rather than regenerating something that cannot be regenerated.
+        if (outcome.status === 409) setGeneratedDraft(null);
+        setSendError(outcome.error);
         setIsAiGenerating(false);
-      }, 900),
-    );
+        return;
+      }
+      // The editor takes this in commitStagedGenerated, after the reveal below
+      // has played out — handing over mid-reveal would cut the text off.
+      const payload = outcome.result;
+      setStagedGenerated({
+        id: payload.id,
+        subject: payload.subject,
+        body: payload.body,
+        recipientOnFile: payload.recipientOnFile ?? null,
+      });
+    } catch {
+      setSendError("Could not reach the server. The draft was not generated.");
+      setIsAiGenerating(false);
+    }
   }
 
   // The five settings as drill data + typed setters. The open page (activeDrill)
@@ -938,18 +1235,11 @@ export function GmailComposeModal({
       onSelect: (value) => setAiOptions((prev) => ({ ...prev, length: value as EmailLength })),
     },
     {
-      key: "tone",
-      title: "Email tone",
-      options: EMAIL_TONES.map((value) => ({ value, label: EMAIL_TONE_LABELS[value] })),
-      selected: aiOptions.tone,
-      onSelect: (value) => setAiOptions((prev) => ({ ...prev, tone: value as EmailTone })),
-    },
-    {
-      key: "voice",
-      title: "Email voice",
-      options: EMAIL_VOICES.map((value) => ({ value, label: EMAIL_VOICE_LABELS[value] })),
-      selected: aiOptions.voice,
-      onSelect: (value) => setAiOptions((prev) => ({ ...prev, voice: value as EmailVoice })),
+      key: "register",
+      title: "Email register",
+      options: EMAIL_REGISTERS.map((value) => ({ value, label: EMAIL_REGISTER_LABELS[value] })),
+      selected: aiOptions.register,
+      onSelect: (value) => setAiOptions((prev) => ({ ...prev, register: value as EmailRegister })),
     },
     {
       key: "opening",
@@ -980,8 +1270,7 @@ export function GmailComposeModal({
     chipClassName?: string;
   }> = [
     { key: "length", label: "Email length", chip: EMAIL_LENGTH_LABELS[aiOptions.length] },
-    { key: "tone", label: "Email tone", chip: EMAIL_TONE_LABELS[aiOptions.tone] },
-    { key: "voice", label: "Email voice", chip: EMAIL_VOICE_LABELS[aiOptions.voice] },
+    { key: "register", label: "Email register", chip: EMAIL_REGISTER_LABELS[aiOptions.register] },
     { key: "opening", label: "Opening approach", chip: OPENING_APPROACH_LABELS[aiOptions.opening] },
     { key: "closing", label: "Closing approach", chip: CLOSING_APPROACH_LABELS[aiOptions.closing] },
     {
@@ -1137,6 +1426,7 @@ export function GmailComposeModal({
                     duration={960}
                     fieldWidth={300}
                     inputType="text"
+                    inputRef={recipientInputRef}
                     value={recipientQuery}
                     onValueChange={(next) => {
                       setRecipientQuery(next);
@@ -1153,7 +1443,7 @@ export function GmailComposeModal({
                     validate={(candidate) => {
                       const value = candidate.trim();
                       if (EMAIL_PATTERN.test(value)) return null;
-                      if (searchRecipients(value, 1, addressable ?? mockFillThreads()).length > 0) return null;
+                      if (searchRecipients(value, 1, addressable ?? fillDirectory).length > 0) return null;
                       return "No client matches that — type a full email address.";
                     }}
                     onSubmit={(value) => {
@@ -1162,7 +1452,7 @@ export function GmailComposeModal({
                         handleSaveRecipient(typed);
                         return;
                       }
-                      const best = searchRecipients(typed, 1, addressable ?? mockFillThreads())[0];
+                      const best = searchRecipients(typed, 1, addressable ?? fillDirectory)[0];
                       if (best) handleSaveRecipient(best.contact.email);
                     }}
                   />
@@ -1246,33 +1536,28 @@ export function GmailComposeModal({
                         transition={{ duration: 0.16, ease: "easeOut" }}
                         className="absolute left-3 top-full z-40 w-[340px] rounded-lg border border-slate-900/10 bg-white p-3.5 shadow-[0_18px_40px_-18px_rgba(15,23,42,0.4)]"
                       >
-                        {justAddedContact ? (
-                          <span className="flex items-center gap-2 text-[13px] font-medium text-emerald-600">
-                            <Check className="h-4 w-4 shrink-0" />
-                            Added to your database
+                        {/* This panel used to offer an "Add to database"
+                            button that wrote nothing: it showed "Added to your
+                            database" for 900ms and then set the typed string
+                            as the recipient, leaving a CAM believing a contact
+                            row existed when none did. Creating a contact is a
+                            real operation with real rules — dedup against the
+                            organisation, `is_primary` handling, and F247's ban
+                            on storing personal addresses — none of which a
+                            compose window can decide. So it says what is true
+                            and points at the screen that can do it. */}
+                        <span className="flex items-start gap-2">
+                          <UserPlus className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                          <span className="font-body text-[12px] leading-snug text-slate-600">
+                            <span className="font-semibold text-slate-900">
+                              {recipientQuery.trim()}
+                            </span>{" "}
+                            isn&rsquo;t on any client record you can reach, so there is
+                            nothing to send this against. Add them as a contact on the
+                            client&rsquo;s record first &mdash; outreach is always
+                            tracked against an organisation.
                           </span>
-                        ) : (
-                          <>
-                            <span className="flex items-start gap-2">
-                              <UserPlus className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-                              <span className="font-body text-[12px] leading-snug text-slate-600">
-                                <span className="font-semibold text-slate-900">
-                                  {recipientQuery.trim()}
-                                </span>{" "}
-                                isn&rsquo;t in your database yet. Add them as a contact to keep this
-                                conversation on their record.
-                              </span>
-                            </span>
-                            <button
-                              type="button"
-                              onClick={handleAddToDatabase}
-                              className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-md bg-lead px-3 py-2 text-[12px] font-semibold text-white hover:bg-lead/90 cursor-pointer"
-                            >
-                              <UserPlus className="h-3.5 w-3.5" />
-                              Add to database
-                            </button>
-                          </>
-                        )}
+                        </span>
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -1324,14 +1609,20 @@ export function GmailComposeModal({
               one-tap AI drafting. */}
           <div className="relative flex-1 min-h-0 pt-3 flex flex-col overflow-hidden">
             {isAiGenerating ? (
-              <div className="space-y-3 pt-1" aria-label="Drafting">
-                {[92, 78, 96, 64, 84, 40].map((width, index) => (
-                  <div
-                    key={index}
-                    className="h-2.5 rounded-full bg-slate-900/8 animate-pulse"
-                    style={{ width: `${width}%`, animationDelay: `${index * 90}ms` }}
+              <div className="pt-1" aria-label="Drafting">
+                <AiThinkingState
+                  stage={draftStream.displayStage}
+                  startedAt={draftStream.startedAt}
+                  heading="Drafting"
+                />
+                {draftStream.displayStage === "done" && (
+                  <StreamingDraftText
+                    subject={draftStream.subject}
+                    body={draftStream.body}
+                    streaming={draftStream.status === "streaming"}
+                    onRevealComplete={commitStagedGenerated}
                   />
-                ))}
+                )}
               </div>
             ) : isWritingManually || (body.length > 0 && !showAiOptions) ? (
               <>
@@ -1339,7 +1630,7 @@ export function GmailComposeModal({
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
                   placeholder="Write your message"
-                  spellCheck
+                  spellCheck={spellCheckOn}
                   autoCapitalize="sentences"
                   className="w-full h-full text-[13px] text-slate-800 placeholder:text-slate-400 border-0 bg-transparent focus:outline-none focus:ring-0 resize-none p-0 leading-6 font-sans"
                 />
@@ -1347,9 +1638,11 @@ export function GmailComposeModal({
                   <button
                     type="button"
                     onClick={openAiPicker}
+                    onMouseEnter={() => setDraftPillHover(true)}
+                    onMouseLeave={() => setDraftPillHover(false)}
                     className="absolute left-0 top-11 flex items-center gap-1.5 rounded-full border border-slate-900/10 bg-white/80 px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-slate-900/20 hover:text-slate-900 hover:shadow-sm transition-all cursor-pointer"
                   >
-                    <Sparkles className="h-3.5 w-3.5 text-lead" />
+                    <LoaderPinwheel animate={draftPillHover} size={14} className="text-lead" />
                     Use AI to draft
                   </button>
                 )}
@@ -1378,6 +1671,13 @@ export function GmailComposeModal({
                           setPanel("profile");
                         }}
                         onBack={() => setDrillSetting(null)}
+                        onAddRecipient={() => {
+                          // Back to the settings list, and the To capsule
+                          // expands with the caret ready — saving a recipient
+                          // is what unlocks this very page.
+                          setDrillSetting(null);
+                          recipientInputRef.current?.focus();
+                        }}
                       />
                     ) : activeDrill ? (
                       <AiOptionPage
@@ -1398,20 +1698,22 @@ export function GmailComposeModal({
                       type="button"
                       onClick={handleAiDraft}
                       disabled={!client}
+                      onMouseEnter={() => setGenerateHover(true)}
+                      onMouseLeave={() => setGenerateHover(false)}
                       title={
                         client
                           ? "Generate the first draft from the settings above"
                           : "Save a recipient first — the AI drafts from their booklet and profile"
                       }
-                      className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-lead px-4 py-2 text-[12px] font-bold text-white shadow-[0_12px_28px_-12px_rgba(35,64,122,0.75)] transition-colors hover:bg-[#1b3160] disabled:cursor-not-allowed disabled:opacity-40"
+                      className="pointer-events-auto inline-flex items-center gap-1.5 rounded-lg bg-lead px-4 py-2 text-[12px] font-bold text-white shadow-[0_12px_28px_-12px_rgba(35,64,122,0.75)] transition-colors hover:bg-[#1b3160] disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      <Sparkles aria-hidden="true" className="h-3.5 w-3.5" />
+                      <LoaderPinwheel animate={generateHover} size={14} aria-hidden="true" />
                       Generate draft
                     </button>
                     <button
                       type="button"
                       onClick={() => setIsWritingManually(true)}
-                      className="pointer-events-auto inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-white/80 px-3 py-2 text-[12px] font-semibold text-slate-700 shadow-[0_8px_20px_-10px_rgba(15,23,42,0.4)] backdrop-blur-sm transition-colors hover:bg-white hover:text-slate-900"
+                      className="pointer-events-auto inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-white/80 px-3 py-2 text-[12px] font-semibold text-slate-700 shadow-[0_8px_20px_-10px_rgba(15,23,42,0.4)] backdrop-blur-sm transition-colors hover:bg-white hover:text-slate-900"
                     >
                       <PenLine aria-hidden="true" className="h-3.5 w-3.5" />
                       Draft manually
@@ -1430,6 +1732,36 @@ export function GmailComposeModal({
             </p>
           )}
 
+          {/* Files chosen but not yet uploaded — they ride along when Send
+              creates the draft (handleSend → uploadStagedFiles). */}
+          {stagedFiles.length > 0 && (
+            <ul className="mt-2 flex flex-wrap gap-1.5">
+              {stagedFiles.map((file, index) => (
+                <li
+                  key={`${file.name}-${index}`}
+                  className="flex items-center gap-1.5 rounded-full border border-slate-900/10 bg-white/70 px-2.5 py-1 text-[11px] text-slate-700"
+                >
+                  <FileText aria-hidden="true" className="h-3 w-3 shrink-0 text-slate-400" />
+                  <span className="max-w-[12rem] truncate">{file.name}</span>
+                  <span className="text-slate-400">{formatFileSize(file.size)}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${file.name}`}
+                    onClick={() => removeStagedFile(index)}
+                    className="text-slate-400 hover:text-red-600 cursor-pointer"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {attachError && (
+            <p className="mt-2 text-[11px] font-semibold text-red-600" role="alert">
+              {attachError}
+            </p>
+          )}
+
           {/* The shared review panel, over the composed draft. It owns the
               approval gate and every commit — send, schedule, save, discard —
               so this window has one send path and it is the same one the
@@ -1439,7 +1771,8 @@ export function GmailComposeModal({
               <EmailReviewPanel
                 description="Sending as the branch mailbox. The recipient, subject and body below are exactly what will go out."
                 draft={reviewDraft}
-                heading="Review before sending"
+                heading={pendingScheduleIso ? "Review before scheduling" : "Review before sending"}
+                initialScheduledAt={pendingScheduleIso}
                 idPrefix="inbox-compose-review"
                 onCommitted={(result) => {
                   onSend({
@@ -1451,7 +1784,10 @@ export function GmailComposeModal({
                   resetDraft();
                   onClose();
                 }}
-                onDraftCleared={() => setReviewDraft(null)}
+                onDraftCleared={() => {
+                  setReviewDraft(null);
+                  setPendingScheduleIso(null);
+                }}
                 organisationId={sendableClient.id}
               />
             </div>
@@ -1474,7 +1810,7 @@ export function GmailComposeModal({
               <div className="relative flex items-stretch shrink-0">
                 <SendButton
                   disabled={cannotSend}
-                  label={reviewDraft ? "Reviewing…" : "Review & send"}
+                  label={reviewDraft ? "Reviewing…" : "Review"}
                   onClick={() => void handleSend()}
                   pending={isSending}
                   pendingLabel="Preparing…"
@@ -1490,14 +1826,15 @@ export function GmailComposeModal({
                   className="my-1.5 w-px bg-slate-900/20"
                 />
                 <Hint label="More send options">
-                  {/* Scheduling moved into the review step with the send: the
-                      panel's own schedule control commits the reviewed content
-                      for later, and a time picked out here would only have to
-                      be picked again in there. */}
+                  {/* The caret mirrors Send's own gate: a schedule needs a real
+                      client behind the recipient, and once the review panel is
+                      open the panel's own schedule control takes over. The
+                      picked time travels with handleSend into that panel, so it
+                      is chosen once, not twice. */}
                   <button
                     type="button"
                     onClick={() => setIsScheduleMenuOpen((open) => !open)}
-                    disabled
+                    disabled={cannotSend}
                     aria-haspopup="menu"
                     aria-expanded={isScheduleMenuOpen}
                     className="flex h-9 w-8 items-center justify-center rounded-r-lg bg-lead text-white ring-1 ring-white/20 shadow-xs shadow-[inset_0_1px_0_rgba(255,255,255,0.3)] transition-colors hover:bg-[#1b3160] disabled:pointer-events-none disabled:opacity-50 cursor-pointer"
@@ -1542,15 +1879,127 @@ export function GmailComposeModal({
                   type="button"
                   onClick={openAiPicker}
                   disabled={isAiGenerating}
+                  onMouseEnter={() => setAiToolbarHover(true)}
+                  onMouseLeave={() => setAiToolbarHover(false)}
                   className={`${iconButton} disabled:opacity-50 disabled:cursor-default`}
                 >
                   {isAiGenerating ? (
                     <Loader2 className="h-4 w-4 animate-spin text-lead" />
                   ) : (
-                    <Sparkles className="h-4 w-4" />
+                    <LoaderPinwheel animate={aiToolbarHover} size={16} />
                   )}
                 </button>
               </Hint>
+
+              {/* Attach files. The picker only stages them here — nothing is
+                  uploaded until Send has a draft to link them to (handleSend →
+                  uploadStagedFiles). */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept={ALLOWED_ATTACHMENT_MIME_TYPES.join(",")}
+                className="sr-only"
+                tabIndex={-1}
+                onChange={(event) => {
+                  stageFiles(event.target.files);
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                }}
+              />
+              <Hint label="Attach files">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className={iconButton}
+                  aria-label="Attach files"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </button>
+              </Hint>
+
+              {/* More options — the ⋮ menu. "Add label" jumps to the tag
+                  picker (mounted below); "Spell check" flips the body's
+                  squiggles for a draft full of names and acronyms. */}
+              <div className="relative">
+                <Hint label="More options">
+                  <button
+                    type="button"
+                    onClick={() => setIsKebabOpen((open) => !open)}
+                    aria-haspopup="menu"
+                    aria-expanded={isKebabOpen}
+                    aria-label="More options"
+                    className={iconButton}
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                  </button>
+                </Hint>
+
+                <AnimatePresence>
+                  {isKebabOpen && (
+                    <motion.div
+                      role="menu"
+                      initial={{ opacity: 0, y: 6, scale: 0.97 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 6, scale: 0.97 }}
+                      transition={{ duration: 0.16, ease: "easeOut" }}
+                      className="absolute bottom-full left-0 z-40 mb-2 w-52 origin-bottom-left rounded-lg border border-slate-900/10 bg-white p-1 shadow-[0_12px_32px_-12px_rgba(15,23,42,0.35)]"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={!sendableClient}
+                        onClick={() => {
+                          setIsKebabOpen(false);
+                          setIsLabelPickerOpen(true);
+                        }}
+                        title={
+                          sendableClient
+                            ? "Add a label to this client"
+                            : "Save a recipient first — labels are set on the client"
+                        }
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-body font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent cursor-pointer"
+                      >
+                        <Tag className="h-4 w-4 text-slate-500" />
+                        Add label
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitemcheckbox"
+                        aria-checked={spellCheckOn}
+                        onClick={() => setSpellCheckOn((on) => !on)}
+                        className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm font-body font-medium text-slate-700 hover:bg-slate-100 cursor-pointer"
+                      >
+                        <span className="flex items-center gap-2">
+                          <SpellCheck2 className="h-4 w-4 text-slate-500" />
+                          Spell check
+                        </span>
+                        {spellCheckOn && <Check className="h-4 w-4 text-lime-700" />}
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* The label picker, opening upward out of the ⋮ (the modal
+                    clips anything that tries to open downward). Mounted only
+                    with a real client behind it. */}
+                <AnimatePresence>
+                  {isLabelPickerOpen && sendableClient && (
+                    <ComposeLabelMenu
+                      organisationId={sendableClient.id}
+                      assignedTags={assignedTags}
+                      assignableTags={assignableTags}
+                      onAssigned={(added) =>
+                        setLocallyAssignedTags((prev) => {
+                          const byId = new Map(prev.map((tag) => [tag.id, tag]));
+                          for (const tag of added) byId.set(tag.id, tag);
+                          return [...byId.values()];
+                        })
+                      }
+                      onClose={() => setIsLabelPickerOpen(false)}
+                    />
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
 
             {/* Client context — dead until an address resolves to a record. */}
@@ -1723,17 +2172,23 @@ export function GmailComposeModal({
                 </div>
               )}
 
+              {/* Not "Scheduled" — nothing is scheduled at this point.
+                  This step used to claim it was, while the chosen time was
+                  being dropped on the floor and an ordinary review panel
+                  opened underneath. The time is real and carried through now,
+                  but the commit still belongs to the review panel's approval
+                  gate, so this says what actually happens next. */}
               {scheduleStep === "done" && pendingWhen && (
                 <div className="flex flex-col items-center gap-2 px-4 py-6 text-center">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100">
-                    <Check className="h-5 w-5 text-emerald-600" />
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-lead-wash">
+                    <CalendarClock className="h-5 w-5 text-lead" />
                   </span>
                   <p className="text-[13px] font-semibold text-slate-900">
-                    Scheduled for {formatScheduleLong(pendingWhen)}
+                    Ready to schedule for {formatScheduleLong(pendingWhen)}
                   </p>
                   <p className="text-[11px] text-slate-500">
-                    The message will send automatically. You can cancel it from
-                    the Scheduled folder before then.
+                    Review the message below and tick the approval box, then
+                    press Schedule send. Nothing is queued until you do.
                   </p>
                 </div>
               )}
@@ -1863,9 +2318,23 @@ export function GmailComposeModal({
                 {panel === "booklet" &&
                   (booklet ? (
                     <BookletView text={booklet.text} generatedAt={booklet.generatedAt} />
+                  ) : bookletState === "loading" ? (
+                    <p className="flex items-center gap-2 text-[12px] text-slate-500">
+                      <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
+                      Loading this client&rsquo;s booklet&hellip;
+                    </p>
+                  ) : bookletState === "failed" ? (
+                    <p className="text-[12px] text-slate-500">
+                      The booklet could not be loaded. Open the client&rsquo;s record to read it.
+                    </p>
+                  ) : !sendableClient ? (
+                    <p className="text-[12px] text-slate-500">
+                      Booklets are held per client record, so there is none behind this
+                      recipient.
+                    </p>
                   ) : (
                     <p className="text-[12px] text-slate-500">
-                      No booklet saved for this client yet.
+                      No booklet saved for this client yet. Generate one from their record.
                     </p>
                   ))}
                 {panel === "profile" && <ProfileView client={client} />}
@@ -1875,6 +2344,205 @@ export function GmailComposeModal({
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+/** A client can hold at most this many tags — mirrors MAX_TAGS_PER_CLIENT in
+    @/lib/tags/assign-tag-core. The server is the real gate; this only stops
+    the menu offering a ninth. */
+const MAX_LABELS_PER_CLIENT = 8;
+
+/**
+ * The compose window's "Add label" panel. Labels are tags (F188-F194): this
+ * assigns an existing one to the recipient's client, or creates and assigns a
+ * new one, through the same server actions the client record uses. Removing a
+ * label is deliberately not offered here — that belongs on the client record.
+ *
+ * Opens upward (`bottom-full`) because the compose modal clips anything that
+ * tries to open past its bottom edge.
+ */
+function ComposeLabelMenu({
+  organisationId,
+  assignedTags,
+  assignableTags,
+  onAssigned,
+  onClose,
+}: {
+  organisationId: string;
+  assignedTags: InboxThreadTag[];
+  assignableTags: InboxThreadTag[];
+  onAssigned: (added: InboxThreadTag[]) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Click outside the panel closes it — the ⋮ menu it opened from is already
+  // gone, so there is nothing else to dismiss it.
+  useEffect(() => {
+    function onPointerDown(event: MouseEvent) {
+      if (!panelRef.current?.contains(event.target as Node)) onClose();
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [onClose]);
+
+  const needle = query.trim().toLowerCase();
+  const results = useMemo(
+    () =>
+      (needle
+        ? assignableTags.filter((tag) => tag.name.toLowerCase().includes(needle))
+        : assignableTags
+      )
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
+    [assignableTags, needle],
+  );
+  const exactExists = useMemo(
+    () =>
+      [...assignedTags, ...assignableTags].some(
+        (tag) => tag.name.toLowerCase() === needle,
+      ),
+    [assignedTags, assignableTags, needle],
+  );
+  const atCap = assignedTags.length >= MAX_LABELS_PER_CLIENT;
+
+  async function assignExisting(tag: InboxThreadTag) {
+    if (busy || atCap) return;
+    setBusy(true);
+    setError(null);
+    const result = await assignTagsBatchAction(organisationId, [tag.id]);
+    setBusy(false);
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    onAssigned([tag]);
+    setQuery("");
+  }
+
+  async function createAndAssign() {
+    const name = query.trim();
+    if (busy || atCap || !name) return;
+    setBusy(true);
+    setError(null);
+    const result = await createAndAssignTagAction(organisationId, name, null);
+    setBusy(false);
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    onAssigned([
+      { id: result.tag.id, name: result.tag.name, colour: result.tag.colour ?? null },
+    ]);
+    setQuery("");
+  }
+
+  return (
+    <motion.div
+      ref={panelRef}
+      role="dialog"
+      aria-label="Add a label"
+      initial={{ opacity: 0, y: 6, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 6, scale: 0.97 }}
+      transition={{ duration: 0.16, ease: "easeOut" }}
+      className="absolute bottom-full left-0 z-40 mb-2 w-64 origin-bottom-left rounded-lg border border-slate-900/10 bg-white p-2 shadow-[0_12px_32px_-12px_rgba(15,23,42,0.35)]"
+    >
+      {assignedTags.length > 0 && (
+        <div className="mb-1.5 flex flex-wrap gap-1 px-1">
+          {assignedTags.map((tag) => (
+            <span
+              key={tag.id}
+              className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium"
+              style={{
+                backgroundColor: `color-mix(in srgb, ${tag.colour ?? "var(--lead)"} 14%, transparent)`,
+                color: tag.colour ?? "var(--lead)",
+              }}
+            >
+              {tag.name}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <input
+        autoFocus
+        value={query}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          if (error) setError(null);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            onClose();
+          }
+          if (event.key === "Enter" && needle && !exactExists) {
+            event.preventDefault();
+            void createAndAssign();
+          }
+        }}
+        placeholder="Search or create a label"
+        aria-label="Search or create a label"
+        autoComplete="off"
+        className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-[12px] text-slate-800 placeholder:text-slate-400 focus:border-lead focus:outline-none"
+      />
+
+      {atCap && (
+        <p className="mt-1.5 px-1 text-[11px] text-slate-500">
+          This client already has {MAX_LABELS_PER_CLIENT} labels — the most allowed.
+        </p>
+      )}
+
+      <ul className="mt-1.5 max-h-44 overflow-y-auto">
+        {results.map((tag) => (
+          <li key={tag.id}>
+            <button
+              type="button"
+              disabled={busy || atCap}
+              onClick={() => void assignExisting(tag)}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+            >
+              <span
+                aria-hidden="true"
+                className="h-2 w-2 shrink-0 rounded-full"
+                style={{ backgroundColor: tag.colour ?? "var(--lead)" }}
+              />
+              <span className="truncate">{tag.name}</span>
+            </button>
+          </li>
+        ))}
+
+        {needle && !exactExists && (
+          <li>
+            <button
+              type="button"
+              disabled={busy || atCap}
+              onClick={() => void createAndAssign()}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] font-medium text-lead hover:bg-lead/8 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+            >
+              <Tag className="h-3.5 w-3.5 shrink-0" />
+              Create &ldquo;{query.trim()}&rdquo;
+            </button>
+          </li>
+        )}
+
+        {results.length === 0 && (!needle || exactExists) && (
+          <li className="px-2 py-3 text-center text-[11px] text-slate-400">
+            {exactExists ? "Already on this client." : "No more labels to add."}
+          </li>
+        )}
+      </ul>
+
+      {error && (
+        <p role="alert" className="mt-1.5 px-1 text-[11px] font-semibold text-red-600">
+          {error}
+        </p>
+      )}
+    </motion.div>
   );
 }
 
@@ -1962,7 +2630,7 @@ function BookletView({ text, generatedAt }: { text: string; generatedAt: string 
   );
 }
 
-function ProfileView({ client }: { client: InboxThreadView }) {
+function ProfileView({ client }: { client: AddressableClient }) {
   const rows: Array<{ icon: LucideIcon; label: string; value: string }> = [
     { icon: Building2, label: "Type", value: client.orgType },
     { icon: MapPin, label: "Location", value: `${client.city}, ${client.country}` },

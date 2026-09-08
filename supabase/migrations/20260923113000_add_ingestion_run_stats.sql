@@ -52,7 +52,7 @@
 --   Approved by   | Bashir (Project Leader).
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260922103000_add_ingestion_run_stats.down.sql
+-- ../rollback/20260923113000_add_ingestion_run_stats.down.sql
 
 alter table public.ingestion_runs
   add column if not exists run_stats jsonb;

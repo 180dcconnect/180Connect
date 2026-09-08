@@ -36,7 +36,7 @@
 --   Documentation | docs/data-model/04-entities.md not changed (no table change);
 --                 function documented here and in the sweep module header.
 --
--- Reversibility: paired rollback in ../rollback/20260922095000_create_provenance_audit_rpc.down.sql
+-- Reversibility: paired rollback in ../rollback/20260923105000_create_provenance_audit_rpc.down.sql
 
 create or replace function public.get_unprovenanced_organisations()
 returns table (

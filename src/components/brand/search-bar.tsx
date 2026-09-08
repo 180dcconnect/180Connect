@@ -824,6 +824,24 @@ export function BrandSearchBar({
     );
   };
 
+  /**
+   * "Clear filters" — empties the chips AND the query, then submits.
+   *
+   * Clearing used to only reset this component's own state. Filters apply on
+   * submit (the contract above `removeFilter`), so the host was never told,
+   * and the list stayed filtered by chips that were no longer on screen — the
+   * one state where the contract reads as a bug rather than a rule. Clearing
+   * is an explicit action, exactly like pressing Search, so it submits like
+   * one: the host receives an empty query and an empty filter list and drops
+   * everything it had applied.
+   */
+  const clearFilters = () => {
+    setSelectedFilters([]);
+    setQuery("");
+    onQueryChange?.("");
+    submitSearch([], "", false);
+  };
+
   const close = () => {
     setOpen(false);
     setConfirming(false);
@@ -1864,22 +1882,7 @@ export function BrandSearchBar({
             )}
           </motion.div>
         ) : null}
-          </AnimatePresence>
-
-        {/* Clear filters button inside the dropdown panel (shown when chipsBelow=false) */}
-        {selectedFilters.length > 0 && (
-          <div className="flex items-center justify-end gap-2 px-4 pb-4">
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedFilters([]);
-              }}
-              className={`font-body text-[13px] font-medium transition-colors ${T.muted50} ${T.hoverBright} ${T.hoverInk}`}
-            >
-              Clear filters
-            </button>
-          </div>
-        )}
+      </AnimatePresence>
       </motion.div>
 
       {/* Active filter pills float UNDER the white card on a transparent background, not inside the card */}
@@ -1926,11 +1929,7 @@ export function BrandSearchBar({
           {(selectedFilters.length > 0 || query) && (
             <button
               type="button"
-              onClick={() => {
-                setSelectedFilters([]);
-                setQuery("");
-                onQueryChange?.("");
-              }}
+              onClick={clearFilters}
               className="text-[13px] font-medium text-black/40 hover:text-black transition-colors ml-1"
             >
               Clear filters
@@ -1992,11 +1991,7 @@ export function BrandSearchBar({
         {(selectedFilters.length > 0 || query) && (
           <button
             type="button"
-            onClick={() => {
-              setSelectedFilters([]);
-              setQuery("");
-              onQueryChange?.("");
-            }}
+            onClick={clearFilters}
             className="text-[13px] font-medium text-black/40 hover:text-black transition-colors ml-1"
           >
             Clear filters
@@ -2007,6 +2002,3 @@ export function BrandSearchBar({
     </div>
   );
 }
-
-
-

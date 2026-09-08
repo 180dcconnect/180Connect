@@ -14,7 +14,7 @@
 //
 // "No source" is not itself an error state — orgs enter manually too. The
 // definition of the flagged set lives entirely in the database:
-// get_unprovenanced_organisations() (20260922095000) returns API-created,
+// get_unprovenanced_organisations() (20260923105000) returns API-created,
 // non-seed organisations with no linked raw record. Keeping the rule in SQL means
 // the audit and any ad-hoc admin query can never disagree about what counts.
 //

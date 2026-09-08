@@ -1,6 +1,15 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from "react";
+import {
+  useState,
+  useMemo,
+  useRef,
+  useEffect,
+  useCallback,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   Inbox,
@@ -15,16 +24,36 @@ import {
   Trash2,
   Tag,
   type LucideIcon,
+  X,
 } from "lucide-react";
 import {
   formatGmailTimestamp,
   resolveDateFilter,
   searchThreads,
+  type InboxThreadTag,
   type InboxThreadView,
 } from "@/lib/inbox-thread-view";
+import { threadMatchesLabels } from "@/lib/inbox/label-filter";
+import { createTagAction } from "@/lib/tags/tag-actions";
 import {
   mockFillThreads,
 } from "@/lib/inbox-mock-data";
+import type { AddressableClient } from "@/lib/inbox/real-threads";
+import { DEFAULT_FOLLOW_UP_THRESHOLDS } from "@/lib/outreach/follow-up-recommendations";
+import {
+  applyThreadFlags,
+  getThreadFlagsServerSnapshot,
+  getThreadFlagsSnapshot,
+  seedThreadFlags,
+  subscribeToThreadFlags,
+  updateThreadFlags,
+  type InboxThreadStateRow,
+  type ThreadFlags,
+} from "@/lib/inbox/thread-flags";
+import {
+  applyInboxThreadFlags,
+  type InboxThreadFlagUpdate,
+} from "@/app/inbox/actions";
 import { GmailSidebar, SECTORS, type GmailFolder, type SidebarLabel } from "./gmail-sidebar";
 import { GmailActionBar, type SelectionState } from "./gmail-action-bar";
 import { GmailThreadRow } from "./gmail-thread-row";
@@ -116,19 +145,22 @@ const CATEGORY_TABS: readonly CategoryTabConfig[] = [
 /** Follow-Up Due mirrors the real recommendation engine
     (`src/lib/outreach/follow-up-recommendations.ts`): a thread counts when we
     sent last and nothing has come back inside the CAM's first-follow-up
-    threshold. The engine reads that threshold from the owner's
-    outreach_preferences; the mock has no preferences table, so it uses the AC
-    default of 7 days. */
-const FOLLOW_UP_DUE_DAYS = 7;
+    threshold.
 
+    That threshold is the viewer's own `outreach_preferences.first_follow_up_days`,
+    read by the page and passed in — it used to be hardcoded to 7 here, so a CAM
+    who had set their own threshold in Settings saw this tab disagree with the
+    dashboard's Needs Attention panel about the same clients.
+    `DEFAULT_FOLLOW_UP_THRESHOLDS.first` is the fallback, and is the same AC
+    default the database column carries. */
 function daysSilent(thread: InboxThreadView): number {
   const elapsed = Date.now() - new Date(thread.lastActivityAt).getTime();
   return Math.floor(elapsed / (24 * 60 * 60 * 1000));
 }
 
-function isFollowUpDue(thread: InboxThreadView): boolean {
+function isFollowUpDue(thread: InboxThreadView, thresholdDays: number): boolean {
   if (thread.status !== "awaiting" && thread.status !== "sent") return false;
-  return daysSilent(thread) >= FOLLOW_UP_DUE_DAYS;
+  return daysSilent(thread) >= thresholdDays;
 }
 
 /**
@@ -190,29 +222,115 @@ const FOLDER_EMPTY_STATES: Record<GmailFolder, { icon: LucideIcon; title: string
 export function GmailInboxShell({
   initialThreads = mockFillThreads(),
   initialThreadId,
-  realThreads,
+  addressableClients,
+  initialTags = [],
+  followUpDays = DEFAULT_FOLLOW_UP_THRESHOLDS.first,
+  initialThreadFlags = [],
   className = "h-[calc(100vh-1.5rem)]",
 }: {
   initialThreads?: InboxThreadView[];
   initialThreadId?: string | null;
+  /**
+   * Every tag (TAGS) in play across the loaded threads, de-duplicated and
+   * name-sorted by the page. Seeds the sidebar's custom-label rows and the
+   * compose window's "Add label" picker — the mailbox does not invent a
+   * label concept, it shows the client record's tags.
+   */
+  initialTags?: InboxThreadTag[];
   /**
    * The subset of `initialThreads` that came from Supabase rather than the
    * design fill. Compose can only send to these — their ids are organisation
    * ids — so it is passed through rather than derived here, where the two
    * kinds are already merged and indistinguishable by design.
    */
-  realThreads?: InboxThreadView[];
+  /**
+   * Every client Compose may address — see `buildAddressableClients`. Distinct
+   * from the thread list on purpose: a client with no outreach yet has no
+   * thread, but is still someone a CAM can write the first email to. This prop
+   * replaced a `realThreads` one that fed the same directory, which is why
+   * Compose could only ever find clients that had already been emailed.
+   */
+  addressableClients?: AddressableClient[];
+  /** The viewer's own first-follow-up threshold, in days (F160). */
+  followUpDays?: number;
+  /**
+   * This viewer's stored mailbox flags, straight from INBOX_THREAD_STATE. The
+   * shell needs no viewer id of its own: the rows are already scoped to the
+   * caller by the table's RLS, and the server action keys its writes the same
+   * way.
+   */
+  initialThreadFlags?: InboxThreadStateRow[];
   className?: string;
 }) {
   const reduceMotion = useReducedMotion();
-  const [threads, setThreads] = useState<InboxThreadView[]>(initialThreads);
+  // The list exactly as the server built it. Everything downstream reads
+  // `threads` below, which is this with the viewer's own flags laid over it.
+  const [serverThreads, setServerThreads] = useState<InboxThreadView[]>(initialThreads);
+  /**
+   * Starred / read / trashed, as this viewer last left them.
+   *
+   * Read from INBOX_THREAD_STATE by the page and seeded into the store during
+   * render, not in an effect: an effect would give one paint with no flags at
+   * all, so every starred thread would flicker unstarred on load. `seedThreadFlags`
+   * identity-compares the rows, so calling it each render is a no-op until the
+   * server actually sends new ones.
+   *
+   * The flags stay a pure overlay (`applyThreadFlags`) rather than being baked
+   * into the thread list, because the list is server data and these are not.
+   */
+  seedThreadFlags(initialThreadFlags);
+  const threadFlags: ThreadFlags = useSyncExternalStore(
+    subscribeToThreadFlags,
+    getThreadFlagsSnapshot,
+    getThreadFlagsServerSnapshot,
+  );
+
+  /**
+   * Applies a flag change optimistically, then persists it.
+   *
+   * `updates` is the list the server action receives, so a bulk action is one
+   * round trip rather than one per thread. A failed write rolls the store back
+   * and surfaces the reason — a star that silently failed to save is worse
+   * than one that visibly refuses.
+   */
+  const commitFlags = useCallback(
+    (update: (previous: ThreadFlags) => ThreadFlags, updates: InboxThreadFlagUpdate[]) => {
+      setFlagError(null);
+      void updateThreadFlags(
+        update,
+        () => applyInboxThreadFlags(updates),
+        (message) => setFlagError(message),
+      );
+    },
+    [],
+  );
   const [activeFolder, setActiveFolder] = useState<GmailFolder>("inbox");
   const [activeCategoryTab, setActiveCategoryTab] = useState<GmailCategoryTab>("primary");
+  // Sector filtering has two independent sources, kept apart on purpose: the
+  // sidebar's label rows, and the search bar's "Filter by sector" chips. They
+  // used to share one Set, so a search could only ever add to the sidebar's
+  // selection and clearing one silently cleared the other.
   const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set());
-  const [appliedLabels, setAppliedLabels] = useState<Set<string>>(new Set());
-  const [isLabelLoading, setIsLabelLoading] = useState(false);
-  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [customLabels, setCustomLabels] = useState<SidebarLabel[]>([]);
+  const [searchSectorLabels, setSearchSectorLabels] = useState<Set<string>>(new Set());
+  const router = useRouter();
+  // The one genuine loading state on this screen: a refresh re-runs the server
+  // component, and the list shows skeletons until React has the new tree.
+  // There used to be a second, `isLabelLoading`, driven by an invented 1.5s
+  // timer around an in-memory filter — see triggerLabelFilter.
+  const [isRefreshing, startRefresh] = useTransition();
+  // Set when a star / read / trash write is refused. The store has already put
+  // the flag back by the time this renders, so the banner explains a change
+  // the CAM can see has reverted.
+  const [flagError, setFlagError] = useState<string | null>(null);
+  // The mailbox's custom labels ARE tags (TAGS/ORG_TAGS). Seeded from the
+  // page's server read and grown in place when the sidebar's + creates one, so
+  // a new tag shows without a full refresh. A refresh re-seeds it (below).
+  const [tags, setTags] = useState<InboxThreadTag[]>(initialTags);
+  const [seededTagsFrom, setSeededTagsFrom] = useState(initialTags);
+  if (seededTagsFrom !== initialTags) {
+    setSeededTagsFrom(initialTags);
+    setTags(initialTags);
+  }
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // Active thread ID initialized from props, never from window during SSR/initial render
   const [activeThreadId, setActiveThreadId] = useState<string | null>(initialThreadId ?? null);
@@ -229,7 +347,6 @@ export function GmailInboxShell({
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
   const [isAtBottom, setIsAtBottom] = useState(false);
@@ -240,10 +357,45 @@ export function GmailInboxShell({
   const [appliedDateValues, setAppliedDateValues] = useState<string[]>([]);
   const [appliedStatusValues, setAppliedStatusValues] = useState<string[]>([]);
 
+  // A refresh re-runs the server component and hands down a new list; without
+  // this the shell would keep rendering the threads it mounted with and the
+  // refresh button would spin over stale rows. Adjusted during render rather
+  // than in an effect — React's own pattern for "reset state when a prop
+  // changes", and it avoids a second render pass showing the stale list.
+  const [seededFrom, setSeededFrom] = useState(initialThreads);
+  if (seededFrom !== initialThreads) {
+    setSeededFrom(initialThreads);
+    setServerThreads(initialThreads);
+  }
+
+  /** What the whole shell renders: server threads under this viewer's flags. */
+  const threads = useMemo(
+    () => applyThreadFlags(serverThreads, threadFlags),
+    [serverThreads, threadFlags],
+  );
+
+  // Tags rendered as sidebar label rows: a tag's palette colour, or the deep
+  // lead the sidebar already falls a colourless label back to.
+  const customLabels = useMemo<SidebarLabel[]>(
+    () => tags.map((tag) => ({ name: tag.name, bg: tag.colour ?? "var(--lead)" })),
+    [tags],
+  );
+
   const allLabels = useMemo(
     () => [...SECTORS, ...customLabels],
     [customLabels],
   );
+
+  // organisation_id → its tags, so the compose window's "Add label" picker can
+  // mark what is already on a client. Built from the server threads because
+  // that is where the per-org tag lists were merged in.
+  const tagsByClientId = useMemo(() => {
+    const map = new Map<string, InboxThreadTag[]>();
+    for (const thread of serverThreads) {
+      if (thread.tags && thread.tags.length > 0) map.set(thread.id, thread.tags);
+    }
+    return map;
+  }, [serverThreads]);
 
   const labelColorMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -254,12 +406,19 @@ export function GmailInboxShell({
     return map;
   }, [allLabels]);
 
+  /** What the list actually filters on: the sidebar's labels plus the search
+      bar's sector chips. */
+  const appliedLabels = useMemo(
+    () => new Set([...selectedLabels, ...searchSectorLabels]),
+    [selectedLabels, searchSectorLabels],
+  );
+
   const activeLabels = useMemo(() => {
-    return Array.from(selectedLabels).map((name) => ({
+    return Array.from(appliedLabels).map((name) => ({
       name,
       bg: labelColorMap.get(name) ?? "var(--lead)",
     }));
-  }, [selectedLabels, labelColorMap]);
+  }, [appliedLabels, labelColorMap]);
 
   // Threads matching the applied query, for the list filter below.
   const queryMatchIds = useMemo(
@@ -303,10 +462,10 @@ export function GmailInboxShell({
         if (thread.folder === "trash" || thread.folder === "scheduled") return false;
       }
 
-      // 2. Sector / Label filter (multi-select / additive)
-      if (appliedLabels.size > 0) {
-        if (!appliedLabels.has(thread.sector)) return false;
-      }
+      // 2. Sector / Label filter (multi-select / additive). A built-in sector
+      //    label matches thread.sector; a tag label matches one of the thread's
+      //    tags — see threadMatchesLabels.
+      if (!threadMatchesLabels(thread, appliedLabels)) return false;
 
       // 3. Category Tab filter (only applies inside Inbox when no label filter is active)
       if (activeFolder === "inbox" && appliedLabels.size === 0) {
@@ -315,7 +474,7 @@ export function GmailInboxShell({
         } else if (activeCategoryTab === "awaiting") {
           if (thread.status !== "awaiting") return false;
         } else if (activeCategoryTab === "followup") {
-          if (!isFollowUpDue(thread)) return false;
+          if (!isFollowUpDue(thread, followUpDays)) return false;
         } else if (activeCategoryTab === "starred") {
           if (!thread.isStarred) return false;
         } else if (activeCategoryTab === "sent") {
@@ -342,7 +501,7 @@ export function GmailInboxShell({
 
       return true;
     });
-  }, [threads, activeFolder, activeCategoryTab, appliedLabels, queryMatchIds, appliedQuery, dateRanges, appliedStatusValues]);
+  }, [threads, activeFolder, activeCategoryTab, appliedLabels, queryMatchIds, appliedQuery, dateRanges, appliedStatusValues, followUpDays]);
 
   // Paginated slice
   const paginatedThreads = useMemo(() => {
@@ -360,8 +519,8 @@ export function GmailInboxShell({
     [threads]
   );
   const followUpDueCount = useMemo(
-    () => threads.filter((t) => t.folder !== "trash" && isFollowUpDue(t)).length,
-    [threads]
+    () => threads.filter((t) => t.folder !== "trash" && isFollowUpDue(t, followUpDays)).length,
+    [threads, followUpDays]
   );
   const scheduledCount = useMemo(
     () => threads.filter((t) => t.folder === "scheduled").length,
@@ -487,28 +646,18 @@ export function GmailInboxShell({
     observer.observe(el);
   }, [paginatedThreads, activeCategoryTab, activeFolder, appliedLabels, activeThreadId]);
 
-  // Cleanup loading timer on unmount
-  useEffect(() => {
-    return () => {
-      if (loadingTimerRef.current) {
-        clearTimeout(loadingTimerRef.current);
-      }
-    };
-  }, []);
-
-  // Label Filter Handlers with 1.5s simulated loading delay and neon spinner signal
+  /**
+   * Applies a label filter.
+   *
+   * The 1.5s delay that used to sit here was simulated — a spinner invented to
+   * make an instant, in-memory `Array.filter` feel like it had gone somewhere.
+   * Against real threads it was a second and a half of nothing, every time a
+   * sector was toggled, so it is gone: the filter applies on the same tick.
+   */
   function triggerLabelFilter(nextLabels: Set<string>) {
     setSelectedLabels(nextLabels);
-    setIsLabelLoading(true);
-    if (loadingTimerRef.current) {
-      clearTimeout(loadingTimerRef.current);
-    }
-    loadingTimerRef.current = setTimeout(() => {
-      setAppliedLabels(nextLabels);
-      setIsLabelLoading(false);
-      setPageIndex(0);
-      listRef.current?.scrollTo({ top: 0 });
-    }, 1500);
+    setPageIndex(0);
+    listRef.current?.scrollTo({ top: 0 });
   }
 
   function handleToggleLabel(labelName: string) {
@@ -522,18 +671,46 @@ export function GmailInboxShell({
     triggerLabelFilter(next);
   }
 
+  /* The chip row above the list shows the union of both sources, so removing
+     one has to reach both — a sector chip that arrived from the search bar
+     would otherwise be undeletable from here. */
   function handleRemoveLabel(labelName: string) {
     const next = new Set(selectedLabels);
     next.delete(labelName);
+    setSearchSectorLabels((prev) => {
+      if (!prev.has(labelName)) return prev;
+      const remaining = new Set(prev);
+      remaining.delete(labelName);
+      return remaining;
+    });
     triggerLabelFilter(next);
   }
 
   function handleClearAllLabels() {
+    setSearchSectorLabels(new Set());
     triggerLabelFilter(new Set());
   }
 
-  function handleAddCustomLabel(label: SidebarLabel) {
-    setCustomLabels((prev) => [...prev, label]);
+  /**
+   * The sidebar's + creates a real tag (TAGS). On success it joins `tags`, so
+   * the new label row and its filter work at once without a refresh; the next
+   * server render re-seeds `tags` from `initialTags` and this optimistic entry
+   * is replaced by the canonical one.
+   */
+  async function handleCreateLabel(
+    name: string,
+    colour: string | null,
+  ): Promise<{ ok: boolean; message?: string }> {
+    const result = await createTagAction(name, colour);
+    if (!result.ok) {
+      return { ok: false, message: result.message };
+    }
+    setTags((prev) =>
+      prev.some((tag) => tag.id === result.tag.id)
+        ? prev
+        : [...prev, { id: result.tag.id, name: result.tag.name, colour: result.tag.colour ?? null }],
+    );
+    return { ok: true };
   }
 
   // Handlers
@@ -567,69 +744,117 @@ export function GmailInboxShell({
     setSelectedIds(new Set(paginatedThreads.filter((t) => t.isStarred).map((t) => t.id)));
   }
 
-  function handleToggleStar(id: string) {
-    setThreads((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, isStarred: !t.isStarred } : t))
+  /* Star / read / trash write to the viewer's flags rather than editing the
+     thread list in place. Same visible behaviour, except that it now survives
+     a reload: these edits used to live only in React state, so every one of
+     them was undone by the next navigation. See @/lib/inbox/thread-flags. */
+
+  function setStarred(ids: readonly string[], starred: boolean) {
+    commitFlags(
+      (prev) => {
+        const next = new Set(prev.starred);
+        ids.forEach((id) => (starred ? next.add(id) : next.delete(id)));
+        return { ...prev, starred: next };
+      },
+      ids.map((organisationId) => ({ organisationId, isStarred: starred })),
     );
+  }
+
+  /** Read state has two override sets, since both directions are deliberate —
+      a marked-unread thread must not be flipped back by the server's own
+      derivation on the next load. */
+  function setRead(ids: readonly string[], read: boolean) {
+    commitFlags(
+      (prev) => {
+        const nextRead = new Set(prev.read);
+        const nextUnread = new Set(prev.unread);
+        ids.forEach((id) => {
+          if (read) {
+            nextRead.add(id);
+            nextUnread.delete(id);
+          } else {
+            nextUnread.add(id);
+            nextRead.delete(id);
+          }
+        });
+        return { ...prev, read: nextRead, unread: nextUnread };
+      },
+      ids.map((organisationId) => ({ organisationId, read })),
+    );
+  }
+
+  function setTrashed(ids: readonly string[]) {
+    commitFlags(
+      (prev) => {
+        const next = new Set(prev.trashed);
+        ids.forEach((id) => next.add(id));
+        return { ...prev, trashed: next };
+      },
+      ids.map((organisationId) => ({ organisationId, isTrashed: true })),
+    );
+  }
+
+  function handleToggleStar(id: string) {
+    const thread = threads.find((t) => t.id === id);
+    setStarred([id], !thread?.isStarred);
   }
 
   function handleToggleRead(id: string) {
-    setThreads((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, isRead: !t.isRead } : t))
-    );
+    const thread = threads.find((t) => t.id === id);
+    setRead([id], !thread?.isRead);
   }
 
   function handleDeleteThread(id: string) {
-    setThreads((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, folder: "trash" } : t))
-    );
+    setTrashed([id]);
     if (activeThreadId === id) setActiveThreadId(null);
   }
 
   // Bulk Handlers
   function handleMarkAsRead() {
-    setThreads((prev) =>
-      prev.map((t) => (selectedIds.has(t.id) ? { ...t, isRead: true } : t))
-    );
+    setRead([...selectedIds], true);
     setSelectedIds(new Set());
   }
 
   function handleMarkAsUnread() {
-    setThreads((prev) =>
-      prev.map((t) => (selectedIds.has(t.id) ? { ...t, isRead: false } : t))
-    );
+    setRead([...selectedIds], false);
     setSelectedIds(new Set());
   }
 
+  /** Gmail's own rule for a mixed selection: if anything is unstarred, star
+      everything; only an all-starred selection unstars. */
   function handleToggleStarSelected() {
-    setThreads((prev) =>
-      prev.map((t) => (selectedIds.has(t.id) ? { ...t, isStarred: !t.isStarred } : t))
-    );
+    const selected = threads.filter((t) => selectedIds.has(t.id));
+    const starring = selected.some((t) => !t.isStarred);
+    setStarred(selected.map((t) => t.id), starring);
     setSelectedIds(new Set());
   }
 
   function handleDeleteSelected() {
-    setThreads((prev) =>
-      prev.map((t) => (selectedIds.has(t.id) ? { ...t, folder: "trash" } : t))
-    );
+    setTrashed([...selectedIds]);
     setSelectedIds(new Set());
     if (activeThreadId && selectedIds.has(activeThreadId)) {
       setActiveThreadId(null);
     }
   }
 
+  /**
+   * Refresh actually refetches now.
+   *
+   * It used to be a 450ms spinner over unchanged state — the one control on
+   * the screen whose entire job is "show me what arrived since", doing nothing
+   * of the kind. `router.refresh()` re-runs the server component, so the four
+   * table reads behind the list run again and new replies appear; the spinner
+   * runs until React has the new tree.
+   */
   function handleRefresh() {
-    setIsRefreshing(true);
-    setTimeout(() => {
-      setIsRefreshing(false);
-    }, 450);
+    startRefresh(() => {
+      router.refresh();
+    });
   }
 
   function handleOpenThread(thread: InboxThreadView) {
     // Mark as read automatically when opening
-    setThreads((prev) =>
-      prev.map((t) => (t.id === thread.id ? { ...t, isRead: true } : t))
-    );
+    setRead([thread.id], true);
     setActiveThreadId(thread.id);
     void hydrate(thread);
   }
@@ -652,7 +877,9 @@ export function GmailInboxShell({
       const response = await fetch(`/api/inbox/${thread.id}/thread`);
       if (!response.ok) return;
       const hydrated = (await response.json()) as InboxThreadView;
-      setThreads((prev) =>
+      // Message bodies are server data, not a viewer flag — they belong on the
+      // underlying list.
+      setServerThreads((prev) =>
         prev.map((t) => (t.id === thread.id ? { ...t, messages: hydrated.messages } : t)),
       );
     } catch {
@@ -711,6 +938,7 @@ export function GmailInboxShell({
       attachments: [],
       notesCount: 0,
       handoversCount: 0,
+      tags: [],
       messages: [
         {
           id: `msg-${Date.now()}`,
@@ -726,7 +954,7 @@ export function GmailInboxShell({
       ],
     };
 
-    setThreads((prev) => [newThread, ...prev]);
+    setServerThreads((prev) => [newThread, ...prev]);
   }
 
   return (
@@ -752,7 +980,7 @@ export function GmailInboxShell({
             tone="light"
             clearRowOnOpen
             placeholder="Search"
-            busy={isLabelLoading}
+            busy={isRefreshing}
             subjects={["organisations", "contacts", "subjects"]}
             onQueryChange={setLiveQuery}
             suggestions={suggestions}
@@ -761,6 +989,17 @@ export function GmailInboxShell({
               if (thread) handleOpenThread(thread);
             }}
             onSubmitQuery={(query, filters) => {
+              /* A submission is the whole filter state, not a set of additions.
+                 The sector chips used to be UNIONED into `selectedLabels`,
+                 which meant a search could only ever add sectors — clearing
+                 the chips and searching again left the old ones applied — and
+                 a later "clear" branch then wiped the SIDEBAR's label
+                 selection too, which the search bar had never touched. The two
+                 sources are kept apart now: the bar owns `searchSectorLabels`,
+                 the sidebar owns `selectedLabels`, and the list filters on the
+                 union of the two (see `appliedLabels`). Submitting with no
+                 sector chips clears the bar's contribution and leaves the
+                 sidebar's alone. */
               setAppliedQuery(query);
               setAppliedDateValues(
                 filters
@@ -772,31 +1011,18 @@ export function GmailInboxShell({
                   .filter((filter) => filter.category === "Filter by status")
                   .map((filter) => filter.value),
               );
-              const sectorFilters = filters
-                .filter((filter) => filter.category === "Filter by sector")
-                .map((filter) => {
-                  const opt = SECTOR_FILTER_OPTIONS.find((s) => s.value === filter.value);
-                  return opt ? opt.label : filter.label || filter.value;
-                });
-              if (sectorFilters.length > 0) {
-                const next = new Set(selectedLabels);
-                sectorFilters.forEach((s) => next.add(s));
-                triggerLabelFilter(next);
-              } else {
-                setPageIndex(0);
-                listRef.current?.scrollTo({ top: 0 });
-              }
-              // When all filter chips have been removed (empty filters array),
-              // clear the applied filter state so the list shows unfiltered results
-              // without needing to click Search again.
-              if (filters.length === 0) {
-                setAppliedDateValues([]);
-                setAppliedStatusValues([]);
-                setSelectedLabels(new Set());
-                setAppliedLabels(new Set());
-                setPageIndex(0);
-                listRef.current?.scrollTo({ top: 0 });
-              }
+              setSearchSectorLabels(
+                new Set(
+                  filters
+                    .filter((filter) => filter.category === "Filter by sector")
+                    .map((filter) => {
+                      const opt = SECTOR_FILTER_OPTIONS.find((s) => s.value === filter.value);
+                      return opt ? opt.label : filter.label || filter.value;
+                    }),
+                ),
+              );
+              setPageIndex(0);
+              listRef.current?.scrollTo({ top: 0 });
             }}
             recentKey="preview-inbox-before"
             chipsBelow={false}
@@ -836,12 +1062,8 @@ export function GmailInboxShell({
       <GmailSidebar
         activeFolder={activeFolder}
         onSelectFolder={(folder) => {
-          if (loadingTimerRef.current) {
-            clearTimeout(loadingTimerRef.current);
-          }
-          setIsLabelLoading(false);
           setSelectedLabels(new Set());
-          setAppliedLabels(new Set());
+          setSearchSectorLabels(new Set());
           setActiveFolder(folder);
           setActiveThreadId(null);
           listRef.current?.scrollTo({ top: 0 });
@@ -857,7 +1079,7 @@ export function GmailInboxShell({
         trashCount={trashCount}
         labelCounts={labelCounts}
         customLabels={customLabels}
-        onAddCustomLabel={handleAddCustomLabel}
+        onCreateLabel={handleCreateLabel}
       />
 
       {/* Right Column: the mail surface fills the content row. */}
@@ -882,6 +1104,27 @@ export function GmailInboxShell({
           />
         ) : (
           <div className="flex-1 flex flex-col min-w-0 min-h-0">
+            {/* A refused star / read / trash. The store has already reverted
+                the flag by now, so this says why the row changed back rather
+                than leaving the CAM to notice it silently. Dismissable, and
+                cleared by the next successful write. */}
+            {flagError && (
+              <div
+                className="mx-3 mt-3 flex items-start justify-between gap-3 rounded-panel border border-stop/25 bg-stop-wash px-3 py-2"
+                role="alert"
+              >
+                <p className="text-xs font-semibold text-stop">{flagError}</p>
+                <button
+                  aria-label="Dismiss"
+                  className="shrink-0 text-stop/70 transition-colors hover:text-stop"
+                  onClick={() => setFlagError(null)}
+                  type="button"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+
             {/* Top Toolbar */}
             <div className="p-3">
               <GmailActionBar
@@ -984,7 +1227,7 @@ export function GmailInboxShell({
                   transition={{ duration: 0.16, ease: "easeOut" }}
                   className="min-h-full"
                 >
-                  {isLabelLoading ? (
+                  {isRefreshing ? (
                     <div className="divide-y divide-rule-soft animate-pulse" aria-label="Loading threads…">
                       {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
                         <div
@@ -1079,7 +1322,9 @@ export function GmailInboxShell({
       <GmailComposeModal
         isOpen={isComposeOpen}
         onClose={() => setIsComposeOpen(false)}
-        directory={realThreads}
+        directory={addressableClients}
+        tags={tags}
+        assignedTagsByClientId={tagsByClientId}
         onSend={handleSendNewOutreach}
       />
     </div>

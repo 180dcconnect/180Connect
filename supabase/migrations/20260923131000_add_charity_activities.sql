@@ -19,7 +19,7 @@
 -- fact about the organisation, from a payload the import already fetches. This
 -- is the same shape, and the same write path (annotateOrganisation), as
 -- registered_on and charity_reporting_status in
--- 20260922093000_add_charity_financial_breakdown.sql.
+-- 20260923103000_add_charity_financial_breakdown.sql.
 --
 -- Named charity_activities, not activities: it is the regulator's field, only
 -- charities have one, and a company or CIC row leaves it null — exactly like
@@ -64,7 +64,7 @@
 --   Documentation | Data Model tab ORGANISATIONS needs the new row; run
 --                 | npm run export:data-model to refresh docs/data-model/.
 --
--- Rollback: ../rollback/20260922121000_add_charity_activities.down.sql
+-- Rollback: ../rollback/20260923131000_add_charity_activities.down.sql
 
 alter table public.organisations
   add column if not exists charity_activities text;

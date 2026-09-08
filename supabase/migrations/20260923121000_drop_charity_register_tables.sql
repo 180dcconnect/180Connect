@@ -38,7 +38,7 @@
 --   Approved by   | Bashir (Project Leader).
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260922111000_drop_charity_register_tables.down.sql — but note it
+-- ../rollback/20260923121000_drop_charity_register_tables.down.sql — but note it
 -- restores empty tables. The data comes back by rebuilding, not by rolling back.
 
 drop table if exists public.charity_register_returns;

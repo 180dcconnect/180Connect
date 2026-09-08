@@ -115,7 +115,7 @@ holding `lower(btrim(name))`: saving under a name already in use replaces that
 set rather than creating a near-twin beside it, whatever case it was typed in.
 The column exists because `ON CONFLICT` cannot target an expression index — the
 table originally carried the same rule as `(source, lower(btrim(name)))` and
-every save failed with `42P10` until `20260922120000` moved it into a column.
+every save failed with `42P10` until `20260923130000` moved it into a column.
 
 ## Who can do it
 

@@ -1,4 +1,4 @@
--- Rollback for: 20260922112000_widen_field_sources_allowlist.sql
+-- Rollback for: 20260923122000_widen_field_sources_allowlist.sql
 --
 -- Narrows the allowlist back to its original eight values.
 --

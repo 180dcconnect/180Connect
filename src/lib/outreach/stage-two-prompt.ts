@@ -10,6 +10,7 @@ import {
   REGISTER_INSTRUCTIONS,
   sizeToneFor,
   SUBJECT_RULE,
+  signOffRule,
   type ClosingApproach,
   type EmailLength,
   type EmailRegister,
@@ -80,7 +81,9 @@ ${REGISTER_INSTRUCTIONS[register]}
 ${CLOSING_INSTRUCTIONS[closing]}
 ${sizeTone}
 
-Return exactly one JSON object with two string properties, "subject" and "body". No markdown fences. The body must be plain text with a blank line between paragraphs, and must stop after its final paragraph — no sign-off and no signature.`,
+${signOffRule(context.senderName)}
+
+Return exactly one JSON object with two string properties, "subject" and "body". No markdown fences. The body must be plain text with a blank line between paragraphs.`,
     prompt: `Draft a Stage 2 follow-up email using this reviewed client context.
 
 Organisation: ${value(context.organisationName)}

@@ -360,7 +360,7 @@ export type PresetState =
  * Saves under a name, replacing any set already holding it.
  *
  * The conflict target is `(source, name_key)`, the generated normalised column
- * added in 20260922120000 — `ON CONFLICT (source, name)` cannot match the
+ * added in 20260923130000 — `ON CONFLICT (source, name)` cannot match the
  * expression index the table shipped with, which is why no save on this screen
  * ever succeeded before that migration.
  */

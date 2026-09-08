@@ -169,7 +169,7 @@ describe("groupFieldSources", () => {
     assert.equal(result[0]?.current?.recordedBy, "A former team member");
   });
 
-  it("attributes organisation_type rows with the Type label (20260922104000 widening)", () => {
+  it("attributes organisation_type rows with the Type label (20260923114000 widening)", () => {
     const result = groupFieldSources([
       row({ field_name: "organisation_type", value: "charity", source: "charity_commission" }),
     ]);

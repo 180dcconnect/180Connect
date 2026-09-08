@@ -38,7 +38,7 @@
 --   Documentation | Reviewed by Bashir (Project Leader).
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260922092000_schedule_charity_commission_financials_cron.down.sql
+-- ../rollback/20260923102000_schedule_charity_commission_financials_cron.down.sql
 
 select cron.schedule(
   'charity_commission_financial_refresh_weekly',

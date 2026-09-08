@@ -75,6 +75,12 @@ export interface GooeyEmailInputProps {
   successPlaceholder?: string;
   /** Focus the field on mount, for fields revealed by a transform. */
   autoFocusField?: boolean;
+  /**
+   * External handle to the field, for callers that need to focus it from
+   * elsewhere (a button in another panel, say). Opt-in only — without it the
+   * component owns its input exactly as before.
+   */
+  inputRef?: React.RefObject<HTMLInputElement | null>;
   /** Maximum input length, passed straight to the field. */
   maxLength?: number;
   /**
@@ -126,6 +132,7 @@ export function GooeyEmailInput({
   validationDelayMs = 600,
   successPlaceholder = "Subscribed successfully!",
   autoFocusField = false,
+  inputRef: externalInputRef,
   maxLength,
   align = "center",
   restPlaceholder,
@@ -136,6 +143,7 @@ export function GooeyEmailInput({
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const fieldRef = externalInputRef ?? inputRef;
   const [isPulsing, setIsPulsing] = React.useState(false);
 
   const controlled = value !== undefined;
@@ -341,7 +349,7 @@ export function GooeyEmailInput({
       }
       setStatus("success");
       if (!controlled) setEmail("");
-      inputRef.current?.blur();
+      fieldRef.current?.blur();
       setTimeout(() => setStatus("idle"), 3500);
     } catch {
       setStatus("error");
@@ -444,7 +452,7 @@ export function GooeyEmailInput({
             }}
           >
             <input
-              ref={inputRef}
+              ref={fieldRef}
               type={inputType}
               value={text}
               maxLength={maxLength}
@@ -526,7 +534,7 @@ export function GooeyEmailInput({
               // focuses the field instead of falling through (or not) to the
               // input beneath, which the goo layering cannot be trusted with.
               if (!isFocused) {
-                inputRef.current?.focus();
+                fieldRef.current?.focus();
                 return;
               }
               // A tick is a verdict, not a trigger: tapping it does nothing.
@@ -536,7 +544,7 @@ export function GooeyEmailInput({
               if (onDropletClick) {
                 // Blur first so the capsule settles back to its resting face;
                 // the caller clears (or collapses) underneath the merge.
-                inputRef.current?.blur();
+                fieldRef.current?.blur();
                 onDropletClick();
               } else handleSubmit();
             }}

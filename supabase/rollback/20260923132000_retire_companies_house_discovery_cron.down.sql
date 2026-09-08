@@ -1,4 +1,4 @@
--- Rollback for: 20260922122000_retire_companies_house_discovery_cron.sql
+-- Rollback for: 20260923132000_retire_companies_house_discovery_cron.sql
 -- Apply manually against the target DB to reverse the paired migration.
 --
 -- Reschedules the weekly Companies House discovery job. Note this only

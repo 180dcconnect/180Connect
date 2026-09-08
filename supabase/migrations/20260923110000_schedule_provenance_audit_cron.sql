@@ -23,7 +23,7 @@
 --                 | open a client record with an empty Data Sources card.
 --   Compatibility | New scheduled job only. No table changes. Depends on
 --                 | 20260809100000_enable_cron_extensions.sql (pg_cron, pg_net)
---                 | and get_unprovenanced_organisations (20260922095000).
+--                 | and get_unprovenanced_organisations (20260923105000).
 --   Data migration| None.
 --   Security      | The route handler checks CRON_SECRET before doing any work
 --                 | (401 otherwise). The sweep runs as service_role and writes

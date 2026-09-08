@@ -13,6 +13,7 @@
 import {
   SECTOR_COLORS,
   type InboxAttachmentView,
+  type InboxContactView,
   type InboxEmailMessage,
   type InboxThreadView,
 } from "./inbox-thread-view.ts";
@@ -61,6 +62,7 @@ const BASE_MOCK_THREADS: InboxThreadView[] = [
     ],
     notesCount: 4,
     handoversCount: 1,
+    tags: [],
     messages: [
       {
         id: "msg-cruk-1",
@@ -172,6 +174,7 @@ finance@cancerresearchuk.org`,
     ],
     notesCount: 2,
     handoversCount: 0,
+    tags: [],
     messages: [
       {
         id: "msg-brc-1",
@@ -235,6 +238,7 @@ finance@cancerresearchuk.org`,
     attachments: [],
     notesCount: 3,
     handoversCount: 0,
+    tags: [],
     messages: [
       {
         id: "msg-well-1",
@@ -296,6 +300,7 @@ finance@cancerresearchuk.org`,
     ],
     notesCount: 1,
     handoversCount: 0,
+    tags: [],
     messages: [
       {
         id: "msg-amn-1",
@@ -347,6 +352,7 @@ finance@cancerresearchuk.org`,
     attachments: [],
     notesCount: 2,
     handoversCount: 1,
+    tags: [],
     messages: [
       {
         id: "msg-oxf-1",
@@ -409,6 +415,7 @@ finance@cancerresearchuk.org`,
     ],
     notesCount: 5,
     handoversCount: 0,
+    tags: [],
     messages: [
       {
         id: "msg-pt-1",
@@ -460,6 +467,7 @@ finance@cancerresearchuk.org`,
     attachments: [],
     notesCount: 1,
     handoversCount: 0,
+    tags: [],
     messages: [
       {
         id: "msg-wwf-1",
@@ -503,6 +511,7 @@ finance@cancerresearchuk.org`,
     attachments: [],
     notesCount: 2,
     handoversCount: 0,
+    tags: [],
     messages: [
       {
         id: "msg-tt-1",
@@ -547,6 +556,7 @@ finance@cancerresearchuk.org`,
     attachments: [],
     notesCount: 1,
     handoversCount: 0,
+    tags: [],
     messages: [
       {
         id: "msg-mind-1",
@@ -590,6 +600,7 @@ finance@cancerresearchuk.org`,
     attachments: [],
     notesCount: 3,
     handoversCount: 0,
+    tags: [],
     messages: [
       {
         id: "msg-sh-1",
@@ -633,6 +644,7 @@ finance@cancerresearchuk.org`,
     attachments: [],
     notesCount: 2,
     handoversCount: 0,
+    tags: [],
     messages: [
       {
         id: "msg-stc-1",
@@ -684,6 +696,7 @@ finance@cancerresearchuk.org`,
     ],
     notesCount: 1,
     handoversCount: 0,
+    tags: [],
     messages: [
       {
         id: "msg-mac-1",
@@ -735,6 +748,7 @@ finance@cancerresearchuk.org`,
     attachments: [],
     notesCount: 0,
     handoversCount: 0,
+    tags: [],
     messages: [
       {
         id: "msg-sm-1",
@@ -778,6 +792,7 @@ finance@cancerresearchuk.org`,
     attachments: [],
     notesCount: 1,
     handoversCount: 0,
+    tags: [],
     messages: [
       {
         id: "msg-cr-1",
@@ -821,6 +836,7 @@ finance@cancerresearchuk.org`,
     attachments: [],
     notesCount: 2,
     handoversCount: 0,
+    tags: [],
     messages: [
       {
         id: "msg-age-1",
@@ -864,6 +880,7 @@ finance@cancerresearchuk.org`,
     attachments: [],
     notesCount: 4,
     handoversCount: 1,
+    tags: [],
     messages: [
       {
         id: "msg-uni-1",
@@ -910,6 +927,7 @@ finance@cancerresearchuk.org`,
     attachments: [],
     notesCount: 0,
     handoversCount: 0,
+    tags: [],
     messages: [
       {
         id: "msg-steeze-1",
@@ -973,6 +991,7 @@ arthur.dent@180dc.org`,
     attachments: [],
     notesCount: 0,
     handoversCount: 0,
+    tags: [],
     messages: [
       {
         id: "msg-avalanche-1",
@@ -1031,6 +1050,7 @@ ada.lovelace@180dc.org`,
     attachments: [],
     notesCount: 0,
     handoversCount: 0,
+    tags: [],
     messages: [
       {
         id: "msg-loop-1",
@@ -2519,6 +2539,7 @@ function buildAdditionalThreads(seeds: typeof SEED_ORGANISATIONS): InboxThreadVi
       attachments,
       notesCount: org.hoursAgo % 4,
       handoversCount: org.hoursAgo % 5 === 0 ? 1 : 0,
+      tags: [],
       messages,
     };
   });
@@ -2712,60 +2733,7 @@ export function deriveFillContacts(thread: InboxThreadView): MockContact[] {
   return contacts;
 }
 
-export type RecipientMatch = {
-  contact: MockContact;
-  thread: InboxThreadView;
-};
-
-/**
- * Recipient lookup for the compose field. One query runs against three things
- * at once — the organisation's name, the contact's name, and the address — so
- * a CAM who only remembers the charity finds the address, and one who only
- * remembers the address finds the charity.
- *
- * Organisation-name hits outrank contact-name hits, which outrank address
- * hits; within a rank a prefix beats a substring, and the primary contact
- * comes before their colleagues.
- */
-export function searchRecipients(
-  rawQuery: string,
-  limit = 6,
-  threads: InboxThreadView[] = MOCK_INBOX_THREADS,
-): RecipientMatch[] {
-  const query = rawQuery.trim().toLowerCase();
-  if (!query) return [];
-
-  const seen = new Set<string>();
-  const scored: Array<{ match: RecipientMatch; score: number; index: number }> = [];
-
-  threads.forEach((thread, index) => {
-    if (thread.folder === "trash") return;
-    const org = thread.orgName.toLowerCase();
-
-    getMockContacts(thread).forEach((contact) => {
-      // The same address can sit on more than one thread for an org; the
-      // first (highest-ranked) sighting is the one that gets listed.
-      const key = contact.email.toLowerCase();
-      if (seen.has(key)) return;
-
-      const name = `${contact.firstName} ${contact.lastName}`.trim().toLowerCase();
-      let score = 0;
-      if (org.startsWith(query)) score = 60;
-      else if (org.includes(query)) score = 50;
-      else if (name && name.startsWith(query)) score = 40;
-      else if (name && name.includes(query)) score = 30;
-      else if (key.startsWith(query)) score = 20;
-      else if (key.includes(query)) score = 10;
-      if (score === 0) return;
-
-      if (contact.isPrimary) score += 5;
-      seen.add(key);
-      scored.push({ match: { contact, thread }, score, index });
-    });
-  });
-
-  return scored
-    .sort((a, b) => b.score - a.score || a.index - b.index)
-    .slice(0, limit)
-    .map((entry) => entry.match);
-}
+/* Recipient lookup used to live here, reading the derived stand-ins above for
+   every thread — which is how invented addresses ended up offered for real
+   organisations. It now lives in ./inbox/recipients.ts, where a real thread's
+   own CONTACTS rows win and this file's stand-ins are the fill-only fallback. */

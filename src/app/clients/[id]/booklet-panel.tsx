@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Clock, ExternalLink, Globe, ShieldCheck, Sparkles } from "lucide-react";
+import { Clock, ExternalLink, Globe, ShieldCheck } from "lucide-react";
+import { LoaderPinwheel } from "@/components/animate-ui/icons/loader-pinwheel";
 import { DeleteButton } from "@/components/ui/delete-button";
 import { GooeyEmailInput } from "@/components/ui/gooey-email-input";
 import { AnimateIcon } from "@/components/animate-ui/icons/icon";
@@ -798,7 +799,7 @@ export function BookletPanel({
         }
         headingId="booklet-heading"
         hint="AI-generated research summary, for outreach preparation"
-        icon={<Sparkles />}
+        icon={<LoaderPinwheel animateOnHover size={24} />}
         title="Client booklet"
       >
 

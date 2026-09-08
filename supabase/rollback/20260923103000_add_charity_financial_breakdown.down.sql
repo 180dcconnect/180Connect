@@ -1,4 +1,4 @@
--- Rollback for: 20260922093000_add_charity_financial_breakdown.sql
+-- Rollback for: 20260923103000_add_charity_financial_breakdown.sql
 -- Apply manually against the target DB to reverse the paired migration.
 --
 -- Destructive: drops the captured breakdown. Re-running the weekly refresh

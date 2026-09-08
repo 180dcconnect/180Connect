@@ -1,4 +1,4 @@
--- Rollback for 20260922091000_add_ai_observability_fields.sql.
+-- Rollback for 20260923101000_add_ai_observability_fields.sql.
 --
 -- Drops only what that migration adds — the activity column/check and the
 -- activity indexes. input_tokens/output_tokens/total_tokens/cost_usd and their

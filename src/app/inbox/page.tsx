@@ -39,6 +39,7 @@ import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
 import { mockFillThreads } from "@/lib/inbox-mock-data";
 import {
+  buildAddressableClients,
   buildRealInboxThreads,
   mergeWithMockFill,
   sortInboxThreads,
@@ -46,7 +47,10 @@ import {
   type InboxOrganisationRow,
   type InboxPendingRow,
 } from "@/lib/inbox/real-threads";
+import type { InboxThreadStateRow } from "@/lib/inbox/thread-flags";
+import { DEFAULT_FOLLOW_UP_THRESHOLDS } from "@/lib/outreach/follow-up-recommendations";
 import type { InboxMessageRow, InboxReplyRow } from "@/lib/outreach-inbox";
+import type { InboxThreadTag } from "@/lib/inbox-thread-view";
 import { createClient } from "@/lib/supabase/server";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
@@ -61,6 +65,45 @@ type MessageListRow = InboxMessageRow & {
   updated_at: string | null;
   created_at: string | null;
 };
+
+/** One ORG_TAGS row with its TAGS parent embedded. PostgREST returns the
+    to-one relation as an object, but the generated types widen it to
+    object-or-array, so both are handled where this is read. */
+type OrgTagJoinRow = {
+  organisation_id: string;
+  tag:
+    | { id: string; name: string; colour: string | null }
+    | { id: string; name: string; colour: string | null }[]
+    | null;
+};
+
+/** One TAGS row. Read whole so a tag created but not yet assigned to any
+    organisation still shows as a sidebar label — `org_tags` alone would drop
+    it the moment the page re-renders. */
+type TagRow = { id: string; name: string; colour: string | null };
+
+/** organisation_id → its tags, from the org_tags join. The sidebar's full
+    label list comes from the TAGS read instead (see above). */
+function collectOrgTags(
+  rows: readonly OrgTagJoinRow[],
+): Map<string, InboxThreadTag[]> {
+  const byOrganisation = new Map<string, InboxThreadTag[]>();
+
+  for (const row of rows) {
+    const parent = Array.isArray(row.tag) ? row.tag[0] : row.tag;
+    if (!parent?.id || !parent.name) continue;
+    const tag: InboxThreadTag = {
+      id: parent.id,
+      name: parent.name,
+      colour: parent.colour ?? null,
+    };
+    const existing = byOrganisation.get(row.organisation_id);
+    if (existing) existing.push(tag);
+    else byOrganisation.set(row.organisation_id, [tag]);
+  }
+
+  return byOrganisation;
+}
 
 /**
  * Reads a whole table through PostgREST's 1000-row window.
@@ -166,7 +209,14 @@ export default async function InboxPage({
 
   const supabase = await createClient();
 
-  const [messageResult, replyResult, orgResult, contactResult] = await Promise.all([
+  const [
+    messageResult,
+    replyResult,
+    orgResult,
+    contactResult,
+    orgTagResult,
+    tagResult,
+  ] = await Promise.all([
     fetchMessages(supabase),
     fetchAllPages<InboxReplyRow>((from, to) =>
       supabase
@@ -192,6 +242,25 @@ export default async function InboxPage({
         .order("id", { ascending: true })
         .range(from, to),
     ),
+    // Tags on organisations (ORG_TAGS, F191). Kept out of the four core
+    // queries above because a thread with no tags is the common case and this
+    // is one cheap join. Shared-read under RLS.
+    fetchAllPages<OrgTagJoinRow>((from, to) =>
+      supabase
+        .from("org_tags")
+        .select("organisation_id, tag:tags(id, name, colour)")
+        .order("organisation_id", { ascending: true })
+        .range(from, to),
+    ),
+    // Every tag (F188), for the sidebar's label rows — including ones not yet
+    // assigned to any organisation.
+    fetchAllPages<TagRow>((from, to) =>
+      supabase
+        .from("tags")
+        .select("id, name, colour")
+        .order("name", { ascending: true })
+        .range(from, to),
+    ),
   ]);
 
   // Fail-soft per source: one dead query degrades the mailbox rather than
@@ -201,6 +270,8 @@ export default async function InboxPage({
     ["inbox.replies", replyResult],
     ["inbox.organisations", orgResult],
     ["inbox.contacts", contactResult],
+    ["inbox.org_tags", orgTagResult],
+    ["inbox.tags", tagResult],
   ] as const) {
     if (result.error) {
       await reportError(result.error, { operation });
@@ -221,7 +292,10 @@ export default async function InboxPage({
       created_at: row.created_at,
     }));
 
-  const [noteCounts, handoverCounts] = await Promise.all([
+  // F160: the viewer's own first-follow-up threshold drives the Follow-Up Due
+  // tab, so it agrees with the dashboard's Needs Attention panel rather than
+  // assuming the AC default for everyone.
+  const [noteCounts, handoverCounts, preferences, threadState] = await Promise.all([
     countByOrganisation(
       "inbox.counts.notes",
       "organisation_id",
@@ -236,7 +310,39 @@ export default async function InboxPage({
         .eq("target_table", "organisations")
         .eq("action", "ownership_reassigned"),
     ),
+    supabase
+      .from("outreach_preferences")
+      .select("first_follow_up_days")
+      .eq("user_id", actor.id)
+      .maybeSingle<{ first_follow_up_days: number | null }>(),
+    // This viewer's own star / read / trash flags. No `.eq("user_id", ...)`
+    // is needed — inbox_thread_state's SELECT policy matches own rows only
+    // (matrix §3.25) — but it is stated anyway so the query says out loud
+    // what it expects back, and so a policy regression shows up as no rows
+    // rather than as another CAM's mailbox.
+    supabase
+      .from("inbox_thread_state")
+      .select("organisation_id, is_starred, read_state, is_trashed")
+      .eq("user_id", actor.id)
+      .returns<InboxThreadStateRow[]>(),
   ]);
+  if (preferences.error) {
+    await reportError(preferences.error, { operation: "inbox.follow_up_preferences" });
+  }
+  if (threadState.error) {
+    await reportError(threadState.error, { operation: "inbox.thread_state" });
+  }
+  // Fails soft, like every other read on this page: with no flags the mailbox
+  // renders the server's own derivation, which is the same thing a CAM who has
+  // never starred anything sees.
+  const threadFlags = threadState.data ?? [];
+
+  const orgTags = collectOrgTags(
+    (orgTagResult.data ?? []) as unknown as OrgTagJoinRow[],
+  );
+  const allTags: InboxThreadTag[] = ((tagResult.data ?? []) as unknown as TagRow[])
+    .filter((row) => row.id && row.name?.trim())
+    .map((row) => ({ id: row.id, name: row.name, colour: row.colour ?? null }));
 
   const real = buildRealInboxThreads({
     messages: sent as unknown as InboxMessageRow[],
@@ -246,6 +352,7 @@ export default async function InboxPage({
     contacts: (contactResult.data ?? []) as unknown as InboxContactRow[],
     noteCounts,
     handoverCounts,
+    orgTags,
   });
 
   // Design fill sits behind the real rows and never shadows one — see
@@ -253,14 +360,27 @@ export default async function InboxPage({
   // NEXT_PUBLIC_INBOX_MOCK_FILL=0 and restart, and mockFillThreads() is [].
   const threads = sortInboxThreads(mergeWithMockFill(real, mockFillThreads()));
 
+  // Who Compose may write to. Every organisation with an address, NOT just the
+  // ones with outreach history — `real` excludes an organisation nobody has
+  // emailed, which is exactly the client a first email is being written to.
+  const addressableClients = buildAddressableClients({
+    organisations: (orgResult.data ?? []) as unknown as InboxOrganisationRow[],
+    contacts: (contactResult.data ?? []) as unknown as InboxContactRow[],
+  });
+
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-[#f6f8fc] text-foreground">
       <main className="flex h-full w-full min-h-0 flex-col py-2 pr-2 sm:pr-4">
         <GmailInboxShell
           className="h-full"
+          followUpDays={
+            preferences.data?.first_follow_up_days ?? DEFAULT_FOLLOW_UP_THRESHOLDS.first
+          }
           initialThreadId={threadParam ?? null}
+          initialThreadFlags={threadFlags}
+          addressableClients={addressableClients}
           initialThreads={threads}
-          realThreads={real}
+          initialTags={allTags}
           key={threadParam ?? "inbox"}
         />
       </main>

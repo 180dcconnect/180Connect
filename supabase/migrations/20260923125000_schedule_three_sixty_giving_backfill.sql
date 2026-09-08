@@ -9,7 +9,7 @@
 -- 600ms to stay under their documented 2 requests/second. That is ~16 minutes
 -- for the 1,915 identifiers on staging, against a 300s platform ceiling. The
 -- walk cannot be one request, so it is a queue that drains a slice at a time —
--- organisations.grants_fetched_at is the cursor (20260922114000).
+-- organisations.grants_fetched_at is the cursor (20260923124000).
 --
 -- WHY EVERY 15 MINUTES, WHICH LOOKS AGGRESSIVE AND IS NOT
 --
@@ -52,7 +52,7 @@
 -- in the same state until those three secrets are set.
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260922115000_schedule_three_sixty_giving_backfill.down.sql
+-- ../rollback/20260923125000_schedule_three_sixty_giving_backfill.down.sql
 
 select cron.schedule(
   'three_sixty_giving_backfill',

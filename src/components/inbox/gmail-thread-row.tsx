@@ -230,6 +230,32 @@ export function GmailThreadRow({
           );
         })()}
 
+        {/* Tag chips (TAGS/ORG_TAGS) — the same labels the sidebar filters on.
+            Capped at two so a heavily-tagged client does not push the
+            timestamp off the row; the rest are a "+N". */}
+        {thread.tags && thread.tags.length > 0 && (
+          <div className="hidden lg:flex items-center gap-1">
+            {thread.tags.slice(0, 2).map((tag) => (
+              <span
+                key={tag.id}
+                title={tag.name}
+                className="inline-flex max-w-[7rem] items-center truncate rounded-full px-2 py-0.5 text-[10px] font-medium"
+                style={{
+                  backgroundColor: `color-mix(in srgb, ${tag.colour ?? "var(--lead)"} 14%, transparent)`,
+                  color: tag.colour ?? "var(--lead)",
+                }}
+              >
+                {tag.name}
+              </span>
+            ))}
+            {thread.tags.length > 2 && (
+              <span className="text-[10px] font-medium text-faint">
+                +{thread.tags.length - 2}
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Attachment Indicator */}
         {thread.attachments && thread.attachments.length > 0 && (
           <div

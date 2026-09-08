@@ -15,6 +15,14 @@ export type StageOneContext = {
   subSector?: string | null;
   newsHooks?: string[] | null;
   booklet?: string | null;
+  /**
+   * The CAM who will send this draft, used for the sign-off. Nullable because
+   * the sign-off rule degrades to no sign-off rather than to an invented name:
+   * a model asked to close an email with no name supplied will happily make
+   * one up, and an outreach email signed by a person who does not exist is
+   * worse than one that ends at its final paragraph.
+   */
+  senderName?: string | null;
 };
 
 export const EMAIL_LENGTHS = ["short", "standard", "detailed"] as const;
@@ -237,6 +245,24 @@ export function label(labels: Record<string, string>, raw: string | null | undef
   return labels[key] ?? key.replace(/_/g, " ");
 }
 
+/**
+ * Sign-off. Previously the prompt said "must not include a sender signature"
+ * and no later step added one, so every generated draft arrived unsigned and
+ * the CAM hand-typed the closing lines before it could go out.
+ *
+ * The model writes it rather than the send path appending a fixed block,
+ * because the closing phrase has to agree with the register — "Yours
+ * sincerely" under `formal` reads wrong under `direct` — and the model is
+ * already choosing the register. The branch line is fixed text either way.
+ */
+export function signOffRule(senderName: string | null | undefined): string {
+  const name = senderName?.trim();
+  if (!name) {
+    return `Sign-off: end the body after its final paragraph. Do not add a closing line, a name, or a signature, and never invent a sender name.`;
+  }
+  return `Sign-off: close the body with a short closing line suited to the register, then "${name}" on its own line, then "180 Degrees Consulting Sheffield" on its own line. Use exactly that name — never a different one, never a placeholder, and never a job title.`;
+}
+
 export function buildStageOnePrompt(
   context: StageOneContext,
   options: {
@@ -268,7 +294,9 @@ ${OPENING_INSTRUCTIONS[opening]}
 ${CLOSING_INSTRUCTIONS[closing]}
 ${sizeTone}
 
-Return exactly one JSON object with two string properties, "subject" and "body". No markdown fences. The body must be plain text with a blank line between paragraphs, and must stop after its final paragraph — no sign-off and no signature.`,
+${signOffRule(context.senderName)}
+
+Return exactly one JSON object with two string properties, "subject" and "body". No markdown fences. The body must be plain text with a blank line between paragraphs.`,
     prompt: `Draft a Stage 1 outreach email using this reviewed client context.
 
 Organisation: ${value(context.organisationName)}

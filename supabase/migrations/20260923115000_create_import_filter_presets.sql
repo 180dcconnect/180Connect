@@ -37,7 +37,7 @@
 --   Approved by   | Bashir (Project Leader).
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260922105000_create_import_filter_presets.down.sql
+-- ../rollback/20260923115000_create_import_filter_presets.down.sql
 
 create table if not exists public.import_filter_presets (
   id                 uuid primary key default gen_random_uuid(),

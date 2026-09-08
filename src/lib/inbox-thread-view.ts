@@ -58,6 +58,19 @@ export type InboxContactView = {
   isPrimary: boolean;
 };
 
+/**
+ * One tag (TAGS / ORG_TAGS) currently on the thread's organisation. Tags are
+ * the shared, platform-wide labels the client record already manages (F188-
+ * F194) — the mailbox sidebar's custom labels are these, not a second concept.
+ * `colour` is a palette hex or null; a null renders as the app's brand tint,
+ * the same fallback the client record's chips use.
+ */
+export type InboxThreadTag = {
+  id: string;
+  name: string;
+  colour: string | null;
+};
+
 export type InboxThreadView = {
   id: string; // Organisation ID
   orgName: string;
@@ -107,6 +120,12 @@ export type InboxThreadView = {
   attachments: InboxAttachmentView[];
   notesCount: number;
   handoversCount: number;
+  /**
+   * Tags on this thread's organisation, primary sort by name. Present on
+   * threads built from the database; the design fill leaves it `[]`. Drives
+   * the sidebar's custom-label filter and the chips on a thread row.
+   */
+  tags: InboxThreadTag[];
 };
 
 /** Sector → label colour. Fixed, so a thread's label is stable across renders

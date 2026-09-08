@@ -6,7 +6,7 @@
 --   calls (insertOrganisation, then markRecordStatus 'validated'), so a crash or
 --   network failure between them left an organisation with no linked
 --   raw_source_records row — a client with no answer to "where did this come
---   from?", invisible until the provenance audit (20260922095000) flags it.
+--   from?", invisible until the provenance audit (20260923105000) flags it.
 --   With this RPC the two writes commit or roll back together, and the
 --   provenance invariant holds by construction rather than by luck.
 --
@@ -52,7 +52,7 @@
 --                 | migration header and the promote loop's comments.
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260922101000_create_link_raw_record_to_organisation_rpc.down.sql
+-- ../rollback/20260923111000_create_link_raw_record_to_organisation_rpc.down.sql
 
 create or replace function public.link_raw_record_to_organisation(
   p_organisation jsonb,

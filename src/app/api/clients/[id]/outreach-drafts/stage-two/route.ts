@@ -268,6 +268,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       subSector: enrichment?.sub_sector,
       newsHooks: enrichment?.news_hooks,
       booklet: savedBooklet?.booklet_text ?? null,
+      senderName: authorization.actor.fullName,
       previousSubject: previousMessage.subject,
       // F117: the sent message's body may be HTML (new) or plain text (sent
       // before this feature) — either way the model prompt wants readable

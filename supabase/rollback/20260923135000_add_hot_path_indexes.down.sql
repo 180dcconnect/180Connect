@@ -1,4 +1,4 @@
--- Rollback for: 20260922125000_add_hot_path_indexes.sql
+-- Rollback for: 20260923135000_add_hot_path_indexes.sql
 -- Apply manually against the target DB to reverse the paired migration.
 --
 -- Drops both indexes. No data is touched and no access changes; the queries that

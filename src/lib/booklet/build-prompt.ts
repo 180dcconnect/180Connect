@@ -57,7 +57,7 @@ export type BookletOrganisationInput = {
   registered_on: string | null;
   charity_reporting_status: string | null;
   // The charity's own filed description of its work
-  // (20260922121000_add_charity_activities.sql). Sent as its own line rather
+  // (20260923131000_add_charity_activities.sql). Sent as its own line rather
   // than folded into Mission: it is canonical register text, where
   // ENRICHMENT_RESULTS.mission_statement is LLM output, and PRD §7.8 requires
   // the two to stay distinguishable. A charity with both gets both — they are

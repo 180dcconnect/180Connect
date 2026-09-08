@@ -17,7 +17,7 @@
 --     3. an approved manual entry (approve_manual_entry creates an
 --        entry_method='manual' organisation whose fields are attributed to
 --        nothing, so its Data Sources card can be empty — the exact gap the
---        20260922095000 provenance-audit cron watches for).
+--        20260923105000 provenance-audit cron watches for).
 --
 -- WHO DECIDED WHAT (sign-off 2 Sep 2026):
 --   - Field provenance is visible to every active signed-in role. This
@@ -70,7 +70,7 @@
 --                  | updated (generated files re-exported) in the same PR.
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260922104000_extend_field_sources_and_manual_provenance.down.sql
+-- ../rollback/20260923114000_extend_field_sources_and_manual_provenance.down.sql
 
 -- ---------------------------------------------------------------------------
 -- 1. FIELD_SOURCES: widen the tracked set, add recorded_by.
@@ -158,7 +158,7 @@ end;
 $$;
 
 comment on function public.get_field_sources(uuid) is
-  'F044 (widened 20260922104000): every recorded value+source for a client''s '
+  'F044 (widened 20260923114000): every recorded value+source for a client''s '
   'tracked fields, current and superseded, newest-first within each field, with '
   'the recorded_by name resolved. Readable by every active signed-in role '
   '(reverses the original admin-only call — sign-off in the migration header): '
@@ -218,7 +218,7 @@ begin
   end if;
 
   -- Same value set as the column's source CHECK constraint, widened by
-  -- 20260922112000 to add the two data_source_name values that were missing:
+  -- 20260923122000 to add the two data_source_name values that were missing:
   -- 'charity_commission_bulk' and 'website'. Both are real sources that write
   -- organisations, so every charity imported through the bulk route silently
   -- recorded no per-field provenance at all — the insert is best-effort, so it
@@ -268,13 +268,13 @@ end;
 $$;
 
 comment on function public.record_field_source(uuid, text, text, text, uuid, uuid) is
-  'F044 (widened 20260922104000): records which source produced a field''s value,
+  'F044 (widened 20260923114000): records which source produced a field''s value,
   flipping the previous current row (if any) to is_current = false. organisation_type
   joined the tracked set; p_recorded_by attributes a manual write to the person
   behind it (null = pipeline/system). Callers: write-organisations.ts on initial
   import (service_role), record_field_discrepancy / resolve_field_discrepancy
   (F048), apply_admin_field_edits (this migration), decide_edit_suggestion
-  (20260922104000 rewrite), approve_manual_entry (20260922104000 rewrite).';
+  (20260923114000 rewrite), approve_manual_entry (20260923114000 rewrite).';
 
 -- Only the six-argument form exists now; the five-argument one was dropped
 -- above rather than left behind as an ambiguous overload.
@@ -413,7 +413,7 @@ end;
 $$;
 
 comment on function public.apply_admin_field_edits(uuid, jsonb, text) is
-  'Admin direct field edits, attributed (20260922104000): applies each {field_name, '
+  'Admin direct field edits, attributed (20260923114000): applies each {field_name, '
   'value} change onto organisations, records FIELD_SOURCES provenance (source=''manual'', '
   'recorded_by=the admin) for tracked fields, and writes one audit_log row '
   '(fields_direct_edited) — all in the caller''s transaction. SECURITY DEFINER; '
@@ -513,7 +513,7 @@ begin
       v_suggestion.field_name
     ) using v_suggestion.proposed_value, v_suggestion.organisation_id;
 
-    -- F044 (20260922104000): the approval is a write to the field, so the field
+    -- F044 (20260923114000): the approval is a write to the field, so the field
     -- history says a person corrected it, not that the old register still owns
     -- the value. Restricted fields are admin-added text columns; only the seven
     -- tracked ones land in FIELD_SOURCES, the rest are attributed by no-op.
@@ -574,7 +574,7 @@ end;
 $$;
 
 comment on function public.decide_edit_suggestion(uuid, boolean, text) is
-  '#80/#81 (F078/F079), rewritten by F020 (#23), re-rewritten 20260922104000: '
+  '#80/#81 (F078/F079), rewritten by F020 (#23), re-rewritten 20260923114000: '
   'approval additionally records FIELD_SOURCES provenance (source=''manual'', '
   'recorded_by=the deciding admin) so the field history attributes the correction '
   'to a person. Everything else — guards, errcodes, audit, notification — '
@@ -760,7 +760,7 @@ begin
       );
     end if;
 
-    -- F044 (20260922104000): a hand-created record's fields are Manual Input,
+    -- F044 (20260923114000): a hand-created record's fields are Manual Input,
     -- attributed to the CAM who typed them — the manual entry's provenance is
     -- the person, not a register. legal_name is not null on the entry, so the
     -- row is guaranteed; every other field is attributed only if the CAM
@@ -838,7 +838,7 @@ end;
 $$;
 
 comment on function public.approve_manual_entry(uuid,text,boolean,uuid,text) is
-  'F036/F042 manual-entry approval, re-rewritten 20260922104000: on create_new, '
+  'F036/F042 manual-entry approval, re-rewritten 20260923114000: on create_new, '
   'each populated tracked field is attributed via record_field_source '
   '(source=''manual'', recorded_by=the submitting CAM), so the record''s field '
   'history and Data Sources card say Manual Input from the person who entered it. '

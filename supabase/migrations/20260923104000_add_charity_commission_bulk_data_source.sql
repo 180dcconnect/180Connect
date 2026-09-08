@@ -52,7 +52,7 @@
 --   Approved by   | Bashir (Project Leader).
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260922094000_add_charity_commission_bulk_data_source.down.sql
+-- ../rollback/20260923104000_add_charity_commission_bulk_data_source.down.sql
 
 alter domain public.data_source_name
   drop constraint data_source_name_check;

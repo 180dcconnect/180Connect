@@ -1,4 +1,4 @@
--- Rollback for: 20260922102000_add_charity_scale_and_govt_funding.sql
+-- Rollback for: 20260923112000_add_charity_scale_and_govt_funding.sql
 -- Apply manually against the target DB to reverse the paired migration.
 --
 -- Destructive: drops the captured scale and government-funding figures. Re-running

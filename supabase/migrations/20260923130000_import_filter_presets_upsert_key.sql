@@ -1,6 +1,6 @@
 -- Migration: import_filter_presets_upsert_key
 -- Sequence: no new step in Data Model tab "11 Supabase Migration Sequence" —
---   a fix to the settings table added in 20260922105000.
+--   a fix to the settings table added in 20260923115000.
 -- Story: saving a filter set actually saves it.
 --
 -- IMPORT_FILTER_PRESETS shipped with its uniqueness expressed as an *expression*
@@ -36,7 +36,7 @@
 --   Approved by   | Bashir (Project Leader).
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260922120000_import_filter_presets_upsert_key.down.sql
+-- ../rollback/20260923130000_import_filter_presets_upsert_key.down.sql
 
 alter table public.import_filter_presets
   add column if not exists name_key text

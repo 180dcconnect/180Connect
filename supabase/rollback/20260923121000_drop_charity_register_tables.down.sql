@@ -1,4 +1,4 @@
--- Rollback for: 20260922111000_drop_charity_register_tables.sql
+-- Rollback for: 20260923121000_drop_charity_register_tables.sql
 --
 -- Deliberately NOT provided as a table recreation.
 --

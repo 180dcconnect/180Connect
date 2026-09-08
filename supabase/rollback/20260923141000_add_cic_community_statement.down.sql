@@ -1,4 +1,4 @@
--- Rollback for 20260922131000_add_cic_community_statement.sql
+-- Rollback for 20260923141000_add_cic_community_statement.sql
 --
 -- Unlike the SIC rollback beside it, dropping these columns IS a loss of
 -- record: the statement text exists nowhere else in the platform. It came from

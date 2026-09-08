@@ -1,4 +1,4 @@
--- Rollback for 20260922132000_scout_weights_five_parameters.sql
+-- Rollback for 20260923142000_scout_weights_five_parameters.sql
 --
 -- Reactivates the generation this migration retired and removes the one it
 -- added, undoing the whole change including its audit row. Deleting an audit

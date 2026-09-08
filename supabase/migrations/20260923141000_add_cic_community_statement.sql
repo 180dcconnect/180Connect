@@ -5,7 +5,7 @@
 --
 -- WHY THIS COLUMN EXISTS
 --
--- 20260922130000_add_sic_codes.sql gave companies their first descriptive
+-- 20260923140000_add_sic_codes.sql gave companies their first descriptive
 -- field, and was honest about its ceiling: a SIC code is the drawer the
 -- registrar filed a company in, not what it set out to do. 118 of the 413
 -- companies on staging share 85590 "Other education n.e.c."; it cannot tell two
@@ -43,7 +43,7 @@
 -- WHY A SECOND COLUMN FOR THE CURSOR
 --
 -- cic_statement_checked_at is the queue, exactly as grants_fetched_at is for
--- 360Giving (20260922114000). Without it, a company that has no CICINC filing —
+-- 360Giving (20260923124000). Without it, a company that has no CICINC filing —
 -- an ordinary limited company, or a CIC whose filing we could not read — is
 -- indistinguishable from one never attempted, and the backfill retries it on
 -- every run forever. Set on every attempt, success or not:
@@ -104,7 +104,7 @@
 --   Approved by   | Bashir (Project Leader).
 --
 -- Reversibility: paired rollback in
--- ../rollback/20260922131000_add_cic_community_statement.down.sql
+-- ../rollback/20260923141000_add_cic_community_statement.down.sql
 
 alter table public.organisations
   add column if not exists cic_community_statement text,

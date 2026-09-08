@@ -165,4 +165,43 @@ if [ -n "$stale" ]; then
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Every version must be UNIQUE, not merely late.
+#
+# supabase_migrations.schema_migrations is keyed on the 14-digit version alone,
+# so two files sharing one is not a style problem -- it is a silent skip. The
+# first to land records the version; the second is then considered
+# already-applied and never runs, on staging and on production, with CI green
+# throughout. It only surfaces on a fresh database, where `db reset` dies on
+# the primary key and nobody can rebuild locally until it is fixed.
+#
+# This happened: 20260912170300 was used by both notify_on_gmail_reply (#510)
+# and auto_transition_no_response (#545), and F154 AC3's two functions reached
+# no environment at all. The staleness check above could not see it -- both
+# files were correctly dated later than everything before them.
+duplicates="$(
+  ls "$MIGRATIONS_DIR" 2>/dev/null \
+    | grep -E '^[0-9]{14}_.*\.sql$' \
+    | cut -d_ -f1 \
+    | sort \
+    | uniq -d
+)"
+
+if [ -n "$duplicates" ]; then
+  echo
+  echo "Migration version collision."
+  echo
+  for stamp in $duplicates; do
+    echo "  $stamp is used by:"
+    for f in "$MIGRATIONS_DIR/${stamp}"_*.sql; do
+      echo "    $(basename "$f")"
+      echo "::error file=$f::Version $stamp is used by more than one migration. schema_migrations is keyed on the version alone, so only the first to be applied ever runs -- the other is silently skipped on every environment. Re-date this file and its supabase/rollback/ counterpart."
+    done
+  done
+  echo
+  echo "Re-date all but one of each group -- migration and rollback together --"
+  echo "to a timestamp after $base_head, then push again."
+  exit 1
+fi
+
 echo "All added migrations are dated after $base_head."

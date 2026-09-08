@@ -21,7 +21,7 @@ describe("F135 reply follow-up contract", () => {
     const button = await source("../../app/clients/[id]/follow-up-button.tsx");
 
     assert.match(thread, /replyEventId=\{entry\.id\}/);
-    assert.match(button, /JSON\.stringify\(\{ length, voice, tone, closing, replyEventId \}\)/);
+    assert.match(button, /JSON\.stringify\(\{ length, register, closing, replyEventId \}\)/);
     assert.match(button, /Review drafted response/);
   });
 

@@ -48,7 +48,7 @@
 -- this does nothing at all — so re-applying it after an admin has tuned the
 -- weights themselves cannot stamp their choice back to equal fifths.
 --
--- Reversibility: paired rollback in ../rollback/20260922132000_scout_weights_five_parameters.down.sql
+-- Reversibility: paired rollback in ../rollback/20260923142000_scout_weights_five_parameters.down.sql
 
 do $$
 declare

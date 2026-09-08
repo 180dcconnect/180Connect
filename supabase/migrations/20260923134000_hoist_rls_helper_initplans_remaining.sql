@@ -1,6 +1,6 @@
 -- Migration: hoist_rls_helper_initplans_remaining
 -- Sequence: no schema change — the same policy-expression rewrite as
---   20260922123000_hoist_rls_helper_initplans.sql, applied to the other 40 tables.
+--   20260923133000_hoist_rls_helper_initplans.sql, applied to the other 40 tables.
 -- Story: performance — intermittent slow page loads.
 --
 -- WHAT THIS DOES
@@ -13,7 +13,7 @@
 -- WHY
 --
 -- The full reasoning and the measurements are in the migration this follows
--- (20260922123000). In short: these helpers are `STABLE SECURITY DEFINER`,
+-- (20260923133000). In short: these helpers are `STABLE SECURITY DEFINER`,
 -- Postgres cannot inline a SECURITY DEFINER function, and so inside a policy's
 -- security qualifier a bare call is invoked once per row rather than once per
 -- statement. On the seven tables `/clients` reads, hoisting took the client-list

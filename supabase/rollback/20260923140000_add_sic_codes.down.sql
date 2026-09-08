@@ -1,4 +1,4 @@
--- Rollback for 20260922130000_add_sic_codes.sql
+-- Rollback for 20260923140000_add_sic_codes.sql
 --
 -- Dropping the column discards the backfilled codes, which is not a loss of
 -- record: every value came from RAW_SOURCE_RECORDS and the forward migration's

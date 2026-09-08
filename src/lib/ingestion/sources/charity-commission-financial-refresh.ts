@@ -348,7 +348,7 @@ export async function runCharityCommissionFinancialRefresh(options?: {
         // The annual return's own split. Nulls are "not published for this
         // year", which is the common case for a smaller charity filing an
         // entry-level return — see the migration header on
-        // 20260922093000_add_charity_financial_breakdown.sql.
+        // 20260923103000_add_charity_financial_breakdown.sql.
         income_donations_legacies: period.incomeDonationsLegacies,
         income_charitable_activities: period.incomeCharitableActivities,
         income_other_trading: period.incomeOtherTrading,

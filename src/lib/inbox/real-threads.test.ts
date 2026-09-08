@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import {
+  buildAddressableClients,
   buildRealInboxThreads,
   deriveFolder,
   deriveSector,
@@ -396,5 +397,141 @@ describe("hydrateInboxThread", () => {
     );
 
     assert.equal(hydrated.messages[0].senderName, "Sam Primary");
+  });
+});
+
+describe("buildRealInboxThreads — thread tags", () => {
+  it("hangs the organisation's tags on the thread, sorted by name", () => {
+    const [thread] = buildRealInboxThreads({
+      messages: [sentMessage()],
+      replies: [],
+      pending: [],
+      organisations: [organisation()],
+      contacts: [],
+      orgTags: new Map([
+        [
+          ORG_A,
+          [
+            { id: "t2", name: "Spring Cycle", colour: "#067647" },
+            { id: "t1", name: "Autumn Cycle", colour: null },
+          ],
+        ],
+      ]),
+      now: NOW,
+    });
+
+    assert.deepEqual(
+      thread.tags.map((tag) => tag.name),
+      ["Autumn Cycle", "Spring Cycle"],
+    );
+    assert.equal(thread.tags[1].colour, "#067647");
+  });
+
+  it("gives a thread with no tags an empty array, not undefined", () => {
+    const [thread] = buildRealInboxThreads({
+      messages: [sentMessage()],
+      replies: [],
+      pending: [],
+      organisations: [organisation()],
+      contacts: [],
+      now: NOW,
+    });
+
+    assert.deepEqual(thread.tags, []);
+  });
+});
+
+describe("buildAddressableClients", () => {
+  const contact = (overrides: Partial<InboxContactRow> = {}): InboxContactRow => ({
+    id: "c1",
+    organisation_id: ORG_A,
+    first_name: "Sam",
+    last_name: "Primary",
+    email: "partnerships@testcharity.org",
+    job_title: "Head of Partnerships",
+    phone: null,
+    is_primary: true,
+    ...overrides,
+  });
+
+  it("includes a client nobody has emailed yet", () => {
+    // The regression this exists for: the compose window used to search the
+    // thread list, which excludes an organisation with no outreach — so the
+    // first email to a client could not be started from the inbox at all.
+    const threads = buildRealInboxThreads({
+      messages: [],
+      replies: [],
+      pending: [],
+      organisations: [organisation()],
+      contacts: [contact()],
+      now: NOW,
+    });
+    assert.deepEqual(threads, [], "no outreach means no thread");
+
+    const clients = buildAddressableClients({
+      organisations: [organisation()],
+      contacts: [contact()],
+    });
+    assert.equal(clients.length, 1);
+    assert.equal(clients[0].id, ORG_A);
+    assert.equal(clients[0].orgName, "Test Charity");
+  });
+
+  it("carries every address the organisation holds, primary first", () => {
+    const clients = buildAddressableClients({
+      organisations: [organisation()],
+      contacts: [
+        contact({ id: "c1", email: "enquiries@testcharity.org", is_primary: false }),
+        contact({ id: "c2", email: "partnerships@testcharity.org", is_primary: true }),
+      ],
+    });
+    assert.deepEqual(
+      clients[0].contacts.map((c) => c.email),
+      ["partnerships@testcharity.org", "enquiries@testcharity.org", "info@testcharity.org"],
+    );
+    assert.equal(clients[0].contacts[0].isPrimary, true);
+  });
+
+  it("falls back to the organisation's own address when it has no contact rows", () => {
+    const clients = buildAddressableClients({
+      organisations: [organisation()],
+      contacts: [],
+    });
+    assert.deepEqual(
+      clients[0].contacts.map((c) => c.email),
+      ["info@testcharity.org"],
+    );
+  });
+
+  it("drops an organisation with no address at all", () => {
+    // Nothing to write into a To: field, so offering it would produce a
+    // recipient that Send could never honour.
+    const clients = buildAddressableClients({
+      organisations: [organisation({ contact_email: null })],
+      contacts: [],
+    });
+    assert.deepEqual(clients, []);
+  });
+
+  it("ignores contacts belonging to another organisation", () => {
+    const clients = buildAddressableClients({
+      organisations: [organisation({ contact_email: null })],
+      contacts: [contact({ organisation_id: ORG_B })],
+    });
+    assert.deepEqual(clients, []);
+  });
+
+  it("orders by organisation name", () => {
+    const clients = buildAddressableClients({
+      organisations: [
+        organisation({ id: ORG_B, legal_name: "Zebra Trust", contact_email: "info@zebra.org" }),
+        organisation({ legal_name: "Alpha Trust" }),
+      ],
+      contacts: [],
+    });
+    assert.deepEqual(
+      clients.map((c) => c.orgName),
+      ["Alpha Trust", "Zebra Trust"],
+    );
   });
 });

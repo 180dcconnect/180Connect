@@ -1,4 +1,4 @@
--- Reverses 20260922090000_add_reason_to_edit_suggestions.sql.
+-- Reverses 20260923100000_add_reason_to_edit_suggestions.sql.
 --
 -- Drops the four-argument overload first (the three-arg wrapper depends on it),
 -- then restores the three-arg form to the self-contained body it had in

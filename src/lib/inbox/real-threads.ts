@@ -34,6 +34,7 @@ import {
 } from "../outreach-inbox.ts";
 import {
   SECTOR_COLORS,
+  type InboxContactView,
   type InboxEmailMessage,
   type InboxThreadView,
 } from "../inbox-thread-view.ts";
@@ -168,6 +169,54 @@ export function deriveFolder(
   if (pending?.send_status === "scheduled") return "scheduled";
   if (pending?.send_status === "draft") return "drafts";
   return "inbox";
+}
+
+/**
+ * Every CONTACTS row the organisation holds, primary first, as the compose
+ * window's recipient lookup consumes them.
+ *
+ * Contacts with no address are dropped rather than listed: an entry that
+ * cannot be written into a To: field is not a recipient. The organisation's
+ * own `contact_email` is appended when no contact row carries it, because that
+ * is the address `sendReviewedEmail` falls back to — offering less than the
+ * send path would accept is how a CAM ends up typing an address by hand.
+ */
+function contactsFor(
+  organisation: InboxOrganisationRow,
+  contacts: readonly InboxContactRow[],
+): InboxContactView[] {
+  const own = contacts
+    .filter((row) => row.organisation_id === organisation.id)
+    .filter((row) => Boolean(row.email?.trim()));
+
+  const views: InboxContactView[] = own.map((row) => {
+    const name = contactName(row);
+    const [firstName, ...rest] = name ? name.split(" ") : [""];
+    return {
+      id: row.id,
+      organisationId: organisation.id,
+      firstName: firstName ?? "",
+      lastName: rest.join(" "),
+      email: row.email!.trim(),
+      jobTitle: row.job_title?.trim() || "Contact",
+      isPrimary: row.is_primary === true,
+    };
+  });
+
+  const fallback = organisation.contact_email?.trim();
+  if (fallback && !views.some((view) => view.email.toLowerCase() === fallback.toLowerCase())) {
+    views.push({
+      id: `${organisation.id}-contact-email`,
+      organisationId: organisation.id,
+      firstName: "",
+      lastName: "",
+      email: fallback,
+      jobTitle: "Organisation address",
+      isPrimary: views.length === 0,
+    });
+  }
+
+  return views.sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary));
 }
 
 function primaryContactFor(
@@ -343,6 +392,7 @@ export function buildRealInboxThreads({
       sector,
       labelColor: SECTOR_COLORS[sector],
       primaryContact: primaryContactFor(organisation, contacts),
+      contacts: contactsFor(organisation, contacts),
       camOwner: {
         name: organisation.owner?.full_name?.trim() || "Unassigned",
         email: organisation.owner?.email?.trim() || "",

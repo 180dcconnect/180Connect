@@ -99,6 +99,11 @@ NEXT_PUBLIC_LOG_LEVEL=debug
 NEXT_PUBLIC_ENABLE_AI_BOOKLETS=true
 NEXT_PUBLIC_ENABLE_SCHEDULED_SENDS=true
 
+# Inbox design fill (mock threads behind the real rows on /inbox). On by
+# default; set to 0 and restart `npm run dev` once testing with the mock data
+# is done and the inbox renders real rows only. No code change needed.
+NEXT_PUBLIC_INBOX_MOCK_FILL=1
+
 # Seed scripts only — Postgres connection string for the DB `npm run seed` /
 # `npm run seed:clear` write to (F233). The app never reads this. Use the SESSION
 # POOLER string (dashboard -> Connect -> Session pooler): it is IPv4 and works
@@ -155,6 +160,7 @@ GEMINI_MODEL=<model-id-from-ai-studio>
 NEXT_PUBLIC_LOG_LEVEL=info
 NEXT_PUBLIC_ENABLE_AI_BOOKLETS=true
 NEXT_PUBLIC_ENABLE_SCHEDULED_SENDS=true
+NEXT_PUBLIC_INBOX_MOCK_FILL=1
 
 # Cron
 CRON_SECRET=<shared-secret>
@@ -205,6 +211,8 @@ GEMINI_MODEL=<model-id-from-ai-studio>
 NEXT_PUBLIC_LOG_LEVEL=warn
 NEXT_PUBLIC_ENABLE_AI_BOOKLETS=true
 NEXT_PUBLIC_ENABLE_SCHEDULED_SENDS=true
+# Mock threads off in production: real mailbox only.
+NEXT_PUBLIC_INBOX_MOCK_FILL=0
 
 # Cron
 CRON_SECRET=<shared-secret>

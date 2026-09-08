@@ -5,8 +5,7 @@ import { reportError } from "../error-logging.ts";
 import {
   buildStageOnePrompt,
   type EmailLength,
-  type EmailVoice,
-  type EmailTone,
+  type EmailRegister,
   type OpeningApproach,
   type ClosingApproach,
   type SizeTemplate,
@@ -83,7 +82,7 @@ export async function generateStageOneDraft(
   organisationId: string,
   context: StageOneContext,
   callModel: CallStageOneModel,
-  options: { length?: EmailLength; voice?: EmailVoice; tone?: EmailTone; opening?: OpeningApproach; closing?: ClosingApproach } = {},
+  options: { length?: EmailLength; register?: EmailRegister; opening?: OpeningApproach; closing?: ClosingApproach } = {},
 ): Promise<
   | { draft: StageOneDraft; sizeTemplate: SizeTemplate; usage: StageOneUsage; prompt: StageOnePromptSent }
   | { error: string }

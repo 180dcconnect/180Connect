@@ -5,7 +5,7 @@ import { RefreshCw } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
 import { RichTextEmailEditor } from "@/components/rich-text-email-editor";
 import { plainTextToEditorHtml } from "@/lib/outreach/email-html";
-import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice } from "@/lib/outreach/stage-one-prompt";
+import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_REGISTER_LABELS, EMAIL_REGISTERS, type ClosingApproach, type EmailLength, type EmailRegister } from "@/lib/outreach/stage-one-prompt";
 
 type Tone = "block" | "conflict";
 type Warning = { text: string; tone: Tone };
@@ -15,19 +15,6 @@ const EMAIL_LENGTH_LABELS: Record<EmailLength, string> = {
   short: "Short",
   standard: "Standard",
   detailed: "Detailed",
-};
-
-const EMAIL_VOICE_LABELS: Record<EmailVoice, string> = {
-  "180dc": "180DC Sheffield",
-  consultative: "Consultative",
-  plain_language: "Plain language",
-};
-
-const EMAIL_TONE_LABELS: Record<EmailTone, string> = {
-  balanced: "Balanced",
-  warm: "Warm",
-  formal: "Formal",
-  concise: "Concise",
 };
 
 const CLOSING_APPROACH_LABELS: Record<ClosingApproach, string> = {
@@ -79,8 +66,7 @@ export function FollowUpButton({
         : null,
   );
   const [length, setLength] = useState<EmailLength>("standard");
-  const [voice, setVoice] = useState<EmailVoice>("180dc");
-  const [tone, setTone] = useState<EmailTone>("balanced");
+  const [register, setRegister] = useState<EmailRegister>("professional");
   const [closing, setClosing] = useState<ClosingApproach>("soft_cta");
 
   async function generate() {
@@ -103,7 +89,7 @@ export function FollowUpButton({
       const response = await fetch(`/api/clients/${organisationId}/outreach-drafts/stage-two`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ length, voice, tone, closing, replyEventId }),
+        body: JSON.stringify({ length, register, closing, replyEventId }),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -173,21 +159,11 @@ export function FollowUpButton({
         </select>
       </label>
       <label className="block max-w-xs text-xs font-semibold text-dim">
-        Email tone
-        <select className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setTone(event.target.value as EmailTone)} value={tone}>
-          {EMAIL_TONES.map((value) => (
+        Email register
+        <select className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setRegister(event.target.value as EmailRegister)} value={register}>
+          {EMAIL_REGISTERS.map((value) => (
             <option key={value} value={value}>
-              {EMAIL_TONE_LABELS[value]}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="block max-w-xs text-xs font-semibold text-dim">
-        Email voice
-        <select className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm" disabled={busy} onChange={(event) => setVoice(event.target.value as EmailVoice)} value={voice}>
-          {EMAIL_VOICES.map((value) => (
-            <option key={value} value={value}>
-              {EMAIL_VOICE_LABELS[value]}
+              {EMAIL_REGISTER_LABELS[value]}
             </option>
           ))}
         </select>

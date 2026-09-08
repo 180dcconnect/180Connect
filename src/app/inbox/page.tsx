@@ -37,7 +37,7 @@ import { GmailInboxShell } from "@/components/inbox/gmail-inbox-shell";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
-import { MOCK_INBOX_THREADS } from "@/lib/inbox-mock-data";
+import { mockFillThreads } from "@/lib/inbox-mock-data";
 import {
   buildRealInboxThreads,
   mergeWithMockFill,
@@ -249,9 +249,9 @@ export default async function InboxPage({
   });
 
   // Design fill sits behind the real rows and never shadows one — see
-  // mergeWithMockFill. Deleting @/lib/inbox-mock-data is the only work
-  // removing it takes.
-  const threads = sortInboxThreads(mergeWithMockFill(real, MOCK_INBOX_THREADS));
+  // mergeWithMockFill. Clearing it takes no code change: set
+  // NEXT_PUBLIC_INBOX_MOCK_FILL=0 and restart, and mockFillThreads() is [].
+  const threads = sortInboxThreads(mergeWithMockFill(real, mockFillThreads()));
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-[#f6f8fc] text-foreground">

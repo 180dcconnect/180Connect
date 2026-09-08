@@ -23,7 +23,7 @@ import {
   type InboxThreadView,
 } from "@/lib/inbox-thread-view";
 import {
-  MOCK_INBOX_THREADS,
+  mockFillThreads,
 } from "@/lib/inbox-mock-data";
 import { GmailSidebar, SECTORS, type GmailFolder, type SidebarLabel } from "./gmail-sidebar";
 import { GmailActionBar, type SelectionState } from "./gmail-action-bar";
@@ -188,7 +188,7 @@ const FOLDER_EMPTY_STATES: Record<GmailFolder, { icon: LucideIcon; title: string
 };
 
 export function GmailInboxShell({
-  initialThreads = MOCK_INBOX_THREADS,
+  initialThreads = mockFillThreads(),
   initialThreadId,
   realThreads,
   className = "h-[calc(100vh-1.5rem)]",
@@ -783,6 +783,17 @@ export function GmailInboxShell({
                 sectorFilters.forEach((s) => next.add(s));
                 triggerLabelFilter(next);
               } else {
+                setPageIndex(0);
+                listRef.current?.scrollTo({ top: 0 });
+              }
+              // When all filter chips have been removed (empty filters array),
+              // clear the applied filter state so the list shows unfiltered results
+              // without needing to click Search again.
+              if (filters.length === 0) {
+                setAppliedDateValues([]);
+                setAppliedStatusValues([]);
+                setSelectedLabels(new Set());
+                setAppliedLabels(new Set());
                 setPageIndex(0);
                 listRef.current?.scrollTo({ top: 0 });
               }

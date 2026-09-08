@@ -4,6 +4,7 @@ import {
   MOCK_INBOX_THREADS,
   getMockThreadById,
   getMockContacts,
+  mockFillThreads,
   searchRecipients,
 } from "./inbox-mock-data.ts";
 import {
@@ -177,5 +178,22 @@ describe("mock recipients carry no personal email addresses", () => {
     assert.ok(contacts.length >= 2);
     assert.equal(new Set(contacts.map((c) => c.email)).size, contacts.length);
     assert.equal(contacts.filter((c) => c.isPrimary).length, 1);
+  });
+});
+
+describe("mockFillThreads", () => {
+  it("serves the fill by default and clears it on NEXT_PUBLIC_INBOX_MOCK_FILL=0", () => {
+    const previous = process.env.NEXT_PUBLIC_INBOX_MOCK_FILL;
+    try {
+      delete process.env.NEXT_PUBLIC_INBOX_MOCK_FILL;
+      assert.equal(mockFillThreads(), MOCK_INBOX_THREADS);
+      process.env.NEXT_PUBLIC_INBOX_MOCK_FILL = "0";
+      assert.deepEqual(mockFillThreads(), []);
+      process.env.NEXT_PUBLIC_INBOX_MOCK_FILL = "false";
+      assert.deepEqual(mockFillThreads(), []);
+    } finally {
+      if (previous === undefined) delete process.env.NEXT_PUBLIC_INBOX_MOCK_FILL;
+      else process.env.NEXT_PUBLIC_INBOX_MOCK_FILL = previous;
+    }
   });
 });

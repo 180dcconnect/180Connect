@@ -22,9 +22,7 @@ import {
   type LucideIcon,
   CalendarClock,
   UserPlus,
-  ArrowUpRight,
 } from "lucide-react";
-import Link from "next/link";
 import { GooeyEmailInput } from "@/components/ui/gooey-email-input";
 import { SendButton } from "@/components/ui/send-button";
 import {
@@ -38,7 +36,7 @@ import {
   type InboxThreadView,
 } from "@/lib/inbox-thread-view";
 import {
-  MOCK_INBOX_THREADS,
+  mockFillThreads,
   getMockBooklet,
   getMockContacts,
   searchRecipients,
@@ -371,19 +369,6 @@ const EMAIL_LENGTH_LABELS: Record<EmailLength, string> = {
   detailed: "Detailed",
 };
 
-const EMAIL_TONE_LABELS: Record<EmailTone, string> = {
-  balanced: "Balanced",
-  warm: "Warm",
-  formal: "Formal",
-  concise: "Concise",
-};
-
-const EMAIL_VOICE_LABELS: Record<EmailVoice, string> = {
-  "180dc": "180DC Sheffield",
-  consultative: "Consultative",
-  plain_language: "Plain language",
-};
-
 const OPENING_APPROACH_LABELS: Record<OpeningApproach, string> = {
   mission_led: "Mission-led",
   direct_intro: "Direct introduction",
@@ -458,7 +443,7 @@ function toLocalInputValue(date: Date): string {
     primary, since a company carries several (CONTACTS is one-to-many). */
 function resolveThread(
   email: string,
-  threads: InboxThreadView[] = MOCK_INBOX_THREADS,
+  threads: InboxThreadView[] = mockFillThreads(),
 ): InboxThreadView | null {
   const needle = email.trim().toLowerCase();
   if (!needle) return null;
@@ -649,7 +634,7 @@ export function GmailComposeModal({
     [directory],
   );
   const client = useMemo(
-    () => resolveThread(savedTo ?? "", addressable ?? MOCK_INBOX_THREADS),
+    () => resolveThread(savedTo ?? "", addressable ?? mockFillThreads()),
     [savedTo, addressable],
   );
   /** The client this draft can actually be sent to — null for a fill match. */
@@ -660,7 +645,7 @@ export function GmailComposeModal({
     [isScheduleDialogOpen],
   );
   const matches = useMemo(
-    () => searchRecipients(recipientQuery, 6, addressable ?? MOCK_INBOX_THREADS),
+    () => searchRecipients(recipientQuery, 6, addressable ?? mockFillThreads()),
     [recipientQuery, addressable],
   );
   // The list is a lookup, not an autocomplete of itself: once what is typed is
@@ -1168,7 +1153,7 @@ export function GmailComposeModal({
                     validate={(candidate) => {
                       const value = candidate.trim();
                       if (EMAIL_PATTERN.test(value)) return null;
-                      if (searchRecipients(value, 1).length > 0) return null;
+                      if (searchRecipients(value, 1, addressable ?? mockFillThreads()).length > 0) return null;
                       return "No client matches that — type a full email address.";
                     }}
                     onSubmit={(value) => {
@@ -1177,7 +1162,7 @@ export function GmailComposeModal({
                         handleSaveRecipient(typed);
                         return;
                       }
-                      const best = searchRecipients(typed, 1)[0];
+                      const best = searchRecipients(typed, 1, addressable ?? mockFillThreads())[0];
                       if (best) handleSaveRecipient(best.contact.email);
                     }}
                   />
@@ -1551,16 +1536,6 @@ export function GmailComposeModal({
                   )}
                 </AnimatePresence>
               </div>
-
-              <Hint label="New outreach is sent from the client's record">
-                <Link
-                  href="/clients"
-                  className="flex items-center gap-1.5 rounded-full border border-slate-900/10 bg-white/80 px-3 py-1.5 text-[12px] font-semibold text-slate-600 transition-colors hover:border-slate-900/20 hover:text-slate-900"
-                >
-                  <ArrowUpRight className="h-3.5 w-3.5" />
-                  Send from the client record
-                </Link>
-              </Hint>
 
               <Hint label="Draft with AI">
                 <button

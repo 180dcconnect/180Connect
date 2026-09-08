@@ -2542,6 +2542,25 @@ export function isDesignFillThread(threadId: string): boolean {
 }
 
 /**
+ * The design fill as the inbox actually consumes it: the mock threads, or an
+ * empty list once testing with them is done.
+ *
+ * Set `NEXT_PUBLIC_INBOX_MOCK_FILL=0` (in `.env.local` locally, or the
+ * project environment on Vercel) and restart, and every surface below renders
+ * real rows only — no source edit, no redeploy of a code change. Anything
+ * that falls back to the fill when the database is thin (the inbox list, the
+ * shell's default, compose recipient lookup) reads through this rather than
+ * importing `MOCK_INBOX_THREADS` directly, so the one setting clears all of
+ * them at once. Anything that must keep working on the mock set itself (its
+ * unit tests) keeps importing the constant.
+ */
+export function mockFillThreads(): InboxThreadView[] {
+  const flag = process.env.NEXT_PUBLIC_INBOX_MOCK_FILL?.trim().toLowerCase();
+  if (flag === "0" || flag === "false" || flag === "off") return [];
+  return MOCK_INBOX_THREADS;
+}
+
+/**
  * Finds a mock thread by orgId.
  */
 export function getMockThreadById(orgId: string): InboxThreadView | undefined {
@@ -2615,15 +2634,7 @@ ${thread.primaryContact.name}, ${thread.primaryContact.role}. Owns the relations
  * CAM's own named contact. It is only the address that is regulated, which is
  * why a contact keeps their name and is reached on the org's role inbox.
  */
-export type MockContact = {
-  id: string;
-  organisationId: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  jobTitle: string;
-  isPrimary: boolean;
-};
+export type MockContact = InboxContactView;
 
 const SECONDARY_CONTACT_NAMES: ReadonlyArray<[string, string, string, string]> = [
   ["Priya", "Raman", "Operations Director", "partnerships"],
@@ -2641,17 +2652,23 @@ function threadSeed(id: string): number {
 }
 
 /**
- * Every address the outreach inbox knows for an organisation: the named
- * primary, a second named contact reached on a different function inbox, and
- * the general enquiries address. Primary first, which is the order
- * `is_primary desc` gives.
+ * Stand-in contacts for a DESIGN FILL thread — never for a real one.
+ *
+ * A fill thread has no CONTACTS rows behind it, so the addresses it is
+ * reachable on are derived from the thread itself: the named primary, a second
+ * named contact on a different function inbox, and the general enquiries
+ * address. Real threads carry their own `contacts` (see `contactsFor` in
+ * ./inbox/real-threads.ts) and must never reach this function — an invented
+ * address on a real organisation is one the CAM could actually send to.
+ * `threadContacts` in ./inbox/recipients.ts is the one caller that decides
+ * which of the two a thread gets.
  *
  * The second contact's local part is picked to differ from the primary's, so a
  * company demonstrably carries more than one address — but if the two collide
  * the general inbox is used instead, because inventing `tom.beckett@` to force
  * a distinct row is exactly the thing the policy forbids.
  */
-export function getMockContacts(thread: InboxThreadView): MockContact[] {
+export function deriveFillContacts(thread: InboxThreadView): MockContact[] {
   const domain = thread.primaryContact.email.split("@")[1] ?? "example.org";
   const primaryLocal = thread.primaryContact.email.split("@")[0];
   const [primaryFirst, ...primaryRest] = thread.primaryContact.name.split(" ");

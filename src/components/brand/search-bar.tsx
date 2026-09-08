@@ -1864,7 +1864,22 @@ export function BrandSearchBar({
             )}
           </motion.div>
         ) : null}
-      </AnimatePresence>
+          </AnimatePresence>
+
+        {/* Clear filters button inside the dropdown panel (shown when chipsBelow=false) */}
+        {selectedFilters.length > 0 && (
+          <div className="flex items-center justify-end gap-2 px-4 pb-4">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedFilters([]);
+              }}
+              className={`font-body text-[13px] font-medium transition-colors ${T.muted50} ${T.hoverBright} ${T.hoverInk}`}
+            >
+              Clear filters
+            </button>
+          </div>
+        )}
       </motion.div>
 
       {/* Active filter pills float UNDER the white card on a transparent background, not inside the card */}
@@ -1908,6 +1923,19 @@ export function BrandSearchBar({
               );
             })}
           </AnimatePresence>
+          {(selectedFilters.length > 0 || query) && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedFilters([]);
+                setQuery("");
+                onQueryChange?.("");
+              }}
+              className="text-[13px] font-medium text-black/40 hover:text-black transition-colors ml-1"
+            >
+              Clear filters
+            </button>
+          )}
         </div>
       )}
       </motion.div>
@@ -1979,5 +2007,6 @@ export function BrandSearchBar({
     </div>
   );
 }
+
 
 

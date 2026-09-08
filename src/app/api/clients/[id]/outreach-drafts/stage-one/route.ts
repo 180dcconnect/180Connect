@@ -9,7 +9,7 @@ import {
   createStageOneModelCall,
   generateStageOneDraft,
 } from "@/lib/outreach/stage-one-generation";
-import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES } from "@/lib/outreach/stage-one-prompt";
+import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_REGISTERS, OPENING_APPROACHES } from "@/lib/outreach/stage-one-prompt";
 import {
   checkSuppressionBeforeSend,
   suppressionBlockedMessage,
@@ -66,14 +66,13 @@ export async function POST(
   const preferences = z
     .object({
       length: z.enum(EMAIL_LENGTHS).default("standard"),
-      voice: z.enum(EMAIL_VOICES).default("180dc"),
-      tone: z.enum(EMAIL_TONES).default("balanced"),
+      register: z.enum(EMAIL_REGISTERS).default("professional"),
       opening: z.enum(OPENING_APPROACHES).default("mission_led"),
       closing: z.enum(CLOSING_APPROACHES).default("soft_cta"),
     })
     .safeParse(parsedInput);
   if (!preferences.success) {
-    return NextResponse.json({ error: "Choose a valid email length, voice, tone, opening and closing approach, then try again." }, { status: 400 });
+    return NextResponse.json({ error: "Choose a valid email length, register, opening and closing approach, then try again." }, { status: 400 });
   }
 
   const admin = createAdminClient();
@@ -250,7 +249,7 @@ export async function POST(
       booklet: savedBooklet?.booklet_text ?? null,
     },
     callModel,
-    { length: preferences.data.length, voice: preferences.data.voice, tone: preferences.data.tone, opening: preferences.data.opening, closing: preferences.data.closing },
+    { length: preferences.data.length, register: preferences.data.register, opening: preferences.data.opening, closing: preferences.data.closing },
   );
   if ("error" in result) return NextResponse.json({ error: result.error }, { status: 502 });
 

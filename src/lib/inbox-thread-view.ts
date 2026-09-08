@@ -39,6 +39,25 @@ export type InboxEmailMessage = {
   attachments?: InboxAttachmentView[];
 };
 
+/**
+ * One row of CONTACTS as the mailbox needs it.
+ *
+ * A thread carries every address the organisation is reachable on, not just
+ * the primary: `contacts.organisation_id` is a plain FK with no uniqueness on
+ * it, so an organisation genuinely holds several, with `isPrimary` marking the
+ * one the CAM leads with. The compose window's recipient lookup searches these
+ * — which is what makes what can be picked exactly what is on the record.
+ */
+export type InboxContactView = {
+  id: string;
+  organisationId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  jobTitle: string;
+  isPrimary: boolean;
+};
+
 export type InboxThreadView = {
   id: string; // Organisation ID
   orgName: string;
@@ -53,6 +72,13 @@ export type InboxThreadView = {
     email: string;
     phone?: string;
   };
+  /**
+   * Every contact on the organisation's record, primary first. Present on
+   * threads built from the database; absent on the design fill, which has no
+   * CONTACTS rows behind it and derives stand-ins instead (see
+   * `threadContacts` in ./inbox/recipients.ts).
+   */
+  contacts?: InboxContactView[];
   camOwner: {
     name: string;
     email: string;

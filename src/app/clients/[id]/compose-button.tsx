@@ -8,7 +8,7 @@ import {
   type EmailReviewDirtyState,
 } from "@/components/outreach/email-review-panel";
 import type { Attachment } from "@/lib/attachments";
-import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailTone, type EmailVoice, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
+import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_REGISTER_LABELS, EMAIL_REGISTERS, OPENING_APPROACHES, SIZE_TEMPLATES, SIZE_TONE_LABELS, type ClosingApproach, type EmailLength, type EmailRegister, type OpeningApproach, type SizeTemplate } from "@/lib/outreach/stage-one-prompt";
 import { AiLoadingState } from "@/components/ui/ai-loading-state";
 import { SectionCard } from "./section-card";
 import { AiSettingsPicker, type AiSettingEntry } from "@/components/outreach/ai-settings-picker";
@@ -41,19 +41,6 @@ const EMAIL_LENGTH_LABELS: Record<EmailLength, string> = {
   short: "Short",
   standard: "Standard",
   detailed: "Detailed",
-};
-
-const EMAIL_VOICE_LABELS: Record<EmailVoice, string> = {
-  "180dc": "180DC Sheffield",
-  consultative: "Consultative",
-  plain_language: "Plain language",
-};
-
-const EMAIL_TONE_LABELS: Record<EmailTone, string> = {
-  balanced: "Balanced",
-  warm: "Warm",
-  formal: "Formal",
-  concise: "Concise",
 };
 
 const OPENING_APPROACH_LABELS: Record<OpeningApproach, string> = {
@@ -169,8 +156,7 @@ export function ComposeButton({
         : null,
   );
   const [length, setLength] = useState<EmailLength>("standard");
-  const [voice, setVoice] = useState<EmailVoice>("180dc");
-  const [tone, setTone] = useState<EmailTone>("balanced");
+  const [register, setRegister] = useState<EmailRegister>("professional");
   const [opening, setOpening] = useState<OpeningApproach>("mission_led");
   const [closing, setClosing] = useState<ClosingApproach>("soft_cta");
 
@@ -186,20 +172,12 @@ export function ComposeButton({
       onSelect: (value) => setLength(value as EmailLength),
     },
     {
-      key: "tone",
-      label: "Email tone",
-      hint: "How friendly or formal the email reads — separate from its length and voice.",
-      options: EMAIL_TONES.map((value) => ({ value, label: EMAIL_TONE_LABELS[value] })),
-      selected: tone,
-      onSelect: (value) => setTone(value as EmailTone),
-    },
-    {
-      key: "voice",
-      label: "Email voice",
-      hint: "Who the email is written as — our collective style or plainer wording.",
-      options: EMAIL_VOICES.map((value) => ({ value, label: EMAIL_VOICE_LABELS[value] })),
-      selected: voice,
-      onSelect: (value) => setVoice(value as EmailVoice),
+      key: "register",
+      label: "Email register",
+      hint: "How formal and how warm the email reads. Every email is written as \u201cwe\u201d either way.",
+      options: EMAIL_REGISTERS.map((value) => ({ value, label: EMAIL_REGISTER_LABELS[value] })),
+      selected: register,
+      onSelect: (value) => setRegister(value as EmailRegister),
     },
     {
       key: "opening",
@@ -302,8 +280,7 @@ export function ComposeButton({
         body: JSON.stringify({
           ...(draft ? { draftId: draft.id } : {}),
           length,
-          voice,
-          tone,
+          register,
           opening,
           closing,
         }),

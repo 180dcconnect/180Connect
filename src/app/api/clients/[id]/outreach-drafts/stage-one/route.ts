@@ -17,6 +17,7 @@ import {
 } from "@/lib/outreach/suppression-check";
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import { computeCostUsd } from "@/lib/outreach/generation-cost";
+import { loadModelRate } from "@/lib/ai/model-rate";
 import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
 
 export const maxDuration = 60;
@@ -303,26 +304,10 @@ export async function POST(
   // still means visible: an errored (as opposed to merely empty) lookup is
   // reported like every other non-fatal read in this route — the DoD requires
   // failures to reach ERROR_LOG even when the request itself succeeds.
-  const { data: pricing, error: pricingError } = await supabase
-    .from("model_pricing")
-    .select("input_usd_per_1k_tokens, output_usd_per_1k_tokens")
-    .eq("model", model)
-    .maybeSingle();
-  if (pricingError) {
-    await reportError(pricingError, {
-      operation: "outreach.stage_one.load_pricing",
-      organisationId,
-      model,
-    });
-  }
+  const pricing = await loadModelRate(supabase, model, "outreach.stage_one.load_pricing");
   const costUsd = computeCostUsd(
     { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens },
-    pricing
-      ? {
-          inputUsdPer1kTokens: pricing.input_usd_per_1k_tokens,
-          outputUsdPer1kTokens: pricing.output_usd_per_1k_tokens,
-        }
-      : null,
+    pricing,
   );
 
   const { error: generationError } = await admin.from("ai_generations").insert({

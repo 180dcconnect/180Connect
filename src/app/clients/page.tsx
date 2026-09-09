@@ -38,6 +38,18 @@ import {
   type VisibleClient,
 } from "./visible-clients.ts";
 import { BrandSearchBar } from "@/components/brand/search-bar";
+import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  createDefaultRunNlSearchDeps,
+  runNlSearch,
+} from "@/lib/search/run-nl-search";
+import { applyNlPlan, resolvedPlanIsEmpty } from "@/lib/search/nl-search-apply";
+import {
+  describeResolvedPlan,
+  planFilterParams,
+  planHasUnconvertibleParts,
+} from "@/lib/search/nl-plan-describe";
+import { MAX_QUERY_LENGTH } from "@/lib/search/nl-search-plan";
 import { BackButton } from "@/components/ui/back-button";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 import { Group, Rise } from "@/components/dashboard-stage";
@@ -90,6 +102,10 @@ type SavedViewRow = { id: string; name: string; filters: unknown };
 type SearchParams = Promise<{
   owner?: string;
   q?: string;
+  /** F214 — a plain-English question. Separate from `q`, which is F052's literal
+   *  name search: the two are different acts and a CAM must be able to hold one
+   *  while clearing the other. */
+  ask?: string;
   page?: string;
   // F193 — tags is inherently multi-select (OR logic across selected tags),
   // so unlike the single-value filters above it can arrive as a string[]
@@ -213,6 +229,7 @@ export default async function ClientsPage({
   const {
     owner: ownerFilter,
     q: search,
+    ask: askParam,
     page: pageParam,
     city,
     country,
@@ -402,12 +419,55 @@ export default async function ClientsPage({
   matchingClients = filterByPriorityScore(matchingClients, scoreBands);
   matchingClients = filterByFinancialRecords(matchingClients, financialValues);
 
+  /**
+   * F214 — Natural Language Charity Search (#209).
+   *
+   * Runs after the manual filters, on purpose: an interpretation narrows what
+   * the CAM already chose rather than replacing it, so a question asked inside
+   * "My clients" stays inside "My clients". It also means AC3's fallback needs
+   * no special path — when interpretation fails, every line above has already
+   * run and the list the CAM lands on is exactly the filtered list they would
+   * have had without asking.
+   *
+   * The vocabulary handed over is the cities and countries these very rows are
+   * in, which is what makes AC2 structural rather than a promise: the model
+   * never sees a client record and never returns one, and a place with no rows
+   * behind it cannot survive resolution into a filter.
+   */
+  const nlSearch = await runNlSearch(
+    askParam,
+    { cities: uniqueCities, countryCodes: uniqueCountries },
+    // createAdminClient() returns null when the service-role key is absent; the
+    // allowance then cannot be consumed and runNlSearch declines to call the
+    // API at all rather than running unmetered (fail closed, as in the booklet
+    // and draft routes).
+    createDefaultRunNlSearchDeps(createAdminClient()),
+    authorization.actor.id,
+  );
+  const nlPlan = nlSearch?.kind === "interpreted" ? nlSearch.plan : null;
+  // A plan that resolved to nothing narrows nothing — the question was
+  // understood as a question but had no filterable content in it. Treated as
+  // "no interpretation" so the list is not silently reordered by an empty plan.
+  const nlPlanApplies = nlPlan !== null && !resolvedPlanIsEmpty(nlPlan);
+  if (nlPlanApplies && nlPlan) {
+    matchingClients = applyNlPlan(matchingClients, nlPlan);
+  } else if (nlSearch?.kind === "literal") {
+    // The question read as a name, so it is one: F052's search, unpaid.
+    matchingClients = searchClients(matchingClients, nlSearch.query);
+  }
+
   // F196 / F197 / F199 / F094: Prioritise matching clients based on the CAM's
   // geographic, sector, size and grant-history preferences, layered on top of
   // the persisted base scores (F088) — preference total first, base score
   // breaks ties. This order is only a *default*: an explicit ?listSort= below
   // can still override it, but it is no longer clobbered by one.
-  matchingClients = prioritiseQueue(matchingClients, outreachPrefs.data);
+  // F214: an answered question is an explicit ordering request, exactly like an
+  // explicit ?listSort=, so the personal queue does not re-sort on top of it —
+  // that would throw away the relevance ranking (AC4) before it reached the
+  // screen. With no interpretation in play this is untouched F094 behaviour.
+  matchingClients = nlPlanApplies
+    ? matchingClients
+    : prioritiseQueue(matchingClients, outreachPrefs.data);
   const teamMembers = team.data ?? [];
   // The owner dropdown lists CAMs only (F163), but `?owner=` can name anyone who
   // holds clients — an admin, or a deactivated former member — because the team
@@ -423,6 +483,7 @@ export default async function ClientsPage({
   const filterActive = Boolean(
     ownerFilter ||
       search ||
+      askParam ||
       cityValues.length ||
       countryValues.length ||
       statusValues.length ||
@@ -537,6 +598,9 @@ export default async function ClientsPage({
     const base: Record<string, HrefValue> = {
       owner: ownerFilter,
       q: search,
+      // F214 — the question rides along like any other filter, so paging or
+      // sorting a set of answered results keeps the answer.
+      ask: askParam,
       // The multi-select filters carry every selected value, so a link that
       // changes the sort keeps all three chosen cities rather than the first.
       city: cityValues,
@@ -589,6 +653,22 @@ export default async function ClientsPage({
   };
 
   const pageHref = (targetPage: number) => hrefWith({ page: targetPage });
+
+  /**
+   * F214 — everything the interpretation banner needs.
+   *
+   * `convertHref` is the CAM taking the interpretation over: it writes the plan's
+   * filters as ordinary repeated params and drops `ask`, so the list is from then
+   * on driven entirely by the F053-F058 chips — editable, removable, and costing
+   * nothing to change. It is the same escape hatch AC3 asks for on failure,
+   * offered on success as well.
+   */
+  const nlChips = nlPlan ? describeResolvedPlan(nlPlan) : [];
+  const clearAskHref = hrefWith({ ask: undefined });
+  const convertHref =
+    nlPlan && nlPlanApplies
+      ? hrefWith({ ask: undefined, ...planFilterParams(nlPlan) })
+      : null;
 
   const columnSortHref = (field: ListSortField) => {
     if (listSortField === field && explicitListSort) {
@@ -657,6 +737,13 @@ export default async function ClientsPage({
           headingClassName="mb-8"
           bar={
             <BrandSearchBar
+              ask={{
+                label: "Ask in plain English",
+                placeholder: "small education charities in Leeds",
+                defaultValue: askParam ?? "",
+                maxLength: MAX_QUERY_LENGTH,
+                param: "ask",
+              }}
               defaultQuery={search ?? ""}
               defaultFilters={[
                 // One chip per selected value, so a three-city filter reads as
@@ -780,6 +867,105 @@ export default async function ClientsPage({
           </Rise>
         )}
 
+        {/* F214 — what the question was taken to mean, or why it could not be.
+            Always rendered above the list, never inside it: a CAM has to be able
+            to read the interpretation *before* they read the results, or the
+            results are just a list that changed for unexplained reasons. */}
+        {nlSearch && (
+          <Rise>
+            {nlSearch.kind === "error" ? (
+              <div
+                role="alert"
+                className="mb-8 rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4"
+              >
+                <p className="text-sm font-bold text-destructive">{nlSearch.message}</p>
+                {/* AC3 — the filters are right below and they still work. Saying
+                    so is the difference between a degraded search and a broken
+                    page. */}
+                <p className="mt-1.5 text-sm leading-[1.7] text-foreground/65">
+                  Your filters are unaffected — narrow the list with them, or{" "}
+                  <Link href={clearAskHref} className="font-bold underline">
+                    clear the question
+                  </Link>
+                  .
+                </p>
+              </div>
+            ) : (
+              <div className="mb-8 rounded-2xl border border-foreground/10 bg-white px-5 py-4">
+                <p className="text-sm leading-[1.7] text-foreground/65">
+                  {nlSearch.kind === "literal" ? (
+                    <>
+                      Searched for names matching{" "}
+                      <span className="font-bold text-foreground">“{nlSearch.query}”</span>.
+                      Add a place, a size or a sector to have it read as a question.
+                    </>
+                  ) : nlPlanApplies ? (
+                    <>
+                      <span className="font-bold text-foreground">“{nlSearch.query}”</span>{" "}
+                      read as:
+                    </>
+                  ) : (
+                    <>
+                      Nothing in{" "}
+                      <span className="font-bold text-foreground">“{nlSearch.query}”</span>{" "}
+                      matched a filter this list has, so every client is still shown.
+                    </>
+                  )}
+                </p>
+
+                {nlChips.length > 0 && (
+                  <ul className="mt-3 flex flex-wrap gap-2">
+                    {nlChips.map((chip) => (
+                      <li
+                        key={`${chip.category}-${chip.value}`}
+                        className="rounded-full border border-foreground/10 bg-[#f4f4ef] px-3 py-1 text-xs font-medium text-foreground/80"
+                      >
+                        <span className="text-foreground/50">{chip.category}</span>{" "}
+                        {chip.label}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {/* Named out loud rather than quietly ignored: a CAM who asked
+                    about somewhere this list holds nobody in should be told that,
+                    not shown an empty page. */}
+                {nlPlan && nlPlan.dropped.length > 0 && (
+                  <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
+                    No clients are in {nlPlan.dropped.join(", ")}, so that part was
+                    ignored.
+                  </p>
+                )}
+                {nlPlan && nlPlan.unsupported.length > 0 && (
+                  <p className="mt-1.5 text-sm leading-[1.7] text-foreground/65">
+                    This list cannot filter on {nlPlan.unsupported.join(", ")}.
+                  </p>
+                )}
+
+                <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                  {convertHref && (
+                    <Link href={convertHref} className="font-bold hover:underline">
+                      Convert to filters
+                    </Link>
+                  )}
+                  <Link
+                    href={clearAskHref}
+                    className="font-bold text-foreground/65 hover:underline"
+                  >
+                    Clear question
+                  </Link>
+                </p>
+                {convertHref && nlPlan && planHasUnconvertibleParts(nlPlan) && (
+                  <p className="mt-1.5 text-xs leading-[1.7] text-foreground/50">
+                    Converting keeps the filters above; the size and ranking parts
+                    of the question are dropped, since no manual filter holds them.
+                  </p>
+                )}
+              </div>
+            )}
+          </Rise>
+        )}
+
         <Group className="space-y-4">
           {/* Where the pipeline stands before the list of it: the four stage
               totals, the stream between them, and the top-N groups. Counts
@@ -815,7 +1001,7 @@ export default async function ClientsPage({
             <Rise>
               {clients.length === 0 ? (
                 <EmptyState
-                  message={emptyStateMessage({ isOwnedView, search, filterActive })}
+                  message={emptyStateMessage({ isOwnedView, search, ask: askParam, filterActive })}
                 />
               ) : (
                 <div className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm">

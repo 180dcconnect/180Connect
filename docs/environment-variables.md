@@ -89,10 +89,13 @@ GMAIL_REPLY_LOOKBACK_DAYS=2
 # LLM (Development API key — ask team)
 OPENAI_API_KEY=sk-proj-test-key-local-only
 
-# Gemini (F082 Client Booklet generation) — free-tier key from
-# aistudio.google.com; copy the model id from the AI Studio model picker
+# Gemini (F082 Client Booklet generation, F214 natural language search) —
+# free-tier key from aistudio.google.com; copy the model ids from the AI Studio
+# model picker. GEMINI_SEARCH_MODEL should be a Flash-Lite-tier model: search is
+# a far easier job than a booklet and the cheaper tier costs ~2.5x less.
 GEMINI_API_KEY=<redacted>
 GEMINI_MODEL=<model-id-from-ai-studio>
+GEMINI_SEARCH_MODEL=<flash-lite-model-id-from-ai-studio>
 
 # Feature flags & logging
 NEXT_PUBLIC_LOG_LEVEL=debug
@@ -152,9 +155,10 @@ GMAIL_REPLY_LOOKBACK_DAYS=2
 # LLM (Development API key)
 OPENAI_API_KEY=<redacted>
 
-# Gemini (F082 Client Booklet generation)
+# Gemini (F082 Client Booklet generation, F214 natural language search)
 GEMINI_API_KEY=<redacted>
 GEMINI_MODEL=<model-id-from-ai-studio>
+GEMINI_SEARCH_MODEL=<flash-lite-model-id-from-ai-studio>
 
 # Feature flags
 NEXT_PUBLIC_LOG_LEVEL=info
@@ -203,9 +207,10 @@ GMAIL_REPLY_LOOKBACK_DAYS=2
 # LLM (Production API key)
 OPENAI_API_KEY=<redacted>
 
-# Gemini (F082 Client Booklet generation)
+# Gemini (F082 Client Booklet generation, F214 natural language search)
 GEMINI_API_KEY=<redacted>
 GEMINI_MODEL=<model-id-from-ai-studio>
+GEMINI_SEARCH_MODEL=<flash-lite-model-id-from-ai-studio>
 
 # Feature flags
 NEXT_PUBLIC_LOG_LEVEL=warn
@@ -250,6 +255,9 @@ NEXT_PUBLIC_SENTRY_DSN=<redacted>
 | `OPENAI_API_KEY` | test-key | prod-key | Only server-side | **SENSITIVE:** Never expose |
 | `GEMINI_API_KEY` | free-tier key from [aistudio.google.com](https://aistudio.google.com) | prod key | Only server-side | **SENSITIVE:** Never expose. Gemini key for LLM calls — F082 Client Booklet generation today, F100 email drafts later. Declared in `SCHEMA` (`src/lib/env.ts`) and passed explicitly to the AI SDK rather than read under its default `GOOGLE_GENERATIVE_AI_API_KEY` name. Unset ⇒ booklet generation returns a clear error |
 | `GEMINI_MODEL` | Flash-tier model id copied from the AI Studio model picker | same | Only server-side | Exact model id booklet generation calls (F082). No hardcoded default in code — Google retires model ids often enough that one would go stale. Unset ⇒ booklet generation cannot run |
+| `GEMINI_SEARCH_MODEL` | Flash-**Lite**-tier model id from the AI Studio model picker | same | Only server-side | Model that interprets F214 natural language searches. Separate from `GEMINI_MODEL` for cost: the LLM Provider Research doc puts search on the Flash-Lite tier ($0.30/$2.50 per million tokens) and booklets/drafts on Flash ($0.75/$3.75), so running search on the booklet model costs ~2.5× for an easier job. Optional — unset falls back to `GEMINI_MODEL` and logs a warning |
+| `AI_SEARCH_RATE_LIMIT` | `40` | `40` | Only server-side | Maximum F214 search interpretations per user per window. Its own bucket, so searching never eats the booklet/draft allowance. Only calls that reach the API count — a repeated query is cached and a plain name search never calls it. Optional, defaults to 40 |
+| `AI_SEARCH_RATE_WINDOW_SECONDS` | `86400` | `86400` | Only server-side | Fixed-window duration for `AI_SEARCH_RATE_LIMIT`; optional, defaults to one day (search is bursty in a way generation is not) |
 | `AI_GENERATION_RATE_LIMIT` | `20` | `20` | Only server-side | Maximum Gemini requests per authenticated user in each fixed window; optional, defaults to 20 |
 | `AI_GENERATION_RATE_WINDOW_SECONDS` | `3600` | `3600` | Only server-side | AI fixed-window duration in seconds; optional, defaults to one hour |
 | `EMAIL_SEND_RATE_LIMIT` | `100` | `100` | Only server-side | Maximum outreach emails per CAM in each fixed window, manual sends and scheduled deliveries combined (F227); optional, defaults to 100 |

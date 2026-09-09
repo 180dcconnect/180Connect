@@ -334,12 +334,22 @@ export function searchClients(
 export function emptyStateMessage({
   isOwnedView,
   search,
+  ask,
   filterActive,
 }: {
   isOwnedView: boolean;
   search?: string | null;
+  /** F214 — the plain-English question, when one was asked. Takes priority over
+   *  every other message for the same reason `search` does: a CAM who asked a
+   *  question and got nothing needs to be told it was their question that
+   *  matched nothing, not handed generic copy about filters they never set. */
+  ask?: string | null;
   filterActive: boolean;
 }): string {
+  const question = ask?.trim();
+  if (question) {
+    return `No clients match “${question}”. Clear the question, or widen it — the filters below still work.`;
+  }
   const term = search?.trim();
   if (term) {
     return `No clients match “${term}”. Clear the search to see the full list.`;

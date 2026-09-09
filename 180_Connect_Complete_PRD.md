@@ -24,7 +24,7 @@
 | Future scoring method | Trained model once sufficient labelled outcomes exist |
 | Database | Supabase Postgres with row-level security |
 | Application | Next.js / TypeScript hosted on Vercel |
-| Email | Gmail API preferred; Gmail SMTP permitted as controlled fallback |
+| Email | Gmail API on the shared branch mailbox `clients.sheffield@180dc.org`; Gmail SMTP permitted as controlled fallback |
 ### 1.1 Revision Policy
 This file must be updated whenever an approved change affects scope, product behaviour, data structures, permissions, integrations, acceptance criteria, or non-functional targets. A change is not complete until the PRD, backlog, and Data Model are aligned. Material changes require approval from the Project Leader and the relevant 180DC stakeholder.
 
@@ -457,7 +457,7 @@ CAM-configured timing may adjust reminders within approved limits. Reminders nev
 | Charity Commission | Charity registration/financial data | Partial ingestion allowed; no corruption of other sources |
 | Find That Charity | Supplementary profiles/contact data | Treat as source-labelled, validate before promotion |
 | 360Giving | Grant history | Continue without grants if unavailable; show freshness |
-| Gmail API | Preferred sending, reply sync, message/thread IDs | Queue/retry; surface authentication expiry |
+| Gmail API | Sending, reply sync, message/thread IDs — one shared branch mailbox | Queue/retry; surface authentication expiry |
 | Gmail SMTP | Controlled sending fallback | Record reduced observability; no silent fallback |
 | LLM provider | Booklets, drafts, NL search parsing, reply classification | Timeout, retry within limits, schema validation, human fallback |
 | Live web search provider | Optional current news hooks | Omit news hook if unavailable; do not block core draft generation |
@@ -529,7 +529,9 @@ LLM summaries are derived data. Every output must retain source context and gene
 Reply classification assists the CAM and does not make irreversible relationship decisions. The original reply remains authoritative. Low-confidence results, legal/privacy objections, and sensitive messages must be visibly escalated for human review.
 ## 12. Email Architecture and Observability
 ### 12.1 Sending
-The preferred implementation uses Gmail API `users.messages.send` or equivalent with each CAM’s authorised account. This provides stable message/thread identifiers and better reconciliation than SMTP. Gmail SMTP may be used as a controlled fallback, but the reduced observability must be recorded.
+The implementation uses Gmail API `users.messages.send` on **one shared branch mailbox**, `clients.sheffield@180dc.org` — a Google Workspace account controlled by 180DC, not any CAM’s personal account. Every CAM’s outreach leaves from that one address; attribution to the individual CAM is held in `OUTREACH_MESSAGES.sent_by_user_id`, not in the From header. One OAuth grant and one stored refresh token serve the whole branch, and one scheduled job polling that mailbox serves reply sync (§12.3). This provides stable message/thread identifiers and better reconciliation than SMTP. Gmail SMTP may be used as a controlled fallback, but the reduced observability must be recorded.
+
+Gmail API is not merely *preferred* here — it is the only route that can send as `@180dc.org` at all. Every ESP alternative (Resend included) requires DKIM/SPF records on the domain to verify it for sending, and 180DC HQ has not granted DNS access to 180dc.org. The Workspace mailbox needs no DNS change from this project: its authentication is already whatever the tenant has configured. See [D-05](docs/open-questions.md).
 
 OAuth tokens are encrypted/server-side. Revocation, expiry, and insufficient scopes produce a clear reconnect action. Sending must be idempotent and use a server-generated unique operation key.
 ### 12.2 Scheduling
@@ -539,7 +541,7 @@ The MVP must be accurate about what Gmail can observe:
 
 - **Reliable internal/provider lifecycle:** approved, scheduled, send attempted, accepted/sent, failed, reply received.
 - **Bounces:** detected from mailbox delivery-status notifications where possible; not guaranteed as real-time webhooks.
-- **Opens/clicks:** optional tracking-pixel/redirect signals only after privacy and deliverability review. They are probabilistic and must be labelled accordingly.
+- **Opens/clicks:** optional tracking-pixel/redirect signals only after privacy and deliverability review. They are probabilistic and must be labelled accordingly. **That review was carried out on 9 September 2026 and the answer is no** — F140, F141 and F142 are descoped, and no open or click signal is collected. Reasoning in [D-05](docs/open-questions.md).
 - **Complaints:** Gmail does not provide transactional-provider complaint webhooks. Negative replies, unsubscribe requests, hard-no outcomes, and suppression actions are the operational complaint signals.
 - **Unsubscribes/objections:** must update suppression before any later send.
 

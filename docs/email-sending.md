@@ -12,13 +12,24 @@ mixing them up is the mistake this document exists to prevent.
 
 | Mail | Path | Verified domain needed? |
 |---|---|---|
-| **Client outreach** — a CAM emailing a charity contact | Gmail API `users.messages.send` on the CAM's own authorised account (PRD §12.1) | No — it is the CAM's real mailbox |
+| **Client outreach** — a CAM emailing a charity contact | Gmail API `users.messages.send` on the shared branch mailbox `clients.sheffield@180dc.org` (PRD §12.1) | No — it is a real Google Workspace mailbox, already authenticated by its own tenant |
 | **Auth mail** — password reset, email confirmation | Supabase Auth, over SMTP to Resend ([recovery-email.md](auth/recovery-email.md)) | **Yes** |
 | **Platform mail** — admin invites, notification digests | `src/lib/email/send.ts` → Resend | **Yes** |
 
-Only the third row is this module. Outreach must never be routed through it:
-Gmail is what gives replies a stable thread and message id, which is what the
-whole reply-sync and outcome model in PRD §12.3 is built on.
+Only the third row is this module. Outreach must never be routed through it,
+for two reasons — and the second is the one that actually settles it:
+
+1. Gmail gives replies a stable thread and message id, which is what the whole
+   reply-sync and outcome model in PRD §12.3 is built on.
+2. **Resend cannot send as `@180dc.org` at all.** Verifying a domain in Resend
+   means adding DKIM and SPF records to it, and 180DC HQ has not granted DNS
+   access to 180dc.org. Routing outreach through Resend would mean emailing
+   charity trustees from some unrelated verified domain — which is not a
+   degraded version of the product, it is the wrong product.
+
+The Gmail path needs no DNS change from us. `clients.sheffield@180dc.org` is a
+Workspace mailbox whose authentication is already whatever the 180dc.org tenant
+has configured, and we send *as the mailbox* rather than on behalf of the domain.
 
 Rows two and three both end at Resend, and both send from the same verified
 domain — one provider, one reputation, one set of delivery logs. They are still
@@ -33,6 +44,8 @@ two paths, and the difference matters in one specific way:
 
 The practical consequence is that **not having DNS access to 180dc.org does not
 block outreach**. It blocks invites and notification email, and nothing else.
+That asymmetry is the reason the split exists: the one kind of mail this project
+cannot afford to lose is the one kind that needs nothing from HQ.
 
 ## The two transports
 
@@ -149,3 +162,45 @@ PRD §7.9 caps outbound at 100 emails per day across the platform. That cap
 governs outreach, not this module, but Resend's own free tier (100/day, 3,000/
 month) sits in the same range — worth knowing before a notification digest goes
 out to every CAM at once.
+
+---
+
+## The outreach path (not this module)
+
+Recorded here because this is where people come looking, and because the shape of
+the outreach mailbox is not what earlier drafts of the PRD assumed. The code is
+`src/lib/gmail/` (transport) and `src/app/clients/[id]/outreach-actions.ts`
+(the send action).
+
+**One shared branch mailbox, not one per CAM.** All client outreach leaves from
+`clients.sheffield@180dc.org` — `GMAIL_SENDER_EMAIL`, a real Google Workspace
+mailbox. No CAM's personal account is connected. Consequences worth keeping in
+mind:
+
+- **One OAuth grant, one `GMAIL_REFRESH_TOKEN`, server-side.** Not a per-user
+  token store — and revocation or expiry is therefore a branch-wide outage, not
+  one person's problem.
+- **One reply-sync job** covers the whole branch
+  (`src/app/api/cron/gmail-replies/route.ts`).
+- **Attribution lives in our database, not in the headers.** Every message looks
+  identical from outside, so `outreach_messages.sent_by_user_id` is the only
+  record of who sent what. It is deliberately never rewritten by a handover.
+- **Send limits and reputation are pooled.** One CAM generating spam complaints
+  degrades deliverability for everyone. That raises the cost of anything that
+  makes the mail look automated.
+
+**Gmail reports no engagement, and this is not fixable.** `users.messages.send`
+returns `{id, threadId, labelIds}` and nothing else. There are no open events, no
+click events, no delivery receipt and no engagement webhook at any tier;
+reply sync works by polling *our own* mailbox for new messages, which says nothing
+about what a recipient did. Bounces are only visible
+as a mailer-daemon message arriving back in the mailbox, so detecting them is
+reply-sync parsing work rather than a delivery feed.
+
+This is why F140 (opens), F141 (clicks) and F142 (forwards) are descoped rather
+than deferred, and why `send_event_type` holds only `sent`, `bounced` and
+`failed` — see [D-05](open-questions.md). Do not add a tracking pixel or a link
+redirector to this path without reopening that decision: wrapped links through a
+young redirector domain, sent from the branch's one real mailbox, put the shared
+reputation above at risk to buy a number that Apple Mail Privacy Protection
+already makes untrustworthy.

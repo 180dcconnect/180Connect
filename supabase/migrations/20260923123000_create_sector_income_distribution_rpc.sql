@@ -72,7 +72,10 @@ create index if not exists organisations_sector_idx
   on public.organisations (sector)
   where sector is not null;
 
-create function public.get_sector_income_distribution(
+-- OR REPLACE: staging already carries this function from untracked applies of
+-- branch work — same story as 20260923114000's guards. From scratch this is a
+-- plain create.
+create or replace function public.get_sector_income_distribution(
   p_sector text,
   p_exclude_organisation_id uuid default null,
   p_income numeric default null

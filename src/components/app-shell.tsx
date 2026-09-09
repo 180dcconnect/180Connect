@@ -56,7 +56,6 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         { href: "/admin", label: "Overview", icon: "admin" },
         { href: "/admin/users", label: "Team management", icon: "users" },
         { href: "/admin/review", label: "Review queue", icon: "review" },
-        { href: "/admin/team-pipeline", label: "Team pipeline", icon: "pipeline" },
         { href: "/admin/analytics", label: "Team analytics", icon: "analytics" },
         { href: "/admin/audit-log", label: "Audit log", icon: "audit" },
         // One entry for the four importer pages; each page carries a tab row

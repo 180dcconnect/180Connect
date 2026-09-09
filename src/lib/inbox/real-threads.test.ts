@@ -398,6 +398,68 @@ describe("hydrateInboxThread", () => {
 
     assert.equal(hydrated.messages[0].senderName, "Sam Primary");
   });
+
+  it("shows a scheduled row's text, dated by its due date", () => {
+    const [thread] = buildRealInboxThreads({
+      messages: [sentMessage()],
+      replies: [],
+      pending: [pendingRow({ send_status: "scheduled" })],
+      organisations: [organisation()],
+      contacts: [],
+      now: NOW,
+    });
+
+    const hydrated = hydrateInboxThread(
+      thread,
+      [
+        { ...sentMessage(), body: "<p>Our opening pitch</p>" },
+        {
+          ...sentMessage({
+            id: "msg-sched",
+            send_status: "scheduled",
+            sent_at: null,
+            scheduled_at: "2026-09-10T09:00:00.000Z",
+          }),
+          body: "<p>Going out next week</p>",
+        },
+      ],
+      [],
+    );
+
+    const queued = hydrated.messages.find((message) => message.pendingKind === "scheduled");
+    assert.ok(queued, "the scheduled row hydrates into the pane");
+    assert.equal(queued.body, "<p>Going out next week</p>");
+    assert.equal(queued.sentAt, "2026-09-10T09:00:00.000Z");
+    // The due date is in the future, so it sorts after everything sent.
+    assert.equal(hydrated.messages[hydrated.messages.length - 1].id, "msg-sched");
+  });
+
+  it("shows a draft row's text so resuming keeps it", () => {
+    const [thread] = buildRealInboxThreads({
+      messages: [],
+      replies: [],
+      pending: [pendingRow()],
+      organisations: [organisation()],
+      contacts: [],
+      now: NOW,
+    });
+
+    const hydrated = hydrateInboxThread(
+      thread,
+      [
+        {
+          ...sentMessage({ id: "msg-draft", send_status: "draft", sent_at: null }),
+          body: "<p>Half-written hello</p>",
+        },
+      ],
+      [],
+    );
+
+    assert.deepEqual(
+      hydrated.messages.map((message) => [message.pendingKind, message.body]),
+      [["draft", "<p>Half-written hello</p>"]],
+    );
+  });
 });
 
 describe("buildRealInboxThreads — thread tags", () => {

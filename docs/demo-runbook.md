@@ -228,16 +228,7 @@ quiet, and any client's history is auditable field by field.*
 1. **`/admin/dashboard` (F180)** — team-wide activity, funnel, sector
    performance. The map before the detail.
 
-2. **`/admin/team-pipeline` (F182).** Two things to say before touching a
-   filter: the stage strip at the top counts **the whole dataset**, not the
-   page, and the table is every client across every CAM.
-
-   Then **filter by owner** to the demo CAM. Staging holds ~2,750 imported
-   charities, nearly all of them Not contacted, so an unfiltered first page is
-   a wall of them — filter, or use the search box, and the demo clients come
-   straight up. Show the ten statuses (F146–F156) present at once.
-
-3. **F183, stall detection — `?stalled=1`, or the Stalled filter.**
+2. **F183, stall detection — `?stalled=1`, or the Stalled filter.**
    **Wearside Youth Music Trust** is flagged: 24 days since the last thing that
    happened on it. The rule is worth stating, because the exclusions are the
    interesting part — a client is stalled when it is mid-pipeline, has been

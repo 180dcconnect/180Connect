@@ -3,6 +3,7 @@
 import { motion } from "motion/react";
 
 import type { CompletenessItem, CompletenessResult } from "@/lib/client-completeness";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { cn } from "@/lib/utils";
 
 /**
@@ -85,18 +86,24 @@ function Chip({ item, index }: { item: CompletenessItem; index: number }) {
 
   return (
     <li>
-      <span
-        className={
-          item.present
-            ? "inline-flex items-center gap-2 rounded-inset border border-rule bg-white py-1 pr-2.5 pl-1.5 text-[12.5px] text-ink"
-            : "inline-flex items-center gap-2 rounded-inset border border-dashed border-rule bg-paper py-1 pr-2.5 pl-1.5 text-[12.5px] text-faint"
-        }
-        title={item.detail}
+      <InfoTooltip
+        content={item.detail}
+        side="top"
+        sideOffset={4}
+        delayDuration={200}
       >
-        <TickBox delay={delay} present={item.present} />
-        <span>{item.label}</span>
-        <span className="sr-only">{item.present ? "— on file" : "— not held"}</span>
-      </span>
+        <span
+          className={
+            item.present
+              ? "inline-flex cursor-help items-center gap-2 rounded-inset border border-rule bg-white py-1 pr-2.5 pl-1.5 text-[12.5px] text-ink"
+              : "inline-flex cursor-help items-center gap-2 rounded-inset border border-dashed border-rule bg-paper py-1 pr-2.5 pl-1.5 text-[12.5px] text-faint"
+          }
+        >
+          <TickBox delay={delay} present={item.present} />
+          <span>{item.label}</span>
+          <span className="sr-only">{item.present ? "— on file" : "— not held"}</span>
+        </span>
+      </InfoTooltip>
     </li>
   );
 }

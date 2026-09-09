@@ -1,10 +1,13 @@
 "use client";
 
 import React from "react";
+import type { LucideIcon } from "lucide-react";
 
 export interface SendButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   label?: string;
+  /** Optional leading icon, shown before the label. */
+  icon?: LucideIcon;
   /** Swaps the label for "Sending…", freezes the plane, and blocks input. */
   pending?: boolean;
   /** Label shown while `pending`. */
@@ -43,6 +46,7 @@ export interface SendButtonProps
  */
 const Button = ({
   label = "Send",
+  icon,
   pending = false,
   pendingLabel = "Sending…",
   tone = "ink",
@@ -67,7 +71,12 @@ const Button = ({
       className={`group/send relative inline-flex h-10 cursor-pointer touch-manipulation items-center justify-center gap-2 overflow-hidden ${corners} ${surface} px-5 text-sm font-semibold tracking-[-0.02em] ring-1 shadow-xs shadow-[inset_0_1px_0_rgba(255,255,255,0.3)] backdrop-blur-md transition-colors duration-200 select-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 ${className}`}
       {...props}
     >
-      <span className="send-plane flex items-center">
+      {typeof icon === "function" && (
+        <span className="shrink-0">
+          {icon({ "aria-hidden": true, className: "size-4" })}
+        </span>
+      )}
+      <span className="send-plane flex items-center" aria-hidden="true">
         <svg
           aria-hidden="true"
           className="send-flight"
@@ -83,7 +92,7 @@ const Button = ({
           />
         </svg>
       </span>
-      <span className="send-label">{pending ? pendingLabel : label}</span>
+      <span className={`send-label${icon ? " ml-2" : ""}`}>{pending ? pendingLabel : label}</span>
     </button>
   );
 };

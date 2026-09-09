@@ -113,10 +113,12 @@ export function ManualEntryForm({
   initialEntry,
   drafts,
   isAdmin,
+  prefillContactEmail,
 }: {
   initialEntry: ManualEntryDraft | null;
   drafts: ManualEntryDraft[];
   isAdmin: boolean;
+  prefillContactEmail?: string | null;
 }) {
   const [state, action, pending] = useActionState(saveManualEntry, initialState);
   const [discardState, discardAction, discarding] = useActionState(
@@ -387,7 +389,7 @@ export function ManualEntryForm({
             <Input
               id="email"
               className={textClass}
-              defaultValue={initialEntry?.contact_email ?? ""}
+              defaultValue={initialEntry?.contact_email ?? prefillContactEmail ?? ""}
               maxLength={320}
               name="contactEmail"
               type="text"

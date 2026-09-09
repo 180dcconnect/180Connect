@@ -71,7 +71,7 @@ const BASE_MOCK_THREADS: InboxThreadView[] = [
         senderRole: "Client Account Manager • 180DC",
         recipientName: "Dr. Marcus Vance",
         recipientEmail: "finance@cancerresearchuk.org",
-        sentAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+        sentAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(),
         subject: "180 Degrees Consulting — Strategic Impact & Data Assessment",
         body: `Dear Dr. Vance,
 
@@ -102,6 +102,106 @@ ada.lovelace@180dc.org | +44 7700 900123`,
       },
       {
         id: "msg-cruk-2",
+        senderName: "Dr. Marcus Vance",
+        senderEmail: "finance@cancerresearchuk.org",
+        senderRole: "Head of Strategic Partnerships",
+        recipientName: "Ada Lovelace",
+        recipientEmail: "ada.lovelace@180dc.org",
+        sentAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+        subject: "Re: 180 Degrees Consulting — Strategic Impact & Data Assessment",
+        body: `Hi Ada,
+
+Thanks for getting in touch — and for the capability deck, which I've shared with our partnerships team.
+
+We may have something timely: our donor intelligence group is reviewing the recurring-giving retention model across regional hubs, and an outside lens on the cohort data would help.
+
+Could you share one or two comparable engagements, and suggest a time for a short intro call next week?
+
+Best regards,
+
+Dr. Marcus Vance
+Head of Strategic Partnerships | Cancer Research UK
+finance@cancerresearchuk.org`,
+        isFromClient: true,
+        intent: "more_info",
+      },
+      {
+        id: "msg-cruk-3",
+        senderName: "Ada Lovelace",
+        senderEmail: "ada.lovelace@180dc.org",
+        senderRole: "Client Account Manager • 180DC",
+        recipientName: "Dr. Marcus Vance",
+        recipientEmail: "finance@cancerresearchuk.org",
+        sentAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
+        subject: "Re: 180 Degrees Consulting — Strategic Impact & Data Assessment",
+        body: `Hi Marcus,
+
+Thanks for coming back to me — glad the deck was useful.
+
+Two recent comparables: a 6-week donor segmentation for a national health charity, and an 8-week fundraising-operations review for a youth education trust. Both were scoped tightly around one question so the team could deliver inside the semester.
+
+Would Tuesday at 10:30 AM or Wednesday at 2:00 PM work for a 20-minute scoping call? I'll bring a draft problem statement we can react to.
+
+Warm regards,
+
+Ada Lovelace
+Client Account Manager | 180 Degrees Consulting
+ada.lovelace@180dc.org`,
+        isFromClient: false,
+      },
+      {
+        id: "msg-cruk-4",
+        senderName: "Dr. Marcus Vance",
+        senderEmail: "finance@cancerresearchuk.org",
+        senderRole: "Head of Strategic Partnerships",
+        recipientName: "Ada Lovelace",
+        recipientEmail: "ada.lovelace@180dc.org",
+        sentAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+        subject: "Re: 180 Degrees Consulting — Strategic Impact & Data Assessment",
+        body: `Hi Ada,
+
+Tuesday at 10:30 works — invite accepted. I've looped in our senior analyst, who owns the retention dataset.
+
+To make the call count: our open questions are (1) which lapsed-donor cohorts are recoverable, (2) what a realistic 6-week scope covers, and (3) how your student team is supervised week to week.
+
+Speak Tuesday.
+
+Best regards,
+
+Dr. Marcus Vance
+Head of Strategic Partnerships | Cancer Research UK
+finance@cancerresearchuk.org`,
+        isFromClient: true,
+        intent: "more_info",
+      },
+      {
+        id: "msg-cruk-5",
+        senderName: "Ada Lovelace",
+        senderEmail: "ada.lovelace@180dc.org",
+        senderRole: "Client Account Manager • 180DC",
+        recipientName: "Dr. Marcus Vance",
+        recipientEmail: "finance@cancerresearchuk.org",
+        sentAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
+        subject: "Re: 180 Degrees Consulting — Strategic Impact & Data Assessment",
+        body: `Hi Marcus,
+
+Thanks for a really useful call yesterday — notes below so we're aligned:
+
+• Focus: recoverable lapsed-donor cohorts across the three largest regional hubs.
+• Scope: 6 weeks, one analytical workstream plus a final readout for your trustees.
+• Team: four consultants plus a senior mentor from a top-tier practice, weekly check-ins with you and your analyst.
+
+If that matches your understanding, I'll draft the engagement letter today and we can confirm the kickoff slot on our next call.
+
+Warm regards,
+
+Ada Lovelace
+Client Account Manager | 180 Degrees Consulting
+ada.lovelace@180dc.org`,
+        isFromClient: false,
+      },
+      {
+        id: "msg-cruk-6",
         senderName: "Dr. Marcus Vance",
         senderEmail: "finance@cancerresearchuk.org",
         senderRole: "Head of Strategic Partnerships",

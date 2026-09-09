@@ -77,6 +77,31 @@ Two systems, one per side of the login. Read the right one **before** touching U
 | `migrations.yml` | push to dev/main (supabase/** changes) | verify (pgTAP + RLS coverage + anon lockout) → auto-apply to staging/production |
 | `secret-scan.yml` | PRs | gitleaks — fails if a credential is committed |
 
+## Infrastructure budget
+
+**We are on the Supabase free plan and that is what the branch can afford.** Treat it
+as a design constraint, not a temporary state — do not propose anything that assumes
+an upgrade.
+
+| Quota | Limit | Notes |
+| --- | --- | --- |
+| Database | **500 MB** | Shared across every table. The binding constraint. |
+| File storage | 1 GB | Separate quota — Storage bytes do not touch the 500 MB. |
+| Active projects | 2 | staging + production, already both spoken for ([`docs/staging-environment-setup.md`](docs/staging-environment-setup.md)) |
+| Inactivity | pauses after 7 days | Wake it from the dashboard |
+
+What this means in practice:
+
+- **Never store file bytes in a table.** Bytes go in Supabase Storage; the database
+  holds metadata and foreign keys. `outreach_message_attachments` is the pattern to
+  copy — a link table, so one stored file can be attached to any number of emails at
+  ~50 bytes of database each.
+- Anything written once per email, per client, or per import needs a row-size
+  sanity check before it ships. 500 MB disappears fast at a megabyte a row.
+- No point-in-time recovery on this plan. See
+  [`docs/staging-environment-setup.md`](docs/staging-environment-setup.md) §"500 MB
+  database limit" for the monitoring and fallback plan.
+
 ## Gotchas
 
 - `package.json` engines say Node 24.x; CI uses 22.x. Match whatever your environment provides.

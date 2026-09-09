@@ -16,13 +16,24 @@ describe("F135 reply follow-up contract", () => {
     assert.match(route, /replyBody: replyEvent\?\.reply_body \?\? null/);
   });
 
-  it("wires each displayed reply to its own draft trigger", async () => {
-    const thread = await source("../../app/clients/[id]/outreach-history.tsx");
-    const button = await source("../../app/clients/[id]/follow-up-button.tsx");
+  it("wires each reply to its own draft trigger", async () => {
+    // Composing moved wholesale into the inbox, so the client record's
+    // follow-up button is gone and the reading pane's ReplyComposer is the
+    // surface that answers a reply. It still names which reply it is
+    // answering, and still shows the draft for review before anything sends.
+    const composer = await source("../../components/outreach/reply-composer.tsx");
+    assert.match(composer, /JSON\.stringify\(\{ length, register, closing, replyEventId \}\)/);
+    assert.match(composer, /EmailReviewPanel/, "the drafted response must be shown before it can send");
 
-    assert.match(thread, /replyEventId=\{entry\.id\}/);
-    assert.match(button, /JSON\.stringify\(\{ length, register, closing, replyEventId \}\)/);
-    assert.match(button, /Review drafted response/);
+    // The id comes from the message the CAM hit Reply on when a
+    // per-message Reply is used, otherwise the thread's most recent
+    // inbound message — so a reply answers what is on screen rather
+    // than the thread in general.
+    const pane = await source("../../components/inbox/gmail-reading-pane.tsx");
+    assert.match(
+      pane,
+      /replyEventId=\{replyTarget\?\.id \?\? lastClientReply\(thread\)\?\.id\}/,
+    );
   });
 
   it("can only persist the generated response as a draft", async () => {

@@ -23,6 +23,14 @@ export type StageOneContext = {
    * worse than one that ends at its final paragraph.
    */
   senderName?: string | null;
+  /**
+   * Whether the send will carry the 180DC flyer (F217 attachment path).
+   * Drives whether the draft may refer to it at all: a first email that
+   * promises a flyer nothing attached is a broken promise the CAM has to
+   * catch by hand, and one that attaches a flyer without mentioning it wastes
+   * the attachment.
+   */
+  attachFlyer?: boolean | null;
 };
 
 export const EMAIL_LENGTHS = ["short", "standard", "detailed"] as const;
@@ -69,9 +77,19 @@ export type ClosingApproach = (typeof CLOSING_APPROACHES)[number];
  *   An email implying otherwise misrepresents a third party.
  */
 export const ORG_FACTS = `About the sender:
-180 Degrees Consulting Sheffield is a student-led consultancy delivering strategy and operations projects for charities and socially minded organisations.
-Fees are low compared with commercial consultancies, but the work is paid. Never say or imply it is free, pro bono, unpaid, or at no cost, and never quote a price or a figure.
-Never mention, claim or imply any university affiliation, endorsement, society status or campus connection.`;
+180 Degrees Consulting Sheffield is a non-profit, student-led consultancy providing strategic and technical consulting to charities, non-profits and social enterprises. Its mission is to help those organisations create impactful community change, and in doing so to develop the next generation of social impact leaders.
+Six practice areas; most projects combine two or three:
+- Strategy and market entry: growth plans, new services, feasibility studies, positioning for a changing funding landscape.
+- Operational efficiency: process reviews, service redesign, volunteer and staff resourcing models.
+- Impact measurement: theories of change and KPI frameworks, for the evidence funders increasingly ask for.
+- Marketing and engagement: brand, messaging, campaign planning, reaching the communities the charity exists to serve.
+- Digital innovation: websites, automation, CRM selection, low-cost technology adoption.
+- Fundraising and revenue: funder mapping, bid support, diversified and more resilient income models.
+How an engagement runs, if it is useful to say: a no-obligation scoping call to test whether we are the right fit, then an agreed proposal, then a typical eight-week project with a dedicated team and checkpoints the charity steers, then handover with recommendations, materials and follow-up.
+Every engagement ends with a clear, implementable set of recommendations, not a report that sits on a shelf.
+We advise; we do not implement. We can produce recommendations, frameworks and resources — a list of funders worth approaching, say — but we never carry the work out on the charity's behalf, and never imply otherwise.
+Never state or imply that the work is free, pro bono, unpaid or at no cost. Do not raise cost, fees, price or affordability at all: that conversation belongs on the call, not in a first email.
+Never claim or imply that any university endorses, accredits, sponsors or formally recognises us, and never describe us as a university society. Describing the team as student-led, or the writer as a student in Sheffield, is accurate and fine.`
 
 /**
  * Past project types, for substance the model would otherwise invent. Left
@@ -84,7 +102,11 @@ Never mention, claim or imply any university affiliation, endorsement, society s
  * anonymised project types only — never a named client, never an outcome
  * figure, since BASE_RULES forbids promising outcomes.
  */
-export const PAST_WORK = "";
+export const PAST_WORK = `Track record, usable as supporting detail but never embellished:
+Over 20 projects delivered for mission-driven organisations. State that count plainly — never add an evaluative adjective such as "successful", "impactful" or "transformative" to it, and never claim a result for any project. Winner of the 180DC Best New Branch Award, EMEA. Representative work:
+- Improving volunteer engagement by mapping recruitment streams and creating marketing template materials.
+- Market research for a charity launching a new service.
+- Building a database of potential audiences to find gaps in a charity's outreach strategy.`;
 
 /**
  * Rules that hold for every draft regardless of which dials were chosen.
@@ -95,11 +117,40 @@ export const PAST_WORK = "";
  * Name]" or "[insert detail]" and produces a draft that looks sendable and is
  * not.
  */
-export const BASE_RULES = `Write in British English throughout.
+/**
+ * How to write the organisation's name.
+ *
+ * Register data is not editorial copy. Companies House stores `company_name`
+ * in capitals and the Charity Commission often does too, so `legal_name`
+ * reaches this prompt as e.g. "SHEFFIELD AFRICAN CARIBBEAN MENTAL HEALTH
+ * ASSOCIATION LIMITED". Echoed verbatim that reads as shouting, and the old
+ * subject rule ("under 60 characters") pushed the model to invent an acronym
+ * to make a 63-character name fit — abbreviating a charity to initials it has
+ * never used itself.
+ *
+ * This is a prompt rule and not a titleCase() helper on the way in, for two
+ * reasons. Case is a judgement, not a transformation: "RSPCA", "NSPCC", "SACMHA"
+ * and "UK" must stay upper while the rest of a long name must not, and no
+ * regex can tell those apart — a model can. And `legal_name` is the legal name;
+ * rewriting it at the data layer to flatter one email would corrupt the value
+ * matching, dedupe and every screen depend on.
+ */
+export const NAME_RULE = `Writing the organisation's name:
+Register records are stored in capitals, so a name may arrive as "SHEFFIELD AFRICAN CARIBBEAN MENTAL HEALTH ASSOCIATION LIMITED". Never copy that casing. Write it as it would appear in ordinary prose — "Sheffield African Caribbean Mental Health Association" — keeping capitals only where the letters are a genuine initialism the organisation itself uses, such as RSPCA, NSPCC, YMCA or UK.
+Use the everyday name, not the registered one: prefer the trading name when one is supplied, and drop legal suffixes such as Limited, Ltd, CIC, plc or "Registered Charity No." unless the organisation plainly uses them itself.
+Never abbreviate, shorten or initialise a name the organisation has not been supplied as using. If the full name is long, use it in full or refer to "your team" or "your organisation" — never invent an acronym from its initials.
+Read the name for meaning, not just for spelling. Many organisations state who they serve, or what they do, directly in their name — a name like "Sheffield African Caribbean Mental Health Association" says the community it exists for. When the name carries that, reflect it plainly in the opening rather than retreating to the sector: write about mental health support for Sheffield's African and Caribbean communities, not about "the health and social care sector".
+Keep that detail in the sentence about THEM. The sentences describing 180 Degrees Consulting Sheffield are the same for every charity we write to, and must never be narrowed to this one's field, community or cause. "We support organisations delivering mental health support for Sheffield's African and Caribbean communities" is a lie: we are a general consultancy, and that is a claim about them wearing our sentence. Say what they do in their sentence, say what we do in ours, and let the connection between the two be the point of the email rather than a merger of the two descriptions.
+Use only what the name actually states. Never infer beliefs, politics, religion or funding from a name, and never guess at what an ambiguous name might mean.`;
+
+export const BASE_RULES = `Write in British English throughout: -ise and -isation endings, never -ize or -ization (organisation, recognise, prioritise, specialised), plus programme, favour, centre and behaviour.
 Write as "we": the email comes from the team, never from one named individual.
 Use only facts supplied in the client context below. Never invent achievements, needs, people, partnerships, or news.
 Never write square brackets, placeholders, merge fields, or any text a reader would recognise as unfilled — for example "[Name]" or "[insert detail]". Every sentence must be ready to send exactly as written.
-Do not promise outcomes, and do not imply an existing relationship or previous contact.`;
+Do not promise outcomes. Do not imply an existing relationship, previous contact, or that we have been watching, following or monitoring the organisation — this is the first time we have written to them.
+Do not speculate about what the organisation is currently planning, facing or exploring. Sentences of the shape "as you continue to grow you may be looking to…" or "you are likely facing…" invent priorities we have not been told about, and read as filler to anyone who knows their own organisation. Offer help; do not diagnose.
+Do not describe the organisation's size or maturity at all, in any wording — "established", "growing", "small", "well-resourced" and the like are inferences from its finances and must not surface.
+Do not flatter. Avoid "vital", "incredible", "amazing", "truly inspiring" and similar praise of work supplied only as a register record: one specific, accurate observation is worth more than any adjective, and unearned praise reads as a mail-merge.`;
 
 /**
  * Greeting is specified because `contactName` is frequently absent and the
@@ -113,7 +164,8 @@ export const GREETING_RULE = `Greeting: if a primary contact name is supplied, a
  * carried no instruction at all. The banned words are ordinary spam-filter
  * triggers; "free" is also banned by ORG_FACTS, which is deliberate overlap.
  */
-export const SUBJECT_RULE = `Subject: four to eight words, under 60 characters, sentence case. Say plainly what the email is about. No exclamation marks, no capitalised words, no emoji, and none of "free", "urgent", "guaranteed", "act now", "limited time". Do not reuse the body's first sentence.`;
+export const SUBJECT_RULE = `Subject: four to eight words, under 60 characters, sentence case. Say plainly what the email is about. No exclamation marks, no words in all capitals, no emoji, and none of "free", "urgent", "guaranteed", "act now", "limited time". Do not reuse the body's first sentence.
+If the organisation's name is too long to fit, leave it out of the subject entirely — never shorten or abbreviate it to make it fit.`;
 
 /**
  * Paragraph caps sit alongside the word ranges because language models count
@@ -255,13 +307,94 @@ export function label(labels: Record<string, string>, raw: string | null | undef
  * sincerely" under `formal` reads wrong under `direct` — and the model is
  * already choosing the register. The branch line is fixed text either way.
  */
+/**
+ * Attachment rule. The draft's claim about what is enclosed has to match what
+ * the send path actually does, so this is derived from the same flag that
+ * decides whether the file is attached — never hardcoded either way.
+ */
+export function attachmentRule(attachFlyer: boolean | null | undefined): string {
+  if (!attachFlyer) {
+    return `Attachments: nothing is attached to this email. Never refer to an attachment, flyer, leaflet or enclosed document.`;
+  }
+  return `Attachments: a one-page 180DC Sheffield flyer is attached, summarising what we do. Refer to it once, briefly and in passing, near the end — for example "I've attached a flyer with a bit more on what we do." Never describe its contents in detail, and never call it anything other than a flyer.`;
+}
+
 export function signOffRule(senderName: string | null | undefined): string {
   const name = senderName?.trim();
   if (!name) {
     return `Sign-off: end the body after its final paragraph. Do not add a closing line, a name, or a signature, and never invent a sender name.`;
   }
-  return `Sign-off: close the body with a short closing line suited to the register, then "${name}" on its own line, then "180 Degrees Consulting Sheffield" on its own line. Use exactly that name — never a different one, never a placeholder, and never a job title.`;
+  return `Sign-off: close the body with a short closing line suited to the register ("Kind regards" fits most), then these three lines, each on its own line and nothing else:
+${name}
+Client Acquisition Manager
+180 Degrees Consulting Sheffield
+Use exactly that name — never a different one, and never a placeholder.`;
 }
+
+/**
+ * Two real sends, as worked examples.
+ *
+ * Rules describe the register; examples demonstrate the shape — the beat order
+ * (greeting, why I am writing, who we are, one researched observation about
+ * this charity, a concrete guess at where we could help, a low-pressure call),
+ * and the specificity that separates a real email from a template. Nothing in
+ * the rule list teaches that as economically.
+ *
+ * Both are Stage 1 cold opens, so they are not shared with Stage 2, whose job
+ * is different. The flyer sentence every real send carries has been removed:
+ * generation attaches nothing, and an example that promises an attachment
+ * teaches the model to promise one too.
+ *
+ * Chosen from the branch's own outcome data: Bluebell Wood was marked
+ * "interested", and Snowdrop carries the sharpest researched opening of the set.
+ */
+const WORKED_EXAMPLES = `Two emails the team has actually sent. Follow their shape, their level of specificity and their sign-off. Never reuse their sentences, and never borrow the facts in them — those belong to those charities, not to the one you are writing to now.
+
+<example>
+Subject: potential collaboration with 180DC Sheffield
+
+Dear Samantha,
+
+I hope you're having a good week!
+
+I came across the work you do supporting children in palliative care and found your work really meaningful. What stood out to me was the tree sculpture memorial garden which is so symbolic and thoughtful for grieving families. I'm reaching out to ask if there would be an opportunity for 180DC Sheffield to support your work and collaborate with you?
+
+180DC Sheffield is a student-led consultancy driven by a mission to create social impact by supporting non-profit organisations. We help charities improve operational efficiency so you can focus on what really matters: supporting families to make the most of the time they have left.
+
+Our projects typically start with an initial discovery call which allows us to scope a tailored project that ensures our services will add value to your organisation. We offer a range of services including marketing and engagement support, social impact measurement, and optimising fundraising strategies.
+
+If any of this sounds useful, I'd love to book in a discovery call to learn more about what you do and how we might be able to support your mission.
+
+I look forward to hearing your thoughts,
+
+Kind regards,
+Marissa Law
+Client Acquisition Manager
+180 Degrees Consulting Sheffield
+</example>
+
+<example>
+Subject: Snowdrop Project: potential collaboration opportunity
+
+Dear Sarah,
+
+I hope you're having a good week. Jess kindly passed on your email address after we spoke, and I wanted to introduce myself and 180 Degrees Consulting Sheffield.
+
+180DC Sheffield is a non-profit, student-led consultancy on a mission to create social impact. We're a team of students who want to help charities like yours run more smoothly, whether through strategy reviews, marketing support, or improving day-to-day operations, so Snowdrop Project can focus resources on what matters most: moving closer to a future free from trafficking.
+
+As a local student in Sheffield, I've been reading about the incredible work Snowdrop does, particularly your contribution to national anti-slavery policy discussions and the Decade of Dignity report. What stood out to me is Snowdrop's focus on improving the systems that shape outcomes for survivors, rather than just addressing immediate needs: a systems-first approach that's exactly what we believe in at 180DC too.
+
+As Snowdrop continues to grow, I'd imagine there are always new goals and challenges on the horizon. Having helped other charities design outcome-tracking systems that hold up to funders and stakeholders, I'd love to hear more about your current priorities, whether that's developing an impact framework to measure your success or something else entirely, and see where we might be able to help.
+
+If this sounds interesting, we can set up a brief, no-commitment call, just a chance to see if we'd be a good fit.
+
+Thank you for your time, Sarah. I look forward to hearing your thoughts.
+
+Kind regards,
+Marissa Law
+Client Acquisition Manager
+180 Degrees Consulting Sheffield
+</example>`;
 
 export function buildStageOnePrompt(
   context: StageOneContext,
@@ -286,6 +419,8 @@ ${ORG_FACTS}${PAST_WORK ? `\n${PAST_WORK}` : ""}
 
 ${BASE_RULES}
 
+${NAME_RULE}
+
 ${GREETING_RULE}
 ${SUBJECT_RULE}
 ${LENGTH_INSTRUCTIONS[length]}
@@ -294,7 +429,10 @@ ${OPENING_INSTRUCTIONS[opening]}
 ${CLOSING_INSTRUCTIONS[closing]}
 ${sizeTone}
 
+${attachmentRule(context.attachFlyer)}
 ${signOffRule(context.senderName)}
+
+${WORKED_EXAMPLES}
 
 Return exactly one JSON object with two string properties, "subject" and "body". No markdown fences. The body must be plain text with a blank line between paragraphs.`,
     prompt: `Draft a Stage 1 outreach email using this reviewed client context.

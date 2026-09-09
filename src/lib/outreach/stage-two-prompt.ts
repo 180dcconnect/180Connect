@@ -1,5 +1,6 @@
 import {
   BASE_RULES,
+  NAME_RULE,
   capBooklet,
   GEOGRAPHIC_REACH_LABELS,
   GREETING_RULE,
@@ -10,6 +11,7 @@ import {
   REGISTER_INSTRUCTIONS,
   sizeToneFor,
   SUBJECT_RULE,
+  attachmentRule,
   signOffRule,
   type ClosingApproach,
   type EmailLength,
@@ -72,6 +74,8 @@ ${conversationInstruction}
 ${ORG_FACTS}${PAST_WORK ? `\n${PAST_WORK}` : ""}
 
 ${BASE_RULES}
+
+${NAME_RULE}
 Never invent dates or prior interactions. Do not repeat the whole initial pitch: reinforce the single most relevant point briefly, and make it easy to reply.
 
 ${GREETING_RULE}
@@ -81,6 +85,7 @@ ${REGISTER_INSTRUCTIONS[register]}
 ${CLOSING_INSTRUCTIONS[closing]}
 ${sizeTone}
 
+${attachmentRule(context.attachFlyer)}
 ${signOffRule(context.senderName)}
 
 Return exactly one JSON object with two string properties, "subject" and "body". No markdown fences. The body must be plain text with a blank line between paragraphs.`,

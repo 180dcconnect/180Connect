@@ -23,6 +23,7 @@ import {
   StickyNote,
   Trash2,
   Tag,
+  Check,
   type LucideIcon,
   X,
 } from "lucide-react";
@@ -58,7 +59,9 @@ import { GmailSidebar, SECTORS, type GmailFolder, type SidebarLabel } from "./gm
 import { GmailActionBar, type SelectionState } from "./gmail-action-bar";
 import { GmailThreadRow } from "./gmail-thread-row";
 import { GmailReadingPane } from "./gmail-reading-pane";
+import { cancelScheduledEmail } from "@/app/clients/[id]/outreach-actions";
 import { GmailComposeModal } from "./gmail-compose-modal";
+import { emailHtmlToPlainText } from "@/lib/outreach/email-html";
 import { BrandSearchBar } from "@/components/brand/search-bar";
 import {
   PRIORITY_SCORE_FILTERS,
@@ -86,7 +89,26 @@ interface CategoryTabConfig {
   iconClass?: string;
   activeTextClass: string;
   indicatorBg: string;
-  renderBadge?: (followUpDueCount: number) => React.ReactNode;
+  renderBadge?: (counts: CategoryBadgeCounts) => React.ReactNode;
+}
+
+interface CategoryBadgeCounts {
+  inbound: number;
+  awaiting: number;
+  followUpDue: number;
+}
+
+/** Shared count pill for the category tabs — hidden entirely when the count is
+    zero, so a tab only carries a number when it has something in it. */
+function countBadge(count: number, toneClass: string): React.ReactNode {
+  if (count <= 0) return null;
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums ${toneClass}`}
+    >
+      {count}
+    </span>
+  );
 }
 
 const CATEGORY_TABS: readonly CategoryTabConfig[] = [
@@ -104,19 +126,18 @@ const CATEGORY_TABS: readonly CategoryTabConfig[] = [
     iconClass: "text-emerald-600",
     activeTextClass: "text-emerald-700",
     indicatorBg: "bg-emerald-600",
-    renderBadge: () => (
-      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] text-emerald-800 font-bold">
-        Action Needed
-      </span>
-    ),
+    renderBadge: (counts) =>
+      countBadge(counts.inbound, "bg-emerald-100 text-emerald-800"),
   },
   {
     id: "awaiting",
     label: "Awaiting Response",
     icon: Clock,
-    iconClass: "text-amber-500",
-    activeTextClass: "text-amber-700",
-    indicatorBg: "bg-amber-500",
+    iconClass: "text-amber-800",
+    activeTextClass: "text-amber-900",
+    indicatorBg: "bg-amber-800",
+    renderBadge: (counts) =>
+      countBadge(counts.awaiting, "bg-amber-100 text-amber-900"),
   },
   {
     id: "followup",
@@ -125,12 +146,8 @@ const CATEGORY_TABS: readonly CategoryTabConfig[] = [
     iconClass: "text-rose-500",
     activeTextClass: "text-rose-700",
     indicatorBg: "bg-rose-500",
-    renderBadge: (count) =>
-      count > 0 ? (
-        <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] text-rose-800 font-bold tabular-nums">
-          {count}
-        </span>
-      ) : null,
+    renderBadge: (counts) =>
+      countBadge(counts.followUpDue, "bg-rose-100 text-rose-800"),
   },
   {
     id: "starred",
@@ -219,9 +236,31 @@ const FOLDER_EMPTY_STATES: Record<GmailFolder, { icon: LucideIcon; title: string
   },
 };
 
+/** One open compose window. */
+type ComposeWindow = {
+  /** Stable identity: the draft's row id, or `new:<n>` for a blank compose. */
+  key: string;
+  /** The outreach_messages row being edited, or null for a fresh email. */
+  draftId: string | null;
+  recipient?: string;
+  subject?: string;
+  body?: string;
+  minimised: boolean;
+};
+
+/** Two fit beside the sidebar on a laptop; a third does not. */
+const MAX_EXPANDED_COMPOSERS = 2;
+
+/** Widths the modal itself uses, needed here to stack the windows. */
+const COMPOSER_WIDTH_PX = 600;
+const COMPOSER_MINIMISED_WIDTH_PX = 320;
+const COMPOSER_GAP_PX = 12;
+const COMPOSER_EDGE_PX = 32;
+
 export function GmailInboxShell({
   initialThreads = mockFillThreads(),
   initialThreadId,
+  initialComposeClientId = null,
   addressableClients,
   initialTags = [],
   followUpDays = DEFAULT_FOLLOW_UP_THRESHOLDS.first,
@@ -230,6 +269,8 @@ export function GmailInboxShell({
 }: {
   initialThreads?: InboxThreadView[];
   initialThreadId?: string | null;
+  /** Organisation id from ?compose=, opened as an addressed compose window. */
+  initialComposeClientId?: string | null;
   /**
    * Every tag (TAGS) in play across the loaded threads, de-duplicated and
    * name-sorted by the page. Seeds the sidebar's custom-label rows and the
@@ -306,6 +347,31 @@ export function GmailInboxShell({
   );
   const [activeFolder, setActiveFolder] = useState<GmailFolder>("inbox");
   const [activeCategoryTab, setActiveCategoryTab] = useState<GmailCategoryTab>("primary");
+  // Unstar inside the Starred tab is not an instant vanish. The row stays put,
+  // showing its now-empty star, for a grace beat; then it is dropped from the
+  // list and AnimatePresence collapses it out. `graceUnstarIds` is the set
+  // still being shown past the filter, `graceTimers` the pending drop timers.
+  const [graceUnstarIds, setGraceUnstarIds] = useState<Set<string>>(new Set());
+  const graceTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const GRACE_UNSTAR_MS = 2200;
+  const clearGraceUnstar = useCallback((id: string) => {
+    const timer = graceTimers.current.get(id);
+    if (timer) clearTimeout(timer);
+    graceTimers.current.delete(id);
+    setGraceUnstarIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+  // Each held row carries its own drop timer (GRACE_UNSTAR_MS), so the set
+  // drains itself even if the tab changes underneath it; this just sweeps any
+  // still-pending timers if the whole screen unmounts.
+  useEffect(() => {
+    const timers = graceTimers.current;
+    return () => timers.forEach((timer) => clearTimeout(timer));
+  }, []);
   // Sector filtering has two independent sources, kept apart on purpose: the
   // sidebar's label rows, and the search bar's "Filter by sector" chips. They
   // used to share one Set, so a search could only ever add to the sidebar's
@@ -319,9 +385,27 @@ export function GmailInboxShell({
   // timer around an in-memory filter — see triggerLabelFilter.
   const [isRefreshing, startRefresh] = useTransition();
   // Set when a star / read / trash write is refused. The store has already put
-  // the flag back by the time this renders, so the banner explains a change
-  // the CAM can see has reverted.
+  // the flag back by now, so the banner explains a change the CAM can see
+  // has reverted.
   const [flagError, setFlagError] = useState<string | null>(null);
+  // One-shot confirmations that outlive the window that earned them — a saved
+  // draft closes its compose window, which would take a modal-local message
+  // down with it. Bottom-left, auto-dismissed, latest wins.
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
+  function showToast(message: string) {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(message);
+    toastTimer.current = setTimeout(() => {
+      setToast(null);
+      toastTimer.current = null;
+    }, 3500);
+  }
   // The mailbox's custom labels ARE tags (TAGS/ORG_TAGS). Seeded from the
   // page's server read and grown in place when the sidebar's + creates one, so
   // a new tag shows without a full refresh. A refresh re-seeds it (below).
@@ -347,7 +431,94 @@ export function GmailInboxShell({
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
-  const [isComposeOpen, setIsComposeOpen] = useState(false);
+  /**
+   * Open compose windows, oldest first, stacked right-to-left like Gmail's.
+   *
+   * Keyed by `key` — the outreach_messages id for a resumed draft, a generated
+   * id for a blank compose. Opening a draft that is already open focuses that
+   * window instead of adding a second: two windows over one row would race on
+   * save, last write winning silently while both still showed their own text.
+   *
+   * At most MAX_EXPANDED_COMPOSERS are expanded at once. This window is denser
+   * than Gmail's — AI settings drill, booklet and profile sheets, recipient
+   * search, attachment staging — so a third expanded one would not fit beside
+   * the sidebar on a laptop. A new window minimises the oldest expanded one
+   * rather than letting the row overflow off-screen.
+   */
+  const [composers, setComposers] = useState<ComposeWindow[]>([]);
+  const nextComposerKey = useRef(0);
+
+  /**
+   * Open a compose window, or focus the one already editing this draft.
+   *
+   * Reopening a draft restores rather than duplicates, which is what keeps two
+   * windows off one outreach_messages row. Opening past the expanded cap
+   * minimises the oldest expanded window instead of refusing to open — the CAM
+   * asked for this draft, so it appears; something else gets out of the way.
+   */
+  const openComposer = useCallback((spec: Omit<ComposeWindow, "key" | "minimised">) => {
+    setComposers((open) => {
+      if (spec.draftId) {
+        const existing = open.find((w) => w.draftId === spec.draftId);
+        if (existing) return open.map((w) => (w === existing ? { ...w, minimised: false } : w));
+      }
+      const key = spec.draftId ?? `new:${nextComposerKey.current++}`;
+      let next = [...open, { ...spec, key, minimised: false }];
+      const expanded = next.filter((w) => !w.minimised);
+      if (expanded.length > MAX_EXPANDED_COMPOSERS) {
+        const oldest = expanded[0];
+        next = next.map((w) => (w === oldest ? { ...w, minimised: true } : w));
+      }
+      return next;
+    });
+  }, []);
+
+  const closeComposer = useCallback((key: string) => {
+    setComposers((open) => open.filter((w) => w.key !== key));
+  }, []);
+
+  const setComposerMinimised = useCallback((key: string, minimised: boolean) => {
+    setComposers((open) => {
+      const next = open.map((w) => (w.key === key ? { ...w, minimised } : w));
+      if (minimised) return next;
+      // Restoring one may push the row over the cap; the oldest other expanded
+      // window yields, never the one just restored.
+      const expanded = next.filter((w) => !w.minimised);
+      if (expanded.length <= MAX_EXPANDED_COMPOSERS) return next;
+      const victim = expanded.find((w) => w.key !== key);
+      return victim ? next.map((w) => (w === victim ? { ...w, minimised: true } : w)) : next;
+    });
+  }, []);
+
+  /**
+   * Right-edge offset for each window, stacked right-to-left in open order so
+   * a window never moves because a different one was minimised beside it.
+   */
+  /**
+   * ?compose=<organisation id> arrives from the client record's "Write to this
+   * client" link. Resolved against the addressable directory so the window
+   * opens with a real recipient already saved rather than a raw id; an id that
+   * matches nothing the viewer can email opens a blank window instead of
+   * silently doing nothing.
+   */
+  useEffect(() => {
+    if (!initialComposeClientId) return;
+    const client = addressableClients?.find((c) => c.id === initialComposeClientId);
+    openComposer({ draftId: null, recipient: client?.primaryContact?.email ?? undefined });
+    // Deliberately once per mount: the page remounts on a new ?compose= (its
+    // key includes the param), so this must not reopen on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const composerOffsets = useMemo(() => {
+    const offsets: number[] = [];
+    let right = COMPOSER_EDGE_PX;
+    for (let i = composers.length - 1; i >= 0; i -= 1) {
+      offsets[i] = right;
+      right += (composers[i]!.minimised ? COMPOSER_MINIMISED_WIDTH_PX : COMPOSER_WIDTH_PX) + COMPOSER_GAP_PX;
+    }
+    return offsets;
+  }, [composers]);
   const [pageIndex, setPageIndex] = useState(0);
   const [isAtBottom, setIsAtBottom] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -443,6 +614,13 @@ export function GmailInboxShell({
       // 1. Folder filter
       if (activeFolder === "starred") {
         if (!thread.isStarred) return false;
+        // Starring is a flag on a thread, not a folder, so this branch has to
+        // exclude trash itself: it was the only folder filter testing nothing
+        // but the star, which left a starred thread visible here after it was
+        // trashed. A starred draft or scheduled email is deliberately still
+        // listed — clicking a draft opens the composer, so it is reachable
+        // rather than misleading.
+        if (thread.folder === "trash") return false;
       } else if (activeFolder === "sent") {
         if (thread.folder === "trash" || thread.folder === "scheduled") return false;
         const hasSent =
@@ -476,7 +654,7 @@ export function GmailInboxShell({
         } else if (activeCategoryTab === "followup") {
           if (!isFollowUpDue(thread, followUpDays)) return false;
         } else if (activeCategoryTab === "starred") {
-          if (!thread.isStarred) return false;
+          if (!thread.isStarred && !graceUnstarIds.has(thread.id)) return false;
         } else if (activeCategoryTab === "sent") {
           if (thread.status !== "sent") return false;
         }
@@ -501,7 +679,7 @@ export function GmailInboxShell({
 
       return true;
     });
-  }, [threads, activeFolder, activeCategoryTab, appliedLabels, queryMatchIds, appliedQuery, dateRanges, appliedStatusValues, followUpDays]);
+  }, [threads, activeFolder, activeCategoryTab, appliedLabels, queryMatchIds, appliedQuery, dateRanges, appliedStatusValues, followUpDays, graceUnstarIds]);
 
   // Paginated slice
   const paginatedThreads = useMemo(() => {
@@ -521,6 +699,26 @@ export function GmailInboxShell({
   const followUpDueCount = useMemo(
     () => threads.filter((t) => t.folder !== "trash" && isFollowUpDue(t, followUpDays)).length,
     [threads, followUpDays]
+  );
+  // Category-tab counts mirror each tab's own filter (see the category filter
+  // block in filteredThreads): the Inbox view, trash/scheduled excluded.
+  const inboxScoped = (t: InboxThreadView) =>
+    t.folder !== "trash" && t.folder !== "scheduled";
+  const inboundCount = useMemo(
+    () => threads.filter((t) => inboxScoped(t) && t.status === "replied").length,
+    [threads]
+  );
+  const awaitingCount = useMemo(
+    () => threads.filter((t) => inboxScoped(t) && t.status === "awaiting").length,
+    [threads]
+  );
+  const categoryBadgeCounts = useMemo<CategoryBadgeCounts>(
+    () => ({
+      inbound: inboundCount,
+      awaiting: awaitingCount,
+      followUpDue: followUpDueCount,
+    }),
+    [inboundCount, awaitingCount, followUpDueCount]
   );
   const scheduledCount = useMemo(
     () => threads.filter((t) => t.folder === "scheduled").length,
@@ -796,7 +994,24 @@ export function GmailInboxShell({
 
   function handleToggleStar(id: string) {
     const thread = threads.find((t) => t.id === id);
-    setStarred([id], !thread?.isStarred);
+    const wasStarred = !!thread?.isStarred;
+    setStarred([id], !wasStarred);
+
+    const inStarredTab =
+      activeFolder === "inbox" &&
+      appliedLabels.size === 0 &&
+      activeCategoryTab === "starred";
+
+    if (inStarredTab && wasStarred && !reduceMotion) {
+      // Just unstarred while looking at the Starred tab: hold the row in place
+      // for a grace beat before it is dropped and animated out.
+      setGraceUnstarIds((prev) => new Set(prev).add(id));
+      const timer = setTimeout(() => clearGraceUnstar(id), GRACE_UNSTAR_MS);
+      graceTimers.current.set(id, timer);
+    } else if (graceTimers.current.has(id)) {
+      // Re-starred during the grace beat: cancel the drop, the row stays.
+      clearGraceUnstar(id);
+    }
   }
 
   function handleToggleRead(id: string) {
@@ -807,6 +1022,42 @@ export function GmailInboxShell({
   function handleDeleteThread(id: string) {
     setTrashed([id]);
     if (activeThreadId === id) setActiveThreadId(null);
+  }
+
+  /**
+   * The reading pane's scheduled-send controls. Cancel returns the row to
+   * draft; edit cancels first (a schedule is a commitment to exact content —
+   * editing in place would break that) and reopens the text in Compose. Both
+   * resolve with an error to show or null: success closes the pane and
+   * refetches, since the thread just changed folders.
+   */
+  async function handleCancelScheduled(
+    thread: InboxThreadView,
+    messageId: string,
+  ): Promise<string | null> {
+    const result = await cancelScheduledEmail({ organisationId: thread.id, messageId });
+    if (!result.ok) return result.message;
+    setActiveThreadId(null);
+    router.refresh();
+    return null;
+  }
+
+  async function handleEditScheduled(
+    thread: InboxThreadView,
+    messageId: string,
+  ): Promise<string | null> {
+    const entry = thread.messages.find((message) => message.id === messageId);
+    const result = await cancelScheduledEmail({ organisationId: thread.id, messageId });
+    if (!result.ok) return result.message;
+    openComposer({
+      draftId: messageId,
+      recipient: thread.primaryContact?.email ?? undefined,
+      subject: thread.subject,
+      body: entry?.body ? emailHtmlToPlainText(entry.body) : undefined,
+    });
+    setActiveThreadId(null);
+    router.refresh();
+    return null;
   }
 
   // Bulk Handlers
@@ -853,10 +1104,46 @@ export function GmailInboxShell({
   }
 
   function handleOpenThread(thread: InboxThreadView) {
+    // A draft is not something you can read — it is an email you have not
+    // finished writing — so opening one resumes it in a compose window rather
+    // than rendering a reading pane for a message nobody ever received. The
+    // test is the thread's folder, not the current one, so this holds wherever
+    // the draft was clicked: Drafts, Starred, search results.
+    if (thread.folder === "drafts") {
+      void resumeDraft(thread);
+      return;
+    }
     // Mark as read automatically when opening
     setRead([thread.id], true);
     setActiveThreadId(thread.id);
     void hydrate(thread);
+  }
+
+  /**
+   * Open a draft thread in a compose window, with whatever it already holds.
+   *
+   * The list query omits message bodies (see `hydrate`), so the body is fetched
+   * first and the window opens with the real text rather than blank. A failed
+   * fetch still opens the window — on the draft's own row, with recipient and
+   * subject — because losing the body is better than the click doing nothing.
+   */
+  async function resumeDraft(thread: InboxThreadView) {
+    const hydrated = await hydrate(thread).catch(() => null);
+    const source = hydrated ?? thread;
+    // A thread with history holds old sent mail too — resuming means the
+    // unsent text, scheduled first (it wins ties everywhere else), else the
+    // draft, else whatever is newest. Before queued rows hydrated, this took
+    // the last message outright and a draft reopened showing old sent mail.
+    const pending =
+      source.messages.find((message) => message.pendingKind === "scheduled") ??
+      source.messages.find((message) => message.pendingKind === "draft");
+    const last = pending ?? source.messages[source.messages.length - 1];
+    openComposer({
+      draftId: pending?.id ?? last?.id ?? thread.id,
+      recipient: thread.primaryContact?.email ?? undefined,
+      subject: thread.subject,
+      body: last?.body ? emailHtmlToPlainText(last.body) : undefined,
+    });
   }
 
   /**
@@ -966,7 +1253,7 @@ export function GmailInboxShell({
         <div className="w-56 shrink-0 pr-3">
           <div className="px-1">
             <button
-              onClick={() => setIsComposeOpen(true)}
+              onClick={() => openComposer({ draftId: null })}
               type="button"
               className="flex items-center gap-3 rounded-2xl bg-[#c2e7ff] hover:bg-[#b3dcf8] active:scale-[0.98] transition-all px-5 py-3.5 shadow-sm text-slate-800 font-semibold text-sm hover:shadow-md cursor-pointer"
             >
@@ -1101,6 +1388,8 @@ export function GmailInboxShell({
               handleToggleRead(id);
               setActiveThreadId(null);
             }}
+            onCancelScheduled={(messageId) => handleCancelScheduled(activeThread, messageId)}
+            onEditScheduled={(messageId) => handleEditScheduled(activeThread, messageId)}
           />
         ) : (
           <div className="flex-1 flex flex-col min-w-0 min-h-0">
@@ -1189,7 +1478,7 @@ export function GmailInboxShell({
                     >
                       <TabIcon className={`h-4 w-4 ${tab.iconClass ?? ""}`} />
                       <span>{tab.label}</span>
-                      {tab.renderBadge?.(followUpDueCount)}
+                      {tab.renderBadge?.(categoryBadgeCounts)}
                       {isSelected && (
                         <motion.span
                           layoutId="activeCategoryTabIndicator"
@@ -1288,26 +1577,37 @@ export function GmailInboxShell({
                       );
                     })()
                   ) : (
-                    paginatedThreads.map((thread) => (
-                      <GmailThreadRow
-                        key={thread.id}
-                        thread={thread}
-                        isSelected={selectedIds.has(thread.id)}
-                        hasSelection={selectedIds.size > 0}
-                        isActive={activeThreadId === thread.id}
-                        isSentView={activeFolder === "sent"}
-                        isScheduledView={activeFolder === "scheduled"}
-                        href={threadHref(thread.id)}
-                        onSelect={() => handleSelectThread(thread.id)}
-                        onOpen={handleOpenThread}
-                        onToggleStar={() => handleToggleStar(thread.id)}
-                        onDelete={() => handleDeleteThread(thread.id)}
-                        onToggleRead={() => handleToggleRead(thread.id)}
-                        onToggleSector={handleToggleLabel}
-                        isSectorActive={selectedLabels.has(thread.sector)}
-                        sectorBg={labelColorMap.get(thread.sector)}
-                      />
-                    ))
+                    <AnimatePresence initial={false}>
+                      {paginatedThreads.map((thread) => (
+                        <motion.div
+                          key={thread.id}
+                          initial={false}
+                          exit={
+                            reduceMotion ? undefined : { opacity: 0, height: 0 }
+                          }
+                          transition={{ duration: 0.32, ease: "easeInOut" }}
+                          style={{ overflow: "hidden" }}
+                        >
+                          <GmailThreadRow
+                            thread={thread}
+                            isSelected={selectedIds.has(thread.id)}
+                            hasSelection={selectedIds.size > 0}
+                            isActive={activeThreadId === thread.id}
+                            isSentView={activeFolder === "sent"}
+                            isScheduledView={activeFolder === "scheduled"}
+                            href={threadHref(thread.id)}
+                            onSelect={() => handleSelectThread(thread.id)}
+                            onOpen={handleOpenThread}
+                            onToggleStar={() => handleToggleStar(thread.id)}
+                            onDelete={() => handleDeleteThread(thread.id)}
+                            onToggleRead={() => handleToggleRead(thread.id)}
+                            onToggleSector={handleToggleLabel}
+                            isSectorActive={selectedLabels.has(thread.sector)}
+                            sectorBg={labelColorMap.get(thread.sector)}
+                          />
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
                   )}
                 </motion.div>
               </AnimatePresence>
@@ -1318,15 +1618,50 @@ export function GmailInboxShell({
       </div>
       </div>
 
-      {/* Floating Compose Modal */}
-      <GmailComposeModal
-        isOpen={isComposeOpen}
-        onClose={() => setIsComposeOpen(false)}
-        directory={addressableClients}
-        tags={tags}
-        assignedTagsByClientId={tagsByClientId}
-        onSend={handleSendNewOutreach}
-      />
+      {/* Floating compose windows, stacked bottom-right like Gmail's. */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            key="shell-toast"
+            role="status"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="fixed bottom-5 left-5 z-[80] flex items-center gap-2 rounded-xl bg-ink px-4 py-2.5 text-sm font-medium text-white shadow-[0_18px_40px_-16px_rgba(15,23,42,0.6)]"
+          >
+            <Check className="h-4 w-4 text-emerald-300" aria-hidden="true" />
+            {toast}
+            <button
+              type="button"
+              aria-label="Dismiss"
+              onClick={() => setToast(null)}
+              className="ml-1 rounded-full p-0.5 text-white/60 transition-colors hover:text-white"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {composers.map((composer, index) => (
+        <GmailComposeModal
+          key={composer.key}
+          isOpen
+          draftId={composer.draftId}
+          initialRecipient={composer.recipient}
+          initialSubject={composer.subject}
+          initialBody={composer.body}
+          rightOffsetPx={composerOffsets[index]}
+          isMinimised={composer.minimised}
+          onMinimisedChange={(minimised) => setComposerMinimised(composer.key, minimised)}
+          onClose={() => closeComposer(composer.key)}
+          directory={addressableClients}
+          tags={tags}
+          assignedTagsByClientId={tagsByClientId}
+          onSend={handleSendNewOutreach}
+          onDraftSaved={() => showToast("Draft saved")}
+        />
+      ))}
     </div>
   );
 }

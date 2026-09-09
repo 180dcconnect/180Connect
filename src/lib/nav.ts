@@ -50,12 +50,6 @@ export const NAV_ITEMS: readonly NavItem[] = [
     permission: "user:manage",
   },
   {
-    href: "/admin/team-pipeline",
-    label: "Team pipeline",
-    description: "Every client's pipeline stage across the whole team.",
-    permission: "user:manage",
-  },
-  {
     href: "/admin/analytics",
     label: "Team analytics",
     description: "Team-wide outreach performance, conversions over time, and who may need support.",

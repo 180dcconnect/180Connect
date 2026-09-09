@@ -44,6 +44,15 @@
 -- Reversibility: paired rollback in
 --   supabase/rollback/20260924090100_schedule_inbox_thread_state_prune.down.sql
 
+-- Unschedule-first: pg_cron's schedule() never dedupes by job name (see
+-- 20260923102000), so a re-apply would run the prune twice. Conditional form
+-- (same as the paired rollback): unscheduling a missing job is an error, not
+-- a harmless false.
+select cron.unschedule('inbox_thread_state_prune_daily')
+where exists (
+  select 1 from cron.job where jobname = 'inbox_thread_state_prune_daily'
+);
+
 select cron.schedule(
   'inbox_thread_state_prune_daily',
   '40 3 * * *',

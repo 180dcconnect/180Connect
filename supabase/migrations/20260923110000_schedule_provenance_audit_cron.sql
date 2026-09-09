@@ -32,6 +32,13 @@
 --
 -- Reversibility: cron.unschedule('provenance_audit_daily').
 
+-- Unschedule-first: pg_cron's schedule() never dedupes by job name (see
+-- 20260923102000). Conditional form: unscheduling a missing job errors.
+select cron.unschedule('provenance_audit_daily')
+where exists (
+  select 1 from cron.job where jobname = 'provenance_audit_daily'
+);
+
 select cron.schedule(
   'provenance_audit_daily',
   '41 4 * * *', -- daily 04:41 UTC — quiet window, clear of 04:17 (stall) and 03:30 (prune)

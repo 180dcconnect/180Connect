@@ -134,6 +134,10 @@ export type OutreachMessageRow = {
   send_status: "draft" | "scheduled" | "sent" | "failed";
   sent_at: string | null;
   sender: { full_name: string | null } | null;
+  /** Real columns, selected only where bodies are read (the hydrate route).
+      Optional so list queries that omit them keep typechecking. */
+  scheduled_at?: string | null;
+  created_at?: string;
 };
 
 export type ReplyEventRow = {

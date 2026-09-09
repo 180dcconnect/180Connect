@@ -516,6 +516,7 @@ export function BasicInfoPanel({
   function submit() {
     if (changes.length === 0) return;
     startTransition(async () => {
+      const start = Date.now();
       const next = isAdmin
         ? await adminDirectEditsAction({
             organisationId: organisation.id,
@@ -526,6 +527,12 @@ export function BasicInfoPanel({
             reason: reason.trim() || null,
             changes,
           });
+      // Brief minimum delay so the "Saving…" state is visible — an instant
+      // flash of the button text feels broken rather than fast.
+      const elapsed = Date.now() - start;
+      if (elapsed < 400) {
+        await new Promise((r) => setTimeout(r, 400 - elapsed));
+      }
       setResult(next);
 
       // Only the fields that landed close. Anything that failed stays open with

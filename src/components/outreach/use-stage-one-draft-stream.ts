@@ -111,6 +111,7 @@ export function useStageOneDraftStream() {
       register: string;
       opening: string;
       closing: string;
+      attachFlyer?: boolean;
     }): Promise<StageOneStreamOutcome> => {
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -139,6 +140,7 @@ export function useStageOneDraftStream() {
               register: input.register,
               opening: input.opening,
               closing: input.closing,
+              attachFlyer: input.attachFlyer ?? false,
             }),
             signal: controller.signal,
           },

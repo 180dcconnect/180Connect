@@ -574,6 +574,28 @@ export function hydrateInboxThread(
     });
   }
 
+  // Queued rows are intentions, not history — but their text still belongs in
+  // the pane: without this a scheduled thread shows a banner promising an
+  // email whose body is nowhere on screen, and a draft resumed from the list
+  // opens with its text silently dropped. Dated by due date, falling back to
+  // creation, so a scheduled send sorts after everything already sent.
+  for (const row of messages) {
+    if (row.organisation_id !== thread.id) continue;
+    if (row.send_status !== "draft" && row.send_status !== "scheduled") continue;
+    entries.push({
+      id: row.id,
+      senderName: thread.camOwner.name,
+      senderEmail: thread.camOwner.email,
+      recipientName: thread.primaryContact.name,
+      recipientEmail: thread.primaryContact.email,
+      sentAt: row.scheduled_at ?? row.created_at ?? new Date(0).toISOString(),
+      subject: row.subject ?? "(no subject)",
+      body: row.body ?? "",
+      isFromClient: false,
+      pendingKind: row.send_status,
+    });
+  }
+
   for (const row of replies) {
     if (row.organisation_id !== thread.id) continue;
     const contactName = row.contact_id ? contactNames.get(row.contact_id) : null;

@@ -33,7 +33,7 @@ import { createClient } from "@/lib/supabase/server";
  * model name against work no model did.
  */
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
@@ -47,6 +47,18 @@ export async function POST(
   const { id: organisationId } = await params;
   if (!z.uuid().safeParse(organisationId).success) {
     return NextResponse.json({ error: "That client could not be found." }, { status: 400 });
+  }
+
+  // F217: the compose window's "Attach flyer" toggle. Absent body or absent
+  // field means no flyer — the safe default, matching the drafting prompt's
+  // own fallback (attachmentRule, stage-one-prompt.ts).
+  const rawBody = await request.text().catch(() => "");
+  let attachFlyer = false;
+  try {
+    const parsed: unknown = rawBody ? JSON.parse(rawBody) : {};
+    attachFlyer = z.object({ attachFlyer: z.boolean().default(false) }).safeParse(parsed).data?.attachFlyer ?? false;
+  } catch {
+    attachFlyer = false;
   }
 
   const supabase = await createClient();
@@ -156,6 +168,7 @@ export async function POST(
       subject: "",
       body: "",
       send_status: "draft",
+      attach_flyer: attachFlyer,
     })
     .select("id")
     .single();

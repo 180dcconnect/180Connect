@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion, type Variants } from "motion/react";
 import {
   X,
@@ -17,14 +18,15 @@ import {
   Mail,
   Phone,
   MapPin,
+  UserRound,
   ChevronDown,
   type LucideIcon,
   CalendarClock,
   UserPlus,
   Paperclip,
+  ExternalLink,
   MoreVertical,
   SpellCheck2,
-  FileText,
   Tag,
 } from "lucide-react";
 import { LoaderPinwheel } from "@/components/animate-ui/icons/loader-pinwheel";
@@ -42,6 +44,8 @@ import { EASE, stagger } from "@/components/brand/motion";
 import { LIP } from "@/components/brand/tokens";
 import type { AddressableClient } from "@/lib/inbox/real-threads";
 import type { InboxThreadTag } from "@/lib/inbox-thread-view";
+import { attachmentFileTypeFromFilename } from "@/lib/inbox-thread-view";
+import { InboxAttachmentCard } from "./inbox-attachment-card";
 import { mockFillThreads } from "@/lib/inbox-mock-data";
 import { attachDraftFile } from "@/app/clients/[id]/outreach-actions";
 import {
@@ -74,10 +78,9 @@ import {
   type OpeningApproach,
   type ClosingApproach,
 } from "@/lib/outreach/stage-one-prompt";
-import { getSectorColor } from "./gmail-sidebar";
+import { getSectorColor, getSectorTagStyle } from "./gmail-sidebar";
 import {
-  EmailReviewPanel,
-  type EmailReviewDraft,
+
 } from "@/components/outreach/email-review-panel";
 import { composeBodyToHtml } from "@/lib/outreach/compose-body-html";
 import {
@@ -90,6 +93,30 @@ import {
 export type GmailComposeModalProps = {
   isOpen: boolean;
   onClose: () => void;
+  /**
+   * Distance from the right edge, in pixels. Windows stack right-to-left the
+   * way Gmail's do, and only the shell knows how many are open or how wide
+   * each one currently is, so it computes the offset and this window just
+   * wears it.
+   */
+  rightOffsetPx?: number;
+  /**
+   * The outreach_messages row this window is editing, when it was opened by
+   * clicking an existing draft. Null for a fresh compose, where the row is
+   * created on send. Windows are keyed on this so the same draft can never be
+   * open twice — two windows over one row would race on save, last write
+   * winning silently while both still showed their own text.
+   */
+  draftId?: string | null;
+  /** Body of a resumed draft, as the compose editor's plain text. */
+  initialBody?: string;
+  /**
+   * Minimised state lives in the shell, not here: with several windows open
+   * the shell has to be able to minimise one it did not click — the oldest,
+   * when a new window would otherwise overflow the row.
+   */
+  isMinimised?: boolean;
+  onMinimisedChange?: (minimised: boolean) => void;
   onSend: (message: {
     to: string;
     subject: string;
@@ -97,6 +124,12 @@ export type GmailComposeModalProps = {
     /** ISO instant a scheduled send is due; absent means send now. */
     scheduledFor?: string;
   }) => void;
+  /**
+   * Fires after Save-as-draft persists, so the shell can toast. The window
+   * closes immediately after saving, which would take any modal-local
+   * confirmation down with it — the toast has to live above this window.
+   */
+  onDraftSaved?: () => void;
   initialRecipient?: string;
   initialSubject?: string;
   /**
@@ -442,6 +475,28 @@ const GOOEY_MERGE_MS = 960;
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** Stable key for a staged file across list removes (indexes shift). */
+function stagedFileKey(file: File): string {
+  return `${file.name}-${file.size}-${file.lastModified}`;
+}
+
+/**
+ * Whether a tap on the staged file can open a preview tab. Browsers render
+ * PDFs, images and plain text from a blob URL inline; anything else would
+ * download, so those names stay plain text (tapping them offers a download
+ * instead — see the download-confirm dialog). Falls back to the extension
+ * family when the OS left file.type blank.
+ */
+function isPreviewableFile(file: File): boolean {
+  if (file.type === "application/pdf" || file.type.startsWith("image/")) return true;
+  if (file.type.startsWith("text/")) return true;
+  if (file.type) return false;
+  const extension = file.name.split(".").pop()?.trim().toLowerCase() ?? "";
+  if (extension === "txt" || extension === "csv") return true;
+  const family = attachmentFileTypeFromFilename(file.name);
+  return family === "pdf" || family === "png";
+}
+
 /** The half of `client_booklets` the booklet sheet renders. */
 type SavedBookletView = {
   id: string;
@@ -552,13 +607,20 @@ function Hint({
 export function GmailComposeModal({
   isOpen,
   onClose,
+  rightOffsetPx = 32,
+  draftId: resumedDraftId = null,
+  initialBody = "",
+  isMinimised,
+  onMinimisedChange,
   onSend,
+  onDraftSaved,
   initialRecipient = "",
   initialSubject = "",
   directory,
   tags,
   assignedTagsByClientId,
 }: GmailComposeModalProps) {
+  const router = useRouter();
   // The recipient is only ever the *saved* address — the in-flight text lives
   // inside the gooey capsule until its droplet commits it.
   const [savedTo, setSavedTo] = useState<string | null>(initialRecipient || null);
@@ -569,22 +631,20 @@ export function GmailComposeModal({
   const [highlightIndex, setHighlightIndex] = useState(0);
   const [showSavedFlash, setShowSavedFlash] = useState(false);
   const [subject, setSubject] = useState(initialSubject);
-  const [body, setBody] = useState("");
-  const [isMinimized, setIsMinimized] = useState(false);
+  const [body, setBody] = useState(initialBody);
+  // Controlled by the shell when it passes `isMinimised`; the local state is
+  // the fallback for a single standalone window (and for tests that mount one).
+  const [localMinimised, setLocalMinimised] = useState(false);
+  const isMinimized = isMinimised ?? localMinimised;
+  const setIsMinimized = (next: boolean) => {
+    setLocalMinimised(next);
+    onMinimisedChange?.(next);
+  };
   const [isExpanded, setIsExpanded] = useState(false);
   const [isAiGenerating, setIsAiGenerating] = useState(false);
   const [isSending, setIsSending] = useState(false);
   /**
-   * The draft row this window handed to EmailReviewPanel, or null while still
-   * composing. Send does not send: it creates the draft and opens the shared
-   * review panel over it, which owns the approval gate and every commit.
-   *
-   * F250 is the reason it works this way rather than this window growing its
-   * own approval checkbox and calling the send action itself. One gate, in one
-   * component — `human-send-control.test.ts` asserts it, because two copies of
-   * a safety gate is how one of them gets a fix and the other does not.
    */
-  const [reviewDraft, setReviewDraft] = useState<EmailReviewDraft | null>(null);
   /** What creating that draft said when it refused. Shown above the actions. */
   const [sendError, setSendError] = useState<string | null>(null);
   // AI-first compose: an empty draft opens on the AI picker below, which asks
@@ -595,9 +655,11 @@ export function GmailComposeModal({
   // `failed` is kept apart from "none saved": one is worth retrying, the other
   // is a fact about the client.
   // The outreach_messages row Stage 1 generation created, if the CAM used it.
-  // Send reuses this row rather than asking for a second blank one.
+  // Send reuses this row rather than asking for a second blank one. The
+  // organisation travels with it so discarding targets the draft's own
+  // record even if the recipient was changed afterwards.
   const [generatedDraft, setGeneratedDraft] = useState<
-    { id: string; recipientOnFile: string | null } | null
+    { id: string; recipientOnFile: string | null; organisationId: string | null } | null
   >(null);
   // The last booklet read, tagged with the client it belongs to — see the
   // derivation below the fetch.
@@ -624,14 +686,45 @@ export function GmailComposeModal({
   // the window closes. `pendingWhen` carries the picked time across the steps.
   const [scheduleStep, setScheduleStep] = useState<"pick" | "confirm" | "done">("pick");
   const [pendingWhen, setPendingWhen] = useState<Date | null>(null);
-  /** The time this draft is destined for, carried into the review panel. The
-      panel commits it — this window never schedules anything itself. */
-  const [pendingScheduleIso, setPendingScheduleIso] = useState<string | null>(null);
   const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
   // Files chosen in this window but not yet anywhere: they are uploaded to the
   // client's attachment store and linked to the draft only once Send has
   // created that draft (see handleSend). Held as raw File objects until then.
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
+  /**
+   * Blob-URL previews for staged files, keyed by stagedFileKey. Created when
+   * a file is picked, revoked when it leaves the list (remove, upload, reset)
+   * or the window unmounts — a preview is a browser-local object URL, so an
+   * unsent, un-negotiated draft stores nothing anywhere: no upload, no row,
+   * no Storage bytes. The state mirrors the ref so render never reads a ref;
+   * the ref mirrors the state so unmount cleanup sees the latest map.
+   */
+  const [stagedPreviews, setStagedPreviews] = useState<Record<string, string>>({});
+  const stagedPreviewsRef = useRef<Record<string, string>>({});
+  // A staged file no browser can preview (Word, Excel…): tapping its name
+  // asks first, downloads on agreement. Holds the File itself — the dialog
+  // blocks the list behind it, so it cannot go stale while open.
+  const [downloadConfirmFile, setDownloadConfirmFile] = useState<File | null>(null);
+  // True while the trash tap is awaiting the discard RPC.
+  const [isDiscarding, setIsDiscarding] = useState(false);
+  // True while Save-as-draft is writing, plus its error line inside the dialog.
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [saveDraftError, setSaveDraftError] = useState<string | null>(null);
+  /**
+   * F217: whether the branch flyer rides along with this email.
+   *
+   * On by default, and scoped to first contact by where this control lives
+   * rather than by a flag: this window is the new-email surface, and a reply
+   * is written in the reading pane's own composer (components/outreach/
+   * reply-composer.tsx), which has no flyer toggle. The flyer introduces
+   * 180DC, so re-sending it into a thread the client is already replying in
+   * would be noise.
+   *
+   * The value is not only about the send: it is passed to generation too, so
+   * the draft's own wording about what is enclosed matches what actually goes
+   * out (attachmentRule in stage-one-prompt.ts).
+   */
+  const [attachFlyer, setAttachFlyer] = useState(true);
   const [attachError, setAttachError] = useState<string | null>(null);
   // Gmail keeps spell-check on by default; the ⋮ menu lets a CAM turn the
   // squiggles off for a draft full of names and acronyms.
@@ -639,6 +732,9 @@ export function GmailComposeModal({
   const [isKebabOpen, setIsKebabOpen] = useState(false);
   const [isLabelPickerOpen, setIsLabelPickerOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // The manual body autogrows inside its scroll column (attachments ride at
+  // the text's end), so it needs a handle for the height sync below.
+  const bodyInputRef = useRef<HTMLTextAreaElement>(null);
   const savedTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   // Live draft state for the X / Escape handler, which is registered once per
   // open: kept on a ref so a keystroke doesn't tear down and re-add the window
@@ -662,6 +758,7 @@ export function GmailComposeModal({
     subject: string;
     body: string;
     recipientOnFile: string | null;
+    organisationId: string | null;
   } | null>(null);
 
   function commitStagedGenerated() {
@@ -669,6 +766,7 @@ export function GmailComposeModal({
     setGeneratedDraft({
       id: stagedGenerated.id,
       recipientOnFile: stagedGenerated.recipientOnFile,
+      organisationId: stagedGenerated.organisationId,
     });
     if (stagedGenerated.subject) {
       setSubject(stagedGenerated.subject);
@@ -698,6 +796,14 @@ export function GmailComposeModal({
   );
   /** The client this draft can actually be sent to — null for a fill match. */
   const sendableClient = addressable ? client : null;
+
+  // A resumed draft's organisation, resolved once from the recipient it
+  // opened with — not from the live one, which the CAM may have changed
+  // since. Null for design-fill resumes (thread ids, not message rows).
+  const resumedDraftOrganisationId = useMemo(() => {
+    if (!resumedDraftId || !initialRecipient.trim() || !addressable) return null;
+    return resolveRecipientThread(initialRecipient, addressable)?.id ?? null;
+  }, [resumedDraftId, initialRecipient, addressable]);
 
   // "Add label" = assign a tag to this client. The menu shows the client's
   // current tags apart from the rest. Locally-added assignments (made in this
@@ -775,6 +881,18 @@ export function GmailComposeModal({
       : bookletResult.failed
         ? "failed"
         : "loaded";
+  // A whole address that resolves to nobody in the register is rejected
+  // here, at the arrow, rather than saved and left to die at Send (which
+  // requires a sendable client). The lookup is synchronous over the loaded
+  // directory, so the verdict is instant — no loading beat.
+  function isUnmatchedEmail(value: string): boolean {
+    const trimmed = value.trim();
+    return (
+      EMAIL_PATTERN.test(trimmed) &&
+      searchRecipients(trimmed, 1, addressable ?? fillDirectory).length === 0
+    );
+  }
+
   // The list is a lookup, not an autocomplete of itself: once what is typed is
   // already a whole address there is nothing left to pick.
   const showMatches =
@@ -803,7 +921,7 @@ export function GmailComposeModal({
         : !savedTo?.trim()
           ? "Save a recipient first."
           : !sendableClient
-            ? "That address does not belong to a client in the database, so there is nothing to send against. Start from the client's record."
+            ? "This address does not belong to a client in the database, so there is nothing to send against. Start from the client's record."
             : !subject.trim()
               ? "Add a subject."
               : body.trim().length === 0
@@ -811,7 +929,7 @@ export function GmailComposeModal({
                 : null;
   // Once the review panel is up, the commit lives there — this control has
   // nothing left to do until the panel is dismissed.
-  const cannotSend = sendBlockedReason !== null || reviewDraft !== null;
+  const cannotSend = sendBlockedReason !== null;
 
   // A recipient, subject or body counts as a draft worth asking about.
   hasDraftContentRef.current = Boolean(
@@ -833,8 +951,12 @@ export function GmailComposeModal({
           setCustomWhen(null);
         }
       } else if (isScheduleMenuOpen) setIsScheduleMenuOpen(false);
+      else if (downloadConfirmFile) setDownloadConfirmFile(null);
       else if (panel) setPanel(null);
-      else if (hasDraftContentRef.current) setIsCloseDialogOpen(true);
+      else if (hasDraftContentRef.current) {
+        setSaveDraftError(null);
+        setIsCloseDialogOpen(true);
+      }
       else {
         resetDraft();
         onClose();
@@ -842,20 +964,44 @@ export function GmailComposeModal({
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose, panel, isScheduleMenuOpen, isScheduleDialogOpen, isCloseDialogOpen, scheduleStep]);
+  }, [isOpen, onClose, panel, isScheduleMenuOpen, isScheduleDialogOpen, isCloseDialogOpen, scheduleStep, downloadConfirmFile]);
+
+  // The manual textarea autogrows (no internal scroll) so its scroll column
+  // carries text and attachments together — attachments sit at the text's
+  // end, never in a fixed strip of their own. DOM measurement only, no
+  // setState, so the Compiler has nothing to complain about. Lives up here
+  // with the other effects: anything past the `!isOpen` early return would
+  // be a conditional hook call.
+  useLayoutEffect(() => {
+    const el = bodyInputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [body, isWritingManually, showAiOptions, isAiGenerating]);
 
   useEffect(() => {
     const timers = savedTimers.current;
     return () => timers.forEach(clearTimeout);
   }, []);
 
+  // Safety net: a navigation away with files still staged (no reset ran)
+  // revokes their preview URLs so the blobs release. The normal paths —
+  // remove, upload, reset — revoke eagerly in their own handlers.
+  useEffect(
+    () => () => {
+      for (const url of Object.values(stagedPreviewsRef.current)) {
+        URL.revokeObjectURL(url);
+      }
+      stagedPreviewsRef.current = {};
+    },
+    [],
+  );
+
   if (!isOpen) return null;
 
   function resetDraft() {
     setSavedTo(null);
-    setReviewDraft(null);
     setGeneratedDraft(null);
-    setPendingScheduleIso(null);
     setBookletResult(null);
     setSendError(null);
     setShowSavedFlash(false);
@@ -868,17 +1014,70 @@ export function GmailComposeModal({
     setIsScheduleMenuOpen(false);
     setIsScheduleDialogOpen(false);
     setIsCloseDialogOpen(false);
+    setDownloadConfirmFile(null);
     setShowAiOptions(false);
     setDrillSetting(null);
     setCustomWhen(null);
     setScheduleStep("pick");
     setPendingWhen(null);
     setStagedFiles([]);
+    untrackAllPreviews();
     setAttachError(null);
     setIsKebabOpen(false);
     setIsLabelPickerOpen(false);
     setLocallyAssignedTags([]);
     setSpellCheckOn(true);
+    setAttachFlyer(true);
+  }
+
+  /** Blob-URL lifecycle for staged previews (see the state comment). */
+  function trackPreview(file: File) {
+    if (!isPreviewableFile(file)) return;
+    const key = stagedFileKey(file);
+    if (stagedPreviewsRef.current[key]) return;
+    const url = URL.createObjectURL(file);
+    stagedPreviewsRef.current[key] = url;
+    setStagedPreviews((prev) => ({ ...prev, [key]: url }));
+  }
+
+  function untrackPreview(file: File) {
+    const key = stagedFileKey(file);
+    const url = stagedPreviewsRef.current[key];
+    if (!url) return;
+    URL.revokeObjectURL(url);
+    delete stagedPreviewsRef.current[key];
+    setStagedPreviews((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
+  function untrackAllPreviews() {
+    for (const url of Object.values(stagedPreviewsRef.current)) {
+      URL.revokeObjectURL(url);
+    }
+    stagedPreviewsRef.current = {};
+    setStagedPreviews({});
+  }
+
+  /**
+   * Downloads a staged file to the CAM's device after the confirm dialog.
+   * The blob URL is minted for the click and revoked a beat later — the file
+   * itself never leaves the browser, exactly like a preview. Nothing is
+   * uploaded or stored.
+   */
+  function downloadStagedFile(file: File) {
+    const url = URL.createObjectURL(file);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = file.name;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setDownloadConfirmFile(null);
   }
 
   /** Adds picked files to the staging list, refusing any the client-side
@@ -907,6 +1106,7 @@ export function GmailComposeModal({
         continue;
       }
       accepted.push(file);
+      trackPreview(file);
       runningCount += 1;
       runningBytes += file.size;
     }
@@ -914,7 +1114,17 @@ export function GmailComposeModal({
   }
 
   function removeStagedFile(index: number) {
-    setStagedFiles((prev) => prev.filter((_, position) => position !== index));
+    const file = stagedFiles[index];
+    const remaining = stagedFiles.filter((_, position) => position !== index);
+    // A twice-picked file shares one URL: only revoke when its last copy
+    // leaves the list, or the surviving card's preview dies with it.
+    if (
+      file &&
+      !remaining.some((kept) => stagedFileKey(kept) === stagedFileKey(file))
+    ) {
+      untrackPreview(file);
+    }
+    setStagedFiles(remaining);
     setAttachError(null);
   }
 
@@ -979,6 +1189,9 @@ export function GmailComposeModal({
       }
 
       queue.shift();
+      // Safely on the draft: the browser-local preview has nothing left to
+      // preview, and the file now lives in Storage under its own record.
+      untrackPreview(file);
       setStagedFiles((prev) => prev.filter((staged) => staged !== file));
     }
     return null;
@@ -1015,16 +1228,23 @@ export function GmailComposeModal({
       off to the normal send path with the scheduled time. */
   function confirmSchedule() {
     if (!pendingWhen) return;
-    setScheduleStep("done");
+    // Close the schedule dialog immediately so the review panel underneath
+    // is visible and interactive. The "done" step was just a confirmation
+    // message — closing it lets the user see the message and approval gate.
+    setIsScheduleDialogOpen(false);
+    setScheduleStep("pick");
+    setPendingWhen(null);
     savedTimers.current.push(
-      setTimeout(() => void handleSend(pendingWhen.toISOString()), 1200),
+      setTimeout(() => void handleSend(pendingWhen.toISOString()), 100),
     );
   }
 
   /** The X (and Escape with no sheet open) never autosaves silently: with a
       draft on the page it asks save-as-draft or discard. An empty compose
       closes cleanly; a minimized window closes without the sheet.
-      "Save as draft" keeps the state so the next open resumes where it left. */
+      "Save as draft" persists subject, body and recipient to the draft row
+      (creating one first for a never-generated manual compose) so the next
+      open resumes where it left. */
   function requestClose() {
     if (isMinimized) {
       onClose();
@@ -1035,6 +1255,7 @@ export function GmailComposeModal({
       onClose();
       return;
     }
+    setSaveDraftError(null);
     setIsCloseDialogOpen(true);
   }
 
@@ -1045,6 +1266,126 @@ export function GmailComposeModal({
     setShowAiOptions(true);
     setIsWritingManually(false);
     setDrillSetting(null);
+  }
+
+  /**
+   * The trash tap and the close dialog's Discard share this: a real delete,
+   * never a silent orphan. A server draft row (AI-generated, blank-created
+   * or resumed) goes through the audited discard RPC under its own
+   * organisation; a pure-local compose with no row just clears. Returns
+   * false — leaving the window open with the reason shown — when the RPC
+   * refuses, so a failed delete never reads as a successful one.
+   */
+  async function discardWholeDraft(): Promise<boolean> {
+    const draftMessageId = generatedDraft?.id ?? resumedDraftId ?? null;
+    const draftOrganisationId =
+      generatedDraft?.organisationId ?? resumedDraftOrganisationId;
+    if (!draftMessageId || !draftOrganisationId) {
+      resetDraft();
+      return true;
+    }
+    setIsDiscarding(true);
+    try {
+      const { discardEmailDraft } = await import(
+        "@/app/clients/[id]/outreach-actions"
+      );
+      const result = await discardEmailDraft({
+        organisationId: draftOrganisationId,
+        messageId: draftMessageId,
+      });
+      if (!result.ok) {
+        setSendError(result.message);
+        return false;
+      }
+    } catch {
+      setSendError("The draft could not be discarded. Refresh and try again.");
+      return false;
+    } finally {
+      setIsDiscarding(false);
+    }
+    resetDraft();
+    router.refresh();
+    return true;
+  }
+
+  /**
+   * The close dialog's Save as draft — a real persist, never a bare close.
+   * A row already exists (generated, blank-created, resumed): the current
+   * edits land on it. A never-generated manual compose has no row at all, so
+   * one is created first — otherwise "Save as draft" would close over content
+   * that lives nowhere. Either way the window ends up tracking a row, so a
+   * later trash or send reuses it instead of stranding it.
+   */
+  async function saveWholeDraft(): Promise<boolean> {
+    setSaveDraftError(null);
+    const existingId = generatedDraft?.id ?? resumedDraftId ?? null;
+    const existingOrg = generatedDraft?.organisationId ?? resumedDraftOrganisationId;
+    if (existingId && existingOrg) {
+      return persistDraft(existingOrg, existingId);
+    }
+    if (!sendableClient) {
+      setSaveDraftError(
+        "Save a recipient from the database first — a draft needs a client to belong to.",
+      );
+      return false;
+    }
+    setIsSavingDraft(true);
+    try {
+      const createResponse = await fetch(
+        `/api/clients/${sendableClient.id}/outreach-drafts/blank`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ attachFlyer }),
+        },
+      );
+      const created = (await createResponse.json().catch(() => null)) as
+        | { id?: string; recipientOnFile?: string | null; error?: string }
+        | null;
+      if (!createResponse.ok || !created?.id) {
+        setSaveDraftError(
+          created?.error ?? "The draft could not be saved. Nothing was lost — keep writing.",
+        );
+        return false;
+      }
+      setGeneratedDraft({
+        id: created.id,
+        recipientOnFile: created.recipientOnFile ?? savedTo,
+        organisationId: sendableClient.id,
+      });
+      return persistDraft(sendableClient.id, created.id);
+    } catch {
+      setSaveDraftError("The network dropped before the draft could be saved. Nothing was lost — keep writing.");
+      return false;
+    } finally {
+      setIsSavingDraft(false);
+    }
+  }
+
+  async function persistDraft(organisationId: string, messageId: string): Promise<boolean> {
+    setIsSavingDraft(true);
+    try {
+      const { saveEmailDraft } = await import(
+        "@/app/clients/[id]/outreach-actions"
+      );
+      const result = await saveEmailDraft({
+        organisationId,
+        messageId,
+        subject,
+        body: composeBodyToHtml(body),
+        recipient: savedTo ?? undefined,
+      });
+      if (!result.ok) {
+        setSaveDraftError(result.message);
+        return false;
+      }
+      return true;
+    } catch {
+      setSaveDraftError("The draft could not be saved. Nothing was lost — keep writing.");
+      return false;
+    } finally {
+      setIsSavingDraft(false);
+    }
   }
 
   /** The droplet's tap. The capsule merges back on its own (the field blurs
@@ -1060,6 +1401,62 @@ export function GmailComposeModal({
     );
   }
 
+  const hasAttachments = attachFlyer || stagedFiles.length > 0;
+  // One fragment, rendered in exactly one place per composer state (end of
+  // the manual text, below the AI picker, or the fixed strip while
+  // generating) — the same cards everywhere, never duplicated.
+  const attachmentItems = (
+    <>
+      {attachFlyer && (
+        <li>
+          <InboxAttachmentCard
+            // The name on the wire — keep in sync with FLYER_FILENAME in
+            // lib/outreach/flyer.ts (imported there would pull node:fs into
+            // this client component).
+            filename="180DC Sheffield - What we do.pdf"
+            fileType="pdf"
+            nameHref="/api/outreach-flyer"
+            title="Sent with every introductory email. Turn it off under More options."
+            action={
+              <button
+                type="button"
+                aria-label="Do not attach the 180DC flyer"
+                onClick={() => setAttachFlyer(false)}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-inset text-faint transition-colors hover:bg-paper-sunk hover:text-red-600 cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            }
+          />
+        </li>
+      )}
+      {stagedFiles.map((file, index) => (
+        <li key={`${file.name}-${index}`}>
+          <InboxAttachmentCard
+            filename={file.name}
+            fileType={attachmentFileTypeFromFilename(file.name)}
+            sizeLabel={formatFileSize(file.size)}
+            // Browser-local preview only (see the stagedPreviews comment):
+            // nothing is uploaded or stored unless this draft sends. Files no
+            // browser can preview offer a download on tap instead.
+            nameHref={stagedPreviews[stagedFileKey(file)] ?? null}
+            onNameTap={() => setDownloadConfirmFile(file)}
+            action={
+              <button
+                type="button"
+                aria-label={`Remove ${file.name}`}
+                onClick={() => removeStagedFile(index)}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-inset text-faint transition-colors hover:bg-paper-sunk hover:text-red-600 cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            }
+          />
+        </li>
+      ))}
+    </>
+  );
+
   /**
    * Hands the composed draft to the shared review panel.
    *
@@ -1072,7 +1469,7 @@ export function GmailComposeModal({
    * What it does NOT do is send. `POST /outreach-drafts/blank` creates the
    * `outreach_messages` row — re-running `client:contact`, the F018 ownership
    * check and the suppression check, so a client this CAM may not contact is
-   * refused here, before anything is written — and then EmailReviewPanel takes
+   * refused here, before anything is written — and then the send action
    * over: the approval gate, the send, the schedule, the discard. That panel is
    * the only component allowed to render the gate (F250,
    * human-send-control.test.ts), so this window mounts it rather than
@@ -1097,20 +1494,21 @@ export function GmailComposeModal({
     setIsScheduleMenuOpen(false);
     setSendError(null);
     setIsSending(true);
-    // Carried into the review panel, which is where a schedule is actually
-    // committed. Set before the await so the panel mounts already knowing.
-    setPendingScheduleIso(scheduledFor ?? null);
 
     try {
       // A draft generated in this window already IS an outreach_messages row;
       // asking for a blank one would strand it and review the wrong record.
-      let draftId = generatedDraft?.id ?? null;
+      let draftId = generatedDraft?.id ?? resumedDraftId ?? null;
       let recipientOnFile = generatedDraft?.recipientOnFile ?? null;
 
       if (!draftId) {
         const response = await fetch(
           `/api/clients/${sendableClient.id}/outreach-drafts/blank`,
-          { method: "POST" },
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ attachFlyer }),
+          },
         );
         const draft = (await response.json().catch(() => null)) as
           | { id?: string; recipientOnFile?: string | null; error?: string }
@@ -1122,7 +1520,6 @@ export function GmailComposeModal({
           setSendError(
             draft?.error ?? "The email could not be prepared. Nothing was sent.",
           );
-          setPendingScheduleIso(null);
           return;
         }
         draftId = draft.id;
@@ -1135,23 +1532,53 @@ export function GmailComposeModal({
       const attachFailure = await uploadStagedFiles(sendableClient.id, draftId);
       if (attachFailure) {
         setSendError(attachFailure);
-        setPendingScheduleIso(null);
-        setGeneratedDraft({ id: draftId, recipientOnFile });
+        setGeneratedDraft({ id: draftId, recipientOnFile, organisationId: sendableClient.id });
         return;
       }
 
-      setReviewDraft({
-        id: draftId,
+      // Send directly — no review panel step. The send action re-checks
+      // suppression, ownership, rate limits and human review server-side.
+      const sendInput = {
+        organisationId: sendableClient.id,
+        messageId: draftId,
+        recipient,
         subject,
         body: composeBodyToHtml(body),
-        recipientOnFile,
-        savedRecipient: recipient,
-      });
+        explicitlyApproved: true as const,
+      };
+
+      let result;
+      if (scheduledFor) {
+        const { scheduleReviewedEmail } = await import(
+          "@/app/clients/[id]/outreach-actions"
+        );
+        result = await scheduleReviewedEmail({
+          ...sendInput,
+          scheduledAt: scheduledFor,
+        });
+      } else {
+        const { sendReviewedEmail } = await import(
+          "@/app/clients/[id]/outreach-actions"
+        );
+        result = await sendReviewedEmail(sendInput);
+      }
+
+      if (result.ok) {
+        onSend({
+          to: recipient,
+          subject,
+          body,
+          scheduledFor: scheduledFor ?? undefined,
+        });
+        resetDraft();
+        onClose();
+      } else {
+        setSendError(result.message);
+      }
     } catch {
       setSendError(
-        "The network dropped before the draft was created. Nothing was sent.",
+        "The network dropped before the email could be sent. Nothing was sent.",
       );
-      setPendingScheduleIso(null);
     } finally {
       setIsSending(false);
     }
@@ -1195,6 +1622,7 @@ export function GmailComposeModal({
         register: aiOptions.register,
         opening: aiOptions.opening,
         closing: aiOptions.closing,
+        attachFlyer,
       });
       if (!outcome.ok) {
         if (outcome.error === "cancelled") {
@@ -1217,6 +1645,9 @@ export function GmailComposeModal({
         subject: payload.subject,
         body: payload.body,
         recipientOnFile: payload.recipientOnFile ?? null,
+        // Captured now, under this client: the recipient may change while the
+        // reveal plays, but the row already belongs to this organisation.
+        organisationId: sendableClient.id,
       });
     } catch {
       setSendError("Could not reach the server. The draft was not generated.");
@@ -1236,7 +1667,7 @@ export function GmailComposeModal({
     },
     {
       key: "register",
-      title: "Email register",
+      title: "Email tone",
       options: EMAIL_REGISTERS.map((value) => ({ value, label: EMAIL_REGISTER_LABELS[value] })),
       selected: aiOptions.register,
       onSelect: (value) => setAiOptions((prev) => ({ ...prev, register: value as EmailRegister })),
@@ -1270,7 +1701,7 @@ export function GmailComposeModal({
     chipClassName?: string;
   }> = [
     { key: "length", label: "Email length", chip: EMAIL_LENGTH_LABELS[aiOptions.length] },
-    { key: "register", label: "Email register", chip: EMAIL_REGISTER_LABELS[aiOptions.register] },
+    { key: "register", label: "Email tone", chip: EMAIL_REGISTER_LABELS[aiOptions.register] },
     { key: "opening", label: "Opening approach", chip: OPENING_APPROACH_LABELS[aiOptions.opening] },
     { key: "closing", label: "Closing approach", chip: CLOSING_APPROACH_LABELS[aiOptions.closing] },
     {
@@ -1296,10 +1727,12 @@ export function GmailComposeModal({
         isExpanded
           ? "inset-8 rounded-2xl"
           : isMinimized
-            ? "bottom-0 right-8 w-80 h-11 rounded-t-2xl"
-            : "bottom-0 right-8 w-[600px] h-[640px] rounded-t-2xl"
+            ? "bottom-0 w-80 h-11 rounded-t-2xl"
+            : "bottom-0 w-[600px] h-[640px] rounded-t-2xl"
       }`}
       style={{
+        // Expanded windows are centred by `inset-8` and take no offset.
+        right: isExpanded ? undefined : rightOffsetPx,
         // The open search bar's light glass (SEARCH_GLASS_OPEN_LIGHT), held a
         // little short of opaque so the frost behind it actually reads, over
         // the same inner lip the bar wears.
@@ -1410,7 +1843,13 @@ export function GmailComposeModal({
                       if (!EMAIL_PATTERN.test(recipientQuery.trim())) {
                         event.preventDefault();
                         event.stopPropagation();
-                        handleSaveRecipient(matches[highlightIndex].contact.email);
+                        // A highlighted row is always a directory match, never a
+                        // stranger — but guarded anyway so Enter can never save
+                        // an address the arrow would reject.
+                        const picked = matches[highlightIndex];
+                        if (picked && !isUnmatchedEmail(picked.contact.email)) {
+                          handleSaveRecipient(picked.contact.email);
+                        }
                       }
                     }
                   }}
@@ -1442,12 +1881,18 @@ export function GmailComposeModal({
                     // nothing and is not an address is rejected.
                     validate={(candidate) => {
                       const value = candidate.trim();
+                      if (isUnmatchedEmail(value)) {
+                        return "This address isn't on any client record.";
+                      }
                       if (EMAIL_PATTERN.test(value)) return null;
                       if (searchRecipients(value, 1, addressable ?? fillDirectory).length > 0) return null;
                       return "No client matches that — type a full email address.";
                     }}
                     onSubmit={(value) => {
                       const typed = value.trim();
+                      // Validate already rejects these, but the submit path is
+                      // guarded too so no caller can save a stranger.
+                      if (isUnmatchedEmail(typed)) return;
                       if (EMAIL_PATTERN.test(typed)) {
                         handleSaveRecipient(typed);
                         return;
@@ -1519,6 +1964,42 @@ export function GmailComposeModal({
                                       </>
                                     )}
                                   </span>
+                                  {/* Sector + custom tags in the thread row's own
+                                      chip language, so a client reads the same
+                                      here as in the list. Tags come from the
+                                      mailbox's tag map (the lookup directory
+                                      carries no tags); capped at two. */}
+                                  {(() => {
+                                    const matchTags =
+                                      assignedTagsByClientId?.get(match.thread.id) ?? [];
+                                    return (
+                                      <span className="mt-1.5 flex items-center gap-1 overflow-hidden">
+                                        <span
+                                          style={getSectorTagStyle(
+                                            getSectorColor(match.thread.sector),
+                                          )}
+                                          className="inline-flex shrink-0 items-center py-px pl-2 pr-2.5 text-[9px] font-medium"
+                                        >
+                                          {match.thread.sector}
+                                        </span>
+                                        {matchTags.slice(0, 2).map((tag) => (
+                                          <span
+                                            key={tag.id}
+                                            title={tag.name}
+                                            className="inline-flex max-w-[6rem] shrink-0 items-center truncate py-px pl-2 pr-2.5 text-[9px] font-medium"
+                                            style={getSectorTagStyle(tag.colour ?? "var(--lead)")}
+                                          >
+                                            {tag.name}
+                                          </span>
+                                        ))}
+                                        {matchTags.length > 2 && (
+                                          <span className="shrink-0 text-[9px] font-medium text-slate-400">
+                                            +{matchTags.length - 2}
+                                          </span>
+                                        )}
+                                      </span>
+                                    );
+                                  })()}
                                 </span>
                               </button>
                             </li>
@@ -1552,10 +2033,23 @@ export function GmailComposeModal({
                             <span className="font-semibold text-slate-900">
                               {recipientQuery.trim()}
                             </span>{" "}
-                            isn&rsquo;t on any client record you can reach, so there is
+                            isn&rsquo;t on any client record, so there is
                             nothing to send this against. Add them as a contact on the
-                            client&rsquo;s record first &mdash; outreach is always
-                            tracked against an organisation.
+                            client&rsquo;s record first.
+                          </span>
+                        </span>
+                        <span className="mt-2.5 items-center flex flex-col gap-1.5">
+                          <a
+                            href={`/clients/new?contact_email=${encodeURIComponent(recipientQuery.trim())}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex w-fit items-center gap-1.5 rounded-lg bg-lead px-3.5 py-1.5 font-body text-[12px] font-semibold text-white transition-colors hover:bg-lead/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/40"
+                          >
+                            <UserPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                            Add Client
+                          </a>
+                          <span className="font-body text-[11px] leading-snug text-slate-500">
+                            Opens in a new tab, so this draft stays put.
                           </span>
                         </span>
                       </motion.div>
@@ -1606,10 +2100,14 @@ export function GmailComposeModal({
               the draft exists. The picker asks for the same five settings the
               client record's outreach tab offers (see compose-button.tsx);
               "Draft manually" swaps to the plain composer, which still keeps
-              one-tap AI drafting. */}
-          <div className="relative flex-1 min-h-0 pt-3 flex flex-col overflow-hidden">
+              one-tap AI drafting.
+              The subject border owns the top edge: this container carries no
+              padding of its own — each state puts its spacing INSIDE its
+              scroll region, so scrolled content slides straight under the
+              border with no gap showing above it. */}
+          <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden">
             {isAiGenerating ? (
-              <div className="pt-1" aria-label="Drafting">
+              <div className="pt-3" aria-label="Drafting">
                 <AiThinkingState
                   stage={draftStream.displayStage}
                   startedAt={draftStream.startedAt}
@@ -1625,15 +2123,22 @@ export function GmailComposeModal({
                 )}
               </div>
             ) : isWritingManually || (body.length > 0 && !showAiOptions) ? (
-              <>
+              // The text and its attachments scroll as one: the textarea
+              // autogrows (see the layout effect) and the strip rides at the
+              // text's end, so scrolling the draft carries both together.
+              <div className="flex-1 min-h-0 overflow-y-auto pt-3 pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                 <textarea
+                  ref={bodyInputRef}
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
                   placeholder="Write your message"
                   spellCheck={spellCheckOn}
                   autoCapitalize="sentences"
-                  className="w-full h-full text-[13px] text-slate-800 placeholder:text-slate-400 border-0 bg-transparent focus:outline-none focus:ring-0 resize-none p-0 leading-6 font-sans"
+                  className="w-full min-h-[10rem] h-auto text-[13px] text-slate-800 placeholder:text-slate-400 border-0 bg-transparent focus:outline-none focus:ring-0 resize-none overflow-hidden p-0 leading-6 font-sans"
                 />
+                {hasAttachments && (
+                  <ul className="flex flex-wrap gap-2 pt-2">{attachmentItems}</ul>
+                )}
                 {body.length === 0 && (
                   <button
                     type="button"
@@ -1646,8 +2151,9 @@ export function GmailComposeModal({
                     Use AI to draft
                   </button>
                 )}
-              </>
+              </div>
             ) : (
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-3">
               <div className="relative flex-1 min-h-0 mb-2 overflow-hidden rounded-2xl border border-slate-900/8 bg-slate-50/70">
                 <AnimatePresence>
                     {drillSetting === null ? (
@@ -1663,11 +2169,11 @@ export function GmailComposeModal({
                         key="ai-context"
                         hasClient={client !== null}
                         onOpenBooklet={() => {
-                          setDrillSetting(null);
+                          // Leave the drill on "context" so closing the sheet
+                          // lands back on the Email-context submenu, not root.
                           setPanel("booklet");
                         }}
                         onOpenProfile={() => {
-                          setDrillSetting(null);
                           setPanel("profile");
                         }}
                         onBack={() => setDrillSetting(null)}
@@ -1720,6 +2226,15 @@ export function GmailComposeModal({
                     </button>
                   </div>
                 </div>
+                {/* While the picker is open it owns the space, so the strip
+                    lives beneath it — capped to one row with its own scroll,
+                    so five attachments never bury the Generate button. */}
+                {hasAttachments && (
+                  <ul className="mb-2 flex max-h-[72px] flex-wrap gap-2 overflow-y-auto">
+                    {attachmentItems}
+                  </ul>
+                )}
+              </div>
             )}
           </div>
 
@@ -1732,65 +2247,16 @@ export function GmailComposeModal({
             </p>
           )}
 
-          {/* Files chosen but not yet uploaded — they ride along when Send
-              creates the draft (handleSend → uploadStagedFiles). */}
-          {stagedFiles.length > 0 && (
-            <ul className="mt-2 flex flex-wrap gap-1.5">
-              {stagedFiles.map((file, index) => (
-                <li
-                  key={`${file.name}-${index}`}
-                  className="flex items-center gap-1.5 rounded-full border border-slate-900/10 bg-white/70 px-2.5 py-1 text-[11px] text-slate-700"
-                >
-                  <FileText aria-hidden="true" className="h-3 w-3 shrink-0 text-slate-400" />
-                  <span className="max-w-[12rem] truncate">{file.name}</span>
-                  <span className="text-slate-400">{formatFileSize(file.size)}</span>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${file.name}`}
-                    onClick={() => removeStagedFile(index)}
-                    className="text-slate-400 hover:text-red-600 cursor-pointer"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </li>
-              ))}
-            </ul>
+          {/* While the draft is generating there is no text to belong to yet,
+              so the strip holds its old fixed place below the body until the
+              reveal commits — then it rides at the text's end like manual. */}
+          {isAiGenerating && hasAttachments && (
+            <ul className="mt-2 mb-3 flex flex-wrap gap-2">{attachmentItems}</ul>
           )}
           {attachError && (
             <p className="mt-2 text-[11px] font-semibold text-red-600" role="alert">
               {attachError}
             </p>
-          )}
-
-          {/* The shared review panel, over the composed draft. It owns the
-              approval gate and every commit — send, schedule, save, discard —
-              so this window has one send path and it is the same one the
-              client record uses (F250). */}
-          {reviewDraft && sendableClient && (
-            <div className="mt-3 rounded-panel border border-rule bg-white p-3">
-              <EmailReviewPanel
-                description="Sending as the branch mailbox. The recipient, subject and body below are exactly what will go out."
-                draft={reviewDraft}
-                heading={pendingScheduleIso ? "Review before scheduling" : "Review before sending"}
-                initialScheduledAt={pendingScheduleIso}
-                idPrefix="inbox-compose-review"
-                onCommitted={(result) => {
-                  onSend({
-                    to: reviewDraft.savedRecipient ?? savedTo ?? "",
-                    subject,
-                    body,
-                    scheduledFor: result.scheduledFor,
-                  });
-                  resetDraft();
-                  onClose();
-                }}
-                onDraftCleared={() => {
-                  setReviewDraft(null);
-                  setPendingScheduleIso(null);
-                }}
-                organisationId={sendableClient.id}
-              />
-            </div>
           )}
 
           {/* Bottom Action Bar */}
@@ -1810,7 +2276,7 @@ export function GmailComposeModal({
               <div className="relative flex items-stretch shrink-0">
                 <SendButton
                   disabled={cannotSend}
-                  label={reviewDraft ? "Reviewing…" : "Review"}
+                  label={isSending ? "Sending…" : "Send"}
                   onClick={() => void handleSend()}
                   pending={isSending}
                   pendingLabel="Preparing…"
@@ -1975,6 +2441,20 @@ export function GmailComposeModal({
                         </span>
                         {spellCheckOn && <Check className="h-4 w-4 text-lime-700" />}
                       </button>
+                      <button
+                        type="button"
+                        role="menuitemcheckbox"
+                        aria-checked={attachFlyer}
+                        onClick={() => setAttachFlyer((on) => !on)}
+                        title="Send the one-page 180DC flyer with this email"
+                        className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm font-body font-medium text-slate-700 hover:bg-slate-100 cursor-pointer"
+                      >
+                        <span className="flex items-center gap-2">
+                          <Paperclip className="h-4 w-4 text-slate-500" />
+                          Attach flyer
+                        </span>
+                        {attachFlyer && <Check className="h-4 w-4 text-lime-700" />}
+                      </button>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -2022,11 +2502,13 @@ export function GmailComposeModal({
               <Hint label="Discard draft">
                 <button
                   type="button"
+                  disabled={isDiscarding}
                   onClick={() => {
-                    resetDraft();
-                    onClose();
+                    void (async () => {
+                      if (await discardWholeDraft()) onClose();
+                    })();
                   }}
-                  className="p-2 rounded-full text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer shrink-0"
+                  className="p-2 rounded-full text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-wait"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -2235,6 +2717,11 @@ export function GmailComposeModal({
               <p className="px-4 py-3 text-[12px] leading-[1.5] text-slate-500">
                 Save it as a draft to finish later, or discard it for good.
               </p>
+              {saveDraftError && (
+                <p className="px-4 pb-2 text-[12px] font-semibold text-red-600" role="alert">
+                  {saveDraftError}
+                </p>
+              )}
 
               <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-900/8 px-4 py-3">
                 <button
@@ -2246,24 +2733,100 @@ export function GmailComposeModal({
                 </button>
                 <button
                   type="button"
+                  disabled={isDiscarding}
                   onClick={() => {
-                    resetDraft();
-                    setIsCloseDialogOpen(false);
-                    onClose();
+                    void (async () => {
+                      if (await discardWholeDraft()) {
+                        setIsCloseDialogOpen(false);
+                        onClose();
+                      }
+                    })();
                   }}
-                  className="rounded-lg border border-red-200 px-3 py-1.5 text-[12px] font-semibold text-red-600 hover:bg-red-50 cursor-pointer transition-colors"
+                  className="rounded-lg border border-red-200 px-3 py-1.5 text-[12px] font-semibold text-red-600 hover:bg-red-50 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-wait"
                 >
                   Discard
                 </button>
                 <button
                   type="button"
+                  disabled={isSavingDraft || isDiscarding}
                   onClick={() => {
-                    setIsCloseDialogOpen(false);
-                    onClose();
+                    void (async () => {
+                      if (await saveWholeDraft()) {
+                        setIsCloseDialogOpen(false);
+                        resetDraft();
+                        router.refresh();
+                        onDraftSaved?.();
+                        onClose();
+                      }
+                    })();
                   }}
-                  className="rounded-full bg-lead px-3.5 py-1.5 text-[12px] font-semibold text-white shadow-sm transition-colors hover:bg-[#1b3160] cursor-pointer"
+                  className="rounded-lg bg-lead px-3.5 py-1.5 text-[12px] font-semibold text-white shadow-sm transition-colors hover:bg-[#1b3160] cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                 >
-                  Save as draft
+                  {isSavingDraft ? "Saving…" : "Save as draft"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Staged files no browser can preview (Word, Excel…) cannot open in a
+          tab — tapping the name asks first, downloads on agreement. Same
+          dialog language as the close confirm above. */}
+      <AnimatePresence>
+        {!isMinimized && downloadConfirmFile && (
+          <motion.div
+            key="download-dialog-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="absolute inset-0 z-40 flex items-center justify-center rounded-[inherit] bg-slate-900/25 p-5"
+            onClick={() => setDownloadConfirmFile(null)}
+          >
+            <motion.div
+              role="dialog"
+              aria-label="Download file to view it"
+              initial={{ opacity: 0, y: 10, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.97 }}
+              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+              onClick={(event) => event.stopPropagation()}
+              className="w-full max-w-[320px] overflow-hidden rounded-xl bg-white shadow-[0_24px_60px_-20px_rgba(15,23,42,0.5)]"
+            >
+              <div className="flex items-center justify-between px-4 pt-4">
+                <span className="text-[15px] font-medium font-body text-slate-900">Download to view?</span>
+                <button
+                  type="button"
+                  onClick={() => setDownloadConfirmFile(null)}
+                  className="p-1 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 cursor-pointer"
+                  title="Cancel"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              <p className="px-4 py-3 text-[12px] leading-[1.5] text-slate-500">
+                <span className="font-semibold text-slate-700">
+                  {downloadConfirmFile.name}
+                </span>{" "}
+                can&rsquo;t be previewed here. Download it to view it.
+              </p>
+
+              <div className="flex flex-wrap items-center justify-end gap-2 px-4 pb-2">
+                <button
+                  type="button"
+                  onClick={() => setDownloadConfirmFile(null)}
+                  className="rounded-lg px-3 py-1.5 text-[12px] font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-800 cursor-pointer transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadStagedFile(downloadConfirmFile)}
+                  className="rounded-lg bg-lead px-3.5 py-1.5 text-[12px] font-semibold text-white shadow-sm transition-colors hover:bg-[#1b3160] cursor-pointer"
+                >
+                  Download
                 </button>
               </div>
             </motion.div>
@@ -2631,7 +3194,12 @@ function BookletView({ text, generatedAt }: { text: string; generatedAt: string 
 }
 
 function ProfileView({ client }: { client: AddressableClient }) {
-  const rows: Array<{ icon: LucideIcon; label: string; value: string }> = [
+  // The dialog header already carries the organisation name, so this view leads
+  // with the sector and then a single, evenly-ruled list. One label style
+  // (sentence case, one weight down from the value), icons only to tell one row
+  // from the next, and Owner sits in the same list rather than a bordered box
+  // of its own — a border inside the dialog's border is just noise.
+  const rows: Array<{ icon: LucideIcon; label: string; value: string; muted?: boolean }> = [
     { icon: Building2, label: "Type", value: client.orgType },
     { icon: MapPin, label: "Location", value: `${client.city}, ${client.country}` },
     { icon: Mail, label: "Contact", value: `${client.primaryContact.name} — ${client.primaryContact.email}` },
@@ -2640,30 +3208,55 @@ function ProfileView({ client }: { client: AddressableClient }) {
     rows.push({ icon: Phone, label: "Phone", value: client.primaryContact.phone });
   }
 
+  const ownerName = client.camOwner.name?.trim() ?? "";
+  const hasOwner = ownerName !== "" && ownerName.toLowerCase() !== "unassigned";
+  rows.push({
+    icon: UserRound,
+    label: "Owner",
+    value: hasOwner ? ownerName : "Unassigned",
+    muted: !hasOwner,
+  });
+
   return (
     <div className="space-y-3">
-      <div>
-        <p className="text-sm font-bold text-slate-900">{client.orgName}</p>
-        <p className="text-[11px] text-slate-500">{client.sector}</p>
-      </div>
-      <dl className="space-y-2">
+      {client.sector && (
+        <span className="inline-flex items-center rounded-inset bg-slate-100 px-2 py-[3px] text-[11px] font-medium text-slate-600">
+          {client.sector}
+        </span>
+      )}
+
+      <dl className="divide-y divide-slate-100">
         {rows.map((row) => {
           const Icon = row.icon;
           return (
-            <div key={row.label} className="flex items-start gap-2">
-              <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
-              <div className="min-w-0">
-                <dt className="text-[10px] uppercase tracking-wide text-slate-400">{row.label}</dt>
-                <dd className="text-[12px] text-slate-700">{row.value}</dd>
-              </div>
+            <div
+              key={row.label}
+              className="grid grid-cols-[1rem_4.5rem_1fr] items-start gap-x-2.5 py-2"
+            >
+              <Icon aria-hidden="true" className="mt-px h-4 w-4 text-slate-400" />
+              <dt className="text-[12px] leading-5 text-slate-500">{row.label}</dt>
+              <dd
+                className={`text-[12px] leading-5 break-words ${
+                  row.muted ? "text-slate-400 italic" : "text-slate-800"
+                }`}
+              >
+                {row.value}
+              </dd>
             </div>
           );
         })}
       </dl>
-      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-        <p className="text-[10px] uppercase tracking-wide text-slate-400">Owner</p>
-        <p className="text-[12px] text-slate-700">{client.camOwner.name}</p>
-      </div>
+      {/* The way back. Composing happens here and researching happens on the
+          record, so each surface carries one link to the other: the reading
+          pane has "Client record", and this sheet is where a compose window
+          knows which client it is writing to. */}
+      <a
+        href={`/clients/${client.id}`}
+        className="mt-4 flex items-center gap-1.5 rounded-inset px-2.5 py-1.5 text-[13px] font-semibold text-lead transition-colors hover:bg-lead-wash"
+      >
+        <span>Open client record</span>
+        <ExternalLink aria-hidden="true" className="h-3 w-3" />
+      </a>
     </div>
   );
 }

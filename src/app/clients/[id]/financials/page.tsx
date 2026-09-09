@@ -112,7 +112,7 @@ async function loadSectorDistribution(
   // Cast rather than `.returns<>()`: the client is untyped (no generated
   // `Database`), so the builder defaults to a single-object shape and the
   // generic fights it. Same pattern as the other table-returning RPC call
-  // sites — see admin/team-pipeline/page.tsx.
+  // sites — see admin/dashboard/page.tsx.
   const rows = (data ?? []) as SectorDistributionRow[];
   return rows[0] ?? null;
 }

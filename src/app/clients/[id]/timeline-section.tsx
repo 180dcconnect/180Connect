@@ -1,3 +1,5 @@
+"use client";
+
 import {
   TIMELINE_EVENT_LABEL,
   TIMELINE_EVENT_STYLE,
@@ -5,6 +7,7 @@ import {
   type TimelineTone,
 } from "@/lib/timeline";
 import { Pill } from "./section-card";
+import { PaginatedList } from "@/components/ui/paginated-list";
 
 function formatTimestamp(value: string): string {
   return new Date(value).toLocaleString("en-GB", {
@@ -110,68 +113,75 @@ export function TimelineSection({
           history.
         </p>
       )}
-      <ul className="mt-4 space-y-3">
-      {entries.map((entry) => (
-        <li key={entry.id} className="rounded-inset border border-rule p-3.5">
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <EventDot type={entry.type} />
-              <Pill tone={TIMELINE_EVENT_STYLE[entry.type].tone}>
-                {TIMELINE_EVENT_LABEL[entry.type]}
-              </Pill>
-              <span className="text-[13px] font-semibold text-dim">{entry.actorName}</span>
-            </div>
-            <span className="text-[13px] text-dim">{formatTimestamp(entry.timestamp)}</span>
-          </div>
+      <div className="mt-4">
+        <PaginatedList
+          items={entries}
+          render={(visible) => (
+            <ul className="space-y-3">
+            {visible.map((entry) => (
+              <li key={entry.id} className="rounded-inset border border-rule p-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <EventDot type={entry.type} />
+                    <Pill tone={TIMELINE_EVENT_STYLE[entry.type].tone}>
+                      {TIMELINE_EVENT_LABEL[entry.type]}
+                    </Pill>
+                    <span className="text-[13px] font-semibold text-dim">{entry.actorName}</span>
+                  </div>
+                  <span className="text-[13px] text-dim">{formatTimestamp(entry.timestamp)}</span>
+                </div>
 
-          {entry.handover ? (
-            // F257 AC5 — outgoing CAM, incoming CAM and reason each shown as
-            // their own labelled field, not folded into one sentence.
-            <dl className="mt-2.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm leading-[1.6]">
-              <dt className="text-dim">From</dt>
-              <dd className="text-ink">{entry.handover.fromName}</dd>
-              <dt className="text-dim">To</dt>
-              <dd className="text-ink">{entry.handover.toName}</dd>
-              <dt className="text-dim">Reason</dt>
-              <dd className="text-ink">{entry.handover.reason}</dd>
-            </dl>
-          ) : (
-<>
-              <p className="mt-2.5 whitespace-pre-wrap text-sm leading-[1.65] text-ink">
-                {entry.summary}
-              </p>
-              {/* F136's jump to the thread, in the redesign's ink and lead
-                  rather than the old foreground/brand tokens the incoming
-                  branch was written against. */}
-              {entry.type === "reply_received" && (
-                <a
-                  className="mt-2 inline-block text-sm font-semibold text-lead underline underline-offset-2"
-                  href={`#thread-reply-${entry.id.slice("reply-".length)}`}
-                >
-                  View full email thread
-                </a>
-              )}
-            </>
-          )}
-          {entry.attachments && entry.attachments.length > 0 && (
-            <ul className="mt-2 space-y-1">
-              {entry.attachments.map((attachment) => (
-                <li key={attachment.id}>
-                  <a
-                    className="text-sm font-semibold text-brand underline underline-offset-2"
-                    href={`/api/clients/${organisationId}/attachments/${attachment.id}/download`}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    {attachment.filename}
-                  </a>
-                </li>
-              ))}
+                {entry.handover ? (
+                  // F257 AC5 — outgoing CAM, incoming CAM and reason each shown as
+                  // their own labelled field, not folded into one sentence.
+                  <dl className="mt-2.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm leading-[1.6]">
+                    <dt className="text-dim">From</dt>
+                    <dd className="text-ink">{entry.handover.fromName}</dd>
+                    <dt className="text-dim">To</dt>
+                    <dd className="text-ink">{entry.handover.toName}</dd>
+                    <dt className="text-dim">Reason</dt>
+                    <dd className="text-ink">{entry.handover.reason}</dd>
+                  </dl>
+                ) : (
+                  <>
+                    <p className="mt-2.5 whitespace-pre-wrap text-sm leading-[1.65] text-ink">
+                      {entry.summary}
+                    </p>
+                    {/* F136's jump to the thread, in the redesign's ink and lead
+                        rather than the old foreground/brand tokens the incoming
+                        branch was written against. */}
+                    {entry.type === "reply_received" && (
+                      <a
+                        className="mt-2 inline-block text-sm font-semibold text-lead underline underline-offset-2"
+                        href={`#thread-reply-${entry.id.slice("reply-".length)}`}
+                      >
+                        View full email thread
+                      </a>
+                    )}
+                  </>
+                )}
+                {entry.attachments && entry.attachments.length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {entry.attachments.map((attachment) => (
+                      <li key={attachment.id}>
+                        <a
+                          className="text-sm font-semibold text-brand underline underline-offset-2"
+                          href={`/api/clients/${organisationId}/attachments/${attachment.id}/download`}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          {attachment.filename}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
             </ul>
           )}
-        </li>
-      ))}
-      </ul>
+        />
+      </div>
     </>
   );
 }

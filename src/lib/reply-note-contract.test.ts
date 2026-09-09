@@ -25,15 +25,13 @@ describe("F136 add note from reply contract", () => {
     assert.doesNotMatch(route, /replyBody: z\./, "the browser must not supply reply context");
   });
 
-  it("only offers the reply-note action to users with client edit permission", async () => {
-    // The outreach tab, not the overview page: the record was split into tabs
-    // after F136 was written, and everything outreach — history, thread,
-    // reply notes — moved with it.
+  it("only offers the add-note action to users with client edit permission", async () => {
     const page = await source("../app/clients/[id]/outreach/page.tsx");
-    const thread = await source("../app/clients/[id]/outreach-history.tsx");
+    const notes = await source("../app/clients/[id]/notes-section.tsx");
 
-    assert.match(page, /noteOrganisationId=\{canEdit \? client\.id : undefined\}/);
-    assert.match(thread, /replyEventId=\{entry\.id\}/);
-    assert.match(thread, /AddNoteForm/);
+    // The add-note form is gated on canEdit in the outreach page and rendered
+    // via the addNoteForm prop on NotesSection.
+    assert.match(page, /canEdit \? <AddNoteForm/);
+    assert.match(notes, /addNoteForm/);
   });
 });

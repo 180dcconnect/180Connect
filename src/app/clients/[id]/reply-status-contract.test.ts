@@ -2,19 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-const threadSource = readFileSync(
-  new URL("./outreach-history.tsx", import.meta.url),
-  "utf8",
-);
-// The record is four tab routes now, not one page.tsx: the header owns the
-// profile control and the outreach tab owns the in-thread one, so the gate this
-// asserts on lives in those two files.
+// The record header still owns the profile-level pipeline status control.
 const headerSource = readFileSync(
   new URL("./record-header.tsx", import.meta.url),
-  "utf8",
-);
-const outreachTabSource = readFileSync(
-  new URL("./outreach/page.tsx", import.meta.url),
   "utf8",
 );
 const statusSource = readFileSync(
@@ -23,20 +13,20 @@ const statusSource = readFileSync(
 );
 
 describe("F137 reply status integration", () => {
-  it("reuses the existing pipeline status control inside the full thread", () => {
-    assert.match(threadSource, /import \{ StatusSelect \} from "\.\/status-select"/);
-    assert.match(threadSource, /<StatusSelect[\s\S]*idSuffix="reply-thread"/);
-    assert.doesNotMatch(threadSource, /fetch\([^)]*\/status/);
+  it("the profile header owns the pipeline status control with the owner-or-admin gate", () => {
+    const gate = "const canSetStatus = isAdmin || isSelf;";
+    assert.ok(headerSource.includes(gate));
+    assert.match(headerSource, /\{canSetStatus && \(/);
   });
 
-  it("uses the same owner-or-admin presentation gate as the profile control", () => {
-    const gate = "const canSetStatus = isAdmin || isSelf;";
-    // Defined identically on both sides, and each side gates its own control
-    // on it — so neither surface can widen who may set the status alone.
-    assert.ok(headerSource.includes(gate));
-    assert.ok(outreachTabSource.includes(gate));
-    assert.match(headerSource, /\{canSetStatus && \(/);
-    assert.match(outreachTabSource, /statusControl=\{\s*canSetStatus/);
+  it("the inline thread status control was removed — status is set from the header or status-select only", () => {
+    // outreach-history.tsx should no longer import or render StatusSelect
+    const outreachSource = readFileSync(
+      new URL("./outreach-history.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.doesNotMatch(outreachSource, /import.*StatusSelect/);
+    assert.doesNotMatch(outreachSource, /<StatusSelect/);
   });
 
   it("refreshes server-rendered timeline and dashboard data after saving", () => {

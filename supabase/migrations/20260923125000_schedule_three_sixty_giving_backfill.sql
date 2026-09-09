@@ -54,6 +54,13 @@
 -- Reversibility: paired rollback in
 -- ../rollback/20260923125000_schedule_three_sixty_giving_backfill.down.sql
 
+-- Unschedule-first: pg_cron's schedule() never dedupes by job name (see
+-- 20260923102000). Conditional form: unscheduling a missing job errors.
+select cron.unschedule('three_sixty_giving_backfill')
+where exists (
+  select 1 from cron.job where jobname = 'three_sixty_giving_backfill'
+);
+
 select cron.schedule(
   'three_sixty_giving_backfill',
   '*/15 * * * *',

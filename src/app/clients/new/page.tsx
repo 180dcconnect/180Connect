@@ -12,12 +12,13 @@ import { UrlImportForm } from "./url-import-form";
 export default async function NewManualClientPage({
   searchParams,
 }: {
-  searchParams: Promise<{ draft?: string | string[] }>;
+  searchParams: Promise<{ draft?: string | string[]; contact_email?: string | string[] }>;
 }) {
   const authorization = await getCurrentActor("client:edit", { route: "/clients/new" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
-  const selectedValue = (await searchParams).draft;
+  const params = await searchParams;
+  const selectedValue = params.draft;
   const selectedId =
     typeof selectedValue === "string" && /^[0-9a-f-]{36}$/i.test(selectedValue)
       ? selectedValue
@@ -42,6 +43,15 @@ export default async function NewManualClientPage({
     ? manualDraftLoadErrorMessage(error, process.env.NODE_ENV === "development")
     : null;
   const initialEntry = selectedId ? drafts.find((draft) => draft.id === selectedId) ?? null : null;
+  // Prefill for arrivals from the inbox compose window ("Add Client" links
+  // /clients/new?contact_email=...). Shaped-checked and capped like the form's
+  // own column (320); a draft under review always wins over the prefill.
+  const contactEmailParam = params.contact_email;
+  const prefillContactEmail =
+    typeof contactEmailParam === "string" &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmailParam.trim())
+      ? contactEmailParam.trim().slice(0, 320)
+      : null;
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
@@ -86,6 +96,7 @@ export default async function NewManualClientPage({
             drafts={drafts}
             initialEntry={initialEntry}
             isAdmin={authorization.actor.role === "admin"}
+            prefillContactEmail={initialEntry?.contact_email ?? prefillContactEmail}
           />
         </section>
       </div>

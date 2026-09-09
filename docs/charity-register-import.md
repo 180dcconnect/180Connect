@@ -128,9 +128,11 @@ plain words, and how many organisations it created.
 ## Access and personal data
 
 The register file is read by server code only (`sqlite.ts` is `server-only`) and
-never served to a browser. `import_filter_presets` has RLS enabled **with no
-policies**, so no anon or authenticated request can read it either; every access
-goes through a Server Action after `getCurrentActor` has authorised the caller.
+never served to a browser.`import_filter_presets` has RLS enabled **with no policies** (marked `RLS-EXEMPT`
+in the table comment — the CI coverage gate allows this because access is
+intentionally locked to service-role only), so no anon or authenticated request
+can read it either; every access goes through a Server Action after
+`getCurrentActor` has authorised the caller.
 
 The register publishes a correspondence email for ~88% of charities and a phone
 for ~99%. The data-handling rules (F246/F247) run **at import**, in

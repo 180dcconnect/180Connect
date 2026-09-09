@@ -53,3 +53,7 @@ the next export.
 - [`inbox-thread-state.md`](inbox-thread-state.md) — the mailbox's star, read
   and trash controls have no table behind them; they persist per browser as an
   interim. Found while making `/inbox` work against real data, 8 September 2026.
+- [`outreach-prod-env.md`](outreach-prod-env.md) — the Gmail and `CRON_SECRET`
+  secrets are set on Vercel Preview only, so production cannot send or run
+  scheduled outreach. Found checking whether send/schedule work, 9 September
+  2026.

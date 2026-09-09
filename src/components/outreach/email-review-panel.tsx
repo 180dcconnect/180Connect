@@ -8,6 +8,7 @@ import {
   ScheduleSendDialog,
   formatScheduleLong,
 } from "@/components/outreach/schedule-send-dialog";
+import { ConfirmSendDialog } from "@/components/outreach/confirm-send-dialog";
 import { SendButton } from "@/components/ui/send-button";
 import { RichTextEmailEditor } from "@/components/rich-text-email-editor";
 import { validateClientEmail } from "@/lib/client-email-validation";
@@ -91,6 +92,7 @@ export function EmailReviewPanel({
   onDraftSaved,
   clientAttachments = [],
   initialScheduledAt = null,
+  preview = false,
 }: {
   organisationId: string;
   draft: EmailReviewDraft;
@@ -130,6 +132,14 @@ export function EmailReviewPanel({
    * later" stays available for changing it.
    */
   initialScheduledAt?: string | null;
+  /**
+   * Example preview for design-fill threads: renders the full review UI —
+   * recipient, subject, body editor, approval gate — but every committing
+   * action (save, send, schedule, discard) stays disabled and the attachment
+   * picker is omitted, so a preview can never read from or write to a real
+   * draft. The banner says so plainly.
+   */
+  preview?: boolean;
 }) {
   const [recipient, setRecipient] = useState(
     draft.savedRecipient ?? draft.recipientOnFile ?? "",
@@ -161,6 +171,10 @@ export function EmailReviewPanel({
     initialScheduledAt ? new Date(initialScheduledAt) : null,
   );
   const [scheduling, setScheduling] = useState(false);
+  // Send now needs a confirmation step before the Gmail call: the approval
+  // checkbox is the review gate, and this is the commit gate. A stray tap on
+  // the paper plane is the one send action that should ask first.
+  const [confirmSendOpen, setConfirmSendOpen] = useState(false);
 
   // The parent reads this to decide whether regenerating would discard work.
   // Reported through an effect rather than from each setter so it can never
@@ -300,6 +314,15 @@ export function EmailReviewPanel({
 
   return (
     <div className={`space-y-3 ${className}`}>
+      {preview && (
+        <p
+          className="rounded-inset bg-paper-sunk px-3 py-2 text-xs leading-[1.55] font-semibold text-dim"
+          role="note"
+        >
+          Example preview — this is design fill, so sending, scheduling, saving
+          and attaching are disabled. Nothing here leaves the page.
+        </p>
+      )}
       <div>
         <h3 className="text-sm font-semibold" id={headingId}>
           {heading}
@@ -383,11 +406,13 @@ export function EmailReviewPanel({
         </div>
       </div>
 
-      <AttachmentPicker
-        clientAttachments={clientAttachments}
-        messageId={draft.id}
-        organisationId={organisationId}
-      />
+      {!preview && (
+        <AttachmentPicker
+          clientAttachments={clientAttachments}
+          messageId={draft.id}
+          organisationId={organisationId}
+        />
+      )}
 
       <label className="flex items-start gap-2 text-xs font-semibold text-dim">
         <input
@@ -404,8 +429,9 @@ export function EmailReviewPanel({
             checkbox, no valid recipient, not even a non-empty subject or
             body — a work-in-progress draft is exactly what this is for. */}
         <OriginButton
-          disabled={savingDraft || sending || discarding}
+          disabled={savingDraft || sending || discarding || preview}
           onClick={saveDraft}
+          title={preview ? "Disabled in the example preview" : undefined}
           type="button"
           variant="outline"
         >
@@ -420,7 +446,7 @@ export function EmailReviewPanel({
              rather than sending now — pressing "Send reviewed email" here
              would quietly ignore the CAM's answer to "when?". */
           <SendButton
-            disabled={cannotCommit || scheduling}
+            disabled={cannotCommit || scheduling || preview}
             label={`Schedule send · ${formatScheduleLong(scheduledAt)}`}
             onClick={() => void schedule(scheduledAt)}
             pending={scheduling}
@@ -429,9 +455,9 @@ export function EmailReviewPanel({
           />
         ) : (
           <SendButton
-            disabled={cannotCommit}
+            disabled={cannotCommit || sending || preview}
             label="Send reviewed email"
-            onClick={send}
+            onClick={() => setConfirmSendOpen(true)}
             pending={sending}
             type="button"
           />
@@ -440,8 +466,9 @@ export function EmailReviewPanel({
             reachable here, so there is no "discard a sent email" case to guard. */}
         <button
           className="shrink-0 rounded-full border border-stop/25 px-4 py-2 text-xs font-semibold text-stop transition-colors hover:bg-stop-wash disabled:opacity-60"
-          disabled={savingDraft || sending || discarding}
+          disabled={savingDraft || sending || discarding || preview}
           onClick={discardDraft}
+          title={preview ? "Disabled in the example preview" : undefined}
           type="button"
         >
           {discarding ? "Discarding…" : "Discard draft"}
@@ -464,8 +491,9 @@ export function EmailReviewPanel({
           edited. Its confirm step does. */}
       <div className="flex flex-wrap items-end gap-2">
         <OriginButton
-          disabled={cannotCommit}
+          disabled={cannotCommit || preview}
           onClick={() => setScheduleOpen(true)}
+          title={preview ? "Disabled in the example preview" : undefined}
           type="button"
           variant="outline"
         >
@@ -474,7 +502,7 @@ export function EmailReviewPanel({
         </OriginButton>
         {scheduledAt && (
           <OriginButton
-            disabled={sending || scheduling}
+            disabled={sending || scheduling || preview}
             onClick={() => setScheduledAt(null)}
             type="button"
             variant="outline"
@@ -492,11 +520,20 @@ export function EmailReviewPanel({
         open={scheduleOpen}
       />
 
+      <ConfirmSendDialog
+        open={confirmSendOpen}
+        onClose={() => setConfirmSendOpen(false)}
+        onConfirm={send}
+        pending={sending}
+      />
+
       <p
         className={`text-xs font-semibold ${sendFailed ? "text-stop" : "text-hold"}`}
         role={sendFailed ? "alert" : "status"}
       >
-        {sendMessage ?? "Not sent — explicit human review and send are required."}
+        {preview
+          ? "Example preview — nothing here sends."
+          : (sendMessage ?? "Not sent — explicit human review and send are required.")}
       </p>
     </div>
   );

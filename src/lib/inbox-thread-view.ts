@@ -37,6 +37,13 @@ export type InboxEmailMessage = {
   isFromClient: boolean;
   intent?: "interested" | "not_interested" | "more_info" | "referral" | null;
   attachments?: InboxAttachmentView[];
+  /**
+   * Set on rows that have not gone out yet. The reading pane shows their
+   * text (a scheduled send's body would otherwise be invisible — only sent
+   * rows used to hydrate), and the scheduled banner's Cancel/Edit act on
+   * the "scheduled" one. Absent on sent mail and client replies.
+   */
+  pendingKind?: "draft" | "scheduled";
 };
 
 /**
@@ -193,6 +200,34 @@ export function formatFileSize(bytes: number): string {
     return `${(bytes / 1000000).toFixed(1)} MB`;
   }
   return `${Math.round(bytes / 1000)} KB`;
+}
+
+/**
+ * Maps a filename onto the inbox's attachment icon vocabulary from its
+ * extension. The union names file *families*, not exact formats: Word
+ * variants collapse to "docx", sheet/CSV variants to "xlsx", slides to
+ * "pptx", raster images to "png". Plain text, unknown and extensionless
+ * names collapse to "docx" — the card renders that family with the generic
+ * file icon, which is the honest rendering for "a document of no
+ * distinguished kind".
+ */
+export function attachmentFileTypeFromFilename(
+  filename: string,
+): InboxAttachmentView["fileType"] {
+  const extension = filename.split(".").pop()?.trim().toLowerCase() ?? "";
+  if (extension === "pdf") return "pdf";
+  if (extension === "xls" || extension === "xlsx" || extension === "csv") return "xlsx";
+  if (extension === "ppt" || extension === "pptx") return "pptx";
+  if (
+    extension === "png" ||
+    extension === "jpg" ||
+    extension === "jpeg" ||
+    extension === "gif" ||
+    extension === "webp"
+  ) {
+    return "png";
+  }
+  return "docx";
 }
 
 /**

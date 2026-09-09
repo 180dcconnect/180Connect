@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { motion } from "motion/react";
 import {
   Star,
   Paperclip,
@@ -41,6 +42,69 @@ export type GmailThreadRowProps = {
   isSectorActive?: boolean;
   sectorBg?: string;
 };
+
+/** Row select box. Same draw-on tick as the Terms & Conditions checkbox
+    (animate-ui/primitives/radix/checkbox): the check path animates pathLength
+    0 → 1 on select, and unwinds 1 → 0 on deselect. */
+function RowCheckbox({
+  checked,
+  visible,
+  ariaLabel,
+  onToggle,
+}: {
+  checked: boolean;
+  visible: boolean;
+  ariaLabel: string;
+  onToggle: (e: React.MouseEvent) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+      onClick={onToggle}
+      className={`grid h-4 w-4 shrink-0 place-items-center rounded border outline-none transition-[opacity,background-color,border-color] duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-lead ${
+        checked
+          ? "border-lead bg-lead text-white"
+          : "border-rule bg-white text-transparent hover:border-dim"
+      } ${
+        visible
+          ? "opacity-100"
+          : "opacity-0 group-hover:opacity-100 focus:opacity-100"
+      }`}
+    >
+      <motion.svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3.5"
+        aria-hidden="true"
+        className="h-3 w-3"
+        initial={false}
+        animate={checked ? "checked" : "unchecked"}
+      >
+        <motion.path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M4.5 12.75l6 6 9-13.5"
+          variants={{
+            checked: {
+              pathLength: 1,
+              opacity: 1,
+              transition: { duration: 0.2, delay: 0.15 },
+            },
+            unchecked: {
+              pathLength: 0,
+              opacity: 0,
+              transition: { duration: 0.15 },
+            },
+          }}
+        />
+      </motion.svg>
+    </button>
+  );
+}
 
 export function GmailThreadRow({
   thread,
@@ -124,20 +188,15 @@ export function GmailThreadRow({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Checkbox */}
-        <input
-          type="checkbox"
-          aria-label={
+        <RowCheckbox
+          checked={isSelected}
+          visible={showCheckbox}
+          ariaLabel={
             isSentView
               ? `Select sent message to ${thread.primaryContact?.name || thread.orgName}`
               : `Select thread from ${thread.orgName}`
           }
-          checked={isSelected}
-          onChange={(e) => onSelect(thread.id, e)}
-          className={`h-4 w-4 rounded border-rule text-lead focus:ring-lead cursor-pointer transition-opacity duration-150 ${
-            showCheckbox
-              ? "opacity-100"
-              : "opacity-0 group-hover:opacity-100 focus:opacity-100"
-          }`}
+          onToggle={(e) => onSelect(thread.id, e)}
         />
 
         {/* Star */}
@@ -231,6 +290,7 @@ export function GmailThreadRow({
         })()}
 
         {/* Tag chips (TAGS/ORG_TAGS) — the same labels the sidebar filters on.
+            Same chevron tag as the sector: straight left edge, V notch right.
             Capped at two so a heavily-tagged client does not push the
             timestamp off the row; the rest are a "+N". */}
         {thread.tags && thread.tags.length > 0 && (
@@ -239,11 +299,8 @@ export function GmailThreadRow({
               <span
                 key={tag.id}
                 title={tag.name}
-                className="inline-flex max-w-[7rem] items-center truncate rounded-full px-2 py-0.5 text-[10px] font-medium"
-                style={{
-                  backgroundColor: `color-mix(in srgb, ${tag.colour ?? "var(--lead)"} 14%, transparent)`,
-                  color: tag.colour ?? "var(--lead)",
-                }}
+                className="inline-flex max-w-[7rem] items-center truncate py-0.5 pl-2 pr-2.5 text-[10px] font-medium"
+                style={getSectorTagStyle(tag.colour ?? "var(--lead)")}
               >
                 {tag.name}
               </span>

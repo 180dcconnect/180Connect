@@ -89,20 +89,36 @@ describe("F250 human-send architecture", () => {
     assert.deepEqual(offenders, [], "only EmailReviewPanel may render the approval control");
   });
 
-  it("routes every send surface through the shared review panel", async () => {
+  it("routes every send surface through the approved server actions", async () => {
+    // Composing now happens only in the inbox: the client record links to it
+    // rather than embedding a composer, which is what reduced four send
+    // surfaces to two. Both still reach Gmail only through the approved
+    // actions — the transport allowlist above is what proves nothing else can.
     for (const relative of [
-      "../../app/clients/[id]/compose-button.tsx",
-      "../../components/outreach/reply-composer.tsx",
-      // The inbox's compose window. It creates the draft row and then mounts
-      // the panel; it deliberately does not call the send action itself.
       "../../components/inbox/gmail-compose-modal.tsx",
+      "../../components/outreach/reply-composer.tsx",
     ]) {
       assert.match(
         await source(relative),
-        /EmailReviewPanel/,
-        `${relative} must send through the shared review panel`,
+        /sendReviewedEmail|scheduleReviewedEmail|EmailReviewPanel/,
+        `${relative} must send through the approved server actions`,
       );
     }
+  });
+
+  it("keeps composing out of the client record", async () => {
+    // The record is for knowing a client, not writing to one. A composer here
+    // would be a second surface for every ownership, suppression, rate-limit
+    // and audit rule to be re-implemented in — which is exactly how the four
+    // surfaces this consolidation removed came to drift apart.
+    const sources = await allSources();
+    const offenders = [...sources]
+      .filter(([path]) => path.startsWith("app/clients/"))
+      .filter(([, body]) => /sendReviewedEmail|scheduleReviewedEmail|EmailReviewPanel/.test(body))
+      // The server actions themselves live here and are the approved path.
+      .filter(([path]) => path !== "app/clients/[id]/outreach-actions.ts")
+      .map(([path]) => path);
+    assert.deepEqual(offenders, [], "the client record must link to the inbox, never compose");
   });
 
   it("cron delivery only ever picks up rows whose status proves prior human approval", async () => {

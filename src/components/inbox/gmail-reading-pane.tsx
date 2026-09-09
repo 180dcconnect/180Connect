@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -14,12 +14,12 @@ import {
   Reply,
   Paperclip,
   Download,
+  Copy,
+  Check,
+  Ban,
   MoreVertical,
   Building2,
   UserRound,
-  FileSpreadsheet,
-  FileText,
-  FileCode,
   StickyNote,
   Plus,
   X,
@@ -37,6 +37,7 @@ import {
   getSectorTagStyle,
 } from "./gmail-sidebar";
 import { isDesignFillThread } from "@/lib/inbox-mock-data";
+import { InboxAttachmentCard } from "./inbox-attachment-card";
 import { ReplyComposer } from "@/components/outreach/reply-composer";
 
 export type GmailReadingPaneProps = {
@@ -45,6 +46,14 @@ export type GmailReadingPaneProps = {
   onToggleStar: (threadId: string) => void;
   onDelete: (threadId: string) => void;
   onMarkUnread: (threadId: string) => void;
+  /**
+   * Scheduled threads only. Resolves with an error message to show, or null
+   * on success (the shell refreshes and moves on). Absent, the banner is
+   * read-only — the design fill has no row behind it to cancel.
+   */
+  onCancelScheduled?: (messageId: string) => Promise<string | null>;
+  /** Same contract: cancels the schedule, then reopens the text in Compose. */
+  onEditScheduled?: (messageId: string) => Promise<string | null>;
 };
 
 function getInitials(name: string): string {
@@ -95,30 +104,175 @@ const HEADER_BTN =
   "flex h-8 w-8 items-center justify-center rounded-inset text-faint transition-colors hover:bg-paper hover:text-ink cursor-pointer";
 
 function AttachmentCard({ attachment }: { attachment: InboxAttachmentView }) {
-  const isPdf = attachment.fileType === "pdf";
-  const isSheet = attachment.fileType === "xlsx";
-  const Icon = isPdf ? FileText : isSheet ? FileSpreadsheet : FileCode;
+  return (
+    <InboxAttachmentCard
+      filename={attachment.filename}
+      fileType={attachment.fileType}
+      sizeLabel={formatFileSize(attachment.sizeBytes)}
+      action={
+        <a
+          href="#"
+          onClick={(e) => {
+            e.preventDefault();
+            alert(`Downloading ${attachment.filename}`);
+          }}
+          title="Download"
+          className="flex h-7 w-7 items-center justify-center rounded-inset text-faint transition-colors hover:bg-paper-sunk hover:text-ink"
+        >
+          <Download className="h-4 w-4" />
+        </a>
+      }
+    />
+  );
+}
+
+/** Confirm-and-reason dialog for flagging the thread's client as Do Not
+    Contact. Posts to the same `/suppress` route the client record's suppress
+    button uses — a CAM request an admin reviews before it takes effect. */
+function SuppressClientDialog({
+  orgName,
+  organisationId,
+  onClose,
+}: {
+  orgName: string;
+  organisationId: string;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !busy) onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [busy, onClose]);
+
+  async function handleConfirm() {
+    if (!reason.trim()) {
+      setError("A reason is required before flagging as Do Not Contact.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/clients/${organisationId}/suppress`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        setError(body.error ?? "The client could not be suppressed.");
+        return;
+      }
+      setDone(true);
+    } catch {
+      setError("Could not reach the server. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
-    <div className="group flex max-w-xs items-center gap-3 rounded-inset border border-rule-soft bg-paper p-2.5 transition-colors hover:border-rule">
-      <Icon className="h-5 w-5 shrink-0 text-faint" />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[13px] font-medium text-ink" title={attachment.filename}>
-          {attachment.filename}
-        </p>
-        <p className="text-[12px] text-dim">{formatFileSize(attachment.sizeBytes)}</p>
-      </div>
-      <a
-        href="#"
-        onClick={(e) => {
-          e.preventDefault();
-          alert(`Downloading ${attachment.filename}`);
-        }}
-        title="Download"
-        className="flex h-7 w-7 items-center justify-center rounded-inset text-faint transition-colors hover:bg-paper-sunk hover:text-ink"
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4"
+      onClick={() => {
+        if (!busy) onClose();
+      }}
+      role="presentation"
+    >
+      <div
+        className="w-full max-w-md rounded-panel border border-rule bg-white p-5"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="suppress-dialog-title"
       >
-        <Download className="h-4 w-4" />
-      </a>
+        {done ? (
+          <div className="text-center">
+            <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-go-wash">
+              <Check className="h-5 w-5 text-go" />
+            </span>
+            <h2 id="suppress-dialog-title" className="mt-3 text-[15px] font-semibold text-ink">
+              Suppression requested
+            </h2>
+            <p className="mt-1 text-[13px] leading-[1.6] text-dim">
+              {orgName} was flagged as Do Not Contact. An admin reviews the
+              request before it takes effect.
+            </p>
+            <div className="mt-4 flex items-center justify-center gap-2">
+              <Link
+                href={`/clients/${organisationId}`}
+                className="rounded-inset bg-ink px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-ink/90"
+              >
+                Open client record
+              </Link>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-inset px-4 py-2 text-[13px] font-semibold text-dim transition-colors hover:bg-paper hover:text-ink"
+              >
+                Back to thread
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <h2 id="suppress-dialog-title" className="text-[15px] font-semibold text-ink">
+              Suppress {orgName}?
+            </h2>
+            <p className="mt-1 text-[13px] leading-[1.6] text-dim">
+              This flags the client as Do Not Contact and stops further
+              outreach. An admin reviews the request before it takes effect.
+            </p>
+            <label
+              className="mt-4 block text-[13px] font-medium text-dim"
+              htmlFor="inbox-suppress-reason"
+            >
+              Reason
+            </label>
+            <textarea
+              id="inbox-suppress-reason"
+              className="mt-2 w-full resize-y rounded-inset border border-rule bg-white px-3 py-2 text-[13px] leading-[1.6] text-ink placeholder:text-faint focus:border-lead focus:outline-none"
+              placeholder="e.g. hard no, legal request, unsubscribe. Required, and kept on file."
+              disabled={busy}
+              onChange={(event) => {
+                setReason(event.target.value);
+                if (error) setError(null);
+              }}
+              rows={3}
+              value={reason}
+            />
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={busy || !reason.trim()}
+                onClick={() => void handleConfirm()}
+                className="rounded-inset border border-stop/30 px-4 py-2 text-[13px] font-semibold text-stop transition-colors hover:bg-stop-wash disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {busy ? "Flagging…" : "Flag as Do Not Contact"}
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={onClose}
+                className="rounded-inset px-4 py-2 text-[13px] font-semibold text-dim transition-colors hover:bg-paper hover:text-ink"
+              >
+                Cancel
+              </button>
+            </div>
+            {error && (
+              <p className="mt-3 text-[13px] font-semibold text-stop" role="alert">
+                {error}
+              </p>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -126,22 +280,95 @@ function AttachmentCard({ attachment }: { attachment: InboxAttachmentView }) {
 function SingleMessageCard({
   message,
   isCollapsedByDefault,
+  onReply,
+  onSuppressClient,
+  suppressUnavailableReason,
+  forceExpanded = false,
 }: {
   message: InboxEmailMessage;
   isLatest?: boolean;
   isCollapsedByDefault: boolean;
+  /** Opens the thread reply composer answering this message. */
+  onReply: (message: InboxEmailMessage) => void;
+  /** Opens the pane-level suppress-client dialog. */
+  onSuppressClient: () => void;
+  /** Non-null disables the suppress item with this explanation (design fill). */
+  suppressUnavailableReason: string | null;
+  /** Printing expands every message: a collapsed card would print its
+      100-character snippet instead of the email body. */
+  forceExpanded?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(isCollapsedByDefault);
   const [showDetails, setShowDetails] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuFeedback, setMenuFeedback] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // The ⋮ menu is a small floating sheet: Escape or a tap outside closes it.
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenuOpen(false);
+    }
+    function handlePointerDown(event: PointerEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [menuOpen]);
 
   const initials = getInitials(message.senderName);
 
-  if (collapsed) {
+  /** Gmail's "Download message": headers + body as .eml, built locally — no
+      attachment bytes travel with it, so it never touches the network. */
+  function downloadMessage() {
+    const lines = [
+      `From: ${message.senderName} <${message.senderEmail}>`,
+      `To: ${message.recipientName} <${message.recipientEmail}>`,
+      `Subject: ${message.subject}`,
+      `Date: ${new Date(message.sentAt).toUTCString()}`,
+      "Content-Type: text/plain; charset=utf-8",
+      ...(message.attachments ?? []).map(
+        (att) => `X-Attachment: ${att.filename}`,
+      ),
+      "",
+      message.body,
+      "",
+    ];
+    const blob = new Blob([lines.join("\r\n")], { type: "message/rfc822" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${message.subject.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "message"}.eml`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setMenuOpen(false);
+  }
+
+  async function copyMessageText() {
+    try {
+      await navigator.clipboard.writeText(message.body);
+      setMenuFeedback("Copied to clipboard.");
+    } catch {
+      setMenuFeedback("Copy failed in this browser.");
+    }
+  }
+
+  if (collapsed && !forceExpanded) {
     return (
       <button
         type="button"
         onClick={() => setCollapsed(false)}
-        className="flex w-full items-center justify-between gap-3 rounded-inset border border-rule-soft bg-paper px-4 py-3 text-left transition-colors hover:bg-paper-sunk"
+        title="Expand message"
+        className="flex w-full items-center justify-between gap-3 bg-white px-1 py-4 text-left transition-colors hover:bg-paper"
       >
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-lead text-[11px] font-semibold text-white">
@@ -165,20 +392,22 @@ function SingleMessageCard({
   }
 
   return (
-    <div
-      className={`rounded-panel border p-5 ${
-        message.isFromClient ? "border-rule bg-white" : "border-rule-soft bg-paper"
-      }`}
-    >
-      {/* Sender header */}
+    <div className="bg-white px-1 py-6 first:pt-1 last:pb-1">
+      {/* Sender header. The avatar + name row is the collapse control: tapping
+          it folds the message back to a strip, the same target that expands it
+          again — no separate up/down chevron. */}
       <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-lead text-[13px] font-semibold text-white">
-            {initials}
-          </div>
-
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <div className="flex min-w-0 flex-col gap-1">
+          <button
+            type="button"
+            onClick={() => setCollapsed(true)}
+            title="Collapse message"
+            className="flex min-w-0 items-center gap-3 text-left print:hidden"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-lead text-[13px] font-semibold text-white">
+              {initials}
+            </div>
+            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <span className="text-sm font-semibold text-ink">{message.senderName}</span>
               <span className="text-[12px] text-faint">&lt;{message.senderEmail}&gt;</span>
               {message.isFromClient && (
@@ -187,34 +416,44 @@ function SingleMessageCard({
                   Client
                 </span>
               )}
-            </div>
+            </span>
+          </button>
 
-            <div className="relative mt-1">
-              <button
-                type="button"
-                onClick={() => setShowDetails(!showDetails)}
-                className="flex items-center gap-1 text-[13px] font-medium text-dim transition-colors hover:text-ink"
-              >
-                <span>to {message.recipientName}</span>
-                <ChevronDown className="h-3 w-3" />
-              </button>
+          {/* Print-only sender line — the interactive header above is hidden
+              when printing. */}
+          <div className="hidden items-center gap-2 print:flex">
+            <span className="text-sm font-semibold text-ink">{message.senderName}</span>
+            <span className="text-[12px] text-faint">&lt;{message.senderEmail}&gt;</span>
+          </div>
 
-              {showDetails && (
-                <div className="absolute left-0 top-full z-20 mt-1 w-80 space-y-1.5 rounded-inset border border-rule bg-white p-3 text-[13px] text-dim shadow-[0_18px_40px_-18px_rgba(15,23,42,0.4)]">
-                  {[
-                    ["From", `${message.senderName} <${message.senderEmail}>`],
-                    ["To", `${message.recipientName} <${message.recipientEmail}>`],
-                    ["Date", new Date(message.sentAt).toLocaleString("en-GB")],
-                    ["Subject", message.subject],
-                  ].map(([label, value]) => (
-                    <div key={label} className="flex gap-2">
-                      <span className="w-14 shrink-0 font-medium text-faint">{label}:</span>
-                      <span className="text-ink">{value}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+          <div className="relative pl-[52px] print:pl-0">
+            <button
+              type="button"
+              onClick={() => setShowDetails(!showDetails)}
+              className="flex items-center gap-1 text-[13px] font-medium text-dim transition-colors hover:text-ink print:hidden"
+            >
+              <span>to {message.recipientName}</span>
+              <ChevronDown className="h-3 w-3" />
+            </button>
+            <span className="hidden text-[13px] font-medium text-dim print:inline">
+              to {message.recipientName} &lt;{message.recipientEmail}&gt;
+            </span>
+
+            {showDetails && (
+              <div className="absolute left-0 top-full z-20 mt-1 w-80 space-y-1.5 rounded-inset border border-rule bg-white p-3 text-[13px] text-dim shadow-[0_18px_40px_-18px_rgba(15,23,42,0.4)]">
+                {[
+                  ["From", `${message.senderName} <${message.senderEmail}>`],
+                  ["To", `${message.recipientName} <${message.recipientEmail}>`],
+                  ["Date", new Date(message.sentAt).toLocaleString("en-GB")],
+                  ["Subject", message.subject],
+                ].map(([label, value]) => (
+                  <div key={label} className="flex gap-2">
+                    <span className="w-14 shrink-0 font-medium text-faint">{label}:</span>
+                    <span className="text-ink">{value}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -233,18 +472,76 @@ function SingleMessageCard({
           </span>
           <button
             type="button"
-            title="Reply"
-            className="flex h-7 w-7 items-center justify-center rounded-inset text-faint transition-colors hover:bg-paper hover:text-ink"
+            title="Reply to this message"
+            onClick={() => onReply(message)}
+            className="flex h-7 w-7 items-center justify-center rounded-inset text-faint transition-colors hover:bg-paper hover:text-ink print:hidden"
           >
             <Reply className="h-3.5 w-3.5" />
           </button>
-          <button
-            type="button"
-            title="More options"
-            className="flex h-7 w-7 items-center justify-center rounded-inset text-faint transition-colors hover:bg-paper hover:text-ink"
-          >
-            <MoreVertical className="h-3.5 w-3.5" />
-          </button>
+          <div className="relative print:hidden" ref={menuRef}>
+            <button
+              type="button"
+              title="More options"
+              aria-expanded={menuOpen}
+              onClick={() => {
+                setMenuFeedback(null);
+                setMenuOpen((open) => !open);
+              }}
+              className="flex h-7 w-7 items-center justify-center rounded-inset text-faint transition-colors hover:bg-paper hover:text-ink"
+            >
+              <MoreVertical className="h-3.5 w-3.5" />
+            </button>
+            {menuOpen && (
+              <div className="absolute top-full right-0 z-20 mt-1 w-56 rounded-inset border border-rule bg-white py-1 shadow-[0_18px_40px_-18px_rgba(15,23,42,0.4)]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onReply(message);
+                  }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] font-medium text-ink transition-colors hover:bg-paper"
+                >
+                  <Reply className="h-3.5 w-3.5 text-faint" />
+                  Reply
+                </button>
+                <button
+                  type="button"
+                  onClick={downloadMessage}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] font-medium text-ink transition-colors hover:bg-paper"
+                >
+                  <Download className="h-3.5 w-3.5 text-faint" />
+                  Download message
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void copyMessageText()}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] font-medium text-ink transition-colors hover:bg-paper"
+                >
+                  <Copy className="h-3.5 w-3.5 text-faint" />
+                  Copy message text
+                </button>
+                <div className="my-1 border-t border-rule-soft" />
+                <button
+                  type="button"
+                  disabled={suppressUnavailableReason !== null}
+                  title={suppressUnavailableReason ?? undefined}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onSuppressClient();
+                  }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] font-medium text-stop transition-colors hover:bg-stop-wash disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Ban className="h-3.5 w-3.5" />
+                  Suppress client
+                </button>
+                {menuFeedback && (
+                  <p className="px-3 py-1.5 text-[12px] font-medium text-dim" role="status">
+                    {menuFeedback}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -255,7 +552,7 @@ function SingleMessageCard({
 
       {/* Attachments */}
       {message.attachments && message.attachments.length > 0 && (
-        <div className="mt-5 border-t border-rule-soft pt-4">
+        <div className="mt-5">
           <div className="mb-2.5 flex items-center gap-1.5 text-[13px] font-semibold text-dim">
             <Paperclip className="h-3.5 w-3.5 text-faint" />
             <span>
@@ -274,17 +571,49 @@ function SingleMessageCard({
   );
 }
 
+/** The client's latest inbound message in a thread, or undefined if none. */
+function lastClientReply(thread: InboxThreadView) {
+  for (let i = thread.messages.length - 1; i >= 0; i -= 1) {
+    if (thread.messages[i]!.isFromClient) return thread.messages[i];
+  }
+  return undefined;
+}
+
 export function GmailReadingPane({
   thread,
   onBack,
   onToggleStar,
   onDelete,
   onMarkUnread,
+  onCancelScheduled,
+  onEditScheduled,
 }: GmailReadingPaneProps) {
   const [replyOpen, setReplyOpen] = useState(false);
+  /** The message a per-message Reply is answering; null answers the latest
+      client reply (the bottom Reply button's meaning). */
+  const [replyToMessageId, setReplyToMessageId] = useState<string | null>(null);
+  const [suppressOpen, setSuppressOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const [notes, setNotes] = useState<ClientNote[]>(() => seedNotes(thread));
   const [draftNote, setDraftNote] = useState("");
+  const replyBoxRef = useRef<HTMLDivElement>(null);
+  // True only while the browser's print dialog is open. Every message card
+  // renders expanded for the printout — a collapsed card would print its
+  // one-line snippet instead of the email.
+  const [printing, setPrinting] = useState(false);
+  useEffect(() => {
+    const before = () => setPrinting(true);
+    const after = () => setPrinting(false);
+    window.addEventListener("beforeprint", before);
+    window.addEventListener("afterprint", after);
+    return () => {
+      window.removeEventListener("beforeprint", before);
+      window.removeEventListener("afterprint", after);
+    };
+  }, []);
+  // Scheduled-send controls: which action is in flight, and the last refusal.
+  const [scheduledBusy, setScheduledBusy] = useState<"cancel" | "edit" | null>(null);
+  const [scheduledError, setScheduledError] = useState<string | null>(null);
 
   // The pane instance is reused as the reader moves between threads — reseed the
   // notes and drop any open sheet / half-typed note when the client changes.
@@ -296,7 +625,11 @@ export function GmailReadingPane({
     setNotes(seedNotes(thread));
     setNotesOpen(false);
     setReplyOpen(false);
+    setReplyToMessageId(null);
+    setSuppressOpen(false);
     setDraftNote("");
+    setScheduledBusy(null);
+    setScheduledError(null);
   }
 
   function handleAddNote() {
@@ -316,11 +649,46 @@ export function GmailReadingPane({
 
   const messages = thread.messages;
   const isDesignFill = isDesignFillThread(thread.id);
+  const latestReply = lastClientReply(thread);
+  const replyTarget = messages.find((msg) => msg.id === replyToMessageId) ?? null;
+
+  /** A per-message Reply opens the composer answering that message (when it is
+      the client's) and scrolls it into view. Answering our own sent mail falls
+      back to the latest client reply — there is nothing to answer in it. */
+  function handleMessageReply(msg: InboxEmailMessage) {
+    setReplyToMessageId(msg.isFromClient ? msg.id : null);
+    setReplyOpen(true);
+    setTimeout(() => {
+      replyBoxRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 60);
+  }
+  // The queued send the banner below manages, if the thread carries one.
+  // Design fill has bodies but no rows behind them, so its banner stays
+  // read-only.
+  const scheduledMessage = isDesignFill
+    ? undefined
+    : messages.find((message) => message.pendingKind === "scheduled");
+
+  async function runScheduledAction(
+    kind: "cancel" | "edit",
+    action: ((messageId: string) => Promise<string | null>) | undefined,
+  ) {
+    if (!scheduledMessage || !action || scheduledBusy) return;
+    setScheduledBusy(kind);
+    setScheduledError(null);
+    const error = await action(scheduledMessage.id);
+    // Null means the shell handled it (refreshed, moved on); a string stays
+    // here, on the banner the CAM was reading.
+    if (error) {
+      setScheduledError(error);
+      setScheduledBusy(null);
+    }
+  }
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden bg-white">
       {/* Top action header */}
-      <div className="flex shrink-0 items-center justify-between border-b border-rule-soft px-4 py-2">
+      <div className="flex shrink-0 items-center justify-between px-4 py-2">
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -394,10 +762,16 @@ export function GmailReadingPane({
         </div>
       </div>
 
-      {/* Conversation */}
-      <div className="flex-1 space-y-5 overflow-y-auto px-8 py-6">
+      {/* Conversation. `id` is the print target: the global `@media print` rule
+          in globals.css hides everything on the page except this subtree, so
+          the printout is the thread alone — no app shell, no inbox list, no
+          notes drawer. */}
+      <div
+        id="inbox-print-region"
+        className="flex-1 space-y-5 overflow-y-auto px-8 py-6"
+      >
         {/* Headline */}
-        <div className="space-y-2 border-b border-rule-soft pb-4">
+        <div className="space-y-2 pb-4">
           <div className="flex items-start justify-between gap-4">
             <h1 className="font-body text-[22px] font-semibold leading-snug tracking-[-0.01em] text-ink">
               {thread.subject}
@@ -423,22 +797,54 @@ export function GmailReadingPane({
         </div>
 
         {/* Scheduled send — this message has not gone out yet. Say so plainly,
-            with the due time, so the pane never reads like a normal sent mail. */}
+            with the due time, so the pane never reads like a normal sent mail.
+            The text itself renders as a message card below with the rest; the
+            banner carries the only two things a CAM can still do to it. */}
         {thread.folder === "scheduled" && thread.scheduledFor && (
           <div className="flex items-start gap-2.5 rounded-inset border border-hold/25 bg-hold-wash px-4 py-3">
             <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-hold" />
-            <div className="text-[13px] leading-snug">
+            <div className="min-w-0 flex-1 text-[13px] leading-snug">
               <p className="font-semibold text-hold">Scheduled to be sent</p>
               <p className="text-dim" suppressHydrationWarning>
                 Goes out {formatScheduledFor(thread.scheduledFor)}. You can still
                 edit or cancel it until then.
               </p>
+              {scheduledMessage && (onCancelScheduled || onEditScheduled) && (
+                <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                  {onEditScheduled && (
+                    <button
+                      type="button"
+                      disabled={scheduledBusy !== null}
+                      onClick={() => void runScheduledAction("edit", onEditScheduled)}
+                      className="rounded-inset bg-ink px-3 py-1.5 text-[12px] font-semibold text-white transition-colors hover:bg-ink/90 disabled:opacity-50"
+                    >
+                      {scheduledBusy === "edit" ? "Opening…" : "Edit"}
+                    </button>
+                  )}
+                  {onCancelScheduled && (
+                    <button
+                      type="button"
+                      disabled={scheduledBusy !== null}
+                      onClick={() => void runScheduledAction("cancel", onCancelScheduled)}
+                      className="rounded-inset border border-hold/30 px-3 py-1.5 text-[12px] font-semibold text-hold transition-colors hover:bg-hold/10 disabled:opacity-50"
+                    >
+                      {scheduledBusy === "cancel" ? "Cancelling…" : "Cancel schedule"}
+                    </button>
+                  )}
+                </div>
+              )}
+              {scheduledError && (
+                <p className="mt-2 text-[12px] font-semibold text-stop" role="alert">
+                  {scheduledError}
+                </p>
+              )}
             </div>
           </div>
         )}
 
-        {/* Messages */}
-        <div className="space-y-4">
+        {/* Messages — one uniform surface; a hairline between emails is the
+            only separator, sent and received alike. */}
+        <div className="divide-y divide-rule-soft">
           {messages.map((msg, idx) => {
             const isLatest = idx === messages.length - 1;
             const isCollapsed = messages.length > 2 && idx < messages.length - 2;
@@ -449,6 +855,14 @@ export function GmailReadingPane({
                 message={msg}
                 isLatest={isLatest}
                 isCollapsedByDefault={isCollapsed}
+                forceExpanded={printing}
+                onReply={handleMessageReply}
+                onSuppressClient={() => setSuppressOpen(true)}
+                suppressUnavailableReason={
+                  isDesignFill
+                    ? "Unavailable on design fill — there is no client record to suppress."
+                    : null
+                }
               />
             );
           })}
@@ -463,12 +877,17 @@ export function GmailReadingPane({
             the approval control (see lib/outreach/human-send-control.test.ts).
 
             Mock fill has no organisation behind it, so there is no draft row to
-            write and the composer says so rather than failing at the API. */}
-        <div className="pt-4">
+            write: on design fill the composer mounts in preview mode — the same
+            current UI, generating a local example with sending disabled, rather
+            than a dead-end notice. */}
+        <div className="pt-4 print:hidden" ref={replyBoxRef}>
           {!replyOpen ? (
             <button
               type="button"
-              onClick={() => setReplyOpen(true)}
+              onClick={() => {
+                setReplyToMessageId(null);
+                setReplyOpen(true);
+              }}
               className="flex cursor-pointer items-center gap-2 rounded-inset bg-ink px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-ink/90"
             >
               <Reply className="h-4 w-4" />
@@ -481,31 +900,56 @@ export function GmailReadingPane({
                   Replying to{" "}
                   <span className="font-semibold text-ink">{thread.primaryContact.name}</span>{" "}
                   &lt;{thread.primaryContact.email}&gt;
+                  {replyTarget && replyTarget.id !== latestReply?.id && (
+                    <span className="text-faint">
+                      {" "}
+                      · answering {replyTarget.senderName} ·{" "}
+                      {new Date(replyTarget.sentAt).toLocaleDateString("en-GB", {
+                        day: "numeric",
+                        month: "short",
+                      })}
+                    </span>
+                  )}
                 </p>
                 <button
                   type="button"
-                  onClick={() => setReplyOpen(false)}
+                  onClick={() => {
+                    setReplyOpen(false);
+                    setReplyToMessageId(null);
+                  }}
                   title="Close the reply"
                   className="flex h-8 w-8 shrink-0 items-center justify-center rounded-inset text-faint transition-colors hover:bg-paper hover:text-ink"
                 >
                   <X className="h-4 w-4" />
                 </button>
               </div>
-              <ReplyComposer
-                blocked={isDesignFill}
-                blockedReason="This is design fill, not a real client — there is nothing to reply to."
-                className="mt-3"
-                organisationId={thread.id}
-                recipientOnFile={thread.primaryContact.email || null}
-              />
+              {/* F135: the reply being answered is the message the CAM hit Reply
+                  on — a per-message Reply names it, otherwise the client's most
+                  recent one in this thread. The Stage 2 route loads that row's
+                  text itself; only its id travels from here. On design fill the
+                  composer previews instead: same UI, example draft, no send. */}
+               <ReplyComposer
+                 className="mt-3"
+                 key={replyToMessageId ?? "latest"}
+                 organisationId={thread.id}
+                 preview={isDesignFill}
+                 previewContext={{
+                   contactName: thread.primaryContact.name,
+                   orgName: thread.orgName,
+                   camName: thread.camOwner.name,
+                 }}
+                 previewSubject={thread.subject}
+                 recipientOnFile={thread.primaryContact.email || null}
+                 replyEventId={replyTarget?.id ?? lastClientReply(thread)?.id}
+               />
             </div>
           )}
         </div>
       </div>
 
-      {/* Client notes — slides over the conversation rather than replacing it,
-          so the thread underneath is never lost. Mock-only: state lives in this
-          component, nothing is persisted. */}
+      {/* Client notes — docks to the right at ~35% so the thread stays
+          visible alongside it. Mock-only: state lives in this component,
+          nothing is persisted. */}
       <AnimatePresence>
         {notesOpen && (
           <motion.div
@@ -514,7 +958,7 @@ export function GmailReadingPane({
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-            className="absolute inset-0 z-30 flex flex-col bg-white"
+            className="absolute inset-y-0 right-0 z-30 flex w-[35%] min-w-[300px] flex-col border-l border-rule-soft bg-white shadow-[-18px_0_40px_-24px_rgba(15,23,42,0.25)]"
           >
             <div className="flex shrink-0 items-center gap-2 border-b border-rule-soft px-4 py-2.5">
               <button
@@ -608,6 +1052,17 @@ export function GmailReadingPane({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Suppress-client confirm dialog — opens from a message's ⋮ → Suppress
+          client. Rendered at pane level so it survives the message card
+          collapsing under it. */}
+      {suppressOpen && (
+        <SuppressClientDialog
+          orgName={thread.orgName}
+          organisationId={thread.id}
+          onClose={() => setSuppressOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -206,6 +206,10 @@ export default async function InboxPage({
 
   const params = await searchParams;
   const threadParam = Array.isArray(params.thread) ? params.thread[0] : params.thread;
+  // ?compose=<organisation id> opens a compose window already addressed to that
+  // client — the client record's "Write to this client" link, so composing is
+  // one click from research without the record needing a composer of its own.
+  const composeParam = Array.isArray(params.compose) ? params.compose[0] : params.compose;
 
   const supabase = await createClient();
 
@@ -377,11 +381,12 @@ export default async function InboxPage({
             preferences.data?.first_follow_up_days ?? DEFAULT_FOLLOW_UP_THRESHOLDS.first
           }
           initialThreadId={threadParam ?? null}
+          initialComposeClientId={composeParam ?? null}
           initialThreadFlags={threadFlags}
           addressableClients={addressableClients}
           initialThreads={threads}
           initialTags={allTags}
-          key={threadParam ?? "inbox"}
+          key={`${threadParam ?? "inbox"}:${composeParam ?? ""}`}
         />
       </main>
     </div>

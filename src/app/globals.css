@@ -17,6 +17,7 @@
  * <html> and define the token overrides under it.
  */
 @custom-variant dark (&:where(.dark, .dark *));
+@custom-variant print (@media print);
 
 :root {
   color-scheme: light;
@@ -581,3 +582,37 @@ html[data-reduced-motion="reduced"] *::after {
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
+
+/* ---------------------------------------------------------------------------
+ * Printing a mail thread from /inbox
+ *
+ * Gmail prints the open conversation only. Ours is buried several flex/overflow
+ * wrappers deep inside the app shell and the inbox list, so `window.print()`
+ * used to spool the whole screen — both sidebars included.
+ *
+ * The reading pane tags its conversation column `#inbox-print-region`. Here we
+ * hide everything else with `visibility` (keeps layout, drops the ink),
+ * un-clip the ancestor chain so the region is not cropped to one screen, and
+ * lift it to the top-left of the sheet. The notes drawer, the suppress dialog
+ * and the top action bar are siblings of the region, so they stay hidden.
+ * ------------------------------------------------------------------------- */
+@media print {
+  body * {
+    visibility: hidden;
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
+  #inbox-print-region,
+  #inbox-print-region * {
+    visibility: visible;
+  }
+
+  #inbox-print-region {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0;
+  }
+}

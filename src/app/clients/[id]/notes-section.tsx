@@ -31,10 +31,12 @@ export function NotesSection({
   notes,
   error,
   organisationId,
+  addNoteForm,
 }: {
   notes: NoteListItem[];
   error: boolean;
   organisationId: string;
+  addNoteForm?: React.ReactNode;
 }) {
   const router = useRouter();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -134,7 +136,12 @@ export function NotesSection({
   }
 
   if (notes.length === 0) {
-    return <p className="mt-4 text-sm leading-[1.7] text-dim">No notes yet.</p>;
+    return (
+      <div className="mt-4">
+        <p className="text-sm leading-[1.7] text-dim">No notes yet.</p>
+        {addNoteForm && <div className="mt-3">{addNoteForm}</div>}
+      </div>
+    );
   }
 
   return (

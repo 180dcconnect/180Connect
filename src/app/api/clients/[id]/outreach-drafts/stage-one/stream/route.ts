@@ -82,6 +82,7 @@ export async function POST(
     .object({
       length: z.enum(EMAIL_LENGTHS).default("standard"),
       register: z.enum(EMAIL_REGISTERS).default("professional"),
+    attachFlyer: z.boolean().default(false),
       opening: z.enum(OPENING_APPROACHES).default("mission_led"),
       closing: z.enum(CLOSING_APPROACHES).default("soft_cta"),
     })
@@ -268,6 +269,7 @@ export async function POST(
             newsHooks: enrichmentRow?.news_hooks,
             booklet: savedBooklet?.booklet_text ?? null,
             senderName,
+            attachFlyer: preferences.data.attachFlyer,
           },
           streamModel,
           (event) => send(event),

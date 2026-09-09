@@ -1,4 +1,4 @@
-import { Clock, Mail, Paperclip, Reply, StickyNote } from "lucide-react";
+import { ArrowRight, Clock, Mail, Paperclip, Reply, StickyNote } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
@@ -6,7 +6,6 @@ import { onFileEmail } from "@/lib/client-email-validation";
 import { hasPermission } from "@/lib/auth/permissions";
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import {
-  buildEmailThread,
   splitOutreachHistory,
   type OutreachMessageRow,
   type ThreadReplyRow,
@@ -36,9 +35,9 @@ import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { AddNoteForm } from "../add-note-form";
 import { AttachmentsSection } from "../attachments-section";
 import { BookletPanel } from "../booklet-panel";
-import { ComposeButton } from "../compose-button";
+import { WriteToClientCard } from "../write-to-client-card";
+import { OriginButton } from "@/components/ui/origin-button";
 import { FailedEmailList } from "../failed-email-list";
-import { FollowUpButton } from "../follow-up-button";
 import { NotesSection } from "../notes-section";
 import { OutreachHistorySection } from "../outreach-history";
 import { ScheduledEmailList } from "../scheduled-email-list";
@@ -185,12 +184,6 @@ export default async function ClientOutreachPage({
     if (error) await reportError(error, { operation, organisationId: id });
   }
 
-  const isSelf = owner.ownerId === actor.id;
-  // F137: the in-thread control must carry the same gate as the header's Stage
-  // control — RecordHeader's canSetStatus. Same rule, asserted in
-  // reply-status-contract.test.ts so the two cannot drift apart.
-  const canSetStatus = isAdmin || isSelf;
-
   const noteList = buildNoteList((notesResult.data ?? []) as unknown as NoteRow[], {
     id: actor.id,
     role: actor.role,
@@ -220,13 +213,6 @@ export default async function ClientOutreachPage({
   const outreachHistory = splitOutreachHistory(
     // `as unknown` — supabase-js infers the users join as an array.
     (outreachResult.data ?? []) as unknown as OutreachMessageRow[],
-  );
-
-  // F134: only delivered messages belong in the client-visible conversation;
-  // drafts, scheduled messages and failures stay in the F070 list above it.
-  const emailThread = buildEmailThread(
-    outreachHistory.sent,
-    replyResult.data ?? [],
   );
 
   // How fast this client answers, over the replies that recorded a turnaround.
@@ -432,25 +418,29 @@ export default async function ClientOutreachPage({
                 />
               </Rise>
 
+              {/* Composing lives in the inbox now (/inbox), not here. This
+                  page is for knowing the client — mission, financials, history,
+                  who owns them — and the inbox is the one place an email is
+                  written or sent. That split means the ownership, suppression,
+                  rate-limit and audit guarantees have exactly one surface to
+                  hold, instead of the four that had drifted apart.
+
+                  The blocked states stay here rather than being discovered on
+                  arrival in the inbox: whether this client can be contacted at
+                  all is a fact about the client, and a CAM should learn it on
+                  the record, not after switching pages and typing an email. */}
               <Rise>
-                <ComposeButton
-                  clientAttachments={attachments}
+                <WriteToClientCard
+                  organisationId={client.id}
                   blocked={suppression.suppressed}
                   ownershipBlocked={!suppression.suppressed && ownershipConflict.hasConflict}
-                  historyHref={
-                    hasPermission(actor.role, "platform-settings:manage")
-                      ? `/admin/ai-generations?client=${client.id}`
-                      : undefined
-                  }
-                  organisationId={client.id}
                   suppressionReason={
                     suppression.suppressed ? suppression.latest?.reason : undefined
                   }
                   ownershipWarning={
                     ownershipConflict.hasConflict ? ownershipConflict.warning : undefined
                   }
-                  hasSavedBooklet={savedBooklet !== null}
-                  existingDraft={existingDraft}
+                  hasDraft={existingDraft !== null}
                 />
               </Rise>
 
@@ -532,26 +522,15 @@ export default async function ClientOutreachPage({
               <OutreachHistorySection
                 history={outreachHistory}
                 error={Boolean(outreachResult.error)}
-                thread={emailThread}
-                threadError={Boolean(outreachResult.error || replyResult.error)}
-                statusControl={
-                  canSetStatus
-                    ? {
-                        organisationId: client.id,
-                        currentStatus: client.outreach_status,
-                      }
-                    : undefined
-                }
-                // F136: a note written against a reply is linked to it, so only
-                // someone who may write to the record gets the composer.
-                noteOrganisationId={canEdit ? client.id : undefined}
               />
             </SectionCard>
           </Rise>
 
-          {/* Stage 2 gets its own card rather than living as a footnote
-              inside the history: it exists at exactly one pipeline stage,
-              and it is an action, not history. */}
+          {/* Stage 2 is an action, so like Stage 1 it now happens in the
+              inbox — the follow-up is written against the thread it belongs to,
+              where the first email and any reply are already on screen. This
+              card is the pointer, and keeps the one thing that is knowledge
+              rather than action: whether a follow-up is available at all. */}
           {canFollowUp && (
             <Rise>
               <SectionCard
@@ -561,26 +540,33 @@ export default async function ClientOutreachPage({
                 icon={<Reply />}
                 tone={followUpBlocked ? "danger" : "default"}
               >
-                <FollowUpButton
-                  blocked={suppression.suppressed}
-                  ownershipBlocked={!suppression.suppressed && ownershipConflict.hasConflict}
-                  organisationId={client.id}
-                  suppressionReason={
-                    suppression.suppressed ? suppression.latest?.reason : undefined
-                  }
-                  ownershipWarning={
-                    ownershipConflict.hasConflict ? ownershipConflict.warning : undefined
-                  }
-                />
+                {followUpBlocked ? (
+                  <p className="mt-4 text-[13px] font-semibold leading-[1.6] text-stop" role="alert">
+                    {suppression.suppressed
+                      ? (suppression.latest?.reason
+                          ? `This client is suppressed: ${suppression.latest.reason}`
+                          : "This client is suppressed and cannot be contacted.")
+                      : (ownershipConflict.hasConflict ? ownershipConflict.warning : "Outreach is unavailable on this client.")}
+                  </p>
+                ) : (
+                  <div className="mt-4">
+                    <OriginButton variant="ink" size="md" href={`/inbox?compose=${client.id}`}>
+                      Follow up in inbox
+                      <ArrowRight aria-hidden="true" className="h-4 w-4" />
+                    </OriginButton>
+                  </div>
+                )}
               </SectionCard>
             </Rise>
           )}
 
           <Rise className="relative z-30">
-            {/* Add note rides the heading row, so the composer opens downward
-                over the list rather than pushing it — see add-note-form.tsx. */}
             <SectionCard
-              action={canEdit ? <AddNoteForm organisationId={client.id} /> : undefined}
+              action={
+                canEdit && noteList.length > 0
+                  ? <AddNoteForm organisationId={client.id} />
+                  : undefined
+              }
               headingId="notes-heading"
               title="Notes"
               hint="Left by any team member — relationship history everyone can see."
@@ -590,6 +576,7 @@ export default async function ClientOutreachPage({
                 notes={noteList}
                 error={Boolean(notesResult.error)}
                 organisationId={client.id}
+                addNoteForm={canEdit ? <AddNoteForm organisationId={client.id} /> : undefined}
               />
             </SectionCard>
           </Rise>

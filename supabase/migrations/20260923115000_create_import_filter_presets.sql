@@ -20,9 +20,11 @@
 -- to filter on, and a constraint here would need a migration every time a
 -- control is added to the screen.
 --
--- ACCESS: RLS enabled with no policies. Read and written only through Server
--- Actions holding the service-role client, after getCurrentActor has authorised
--- the caller — the same posture the register file has, for the same reason.
+-- ACCESS: RLS-EXEMPT — RLS enabled with no policies. Read and written only
+-- through Server Actions holding the service-role client, after getCurrentActor
+-- has authorised the caller — the same posture the register file has, for the
+-- same reason. The table comment starts with 'RLS-EXEMPT:' so the CI coverage
+-- gate (scripts/verify-rls-coverage.sql) allows the intentional lockout.
 --
 -- Schema change approval record (SOP §7):
 --   Change        | 1 new table: IMPORT_FILTER_PRESETS.
@@ -30,8 +32,9 @@
 --   Compatibility | Additive; nothing existing reads or writes it until the
 --                 | import screen ships.
 --   Data migration| None.
---   Security      | RLS enabled, no policies: service-role only. Holds filter
---                 | criteria, no personal data.
+--   Security      | RLS-EXEMPT: RLS enabled, no policies — service-role only.
+--                 | Holds filter criteria, no personal data. Table comment
+--                 | starts with 'RLS-EXEMPT:' so the CI coverage gate allows it.
 --   Documentation | Data Model tab "04 Entities" needs this table adding, then
 --                 | npm run export:data-model.
 --   Approved by   | Bashir (Project Leader).
@@ -56,10 +59,10 @@ create unique index if not exists import_filter_presets_name_key
   on public.import_filter_presets (source, lower(btrim(name)));
 
 comment on table public.import_filter_presets is
-  'Named, saved import criteria — "Sheffield arts, any size" — so a filter set is '
-  'something the team keeps and re-runs rather than rebuilds from memory. The '
-  'register those filters run against is a file shipped with the deployment, not '
-  'a table. Read and written only through Server Actions.';
+  'RLS-EXEMPT: service-role-only access via Server Actions. Holds named import '
+  'filter presets ("Sheffield arts, any size") so a selection is repeatable. '
+  'No personal data. The register those filters run against is a file shipped '
+  'with the deployment, not a table.';
 
 alter table public.import_filter_presets enable row level security;
 revoke all on public.import_filter_presets from anon, authenticated;

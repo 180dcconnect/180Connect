@@ -108,8 +108,7 @@ test("buildStageOnePrompt applies each selected register", () => {
 test("the sender description never claims the work is free or university-backed", () => {
   const context = { organisationName: "Example", organisationType: "charity" };
   const { system } = buildStageOnePrompt(context);
-  assert.match(system, /the work is paid/i);
-  assert.match(system, /Never mention, claim or imply any university affiliation/i);
+  assert.match(system, /Never claim or imply that any university endorses/i);
   assert.match(system, /Write as "we"/);
 });
 
@@ -186,14 +185,183 @@ test("buildStageOnePrompt adapts its size guidance to the latest income band", (
 test("a supplied sender name becomes the sign-off, and a missing one does not", () => {
   const context = { organisationName: "Example", organisationType: "charity" };
   const signed = buildStageOnePrompt({ ...context, senderName: "Ada Lovelace" }).system;
-  assert.match(signed, /"Ada Lovelace" on its own line/);
-  assert.match(signed, /"180 Degrees Consulting Sheffield" on its own line/);
-  assert.match(signed, /never a job title/);
+  assert.match(signed, /Ada Lovelace\nClient Acquisition Manager\n180 Degrees Consulting Sheffield/);
+  assert.match(signed, /never a placeholder/);
 
   // No name on file must never become an invented one.
   for (const missing of [undefined, null, "", "   "]) {
     const unsigned = buildStageOnePrompt({ ...context, senderName: missing }).system;
     assert.match(unsigned, /never invent a sender name/);
-    assert.doesNotMatch(unsigned, /on its own line/);
+    assert.match(unsigned, /Do not add a closing line, a name, or a signature/);
+  }
+});
+
+test("the sender description matches what the branch actually offers", () => {
+  const { system } = buildStageOnePrompt({ organisationName: "Example", organisationType: "charity" });
+  assert.match(system, /non-profit, student-led consultancy/);
+  assert.match(system, /Over 20 projects delivered/);
+  // All six practice areas from the client-facing flyer.
+  for (const area of [
+    "Strategy and market entry",
+    "Operational efficiency",
+    "Impact measurement",
+    "Marketing and engagement",
+    "Digital innovation",
+    "Fundraising and revenue",
+  ]) {
+    assert.match(system, new RegExp(area));
+  }
+  assert.match(system, /We advise; we do not implement/);
+});
+
+test("cost is never raised, and the university claim stays narrow", () => {
+  const { system } = buildStageOnePrompt({ organisationName: "Example", organisationType: "charity" });
+  assert.match(system, /Do not raise cost, fees, price or affordability at all/);
+  assert.match(system, /Never state or imply that the work is free/);
+  // No figure may reach the model: quoting one is a decision taken on the call.
+  assert.doesNotMatch(system, /£\d/);
+  // The ban is on endorsement, not on describing the team as student-led.
+  assert.match(system, /never describe us as a university society/);
+  assert.match(system, /student-led, or the writer as a student in Sheffield, is accurate and fine/);
+});
+
+test("nothing is attached, so nothing may promise an attachment", () => {
+  const { system } = buildStageOnePrompt({ organisationName: "Example", organisationType: "charity" });
+  assert.match(system, /Never refer to an attachment, flyer, leaflet or enclosed document/);
+  // The worked examples must not reintroduce what the rule forbids.
+  const examples = system.slice(system.indexOf("<example>"));
+  assert.doesNotMatch(examples, /attached a flyer|attached a leaflet/);
+  assert.doesNotMatch(examples, /£\d/);
+});
+
+test("both worked examples are present and correctly framed", () => {
+  const { system } = buildStageOnePrompt({ organisationName: "Example", organisationType: "charity" });
+  assert.equal(system.split("<example>").length - 1, 2);
+  assert.match(system, /Never reuse their sentences, and never borrow the facts in them/);
+});
+
+test("flyer facts are in, but the flyer's pricing message is not", () => {
+  const { system } = buildStageOnePrompt({ organisationName: "Example", organisationType: "charity" });
+  // Facts worth having, from the client-facing flyer.
+  assert.match(system, /charities, non-profits and social enterprises/);
+  assert.match(system, /next generation of social impact leaders/);
+  assert.match(system, /eight-week project/);
+  assert.match(system, /no-obligation scoping call/);
+  assert.match(system, /not a report that sits on a shelf/);
+  assert.match(system, /Best New Branch Award, EMEA/);
+
+  // The flyer sells on price; the first email must not. "low-cost technology
+  // adoption" is allowed — that is the charity's software spend, not our fee.
+  for (const ourPricing of [
+    "affordable",
+    "modest fee",
+    "charity pricing",
+    "fee agreed",
+    "cost is never the reason",
+    "fees kept minimal",
+  ]) {
+    assert.ok(
+      !system.toLowerCase().includes(ourPricing),
+      `the flyer's pricing message leaked into the prompt: "${ourPricing}"`,
+    );
+  }
+  assert.doesNotMatch(system, /£/);
+});
+
+test("the attachment rule follows what the send will actually do", () => {
+  const context = { organisationName: "Example", organisationType: "charity" };
+  const without = buildStageOnePrompt(context).system;
+  assert.match(without, /nothing is attached to this email/);
+  assert.match(without, /Never refer to an attachment, flyer, leaflet or enclosed document/);
+
+  const withFlyer = buildStageOnePrompt({ ...context, attachFlyer: true }).system;
+  assert.match(withFlyer, /a one-page 180DC Sheffield flyer is attached/);
+  assert.match(withFlyer, /Refer to it once, briefly and in passing/);
+  // The two rules are mutually exclusive: a draft must never be told both.
+  assert.doesNotMatch(withFlyer, /Never refer to an attachment/);
+
+  // Anything falsy means no attachment, so the ban is the safe default.
+  for (const off of [undefined, null, false]) {
+    assert.match(buildStageOnePrompt({ ...context, attachFlyer: off }).system, /nothing is attached/);
+  }
+});
+
+test("register capitals and invented acronyms are both ruled out", () => {
+  const { system } = buildStageOnePrompt({
+    organisationName: "SHEFFIELD AFRICAN CARIBBEAN MENTAL HEALTH ASSOCIATION LIMITED",
+    organisationType: "both",
+  });
+  assert.match(system, /Register records are stored in capitals/);
+  assert.match(system, /Never copy that casing/);
+  // The genuine-initialism carve-out has to survive: RSPCA must not be "Rspca".
+  assert.match(system, /genuine initialism the organisation itself uses/);
+  assert.match(system, /RSPCA/);
+  // The acronym the model reached for came from the subject's character cap.
+  assert.match(system, /never invent an acronym from its initials/);
+  assert.match(system, /too long to fit, leave it out of the subject entirely/);
+  // Everyday name, not the registered one.
+  assert.match(system, /drop legal suffixes such as Limited, Ltd, CIC/);
+});
+
+test("the organisation's name is treated as substance, not just as spelling", () => {
+  const { system } = buildStageOnePrompt({
+    organisationName: "SHEFFIELD AFRICAN CARIBBEAN MENTAL HEALTH ASSOCIATION LIMITED",
+    organisationType: "both",
+  });
+  assert.match(system, /Read the name for meaning, not just for spelling/);
+  assert.match(system, /not about "the health and social care sector"/);
+  // Reading a name must not become inventing from one.
+  assert.match(system, /Never infer beliefs, politics, religion or funding from a name/);
+});
+
+test("flattery and implied familiarity are ruled out for every register", () => {
+  for (const register of ["professional", "warm", "formal", "direct"] as const) {
+    const { system } = buildStageOnePrompt(
+      { organisationName: "Example", organisationType: "charity" },
+      { register },
+    );
+    assert.match(system, /Do not flatter/);
+    assert.match(system, /truly inspiring/);
+    assert.match(system, /we have been watching, following or monitoring/);
+  }
+});
+
+test("British English names the endings the model actually gets wrong", () => {
+  const { system } = buildStageOnePrompt({ organisationName: "Example", organisationType: "charity" });
+  assert.match(system, /never -ize or -ization/);
+  assert.match(system, /organisation, recognise, prioritise, specialised/);
+});
+
+test("what the charity does never migrates into the description of 180DC", () => {
+  const { system } = buildStageOnePrompt({
+    organisationName: "SHEFFIELD AFRICAN CARIBBEAN MENTAL HEALTH ASSOCIATION LIMITED",
+    organisationType: "both",
+  });
+  // Told to reflect the community, a model will otherwise fold it into the
+  // sentence about us — "we support organisations delivering mental health
+  // support for Sheffield's African and Caribbean communities" — which is a
+  // false claim of specialism, not an observation about the client.
+  assert.match(system, /Keep that detail in the sentence about THEM/);
+  assert.match(system, /must never be narrowed to this one's field, community or cause/);
+  assert.match(system, /is a lie: we are a general consultancy/);
+});
+
+test("the track record is stated, never embellished or diagnosed around", () => {
+  const { system } = buildStageOnePrompt({ organisationName: "Example", organisationType: "charity" });
+  assert.match(system, /never add an evaluative adjective such as "successful"/);
+  assert.match(system, /never claim a result for any project/);
+  assert.match(system, /Do not speculate about what the organisation is currently planning/);
+  assert.match(system, /Offer help; do not diagnose/);
+});
+
+test("size never surfaces, not even as an adjective", () => {
+  for (const band of ["under_10k", "over_1m", null] as const) {
+    const { system } = buildStageOnePrompt({
+      organisationName: "Example",
+      organisationType: "charity",
+      incomeBand: band,
+    });
+    assert.match(system, /Do not describe the organisation's size or maturity at all/);
+    assert.match(system, /"established", "growing", "small", "well-resourced"/);
   }
 });

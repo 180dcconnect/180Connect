@@ -19,8 +19,11 @@
 -- entry either — submitting a suggestion is not a decision, and the RPC's
 -- header records why the whole submission path stays out of the audit trail.
 
+-- IF NOT EXISTS: staging already carries this column (with the same shape
+-- constraint) from untracked applies of branch work — same story as
+-- 20260923114000's recorded_by guard. From scratch this is a plain add.
 alter table public.edit_suggestions
-  add column reason text
+  add column if not exists reason text
     constraint edit_suggestions_reason_shape
       check (reason is null or (btrim(reason) <> '' and char_length(reason) <= 280));
 

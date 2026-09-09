@@ -104,7 +104,7 @@ export function StatusSelect({
         // F149 AC3: 'responded' is intermediate — this status alone doesn't
         // conclude the interaction, so a CAM viewing it needs a nudge to
         // actually check the reply content and decide next steps.
-        <p className="w-full text-[13px] text-foreground/60">
+        <p className="ml-1 text-[13px] text-foreground/60">
           A reply has come in. Check the reply content and decide the next step.
         </p>
       )}

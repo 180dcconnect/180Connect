@@ -92,8 +92,11 @@ alter table public.field_sources
 -- (write-organisations.ts holds no user context — a register supplied the
 -- value) and on discrepancy auto-resolutions; set by apply_admin_field_edits.
 -- Null = "the system", which is honest: the pipeline wrote it.
+-- IF NOT EXISTS: staging already carries this column from the untracked
+-- 20260914110000 apply (re-dated to this file in 993e42c9 without a recorded
+-- history row). From scratch this is a plain add.
 alter table public.field_sources
-  add column recorded_by uuid references public.users (id);
+  add column if not exists recorded_by uuid references public.users (id);
 
 comment on column public.field_sources.recorded_by is
   'The user whose action produced this value (apply_admin_field_edits), or null '
@@ -171,6 +174,11 @@ grant execute on function public.get_field_sources(uuid) to authenticated;
 -- The table policy widens with the function — one motion. Same shape as every
 -- other shared-read child table (notes, attachments): all active roles read.
 drop policy if exists field_sources_select_admin on public.field_sources;
+
+-- Drop-then-create: staging already carries field_sources_select from the
+-- untracked 20260914110000 apply (see recorded_by above). From scratch the
+-- drop is a no-op and the create stands.
+drop policy if exists field_sources_select on public.field_sources;
 
 create policy field_sources_select on public.field_sources
   for select to authenticated

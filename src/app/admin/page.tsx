@@ -127,9 +127,6 @@ export default async function AdminPage() {
           <Tile href="/admin/dashboard" title="Admin dashboard">
             Team-wide pipeline activity, funnel and sector performance.
           </Tile>
-          <Tile href="/admin/team-pipeline" title="Team pipeline">
-            Every client&apos;s pipeline stage across the whole team, by stage or owning CAM.
-          </Tile>
           <Tile href="/admin/analytics" title="Team analytics">
             Team-wide outreach performance, conversions over time, and who may need support.
           </Tile>

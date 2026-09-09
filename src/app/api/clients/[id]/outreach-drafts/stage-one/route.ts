@@ -67,6 +67,7 @@ export async function POST(
     .object({
       length: z.enum(EMAIL_LENGTHS).default("standard"),
       register: z.enum(EMAIL_REGISTERS).default("professional"),
+    attachFlyer: z.boolean().default(false),
       opening: z.enum(OPENING_APPROACHES).default("mission_led"),
       closing: z.enum(CLOSING_APPROACHES).default("soft_cta"),
     })
@@ -248,6 +249,7 @@ export async function POST(
       newsHooks: enrichment?.news_hooks,
       booklet: savedBooklet?.booklet_text ?? null,
       senderName: authorization.actor.fullName,
+      attachFlyer: preferences.data.attachFlyer,
     },
     callModel,
     { length: preferences.data.length, register: preferences.data.register, opening: preferences.data.opening, closing: preferences.data.closing },
@@ -264,7 +266,7 @@ export async function POST(
   const { data: message, error: draftError } = isRegeneration
     ? await supabase
         .from("outreach_messages")
-        .update({ subject: result.draft.subject, body: result.draft.body })
+        .update({ subject: result.draft.subject, body: result.draft.body, attach_flyer: preferences.data.attachFlyer })
         .eq("id", draftId)
         .eq("organisation_id", organisationId)
         .select("id")
@@ -278,6 +280,7 @@ export async function POST(
           subject: result.draft.subject,
           body: result.draft.body,
           send_status: "draft",
+          attach_flyer: preferences.data.attachFlyer,
         })
         .select("id")
         .single();

@@ -40,6 +40,16 @@
 -- Reversibility: paired rollback in
 -- ../rollback/20260923102000_schedule_charity_commission_financials_cron.down.sql
 
+-- Unschedule-first: pg_cron's schedule() never dedupes by job name, so a
+-- re-apply (e.g. after an untracked apply left the job behind) would run the
+-- sweep twice. Conditional form: unscheduling a missing job is an error, not
+-- a harmless false. From scratch the where-clause is empty and the schedule
+-- below stands.
+select cron.unschedule('charity_commission_financial_refresh_weekly')
+where exists (
+  select 1 from cron.job where jobname = 'charity_commission_financial_refresh_weekly'
+);
+
 select cron.schedule(
   'charity_commission_financial_refresh_weekly',
   '0 3 * * 3', -- Wednesday 03:00 UTC

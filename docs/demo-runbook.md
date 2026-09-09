@@ -254,9 +254,9 @@ quiet, and any client's history is auditable field by field.*
 
 ## What is not built
 
-**F214 (Natural Language Charity Search) is not on `dev` yet** — unless the
-branch carrying it has merged by the time you read this. (This runbook was
-written while it existed only on a feature branch; check before demoing.)
+**F214 (Natural Language Charity Search) is now on `dev`** (PR #555) — the
+search bar's "Ask in plain English" field interprets a question and converts it
+into filters. Demo it as built.
 
 ~~F215 (Search by Mission)~~ — **now built** on the `feature/f215-search-by-mission`
 branch. The client list's search bar has a **"Filter by mission"** category:

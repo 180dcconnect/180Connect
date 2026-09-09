@@ -304,7 +304,16 @@ export async function POST(
   // still means visible: an errored (as opposed to merely empty) lookup is
   // reported like every other non-fatal read in this route — the DoD requires
   // failures to reach ERROR_LOG even when the request itself succeeds.
-  const pricing = await loadModelRate(supabase, model, "outreach.stage_one.load_pricing");
+  const pricing = await loadModelRate(
+    () =>
+      supabase
+        .from("model_pricing")
+        .select("input_usd_per_1k_tokens, output_usd_per_1k_tokens")
+        .eq("model", model)
+        .maybeSingle(),
+    model,
+    "outreach.stage_one.load_pricing",
+  );
   const costUsd = computeCostUsd(
     { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens },
     pricing,

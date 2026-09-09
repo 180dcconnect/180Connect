@@ -307,7 +307,16 @@ export async function POST(
           return fail("The draft was generated but could not be saved. Try again.");
         }
 
-        const pricing = await loadModelRate(supabase, model, "outreach.stage_one.load_pricing");
+        const pricing = await loadModelRate(
+    () =>
+      supabase
+        .from("model_pricing")
+        .select("input_usd_per_1k_tokens, output_usd_per_1k_tokens")
+        .eq("model", model)
+        .maybeSingle(),
+    model,
+    "outreach.stage_one.load_pricing",
+  );
         const costUsd = computeCostUsd(
           { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens },
           pricing,

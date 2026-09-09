@@ -54,7 +54,7 @@
 --   Security      | Unchanged. RLS on; SELECT for active users; no write grant to
 --                 | authenticated — a rate change stays a migration.
 --   Documentation | Data Model tab 04 — MODEL_PRICING gains two columns.
---   Approved by   | Pending — flagged for Bashir per SOP §7.
+--   Approved by   | Bashir (Project Leader), 9 Sep 2026 — SOP §7.
 --
 -- Reversibility: paired rollback in
 --   ../rollback/20260925090100_seed_model_pricing.down.sql

@@ -27,7 +27,7 @@ import { deriveBookletSources } from "@/lib/booklet/sources";
 import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { computeCostUsd } from "@/lib/outreach/generation-cost";
-import { loadModelRate, type ModelPricingReader } from "@/lib/ai/model-rate";
+import { loadModelRate } from "@/lib/ai/model-rate";
 
 // F084 — Use Website URL in Booklet: an optional URL the CAM pastes in, separate
 // from the stored organisation.website (which is always sent as a plain field
@@ -345,11 +345,12 @@ export async function POST(
   // would trade a compliance nicety for a user-visible failure. It is reported
   // to ERROR_LOG so the gap is visible, not silent.
   const pricing = await loadModelRate(
-    // Cast, not a type hole: `supabase` really does have this shape, but matching
-    // the full generated Supabase client type against the structural reader type
-    // blows TypeScript's instantiation depth in this file specifically (TS2589).
-    // The three outreach routes pass the same client with no cast at all.
-    supabase as unknown as ModelPricingReader,
+    () =>
+      supabase
+        .from("model_pricing")
+        .select("input_usd_per_1k_tokens, output_usd_per_1k_tokens")
+        .eq("model", result.model)
+        .maybeSingle(),
     result.model,
     "clients.generate_booklet.load_pricing",
   );

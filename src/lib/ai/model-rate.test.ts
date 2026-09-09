@@ -1,16 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { loadModelRate, type ModelPricingReader } from "./model-rate.ts";
+import { loadModelRate, type ModelPricingLookup } from "./model-rate.ts";
 
-function reader(result: { data: unknown; error: unknown }): ModelPricingReader {
-  return {
-    from: () => ({
-      select: () => ({
-        eq: () => ({ maybeSingle: async () => result as never }),
-      }),
-    }),
-  };
+function reader(result: { data: unknown; error: unknown }): ModelPricingLookup {
+  return async () => result as never;
 }
 
 describe("loadModelRate", () => {

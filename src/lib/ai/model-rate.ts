@@ -16,29 +16,29 @@
 import { reportError } from "../error-logging.ts";
 import type { ModelPricingRate } from "../outreach/generation-cost.ts";
 
-/**
- * Just the surface this needs. Typed structurally rather than as SupabaseClient
- * so a test can pass a two-line fake — but with the row shape stated as its own
- * named type, since inlining it made TypeScript walk the full Supabase generic
- * tree at one call site and give up (TS2589).
- */
+/** The two columns this reads. */
 export type ModelPricingRow = {
   input_usd_per_1k_tokens: number;
   output_usd_per_1k_tokens: number;
 };
 
-export type ModelPricingReader = {
-  from: (table: string) => {
-    select: (columns: string) => {
-      eq: (
-        column: string,
-        value: string,
-      ) => {
-        maybeSingle: () => PromiseLike<{ data: ModelPricingRow | null; error: unknown }>;
-      };
-    };
-  };
-};
+/**
+ * The caller runs the query and hands the result over.
+ *
+ * The obvious signature — take the Supabase client and build the query in here —
+ * does not survive contact with TypeScript: checking the generated client type
+ * against a structural `{ from: … }` shape blows the instantiation-depth limit
+ * (TS2589) in the larger route files, and it does so *only on a cold build*, so
+ * an incremental local run says everything is fine and CI does not. Taking a
+ * thunk means the only type that has to be matched is this small result object,
+ * which is cheap to check anywhere.
+ *
+ * It also keeps the fake in tests down to one line.
+ */
+export type ModelPricingLookup = () => PromiseLike<{
+  data: ModelPricingRow | null;
+  error: unknown;
+}>;
 
 /**
  * Best-effort: always resolves, never throws, and returns null whenever the rate
@@ -49,15 +49,11 @@ export type ModelPricingReader = {
  * which feature was generating when the rate came up missing.
  */
 export async function loadModelRate(
-  client: ModelPricingReader,
+  lookup: ModelPricingLookup,
   model: string,
   operation: string,
 ): Promise<ModelPricingRate | null> {
-  const { data, error } = await client
-    .from("model_pricing")
-    .select("input_usd_per_1k_tokens, output_usd_per_1k_tokens")
-    .eq("model", model)
-    .maybeSingle();
+  const { data, error } = await lookup();
 
   if (error) {
     await reportError(error, { operation, model });

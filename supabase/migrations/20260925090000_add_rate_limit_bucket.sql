@@ -36,7 +36,7 @@
 --                 | is SECURITY DEFINER and executable by service_role alone,
 --                 | exactly like the function it sits beside.
 --   Documentation | Data Model tab 04 — AI_GENERATION_RATE_LIMIT gains one column.
---   Approved by   | Pending — flagged for Bashir per SOP §7.
+--   Approved by   | Bashir (Project Leader), 9 Sep 2026 — SOP §7.
 --
 -- Reversibility: paired rollback in
 --   ../rollback/20260925090000_add_rate_limit_bucket.down.sql

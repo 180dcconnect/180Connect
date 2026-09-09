@@ -394,9 +394,9 @@
 | 07 Outreach & Outcomes | AI_GENERATIONS | created_at | timestamp |  | Row creation timestamp |
 | 07 Outreach & Outcomes | SEND_EVENTS | id | uuid |  | Primary key |
 | 07 Outreach & Outcomes | SEND_EVENTS | outreach_message_id | uuid |  | Links to the OUTREACH_MESSAGES record associated with the email |
-| 07 Outreach & Outcomes | SEND_EVENTS | event_type | enum |  | sent / delivered / bounced / opened / failed |
-| 07 Outreach & Outcomes | SEND_EVENTS | occurred_at | timestamp |  | Date and time Gmail reported the delivery event |
-| 07 Outreach & Outcomes | SEND_EVENTS | metadata | jsonb |  | Additional event information returned by the Gmail API |
+| 07 Outreach & Outcomes | SEND_EVENTS | event_type | enum |  | sent / bounced / failed |
+| 07 Outreach & Outcomes | SEND_EVENTS | occurred_at | timestamp |  | Date and time the event happened, as observed by the platform |
+| 07 Outreach & Outcomes | SEND_EVENTS | metadata | jsonb |  | Additional event information recorded by the platform — send identifiers, failure reason, or bounce detail |
 | 07 Outreach & Outcomes | SEND_EVENTS | created_at | timestamp |  | Row creation timestamp |
 | 07 Outreach & Outcomes | REPLY_EVENTS | id | uuid |  | Primary key |
 | 07 Outreach & Outcomes | REPLY_EVENTS | outreach_message_id | uuid |  | Links to the OUTREACH_MESSAGES record this message replies to |
@@ -589,3 +589,18 @@
 | 04 Entities | INBOX_THREAD_STATE | trashed_at | timestamptz |  | When it was trashed |
 | 04 Entities | INBOX_THREAD_STATE | created_at | timestamptz |  | Row creation timestamp |
 | 04 Entities | INBOX_THREAD_STATE | updated_at | timestamptz |  | Last updated timestamp |
+| 04 Entities | MODEL_PRICING | id | uuid |  | Primary key |
+| 04 Entities | MODEL_PRICING | model | text |  | AI model name this price applies to; one row per model (unique) |
+| 04 Entities | MODEL_PRICING | input_usd_per_1k_tokens | numeric |  | US dollars per 1,000 prompt tokens, at the provider's list price |
+| 04 Entities | MODEL_PRICING | output_usd_per_1k_tokens | numeric |  | US dollars per 1,000 response tokens, at the provider's list price |
+| 04 Entities | MODEL_PRICING | confirmed_on | date |  | Date a human last verified this rate against the provider's pricing page |
+| 04 Entities | MODEL_PRICING | source_url | text |  | Where the rate was read from |
+| 04 Entities | MODEL_PRICING | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | MODEL_PRICING | updated_at | timestamp |  | Last time the rate changed |
+| 04 Entities | AI_GENERATION_RATE_LIMIT | id | uuid |  | Primary key |
+| 04 Entities | AI_GENERATION_RATE_LIMIT | user_id | uuid | USERS | The user whose allowance this counts; unique with bucket |
+| 04 Entities | AI_GENERATION_RATE_LIMIT | bucket | text |  | Which AI feature the counter is for: generation or search |
+| 04 Entities | AI_GENERATION_RATE_LIMIT | request_count | int |  | Requests consumed in the current fixed window |
+| 04 Entities | AI_GENERATION_RATE_LIMIT | window_started_at | timestamp |  | When the current fixed window opened |
+| 04 Entities | AI_GENERATION_RATE_LIMIT | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | AI_GENERATION_RATE_LIMIT | updated_at | timestamp |  | Last time the counter changed |

@@ -376,8 +376,22 @@
 | model | text |  | No | AI model name this price applies to | Human | Entered by an admin directly in the database | One row per model (unique) |
 | input_usd_per_1k_tokens | decimal(12,6) |  | No | US dollars per 1,000 prompt tokens | Human | Copied from the provider's official pricing page by whoever owns billing | Zero or more |
 | output_usd_per_1k_tokens | decimal(12,6) |  | No | US dollars per 1,000 response tokens | Human | Same as above | Zero or more |
+| confirmed_on | date |  | Yes | The date a human last read this rate from the provider's published pricing page | Human | Entered by whoever verified the rate, in the migration that sets it | Not updated_at, which moves for any edit. This answers "when was this last verified against the source". A rate months past this date should be re-checked before anyone quotes totals built on it. Blank = never verified. |
+| source_url | text |  | Yes | Where the rate was read from | Human | Entered alongside confirmed_on | So re-verifying is a click rather than a search. Currently https://ai.google.dev/gemini-api/docs/pricing for both Gemini rows. |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last time the rate changed | System | Auto-updated on change |  |
+
+## AI_GENERATION_RATE_LIMIT
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| user_id | uuid | USERS | No | The user whose allowance this counts; unique with bucket | System | From the session | unique with bucket |
+| bucket | text |  | No | Which AI feature the counter is for: generation or search | System | Set when allowance checked | generation or search |
+| request_count | int |  | No | Requests consumed in the current fixed window | System | Incremented on each request |  |
+| window_started_at | timestamp |  | No | When the current fixed window opened | System | Set on window start / reset |  |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+| updated_at | timestamp |  | No | Last time the counter changed | System | Auto-updated on change |  |
 
 ## IMPORT_FILTER_PRESETS
 

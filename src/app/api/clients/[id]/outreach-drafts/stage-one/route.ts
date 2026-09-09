@@ -9,7 +9,7 @@ import {
   createStageOneModelCall,
   generateStageOneDraft,
 } from "@/lib/outreach/stage-one-generation";
-import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES, OPENING_APPROACHES } from "@/lib/outreach/stage-one-prompt";
+import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_REGISTERS, OPENING_APPROACHES } from "@/lib/outreach/stage-one-prompt";
 import {
   checkSuppressionBeforeSend,
   suppressionBlockedMessage,
@@ -66,14 +66,14 @@ export async function POST(
   const preferences = z
     .object({
       length: z.enum(EMAIL_LENGTHS).default("standard"),
-      voice: z.enum(EMAIL_VOICES).default("180dc"),
-      tone: z.enum(EMAIL_TONES).default("balanced"),
+      register: z.enum(EMAIL_REGISTERS).default("professional"),
+    attachFlyer: z.boolean().default(false),
       opening: z.enum(OPENING_APPROACHES).default("mission_led"),
       closing: z.enum(CLOSING_APPROACHES).default("soft_cta"),
     })
     .safeParse(parsedInput);
   if (!preferences.success) {
-    return NextResponse.json({ error: "Choose a valid email length, voice, tone, opening and closing approach, then try again." }, { status: 400 });
+    return NextResponse.json({ error: "Choose a valid email length, register, opening and closing approach, then try again." }, { status: 400 });
   }
 
   const admin = createAdminClient();
@@ -88,7 +88,7 @@ export async function POST(
   const { data: organisation, error: organisationError } = await supabase
     .from("organisations")
     .select(
-      "id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach, owner_id, contact_email, owner:users!organisations_owner_id_fkey(full_name)",
+      "id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach, sector, sub_sector, owner_id, contact_email, owner:users!organisations_owner_id_fkey(full_name)",
     )
     .eq("id", organisationId)
     .maybeSingle<{
@@ -100,6 +100,8 @@ export async function POST(
       city: string | null;
       country_code: string | null;
       geographic_reach: string | null;
+      sector: string | null;
+      sub_sector: string | null;
       owner_id: string | null;
       contact_email: string | null;
       owner: { full_name: string | null } | null;
@@ -239,13 +241,18 @@ export async function POST(
       contactJobTitle: contact?.job_title,
       missionStatement: enrichment?.mission_statement,
       missionKeywords: enrichment?.mission_keywords,
-      sector: enrichment?.sector,
-      subSector: enrichment?.sub_sector,
+      // Canonical ORGANISATIONS column first, LLM enrichment as the fallback —
+      // the same resolution build-prompt.ts applies for the booklet. Reading only
+      // enrichment reported no sector at all for register-imported charities.
+      sector: organisation.sector?.trim() || enrichment?.sector,
+      subSector: organisation.sub_sector?.trim() || enrichment?.sub_sector,
       newsHooks: enrichment?.news_hooks,
       booklet: savedBooklet?.booklet_text ?? null,
+      senderName: authorization.actor.fullName,
+      attachFlyer: preferences.data.attachFlyer,
     },
     callModel,
-    { length: preferences.data.length, voice: preferences.data.voice, tone: preferences.data.tone, opening: preferences.data.opening, closing: preferences.data.closing },
+    { length: preferences.data.length, register: preferences.data.register, opening: preferences.data.opening, closing: preferences.data.closing },
   );
   if ("error" in result) return NextResponse.json({ error: result.error }, { status: 502 });
 
@@ -259,7 +266,7 @@ export async function POST(
   const { data: message, error: draftError } = isRegeneration
     ? await supabase
         .from("outreach_messages")
-        .update({ subject: result.draft.subject, body: result.draft.body })
+        .update({ subject: result.draft.subject, body: result.draft.body, attach_flyer: preferences.data.attachFlyer })
         .eq("id", draftId)
         .eq("organisation_id", organisationId)
         .select("id")
@@ -273,6 +280,7 @@ export async function POST(
           subject: result.draft.subject,
           body: result.draft.body,
           send_status: "draft",
+          attach_flyer: preferences.data.attachFlyer,
         })
         .select("id")
         .single();
@@ -324,6 +332,7 @@ export async function POST(
     // F113: the model in force at generation time, not a live lookup of the current
     // default — see the migration for why a later env change must never rewrite history.
     model,
+    activity: isRegeneration ? "email_regeneration" : "initial_email",
     // F112: the exact prompt this generation actually sent — every attempt (create
     // or regenerate) gets its own row here, never overwritten, so this is also the
     // audit trail AC3 asks for.

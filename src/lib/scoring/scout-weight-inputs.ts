@@ -19,12 +19,15 @@ export const SCOUT_WEIGHT_PARAMETERS = [
     key: "sector",
     label: "Sector fit",
     description:
-      "How strongly a client's sector influences its priority. Sector scoring stands at a neutral placeholder until F089 lands.",
+      "How strongly a client's sector influences its priority. Charities imported from the " +
+      "register arrive classified; a client with no sector recorded scores the neutral.",
   },
   {
     key: "geography",
     label: "Geography",
-    description: "Weight given to where the client is based, relative to priority regions.",
+    description:
+      "Weight given to where the client is based, against the branch's priority cities " +
+      "(Sheffield, Rotherham, Barnsley, Doncaster — the same list the import criteria use).",
   },
   {
     key: "size",

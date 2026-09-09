@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useActionState, useState } from "react";
 import { OriginButton } from "@/components/ui/origin-button";
+import { TriangleAlert, Info, Copy } from "lucide-react";
 
 import { importFromUrl, type UrlImportState } from "./import-actions";
 
@@ -13,8 +13,10 @@ const initialState: UrlImportState = { kind: "idle", message: "" };
  *
  * Implements Manual URL Import Failure Handling with three visually distinct states:
  *   1. Unreachable / No usable data (Red alert card with specific diagnosis)
- *   2. Insufficient data below threshold (Amber warning card with manual completion prompt)
+ *   2. Insufficient data below threshold (Amber warning card)
  *   3. Duplicate / Existing record (Indigo card with existing record summary and merge/discard CTAs)
+ *
+ * Rendered inside the page's white floating card, so content only — no outer border.
  */
 export function UrlImportForm() {
   const [state, action, pending] = useActionState(importFromUrl, initialState);
@@ -32,24 +34,29 @@ export function UrlImportForm() {
 
   const isDuplicateActive = state.kind === "duplicate" && state.duplicate && !discardedDuplicate;
 
+  const alertCard =
+    "rounded-2xl border px-5 py-4 text-sm";
+  const iconDisc =
+    "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full";
+
   return (
-    <section className="mt-6 rounded-xl border border-black/10 bg-gray-50 p-5 shadow-xs">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-base font-bold text-foreground">Start from their website</h2>
-          <p className="mt-1 text-sm text-foreground/70">
-            Paste an organisation&apos;s website URL to retrieve publicly available information,
-            identify registration numbers, and pre-fill client details. Nothing is saved until you
-            review and submit.
-          </p>
-        </div>
+    <>
+      <div>
+        <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-brand">
+          Start from their website
+        </p>
+        <p className="mt-1 text-sm leading-[1.7] text-foreground/65">
+          Paste an organisation&apos;s website URL to retrieve publicly available information,
+          identify registration numbers, and pre-fill client details. Nothing is saved until you
+          review and submit.
+        </p>
       </div>
 
       <form action={action} className="mt-4 flex flex-wrap items-end gap-3">
-        <label className="min-w-64 flex-1 text-sm font-bold text-foreground">
+        <label className="min-w-64 flex-1 flex flex-col gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/70">
           Website address
           <input
-            className="mt-1.5 w-full rounded-lg border border-black/20 bg-white px-3.5 py-2.5 text-sm transition-colors focus:border-brand focus:outline-hidden focus:ring-2 focus:ring-brand/20"
+            className="mt-0.5 h-10 w-full rounded-lg border border-black/15 bg-white px-3 text-sm font-medium normal-case tracking-normal outline-none transition-[border-color,box-shadow] focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/20 placeholder:text-foreground/35"
             defaultValue={state.sourceUrl ?? ""}
             inputMode="url"
             maxLength={2000}
@@ -59,41 +66,22 @@ export function UrlImportForm() {
             type="url"
           />
         </label>
-        <OriginButton
-          type="submit"
-          loading={pending}
-          disabled={pending}
-          size="md"
-        >
+        <OriginButton type="submit" loading={pending} disabled={pending} size="md">
           {pending ? "Reading website…" : "Import from website"}
         </OriginButton>
       </form>
 
       {/* State 1: URL Unreachable / No Usable Data / System Error (Red) */}
       {(state.kind === "unreachable" || state.kind === "error") && (
-        <div
-          className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-950 shadow-xs"
-          role="alert"
-        >
+        <div className={`mt-4 ${alertCard} border-destructive/25 bg-destructive/[0.05]`} role="alert">
           <div className="flex items-start gap-3">
-            <div className="mt-0.5 rounded-full bg-red-100 p-1 text-red-700">
-              <svg
-                aria-hidden="true"
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" x2="12" y1="8" y2="12" />
-                <line x1="12" x2="12.01" y1="16" y2="16" />
-              </svg>
+            <div className={`${iconDisc} bg-destructive/10 text-destructive`}>
+              <TriangleAlert className="h-4 w-4" aria-hidden="true" />
             </div>
             <div className="flex-1 space-y-1">
-              <p className="font-bold text-red-900">{state.message}</p>
-              {state.detail && <p className="text-red-900/80">{state.detail}</p>}
-              <p className="pt-1 text-xs text-red-800/80">
+              <p className="font-bold text-destructive">{state.message}</p>
+              {state.detail && <p className="text-foreground/70">{state.detail}</p>}
+              <p className="pt-1 text-xs text-foreground/50">
                 Tip: Check the URL for typos, or proceed by entering the client details in the form
                 below.
               </p>
@@ -104,37 +92,23 @@ export function UrlImportForm() {
 
       {/* State 2: Data Returned But Below Minimum Threshold / Incomplete Profile (Amber) */}
       {state.kind === "insufficient" && (
-        <div
-          className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 shadow-xs"
-          role="alert"
-        >
+        <div className={`mt-4 ${alertCard} border-amber-500/25 bg-amber-500/[0.06]`} role="alert">
           <div className="flex items-start gap-3">
-            <div className="mt-0.5 rounded-full bg-amber-100 p-1 text-amber-800">
-              <svg
-                aria-hidden="true"
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
-              >
-                <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                <line x1="12" x2="12" y1="9" y2="13" />
-                <line x1="12" x2="12.01" y1="17" y2="17" />
-              </svg>
+            <div className={`${iconDisc} bg-amber-500/15 text-amber-800`}>
+              <Info className="h-4 w-4" aria-hidden="true" />
             </div>
             <div className="flex-1 space-y-2">
               <div>
-                <p className="font-bold text-amber-900">{state.message}</p>
-                {state.detail && <p className="mt-0.5 text-amber-900/85">{state.detail}</p>}
+                <p className="font-bold text-amber-800">{state.message}</p>
+                {state.detail && <p className="mt-0.5 text-foreground/70">{state.detail}</p>}
               </div>
 
               {state.notes && state.notes.length > 0 && (
-                <div className="rounded-lg bg-amber-100/60 p-3">
-                  <p className="text-xs font-bold text-amber-900 uppercase tracking-wider">
-                    Extracted Summary & Missing Details
+                <div className="rounded-xl border border-amber-500/15 bg-amber-500/[0.06] p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-amber-800">
+                    Extracted summary &amp; missing details
                   </p>
-                  <ul className="mt-1.5 list-disc space-y-1 pl-4 text-xs text-amber-900/90">
+                  <ul className="mt-1.5 list-disc space-y-1 pl-4 text-xs text-foreground/70">
                     {state.notes.map((note) => (
                       <li key={note}>{note}</li>
                     ))}
@@ -143,14 +117,14 @@ export function UrlImportForm() {
               )}
 
               <div className="pt-1">
-                <button
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3.5 py-1.5 text-xs font-bold text-amber-900 shadow-2xs hover:bg-amber-100/50"
+                <OriginButton
+                  variant="outline"
+                  size="sm"
                   onClick={scrollToManualForm}
                   type="button"
                 >
-                  <span>Fill in missing fields manually</span>
-                  <span aria-hidden="true">↓</span>
-                </button>
+                  Fill in missing fields manually ↓
+                </OriginButton>
               </div>
             </div>
           </div>
@@ -159,42 +133,27 @@ export function UrlImportForm() {
 
       {/* State 3: Duplicate Record Detected / Existing Charity (Indigo / Blue) */}
       {isDuplicateActive && state.duplicate && (
-        <div
-          className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-950 shadow-xs"
-          role="alert"
-        >
+        <div className={`mt-4 ${alertCard} border-indigo-500/25 bg-indigo-500/[0.06]`} role="alert">
           <div className="flex items-start gap-3">
-            <div className="mt-0.5 rounded-full bg-indigo-100 p-1 text-indigo-800">
-              <svg
-                aria-hidden="true"
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
-              >
-                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-                <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-              </svg>
+            <div className={`${iconDisc} bg-indigo-500/15 text-indigo-800`}>
+              <Copy className="h-4 w-4" aria-hidden="true" />
             </div>
             <div className="flex-1 space-y-3">
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <p className="font-bold text-indigo-900">{state.message}</p>
-                  <span className="rounded-full bg-indigo-200/70 px-2 py-0.5 text-2xs font-bold text-indigo-900 uppercase">
-                    Duplicate Prevention
+                  <span className="rounded-full bg-indigo-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-indigo-800">
+                    Duplicate prevention
                   </span>
                 </div>
-                {state.detail && <p className="mt-0.5 text-indigo-900/80">{state.detail}</p>}
+                {state.detail && <p className="mt-0.5 text-foreground/70">{state.detail}</p>}
               </div>
 
-              <div className="rounded-lg border border-indigo-200 bg-white p-3 shadow-2xs">
-                <p className="text-xs font-bold text-foreground/60 uppercase tracking-wider">
-                  Existing Client Match
+              <div className="rounded-xl border border-indigo-500/15 bg-white p-3">
+                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+                  Existing client match
                 </p>
-                <p className="mt-1 text-sm font-bold text-indigo-950">
-                  {state.duplicate.legalName}
-                </p>
+                <p className="mt-1 text-sm font-bold text-indigo-950">{state.duplicate.legalName}</p>
                 <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-foreground/75">
                   {state.duplicate.registryNumber && (
                     <span>Registration: {state.duplicate.registryNumber}</span>
@@ -212,25 +171,27 @@ export function UrlImportForm() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5 pt-1">
-                <Link
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-700 px-3.5 py-2 text-xs font-bold text-white shadow-2xs transition-colors hover:bg-indigo-800"
+                <OriginButton
+                  variant="default"
+                  size="sm"
                   href={`/clients/${state.duplicate.organisationId}`}
                 >
-                  <span>View existing client profile</span>
-                  <span aria-hidden="true">→</span>
-                </Link>
-                <button
-                  className="rounded-lg border border-indigo-300 bg-white px-3.5 py-2 text-xs font-bold text-indigo-900 shadow-2xs hover:bg-indigo-100/50"
+                  View existing client profile →
+                </OriginButton>
+                <OriginButton
+                  variant="ghost"
+                  size="sm"
+                  className="border border-black/10"
                   onClick={() => setDiscardedDuplicate(true)}
                   type="button"
                 >
                   Discard import
-                </button>
+                </OriginButton>
               </div>
             </div>
           </div>
         </div>
       )}
-    </section>
+    </>
   );
 }

@@ -62,6 +62,7 @@ export const SENSITIVE_FIELD_LABELS: Record<SensitiveOrgField, string> = {
  * UI can go.
  */
 export function restrictedFieldLabel(fieldName: string): string {
+  if (fieldName === "mission_statement" || fieldName === "mission") return "Mission";
   return isSensitiveOrgField(fieldName)
     ? SENSITIVE_FIELD_LABELS[fieldName]
     : fieldName.replaceAll("_", " ");
@@ -86,8 +87,244 @@ const FIELD_MAX_LENGTHS: Record<SensitiveOrgField, number> = {
 
 const DEFAULT_FIELD_MAX_LENGTH = 500;
 
-function maxLengthFor(field: string): number {
+/**
+ * The cap the server will enforce for a field. Exported because the input that
+ * collects the value should stop at the same number rather than letting someone
+ * type 400 characters into a 200-character column and learn about it from a
+ * rejected submission.
+ */
+export function maxLengthFor(field: string): number {
   return isSensitiveOrgField(field) ? FIELD_MAX_LENGTHS[field] : DEFAULT_FIELD_MAX_LENGTH;
+}
+
+/**
+ * Fields whose value is prose rather than an identifier. A one-line pill is the
+ * right shape for a postcode and the wrong one for a mission statement, and the
+ * restricted set is runtime configuration — an admin can restrict any text
+ * column — so the UI has to decide from the field name rather than from a fixed
+ * list of six.
+ */
+const LONG_FORM_FIELDS = new Set([
+  "mission_statement",
+  "mission",
+  "description",
+  "summary",
+  "notes",
+]);
+
+export function isLongFormField(field: string): boolean {
+  return LONG_FORM_FIELDS.has(field) || maxLengthFor(field) > 500;
+}
+
+/** The HTML input type that gets a CAM the right keyboard and autofill. */
+export function inputTypeFor(field: string): "email" | "url" | "text" {
+  if (field === "contact_email") return "email";
+  if (field === "website") return "url";
+  return "text";
+}
+
+// ---------------------------------------------------------------------------
+// Normalisation and soft warnings
+// ---------------------------------------------------------------------------
+
+/**
+ * Tidies a value into the shape the column wants, without ever changing what it
+ * says.
+ *
+ * The scorers, dedup and outreach all read these columns raw, so "https://x.org"
+ * and "x.org " are the same fact stored two ways, and whichever one a CAM
+ * happened to type is what the record keeps. Normalising at the door is cheaper
+ * than a cleanup migration later.
+ *
+ * Everything here is reversible-by-eye and reported back to the user before they
+ * submit — see `normalisationNote`. Nothing here rejects: a value that fails to
+ * look like an email is still submitted, because a real organisation's real
+ * address is allowed to be strange (that is what `fieldWarnings` is for).
+ */
+export function normaliseFieldValue(field: string, raw: string): string {
+  // Collapse runs of whitespace everywhere: a double space inside a legal name
+  // is never meaningful and always breaks an equality check somewhere.
+  const value = raw.trim().replace(/\s+/g, " ");
+  if (!value) return "";
+
+  if (field === "contact_email") {
+    return value.replace(/^mailto:/i, "").replace(/\s+/g, "").toLowerCase();
+  }
+
+  if (field === "website") {
+    const withoutSpaces = value.replace(/\s+/g, "");
+    // A bare domain is what people type and what registers publish; the column
+    // is consumed as a URL, so give it a scheme rather than storing half of one.
+    const schemed = /^[a-z][a-z0-9+.-]*:\/\//i.test(withoutSpaces)
+      ? withoutSpaces
+      : `https://${withoutSpaces.replace(/^\/+/, "")}`;
+    return schemed.replace(/\/+$/, "");
+  }
+
+  if (field === "postcode") {
+    // UK postcodes are canonically upper case with one space before the final
+    // three characters. Anything that is not recognisably one is left alone —
+    // international records live in this column too.
+    const compact = value.replace(/\s+/g, "").toUpperCase();
+    const match = /^([A-Z]{1,2}\d[A-Z\d]?)(\d[A-Z]{2})$/.exec(compact);
+    return match ? `${match[1]} ${match[2]}` : value.toUpperCase();
+  }
+
+  return value;
+}
+
+/**
+ * What to tell the user when normalisation changed what they typed. Silent
+ * rewriting is the version of this that erodes trust: someone types an address
+ * and the record shows something else, with no explanation.
+ */
+export function normalisationNote(field: string, raw: string): string | null {
+  const normalised = normaliseFieldValue(field, raw);
+  if (!normalised || normalised === raw.trim()) return null;
+  return `Will be saved as ${normalised}`;
+}
+
+/**
+ * Soft format checks: reasons to look again, never reasons to refuse.
+ *
+ * `website` and `contact_email` are deliberately not `urlField`/`emailField` in
+ * the schema below — canonical values arrive from messy third-party registers
+ * and manual entry accepts the same shapes, so validating hard here would make
+ * a CAM unable to propose a value the record is already allowed to hold. But
+ * that reasoning covers *ingested* values, not one being typed by hand right
+ * now, and the admin approving it has no better way to spot a typo than the CAM
+ * did. So: warn, and let them submit anyway.
+ */
+export function fieldWarnings(field: string, raw: string): string[] {
+  const value = normaliseFieldValue(field, raw);
+  if (!value) return [];
+  const warnings: string[] = [];
+
+  if (field === "contact_email") {
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(value)) {
+      warnings.push("That doesn't look like an email address. Check it before submitting.");
+    }
+  }
+
+  if (field === "website") {
+    const host = value.replace(/^[a-z]+:\/\//i, "").split("/")[0];
+    if (!/^[^\s.]+(\.[^\s.]+)+$/.test(host)) {
+      warnings.push("That doesn't look like a web address. Check it before submitting.");
+    }
+  }
+
+  if (field === "postcode") {
+    if (!/^[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2}$/.test(value)) {
+      warnings.push("That isn't a recognisable UK postcode — fine for an overseas address, worth a second look otherwise.");
+    }
+  }
+
+  if (field === "legal_name" && value === value.toUpperCase() && value.length > 8) {
+    warnings.push("All capitals — registers usually publish mixed case.");
+  }
+
+  return warnings;
+}
+
+/**
+ * Whether a proposal would change anything. The RPC refuses a no-op with 55000,
+ * so this exists to stop the UI offering a submission that is guaranteed to
+ * bounce — and to stop an admin being handed a decision about nothing.
+ */
+export function isUnchanged(
+  field: string,
+  raw: string,
+  currentValue: string | null | undefined,
+): boolean {
+  return normaliseFieldValue(field, raw) === (currentValue ?? "").trim();
+}
+
+/** Cap on the requester's note, mirroring edit_suggestions_reason_shape. */
+export const REASON_MAX_LENGTH = 280;
+
+/**
+ * The optional note, checked the way the column is: absent or real, never blank.
+ */
+export function validateReason(
+  raw: unknown,
+): { ok: true; value: string | null } | { ok: false; message: string } {
+  if (raw === null || raw === undefined) return { ok: true, value: null };
+  if (typeof raw !== "string") {
+    return { ok: false, message: "The note could not be read." };
+  }
+  const value = raw.trim();
+  if (!value) return { ok: true, value: null };
+  if (value.length > REASON_MAX_LENGTH) {
+    return {
+      ok: false,
+      message: `Keep the note to ${REASON_MAX_LENGTH} characters or fewer.`,
+    };
+  }
+  return { ok: true, value };
+}
+
+/** One field's outcome in a multi-field submission. */
+export type FieldSubmissionResult = {
+  fieldName: string;
+  ok: boolean;
+  message: string;
+};
+
+/**
+ * The result of proposing (or, for an admin, applying) several fields at once.
+ *
+ * Per-field rather than one verdict, because the fields fail independently:
+ * another CAM may hold a pending proposal on the postcode while the address
+ * line is free, and reporting that as "the submission failed" would lose the
+ * three changes that landed.
+ */
+export type EditBatchState = {
+  kind: "idle" | "success" | "partial" | "error";
+  message: string;
+  results: FieldSubmissionResult[];
+};
+
+export const idleEditBatchState: EditBatchState = {
+  kind: "idle",
+  message: "",
+  results: [],
+};
+
+/** Rolls per-field outcomes into the state the UI reports. */
+export function summariseBatch(
+  results: FieldSubmissionResult[],
+  verb: "proposed" | "saved",
+): EditBatchState {
+  const failed = results.filter((result) => !result.ok);
+  const succeeded = results.length - failed.length;
+
+  if (failed.length === 0) {
+    return {
+      kind: "success",
+      message:
+        succeeded === 1
+          ? `Change ${verb}.`
+          : `${succeeded} changes ${verb}.`,
+      results,
+    };
+  }
+
+  if (succeeded === 0) {
+    return {
+      kind: "error",
+      message:
+        failed.length === 1
+          ? failed[0].message
+          : "None of the changes could be saved.",
+      results,
+    };
+  }
+
+  return {
+    kind: "partial",
+    message: `${succeeded} ${verb}, ${failed.length} could not be — see the fields below.`,
+    results,
+  };
 }
 
 function fieldValueSchema(field: string) {
@@ -284,6 +521,8 @@ export type EditSuggestionRow = {
   decided_by: string | null;
   decided_at: string | null;
   rejection_reason: string | null;
+  /** The requester's own note, added 20260923100000. Null on older rows. */
+  reason: string | null;
   created_at: string;
   organisations: { legal_name: string } | null;
   requested_by_user: { full_name: string | null; email: string } | null;
@@ -293,7 +532,7 @@ export type EditSuggestionRow = {
 /** Shared PostgREST select for the admin page's initial load and the GET route. */
 export const EDIT_SUGGESTION_SELECT = `
   id, organisation_id, field_name, current_value, proposed_value, status,
-  requested_by, decided_by, decided_at, rejection_reason, created_at,
+  requested_by, decided_by, decided_at, rejection_reason, reason, created_at,
   organisations ( legal_name ),
   requested_by_user:users!edit_suggestions_requested_by_fkey ( full_name, email ),
   decided_by_user:users!edit_suggestions_decided_by_fkey ( full_name, email )

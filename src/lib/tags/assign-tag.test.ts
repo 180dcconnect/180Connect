@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { assignTagsCore, type OrgTagInsertClient } from "./assign-tag-core.ts";
+import {
+  assignTagsCore,
+  MAX_TAGS_PER_CLIENT,
+  type OrgTagInsertClient,
+} from "./assign-tag-core.ts";
 
 function fakeClient(overrides: Partial<OrgTagInsertClient> = {}) {
   const inserted: { organisationId: string; tagId: string }[] = [];
@@ -9,6 +13,9 @@ function fakeClient(overrides: Partial<OrgTagInsertClient> = {}) {
     async insertOrgTag(organisationId, tagId) {
       inserted.push({ organisationId, tagId });
       return { ok: true };
+    },
+    async listOrgTagIds() {
+      return [];
     },
     ...overrides,
   };
@@ -88,6 +95,111 @@ describe("assignTagsCore — duplicate assignment is a no-op (AC2)", () => {
 
     assert.deepEqual(result.assigned, ["tag-new"]);
     assert.deepEqual(result.alreadyAssigned, ["tag-already"]);
+  });
+});
+
+describe("assignTagsCore — per-client tag cap", () => {
+  const existing = Array.from(
+    { length: MAX_TAGS_PER_CLIENT },
+    (_, index) => `tag-existing-${index}`,
+  );
+
+  it("refuses a batch that would push the client over the cap, assigning nothing", async () => {
+    const { client, inserted } = fakeClient({
+      async listOrgTagIds() {
+        return ["tag-a", "tag-b", "tag-c", "tag-d", "tag-e", "tag-f", "tag-g"];
+      },
+    });
+
+    const result = await assignTagsCore(
+      "org-1",
+      ["tag-new-1", "tag-new-2"],
+      "user-1",
+      client,
+    );
+
+    assert.equal(result.limitReached, true);
+    assert.deepEqual(result.assigned, []);
+    assert.equal(inserted.length, 0);
+  });
+
+  it("allows a batch that lands exactly on the cap", async () => {
+    const { client } = fakeClient({
+      async listOrgTagIds() {
+        return ["tag-a", "tag-b", "tag-c", "tag-d", "tag-e", "tag-f", "tag-g"];
+      },
+    });
+
+    const result = await assignTagsCore(
+      "org-1",
+      ["tag-new-1"],
+      "user-1",
+      client,
+    );
+
+    assert.equal(result.limitReached, false);
+    assert.deepEqual(result.assigned, ["tag-new-1"]);
+  });
+
+  it("does not count already-assigned tags against the cap (AC2)", async () => {
+    const { client, inserted } = fakeClient({
+      async listOrgTagIds() {
+        return existing;
+      },
+    });
+
+    // Every id in the batch is already assigned: at the cap, this must still
+    // be a no-op success, not a limit refusal.
+    const result = await assignTagsCore(
+      "org-1",
+      ["tag-existing-0", "tag-existing-1"],
+      "user-1",
+      client,
+    );
+
+    assert.equal(result.limitReached, false);
+    assert.equal(result.alreadyAssigned.length, 2);
+    assert.equal(inserted.length, 0);
+  });
+
+  it("counts a mixed batch precisely: only genuinely new tags consume slots", async () => {
+    const { client, inserted } = fakeClient({
+      async listOrgTagIds() {
+        return ["tag-a", "tag-b", "tag-c", "tag-d", "tag-e", "tag-f", "tag-g"];
+      },
+    });
+
+    // 7 existing + 2 new would exceed the cap; 7 existing + 1 new (the other
+    // id is already on record) lands exactly on it.
+    const result = await assignTagsCore(
+      "org-1",
+      ["tag-a", "tag-new-1"],
+      "user-1",
+      client,
+    );
+
+    assert.equal(result.limitReached, false);
+    assert.deepEqual(result.assigned, ["tag-new-1"]);
+    assert.deepEqual(result.alreadyAssigned, ["tag-a"]);
+    assert.equal(inserted.length, 1);
+  });
+
+  it("treats a full client already at the cap as a limit refusal for new tags", async () => {
+    const { client } = fakeClient({
+      async listOrgTagIds() {
+        return existing;
+      },
+    });
+
+    const result = await assignTagsCore(
+      "org-1",
+      ["tag-fresh"],
+      "user-1",
+      client,
+    );
+
+    assert.equal(result.limitReached, true);
+    assert.deepEqual(result.assigned, []);
   });
 });
 

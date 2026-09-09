@@ -11,7 +11,7 @@ import {
 import Image from "next/image";
 import { useEffect } from "react";
 
-import { BrandCtaButton } from "@/components/brand/brand-cta";
+import { BrandCta, BrandCtaButton } from "@/components/brand/brand-cta";
 import { EASE, entrance, stagger } from "@/components/brand/motion";
 import { SiteChrome } from "@/components/brand/site-chrome";
 import { useAuthDialog } from "@/components/brand/use-auth-dialog";
@@ -209,7 +209,7 @@ function Crop({ crop, delay, index }: { crop: CropSpec; delay: number; index: nu
 const INLINE_MARK =
   "inline-block h-[0.78em] w-[0.78em] -translate-y-[0.06em] align-middle";
 
-function SheetsMark() {
+export function SheetsMark() {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -223,7 +223,7 @@ function SheetsMark() {
   );
 }
 
-function GmailMark() {
+export function GmailMark() {
   return (
     <Image
       src="/gmail.svg"
@@ -241,7 +241,7 @@ function GmailMark() {
  * other two (their 24-unit box carries some padding), so all three sit at the
  * same optical size on the line.
  */
-function MondayMark() {
+export function MondayMark() {
   return (
     <svg
       viewBox="0 0 256 156"
@@ -265,6 +265,7 @@ function MondayMark() {
 export default function Landing({
   skipIntro = false,
   notice = null,
+  isSignedIn = false,
 }: {
   /**
    * Set when an auth route (/login, /forgot-password) is rendering this rather
@@ -274,6 +275,11 @@ export default function Landing({
   skipIntro?: boolean;
   /** Passed straight to the dialog; only /login ever has one. */
   notice?: SignedOutNotice | null;
+  /**
+   * True when the visitor already holds a session. The nav pill and the hero
+   * CTA link straight to the app instead of opening the sign-in dialog.
+   */
+  isSignedIn?: boolean;
 }) {
   // Only for the hero button — the chrome renders the dialog itself.
   const { openSignin } = useAuthDialog();
@@ -343,7 +349,7 @@ export default function Landing({
         </div>
 
         <SiteChrome revealStyle={reveal} activeHref="/" onCtaClick={openSignin}
-          notice={notice} />
+          notice={notice} isSignedIn={isSignedIn} />
 
         <motion.div
           // The wordmark and burger are absolute now, so this pad stands in for
@@ -395,7 +401,11 @@ export default function Landing({
               />
             </div>
 
-            <BrandCtaButton type="button" label="Get Started" size="lg" onClick={openSignin} />
+            {isSignedIn ? (
+              <BrandCta href="/dashboard" label="Go to app" size="lg" ariaLabel="Go to app" />
+            ) : (
+              <BrandCtaButton type="button" label="Get Started" size="lg" onClick={openSignin} />
+            )}
           </motion.div>
 
           {/* Scattered crops of the same source photo — a few left soft to

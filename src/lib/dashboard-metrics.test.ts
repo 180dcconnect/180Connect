@@ -30,6 +30,9 @@ describe("computeDashboardMetrics", () => {
       responsesReceived: 0,
       respondingClients: 0,
       converted: 0,
+      contactRate: 0,
+      replyRate: 0,
+      conversionRate: 0,
     });
   });
 

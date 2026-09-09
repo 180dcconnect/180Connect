@@ -1,39 +1,33 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import {
+  RequestFeedbackButton as RequestFeedbackButtonUI,
+  type RequestFeedbackButtonProps,
+} from "@/components/ui/request-feedback-button";
 import { requestFeedbackRound } from "@/lib/feedback-actions";
 
 /**
  * Admin-only button: clears feedback_snoozed_until for every active user,
  * so the in-app prompt re-appears on their next dashboard visit.
+ *
+ * Implements confirmation morph ("Confirm" + "X" cancel), Thanos snap particle
+ * dissolve, and a smooth 1-second reappearance animation.
  */
-export function RequestFeedbackButton() {
-  const [isPending, startTransition] = useTransition();
-  const [done, setDone] = useState(false);
-
-  const handleClick = () => {
-    startTransition(async () => {
-      const result = await requestFeedbackRound();
-      if (result.ok) setDone(true);
-    });
+export function RequestFeedbackButton(props: Partial<RequestFeedbackButtonProps>) {
+  const handleConfirm = async () => {
+    const result = await requestFeedbackRound();
+    if (!result.ok) {
+      throw new Error(result.message);
+    }
   };
 
-  if (done) {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-700">
-        <span aria-hidden="true">✓</span> Feedback round requested
-      </span>
-    );
-  }
-
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={isPending}
-      className="shrink-0 rounded-full bg-[var(--brand,#72b744)] px-5 py-2.5 text-xs font-bold text-white shadow-sm transition-all hover:brightness-110 disabled:opacity-50 disabled:hover:brightness-100"
-    >
-      {isPending ? "Requesting…" : "Request feedback round"}
-    </button>
+    <RequestFeedbackButtonUI
+      onConfirm={handleConfirm}
+      variant="lead"
+      size="md"
+      {...props}
+    />
   );
 }
+

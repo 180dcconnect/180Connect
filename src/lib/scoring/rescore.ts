@@ -18,8 +18,11 @@
 
 import "server-only";
 
-import { createAdminClient } from "@/lib/supabase/admin";
-import { reportError } from "@/lib/error-logging";
+// Relative, not "@/lib/...": this module is on the import chain of
+// three-sixty-giving.ts, whose tests run under `node --test` and cannot resolve
+// Next's tsconfig path aliases.
+import { createAdminClient } from "../supabase/admin.ts";
+import { reportError } from "../error-logging.ts";
 import { getActiveScoutConfig } from "./configured-weights.ts";
 import { persistLatestScore, type PersistedScoreResult } from "./persist-latest-score.ts";
 import type { ScoreableOrganisation } from "./score-client.ts";

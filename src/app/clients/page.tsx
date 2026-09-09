@@ -14,6 +14,9 @@ import {
   filterByStatus,
   filterByTags,
   filterByPriorityScore,
+  filterByFinancialRecords,
+  FINANCIAL_RECORD_FILTERS,
+  financialRecordFilterLabel,
   hasActiveQueuePreferences,
   prioritiseQueue,
   filterByType,
@@ -21,8 +24,6 @@ import {
   filterValues,
   SECTOR_FILTER_LABELS,
   SECTOR_FILTER_OPTIONS,
-  LIST_SORT_DIRECTIONS,
-  LIST_SORT_FIELDS,
   PRIORITY_SCORE_FILTERS,
   parseListDirection,
   parseListSort,
@@ -32,11 +33,12 @@ import {
   sortClients,
   visibleClients,
   type ClientListRow,
+  type ListSortField,
   type OpenSuppression,
   type VisibleClient,
 } from "./visible-clients.ts";
 import { BrandSearchBar } from "@/components/brand/search-bar";
-import { ClaimButton } from "./[id]/claim-button";
+import { BackButton } from "@/components/ui/back-button";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 import { Group, Rise } from "@/components/dashboard-stage";
 import { OriginButton } from "@/components/ui/origin-button";
@@ -44,6 +46,7 @@ import { SearchRail } from "@/components/search-rail";
 import {
   SOURCE_LABELS,
   breakdown,
+  parseBreakdownLimit,
   parseDirection,
   parseField,
   parseStage,
@@ -57,7 +60,11 @@ import {
   formatOrganisationType,
   formatOutreachStatus,
 } from "@/lib/organisation-format";
-import { PipelineReport } from "./pipeline-report";
+import {
+  PipelineReport,
+  type PipelineRowItem,
+  type PipelineStageItem,
+} from "./pipeline-report";
 import {
   captureFilters,
   describeFilters,
@@ -65,8 +72,8 @@ import {
   parseFilters,
   savedViewHref,
 } from "./saved-view-filters";
-import { SavedViewsPanel, type SavedViewSummary } from "./saved-views-panel";
-import { SortMenu as ListSortMenu } from "./sort-menu";
+import { type SavedViewSummary } from "./saved-views-panel";
+import { SavedViewsPopover } from "./saved-views-popover";
 import { bulkStatusBlockedReason, canBulkUpdateStatus } from "@/lib/bulk-status";
 import { ClientSelectCheckbox, SelectPageCheckbox } from "./bulk-selection";
 import { BulkActionsBar } from "./bulk-actions-bar";
@@ -101,11 +108,15 @@ type SearchParams = Promise<{
   // F058 — priority-score bands (`high` / `medium` / `low` / `unscored`), same
   // repeated-param shape as the other multi-selects.
   score?: string | string[];
+  // Filter by presence of financial records (charity commission, 360giving, any, none)
+  financials?: string | string[];
   /** Funnel stage the breakdown counts. */
   stage?: string;
   /** Field the breakdown groups by, and which end of it to show. */
   sort?: string;
   dir?: string;
+  /** Limit for breakdown rows (3, 5, 10, 20). */
+  top?: string;
   /** F060/F061 — field the *list* is ordered on, and which way. Separate from
    * `sort`/`dir` above on purpose: that pair drives the breakdown card, and
    * both controls are on screen together. */
@@ -154,8 +165,8 @@ function PriorityScorePill({ client }: { client: VisibleClient }) {
   );
 }
 
-/** Reserved width for the claim button, held whether or not the row has one. */
-const CLAIM_SLOT = "w-[6.5rem] shrink-0";
+/** Reserved width for the row action (View), held for every row so columns don't shift. */
+const ACTION_SLOT = "w-[6.5rem] shrink-0";
 
 /**
  * F062's checkbox column. Outside the row's Link, on the same reasoning the claim
@@ -210,15 +221,17 @@ export default async function ClientsPage({
     type: typeFilter,
     sector: sectorParam,
     score: scoreParam,
+    financials: financialsParam,
     stage: stageParam,
     sort: sortParam,
     dir: dirParam,
+    top: topParam,
     listSort: listSortParam,
     listDir: listDirParam,
   } = await searchParams;
 
   const supabase = await createClient();
-  const canClaim = hasPermission(authorization.actor.role, "client:edit");
+  const canAddClient = hasPermission(authorization.actor.role, "client:edit");
   /**
    * F062 AC1 names the CAM: "CAM can select multiple individual clients from the
    * list via checkboxes". Selection was gated on `isAdmin`, so the role the whole
@@ -367,6 +380,8 @@ export default async function ClientsPage({
   // F058 — unknown values are dropped at parse time, so a hand-edited URL
   // carrying `?score=banana` filters nothing rather than matching nothing.
   const scoreBands = parsePriorityScoreFilter(scoreParam);
+  // Financial records filter: charity_commission, 360giving, any, none
+  const financialValues = filterValues(financialsParam);
 
   // BrandSearchBar always writes a multi-selected category as repeated params
   // (see its submitSearch), so this can legitimately arrive as one string or
@@ -385,6 +400,7 @@ export default async function ClientsPage({
   // F058 — bands narrow the searched set; unscored clients stay visible until a
   // band is actually chosen (the filter's own AC3, enforced inside the function).
   matchingClients = filterByPriorityScore(matchingClients, scoreBands);
+  matchingClients = filterByFinancialRecords(matchingClients, financialValues);
 
   // F196 / F197 / F199 / F094: Prioritise matching clients based on the CAM's
   // geographic, sector, size and grant-history preferences, layered on top of
@@ -413,7 +429,8 @@ export default async function ClientsPage({
       typeValues.length ||
       sectorValues.length ||
       tagFilter.length ||
-      scoreBands.length,
+      scoreBands.length ||
+      financialValues.length,
   );
   // F166 AC1/AC3: this is the CAM viewing their own filter, not just any owner
   // filter — the heading, count label and empty state read "your clients" so the
@@ -531,9 +548,11 @@ export default async function ClientsPage({
       // F058 — the parsed bands, not the raw param, for the same reason as
       // listSort below: junk leaves the URL on the next click.
       score: scoreBands,
+      financials: financialValues,
       stage: stageParam,
       sort: sortParam,
       dir: dirParam,
+      top: topParam !== undefined ? topLimit : undefined,
       // The parsed values, not the raw params: a pasted `?listSort=banana`
       // renders as name/ascending, and every link this page generates then
       // carries the canonical value, so the junk leaves the URL on the next
@@ -571,21 +590,34 @@ export default async function ClientsPage({
 
   const pageHref = (targetPage: number) => hrefWith({ page: targetPage });
 
+  const columnSortHref = (field: ListSortField) => {
+    if (listSortField === field && explicitListSort) {
+      return hrefWith({
+        listSort: field,
+        listDir: listSortDirection === "ascending" ? "descending" : "ascending",
+      });
+    }
+    const defaultDir = field === "priority" ? "descending" : "ascending";
+    return hrefWith({ listSort: field, listDir: defaultDir });
+  };
+
   // The insight band reads the list you are actually looking at: filter to your
   // own clients and the funnel is yours, not the platform's. `caption` says which
   // of the two it is, so the numbers are never ambiguous.
   const stage: FunnelStageKey = parseStage(stageParam);
   const breakdownField = parseField(sortParam);
   const breakdownDirection = parseDirection(dirParam);
+  const topLimit = parseBreakdownLimit(topParam);
   const funnel = pipelineFunnel(matchingClients);
   // Every group carries all four stage counts, so the table reads across as that
-  // group's own funnel; `stage` only decides which column the top three is
+  // group's own funnel; `stage` only decides which column the top N is
   // ranked on.
   const breakdownRows = breakdown(
     matchingClients,
     breakdownField,
     breakdownDirection,
     stage,
+    topLimit,
   );
   const funnelCaption = filterActive
     ? `${matchingClients.length.toLocaleString()} filtered`
@@ -600,6 +632,16 @@ export default async function ClientsPage({
     hrefWith({ [filter.param]: [filter.value] });
   const stageHref = (key: FunnelStageKey) =>
     hrefWith({ stage: key === "all" ? undefined : key });
+
+  const pipelineStages: PipelineStageItem[] = funnel.map((s) => ({
+    ...s,
+    href: stageHref(s.key),
+  }));
+
+  const pipelineRows: PipelineRowItem[] = breakdownRows.map((r) => ({
+    ...r,
+    href: r.filter ? rowHref(r.filter) : null,
+  }));
 
   // F255 step 2 — "review your assigned clients" is complete when the CAM has looked
   // at their own list, which is this page filtered to themselves. Recording it here
@@ -653,6 +695,11 @@ export default async function ClientsPage({
                   label: priorityScoreFilterLabel(band),
                   value: band,
                 })),
+                ...financialValues.map((value) => ({
+                  category: "Filter by financial records",
+                  label: financialRecordFilterLabel(value),
+                  value,
+                })),
               ]}
               params={{
                 "Filter by city": "city",
@@ -663,6 +710,7 @@ export default async function ClientsPage({
                 "Filter by owner": "owner",
                 "Filter by tag": "tags",
                 "Filter by priority score": "score",
+                "Filter by financial records": "financials",
               }}
               categories={{
                 "Filter by city": uniqueCities.map(c => ({ label: c, value: c })),
@@ -679,6 +727,10 @@ export default async function ClientsPage({
                   label: band.label,
                   value: band.value,
                 })),
+                "Filter by financial records": FINANCIAL_RECORD_FILTERS.map((f) => ({
+                  label: f.label,
+                  value: f.value,
+                })),
               }}
             />
           }
@@ -688,7 +740,7 @@ export default async function ClientsPage({
                 <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
                   {isOwnedView ? "My clients" : "Clients"}
                 </h1>
-                {canClaim && (
+                {canAddClient && (
                   <OriginButton
                     href="/clients/new"
                     size="md"
@@ -710,7 +762,7 @@ export default async function ClientsPage({
                     ownerFilter === authorization.actor.id ? "text-brand" : "text-foreground/65"
                   }`}
                 >
-                  My clients
+                  {ownerFilter === authorization.actor.id ? "Showing your clients" : "Show my clients only"}
                 </Link>
               )}
             </>
@@ -729,77 +781,36 @@ export default async function ClientsPage({
         )}
 
         <Group className="space-y-4">
-          {/* F066 — the CAM's saved filter combinations, above the report they
-              change. Selecting one is a link; saving one posts the filters this
-              render used. */}
+          {/* Where the pipeline stands before the list of it: the four stage
+              totals, the stream between them, and the top-N groups. Counts
+              whatever the list is currently showing. */}
           <Rise>
-            <SavedViewsPanel
+            <PipelineReport
+              stages={pipelineStages}
+              selected={stage}
+              caption={funnelCaption}
+              field={breakdownField}
+              direction={breakdownDirection}
+              rows={pipelineRows}
+              limit={topLimit}
+            />
+          </Rise>
+
+          {/* Table Toolbar / Saved Views Bar */}
+          <Rise className="flex items-center justify-between gap-4 pt-2">
+            <div className="flex items-center gap-2">
+              {personalQueueDefault && (
+                <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+                  Ordered for you
+                </span>
+              )}
+            </div>
+            <SavedViewsPopover
               views={savedViewSummaries}
               activeFilters={activeFilters}
               hasActiveFilters={filterActive}
             />
           </Rise>
-
-          {/* Where the pipeline stands before the list of it: the four stage
-              totals, the stream between them, and the top three groups. Counts
-              whatever the list is currently showing. */}
-          <Rise>
-            <PipelineReport
-              stages={funnel}
-              selected={stage}
-              stageHref={stageHref}
-              caption={funnelCaption}
-              field={breakdownField}
-              direction={breakdownDirection}
-              rows={breakdownRows}
-              rowHref={rowHref}
-            />
-          </Rise>
-
-          {matchingClients.length > 0 && (
-            <Rise className="flex items-baseline justify-between gap-4 pt-4">
-              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                {matchingClients.length} client{matchingClients.length === 1 ? "" : "s"}
-                {isOwnedView ? " you own" : ""}
-              </p>
-              {/* F060/F061 — the list's own sort. Same sentence control the
-                  breakdown card uses, on its own pair of params, sitting on
-                  the line that already introduces the list. Shown at every
-                  width: the column headers below it are lg-only.
-                  F094 — when the CAM's preferences are driving the default
-                  order and no explicit sort has been chosen over them, the
-                  sentence says so rather than quietly claiming "name,
-                  ascending" for an order it isn't. Choosing either word in
-                  the sentence applies that sort explicitly. */}
-              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                {personalQueueDefault ? "Ordered for you — override:" : "Sorted by"}{" "}
-                <ListSortMenu
-                  param="listSort"
-                  value={listSortField}
-                  ariaLabel="Sort the client list by"
-                  options={LIST_SORT_FIELDS.map((entry) => ({
-                    value: entry.key,
-                    label: entry.label,
-                  }))}
-                />
-                ,{" "}
-                <ListSortMenu
-                  param="listDir"
-                  value={listSortDirection}
-                  ariaLabel="Sort direction for the client list"
-                  options={LIST_SORT_DIRECTIONS.map((entry) => ({
-                    value: entry,
-                    label: entry,
-                  }))}
-                />
-              </p>
-              {totalPages > 1 && (
-                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                  Page {currentPage} of {totalPages}
-                </p>
-              )}
-            </Rise>
-          )}
 
             <Rise>
               {clients.length === 0 ? (
@@ -820,18 +831,88 @@ export default async function ClientsPage({
                     )}
                     <span className={`${ROW_GRID} min-w-0 flex-1`}>
                       <span />
-                      <span>Client</span>
-                      <span>Location</span>
-                      <span>Score</span>
-                      <span>Status</span>
+                      <Link
+                        href={columnSortHref("name")}
+                        className={`group/sort flex items-center gap-1 transition-colors hover:text-foreground ${
+                          explicitListSort && listSortField === "name" ? "text-foreground font-extrabold" : "text-foreground/40"
+                        }`}
+                        aria-label={`Sort by Client name (${explicitListSort && listSortField === "name" ? listSortDirection : "ascending"})`}
+                      >
+                        <span>Client</span>
+                        {explicitListSort && listSortField === "name" ? (
+                          <span className="text-[11px] text-brand" aria-hidden="true">
+                            {listSortDirection === "ascending" ? "↑" : "↓"}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] opacity-0 group-hover/sort:opacity-40 transition-opacity" aria-hidden="true">
+                            ↕
+                          </span>
+                        )}
+                      </Link>
+
+                      <Link
+                        href={columnSortHref("location")}
+                        className={`group/sort flex items-center gap-1 transition-colors hover:text-foreground ${
+                          explicitListSort && listSortField === "location" ? "text-foreground font-extrabold" : "text-foreground/40"
+                        }`}
+                        aria-label={`Sort by Location (${explicitListSort && listSortField === "location" ? listSortDirection : "ascending"})`}
+                      >
+                        <span>Location</span>
+                        {explicitListSort && listSortField === "location" ? (
+                          <span className="text-[11px] text-brand" aria-hidden="true">
+                            {listSortDirection === "ascending" ? "↑" : "↓"}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] opacity-0 group-hover/sort:opacity-40 transition-opacity" aria-hidden="true">
+                            ↕
+                          </span>
+                        )}
+                      </Link>
+
+                      <Link
+                        href={columnSortHref("priority")}
+                        className={`group/sort flex items-center gap-1 transition-colors hover:text-foreground ${
+                          explicitListSort && listSortField === "priority" ? "text-foreground font-extrabold" : "text-foreground/40"
+                        }`}
+                        aria-label={`Sort by Score (${explicitListSort && listSortField === "priority" ? listSortDirection : "descending"})`}
+                      >
+                        <span>Score</span>
+                        {explicitListSort && listSortField === "priority" ? (
+                          <span className="text-[11px] text-brand" aria-hidden="true">
+                            {listSortDirection === "ascending" ? "↑" : "↓"}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] opacity-0 group-hover/sort:opacity-40 transition-opacity" aria-hidden="true">
+                            ↕
+                          </span>
+                        )}
+                      </Link>
+
+                      <Link
+                        href={columnSortHref("status")}
+                        className={`group/sort flex items-center gap-1 transition-colors hover:text-foreground ${
+                          explicitListSort && listSortField === "status" ? "text-foreground font-extrabold" : "text-foreground/40"
+                        }`}
+                        aria-label={`Sort by Status (${explicitListSort && listSortField === "status" ? listSortDirection : "ascending"})`}
+                      >
+                        <span>Status</span>
+                        {explicitListSort && listSortField === "status" ? (
+                          <span className="text-[11px] text-brand" aria-hidden="true">
+                            {listSortDirection === "ascending" ? "↑" : "↓"}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] opacity-0 group-hover/sort:opacity-40 transition-opacity" aria-hidden="true">
+                            ↕
+                          </span>
+                        )}
+                      </Link>
+
                       <span>Owner</span>
                       <span />
                     </span>
-                    {canClaim && (
-                      <span className="flex shrink-0 items-center gap-2">
-                        <span className={CLAIM_SLOT} />
-                      </span>
-                    )}
+                    <span className="flex shrink-0 items-center gap-2">
+                      <span className={ACTION_SLOT} />
+                    </span>
                   </div>
 
                   <ul>
@@ -922,17 +1003,20 @@ export default async function ClientsPage({
                           </span>
                         </Link>
 
-                        {/* A fixed slot rather than a conditional child: an owned
-                            row still reserves the width, so no column shifts as
-                            the list changes hands. The booklet action lives on
-                            the client's own page only, not in this list. */}
-                        {canClaim && (
-                          <span className={`${CLAIM_SLOT} flex shrink-0 justify-end`}>
-                            {!client.ownerName && (
-                              <ClaimButton compact organisationId={client.id} />
-                            )}
-                          </span>
-                        )}
+                        {/* View replaces Claim this client: every row offers the same
+                            explicit CTA (inverse sliding-door) rather than a
+                            conditional claim that shifted columns per ownership. */}
+                        <span className={`${ACTION_SLOT} flex shrink-0 justify-end`}>
+                          <BackButton
+                            href={`/clients/${client.id}`}
+                            label="View"
+                            variant="sliding-door-right"
+                            tone="bone"
+                            size="sm"
+                            icon="arrow"
+                            aria-label={`View ${client.legal_name}`}
+                          />
+                        </span>
                       </li>
                     ))}
                   </ul>
@@ -941,30 +1025,46 @@ export default async function ClientsPage({
             )}
           </Rise>
 
-          {totalPages > 1 && (
-            <Rise className="flex items-center justify-between gap-4 pt-4">
-              {currentPage > 1 ? (
-                <Link
-                  href={pageHref(currentPage - 1)}
-                  className="rounded-full bg-white px-5 py-2 text-[13px] font-bold shadow-sm ring-1 ring-black/[0.06] transition-shadow hover:shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-                >
-                  ← Previous
-                </Link>
-              ) : (
-                <div />
-              )}
-              {currentPage < totalPages ? (
-                <Link
-                  href={pageHref(currentPage + 1)}
-                  className="rounded-full bg-white px-5 py-2 text-[13px] font-bold shadow-sm ring-1 ring-black/[0.06] transition-shadow hover:shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-                >
-                  Next →
-                </Link>
-              ) : (
-                <div />
-              )}
-            </Rise>
-          )}
+          <Rise className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4">
+            <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+              {matchingClients.length.toLocaleString()} client{matchingClients.length === 1 ? "" : "s"}
+              {isOwnedView ? " you own" : ""}
+            </p>
+
+            {totalPages > 1 && (
+              <div className="flex items-center gap-4">
+                <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <div className="flex items-center gap-2">
+                  {currentPage > 1 ? (
+                    <Link
+                      href={pageHref(currentPage - 1)}
+                      className="rounded-full bg-white px-4 py-1.5 text-[12px] font-bold shadow-xs ring-1 ring-black/[0.06] transition-shadow hover:shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                    >
+                      ← Previous
+                    </Link>
+                  ) : (
+                    <span className="rounded-full bg-black/[0.02] px-4 py-1.5 text-[12px] font-bold text-foreground/20 cursor-not-allowed">
+                      ← Previous
+                    </span>
+                  )}
+                  {currentPage < totalPages ? (
+                    <Link
+                      href={pageHref(currentPage + 1)}
+                      className="rounded-full bg-white px-4 py-1.5 text-[12px] font-bold shadow-xs ring-1 ring-black/[0.06] transition-shadow hover:shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                    >
+                      Next →
+                    </Link>
+                  ) : (
+                    <span className="rounded-full bg-black/[0.02] px-4 py-1.5 text-[12px] font-bold text-foreground/20 cursor-not-allowed">
+                      Next →
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </Rise>
           </Group>
         </SearchRail>
         {canSelect && (

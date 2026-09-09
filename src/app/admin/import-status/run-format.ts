@@ -32,6 +32,11 @@ import { labelForStatus } from "./status-helpers.ts";
 const SOURCE_LABELS: Record<string, string> = {
   charitybase: "CharityBase",
   charity_commission: "Charity Commission",
+  // The two Charity Commission pipelines are separate sources (they carry
+  // different payload shapes and dedup independently), so they need separate
+  // labels — "Charity Commission Bulk" from the humanised token reads as a
+  // spelling variant of the other rather than a different job.
+  charity_commission_bulk: "Charity Commission (bulk register)",
   companies_house: "Companies House",
   "360giving": "360Giving",
   find_that_charity: "Find That Charity",
@@ -62,6 +67,93 @@ export function toneForStatus(status: string): RunTone {
   return TONES[status] ?? "neutral";
 }
 
+export type HumanisedError = {
+  summary: string;
+  description: string;
+  actionHint?: string;
+  rawMessage: string;
+};
+
+/**
+ * Translates cryptic or technical error messages into clear, human-friendly
+ * language with actionable instructions on where to configure settings.
+ */
+export function humaniseErrorMessage(errorMessage: string | null): HumanisedError | null {
+  if (!errorMessage || !errorMessage.trim()) return null;
+  const raw = errorMessage.trim();
+
+  // Companies House API key missing
+  if (
+    /COMPANIES_HOUSE_API_KEY/i.test(raw) ||
+    /companies house.*api key.*not (set|configured)/i.test(raw)
+  ) {
+    return {
+      summary: "Companies House API access key is not set",
+      description:
+        "The server requires a Companies House API key to connect to the official UK company register.",
+      actionHint:
+        "An administrator can configure this by setting the `COMPANIES_HOUSE_API_KEY` variable in your deployment environment settings (e.g. Vercel or .env.local).",
+      rawMessage: raw,
+    };
+  }
+
+  // Charity Commission API key missing
+  if (
+    /CHARITY_COMMISSION_API_KEY/i.test(raw) ||
+    /charity commission.*api key.*not (set|configured)/i.test(raw)
+  ) {
+    return {
+      summary: "Charity Commission API subscription key is not set",
+      description:
+        "The server requires a Charity Commission primary API key to fetch live registered charity records.",
+      actionHint:
+        "An administrator can configure this by setting the `CHARITY_COMMISSION_API_KEY` variable in your deployment environment settings.",
+      rawMessage: raw,
+    };
+  }
+
+  // 401 / 403 / Invalid key
+  if (/401|403|unauthorized|forbidden|invalid api key/i.test(raw)) {
+    return {
+      summary: "Authentication rejected by the data provider",
+      description:
+        "The external registry API rejected the request because the configured API key is invalid or lacks required permissions.",
+      actionHint:
+        "Verify that your configured API key in environment variables matches the key generated in your provider developer portal.",
+      rawMessage: raw,
+    };
+  }
+
+  // 429 / Rate limit
+  if (/429|rate limit|too many requests/i.test(raw)) {
+    return {
+      summary: "Rate limit reached on external registry",
+      description:
+        "The external data source received too many requests in a short time window and temporarily paused responses.",
+      actionHint:
+        "No manual action needed. The job will automatically back off and retry during the next scheduled cycle.",
+      rawMessage: raw,
+    };
+  }
+
+  // Network / timeout
+  if (/ETIMEDOUT|ECONNREFUSED|ENOTFOUND|fetch failed|timeout/i.test(raw)) {
+    return {
+      summary: "Connection timed out with registry service",
+      description:
+        "The server could not reach the external registry endpoint. The external service may be temporarily unavailable or down for maintenance.",
+      actionHint: "Check the provider service status or retry the import in a few minutes.",
+      rawMessage: raw,
+    };
+  }
+
+  return {
+    summary: raw.length > 90 ? `${raw.slice(0, 87)}…` : raw,
+    description: raw,
+    rawMessage: raw,
+  };
+}
+
 export type IngestionRunRow = {
   id: string;
   api_source: string;
@@ -74,6 +166,7 @@ export type IngestionRunRow = {
   started_at: string;
   completed_at: string | null;
   error_message: string | null;
+  triggered_by?: string | null;
 };
 
 /** One count, ready to render. Zeroes are kept — "0 failed" is reassuring. */
@@ -91,12 +184,15 @@ export type RunView = {
   /** The counts worth putting on a collapsed row: the ones that aren't zero. */
   highlights: RunCount[];
   errorMessage: string | null;
+  humanError: HumanisedError | null;
   startedRelative: string;
   startedExact: string;
   finishedExact: string | null;
   duration: string;
   dayKey: string;
   dayLabel: string;
+  triggeredBy?: string | null;
+  triggerLabel?: string | null;
 };
 
 const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
@@ -138,6 +234,7 @@ export function summariseRun(run: IngestionRunRow): string {
 export function describeRun(run: IngestionRunRow, now: Date): RunView {
   const started = new Date(run.started_at);
   const finished = run.completed_at ? new Date(run.completed_at) : null;
+  const humanError = humaniseErrorMessage(run.error_message);
 
   const counts: RunCount[] = [
     { label: "Fetched", value: run.records_fetched, tone: "neutral" },
@@ -146,6 +243,10 @@ export function describeRun(run: IngestionRunRow, now: Date): RunView {
     { label: "Failed", value: run.records_failed, tone: "danger" },
     { label: "Flagged", value: run.records_flagged, tone: "warning" },
   ];
+
+  const triggeredBy = run.triggered_by ?? null;
+  const triggerLabel =
+    triggeredBy === "manual" ? "Manual" : triggeredBy === "schedule" ? "Scheduled" : null;
 
   return {
     id: run.id,
@@ -159,6 +260,7 @@ export function describeRun(run: IngestionRunRow, now: Date): RunView {
     // four are zero is four pieces of furniture around one fact.
     highlights: counts.filter((count) => count.value > 0),
     errorMessage: run.error_message,
+    humanError,
     startedRelative: formatRelativeTime(started, now),
     startedExact: formatExactTime(started),
     finishedExact: finished ? formatExactTime(finished) : null,
@@ -167,6 +269,8 @@ export function describeRun(run: IngestionRunRow, now: Date): RunView {
     duration: finished ? formatDuration(finished.getTime() - started.getTime()) : "—",
     dayKey: dayKeyOf(started),
     dayLabel: formatDayLabel(started, now),
+    triggeredBy,
+    triggerLabel,
   };
 }
 
@@ -174,7 +278,31 @@ export function describeRun(run: IngestionRunRow, now: Date): RunView {
 export function matchesRunQuery(view: RunView, query: string): boolean {
   const term = query.trim().toLowerCase();
   if (!term) return true;
-  const haystack = [view.source, view.statusLabel, view.status, view.summary, view.errorMessage ?? ""]
+
+  const monthName = (() => {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(view.dayKey)) {
+      const [y, m, d] = view.dayKey.split("-").map(Number);
+      return new Date(y, m - 1, d).toLocaleDateString("en-GB", { month: "long" });
+    }
+    return "";
+  })();
+
+  const haystack = [
+    view.source,
+    view.statusLabel,
+    view.status,
+    view.summary,
+    view.errorMessage ?? "",
+    view.humanError?.summary ?? "",
+    view.humanError?.description ?? "",
+    view.humanError?.actionHint ?? "",
+    view.dayLabel,
+    view.dayKey,
+    view.startedExact,
+    view.startedRelative,
+    monthName,
+    view.triggerLabel ?? "",
+  ]
     .join(" ")
     .toLowerCase();
   return term.split(/\s+/).every((word) => haystack.includes(word));

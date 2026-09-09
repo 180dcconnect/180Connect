@@ -5,16 +5,42 @@ import { reportError } from "../error-logging.ts";
 import {
   buildStageOnePrompt,
   type EmailLength,
-  type EmailVoice,
-  type EmailTone,
+  type EmailRegister,
   type OpeningApproach,
   type ClosingApproach,
   type SizeTemplate,
   type StageOneContext,
 } from "./stage-one-prompt.ts";
 
-const TIMEOUT_MS = 30_000;
-const MAX_OUTPUT_TOKENS = 1536;
+/**
+ * Model-call ceiling. Free-tier Gemini regularly takes 30–45s on this prompt
+ * (the saved booklet rides along as context), so the old 30s abort fired on
+ * healthy generations. 55s leaves ~5s of the route's 60s maxDuration for the
+ * reads and writes around the call — tight on purpose: anything slower should
+ * fail loudly rather than die silently at the platform edge.
+ */
+const TIMEOUT_MS = 55_000;
+
+/**
+ * Shared model options for both stage-one call shapes (one-shot and stream).
+ *
+ * `thinkingLevel: "minimal"` is the load-bearing half. Gemini 3 Flash thinks
+ * by default, and thinking tokens count against `maxOutputTokens` — with the
+ * old 1536-token ceiling the model spent ~1400 tokens thinking through the
+ * booklet context and had ~70 tokens left for the email, so every generation
+ * for a context-rich client cut off mid-word at the same ~270 characters
+ * (`Unterminated string`, three calls running). A templated outreach draft
+ * off a fully-specified prompt needs no deliberation, so minimal thinking
+ * buys back both the truncated output and most of the 30–50s latency.
+ *
+ * 4096 output tokens is headroom, not a target: a detailed draft is ~350.
+ */
+export const STAGE_ONE_MODEL_OPTIONS = {
+  maxOutputTokens: 4096,
+  providerOptions: {
+    google: { thinkingConfig: { thinkingLevel: "minimal" } },
+  },
+} as const;
 
 export type StageOneDraft = { subject: string; body: string };
 // F213 — LLM Cost Tracking: token counts travel back with the raw text rather
@@ -59,7 +85,7 @@ export function createStageOneModelCall(): { callModel: CallStageOneModel; model
       system,
       prompt,
       timeout: TIMEOUT_MS,
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      ...STAGE_ONE_MODEL_OPTIONS,
     });
     return {
       text: result.text,
@@ -83,7 +109,7 @@ export async function generateStageOneDraft(
   organisationId: string,
   context: StageOneContext,
   callModel: CallStageOneModel,
-  options: { length?: EmailLength; voice?: EmailVoice; tone?: EmailTone; opening?: OpeningApproach; closing?: ClosingApproach } = {},
+  options: { length?: EmailLength; register?: EmailRegister; opening?: OpeningApproach; closing?: ClosingApproach } = {},
 ): Promise<
   | { draft: StageOneDraft; sizeTemplate: SizeTemplate; usage: StageOneUsage; prompt: StageOnePromptSent }
   | { error: string }

@@ -1,5 +1,6 @@
 import { reportError } from "../error-logging.ts";
 import { logSecurityEvent } from "../log-security-event.ts";
+import { MAX_ATTACHMENTS_PER_DRAFT, MAX_COMBINED_ATTACHMENT_SIZE_BYTES } from "../attachments.ts";
 import { emailHtmlToPlainText } from "./email-html.ts";
 import { resolveEmailSendLimit } from "./send-rate-limit.ts";
 
@@ -51,11 +52,56 @@ export type DueScheduledMessage = {
   /** Null when neither the contact nor the organisation has an address on
    * file — such a message can never leave and is failed, not skipped. */
   recipient: string | null;
+  /**
+   * F217: whether this message was composed to carry the branch flyer. The
+   * draft's own wording depends on it ("I've attached a flyer"), so a
+   * scheduled send has to honour it exactly as an immediate send does — the
+   * flag is read from the row rather than passed in, because by the time this
+   * runs there is no UI and no CAM to ask.
+   */
+  attachFlyer: boolean;
 };
 
 export type DeliveryOutcome =
   | { ok: true; providerMessageId?: string; providerThreadId?: string }
   | { ok: false; reason: string };
+
+/** One linked file, bytes in hand, ready for the MIME builder. */
+export type ScheduledAttachmentFile = {
+  filename: string;
+  contentType: string | null;
+  content: Buffer;
+};
+
+export type AttachmentLoadResult =
+  | { ok: true; attachments: ScheduledAttachmentFile[] }
+  /**
+   * Permanent (a file deleted from Storage, a set over the caps): the message
+   * is failed visibly, never looped. Retryable (a Storage blip mid-download):
+   * the message stays scheduled for the next run.
+   */
+  | { ok: false; reason: string; retryable: boolean };
+
+/**
+ * The set-level caps for a scheduled send's attachments — the same two caps
+ * attach_file_to_draft enforces at attach time and the immediate send path
+ * re-checks (defense in depth: a set that changed between scheduling and
+ * sending in some way neither side can see today must still not go out).
+ * Pure, so both the schedule-time gate and the worker's real adapter (and
+ * the tests) share it. Returns a CAM-readable refusal or null to proceed.
+ */
+export function checkScheduledAttachmentSet(
+  files: readonly { sizeBytes: number | null }[],
+): string | null {
+  if (files.length > MAX_ATTACHMENTS_PER_DRAFT) {
+    return `A draft can have at most ${MAX_ATTACHMENTS_PER_DRAFT} attachments.`;
+  }
+  const totalBytes = files.reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0);
+  if (totalBytes > MAX_COMBINED_ATTACHMENT_SIZE_BYTES) {
+    return "These attachments are too large to send together (25MB email limit).";
+  }
+  return null;
+}
 
 export type ScheduledOutreachDeps = {
   /** Due messages (send_status='scheduled', scheduled_at <= now), oldest due first. */
@@ -76,7 +122,21 @@ export type ScheduledOutreachDeps = {
    * away — silent, never call Gmail on it. 'claimed': proceed to deliver().
    */
   claim(messageId: string, nowIso: string): Promise<"claimed" | "daily_limit_reached" | "lost_claim">;
-  deliver(input: { recipient: string; subject: string; text: string; html: string }): Promise<DeliveryOutcome>;
+  /**
+   * The draft's linked files with bytes downloaded, ready to append to the
+   * MIME. Runs AFTER the claim so bytes are only fetched for the message
+   * this run actually owns — suppressed, over-limit and lost-claim messages
+   * never pay a download.
+   */
+  loadAttachments(messageId: string): Promise<AttachmentLoadResult>;
+  deliver(input: {
+    recipient: string;
+    subject: string;
+    text: string;
+    html: string;
+    attachFlyer: boolean;
+    attachments: ScheduledAttachmentFile[];
+  }): Promise<DeliveryOutcome>;
   /** Flips scheduled→sent. False means the flip matched no rows — reported,
    * not retried, since the email may already be out (F123's rule).
    * organisationId lets the F097 score snapshot ride the same RPC call. */
@@ -186,11 +246,45 @@ export async function deliverDueScheduledEmails(
     }
     if (claim !== "claimed") continue;
 
+    // Attachments resolve here, after the claim: only the run that owns the
+    // message downloads bytes. A permanent gap (deleted file, over-cap set)
+    // fails the message visibly with its scheduler told — the refuse that
+    // schedule-time used to do up front, now enforced at the last moment it
+    // can still stop the send. A transient download failure stays scheduled
+    // for the next run, same treatment as the rate-limit blocks above.
+    const files = await deps.loadAttachments(message.id);
+    if (!files.ok) {
+      if (files.retryable) {
+        await reportError(new Error(files.reason), {
+          operation: "outreach.scheduler.attachments_retryable",
+          messageId: message.id,
+        });
+        summary.blocked += 1;
+        continue;
+      }
+      if (await deps.markFailed(message.id, files.reason)) {
+        summary.failed += 1;
+        if (message.sentByUserId) {
+          await deps.notifySendFailed(
+            message.sentByUserId,
+            message.id,
+            message.organisationId,
+            files.reason,
+          );
+        }
+        continue;
+      }
+      summary.blocked += 1;
+      continue;
+    }
+
     const outcome = await deps.deliver({
       recipient: message.recipient,
       subject: message.subject,
       text: message.text,
       html: message.html,
+      attachFlyer: message.attachFlyer,
+      attachments: files.attachments,
     });
     if (!outcome.ok) {
       // F129 AC1/AC2: record the failure durably and tell the CAM — never a
@@ -225,6 +319,7 @@ type ScheduledRow = {
   sent_by_user_id: string | null;
   subject: string;
   body: string;
+  attach_flyer: boolean | null;
   contacts: { email: string | null } | null;
   organisations: { contact_email: string | null } | null;
 };
@@ -242,7 +337,7 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
       async loadDue(nowIso) {
         const { data, error } = await admin
           .from("outreach_messages")
-          .select("id, organisation_id, sent_by_user_id, subject, body, contacts(email), organisations(contact_email)")
+          .select("id, organisation_id, sent_by_user_id, subject, body, attach_flyer, contacts(email), organisations(contact_email)")
           .eq("send_status", "scheduled")
           .lte("scheduled_at", nowIso)
           .order("scheduled_at", { ascending: true })
@@ -262,6 +357,7 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
           // F129: kept null rather than filtered out so the loop can fail the
           // message visibly instead of it looping as invisible scheduled rows.
           recipient: row.contacts?.email ?? row.organisations?.contact_email ?? null,
+          attachFlyer: row.attach_flyer === true,
         }));
       },
 
@@ -328,10 +424,132 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
         return data as "claimed" | "daily_limit_reached" | "lost_claim";
       },
 
-      async deliver({ recipient, subject, text, html }) {
+      async loadAttachments(messageId): Promise<AttachmentLoadResult> {
+        // Same join the immediate send path uses: link rows into the
+        // attachment records behind them. Service role sees every row, so a
+        // missing link here means the set genuinely changed, not an RLS gap.
+        const { data: links, error: linksError } = await admin
+          .from("outreach_message_attachments")
+          .select("attachments(filename, storage_path, content_type, size_bytes)")
+          .eq("outreach_message_id", messageId);
+        if (linksError) {
+          await reportError(linksError, {
+            operation: "outreach.scheduler.load_attachments",
+            messageId,
+          });
+          return {
+            ok: false,
+            reason: "The attached files could not be verified. Nothing was sent.",
+            retryable: true,
+          };
+        }
+
+        type LinkedAttachment = {
+          filename: string;
+          storage_path: string;
+          content_type: string | null;
+          size_bytes: number | null;
+        };
+        const linked = (links ?? [])
+          .map((row) => (Array.isArray(row.attachments) ? row.attachments[0] : row.attachments) as LinkedAttachment | null)
+          .filter((row): row is LinkedAttachment => row != null);
+        if (linked.length === 0) return { ok: true, attachments: [] };
+
+        // Defense in depth, same as the immediate path: attach_file_to_draft
+        // and the schedule-time gate both checked this already, but a set
+        // that changed between scheduling and sending must still not go out.
+        const violation = checkScheduledAttachmentSet(
+          linked.map((row) => ({ sizeBytes: row.size_bytes })),
+        );
+        if (violation) return { ok: false, reason: violation, retryable: false };
+
+        const downloaded: ScheduledAttachmentFile[] = [];
+        for (const row of linked) {
+          let bytes: Blob | null = null;
+          try {
+            const { data, error: downloadError } = await admin.storage
+              .from("client-attachments")
+              .download(row.storage_path);
+            if (downloadError) {
+              // A path that no longer resolves is permanent (deleted file);
+              // anything else is treated as a transient Storage blip.
+              const missing =
+                (downloadError as { statusCode?: string }).statusCode === "404" ||
+                /not.?found|does not exist/i.test(downloadError.message ?? "");
+              if (missing) {
+                return {
+                  ok: false,
+                  reason: "One of the attached files could not be found. Nothing was sent.",
+                  retryable: false,
+                };
+              }
+              await reportError(downloadError, {
+                operation: "outreach.scheduler.attachment_download_failed",
+                messageId,
+                storagePath: row.storage_path,
+              });
+              return {
+                ok: false,
+                reason: "The attached files could not be downloaded. Nothing was sent.",
+                retryable: true,
+              };
+            }
+            bytes = data;
+          } catch (error) {
+            await reportError(error, {
+              operation: "outreach.scheduler.attachment_download_failed",
+              messageId,
+              storagePath: row.storage_path,
+            });
+            return {
+              ok: false,
+              reason: "The attached files could not be downloaded. Nothing was sent.",
+              retryable: true,
+            };
+          }
+          if (!bytes) {
+            return {
+              ok: false,
+              reason: "One of the attached files could not be found. Nothing was sent.",
+              retryable: false,
+            };
+          }
+          downloaded.push({
+            filename: row.filename,
+            contentType: row.content_type,
+            content: Buffer.from(await bytes.arrayBuffer()),
+          });
+        }
+        return { ok: true, attachments: downloaded };
+      },
+
+      async deliver({ recipient, subject, text, html, attachFlyer, attachments }) {
         // F117: HTML body travels as sanitised HTML plus its derived plain-text
         // part — identical MIME shape to the manual send path.
-        const result = await sendBranchOutreach({ to: recipient, subject, text, html });
+        //
+        // The CAM's own files arrive via loadAttachments (downloaded after the
+        // claim); the flyer below is the one attachment that needs no download.
+        const outgoing = [...attachments];
+        // F217: the flyer is the one attachment a scheduled send can carry. It
+        // ships with the code rather than living in Storage, so there are no
+        // bytes to download and none of the reasons general attachment support
+        // is still refused at schedule time apply to it. A missing file logs
+        // and sends without it, matching sendReviewedDraft.
+        if (attachFlyer) {
+          const { flyerAttachment } = await import("./flyer.ts");
+          const flyer = await flyerAttachment();
+          if (flyer) outgoing.push(flyer);
+          else await reportError(new Error("Outreach flyer missing from deployment"), {
+            operation: "outreach.scheduler.flyer_unavailable",
+          });
+        }
+        const result = await sendBranchOutreach({
+          to: recipient,
+          subject,
+          text,
+          html,
+          attachments: outgoing.length > 0 ? outgoing : undefined,
+        });
         if (!result.ok) {
           await reportError(new Error(result.reason), {
             operation: "outreach.scheduler.deliver",

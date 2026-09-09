@@ -6,8 +6,6 @@
 
 # 02 Data Dictionary
 
-## 02 Data Dictionary: every field across all tabs (auto-compiled 12 Jul 2026; descriptions blank where the source tab has none)
-
 | Tab | Table | Field | Type | Foreign key to | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 03 Raw Data | INGESTION_RUNS | id | uuid |  |  |
@@ -554,8 +552,6 @@
 | 04 Entities | ATTACHMENTS | size_bytes | bigint |  | File size in bytes |
 | 04 Entities | ATTACHMENTS | uploaded_by | uuid | USERS | Team member who attached the file |
 | 04 Entities | ATTACHMENTS | created_at | timestamp |  | Row creation timestamp |
-| 04 Entities | ATTACHMENTS | timeline_context_type | text |  | Timeline source: client, note, outreach_message, reply_event, or audit_log |
-| 04 Entities | ATTACHMENTS | timeline_context_id | uuid |  | Stable linked event ID; null for a client-level File shared event |
 | 04 Entities | RESTRICTED_EDIT_FIELDS | id | uuid |  | Primary key |
 | 04 Entities | RESTRICTED_EDIT_FIELDS | field_name | text |  | An ORGANISATIONS column CAMs may not write directly |
 | 04 Entities | RESTRICTED_EDIT_FIELDS | active | boolean |  | False = retired: not enforced, not suggestible, row kept |
@@ -584,3 +580,12 @@
 | 04 Entities | FINANCIAL_PERIODS | expenditure_other | numeric |  |  |
 | 04 Entities | ORGANISATIONS | registered_on | date |  |  |
 | 04 Entities | ORGANISATIONS | charity_reporting_status | text |  |  |
+| 04 Entities | INBOX_THREAD_STATE | id | uuid |  | Primary key |
+| 04 Entities | INBOX_THREAD_STATE | user_id | uuid | USERS | Whose view of the mailbox this is |
+| 04 Entities | INBOX_THREAD_STATE | organisation_id | uuid | ORGANISATIONS | The thread this state belongs to |
+| 04 Entities | INBOX_THREAD_STATE | is_starred | boolean |  | Whether this viewer starred the thread |
+| 04 Entities | INBOX_THREAD_STATE | read_state | enum |  | Override of the server-derived read flag |
+| 04 Entities | INBOX_THREAD_STATE | is_trashed | boolean |  | Whether this viewer moved the thread to trash |
+| 04 Entities | INBOX_THREAD_STATE | trashed_at | timestamptz |  | When it was trashed |
+| 04 Entities | INBOX_THREAD_STATE | created_at | timestamptz |  | Row creation timestamp |
+| 04 Entities | INBOX_THREAD_STATE | updated_at | timestamptz |  | Last updated timestamp |

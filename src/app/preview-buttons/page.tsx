@@ -3,6 +3,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { OriginButton } from "@/components/ui/origin-button";
+import { DeleteButton } from "@/components/ui/delete-button";
+import { BackButton } from "@/components/ui/back-button";
 import { Stage, Rise } from "@/components/dashboard-stage";
 import { ArrowRight, Sparkles, Check, Download, Trash2, Settings, User } from "lucide-react";
 
@@ -30,12 +32,12 @@ export default function PreviewButtonsPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <Link
+            <BackButton
+              variant="sliding-door"
+              size="sm"
+              tone="bone"
               href="/dashboard"
-              className="rounded-full bg-black/5 px-4 py-2 text-xs font-bold text-foreground transition-colors hover:bg-black/10"
-            >
-              ← Back to Dashboard
-            </Link>
+            />
           </div>
         </Rise>
 
@@ -141,6 +143,36 @@ export default function PreviewButtonsPage() {
             >
               As Next.js Link →
             </OriginButton>
+          </div>
+        </Rise>
+
+        {/* DeleteConfirmButton Feature Showcase */}
+        <Rise className="space-y-4 rounded-3xl border border-red-200/80 bg-red-500/[0.03] p-6 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-red-600">
+                New Component
+              </span>
+              <h2 className="text-base font-bold text-foreground">
+                DeleteConfirmButton (Morphing Confirmation & Cancel &ldquo;X&rdquo;)
+              </h2>
+              <p className="text-xs text-foreground/60">
+                Click to morph &ldquo;Delete&rdquo; + trash can into &ldquo;Confirm&rdquo; + tick icon in red, with an outlined &ldquo;X&rdquo; dismiss button.
+              </p>
+            </div>
+            <Link
+              href="/preview-delete-button"
+              className="text-xs font-semibold text-red-600 hover:text-red-700 bg-red-100 hover:bg-red-200 px-3 py-1.5 rounded-sm transition-colors"
+            >
+              Open Full Interactive Sandbox →
+            </Link>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 pt-2">
+            <DeleteButton size="lg" />
+            <DeleteButton size="md" />
+            <DeleteButton size="sm" />
+            <DeleteButton size="xs" />
           </div>
         </Rise>
 

@@ -52,6 +52,14 @@ describe("describeAuditEvent", () => {
     assert.equal(view.label, "Role changed");
     assert.ok(!view.sentence.includes(ADMIN));
     assert.ok(!view.sentence.includes(CAM));
+    assert.deepEqual(view.actorEntity, { entityType: "user", id: ADMIN, name: "Bashir Bobboi" });
+    assert.deepEqual(view.targetEntity, { entityType: "user", id: CAM, name: "Mohammed Saeed" });
+    assert.deepEqual(view.sentenceParts, [
+      { type: "entity", entityType: "user", id: ADMIN, name: "Bashir Bobboi" },
+      { type: "text", text: " changed the role of" },
+      { type: "text", text: " " },
+      { type: "entity", entityType: "user", id: CAM, name: "Mohammed Saeed" },
+    ]);
   });
 
   it("falls back to a humanised token for an action it has never seen", () => {
@@ -228,8 +236,18 @@ describe("formatDetails", () => {
   it("resolves a user id inside the detail to a name", () => {
     const details = formatDetails({ from_user_id: ADMIN, to_user_id: CAM }, resolvers);
     assert.deepEqual(details, [
-      { label: "From", value: "Bashir Bobboi", kind: "value" },
-      { label: "To", value: "Mohammed Saeed", kind: "value" },
+      {
+        label: "From",
+        value: "Bashir Bobboi",
+        kind: "value",
+        entity: { entityType: "user", id: ADMIN, name: "Bashir Bobboi" },
+      },
+      {
+        label: "To",
+        value: "Mohammed Saeed",
+        kind: "value",
+        entity: { entityType: "user", id: CAM, name: "Mohammed Saeed" },
+      },
     ]);
   });
 
@@ -246,9 +264,48 @@ describe("formatDetails", () => {
     assert.deepEqual(details, [{ label: "Note", value: "Left", kind: "note" }]);
   });
 
-  it("drops the bookkeeping ids that mean nothing to a reader", () => {
-    const details = formatDetails({ suppression_id: ORG, reason: "Asked to be removed" }, resolvers);
+  it("drops the bookkeeping ids and raw technical arrays that mean nothing on uncollapsed chips", () => {
+    const details = formatDetails(
+      {
+        suppression_id: ORG,
+        reason: "Asked to be removed",
+        imported_field_paths: ["legal_name", "website"],
+        import_notes: ["Note 1"],
+      },
+      resolvers,
+    );
     assert.deepEqual(details, [{ label: "Reason", value: "Asked to be removed", kind: "note" }]);
+  });
+
+  it("formats url_import_drafted cleanly without raw array badges on the row", () => {
+    const view = describeAuditEvent(
+      row({
+        action: "url_import_drafted",
+        target_table: "manual_entry_records",
+        target_id: "draft-123",
+        detail: {
+          from: null,
+          to: "draft",
+          source_url: "https://example.org",
+          imported_field_paths: ["legal_name", "mission_statement"],
+        },
+      }),
+      resolvers,
+      NOW,
+    );
+    assert.equal(view.label, "URL import drafted");
+    assert.equal(view.sentence, "Bashir Bobboi drafted a client from https://example.org");
+    assert.deepEqual(view.details, [
+      { label: "Changed", value: "— → Draft", kind: "transition" },
+    ]);
+    // The imported_field_paths array remains preserved for the expanded view's rawDetail table
+    assert.ok(
+      view.rawDetail.some(
+        (entry) =>
+          entry.key === "imported_field_paths" &&
+          entry.value === JSON.stringify(["legal_name", "mission_statement"]),
+      ),
+    );
   });
 
   it("returns nothing for an empty detail", () => {

@@ -12,7 +12,7 @@ import {
 } from "@/lib/outreach/stage-two-generation";
 import { buildStageTwoGenerationInsert } from "@/lib/outreach/stage-two-persistence";
 import { emailHtmlToPlainText } from "@/lib/outreach/email-html";
-import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES } from "@/lib/outreach/stage-one-prompt";
+import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_REGISTERS } from "@/lib/outreach/stage-one-prompt";
 import {
   checkSuppressionBeforeSend,
   suppressionBlockedMessage,
@@ -44,8 +44,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // RLS-protected storage holds, never a client-supplied string.
   const parsed = z.object({
     length: z.enum(EMAIL_LENGTHS).default("standard"),
-    voice: z.enum(EMAIL_VOICES).default("180dc"),
-    tone: z.enum(EMAIL_TONES).default("balanced"),
+    register: z.enum(EMAIL_REGISTERS).default("professional"),
     closing: z.enum(CLOSING_APPROACHES).default("soft_cta"),
     replyEventId: z.uuid().optional(),
   }).safeParse(await request.json().catch(() => ({})));
@@ -269,6 +268,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       subSector: enrichment?.sub_sector,
       newsHooks: enrichment?.news_hooks,
       booklet: savedBooklet?.booklet_text ?? null,
+      senderName: authorization.actor.fullName,
       previousSubject: previousMessage.subject,
       // F117: the sent message's body may be HTML (new) or plain text (sent
       // before this feature) — either way the model prompt wants readable
@@ -279,8 +279,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     callModel,
     {
       length: parsed.data.length,
-      voice: parsed.data.voice,
-      tone: parsed.data.tone,
+      register: parsed.data.register,
       closing: parsed.data.closing,
       newsEnabled: Boolean(enrichment?.news_hooks?.length),
     },
@@ -338,6 +337,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         outreachMessageId: message.id,
         draft: result.draft,
         model,
+        activity: "follow_up_email",
         usage: result.usage,
         costUsd,
         prompt: result.prompt,

@@ -2,11 +2,25 @@
 
 import { reportError } from "@/lib/error-logging";
 import { getCurrentActor, actorFailureMessage } from "@/lib/auth/actor";
+import { createClient } from "@/lib/supabase/server";
 import { runIngestion } from "@/lib/ingestion/runner";
-import { createCompaniesHouseAdapter } from "@/lib/ingestion/sources/companieshouse";
-import { runCompaniesHouseDiscoveryImport } from "@/lib/ingestion/sources/companies-house-discovery";
+import {
+  createCompaniesHouseAdapter,
+  normalizeCompanyNumber,
+  type CompaniesHouseLookup,
+} from "@/lib/ingestion/sources/companieshouse";
 import { promotePendingCompaniesHouseRecords } from "@/lib/standardize/write-organisations";
-import { importStateFromSummary } from "./import-result";
+import {
+  companyLookupOutcome,
+  importStateFromSummary,
+  type CompanyLookupOutcome,
+  type ListedCompany,
+} from "./import-result";
+import {
+  createDefaultCompanyPreviewDependencies,
+  previewCompany,
+  type CompanyPreview,
+} from "@/lib/import/company-preview";
 
 export type CompaniesHouseImportState = {
   kind: "idle" | "success" | "warning" | "error";
@@ -24,7 +38,86 @@ export type CompaniesHouseImportState = {
     doesNotMeet: number;
     failed: number;
   };
+  /**
+   * What happened to the one company that was looked up, as opposed to the
+   * batch counters above.
+   */
+  outcome?: CompanyLookupOutcome;
 };
+
+/**
+ * Step one's result: what the company looks like, before anything is written.
+ */
+export type CompanyPreviewState =
+  | { kind: "idle" }
+  | { kind: "error"; message: string }
+  | {
+      kind: "preview";
+      preview: CompanyPreview;
+      alreadyListed: ListedCompany | null;
+    };
+
+/**
+ * The company on the client list carrying this company number, if any.
+ */
+async function findListedCompany(companyNumber: string): Promise<ListedCompany | null> {
+  const normalized = normalizeCompanyNumber(companyNumber);
+  const supabase = await createClient();
+
+  const { data: identifier, error: identifierError } = await supabase
+    .from("organisation_identifiers")
+    .select("organisation_id")
+    .in("identifier_type", ["uk_company", "companies_house"])
+    .in("identifier_value", [normalized, companyNumber.trim()])
+    .limit(1)
+    .maybeSingle<{ organisation_id: string }>();
+  if (identifierError || !identifier) return null;
+
+  const [{ data: organisation }, { count }] = await Promise.all([
+    supabase
+      .from("organisations")
+      .select("legal_name, grants_fetched_at")
+      .eq("id", identifier.organisation_id)
+      .maybeSingle<{ legal_name: string; grants_fetched_at: string | null }>(),
+    supabase
+      .from("grants")
+      .select("id", { count: "exact", head: true })
+      .eq("organisation_id", identifier.organisation_id),
+  ]);
+  if (!organisation) return null;
+
+  return {
+    organisationId: identifier.organisation_id,
+    name: organisation.legal_name,
+    grants: organisation.grants_fetched_at
+      ? { status: "fetched", count: count ?? 0 }
+      : { status: "queued" },
+  };
+}
+
+async function findListedCompanyByName(name: string): Promise<ListedCompany | null> {
+  const supabase = await createClient();
+  const { data: organisation, error } = await supabase
+    .from("organisations")
+    .select("id, legal_name, grants_fetched_at")
+    .ilike("legal_name", name.trim())
+    .limit(1)
+    .maybeSingle<{ id: string; legal_name: string; grants_fetched_at: string | null }>();
+  if (error || !organisation) return null;
+
+  const { count } = await supabase
+    .from("grants")
+    .select("id", { count: "exact", head: true })
+    .eq("organisation_id", organisation.id);
+
+  return {
+    organisationId: organisation.id,
+    name: organisation.legal_name,
+    grants: organisation.grants_fetched_at
+      ? { status: "fetched", count: count ?? 0 }
+      : { status: "queued" },
+  };
+}
 
 /**
  * promotePendingCompaniesHouseRecords already existed but was only ever
@@ -53,10 +146,6 @@ async function promoteAndMergeCounts(
       },
     };
   } catch (error) {
-    // The fetch/import above already succeeded and was already written to
-    // raw_source_records — a promotion failure shouldn't be reported as an
-    // import failure, just surfaced so the admin knows records are still
-    // sitting unpromoted.
     await reportError(error, {
       operation: "admin.companies_house.promote",
       actorUserId,
@@ -68,12 +157,144 @@ async function promoteAndMergeCounts(
   }
 }
 
+/**
+ * Step one of two: fetch the company and show what importing it would do,
+ * without importing it.
+ */
+export async function previewCompanyForImport(
+  previous: CompanyPreviewState,
+  formData: FormData,
+): Promise<CompanyPreviewState> {
+  void previous;
+
+  const authorization = await getCurrentActor("client:edit");
+  if (!authorization.ok) {
+    return { kind: "error", message: actorFailureMessage(authorization.reason) };
+  }
+
+  const companyNumber = String(formData.get("companyNumber") ?? "").trim();
+  const registeredName = String(formData.get("registeredName") ?? "").trim();
+  if (!companyNumber && !registeredName) {
+    return {
+      kind: "error",
+      message: "Enter a company number or registered name.",
+    };
+  }
+
+  const lookup: CompaniesHouseLookup = companyNumber
+    ? { companyNumber }
+    : { registeredName };
+
+  const result = await previewCompany(
+    lookup,
+    createDefaultCompanyPreviewDependencies(),
+  );
+
+  if (result.status === "not_found") {
+    return {
+      kind: "error",
+      message: companyNumber
+        ? "No company on the Companies House register has that company number."
+        : "No exact Companies House match was found for that registered name.",
+    };
+  }
+  if (result.status === "unavailable") {
+    return { kind: "error", message: result.message };
+  }
+
+  return {
+    kind: "preview",
+    preview: result.preview,
+    alreadyListed: await findListedCompany(result.preview.companyNumber),
+  };
+}
+
+/**
+ * Step two of two: import the company the reader has just reviewed.
+ */
+export async function lookupCompany(
+  previous: CompaniesHouseImportState,
+  formData: FormData,
+): Promise<CompaniesHouseImportState> {
+  void previous;
+
+  const authorization = await getCurrentActor("client:edit");
+  if (!authorization.ok) {
+    return {
+      kind: "error",
+      message: actorFailureMessage(authorization.reason),
+    };
+  }
+
+  const companyNumber = String(formData.get("companyNumber") ?? "").trim();
+  const registeredName = String(formData.get("registeredName") ?? "").trim();
+  if (!companyNumber && !registeredName) {
+    return {
+      kind: "error",
+      message: "Enter a company number or registered name.",
+    };
+  }
+
+  const lookup: CompaniesHouseLookup = companyNumber
+    ? { companyNumber }
+    : { registeredName };
+
+  const listedBefore = companyNumber
+    ? await findListedCompany(companyNumber)
+    : registeredName
+      ? await findListedCompanyByName(registeredName)
+      : null;
+
+  try {
+    const adapter = createCompaniesHouseAdapter(lookup);
+    const [summary] = await runIngestion([adapter], {
+      triggeredBy: "manual",
+      triggeredByUserId: authorization.actor.id,
+    });
+
+    if (summary.status === "failed") {
+      await reportError(new Error(summary.error ?? "Companies House lookup failed"), {
+        operation: "admin.companies_house.lookup",
+        source: summary.source,
+        actorUserId: authorization.actor.id,
+      });
+      return importStateFromSummary(summary);
+    }
+
+    const promotedState = await promoteAndMergeCounts(
+      importStateFromSummary(summary),
+      authorization.actor.id,
+    );
+
+    const listedAfter = companyNumber
+      ? await findListedCompany(companyNumber)
+      : registeredName
+        ? await findListedCompanyByName(registeredName)
+        : null;
+
+    return {
+      ...promotedState,
+      outcome: companyLookupOutcome(listedBefore, listedAfter, promotedState.promoteCounts),
+    };
+  } catch (error) {
+    await reportError(error, {
+      operation: "admin.companies_house.lookup",
+      actorUserId: authorization.actor.id,
+    });
+    return {
+      kind: "error",
+      message:
+        "Companies House could not be imported. The failure was recorded; please try again later.",
+    };
+  }
+}
+
 export async function importCompaniesHouse(
   previous: CompaniesHouseImportState,
   formData: FormData,
 ): Promise<CompaniesHouseImportState> {
   void previous;
-  const authorization = await getCurrentActor("user:manage");
+  const authorization = await getCurrentActor("client:edit");
   if (!authorization.ok) {
     return {
       kind: "error",
@@ -117,70 +338,6 @@ export async function importCompaniesHouse(
   } catch (error) {
     await reportError(error, {
       operation: "admin.companies_house.import",
-      actorUserId: authorization.actor.id,
-    });
-    return {
-      kind: "error",
-      message:
-        "Companies House could not be imported. The failure was recorded; please try again later.",
-    };
-  }
-}
-
-/**
- * Zero-input replacement for the old typed-criteria bulk search: runs the same
- * 3-tier mission-fit discovery the weekly cron job runs
- * (companies-house-discovery.ts's runCompaniesHouseDiscoveryImport), so the
- * manual button and the scheduled job can never drift apart. Promotion —
- * including the F047 Tier A/B strong-evidence bypass — happens inside that
- * shared function, not here.
- */
-export async function importCompaniesHouseAuto(
-  previous: CompaniesHouseImportState,
-  formData: FormData,
-): Promise<CompaniesHouseImportState> {
-  void previous;
-  void formData;
-  const authorization = await getCurrentActor("user:manage");
-  if (!authorization.ok) {
-    return {
-      kind: "error",
-      message: actorFailureMessage(authorization.reason),
-    };
-  }
-
-  try {
-    const result = await runCompaniesHouseDiscoveryImport(
-      { triggeredBy: "manual", triggeredByUserId: authorization.actor.id },
-      authorization.actor.id,
-    );
-
-    if (result.summary.status === "failed") {
-      await reportError(new Error(result.summary.error ?? "Companies House discovery import failed"), {
-        operation: "admin.companies_house.import_auto",
-        source: result.summary.source,
-        actorUserId: authorization.actor.id,
-      });
-      return importStateFromSummary(result.summary);
-    }
-
-    const state = importStateFromSummary(result.summary);
-    if (!result.promoteCounts) {
-      return { ...state, message: `${state.message} ${result.promoteError}`.trim() };
-    }
-    return {
-      ...state,
-      promoteCounts: {
-        inserted: result.promoteCounts.inserted,
-        rejected: result.promoteCounts.rejected,
-        needsReview: result.promoteCounts.needsReview,
-        doesNotMeet: result.promoteCounts.doesNotMeet,
-        failed: result.promoteCounts.failed,
-      },
-    };
-  } catch (error) {
-    await reportError(error, {
-      operation: "admin.companies_house.import_auto",
       actorUserId: authorization.actor.id,
     });
     return {

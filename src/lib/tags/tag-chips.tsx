@@ -1,18 +1,27 @@
 "use client";
 
-// F192 UI for Remove Tag from Client, following docs/design-system.md's
-// "Inside the app" rules: bone/white app, rounded pills, --brand green as
-// the single sparing accent (the doc names "an icon disc, a chip" as exactly
-// where that accent belongs). Removal has no page reload (F192 AC2): the
-// server action confirms, then the parent drops the tag from its state.
+// F192 UI for Remove Tag from Client. Removal has no page reload (F192 AC2):
+// the server action confirms, then the parent drops the tag from its state.
 // The list itself lives in the parent (TagsSection on the client profile),
 // so chips assigned elsewhere in the same session stay in sync.
+//
+// The shape is a tag, not a pill: a rectangle cut with a V notch into its
+// right edge, like the punch-hole end of a paper tag. The clip-path carves
+// the notch out of the tinted surface; the delete button sits in the empty
+// space the notch leaves beside the tag, so removal reads as an affordance
+// next to the tag rather than a glyph printed on it.
 
 import { useState, useTransition } from "react";
+import { X } from "lucide-react";
+
 import { removeTagAction } from "@/lib/tags/tag-actions";
 import { tagPillStyle } from "@/lib/tags/tag-colours";
 
 export type TagChip = { id: string; name: string; colour?: string | null };
+
+/** The V notch: 8px deep, apex centred on the right edge. */
+export const TAG_NOTCH_CLIP =
+  "polygon(0 0, 100% 0, calc(100% - 8px) 50%, 100% 100%, 0 100%)";
 
 export function TagChips({
   organisationId,
@@ -54,29 +63,30 @@ export function TagChips({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-2">
       {tags.map((tag) => {
-        // F194 AC2/AC4: a tag with a colour renders as a pill tinted with it;
-        // absent/unrecognised falls back to today's brand styling.
+        // F194 AC2/AC4: a tag with a colour renders as a surface tinted with
+        // it; absent/unrecognised falls back to today's brand styling.
         const pillStyle = tagPillStyle(tag.colour);
         return (
-          <span
-            key={tag.id}
-            style={pillStyle ?? undefined}
-            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
-              pillStyle ? "" : "bg-brand/12 text-brand-hover"
-            }`}
-          >
-            {tag.name}
+          <span key={tag.id} className="inline-flex items-center">
+            <span
+              style={{ clipPath: TAG_NOTCH_CLIP, ...(pillStyle ?? undefined) }}
+              className={`inline-flex items-center py-1 pl-2.5 pr-3 text-xs font-medium ${
+                pillStyle ? "" : "bg-brand/12 text-brand-hover"
+              }`}
+            >
+              {tag.name}
+            </span>
             {canEdit && (
               <button
                 type="button"
                 onClick={() => handleRemove(tag.id)}
                 disabled={pending}
                 aria-label={`Remove ${tag.name}`}
-                className="ml-0.5 rounded-full opacity-60 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
+                className="ml-1 inline-flex size-4 shrink-0 items-center justify-center rounded-full text-dim opacity-60 transition-colors hover:bg-black/[0.06] hover:text-ink hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
               >
-                ×
+                <X aria-hidden="true" className="size-3" strokeWidth={2.5} />
               </button>
             )}
           </span>

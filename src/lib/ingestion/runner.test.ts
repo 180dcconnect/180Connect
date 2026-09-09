@@ -46,6 +46,12 @@ type FinishedRun = {
   errorMessage?: string;
 };
 
+type ProgressUpdate = {
+  runId: string;
+  walked: number;
+  total: number;
+};
+
 /**
  * An in-memory IngestionStore. The runner talks to this interface rather than to
  * Supabase, so failure isolation and the counts can be asserted without a database.
@@ -58,6 +64,7 @@ function fakeStore(
   const started: { source: DataSourceName; trigger: RunTrigger }[] = [];
   const finished: FinishedRun[] = [];
   const written: RawRecordRow[] = [];
+  const progress: ProgressUpdate[] = [];
   let nextId = 1;
 
   const store: IngestionStore = {
@@ -78,6 +85,9 @@ function fakeStore(
     async writeRecords(rows) {
       written.push(...rows);
     },
+    async updateRunProgress(runId, { walked, total }) {
+      progress.push({ runId, walked, total });
+    },
     async finishRun(runId, status, counts, errorMessage) {
       finished.push({ runId, status, counts: { ...counts }, errorMessage });
     },
@@ -87,7 +97,7 @@ function fakeStore(
     ...overrides,
   };
 
-  return { store, started, finished, written };
+  return { store, started, finished, written, progress };
 }
 
 function record(id: string, payload: unknown = { id }): CommonRecord {
@@ -316,6 +326,57 @@ describe("runIngestion", () => {
       failed: 0,
     });
     assert.equal(written.length, 2);
+    assert.equal(finished[0].status, "completed");
+  });
+
+  it("persists adapter progress reports onto the running run row", async () => {
+    const { store, progress } = fakeStore();
+    const errors: Error[] = [];
+    const source: DataSourceAdapter = {
+      name: "360giving",
+      async fetch(reportProgress) {
+        reportProgress?.({ walked: 1, total: 2 });
+        reportProgress?.({ walked: 2, total: 2 });
+        return { records: [], truncated: false };
+      },
+      onError(err) {
+        errors.push(err);
+      },
+    };
+
+    const [summary] = await runIngestion([source], undefined, store);
+    // Progress writes are fire-and-forget — let them land before asserting.
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(summary.status, "completed");
+    assert.deepEqual(errors, []);
+    assert.deepEqual(progress, [
+      { runId: "run-1", walked: 1, total: 2 },
+      { runId: "run-1", walked: 2, total: 2 },
+    ]);
+  });
+
+  it("does not fail the run when a progress write fails", async () => {
+    const { store, finished } = fakeStore({
+      async updateRunProgress() {
+        throw new Error("heartbeat lost");
+      },
+    });
+    const source: DataSourceAdapter = {
+      name: "360giving",
+      async fetch(reportProgress) {
+        reportProgress?.({ walked: 1, total: 1 });
+        return { records: [], truncated: false };
+      },
+      onError() {},
+    };
+
+    const [summary] = await runIngestion([source], undefined, store);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // A lost heartbeat is swallowed: the run still completes and the
+    // authoritative totals are still recorded by finishRun.
+    assert.equal(summary.status, "completed");
     assert.equal(finished[0].status, "completed");
   });
 

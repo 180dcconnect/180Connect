@@ -7,7 +7,7 @@ import { runCompaniesHouseStatusRecheck } from "@/lib/ingestion/sources/companie
  * (supabase/migrations/20260809100400_schedule_companies_house_cron.sql). Never
  * touches organisations.outreach_status — see the migration header on
  * 20260809100200_create_organisation_status_flags.sql for why. Same CRON_SECRET
- * check as companies-house-import/route.ts.
+ * check the retired discovery route used to carry.
  */
 
 export const maxDuration = 300;

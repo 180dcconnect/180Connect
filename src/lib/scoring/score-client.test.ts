@@ -96,10 +96,17 @@ describe("priorityFactorsFor — factor coverage matches the header's honesty ta
     assert.ok(health > unscored); // adding a strong sector must move the score
   });
 
-  it("keeps geography neutral while no branch priority regions exist", () => {
+  it("keeps geography neutral for a caller that passes no regions at all", () => {
     assert.equal(
-      priorityFactorsFor({ city: "Leeds", outreach_status: "not_contacted" }).geography,
+      priorityFactorsFor({ city: "Leeds", outreach_status: "not_contacted" }, []).geography,
       0.5,
+    );
+  });
+
+  it("scores geography with branch priority regions by default", () => {
+    assert.equal(
+      priorityFactorsFor({ city: "Sheffield", outreach_status: "not_contacted" }).geography,
+      0.8,
     );
   });
 

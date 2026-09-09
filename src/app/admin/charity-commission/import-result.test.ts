@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { RunSummary } from "@/lib/ingestion/type";
 import type { PromoteCounts } from "@/lib/standardize/write-organisations";
-import { importStateFromSummary, describePromotion } from "./import-result.ts";
+import {
+  importStateFromSummary,
+  describePromotion,
+  lookupOutcome,
+  type ListedCharity,
+} from "./import-result.ts";
 
 function summary(status: RunSummary["status"], error?: string): RunSummary {
   return {
@@ -80,5 +85,59 @@ describe("describePromotion", () => {
       message,
       "1 added to the client list, 2 flagged for review, 1 did not meet the client criteria, 1 had no usable name.",
     );
+  });
+});
+
+// The single-charity answer, which the batch counters cannot give on their own.
+describe("lookupOutcome", () => {
+  const listed: ListedCharity = {
+    organisationId: "org-1",
+    name: "Sheffield Example Trust",
+    grants: { status: "queued" },
+  };
+
+  it("reports a charity that was not on the list before as added", () => {
+    const outcome = lookupOutcome(null, listed, { inserted: 1, needsReview: 0, doesNotMeet: 0, invalidData: 0, failed: 0 });
+    assert.deepEqual(outcome, { kind: "added", ...listed });
+  });
+
+  // The case the old counts grid could not express: the raw record dedups on
+  // checksum and promotion flags it as a duplicate, so every counter the dialog
+  // rendered was zero while the charity sat on the list all along.
+  it("reports a charity that was already there as already listed, not as nothing happening", () => {
+    const outcome = lookupOutcome(listed, listed, { inserted: 0, needsReview: 0, doesNotMeet: 0, invalidData: 0, failed: 0 });
+    assert.deepEqual(outcome, { kind: "already_listed", ...listed });
+  });
+
+  it("carries the grant coverage of the record as it stands after the run", () => {
+    const withGrants: ListedCharity = { ...listed, grants: { status: "fetched", count: 12 } };
+    const outcome = lookupOutcome(null, withGrants, { inserted: 1, needsReview: 0, doesNotMeet: 0, invalidData: 0, failed: 0 });
+    assert.deepEqual(outcome.kind === "added" ? outcome.grants : null, { status: "fetched", count: 12 });
+  });
+
+  it("distinguishes held-for-review from rejected when nothing reached the list", () => {
+    assert.equal(
+      lookupOutcome(null, null, { inserted: 0, needsReview: 1, doesNotMeet: 0, invalidData: 0, failed: 0 }).kind,
+      "held_for_review",
+    );
+    assert.equal(
+      lookupOutcome(null, null, { inserted: 0, needsReview: 0, doesNotMeet: 1, invalidData: 0, failed: 0 }).kind,
+      "does_not_meet",
+    );
+  });
+
+  it("falls back to not-on-list when the counters explain nothing", () => {
+    assert.equal(lookupOutcome(null, null, undefined).kind, "not_on_list");
+    assert.equal(
+      lookupOutcome(null, null, { inserted: 0, needsReview: 0, doesNotMeet: 0, invalidData: 1, failed: 0 }).kind,
+      "not_on_list",
+    );
+  });
+
+  // Presence wins over the counters: a review flag on some other record in the
+  // same promote pass must not hide a charity that is demonstrably on the list.
+  it("prefers what is actually on the list over what the counters say", () => {
+    const outcome = lookupOutcome(null, listed, { inserted: 0, needsReview: 1, doesNotMeet: 0, invalidData: 0, failed: 0 });
+    assert.equal(outcome.kind, "added");
   });
 });

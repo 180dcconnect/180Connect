@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  checkScheduledAttachmentSet,
   deliverDueScheduledEmails,
+  type AttachmentLoadResult,
   type DueScheduledMessage,
   type ScheduledOutreachDeps,
 } from "./scheduled-worker.ts";
@@ -24,6 +26,7 @@ function message(overrides: Partial<DueScheduledMessage> = {}): DueScheduledMess
     html: "<p>Body</p>",
     text: "Body",
     recipient: "client@example.org",
+    attachFlyer: false,
     ...overrides,
   };
 }
@@ -33,6 +36,7 @@ function harness(options: {
   due?: DueScheduledMessage[];
   suppressed?: boolean;
   claimResult?: "claimed" | "daily_limit_reached" | "lost_claim";
+  attachments?: AttachmentLoadResult;
   delivery?: "ok" | "failed";
   flipSucceeds?: boolean;
   failFlipSucceeds?: boolean;
@@ -55,6 +59,10 @@ function harness(options: {
     async claim(id) {
       calls.push(`claim:${id}`);
       return options.claimResult ?? "claimed";
+    },
+    async loadAttachments(id) {
+      calls.push(`loadAttachments:${id}`);
+      return options.attachments ?? { ok: true, attachments: [] };
     },
     async deliver(input) {
       calls.push(`deliver:${input.recipient}`);
@@ -86,6 +94,7 @@ test("a due message is claimed, delivered and marked sent", async () => {
     "isSuppressed",
     `underSendLimit:00000000-0000-4000-a000-000000000001`,
     `claim:00000000-0000-4000-d000-000000000001`,
+    `loadAttachments:00000000-0000-4000-d000-000000000001`,
     "deliver:client@example.org",
     "markSent:00000000-0000-4000-d000-000000000001",
   ]);
@@ -217,6 +226,9 @@ test("mixed outcomes across a batch are counted independently", async () => {
     async claim(id) {
       return id.endsWith("3") ? "lost_claim" : "claimed"; // third message lost to a concurrent runner
     },
+    async loadAttachments() {
+      return { ok: true, attachments: [] };
+    },
     async deliver() {
       deliveries += 1;
       return deliveries === 2 ? { ok: false, reason: "boom" } : { ok: true }; // fifth attempt fails at Gmail
@@ -249,4 +261,99 @@ test("an empty due list does nothing beyond the load", async () => {
   assert.deepEqual(summary, { sent: 0, blocked: 0, failed: 0 });
   assert.equal(calls.length, 1);
   assert.match(calls[0], /^loadDue:/);
+});
+
+test("a scheduled send carries the flyer exactly as an immediate send does", async () => {
+  const seen: boolean[] = [];
+  const { deps } = harness({
+    due: [
+      message({ attachFlyer: true }),
+      message({ id: "00000000-0000-4000-d000-000000000002", attachFlyer: false }),
+    ],
+  });
+  const recording: ScheduledOutreachDeps = {
+    ...deps,
+    async deliver(input) {
+      seen.push(input.attachFlyer);
+      return { ok: true, providerMessageId: "pm-1" };
+    },
+  };
+  await deliverDueScheduledEmails(recording, new Date("2026-09-01T10:00:00Z"));
+  // Read from the row, so the draft's wording about what is enclosed still
+  // holds hours later with no UI and no CAM present to re-tick a box.
+  assert.deepEqual(seen, [true, false]);
+});
+
+test("linked files resolve after the claim and ride along to deliver", async () => {
+  const files = [
+    { filename: "scope.pdf", contentType: "application/pdf", content: Buffer.from("pdf-bytes") },
+    { filename: "budget.xlsx", contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content: Buffer.from("sheet-bytes") },
+  ];
+  const seen: string[][] = [];
+  const { deps, calls } = harness({ due: [message()], attachments: { ok: true, attachments: files } });
+  const recording: ScheduledOutreachDeps = {
+    ...deps,
+    async deliver(input) {
+      calls.push(`deliver:${input.recipient}`);
+      seen.push(input.attachments.map((file) => file.filename));
+      return { ok: true, providerMessageId: "pm-1" };
+    },
+  };
+  const summary = await deliverDueScheduledEmails(recording);
+  assert.deepEqual(summary, { sent: 1, blocked: 0, failed: 0 });
+  assert.deepEqual(seen, [["scope.pdf", "budget.xlsx"]]);
+  // Bytes are only fetched for the message this run owns: suppressed,
+  // over-limit and lost-claim rows never pay a download.
+  const claimAt = calls.findIndex((c) => c.startsWith("claim:"));
+  const loadAt = calls.findIndex((c) => c.startsWith("loadAttachments:"));
+  const deliverAt = calls.findIndex((c) => c.startsWith("deliver:"));
+  assert.ok(claimAt !== -1 && loadAt > claimAt && deliverAt > loadAt, "claim, then resolve, then deliver");
+});
+
+test("a lost claim never resolves attachments — another runner owns the bytes", async () => {
+  const { deps, calls } = harness({ due: [message()], claimResult: "lost_claim" });
+  const summary = await deliverDueScheduledEmails(deps);
+  assert.deepEqual(summary, { sent: 0, blocked: 0, failed: 0 });
+  assert.ok(!calls.some((c) => c.startsWith("loadAttachments:")), "no download for a message this run does not own");
+});
+
+test("a permanently missing file fails the message and tells the scheduler", async () => {
+  const reason = "One of the attached files could not be found. Nothing was sent.";
+  const { deps, calls } = harness({
+    due: [message()],
+    attachments: { ok: false, reason, retryable: false },
+  });
+  const summary = await deliverDueScheduledEmails(deps);
+  assert.deepEqual(summary, { sent: 0, blocked: 0, failed: 1 });
+  assert.ok(!calls.some((c) => c.startsWith("deliver:")), "nothing may leave short of the reviewed files");
+  assert.ok(calls.some((c) => c.startsWith("markFailed:") && c.includes(reason)));
+  assert.ok(calls.some((c) => c.startsWith("notify:")));
+});
+
+test("a transient download failure stays scheduled for the next run", async () => {
+  const { deps, calls } = harness({
+    due: [message()],
+    attachments: { ok: false, reason: "The attached files could not be downloaded. Nothing was sent.", retryable: true },
+  });
+  const summary = await deliverDueScheduledEmails(deps);
+  assert.deepEqual(summary, { sent: 0, blocked: 1, failed: 0 });
+  // Same treatment as the rate-limit blocks: transient by construction, so no
+  // failure record and no notification — the next run retries the download.
+  assert.ok(!calls.some((c) => c.startsWith("deliver:")));
+  assert.ok(!calls.some((c) => c.startsWith("markFailed:") || c.startsWith("notify:")));
+});
+
+test("checkScheduledAttachmentSet enforces the shared caps", async () => {
+  assert.equal(checkScheduledAttachmentSet([]), null);
+  assert.equal(checkScheduledAttachmentSet([{ sizeBytes: 100 }]), null);
+  // Null sizes (rows predating size tracking) count as zero, like the send path.
+  assert.equal(checkScheduledAttachmentSet([{ sizeBytes: null }]), null);
+  assert.match(
+    checkScheduledAttachmentSet(Array.from({ length: 11 }, () => ({ sizeBytes: 10 }))) ?? "",
+    /at most 10 attachments/,
+  );
+  assert.match(
+    checkScheduledAttachmentSet([{ sizeBytes: 19 * 1024 * 1024 }]) ?? "",
+    /too large to send together/,
+  );
 });

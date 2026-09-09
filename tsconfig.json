@@ -22,7 +22,15 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      // The vendored CherryBlossomQRCode component imports React Native
+      // runtime packages. At bundle time next.config.ts aliases them to web
+      // equivalents (react-native-web + the shims in src/lib/web-shims/);
+      // these paths make the TypeScript compiler resolve them the same way.
+      "react-native-reanimated": ["./src/lib/web-shims/react-native-reanimated.ts"],
+      "react-native-keyboard-controller": ["./src/lib/web-shims/react-native-keyboard-controller.ts"],
+      "react-native-pulsar": ["./src/lib/web-shims/react-native-pulsar.ts"],
+      "react-native-webgpu": ["./src/lib/web-shims/react-native-webgpu.tsx"]
     }
   },
   "include": [

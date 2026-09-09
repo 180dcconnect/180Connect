@@ -74,11 +74,11 @@ export function AssignOwnerForm({
   }
 
   return (
-    <form className="mt-5 space-y-3 border-t border-black/[0.06] pt-5" onSubmit={submit}>
+    <form className="mt-5 space-y-3 border-t border-rule pt-5" onSubmit={submit}>
       {currentOwnerId && (
         <p
           role="alert"
-          className="rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-3.5 py-3 text-[13px] font-bold leading-[1.6] text-amber-800"
+          className="rounded-inset border border-hold/25 bg-hold-wash px-3.5 py-3 text-[13px] font-semibold leading-[1.6] text-hold"
         >
           Currently owned by {currentOwnerName ?? "a former team member"}. Assigning a
           new owner moves this client away from them — this is not silent.
@@ -86,11 +86,11 @@ export function AssignOwnerForm({
       )}
 
       <label className="flex flex-col gap-1.5 text-sm">
-        <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+        <span className="text-[13px] font-medium text-dim">
           Assign to
         </span>
         <Select value={ownerId} onValueChange={setOwnerId}>
-          <SelectTrigger className="w-full rounded-xl bg-white text-sm">
+          <SelectTrigger className="w-full rounded-inset bg-white text-sm">
             <SelectValue placeholder="Choose a CAM" />
           </SelectTrigger>
           <SelectContent>
@@ -105,7 +105,7 @@ export function AssignOwnerForm({
       </label>
 
       <label className="flex flex-col gap-1.5 text-sm">
-        <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+        <span className="text-[13px] font-medium text-dim">
           Reason
         </span>
         <Input
@@ -113,7 +113,7 @@ export function AssignOwnerForm({
           value={reason}
           onChange={(event) => setReason(event.target.value)}
           placeholder="Why this handover is happening"
-          className="rounded-xl bg-white"
+          className="rounded-inset bg-white"
         />
       </label>
 
@@ -122,7 +122,7 @@ export function AssignOwnerForm({
       </OriginButton>
 
       {error && (
-        <p aria-live="polite" role="alert" className="text-[13px] font-bold text-destructive">
+        <p aria-live="polite" role="alert" className="text-[13px] font-semibold text-stop">
           {error}
         </p>
       )}

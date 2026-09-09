@@ -637,6 +637,29 @@ describe("resendInvite", () => {
     assert.ok(logs.some((log) => log.includes("user.invite_resent")));
   });
 
+  it("calls touchInvitedAt to refresh the expiry window on a successful resend", async () => {
+    const { lookup } = fakePendingLookup({
+      row: { email: "ada@180dc.org", accepted: false },
+    });
+    const { client: admin } = fakeAdminClient({ ok: true });
+    const { send } = fakeSender();
+    const touchedIds: string[] = [];
+    const touchInvitedAt = async (userId: string) => {
+      touchedIds.push(userId);
+      return { error: null };
+    };
+
+    const { result } = await silencingLogs(() =>
+      resendInvite(lookup, admin, INVITED_BY, RESEND_USER_ID, REDIRECT_TO, {
+        send,
+        touchInvitedAt,
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(touchedIds, [RESEND_USER_ID]);
+  });
+
   it("reports a mint failure without leaking the cause", async () => {
     const { lookup } = fakePendingLookup({
       row: { email: "ada@180dc.org", accepted: false },

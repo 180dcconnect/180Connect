@@ -17,14 +17,16 @@ This version has breaking changes — APIs, conventions, and file structure may 
 ```bash
 npm run lint                     # ESLint
 npx tsc --noEmit                 # typecheck
-npm run build                    # production build (catches errors the dev server tolerates)
+npm run build                    # production build (run ONLY when explicitly requested)
 npm test                         # unit tests (Node built-in test runner, not Jest/Vitest)
 npm run seed                     # load 50 fake organisations into local DB
 npm run seed:clear               # remove all is_seed rows
-npm run companies-register:build # rebuild the companies register file (CI does this; ~20 min)
+npm run register:build           # rebuild the charity register file (CI does this; ~12 min)
+npm run companies-register:build # rebuild the companies register file (CI does this; ~3 min)
 ```
 
-**Pre-push order:** `npm run lint` → `npx tsc --noEmit` → `npm run build`
+**Pre-push order:** `npm run lint` → `npx tsc --noEmit`
+**CRITICAL:** Never run `npm run build` unless the user explicitly asks for it.
 
 ## Architecture at a glance
 
@@ -60,9 +62,12 @@ npm run companies-register:build # rebuild the companies register file (CI does 
 
 ## Visual design
 
-- Public pages (landing, legal, login — before sign-in) follow the design system in [`docs/design-system.md`](docs/design-system.md).
-- **Source of truth for brand tokens:** `src/components/brand/` — import it, never copy hex values or variants into page files.
-- Logged-in app is exempt: uses shadcn tokens in `globals.css`.
+Two systems, one per side of the login. Read the right one **before** touching UI.
+
+- Public pages (landing, legal, login — before sign-in): [`docs/design-system.md`](docs/design-system.md). Tokens in `src/components/brand/`.
+- Logged-in app (`/dashboard`, `/clients`, `/admin`, `/settings`): [`docs/app-design-system.md`](docs/app-design-system.md). Tokens in `src/app/globals.css`.
+- **Never copy hex values or variants into a page file.** Import the token.
+- **Do not copy the file next to the one you are editing.** The app is mid-migration and most screens are on the old language. `src/app/clients/[id]/` is the reference; `src/app/admin/*` and `src/app/clients/page.tsx` are not.
 
 ## CI workflows
 
@@ -72,21 +77,50 @@ npm run companies-register:build # rebuild the companies register file (CI does 
 | `migrations.yml` | push to dev/main (supabase/** changes) | verify (pgTAP + RLS coverage + anon lockout) → auto-apply to staging/production |
 | `secret-scan.yml` | PRs | gitleaks — fails if a credential is committed |
 
+## Infrastructure budget
+
+**We are on the Supabase free plan and that is what the branch can afford.** Treat it
+as a design constraint, not a temporary state — do not propose anything that assumes
+an upgrade.
+
+| Quota | Limit | Notes |
+| --- | --- | --- |
+| Database | **500 MB** | Shared across every table. The binding constraint. |
+| File storage | 1 GB | Separate quota — Storage bytes do not touch the 500 MB. |
+| Active projects | 2 | staging + production, already both spoken for ([`docs/staging-environment-setup.md`](docs/staging-environment-setup.md)) |
+| Inactivity | pauses after 7 days | Wake it from the dashboard |
+
+What this means in practice:
+
+- **Never store file bytes in a table.** Bytes go in Supabase Storage; the database
+  holds metadata and foreign keys. `outreach_message_attachments` is the pattern to
+  copy — a link table, so one stored file can be attached to any number of emails at
+  ~50 bytes of database each.
+- Anything written once per email, per client, or per import needs a row-size
+  sanity check before it ships. 500 MB disappears fast at a megabyte a row.
+- No point-in-time recovery on this plan. See
+  [`docs/staging-environment-setup.md`](docs/staging-environment-setup.md) §"500 MB
+  database limit" for the monitoring and fallback plan.
+
 ## Gotchas
 
 - `package.json` engines say Node 24.x; CI uses 22.x. Match whatever your environment provides.
 - `src/lib/supabase/admin-client-factory.ts` bypasses `server-only` guard. ESLint blocks importing it from `src/` except in `admin.ts` and `src/lib/ingestion/` / `src/lib/standardize/`.
 - `NEXT_PUBLIC_` vars are inlined into the browser bundle — never prefix a secret with it.
 - Seed scripts refuse to run against production. They check `SUPABASE_DB_URL`.
-- `npm run build` is the real pre-push gate — the dev server tolerates errors that the production build does not.
+- Never run `npm run build` unless the user explicitly asks for it. Use `npm run lint` and `npx tsc --noEmit` for validation instead.
 
 ## Key reference docs
 
 - [`docs/architecture.md`](docs/architecture.md) — how auth, validation, errors, and the DB fit together
+- [`docs/app-design-system.md`](docs/app-design-system.md) — the logged-in app's visual language: surfaces, type, colour, motion, and how to convert an old screen
 - [`docs/rls-permission-matrix.md`](docs/rls-permission-matrix.md) — who can read/write what
 - [`docs/data-model/`](docs/data-model/) — table and field definitions
 - [`docs/environment-variables.md`](docs/environment-variables.md) — every env var, where to get it
 - [`supabase/MIGRATIONS.md`](supabase/MIGRATIONS.md) — migration conventions and workflow
 - [`docs/audit-log-pattern.md`](docs/audit-log-pattern.md) — required pattern for privileged writes
 - [`docs/client-list-sorting.md`](docs/client-list-sorting.md) — how `/clients` is ordered, and the pipeline-status order
-- [`docs/companies-register-import.md`](docs/companies-register-import.md) — how Companies House imports work: why the register file is a filtered ~12%, what the monthly build keeps, what the screen chooses
+- [`docs/ingestion.md`](docs/ingestion.md) — the whole ingestion pipeline: the four stages, every source, what runs on a schedule
+- [`docs/charity-register-import.md`](docs/charity-register-import.md) — how charity imports work; criteria are data (a query over a register file), never code
+- [`docs/charity-import-guide.md`](docs/charity-import-guide.md) — the same thing for CAMs and admins: running an import, what the filters mean, refreshing the register
+- [`docs/companies-register-import.md`](docs/companies-register-import.md) — the Companies House twin: why the file is a filtered ~12% of the register, what the build keeps, what the screen chooses

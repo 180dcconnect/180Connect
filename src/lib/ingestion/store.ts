@@ -8,6 +8,7 @@ import { buildAdminClient } from "../supabase/admin-client-factory.ts";
 import type { RedactionKind } from "./personal-data.ts";
 import type {
   DataSourceName,
+  FetchProgress,
   IngestionStore,
   JobStatus,
   RawRecordRow,
@@ -87,11 +88,29 @@ export function createSupabaseIngestionStore(
       }
     },
 
+    async updateRunProgress(runId: string, progress: FetchProgress) {
+      // A heartbeat, not a ledger: finishRun overwrites run_stats with the
+      // source's final stats, so each write simply replaces the last one.
+      // Flat numbers only, per the SourceFetchResult.stats convention.
+      const { error } = await supabase
+        .from("ingestion_runs")
+        .update({
+          run_stats: {
+            walked_organisations: progress.walked,
+            total_organisations: progress.total,
+          },
+        })
+        .eq("id", runId);
+
+      if (error) throw error;
+    },
+
     async finishRun(
       runId: string,
       status: JobStatus,
       counts: RunCounts,
       errorMessage?: string,
+      stats?: Record<string, number>,
     ) {
       const { error } = await supabase
         .from("ingestion_runs")
@@ -103,6 +122,10 @@ export function createSupabaseIngestionStore(
           records_skipped: counts.skipped,
           records_failed: counts.failed,
           error_message: errorMessage ?? null,
+          // Undefined stays null rather than writing `{}`: "this source reports
+          // no funnel" and "the funnel was all zeroes" are different facts, and
+          // the admin page renders them differently.
+          run_stats: stats ?? null,
         })
         .eq("id", runId);
 

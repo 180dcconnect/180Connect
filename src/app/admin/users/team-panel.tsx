@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/browser";
 import {
   applyRealtimeUserChange,
@@ -8,6 +8,10 @@ import {
   type TeamPanelState,
   type TeamUser,
 } from "@/lib/admin/team-realtime";
+import {
+  filterTeamUsers,
+  type TeamFilterCriteria,
+} from "@/lib/admin/team-filter";
 import { PendingInvitesList } from "./pending-invites-list";
 import { UserManagementTable } from "./user-management-table";
 import { Group, Rise } from "@/components/dashboard-stage";
@@ -18,11 +22,13 @@ export function TeamPanel({
   initialTeamUsers,
   initialPendingInvites,
   pendingInvitesError,
+  filterCriteria,
 }: {
   currentUserId: string;
   initialTeamUsers: TeamUser[];
   initialPendingInvites: PendingInvite[];
   pendingInvitesError: boolean;
+  filterCriteria?: TeamFilterCriteria;
 }) {
   // Both lists are one state object, not two, so a realtime change can move a
   // row between them (invite accepted -> team member) in a single update. A
@@ -103,6 +109,35 @@ export function TeamPanel({
     }));
   }
 
+  function handleResendSuccess(id: string, newInvitedAt: string) {
+    setState((current) => ({
+      ...current,
+      pendingInvites: current.pendingInvites.map((inv) =>
+        inv.id === id ? { ...inv, invited_at: newInvitedAt } : inv,
+      ),
+    }));
+  }
+
+  function handleCancelSuccess(id: string) {
+    setState((current) => ({
+      ...current,
+      pendingInvites: current.pendingInvites.filter((inv) => inv.id !== id),
+    }));
+  }
+
+  const hasActiveFilters = Boolean(
+    filterCriteria?.query ||
+      (filterCriteria?.roles && filterCriteria.roles.length > 0) ||
+      (filterCriteria?.clientRanges && filterCriteria.clientRanges.length > 0) ||
+      (filterCriteria?.lastActiveRanges && filterCriteria.lastActiveRanges.length > 0) ||
+      (filterCriteria?.statuses && filterCriteria.statuses.length > 0),
+  );
+
+  const filteredTeamUsers = useMemo(() => {
+    if (!filterCriteria) return state.teamUsers;
+    return filterTeamUsers(state.teamUsers, filterCriteria);
+  }, [state.teamUsers, filterCriteria]);
+
   return (
     <>
       {connectionLost && (
@@ -112,11 +147,13 @@ export function TeamPanel({
       )}
       <Group className="space-y-4">
         <Rise>
-          <div className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm overflow-hidden">
+          <div className="rounded-2xl border border-black/[0.06] bg-white shadow-sm overflow-hidden">
             <UserManagementTable
               currentUserId={currentUserId}
+              hasActiveFilters={hasActiveFilters}
+              totalCount={state.teamUsers.length}
               setUsers={setTeamUsers}
-              users={state.teamUsers}
+              users={filteredTeamUsers}
             />
           </div>
         </Rise>
@@ -128,7 +165,12 @@ export function TeamPanel({
         </Rise>
         <Rise>
           <div className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm">
-            <PendingInvitesList error={pendingInvitesError} invites={state.pendingInvites} />
+            <PendingInvitesList
+              error={pendingInvitesError}
+              invites={state.pendingInvites}
+              onResendSuccess={handleResendSuccess}
+              onCancelSuccess={handleCancelSuccess}
+            />
           </div>
         </Rise>
       </Group>

@@ -18,7 +18,7 @@ import { createClient } from "@/lib/supabase/server";
  *        applies the value to organisations, inside the RPC, after its
  *        stale-snapshot guard; both branches audit in the same transaction.
  *
- * There is no POST: suggestions are created by CAMs through suggestEditAction on the
+ * There is no POST: suggestions are created by CAMs through suggestEditsAction on the
  * client profile. This route only decides them.
  */
 

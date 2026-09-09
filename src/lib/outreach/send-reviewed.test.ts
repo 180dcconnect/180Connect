@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { safeValidate } from "../validation.ts";
-import { reviewedEmailSchema } from "./send-reviewed.ts";
+import { reviewedEmailSchema, scheduleSchema } from "./send-reviewed.ts";
 
 const valid = {
   organisationId: "00000000-0000-4000-a000-000000000001",
@@ -61,5 +61,37 @@ test("a missing or malformed recipient is refused before anything can be sent", 
 test("malformed identifiers are refused", () => {
   for (const field of ["organisationId", "messageId"] as const) {
     assert.match(firstError({ ...valid, [field]: "not-a-uuid" }, ), /invalid/i);
+  }
+});
+
+test("scheduling requires the reviewed recipient, exactly as sending does", () => {
+  // F126's payload is reviewedEmailSchema.extend({ scheduledAt }), so a caller
+  // that forgets `recipient` is refused — which is what happened to the review
+  // panel's schedule button: it validated against the full schema and failed on
+  // a recipient it never sent, while the recipient field on screen was filled
+  // in. The rejection had no visible cause, so it needs a test, not a comment.
+  const scheduledAt = "2030-01-01T09:00:00.000Z";
+  const { recipient, ...withoutRecipient } = valid;
+  assert.equal(typeof recipient, "string");
+
+  const parsed = safeValidate(scheduleSchema, { ...withoutRecipient, scheduledAt });
+  assert.equal(parsed.success, false);
+  if (!parsed.success) {
+    assert.ok(
+      "recipient" in parsed.fieldErrors,
+      `recipient must be the field that fails, got ${Object.keys(parsed.fieldErrors).join(", ")}`,
+    );
+  }
+
+  assert.deepEqual(safeValidate(scheduleSchema, { ...valid, scheduledAt }), {
+    success: true,
+    data: { ...valid, scheduledAt },
+  });
+});
+
+test("scheduling refuses a non-instant time", () => {
+  for (const scheduledAt of ["", "tomorrow", "2030-01-01", undefined]) {
+    const parsed = safeValidate(scheduleSchema, { ...valid, scheduledAt });
+    assert.equal(parsed.success, false, `scheduledAt=${String(scheduledAt)} should fail`);
   }
 });

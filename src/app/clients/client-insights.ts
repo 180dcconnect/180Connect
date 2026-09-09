@@ -124,7 +124,15 @@ export const BREAKDOWN_FIELDS: { key: BreakdownField; label: string }[] = [
   { key: "owner", label: "owner" },
 ];
 
+export const BREAKDOWN_LIMITS = [3, 5, 10, 20] as const;
+export type BreakdownLimit = (typeof BREAKDOWN_LIMITS)[number];
+
 export const SORT_DIRECTIONS: SortDirection[] = ["descending", "ascending"];
+
+export function parseBreakdownLimit(value: string | null | undefined): BreakdownLimit {
+  const num = Number.parseInt(value ?? "3", 10);
+  return (BREAKDOWN_LIMITS as readonly number[]).includes(num) ? (num as BreakdownLimit) : 3;
+}
 
 export function parseField(value: string | null | undefined): BreakdownField {
   return BREAKDOWN_FIELDS.some((field) => field.key === value)

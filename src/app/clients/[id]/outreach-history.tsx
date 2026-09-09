@@ -6,27 +6,10 @@ import {
   describeStatusFilter,
   filterOutreachHistory,
   STATUS_FILTERS,
-  type EmailThreadEntry,
   type OutreachHistory as OutreachHistoryData,
   type StatusFilter,
 } from "@/lib/outreach-history";
 import { isRichEmailHtml, sanitizeEmailHtml } from "@/lib/outreach/email-html";
-import { FollowUpButton } from "./follow-up-button";
-import { StatusSelect } from "./status-select";
-import { AddNoteForm } from "./add-note-form";
-
-type ReplyDraftControls = {
-  organisationId: string;
-  blocked: boolean;
-  ownershipBlocked: boolean;
-  suppressionReason?: string;
-  ownershipWarning?: string;
-};
-
-type ThreadStatusControl = {
-  organisationId: string;
-  currentStatus: string;
-};
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleDateString("en-GB", {
@@ -48,20 +31,20 @@ function EmailBodyPreview({ body }: { body: string }) {
   if (isRichEmailHtml(body)) {
     return (
       <div
-        className="mt-2 text-sm text-foreground/80 [&_a]:text-brand [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-black/15 [&_blockquote]:pl-3 [&_blockquote]:text-foreground/70 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 [&_p:last-child]:mb-0 [&_ul]:list-disc [&_ul]:pl-5"
+        className="mt-2 text-sm text-ink [&_a]:text-lead [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-rule [&_blockquote]:pl-3 [&_blockquote]:text-dim [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 [&_p:last-child]:mb-0 [&_ul]:list-disc [&_ul]:pl-5"
         dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(body) }}
       />
     );
   }
-  return <p className="mt-2 whitespace-pre-wrap text-sm text-foreground/80">{body}</p>;
+  return <p className="mt-2 whitespace-pre-wrap text-sm text-ink">{body}</p>;
 }
 
 function StatusBadge({ status }: { status: OutreachHistoryData["sent"][number]["send_status"] }) {
   const failed = status === "failed";
   return (
     <span
-      className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${
-        failed ? "bg-destructive/10 text-destructive" : "bg-black/5 text-foreground/70"
+      className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
+        failed ? "bg-stop-wash text-stop" : "bg-paper-sunk text-dim"
       }`}
     >
       {describeSendStatus(status)}
@@ -69,112 +52,7 @@ function StatusBadge({ status }: { status: OutreachHistoryData["sent"][number]["
   );
 }
 
-function FullEmailThread({
-  entries,
-  error,
-  replyDraftControls,
-  statusControl,
-  noteOrganisationId,
-}: {
-  entries: readonly EmailThreadEntry[];
-  error: boolean;
-  replyDraftControls?: ReplyDraftControls;
-  statusControl?: ThreadStatusControl;
-  noteOrganisationId?: string;
-}) {
-  return (
-    <section id="email-thread" aria-labelledby="email-thread-heading" className="mt-5 scroll-mt-24 rounded-xl border border-black/10 bg-black/[0.02] p-4">
-      <h3 id="email-thread-heading" className="text-sm font-bold text-foreground">
-        Full email thread
-      </h3>
-      <p className="mt-1 text-xs text-foreground/60">
-        Sent emails and client replies, oldest first.
-      </p>
 
-      {statusControl && (
-        <div className="mt-4 rounded-lg border border-black/10 bg-white p-3">
-          <p className="text-sm font-bold text-foreground">Update pipeline status</p>
-          <p className="mt-1 text-xs text-foreground/60">
-            Record the latest outcome while reviewing this conversation.
-          </p>
-          <StatusSelect
-            key={`reply-thread-${statusControl.currentStatus}`}
-            organisationId={statusControl.organisationId}
-            currentStatus={statusControl.currentStatus}
-            idSuffix="reply-thread"
-          />
-        </div>
-      )}
-
-      {error ? (
-        <p className="mt-3 text-sm font-medium text-red-800" role="alert">
-          The full email thread could not be loaded. Refresh and try again.
-        </p>
-      ) : entries.length === 0 ? (
-        <p className="mt-3 text-sm text-foreground/65">
-          No sent emails or replies are available for this client yet.
-        </p>
-      ) : (
-        <ol className="mt-4 space-y-3">
-          {entries.map((entry) => {
-            const incoming = entry.kind === "incoming";
-            return (
-              <li
-                id={incoming ? `thread-reply-${entry.id}` : `thread-email-${entry.id}`}
-                key={`${entry.kind}-${entry.id}`}
-                className={`scroll-mt-24 rounded-xl border p-3 ${
-                  incoming
-                    ? "ml-0 mr-6 border-brand/20 bg-brand/5"
-                    : "ml-6 mr-0 border-black/10 bg-white"
-                }`}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wide text-foreground/60">
-                      {incoming ? "Client replied" : "180Connect sent"}
-                    </p>
-                    {entry.subject && <p className="mt-0.5 text-sm font-semibold">{entry.subject}</p>}
-                  </div>
-                  <time className="text-xs text-foreground/55" dateTime={entry.occurredAt}>
-                    {new Date(entry.occurredAt).toLocaleString("en-GB", {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </time>
-                </div>
-                <EmailBodyPreview body={entry.body} />
-                {incoming && replyDraftControls && (
-                  <div className="mt-3 border-t border-brand/10 pt-3">
-                    <FollowUpButton
-                      {...replyDraftControls}
-                      replyEventId={entry.id}
-                    />
-                  </div>
-                )}
-                {incoming && noteOrganisationId && (
-                  <div className="mt-3 border-t border-brand/10 pt-3">
-                    <AddNoteForm
-                      organisationId={noteOrganisationId}
-                      replyEventId={entry.id}
-                    />
-                  </div>
-                )}
-                {!incoming && (
-                  <p className="mt-2 text-xs text-foreground/55">
-                    Sent by {entry.senderName || "a former team member"}
-                  </p>
-                )}
-              </li>
-            );
-          })}
-        </ol>
-      )}
-    </section>
-  );
-}
 
 /**
  * F070/F130: a client's outreach history, split into what the client has
@@ -188,19 +66,9 @@ function FullEmailThread({
 export function OutreachHistorySection({
   history,
   error,
-  thread,
-  threadError,
-  replyDraftControls,
-  statusControl,
-  noteOrganisationId,
 }: {
   history: OutreachHistoryData;
   error: boolean;
-  thread: readonly EmailThreadEntry[];
-  threadError: boolean;
-  replyDraftControls?: ReplyDraftControls;
-  statusControl?: ThreadStatusControl;
-  noteOrganisationId?: string;
 }) {
   // F130 AC3: filter selection is view state, not data state — it lives here,
   // never in the query, so the sent/not-sent grouping above it cannot drift.
@@ -211,7 +79,7 @@ export function OutreachHistorySection({
 
   if (error) {
     return (
-      <p className="mt-3 text-sm font-medium text-red-800" role="alert">
+      <p className="mt-3 text-sm font-medium text-stop" role="alert">
         Outreach history could not be loaded. Refresh and try again.
       </p>
     );
@@ -219,21 +87,10 @@ export function OutreachHistorySection({
 
   return (
     <div className="mt-3">
-      <a className="text-sm font-semibold text-brand underline underline-offset-2" href="#email-thread">
-        View full email thread
-      </a>
-      <FullEmailThread
-        entries={thread}
-        error={threadError}
-        replyDraftControls={replyDraftControls}
-        statusControl={statusControl}
-        noteOrganisationId={noteOrganisationId}
-      />
-
       {/* AC3's filter: one control, five states, no page reload. Buttons with
           aria-pressed rather than a <select> — four options fit in a row and
           stay visible, which is the point of scanning at a glance. */}
-      <div role="group" aria-label="Filter emails by status" className="mt-5 flex flex-wrap gap-1.5">
+      <div role="group" aria-label="Filter emails by status" className="flex flex-wrap gap-1.5">
         {STATUS_FILTERS.map((option) => {
           const active = option === filter;
           return (
@@ -242,10 +99,10 @@ export function OutreachHistorySection({
               type="button"
               aria-pressed={active}
               onClick={() => setFilter(option)}
-              className={`rounded-full px-2.5 py-1 text-xs font-bold transition-colors ${
+              className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
                 active
-                  ? "bg-brand text-white"
-                  : "bg-black/5 text-foreground/60 hover:bg-black/10 hover:text-foreground/80"
+                  ? "bg-ink text-white"
+                  : "bg-paper-sunk text-dim hover:bg-paper hover:text-ink"
               }`}
             >
               {describeStatusFilter(option)}
@@ -255,29 +112,29 @@ export function OutreachHistorySection({
       </div>
 
       {nothingMatches && (
-        <p className="mt-4 text-sm text-foreground/65">
+        <p className="mt-4 text-sm text-dim">
           No emails with status {describeStatusFilter(filter)} for this client.
         </p>
       )}
 
       {(filtered.sent.length > 0 || filter === "all") && (
         <>
-          <h3 className="mt-6 text-xs font-bold uppercase tracking-wide text-foreground/60">
+          <h3 className="mt-6 text-sm font-semibold text-ink">
             Sent
           </h3>
           {filtered.sent.length === 0 ? (
-            <p className="mt-2 text-sm text-foreground/65">
+            <p className="mt-2 text-sm text-dim">
               No emails have been sent to this client yet.
             </p>
           ) : (
-            <ul className="mt-2 divide-y divide-black/5">
+            <ul className="mt-2 divide-y divide-rule-soft">
               {filtered.sent.map((message) => (
                 <li key={message.id}>
                   <details className="py-2">
                     <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm">
                       <span className="font-medium">{message.subject}</span>
                       <span className="flex shrink-0 items-center gap-2">
-                        <span className="text-foreground/60">
+                        <span className="text-dim">
                           {message.sent_at ? formatDate(message.sent_at) : ""}
                         </span>
                         {/* F130 AC1: every email carries its status, including
@@ -290,7 +147,7 @@ export function OutreachHistorySection({
                     {/* F125: the exact final content plus who delivered it — sent
                         rows are immutable history, so attribution is fixed at send
                         time and falls back for senders since removed from users. */}
-                    <p className="mt-2 text-xs text-foreground/55">
+                    <p className="mt-2 text-xs text-dim">
                       Sent by{" "}
                       {message.sender?.full_name?.trim() || "a former team member"}
                       {message.sent_at ? ` on ${formatDate(message.sent_at)}` : ""}
@@ -305,13 +162,13 @@ export function OutreachHistorySection({
 
       {(filtered.notSent.length > 0 || (filter === "all")) && (
         <>
-          <h3 className="mt-6 text-xs font-bold uppercase tracking-wide text-foreground/60">
+          <h3 className="mt-6 text-sm font-semibold text-ink">
             Not sent
           </h3>
           {filtered.notSent.length === 0 ? (
-            <p className="mt-2 text-sm text-foreground/65">Nothing waiting to be sent.</p>
+            <p className="mt-2 text-sm text-dim">Nothing waiting to be sent.</p>
           ) : (
-            <ul className="mt-2 divide-y divide-black/5">
+            <ul className="mt-2 divide-y divide-rule-soft">
               {filtered.notSent.map((message) => (
                 <li key={message.id}>
                   <details className="py-2">
@@ -323,7 +180,7 @@ export function OutreachHistorySection({
                           no due date — the badge carries the state instead. */}
                       <span className="flex shrink-0 items-center gap-2">
                         {message.scheduled_at && (
-                          <span className="text-foreground/60">
+                          <span className="text-dim">
                             Due {formatDate(message.scheduled_at)}
                           </span>
                         )}

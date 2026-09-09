@@ -2,26 +2,31 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-const threadSource = readFileSync(
-  new URL("./outreach-history.tsx", import.meta.url),
+// The record header still owns the profile-level pipeline status control.
+const headerSource = readFileSync(
+  new URL("./record-header.tsx", import.meta.url),
   "utf8",
 );
-const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 const statusSource = readFileSync(
   new URL("./status-select.tsx", import.meta.url),
   "utf8",
 );
 
 describe("F137 reply status integration", () => {
-  it("reuses the existing pipeline status control inside the full thread", () => {
-    assert.match(threadSource, /import \{ StatusSelect \} from "\.\/status-select"/);
-    assert.match(threadSource, /<StatusSelect[\s\S]*idSuffix="reply-thread"/);
-    assert.doesNotMatch(threadSource, /fetch\([^)]*\/status/);
+  it("the profile header owns the pipeline status control with the owner-or-admin gate", () => {
+    const gate = "const canSetStatus = isAdmin || isSelf;";
+    assert.ok(headerSource.includes(gate));
+    assert.match(headerSource, /\{canSetStatus && \(/);
   });
 
-  it("uses the same owner-or-admin presentation gate as the profile control", () => {
-    const gate = "isAdmin || ownerId === authorization.actor.id";
-    assert.equal(pageSource.split(gate).length - 1, 2);
+  it("the inline thread status control was removed — status is set from the header or status-select only", () => {
+    // outreach-history.tsx should no longer import or render StatusSelect
+    const outreachSource = readFileSync(
+      new URL("./outreach-history.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.doesNotMatch(outreachSource, /import.*StatusSelect/);
+    assert.doesNotMatch(outreachSource, /<StatusSelect/);
   });
 
   it("refreshes server-rendered timeline and dashboard data after saving", () => {

@@ -41,9 +41,19 @@ describe("formatOrganisationSources", () => {
         source_registry_name: null,
         first_seen_at: "2026-08-02T10:00:00Z",
       },
+      {
+        source: "charity_commission_bulk",
+        source_record_id: "cc-bulk-1",
+        source_registry_name: null,
+        first_seen_at: "2026-08-03T10:00:00Z",
+      },
     ]);
 
-    assert.deepEqual(sources.map((source) => source.label), ["CharityBase", "Charity Commission"]);
+    assert.deepEqual(sources.map((source) => source.label), [
+      "CharityBase",
+      "Charity Commission",
+      "Charity Commission",
+    ]);
   });
 
   it("collapses duplicate links and preserves the original first-seen metadata", () => {

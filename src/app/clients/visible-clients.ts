@@ -261,6 +261,57 @@ export function filterByPriorityScore(
 }
 
 /**
+ * Filter by presence of financial records (Charity Commission accounts or 360Giving grants).
+ */
+export const FINANCIAL_RECORD_FILTERS = [
+  { value: "charity_commission", label: "Charity Commission (Accounts)" },
+  { value: "360giving", label: "360Giving (Grants)" },
+  { value: "any", label: "Either source (Any financials)" },
+  { value: "none", label: "No financial records" },
+] as const;
+
+export type FinancialRecordFilter = (typeof FINANCIAL_RECORD_FILTERS)[number]["value"];
+
+export function financialRecordFilterLabel(value: string): string {
+  return FINANCIAL_RECORD_FILTERS.find((entry) => entry.value === value)?.label ?? value;
+}
+
+export function filterByFinancialRecords(
+  clients: VisibleClient[],
+  financialFilter: string | string[] | null | undefined,
+): VisibleClient[] {
+  const wanted = filterValues(financialFilter).map((v) => v.toLowerCase());
+  if (wanted.length === 0) return clients;
+
+  return clients.filter((client) => {
+    const hasCharityCommission = Boolean(
+      (client.financial_periods && client.financial_periods.length > 0) ||
+        (client.total_income !== null && client.total_income !== undefined),
+    );
+    const has360Giving = Boolean(
+      client.has_grants || (client.grants && client.grants.length > 0),
+    );
+    const hasAny = hasCharityCommission || has360Giving;
+
+    return wanted.some((val) => {
+      if (val === "charity_commission" || val === "charity-commission" || val === "filings") {
+        return hasCharityCommission;
+      }
+      if (val === "360giving" || val === "360-giving" || val === "grants") {
+        return has360Giving;
+      }
+      if (val === "any" || val === "either") {
+        return hasAny;
+      }
+      if (val === "none" || val === "missing") {
+        return !hasAny;
+      }
+      return false;
+    });
+  });
+}
+
+/**
  * Free-text search on the client list. Case-insensitive substring match on
  * legal_name only — the field the list actually displays and the one a CAM
  * would type from memory.

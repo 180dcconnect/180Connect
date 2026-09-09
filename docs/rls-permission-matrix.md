@@ -27,6 +27,15 @@ advisors 0028 / 0029 clean; see §7). Base role checks come from `create_users` 
 `SECURITY DEFINER` with `set search_path = ''`; `authenticated` is granted `EXECUTE`
 (policies need it), `anon` is not.
 
+Being `SECURITY DEFINER` is also why **the zero-argument helpers must be called as
+`(select app.is_active_user())` inside a policy**, never bare: Postgres cannot inline a
+SECURITY DEFINER function, so a bare call in a security qualifier runs once per row
+instead of once per statement. It changes no permission — the same rows are admitted
+either way — which is exactly why it is easy to lose. The rule, the measurements and
+which helpers are exempt are in
+[`supabase/MIGRATIONS.md`](../supabase/MIGRATIONS.md) §"Row-Level Security"; the guard
+is `tests.suite_rls_initplan` in `supabase/tests/rls_policies.test.sql`.
+
 ---
 
 ## 1. Roles
@@ -222,7 +231,7 @@ write that changes a column listed active in `RESTRICTED_EDIT_FIELDS`
 (`20260822160000_create_restricted_edit_fields.sql`), raising 42501 with a pointer to
 the suggestion flow. The restricted set is configuration, not code: an admin adds or
 retires fields at runtime through `add_restricted_edit_field` /
-`deactivate_restricted_edit_field` (both audited, `/admin/restricted-fields`), and both
+`deactivate_restricted_edit_field` (both audited, `/settings/restricted-fields`), and both
 enforcement points — the trigger and the suggestion RPC — follow the table. What F077
 added is the legitimate path for corrections: `suggest_organisation_edit(org_id,
 field_name, new_value)` (`20260822140000_create_edit_suggestions.sql`, rewritten by
@@ -494,6 +503,28 @@ client, the newest sent email, received reply and audited status change — the
 clock F160 measures silence against. Owner-scoped unless admin, matching the
 Needs Attention panel it feeds; ids the caller cannot access are dropped
 silently rather than erroring. EXECUTE granted to `authenticated` only.
+
+**Sector income distribution for the Financials peer strip (`20260923123000`).**
+`get_sector_income_distribution(text, uuid, numeric)` is a read-only
+aggregation: for one sector, the peer count, the five-number summary
+(min/p25/median/p75/max) of each peer client's latest filed income, and how many
+of those file less than a supplied figure. It exists because picking one income
+per peer is a max-per-group that PostgREST cannot express (no `DISTINCT ON`),
+and the app-side reduction it replaces pulled ~1,750 rows per page view to
+produce six numbers.
+
+**The one RPC on this record that is `SECURITY INVOKER`, deliberately.** Both
+tables it reads — `ORGANISATIONS` and `FINANCIAL_PERIODS` — are shared-read for
+every active user (§3.2, §4.3 "View canonical organisations"; §3.6's
+`FINANCIAL_PERIODS` row is "all roles"). There is nothing here a caller could
+not already `select` for itself, so the function is given no elevated rights:
+RLS applies normally, and a deactivated user's read collapses to zero rows
+through the same policies as everything else instead of through a hand-written
+guard in a definer body that could drift from them. `app.is_active_user()` is
+still checked in the body so a deactivated caller gets an explicit `42501`
+rather than a silently empty result. `search_path` is pinned regardless — an
+invoker function still resolves against the caller's `search_path` otherwise.
+EXECUTE revoked from `public`/`anon`, granted to `authenticated` only.
 
 ### 3.5 Raw ingestion and data quality — admin only
 
@@ -1045,10 +1076,12 @@ which source "owns" a field's current value.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `FIELD_SOURCES` | admin only | — (`service_role` only) | — (`service_role` only, via same RPC) | — (no grant) |
+| `FIELD_SOURCES` | all active roles (widened 20260923114000, was admin only) | — (`service_role` only) | — (`service_role` only, via same RPC) | — (no grant) |
 
-SELECT is admin-only, same reasoning as §3.16 — which source produced a field's
-value is not CAM-visible data. There is one write path, `record_field_source`
+SELECT was admin-only until 20260923114000 — same reasoning as §3.16 originally
+— which source produced a field's value is not CAM-visible data. The widening
+above reverses that call with sign-off; §3.16 (FIELD_DISCREPANCIES) keeps its
+admin-only read — conflict review is still an admin queue. There is one write path, `record_field_source`
 (`p_organisation_id, p_field_name, p_value, p_source, p_raw_source_record_id`):
 flips any existing `is_current = true` row for that `organisation_id +
 field_name` to `false`, then inserts the new one as current. Granted to
@@ -1067,10 +1100,47 @@ outside those two), so there is nothing else to wire up today; a future hand-edi
 feature is responsible for calling `record_field_source` itself.
 
 `get_field_sources(organisation_id)` — the read path, `authenticated`, self-checks
-`app.is_admin()` and `app.is_active_user()` inside (same shape as
-`get_organisation_sources`, §3.2). Returns every row for the organisation, current
-and superseded, newest-first per field — satisfies AC1 (current source per field)
-and AC2 (conflicting values and their sources both visible) from a single query.
+`app.is_active_user()` and returns every row for the organisation, current and
+superseded, newest-first per field, with `recorded_by` resolved to a name —
+satisfies AC1 (current source per field) and AC2 (conflicting values and their
+sources both visible) from a single query.
+
+**20260923114000 — widened, and the admin-only read call reversed.** Three
+write paths still recorded no provenance after F044 landed: admin direct edits,
+approved edit suggestions, and approved manual entries (the last left
+hand-created records with an empty provenance story — the gap the provenance
+audit cron watches for). The migration closes all three and changes this
+table's visibility, signed off 2 Sep 2026:
+
+- **SELECT is now every active signed-in role** (`field_sources_select`,
+  `using (app.is_active_user())`). This deliberately reverses the original
+  "which source said what is not CAM-visible data" call: the point of the
+  feature is that a CAM sees which register supplied a value and who corrected
+  it. No INSERT/UPDATE/DELETE grant exists — writes remain RPC-only.
+- **`organisation_type` joined the tracked set** (check constraint,
+  `record_field_source`'s validation, and the UI's label map all widened
+  together). Mission and pipeline stage are surfaced on the profile but stay
+  out of this table: mission's history is ENRICHMENT_RESULTS itself
+  (append-only), stage's is audit_log's `status_changed` rows.
+- **New column `recorded_by`** (null-able FK to USERS): the person behind a
+  manual attribution. Null = the pipeline wrote it — honest, not unknown.
+- **New write path `apply_admin_field_edits(organisation_id, changes, reason)`**
+  — admin direct edits moved off their direct UPDATE. SECURITY DEFINER,
+  self-checks `app.is_admin()`, applies the columns, records provenance
+  (`source='manual'`, `recorded_by`=the admin) for tracked fields, and writes
+  one audit_log row (`fields_direct_edited`) in the same transaction. Grantee:
+  authenticated; the body decides.
+- **`decide_edit_suggestion` (fix-forward rewrite)** — approval additionally
+  records provenance (`source='manual'`, `recorded_by`=the deciding admin), so
+  an approved correction stops presenting as the old register's value.
+- **`approve_manual_entry` (fix-forward rewrite)** — on create_new, every
+  populated tracked field is attributed (`source='manual'`,
+  `recorded_by`=the submitting CAM, who typed the values). link_existing
+  writes none: the linked record keeps whichever source produced its fields.
+
+Data Model tab 03 governs this table's columns; the tab had not been updated
+with `organisation_type`/`recorded_by` at the time of writing — raised for the
+spreadsheet rather than edited here.
 
 **MVP field scope**: the same six fields as `FIELD_DISCREPANCIES` (`legal_name`,
 `website`, `contact_email`, `address_line_1`, `city`, `postcode`) — kept identical
@@ -1502,6 +1572,61 @@ docs/audit-log-pattern.md. No-op writes (same value) are skipped, same as
 `set_data_handling_rule_active`.
 
 ---
+
+### 3.25 Inbox thread state — own rows only, nothing shared
+
+Backs the mailbox's three per-viewer controls — star, read/unread, trash —
+`supabase/migrations/20260924090000_create_inbox_thread_state.sql` (+ the
+paired daily prune, `20260924090100`). New table; add
+**INBOX_THREAD_STATE** to the Data Model.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `INBOX_THREAD_STATE` | own rows (`user_id = auth.uid()`) | own rows | own rows | own rows |
+
+The one table in this register where **admin has no branch at all**, on any
+verb. Every other own-row table here (`§3.19` notifications, `§3.20` saved
+views) grants an admin read for support or oversight; there is nothing to
+oversee in which threads a CAM has starred in their own mailbox, and reading
+it would be surveillance of how someone works rather than of what they did.
+The record of what actually happened — every email, every reply, every status
+change — is in `OUTREACH_MESSAGES`, `REPLY_EVENTS` and `AUDIT_LOG`, all of
+which an admin can already read.
+
+Direct grants rather than RPCs, which is the exception to `§3`'s usual shape
+and is deliberate. The RPC rule (`MIGRATIONS.md` step 4) exists for writes
+that must be conditional, single-column, or reason-carrying. None applies: a
+row is entirely its owner's, every column on it is theirs to set, and there is
+no state transition anyone else can observe. A `SECURITY DEFINER` wrapper here
+would add a function to maintain and nothing to enforce.
+
+**No audit log entries** (`§1` of `docs/audit-log-pattern.md`): none of these
+writes changes ownership, status, role or approval state of a business entity.
+Same documented reasoning as `feedback` and `notifications`.
+
+**Two database-enforced bounds**, because the database ceiling is 500 MB and
+this table is written by ordinary UI clicks:
+
+- `enforce_inbox_trash_cap()`, a `BEFORE INSERT OR UPDATE` trigger — at most
+  **200** trashed threads per user, oldest untrashed on the way in. It also
+  derives `trashed_at` rather than accepting it from the client, so nobody can
+  backdate a row past the cap's ordering or forward-date one out of the purge
+  below.
+- `prune_inbox_thread_state()`, granted to **no** interactive role and run only
+  by its daily job (`inbox_thread_state_prune_daily`, 03:40 UTC) — deletes
+  trash older than **30 days** (matching Gmail's own window) and any row that
+  has drifted back to carrying no state at all (unstarred, no read override,
+  not trashed), which would otherwise cost 200 bytes to say the same thing as
+  having no row.
+
+A row is ~200 bytes with both indexes, so trash is bounded at ~40 KB per user.
+
+`read_state` is a three-valued enum (`'read'`, `'unread'`, NULL) rather than a
+boolean. Both directions are overrides of a value the server derives from
+whether the newest event is an unanswered reply: a thread the server calls
+unread that the CAM has read must stay read, and one they marked unread on
+purpose must not be flipped back on the next load. NULL means "no override".
+
 
 ## 4. Denial behaviour and feedback
 

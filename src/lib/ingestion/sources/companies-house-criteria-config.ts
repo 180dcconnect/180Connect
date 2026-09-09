@@ -95,6 +95,12 @@ const TIER_C_SIC_SET: ReadonlySet<string> = new Set(TIER_C_SIC_ALLOWLIST);
  * Classifies a single Companies House advanced-search item (or any record carrying
  * the same three fields) against the tier rules. Pure — no I/O — so the discovery
  * adapter and the promotion pipeline can both call it and always agree.
+ *
+ * "community-interest-company" as a `company_type` is the companies-register
+ * file's doing, not the API's: the bulk product records CICs as their own
+ * category instead of a subtype of an underlying form it does not publish
+ * (see src/lib/companies-register/csv-row.ts). It classifies as Tier B on
+ * sight, the same standing an API-sourced CIC holds via the subtype check.
  */
 export function classifyCompaniesHouseTier(
   item: CompaniesHouseTierableItem,
@@ -106,6 +112,7 @@ export function classifyCompaniesHouseTier(
     : [];
 
   if (TIER_A_SET.has(companyType)) return "A";
+  if (companyType === "community-interest-company") return "B";
   if (TIER_B_SET.has(companyType) && companySubtype === TIER_B_SUBTYPE) return "B";
   if (TIER_C_SET.has(companyType) && sicCodes.some((code) => TIER_C_SIC_SET.has(code))) {
     return "C";

@@ -10,6 +10,7 @@ export type StageTwoGenerationInsert = {
   generated_subject: string;
   generated_body: string;
   model: string;
+  activity: "follow_up_email";
   input_tokens: number | null;
   output_tokens: number | null;
   total_tokens: number | null;
@@ -22,6 +23,7 @@ export function buildStageTwoGenerationInsert(input: {
   outreachMessageId: string;
   draft: { subject: string; body: string };
   model: string;
+  activity?: "follow_up_email";
   usage: {
     inputTokens: number | undefined;
     outputTokens: number | undefined;
@@ -37,6 +39,7 @@ export function buildStageTwoGenerationInsert(input: {
     // NOT NULL in ai_generations since F113: the model in force at generation
     // time, not a live lookup of the current default.
     model: input.model,
+    activity: input.activity ?? "follow_up_email",
     input_tokens: input.usage.inputTokens ?? null,
     output_tokens: input.usage.outputTokens ?? null,
     total_tokens: input.usage.totalTokens ?? null,

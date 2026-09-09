@@ -9,6 +9,8 @@ import {
   filterByTags,
   filterByStatus,
   filterByPriorityScore,
+  filterByFinancialRecords,
+  financialRecordFilterLabel,
   formatLocation,
   formatOutreachStatus,
   parsePriorityScoreFilter,
@@ -1331,3 +1333,95 @@ describe("F058 + F059 combined (F059 AC3)", () => {
     ]);
   });
 });
+
+describe("filterByFinancialRecords", () => {
+  const cCommissionOnly = org({
+    id: "org-cc",
+    legal_name: "Charity Commission Client",
+    financial_periods: [{ income_band: "large", total_income: 1000000, period_end: "2025-12-31" }],
+    grants: [],
+    has_grants: false,
+  });
+
+  const c360GivingOnly = org({
+    id: "org-360",
+    legal_name: "360Giving Client",
+    financial_periods: [],
+    total_income: null,
+    grants: [{ id: "g-1", amount_awarded: 50000, funder_name: "Big Lottery" }],
+    has_grants: true,
+  });
+
+  const cBoth = org({
+    id: "org-both",
+    legal_name: "Both Sources Client",
+    financial_periods: [{ income_band: "small", total_income: 50000, period_end: "2025-12-31" }],
+    grants: [{ id: "g-2", amount_awarded: 10000 }],
+    has_grants: true,
+  });
+
+  const cNeither = org({
+    id: "org-neither",
+    legal_name: "Neither Source Client",
+    financial_periods: [],
+    total_income: null,
+    grants: [],
+    has_grants: false,
+  });
+
+  const testClients = visibleClients([cCommissionOnly, c360GivingOnly, cBoth, cNeither], []);
+
+  it("returns all clients when filter is empty or null", () => {
+    assert.equal(filterByFinancialRecords(testClients, null).length, 4);
+    assert.equal(filterByFinancialRecords(testClients, []).length, 4);
+    assert.equal(filterByFinancialRecords(testClients, "").length, 4);
+  });
+
+  it("filters to clients with Charity Commission financial filings", () => {
+    const res = filterByFinancialRecords(testClients, "charity_commission");
+    assert.deepEqual(
+      res.map((c) => c.legal_name),
+      ["Charity Commission Client", "Both Sources Client"],
+    );
+  });
+
+  it("filters to clients with 360Giving grant awards", () => {
+    const res = filterByFinancialRecords(testClients, "360giving");
+    assert.deepEqual(
+      res.map((c) => c.legal_name),
+      ["360Giving Client", "Both Sources Client"],
+    );
+  });
+
+  it("filters to clients with any financial records", () => {
+    const res = filterByFinancialRecords(testClients, "any");
+    assert.deepEqual(
+      res.map((c) => c.legal_name),
+      ["Charity Commission Client", "360Giving Client", "Both Sources Client"],
+    );
+  });
+
+  it("filters to clients with no financial records", () => {
+    const res = filterByFinancialRecords(testClients, "none");
+    assert.deepEqual(
+      res.map((c) => c.legal_name),
+      ["Neither Source Client"],
+    );
+  });
+
+  it("supports multi-select union across filters", () => {
+    const res = filterByFinancialRecords(testClients, ["charity_commission", "360giving"]);
+    assert.deepEqual(
+      res.map((c) => c.legal_name),
+      ["Charity Commission Client", "360Giving Client", "Both Sources Client"],
+    );
+  });
+
+  it("provides labels for all filter options", () => {
+    assert.equal(financialRecordFilterLabel("charity_commission"), "Charity Commission (Accounts)");
+    assert.equal(financialRecordFilterLabel("360giving"), "360Giving (Grants)");
+    assert.equal(financialRecordFilterLabel("any"), "Either source (Any financials)");
+    assert.equal(financialRecordFilterLabel("none"), "No financial records");
+  });
+});
+

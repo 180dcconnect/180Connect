@@ -1,26 +1,28 @@
 import { Skeleton, SkeletonListPanel } from "@/components/ui/skeleton";
+import { DataImportsHeader } from "../data-imports-header";
 
-/** F234 — mirrors page.tsx's shell (single white card on the admin ground). */
+/**
+ * Mirrors page.tsx's shell: bone ground, the real Data imports header, then the
+ * stack of white cards. The card heights approximate the real ones so the page
+ * does not jump when it arrives.
+ */
 export default function Loading() {
   return (
-    <main className="min-h-screen bg-[#f1f2f4] p-6">
-      <section className="mx-auto max-w-5xl rounded-2xl bg-white p-8 shadow-sm">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <Skeleton className="h-4 w-32" />
-            <Skeleton className="mt-2 h-8 w-72" />
-            <Skeleton className="mt-3 h-4 w-96 max-w-full" />
-          </div>
+    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+      <div className="mx-auto max-w-6xl space-y-8">
+        <div>
+          <DataImportsHeader current="/admin/charity-commission">
+            <Skeleton className="mt-4 h-5 w-80 max-w-full" />
+          </DataImportsHeader>
         </div>
 
-        <Skeleton className="mt-8 h-32 w-full rounded-xl" />
-        <Skeleton className="mt-4 h-24 w-full rounded-xl" />
-
-        <div className="mt-8">
-          <Skeleton className="h-5 w-32" />
-          <SkeletonListPanel className="mt-3" rows={4} />
+        <div className="space-y-6">
+          <SkeletonListPanel rows={5} />
+          <Skeleton className="h-40 w-full rounded-2xl" />
+          <Skeleton className="h-40 w-full rounded-2xl" />
+          <Skeleton className="h-56 w-full rounded-2xl" />
         </div>
-      </section>
-    </main>
+      </div>
+    </div>
   );
 }

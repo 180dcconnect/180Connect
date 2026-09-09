@@ -184,7 +184,7 @@ describe("formatTeamActivity (F029)", () => {
     assert.equal(lifted.actionLabel, "Suppression");
   });
 
-  it("formats team join events with Assign clients button when user has 0 clients", () => {
+  it("formats team join events with View button when user has 0 clients", () => {
     const activity = formatTeamActivity(
       row({
         actor_name: "Alex Smith",
@@ -198,10 +198,10 @@ describe("formatTeamActivity (F029)", () => {
     assert.equal(activity.sentence, "Alex Smith joined the team");
     assert.equal(activity.actionLabel, "Joined");
     assert.deepEqual(activity.actionButton, {
-      label: "Assign clients",
-      href: "/clients?owner=unassigned",
+      label: "View",
+      href: "/team/user-1",
     });
-    assert.equal(activity.targetHref, "/clients?owner=unassigned");
+    assert.equal(activity.targetHref, "/team/user-1");
   });
 
   it("formats team join events without Assign clients button when user already has clients", () => {

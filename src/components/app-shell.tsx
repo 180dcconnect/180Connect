@@ -35,11 +35,11 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     sections[0].items.push(
       { href: "/actions", label: "My actions", icon: "actions" },
       { href: "/clients", label: "Clients", icon: "clients" },
+      // Outreach Inbox — same visibility as Clients: RLS grants every active
+      // user SELECT on outreach_messages/reply_events (matrix §3.4).
+      { href: "/inbox", label: "Inbox", icon: "inbox" },
+      { href: "/analytics", label: "Analytics", icon: "analytics" },
     );
-  }
-
-  if (hasPermission(actor.role, "client:view")) {
-    sections[0].items.push({ href: "/analytics", label: "Analytics", icon: "analytics" });
   }
 
   if (hasPermission(actor.role, "client:edit")) {
@@ -55,16 +55,21 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
       items: [
         { href: "/admin", label: "Overview", icon: "admin" },
         { href: "/admin/users", label: "Team management", icon: "users" },
+        { href: "/admin/review", label: "Review queue", icon: "review" },
         { href: "/admin/analytics", label: "Team analytics", icon: "analytics" },
         { href: "/admin/audit-log", label: "Audit log", icon: "audit" },
-        { href: "/admin/import-status", label: "Import status", icon: "import" },
-        // Not duplicated here: every admin already has tags:manage, so the
-        // main-nav entry above already covers them — a second entry in this
-        // section would just show "Tags" twice in the same sidebar.
+        // One entry for the four importer pages; each page carries a tab row
+        // (see src/app/admin/import-group.ts) so the group is navigable without
+        // spending four sidebar slots on pages that are cousins of each other.
+        { href: "/admin/import-status", label: "Data imports", icon: "import" },
         { href: "/admin/feedback", label: "Feedback", icon: "feedback" },
       ],
     });
   }
+
+  // Score settings, data handling rules and restricted fields live under
+  // /settings now, reached from the account menu — rare, deliberate
+  // configuration does not earn a row in the daily-ops rail.
 
   let onboarding: SidebarOnboarding | undefined = undefined;
 

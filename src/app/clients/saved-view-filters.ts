@@ -10,7 +10,11 @@
  * combination comes back exactly — true by construction rather than by care.
  */
 
-import { SECTOR_FILTER_LABELS, priorityScoreFilterLabel } from "./visible-clients.ts";
+import {
+  SECTOR_FILTER_LABELS,
+  financialRecordFilterLabel,
+  priorityScoreFilterLabel,
+} from "./visible-clients.ts";
 
 /**
  * The params a view remembers, and the order they are written back in.
@@ -43,6 +47,7 @@ export const SAVED_VIEW_FILTER_KEYS = [
   "sector",
   "owner",
   "score",
+  "financials",
 ] as const;
 
 /** Keys whose URL form is a repeated param, stored as arrays in `filters`. */
@@ -53,6 +58,7 @@ export const SAVED_VIEW_MULTI_KEYS: readonly SavedViewFilterKey[] = [
   "type",
   "sector",
   "score",
+  "financials",
 ];
 
 export type SavedViewFilterKey = (typeof SAVED_VIEW_FILTER_KEYS)[number];
@@ -266,6 +272,14 @@ export function describeFilters(
   // values, so a view's description says what selecting it will show.
   if (filters.score) {
     parts.push(describeValues(filters.score).split(", ").map((value) => priorityScoreFilterLabel(value)).join(", "));
+  }
+  if (filters.financials) {
+    parts.push(
+      describeValues(filters.financials)
+        .split(", ")
+        .map((value) => financialRecordFilterLabel(value))
+        .join(", "),
+    );
   }
   return parts.length > 0 ? parts.join(" · ") : "No filters — the whole list";
 }

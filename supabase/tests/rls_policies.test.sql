@@ -3179,14 +3179,14 @@ begin
 
   return next is(
     tests.sqlstate_of(v_cam_a, format(
-      'select public.approve_manual_entry(%L, false, ''create_new'', null, null)',
+      'select public.approve_manual_entry(%L, ''create_new'', false, null, null)',
       v_approval_entry
     )),
     '42501', 'CAM cannot call the manual approval RPC');
 
   perform tests.login_as(v_admin);
   select public.approve_manual_entry(
-    v_approval_entry, false, 'create_new', null, 'Meets the target criteria'
+    v_approval_entry, 'create_new', false, null, 'Meets the target criteria'
   ) into v_created_org;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
   return next ok(v_created_org is not null, 'admin can approve a distinct manual entry');
@@ -3227,14 +3227,14 @@ begin
 
   return next is(
     tests.sqlstate_of(v_admin, format(
-      'select public.approve_manual_entry(%L, false, ''create_new'', %L, null)',
+      'select public.approve_manual_entry(%L, ''create_new'', false, %L, null)',
       v_duplicate_entry, v_created_org
     )),
     '22023', 'a likely duplicate cannot become a second client without a human explanation');
 
   perform tests.login_as(v_admin);
   select public.approve_manual_entry(
-    v_duplicate_entry, false, 'link_existing', v_created_org,
+    v_duplicate_entry, 'link_existing', false, v_created_org,
     'Same organisation despite the formatting difference'
   ) into v_linked_org;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
@@ -3251,21 +3251,21 @@ begin
 
   return next is(
     tests.sqlstate_of(v_admin, format(
-      'select public.approve_manual_entry(%L, true, null, null, null)',
+      'select public.approve_manual_entry(%L, null, true, null, null)',
       v_company_entry
     )),
     '22023', 'a null duplicate decision cannot bypass the approval decision');
 
   return next is(
     tests.sqlstate_of(v_admin, format(
-      'select public.approve_manual_entry(%L, null, ''create_new'', null, null)',
+      'select public.approve_manual_entry(%L, ''create_new'', null, null, null)',
       v_company_entry
     )),
     '22023', 'a null eligibility confirmation cannot bypass F047');
 
   return next is(
     tests.sqlstate_of(v_admin, format(
-      'select public.approve_manual_entry(%L, false, ''create_new'', null, null)',
+      'select public.approve_manual_entry(%L, ''create_new'', false, null, null)',
       v_company_entry
     )),
     '22023', 'ambiguous company cannot bypass the F047 human eligibility decision');
@@ -3278,7 +3278,7 @@ begin
     'Added directly by an administrator', true
   ) into v_admin_entry;
   select public.approve_manual_entry(
-    v_admin_entry, false, 'create_new', null, 'Submitted and self-approved by admin'
+    v_admin_entry, 'create_new', false, null, 'Submitted and self-approved by admin'
   ) into v_admin_org;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
   select count(*) into v_count from public.manual_entry_records
@@ -5318,6 +5318,77 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------------------
+-- The `(select ...)` wrapper on the zero-argument role helpers
+-- (20260923133000_hoist_rls_helper_initplans).
+--
+-- This is the one suite here that asserts on policy *text* rather than only on
+-- behaviour, and deliberately so. The wrapper is invisible from the outside:
+-- `app.is_active_user()` and `(select app.is_active_user())` admit exactly the
+-- same rows, so every behavioural test in this file passes either way. What
+-- differs is that the bare form is SECURITY DEFINER and cannot be inlined, so
+-- Postgres calls it once per row — 629ms versus 39ms on the client-list query,
+-- measured on staging with 2,738 organisations.
+--
+-- Without this assertion the fix has no guard at all: the next person to edit
+-- one of these policies drops the wrapper, nothing goes red, and the per-row
+-- cost quietly comes back. Supabase's own `auth_rls_initplan` advisor will not
+-- catch it either — it matches `auth.<fn>()` and is blind to `app.*`.
+--
+-- The behavioural half (deactivation still bites on these tables) is already
+-- covered by suite_core, suite_users, suite_org_tags and suite_latest_scores,
+-- which is what proves the rewrite changed no access.
+--
+-- Covers every policy in `public` — all 97 at the time of writing, across the
+-- two migrations 20260923133000 and 20260923134000. A new table that ships a
+-- bare helper call fails here, on its own migration, rather than becoming the
+-- next slow page nobody can explain.
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_rls_initplan()
+returns setof text language plpgsql as $$
+declare
+  r record;
+  v_bare text[];
+begin
+  -- Every policy in `public`, not a listed subset: a new table added without
+  -- the wrapper should fail here on the migration that introduces it, and a
+  -- hand-maintained table list would silently stop covering the schema.
+  -- Argument-taking helpers (app.owns_organisation and friends) are
+  -- row-correlated and correctly left alone, so they are not checked.
+  for r in
+    select tablename, policyname,
+           concat_ws(' | ', qual, with_check) as expr
+    from pg_policies
+    where schemaname = 'public'
+    order by tablename, policyname
+  loop
+    -- A bare call is the helper name NOT preceded by "select ". Checked per
+    -- helper so a policy mixing a wrapped and a bare call is still caught.
+    v_bare := array(
+      select h from unnest(array[
+               'app.is_active_user()', 'app.is_admin()',
+               'app.is_cam()', 'app.is_viewer()', 'app.can_write()'
+             ]) as h
+       where r.expr like '%' || h || '%'
+         and r.expr not like '%( SELECT ' || h || '%'
+         and r.expr not like '%(select ' || h || '%'
+    );
+
+    return next ok(
+      cardinality(v_bare) = 0,
+      format(
+        '%s.%s wraps its zero-argument helpers in (select ...)%s',
+        r.tablename, r.policyname,
+        case when cardinality(v_bare) = 0 then ''
+             else ' -- unwrapped: ' || array_to_string(v_bare, ', ') end
+      )
+    );
+  end loop;
+end;
+$$;
+
+select * from tests.suite_rls_initplan();
 select * from tests.suite_core();
 select * from tests.suite_viewer();
 select * from tests.suite_users();

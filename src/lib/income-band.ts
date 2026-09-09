@@ -37,6 +37,43 @@ export const INCOME_BAND_DESCRIPTIONS: Record<IncomeBand, string> = {
   over_1m: "Large institution (> £1m)",
 };
 
+export const INCOME_BAND_SHORT_NAMES: Record<IncomeBand, string> = {
+  under_10k: "Micro",
+  "10k_100k": "Small",
+  "100k_1m": "Medium",
+  over_1m: "Large",
+};
+
+const GBP_FORMATTER = new Intl.NumberFormat("en-GB", {
+  style: "currency",
+  currency: "GBP",
+  maximumFractionDigits: 0,
+});
+
+/** Formats a monetary number into standard GBP, or returns "Not disclosed" if null/undefined. */
+export function formatGbp(amount: number | null | undefined): string {
+  if (amount === null || amount === undefined || Number.isNaN(amount)) {
+    return "Not disclosed";
+  }
+  return GBP_FORMATTER.format(amount);
+}
+
+/** Formats a monetary number into a compact string (e.g. £450k, £1.2m). */
+export function formatCompactGbp(amount: number | null | undefined): string {
+  if (amount === null || amount === undefined || Number.isNaN(amount)) {
+    return "Not disclosed";
+  }
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? "-" : "";
+  if (abs >= 1_000_000) {
+    return `${sign}£${(abs / 1_000_000).toFixed(1).replace(/\.0$/, "")}m`;
+  }
+  if (abs >= 1_000) {
+    return `${sign}£${Math.round(abs / 1_000)}k`;
+  }
+  return `${sign}£${abs.toLocaleString("en-GB")}`;
+}
+
 /** Converts a numeric total income into the standard public.income_band enum value. */
 export function deriveIncomeBand(totalIncome: number | null | undefined): IncomeBand | null {
   if (totalIncome === null || totalIncome === undefined || Number.isNaN(totalIncome)) {

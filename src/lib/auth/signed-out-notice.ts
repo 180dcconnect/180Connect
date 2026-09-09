@@ -36,7 +36,7 @@ export function signedOutNotice(
     return {
       tone: "warning",
       message:
-        "Your session expired after a period of inactivity. Please log in again.",
+        "Your session expired after 30 days of inactivity. Please log in again.",
     };
   }
 

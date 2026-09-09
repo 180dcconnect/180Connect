@@ -1,9 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ChevronsUpDown, CircleUserRound, LogOut, Sliders } from "lucide-react";
+import { ChevronsUpDown } from "lucide-react";
 import { AnimateIcon } from "@/components/animate-ui/icons/icon";
+import { Accessibility } from "@/components/animate-ui/icons/accessibility";
+import { LogOut } from "@/components/animate-ui/icons/log-out";
 import { Settings } from "@/components/animate-ui/icons/settings";
+import { User } from "@/components/animate-ui/icons/user";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -117,10 +120,12 @@ export function SidebarAccountMenu({
          * prop, so an item cannot *be* an anchor. `logout` redirects, so
          * calling the action directly ends the same way the form post did.
          */}
-        <DropdownMenuItem onSelect={() => router.push("/settings/profile")}>
-          <CircleUserRound aria-hidden="true" />
-          Profile
-        </DropdownMenuItem>
+        <AnimateIcon animateOnHover asChild>
+          <DropdownMenuItem onSelect={() => router.push("/settings/profile")}>
+            <User aria-hidden="true" />
+            Profile
+          </DropdownMenuItem>
+        </AnimateIcon>
 
         <AnimateIcon animateOnHover asChild>
           <DropdownMenuItem onSelect={() => router.push("/settings")}>
@@ -129,17 +134,21 @@ export function SidebarAccountMenu({
           </DropdownMenuItem>
         </AnimateIcon>
 
-        <DropdownMenuItem onSelect={() => router.push("/settings/accessibility")}>
-          <Sliders aria-hidden="true" />
-          Accessibility
-        </DropdownMenuItem>
+        <AnimateIcon animateOnHover asChild>
+          <DropdownMenuItem onSelect={() => router.push("/settings/accessibility")}>
+            <Accessibility aria-hidden="true" />
+            Accessibility
+          </DropdownMenuItem>
+        </AnimateIcon>
 
         <DropdownMenuSeparator />
 
-        <DropdownMenuItem onSelect={() => void onLogout()}>
-          <LogOut aria-hidden="true" />
-          Log out
-        </DropdownMenuItem>
+        <AnimateIcon animateOnHover asChild>
+          <DropdownMenuItem variant="destructive" onSelect={() => void onLogout()}>
+            <LogOut aria-hidden="true" />
+            Log out
+          </DropdownMenuItem>
+        </AnimateIcon>
       </DropdownMenuContent>
     </DropdownMenu>
   );

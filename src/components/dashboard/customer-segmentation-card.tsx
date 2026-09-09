@@ -1,0 +1,306 @@
+"use client";
+
+import { useId, useMemo, useState } from "react";
+import { Layers, Users } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+
+export interface SegmentItem {
+  id: string;
+  name: string;
+  value: number;
+  change: string;
+  isPositive: boolean;
+  color: string;
+  strokeColor: string;
+  bgBadgeColor: string;
+}
+
+export interface CustomerSegmentationCardProps {
+  title?: string;
+  total?: number | string;
+  segments?: SegmentItem[];
+  className?: string;
+}
+
+const DEFAULT_SEGMENTS: SegmentItem[] = [
+  {
+    id: "startup",
+    name: "Startup",
+    value: 2310,
+    change: "+32.8%",
+    isPositive: true,
+    color: "#0f172a", // Dark slate / primary
+    strokeColor: "#0f172a",
+    bgBadgeColor: "bg-slate-900",
+  },
+  {
+    id: "enterprise",
+    name: "Enterprise",
+    value: 800,
+    change: "+32.8%",
+    isPositive: true,
+    color: "#64748b", // Slate 500
+    strokeColor: "#64748b",
+    bgBadgeColor: "bg-slate-500",
+  },
+  {
+    id: "individuals",
+    name: "Individuals",
+    value: 310,
+    change: "-1.7%",
+    isPositive: false,
+    color: "#cbd5e1", // Slate 300
+    strokeColor: "#cbd5e1",
+    bgBadgeColor: "bg-slate-300",
+  },
+];
+
+const TOTAL_TICKS = 42;
+const START_ANGLE_DEG = 135; // Bottom-left
+const SWEEP_ANGLE_DEG = 270; // 270 degree arc leaving open bottom-left/bottom
+
+export function CustomerSegmentationCard({
+  title = "Customer Segmentation",
+  total,
+  segments = DEFAULT_SEGMENTS,
+  className = "",
+}: CustomerSegmentationCardProps) {
+  const cardId = useId().replace(/:/g, "");
+  const [hoveredSegmentId, setHoveredSegmentId] = useState<string | null>(null);
+  const [hasEnteredView, setHasEnteredView] = useState(false);
+
+  const totalCalculated = useMemo(() => {
+    return segments.reduce((sum, item) => sum + item.value, 0);
+  }, [segments]);
+
+  const displayTotal = total !== undefined ? total.toLocaleString() : totalCalculated.toLocaleString();
+
+  // Only segments with a value get ticks/bars — if you only have medium
+  // 100%, no other bar appears; mix → all appear. Keeps colours as-is.
+  const visibleSegments = useMemo(() => {
+    const filtered = segments.filter((s) => s.value > 0);
+    return filtered.length ? filtered : segments;
+  }, [segments]);
+
+  // Tooltip follows any hovered segment (even 0%); ticks only hide when hovered segment has ticks.
+  const activeSegment = useMemo(() => {
+    return segments.find((s) => s.id === hoveredSegmentId) ?? visibleSegments[0];
+  }, [segments, visibleSegments, hoveredSegmentId]);
+
+  const isTicksHovered = useMemo(
+    () => hoveredSegmentId !== null && visibleSegments.some((s) => s.id === hoveredSegmentId),
+    [hoveredSegmentId, visibleSegments],
+  );
+
+  // Compute tick ranges per segment
+  const ticks = useMemo(() => {
+    const totalVal = visibleSegments.reduce((sum, s) => sum + s.value, 0) || 1;
+    const segmentRanges: { segment: SegmentItem; startTick: number; endTick: number }[] = [];
+    let currentAcc = 0;
+    for (const seg of visibleSegments) {
+      const startPct = currentAcc / totalVal;
+      const nextAcc = currentAcc + seg.value;
+      const endPct = nextAcc / totalVal;
+      segmentRanges.push({
+        segment: seg,
+        startTick: Math.round(startPct * TOTAL_TICKS),
+        endTick: Math.round(endPct * TOTAL_TICKS),
+      });
+      currentAcc = nextAcc;
+    }
+
+    const result = [];
+    const cx = 100;
+    const cy = 100;
+    const r1 = 68; // inner radius
+    const r2 = 84; // outer radius
+
+    for (let i = 0; i < TOTAL_TICKS; i++) {
+      const fraction = i / (TOTAL_TICKS - 1);
+      const angleDeg = START_ANGLE_DEG + fraction * SWEEP_ANGLE_DEG;
+      const angleRad = (angleDeg * Math.PI) / 180;
+
+      const cos = Math.cos(angleRad);
+      const sin = Math.sin(angleRad);
+
+      const x1 = Math.round((cx + r1 * cos) * 1000) / 1000;
+      const y1 = Math.round((cy + r1 * sin) * 1000) / 1000;
+      const x2 = Math.round((cx + r2 * cos) * 1000) / 1000;
+      const y2 = Math.round((cy + r2 * sin) * 1000) / 1000;
+
+      // Find which segment this tick belongs to
+      let tickSegment = segmentRanges[0].segment;
+      for (const range of segmentRanges) {
+        if (i >= range.startTick && i <= range.endTick) {
+          tickSegment = range.segment;
+          break;
+        }
+      }
+
+      result.push({
+        index: i,
+        x1,
+        y1,
+        x2,
+        y2,
+        segment: tickSegment,
+      });
+    }
+    return result;
+  }, [visibleSegments]);
+
+  return (
+    <div
+      ref={(node) => {
+        if (!node || hasEnteredView) return;
+        const observer = new IntersectionObserver(([entry]) => {
+          if (entry.isIntersecting) {
+            setHasEnteredView(true);
+            observer.disconnect();
+          }
+        }, { threshold: 0.2 });
+        observer.observe(node);
+      }}
+      className={`relative flex w-full flex-col justify-between overflow-hidden rounded-[28px] border border-border bg-card p-6 shadow-[0_2px_10px_rgba(0,0,0,0.04)] transition-all ${className}`}
+    >
+      {/* Top Header */}
+      <div>
+        <div className="flex items-center gap-2.5 pb-4 border-b border-black/[0.06] dark:border-white/[0.08]">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-black/[0.04] text-foreground dark:bg-white/[0.08]">
+            <Layers size={16} strokeWidth={2.2} className="opacity-80" />
+          </div>
+          <h3 className="text-[15px] font-semibold tracking-tight text-foreground">{title}</h3>
+        </div>
+
+        {/* Center Radial Meter Area */}
+        <div className="relative mx-auto mt-4 flex aspect-square w-full max-w-[260px] items-center justify-center">
+          <svg
+            viewBox="0 0 200 200"
+            className="h-full w-full select-none overflow-visible"
+            aria-hidden="true"
+          >
+            {ticks.map((tick) => {
+              const isSegmentActive = activeSegment.id === tick.segment.id;
+              const opacity = !isTicksHovered ? 1 : isSegmentActive ? 1 : 0;
+
+              return (
+                <motion.line
+                  key={`tick-${cardId}-${tick.index}`}
+                  x1={tick.x1}
+                  y1={tick.y1}
+                  x2={tick.x2}
+                  y2={tick.y2}
+                  stroke={tick.segment.strokeColor}
+                  strokeWidth={3}
+                  strokeLinecap="round"
+                  initial={{ opacity: 0, pathLength: 0 }}
+                  animate={{
+                    opacity: hasEnteredView ? opacity : 0,
+                    pathLength: hasEnteredView ? 1 : 0,
+                    strokeWidth: isSegmentActive && isTicksHovered ? 3.5 : 3,
+                  }}
+                  transition={{
+                    opacity: { duration: 0.25 },
+                    pathLength: { duration: 0.55, ease: "easeOut" },
+                    strokeWidth: { duration: 0.2 },
+                  }}
+                  className="transition-all duration-150"
+                  onPointerEnter={() => setHoveredSegmentId(tick.segment.id)}
+                  onPointerLeave={() => setHoveredSegmentId(null)}
+                />
+              );
+            })}
+          </svg>
+
+          {/* Center Info Ring / Pill */}
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-black/[0.04] text-foreground/75 dark:bg-white/[0.08]">
+              <Users size={16} strokeWidth={2.2} />
+            </div>
+            <span className="mt-1.5 text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
+              Total
+            </span>
+            <span className="text-[26px] font-bold leading-none tracking-tight text-foreground">
+              {displayTotal}
+            </span>
+          </div>
+
+          {/* Floating Tooltip positioned near the active segment */}
+          <AnimatePresence>
+            {hoveredSegmentId && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9, y: 4 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 4 }}
+                transition={{ duration: 0.18, ease: "easeOut" }}
+                className="pointer-events-none absolute right-0 bottom-8 z-30 min-w-[130px] rounded-xl border border-black/[0.08] dark:border-white/[0.12] bg-popover/95 px-3 py-2 shadow-[0_8px_20px_rgba(0,0,0,0.12),0_2px_6px_rgba(0,0,0,0.06)] backdrop-blur-md"
+              >
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ background: activeSegment.color }}
+                  />
+                  <span className="text-[12px] font-bold text-foreground">{activeSegment.name}</span>
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-3 text-[13px] font-semibold tabular-nums">
+                  <span className="text-foreground">{activeSegment.value.toLocaleString()}</span>
+                  <span
+                    className={`text-[12px] font-bold ${
+                      activeSegment.isPositive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+                    }`}
+                  >
+                    {activeSegment.change}
+                  </span>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+
+      {/* Breakdown Rows List — always show all segments (0% if zero) so user knows options */}
+      <div className="mt-4 space-y-2 border-t border-black/[0.04] pt-4 dark:border-white/[0.06]">
+        {segments.map((seg) => {
+          const isHovered = hoveredSegmentId === seg.id;
+          return (
+            <div
+              key={seg.id}
+              className={`flex items-center justify-between rounded-xl px-2.5 py-1.5 transition-colors cursor-pointer ${
+                isHovered
+                  ? "bg-black/[0.04] dark:bg-white/[0.06]"
+                  : "hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"
+              }`}
+              onPointerEnter={() => setHoveredSegmentId(seg.id)}
+              onPointerLeave={() => setHoveredSegmentId(null)}
+            >
+              {/* Left indicator + name */}
+              <div className="flex items-center gap-2.5">
+                <span
+                  className="h-4 w-1.5 rounded-full"
+                  style={{ background: seg.color }}
+                />
+                <span className="text-[13px] font-medium text-foreground">{seg.name}</span>
+              </div>
+
+              {/* Right: count + change */}
+              <div className="flex items-center gap-3 text-[13px] font-semibold tabular-nums">
+                <span className="text-foreground font-bold">{seg.value.toLocaleString()}</span>
+                <span
+                  className={`text-[12px] font-bold ${
+                    seg.isPositive
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-rose-600 dark:text-rose-400"
+                  }`}
+                >
+                  {seg.change}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export default CustomerSegmentationCard;

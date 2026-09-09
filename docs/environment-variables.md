@@ -99,6 +99,11 @@ NEXT_PUBLIC_LOG_LEVEL=debug
 NEXT_PUBLIC_ENABLE_AI_BOOKLETS=true
 NEXT_PUBLIC_ENABLE_SCHEDULED_SENDS=true
 
+# Inbox design fill (mock threads behind the real rows on /inbox). On by
+# default; set to 0 and restart `npm run dev` once testing with the mock data
+# is done and the inbox renders real rows only. No code change needed.
+NEXT_PUBLIC_INBOX_MOCK_FILL=1
+
 # Seed scripts only — Postgres connection string for the DB `npm run seed` /
 # `npm run seed:clear` write to (F233). The app never reads this. Use the SESSION
 # POOLER string (dashboard -> Connect -> Session pooler): it is IPv4 and works
@@ -155,6 +160,7 @@ GEMINI_MODEL=<model-id-from-ai-studio>
 NEXT_PUBLIC_LOG_LEVEL=info
 NEXT_PUBLIC_ENABLE_AI_BOOKLETS=true
 NEXT_PUBLIC_ENABLE_SCHEDULED_SENDS=true
+NEXT_PUBLIC_INBOX_MOCK_FILL=1
 
 # Cron
 CRON_SECRET=<shared-secret>
@@ -205,6 +211,8 @@ GEMINI_MODEL=<model-id-from-ai-studio>
 NEXT_PUBLIC_LOG_LEVEL=warn
 NEXT_PUBLIC_ENABLE_AI_BOOKLETS=true
 NEXT_PUBLIC_ENABLE_SCHEDULED_SENDS=true
+# Mock threads off in production: real mailbox only.
+NEXT_PUBLIC_INBOX_MOCK_FILL=0
 
 # Cron
 CRON_SECRET=<shared-secret>
@@ -247,7 +255,7 @@ NEXT_PUBLIC_SENTRY_DSN=<redacted>
 | `EMAIL_SEND_RATE_LIMIT` | `100` | `100` | Only server-side | Maximum outreach emails per CAM in each fixed window, manual sends and scheduled deliveries combined (F227); optional, defaults to 100 |
 | `EMAIL_SEND_RATE_WINDOW_SECONDS` | `3600` | `3600` | Only server-side | Email send fixed-window duration in seconds; optional, defaults to one hour |
 | `CRON_SECRET` | shared-secret | shared-secret | Only server-side | **SENSITIVE:** Auth for `/api/cron/*` routes |
-| `SESSION_ACTIVITY_SECRET` | random 32+ chars | random 32+ chars | Only server-side | **SENSITIVE:** Signs the inactivity record behind session expiry (F007). Optional — unset means sessions still expire after 30 idle minutes but the record is unsigned and forgeable, so set it everywhere hosted. `openssl rand -base64 32`. Rotating it signs every open session out once |
+| `SESSION_ACTIVITY_SECRET` | random 32+ chars | random 32+ chars | Only server-side | **SENSITIVE:** Signs the inactivity record behind session expiry (F007). Optional — unset means sessions still expire after 30 idle days but the record is unsigned and forgeable, so set it everywhere hosted. `openssl rand -base64 32`. Rotating it signs every open session out once |
 | `NEXT_PUBLIC_POSTHOG_KEY` | dev-key | prod-key | Always | Public analytics key |
 | `NEXT_PUBLIC_SENTRY_DSN` | dev-dsn | prod-dsn | Always | Public error reporting endpoint — where captured errors are sent (F226). Unset ⇒ errors log to the platform console instead |
 | `SENTRY_ENVIRONMENT` | `staging` | `production` | Only server-side | Environment tag on captured errors (F226). Optional — falls back to `VERCEL_ENV` |

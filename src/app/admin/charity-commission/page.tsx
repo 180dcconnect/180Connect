@@ -1,125 +1,267 @@
-import Link from "next/link";
+// Charity Commission imports.
+//
+// The criteria that decide what gets imported — an income floor, a set of
+// sectors, a list of place names — used to be constants in a config file,
+// applied inside a streaming download. Nobody without a pull request could
+// change them and nobody looking at the page could see what they cost. They
+// cost a great deal: the £100k floor alone excluded 3,229 of the 4,340
+// charities local to the branch.
+//
+// So the shape changed rather than the constants. The expensive half — reading
+// ~1.8GB of daily extracts — is a job that filters nothing and stages the whole
+// register of England and Wales. The selective half is this page: an ordinary
+// query over that register, with a live count, so a criterion is something you
+// set and immediately see the consequence of.
+//
+// ── The layout ──
+//
+// Three things, in the order they are needed:
+//
+//   1. A rail under the tabs — how big the register is, when it was last
+//      checked, and the button that refreshes it. This was a card explaining
+//      that the register is a file shipped with the deployment; see
+//      register-rail.tsx for why that is now one line.
+//   2. The run history, which is the landing view. Whether the last import
+//      worked is the question people arrive with.
+//   3. The composer, entered from that history rather than stacked under it.
+//      `ImportConsole` owns which of the two is showing and keeps both mounted.
+//
+// The root element is a `div`, not a `main`: the admin layout's AppShell already
+// renders the `main` this is slotted into.
+
 import { redirect } from "next/navigation";
+
 import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
-import { CharityCommissionImportForm } from "./import-form";
-import { CharityCommissionImportAutoButton } from "./import-auto-button";
-import { CharityCommissionLookupForm } from "./lookup-form";
+import { Group, Rise, Stage } from "@/components/dashboard-stage";
+import { parseFilters } from "@/lib/charity-register/filters";
+import { findBackfillTargets } from "@/lib/charity-register/annual-return-backfill";
+import { findProfileTargets } from "@/lib/charity-register/profile-backfill";
+import { labelValues, registerMeta } from "@/lib/charity-register/sqlite";
+import { LABEL_KIND } from "@/lib/charity-register/sqlite-query";
+import { DataImportsHeader } from "../data-imports-header";
+import { AnnualReturnCard } from "./annual-return-card";
+import { RegisterProfileCard } from "./profile-card";
+import { CharityLookupDialog } from "./lookup-dialog";
+import { FilterBuilder, type PresetSummary } from "./filter-builder";
+import { ImportConsole, NewImportButton } from "./import-console";
+import { PipelinesGuide } from "./pipelines-guide";
+import { RecentRuns } from "./recent-runs";
+import { RegisterRail } from "./register-rail";
+import { MAX_BACKFILL } from "@/lib/charity-register/annual-return-backfill";
+import { MAX_BACKFILL as MAX_PROFILE_BACKFILL } from "@/lib/charity-register/profile-backfill";
+import type { CharityCommissionRun } from "./bulk-funnel";
 
-// TODO: Companies House's admin trigger uses maxDuration = 60 (a single
-// company lookup finishes well within that). Charity Commission's fetch() is
-// a bulk date-range import — even the narrow one-month test range took
-// longer than a single lookup, and a wider range could exceed a 60s
-// serverless timeout entirely. This page inherits that same risk without
-// solving it: triggering a wide date range through this button may time out
-// mid-import. Worth deciding with the team whether the admin trigger should
-// only run a small/incremental range (e.g. "since last successful run"), or
-// whether this needs to become a background job instead of a synchronous
-// server action. Not resolved here.
-export const maxDuration = 60;
+// The import runs inside a Server Action, not this page — but promotion of a
+// large selection is the slowest thing on the route, so the ceiling is raised
+// from the default. The snapshot itself is a CLI job precisely because no
+// serverless timeout would hold it.
+export const maxDuration = 300;
 
-type IngestionRun = {
-  id: string;
-  started_at: string;
-  completed_at: string | null;
-  job_status: "running" | "completed" | "failed" | "partial";
-  records_fetched: number;
-  records_inserted: number;
-  records_skipped: number;
-  records_failed: number;
-};
+const RUN_WINDOW = 8;
 
 export default async function CharityCommissionPage() {
-  const authorization = await getCurrentActor("user:manage");
+  // `client:edit`, not `user:manage`: the team decided everyone who works the
+  // client list can shape and run imports. Viewers still cannot.
+  const authorization = await getCurrentActor("client:edit");
   if (!authorization.ok) {
     if (authorization.reason === "unauthenticated") redirect("/login");
     redirect("/dashboard?error=admin-access-required");
   }
 
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("ingestion_runs")
-    .select(
-      "id, started_at, completed_at, job_status, records_fetched, records_inserted, records_skipped, records_failed",
-    )
-    .eq("api_source", "charity_commission")
-    .order("started_at", { ascending: false })
-    .limit(10);
+  const admin = createAdminClient();
 
-  if (error) {
-    await reportError(error, { operation: "admin.charity_commission.list_runs" });
+  const [runsResult, presetsResult] = await Promise.all([
+    supabase
+      .from("ingestion_runs")
+      .select(
+        "id, api_source, started_at, job_status, records_fetched, records_inserted, records_skipped, records_failed, run_stats",
+      )
+      .in("api_source", ["charity_commission", "charity_commission_bulk"])
+      .order("started_at", { ascending: false })
+      .limit(RUN_WINDOW),
+    admin
+      ? admin
+          .from("import_filter_presets")
+          .select("id, name, description, filters")
+          .eq("source", "charity_commission")
+          .order("name")
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  // What the register could still add to the client list. Cheap enough to read
+  // on every page load: the expensive half is the local file, and the Postgres
+  // half is two reads of a few thousand rows. Degrades to null rather than
+  // failing the page — the coverage card is the least important thing here, and
+  // a missing register file is its normal empty case, not an error.
+  //
+  // The two reads run together. They are independent, and each is several
+  // thousand rows, so awaiting one before starting the other doubled the wait
+  // for no reason. `allSettled` keeps the "degrades to null" behaviour per
+  // read — one failing must not deny the other its card.
+  let coverage = null;
+  let profileCoverage = null;
+  if (admin) {
+    const [backfill, profile] = await Promise.allSettled([
+      findBackfillTargets(admin),
+      findProfileTargets(admin),
+    ]);
+
+    if (backfill.status === "fulfilled") {
+      coverage = backfill.value.coverage;
+    } else {
+      await reportError(backfill.reason, {
+        operation: "admin.charity_commission.annual_return_coverage",
+      });
+    }
+
+    // The same read for the profile fields, degrading the same way and for the
+    // same reasons. Kept separate rather than folded into the one above: they
+    // answer different questions and either can be empty while the other is not.
+    if (profile.status === "fulfilled") {
+      profileCoverage = profile.value.coverage;
+    } else {
+      await reportError(profile.reason, {
+        operation: "admin.charity_commission.register_profile_coverage",
+      });
+    }
   }
 
-  const runs = (data ?? []) as IngestionRun[];
-  const configured = Boolean(process.env.CHARITY_COMMISSION_API_KEY?.trim());
+  // The register is a file in the deployment, not a table — reading it is
+  // synchronous and needs no await, and no Supabase round trip.
+  const meta = registerMeta();
+  const localAuthorities = labelValues(LABEL_KIND.localAuthority);
+
+  if (runsResult.error) {
+    await reportError(runsResult.error, { operation: "admin.charity_commission.list_runs" });
+  }
+
+  const runs = (runsResult.data ?? []) as CharityCommissionRun[];
+
+  const presets: PresetSummary[] = ((presetsResult.data ?? []) as Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    filters: unknown;
+  }>).map((row) => ({
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    filters: parseFilters(row.filters),
+  }));
+
+  const snapshotDate = meta?.builtOn ?? null;
+  const registerSize = meta?.charities ?? 0;
+
+  // One clock for the page, read here rather than inside a component: a server
+  // component's render must stay pure, and two reads could disagree. `new Date()`
+  // rather than `Date.now()` — the same shape /admin/import-status uses, and the
+  // one the React Compiler's purity rule accepts.
+  const now = new Date();
+  const staleDays = snapshotDate
+    ? Math.floor((now.getTime() - new Date(snapshotDate).getTime()) / 86_400_000)
+    : null;
+
+  const staged = registerSize > 0;
+  // Read once here rather than at each render site: process.env is server-only,
+  // and both branches below need the same answer.
+  const lookupConfigured = Boolean(process.env.CHARITY_COMMISSION_API_KEY?.trim());
 
   return (
-    <main className="min-h-screen bg-[#f1f2f4] p-6">
-      <section className="mx-auto max-w-5xl rounded-2xl bg-white p-8 shadow-sm">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold">Charity Commission import</h1>
-            <p className="mt-3 max-w-2xl text-sm text-foreground/65">
-              Bring UK charity registration and contact data into the
-              validation and matching pipeline.
-            </p>
-          </div>
-          <div className="flex items-center gap-4">
-            <Link className="text-sm font-bold text-brand hover:underline" href="/admin/review">
-              Review queue
-            </Link>
-            <Link className="text-sm font-bold text-brand hover:underline" href="/admin">
-              Back to admin
-            </Link>
-          </div>
-        </div>
+    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+      <Stage className="mx-auto max-w-6xl space-y-8">
+        <Rise>
+          <DataImportsHeader current="/admin/charity-commission">
+            <RegisterRail
+              snapshotDate={snapshotDate}
+              registerSize={registerSize}
+              staleDays={staleDays}
+              canRefresh={Boolean(process.env.GITHUB_REGISTER_TOKEN?.trim())}
+            />
+          </DataImportsHeader>
+        </Rise>
 
-        <div className="mt-8">
-          <CharityCommissionImportAutoButton configured={configured} />
-        </div>
-        <CharityCommissionImportForm configured={configured} />
-        <CharityCommissionLookupForm configured={configured} />
+        <Group>
+          <Rise>
+            <ImportConsole
+              home={
+                <>
+                  {/* The screen's other starting point, beside the primary one
+                      rather than below the history. It used to sit under the run
+                      list, which on a page with real history put the one action
+                      that needs neither a staged register nor a loaded history
+                      below the fold — and directly under an alert saying there
+                      was nothing to import from. Kept a quiet text link against
+                      the solid button, so the weighting still says which of the
+                      two is the common job.
 
-        <div className="mt-8">
-          <h2 className="text-lg font-bold">Recent imports</h2>
-          {error ? (
-            <div className="mt-3">
-              <InlineAlert
-                variant="page"
-                message="Import history could not be loaded. Please refresh and try again."
-              />
-            </div>
-          ) : runs.length === 0 ? (
-            <p className="mt-3 text-sm text-foreground/65">No Charity Commission imports have run yet.</p>
-          ) : (
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="border-b border-black/10 text-foreground/60">
-                  <tr>
-                    <th className="p-3">Started</th><th className="p-3">Status</th>
-                    <th className="p-3">Fetched</th><th className="p-3">Written</th>
-                    <th className="p-3">Skipped</th><th className="p-3">Failed</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {runs.map((run) => (
-                    <tr className="border-b border-black/5" key={run.id}>
-                      <td className="p-3">{new Date(run.started_at).toLocaleString("en-GB")}</td>
-                      <td className="p-3 capitalize">{run.job_status}</td>
-                      <td className="p-3">{run.records_fetched}</td>
-                      <td className="p-3">{run.records_inserted}</td>
-                      <td className="p-3">{run.records_skipped}</td>
-                      <td className="p-3">{run.records_failed}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </section>
-    </main>
+                      Rendered in both branches on purpose: a failed history read
+                      says nothing about whether a lookup would work, and losing
+                      the link there would take the one thing still available on a
+                      broken page. */}
+                  {runsResult.error ? (
+                    <>
+                      <InlineAlert
+                        variant="page"
+                        message="Import history could not be loaded. This has been recorded — refresh and try again."
+                      />
+                      <div className="px-1">
+                        <CharityLookupDialog configured={lookupConfigured} />
+                      </div>
+                    </>
+                  ) : (
+                    <RecentRuns
+                      runs={runs}
+                      action={staged ? <NewImportButton /> : undefined}
+                      secondaryAction={<CharityLookupDialog configured={lookupConfigured} />}
+                    />
+                  )}
+
+                  {!staged && (
+                    <InlineAlert
+                      variant="page"
+                      message="The register has not been loaded yet, so there is nothing to import from. Refresh it from the link above the history."
+                    />
+                  )}
+
+                  {coverage && coverage.charities > 0 && (
+                    <AnnualReturnCard
+                      charities={coverage.charities}
+                      covered={coverage.covered}
+                      pending={coverage.pending}
+                      pendingPeriods={coverage.pendingPeriods}
+                      maxBatchSize={MAX_BACKFILL}
+                    />
+                  )}
+
+                  {profileCoverage && profileCoverage.charities > 0 && (
+                    <RegisterProfileCard
+                      charities={profileCoverage.charities}
+                      covered={profileCoverage.covered}
+                      pending={profileCoverage.pending}
+                      pendingFields={profileCoverage.pendingFields}
+                      maxBatchSize={MAX_PROFILE_BACKFILL}
+                    />
+                  )}
+
+                  <PipelinesGuide />
+                </>
+              }
+              composer={
+                <FilterBuilder
+                  presets={presets}
+                  localAuthorities={localAuthorities}
+                  registerSize={registerSize}
+                />
+              }
+            />
+          </Rise>
+        </Group>
+      </Stage>
+    </div>
   );
 }

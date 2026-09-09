@@ -107,6 +107,13 @@ create table if not exists meta (
  * `charity_label (label_id, organisation_number)` is the one that matters — the
  * classification and area filters all read "which charities carry this label",
  * and that index answers it without touching the charity table.
+ *
+ * The two `charity` lookup indexes are what `lookupCharityOperatingAreas` needs.
+ * Without them every client profile view cost a full scan of all 171,800 rows —
+ * synchronously, on the request thread — because `organisation_number` is the
+ * only indexed way in and a charity is just as often found by its registration
+ * number or its name. `collate nocase` on the name matches how the lookup
+ * queries it; an index in the default collation would be ignored.
  */
 export const REGISTER_SCHEMA_INDEXES = `
 create index if not exists charity_label_by_label on charity_label (label_id, organisation_number);
@@ -114,5 +121,7 @@ create index if not exists charity_label_by_charity on charity_label (organisati
 create index if not exists charity_income on charity (latest_income);
 create index if not exists charity_postcode_area on charity (postcode_area);
 create index if not exists charity_registered on charity (date_of_registration);
+create index if not exists charity_reg_number on charity (registered_charity_number);
+create index if not exists charity_name_nocase on charity (charity_name collate nocase);
 create unique index if not exists label_kind_value on label (kind, value);
 `;

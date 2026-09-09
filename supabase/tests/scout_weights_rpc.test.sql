@@ -102,16 +102,23 @@ begin
         is_active = excluded.is_active,
         full_name = excluded.full_name;
 
-  -- Only if no active generation exists (migrations normally leave SCOUT v1).
+  -- Ensure the active generation has weights that DIFFER from tests.equal_five()
+  -- (all 0.2). After 20260923142000, migrations seed v2 with all-five 0.2 —
+  -- identical to equal_five — so every set_scout_weights call would be a no-op.
+  -- We retire whatever is active and insert a four-key config (no
+  -- partnershipHistory) that the RPC must version away from.
+  update public.model_versions
+     set is_active = false,
+         deprecated_at = now()
+   where model_name = 'SCOUT' and is_active;
+
   insert into public.model_versions
     (model_name, version, implementation_type, config, is_active, notes)
-  select 'SCOUT', 'v9000fixture', 'rules',
-         '{"weights": {"sector": 0.25, "geography": 0.25, "size": 0.25, "previousContact": 0.25},
-           "bands": {"high": 0.70, "medium": 0.40}}'::jsonb,
-         true,
-         'F096 test fixture'
-  where not exists (
-    select 1 from public.model_versions where model_name = 'SCOUT' and is_active
+  values (
+    'SCOUT', 'v9000fixture', 'rules',
+    '{"weights": {"sector": 0.25, "geography": 0.25, "size": 0.25, "previousContact": 0.25}}'::jsonb,
+    true,
+    'F096 test fixture — four keys, differs from equal_five so versioning is exercised'
   );
 end;
 $$;

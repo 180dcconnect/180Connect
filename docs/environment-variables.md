@@ -31,7 +31,7 @@ Project Root/
 | Category | Examples | Sensitive? | Local | Preview | Production |
 |---|---|---|---|---|---|
 | **Supabase** | URL, anon key, service role key | Yes (service key) | Dev project | Dev project | Prod project |
-| **Gmail/Email** | OAuth tokens, SMTP credentials | Yes | Dev Gmail account | Dev Gmail account | Production Gmail |
+| **Gmail/Email** | OAuth client + one shared-mailbox refresh token | Yes | Dev Gmail account | The branch outreach mailbox, `clients.sheffield@180dc.org` | Not yet set — see [end-of-project/outreach-prod-env.md](end-of-project/outreach-prod-env.md) |
 | **LLM** | API key for VOICE or Claude | Yes | Test/dev key | Test/dev key | Production key |
 | **Third-party APIs** | CharityBase, Companies House, etc. | Yes | Test credentials | Test credentials | Production credentials |
 | **Feature flags** | `ENABLE_AI_BOOKLETS`, log levels | No | Feature flags | Feature flags | Feature flags |
@@ -79,6 +79,8 @@ NEXT_PUBLIC_ENV=local
 
 # Email (Dev Gmail account — ask team)
 # These are used when manually testing email sending; CI/CD doesn't need them
+# These authorise ONE shared mailbox (clients.sheffield@180dc.org), not a per-CAM
+# account — see docs/email-sending.md
 GMAIL_REDIRECT_URI=http://localhost:3000/api/auth/gmail/callback
 GMAIL_CLIENT_ID=123456789-randomstring.apps.googleusercontent.com
 GMAIL_CLIENT_SECRET=GOCSPX-secretkey
@@ -242,9 +244,9 @@ NEXT_PUBLIC_SENTRY_DSN=<redacted>
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | `1x00000000000000000000AA` (test key) locally; real key on preview | real key | Always | **Required** (F003) — public site key for the login CAPTCHA. **Half of a pair:** the matching secret must be set in that project's Supabase **Authentication → Attack Protection**, or the widget renders, issues a token and nothing ever validates it. Setting this variable alone does *not* turn the CAPTCHA on. Each environment needs its own Cloudflare widget, or one rotation breaks the other. Production was misconfigured on both counts until 30 July 2026 and is now correct — the probe that proves it is in [production-deployment.md](production-deployment.md#the-captcha-needs-a-second-non-vercel-half) |
 | `TURNSTILE_SECRET_KEY` | test secret locally | not set | Only server-side | **SENSITIVE.** Only the local Supabase stack reads it, via `supabase/config.toml`. Hosted environments hold it in the Supabase dashboard instead |
 | `NEXT_PUBLIC_ENV` | `staging` | `production` | Always | Tells app which environment it's in |
-| `GMAIL_CLIENT_ID` | dev-id | prod-id | Always | Public OAuth client ID |
+| `GMAIL_CLIENT_ID` | dev-id | prod-id | Always | Public OAuth client ID for the Gmail send/reply-sync flow (PRD §12.1). Nothing to do with signing in — there is no login SSO |
 | `GMAIL_CLIENT_SECRET` | dev-secret | prod-secret | Only server-side | **SENSITIVE:** Never expose |
-| `GMAIL_REFRESH_TOKEN` | dev token | prod token | Only server-side | **SENSITIVE:** Authorises mailbox access |
+| `GMAIL_REFRESH_TOKEN` | dev token | prod token | Only server-side | **SENSITIVE:** Authorises mailbox access. **One token for the whole branch**, obtained once by authorising `clients.sheffield@180dc.org` — not one per CAM, because outreach leaves from a single shared Workspace mailbox ([email-sending.md](email-sending.md)). Revocation or expiry therefore stops outreach branch-wide, not for one person |
 | `GMAIL_SENDER_EMAIL` | outreach mailbox | outreach mailbox | Only server-side | Exact branch mailbox; no fallback sender |
 | `GMAIL_REPLY_LOOKBACK_DAYS` | positive whole days; default `2` | positive whole days; default `2` | Only server-side | Gmail inbox search window for replies; increase when clients commonly reply later |
 | `OPENAI_API_KEY` | test-key | prod-key | Only server-side | **SENSITIVE:** Never expose |

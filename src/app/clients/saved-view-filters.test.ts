@@ -201,9 +201,19 @@ describe("filterCount", () => {
     assert.equal(filterCount({ q: "oxfam" }), 1);
     assert.equal(filterCount({ q: "oxfam", city: ["Leeds"], owner: "unassigned" }), 3);
   });
-});
+});  it("captures and describes a mission term (F215)", () => {
+    const filters = captureFilters({ q: "haven", mission: "asylum seekers" });
+    assert.equal(filters.mission, "asylum seekers");
+    const described = describeFilters(filters, null);
+    assert.ok(described.includes("mission: asylum seekers"));
+  });
 
-describe("describeFilters", () => {
+  it("drops an over-long mission term rather than storing it", () => {
+    const tooLong = "x".repeat(MAX_FILTER_VALUE_LENGTH + 1);
+    assert.deepEqual(captureFilters({ mission: tooLong }), {});
+  });
+
+  describe("describeFilters", () => {
   it("reads out the filters in a fixed order", () => {
     assert.equal(
       describeFilters({

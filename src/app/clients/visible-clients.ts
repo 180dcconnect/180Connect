@@ -12,7 +12,7 @@ import {
   type PipelineStatus,
 } from "../../lib/organisation-format.ts";
 import { deriveIncomeBand } from "../settings/outreach-preferences/constants.ts";
-import { safeValidate } from "../../lib/validation.ts";
+import { nonEmptyTrimmed, safeValidate } from "../../lib/validation.ts";
 
 export { formatLocation, formatOutreachStatus };
 
@@ -48,6 +48,9 @@ export type ClientListRow = {
   geographic_reach?: string | null;
   sector?: string | null;
   sub_sector?: string | null;
+  /** F215 — the charity's own filed description of its work (register text,
+   * mirrored to enrichment_results.mission_statement). Companies have none. */
+  charity_activities?: string | null;
   income_band?: string | null;
   total_income?: number | null;
   financial_periods?: FinancialPeriodRow[] | null;
@@ -312,10 +315,99 @@ export function filterByFinancialRecords(
 }
 
 /**
- * Free-text search on the client list. Case-insensitive substring match on
- * legal_name only — the field the list actually displays and the one a CAM
- * would type from memory.
+ * F052/F215 — free-text search on the client list.
+ *
+ * `term` matches the legal name — case-insensitive substring, as it has always
+ * been. `missionTerm` matches the charity's own filed description of its work
+ * (ORGANISATIONS.charity_activities): every mission word must appear as a whole
+ * word, so "youth education" is an AND over "youth" and "education" and a
+ * charity whose mission says only "elderly care" does not match. Passing both
+ * narrows to clients satisfying the two — the same AND the page applies between
+ * every other pair of filters (AC3: mission search composes, it is not a mode).
+ *
+ * `missionTerm` is pre-validated by `parseMissionTerm` (safeValidate + a max
+ * length) before it reaches here — the same shape `parseListSort` establishes —
+ * so this function only ever sees a bounded string. Long queries are capped
+ * rather than substring-scanned in full.
  */
+export const MISSION_TERM_MAX_LENGTH = 120;
+
+/** Validates/normalises the `?mission=` URL param: trimmed, bounded, or null.
+ * A too-long or junk param filters nothing rather than throwing — same
+ * "junk narrows visibly, never crashes" rule as parseListSort. */
+export function parseMissionTerm(value: string | string[] | null | undefined): string | null {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (raw == null) return null;
+  const parsed = safeValidate(nonEmptyTrimmed(MISSION_TERM_MAX_LENGTH), raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * Mission search (F215 AC1) — whole-word keyword matching on the charity's
+ * filed description of its work.
+ *
+ * Why whole words rather than substring: the field is dense free text where
+ * fragments mislead ("art" inside "participation", "rat" inside "operation").
+ * The page's other text matcher, `textContains`, already takes this position
+ * for sector aliases; mission search reuses the same matcher so the two can
+ * never disagree about what a word is. A registered company with no mission
+ * text simply never matches — a missing value is not a match.
+ */
+export function searchClientsByMission(
+  clients: VisibleClient[],
+  missionTerm: string | null | undefined,
+): VisibleClient[] {
+  return searchClientsByMissionKeywords(clients, missionTerm, []);
+}
+
+/**
+ * F215 AC1+AC2 — the mission matcher with query expansion.
+ *
+ * `missionTerm` is the CAM's phrase: its words must ALL appear (an AND, so
+ * "youth education" is not satisfied by a mission mentioning only "youth").
+ * `expandedKeywords` are the alternative terms a mission statement may use for
+ * the same cause ("helping refugees" → "asylum seekers"); a client matching
+ * ANY one of them also matches, which is the OR half. The two halves union:
+ * semantic widening can only add clients to AC1's exact matches, never remove
+ * them — a wider net, not a different one.
+ *
+ * Expanded terms match as whole *phrases* via the same whole-word matcher, and
+ * an empty/whitespace expansion list degrades to plain AC1 keyword matching.
+ */
+export function searchClientsByMissionKeywords(
+  clients: VisibleClient[],
+  missionTerm: string | null | undefined,
+  expandedKeywords: string[] | null | undefined,
+): VisibleClient[] {
+  const query = missionTerm?.trim().toLowerCase();
+  const terms = (expandedKeywords ?? [])
+    .map((keyword) => keyword.trim().toLowerCase())
+    .filter((keyword) => keyword.length > 0);
+  if (!query && terms.length === 0) return clients;
+
+  const queryWords = query
+    ? query.split(/[^a-z0-9]+/).filter((word) => word.length > 0)
+    : [];
+  // A term of only punctuation/whitespace parses to nothing: filtering by an
+  // empty AND would be "everything", which would read as the filter doing
+  // nothing. No words and no expansion — no filter.
+  if (queryWords.length === 0 && terms.length === 0) return clients;
+
+  return clients.filter((client) => {
+    const mission = client.charity_activities;
+    if (typeof mission !== "string" || !mission.trim()) return false;
+    const haystack = mission.toLowerCase();
+    // AC1 half: every word of the CAM's own phrase appears.
+    if (queryWords.length > 0 && queryWords.every((word) => textContains(haystack, word))) {
+      return true;
+    }
+    // AC2 half: any expanded alternative appears — even when the phrase's own
+    // words do not, since widening is the point ("helping refugees" matches a
+    // mission that only says "asylum seekers").
+    return terms.some((term) => textContains(haystack, term));
+  });
+}
+
 export function searchClients(
   clients: VisibleClient[],
   term: string | null | undefined,
@@ -335,6 +427,7 @@ export function emptyStateMessage({
   isOwnedView,
   search,
   ask,
+  mission,
   filterActive,
 }: {
   isOwnedView: boolean;
@@ -344,6 +437,10 @@ export function emptyStateMessage({
    *  question and got nothing needs to be told it was their question that
    *  matched nothing, not handed generic copy about filters they never set. */
   ask?: string | null;
+  /** F215 — a mission term alone gets its own sentence: the honest reading of
+   * "no results" is "no charity's filed mission says this", which is what a
+   * CAM weighing whether to widen their words needs to hear. */
+  mission?: string | null;
   filterActive: boolean;
 }): string {
   const question = ask?.trim();
@@ -351,8 +448,12 @@ export function emptyStateMessage({
     return `No clients match “${question}”. Clear the question, or widen it — the filters below still work.`;
   }
   const term = search?.trim();
+  const missionTerm = mission?.trim();
   if (term) {
     return `No clients match “${term}”. Clear the search to see the full list.`;
+  }
+  if (missionTerm) {
+    return `No client's mission mentions “${missionTerm}”. Try fewer or broader words — or clear the mission filter.`;
   }
   if (isOwnedView) {
     return "You don't own any clients yet. Claim one from the list, or ask an admin to assign you one.";

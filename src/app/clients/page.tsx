@@ -27,9 +27,12 @@ import {
   PRIORITY_SCORE_FILTERS,
   parseListDirection,
   parseListSort,
+  MISSION_TERM_MAX_LENGTH,
+  parseMissionTerm,
   parsePriorityScoreFilter,
   priorityScoreFilterLabel,
   searchClients,
+  searchClientsByMissionKeywords,
   sortClients,
   visibleClients,
   type ClientListRow,
@@ -86,6 +89,7 @@ import {
 } from "./saved-view-filters";
 import { type SavedViewSummary } from "./saved-views-panel";
 import { SavedViewsPopover } from "./saved-views-popover";
+import { expandMissionQuery } from "@/lib/ai/mission-query";
 import { bulkStatusBlockedReason, canBulkUpdateStatus } from "@/lib/bulk-status";
 import { ClientSelectCheckbox, SelectPageCheckbox } from "./bulk-selection";
 import { BulkActionsBar } from "./bulk-actions-bar";
@@ -121,6 +125,10 @@ type SearchParams = Promise<{
   // F055 — sector is multi-select like the filters above; values are the
   // canonical group keys (see CANONICAL_SECTOR_GROUPS) plus "unclassified".
   sector?: string | string[];
+  /** F215 — free-text mission search term ("climate", "youth education").
+   * Single-valued: one mission filter per view, staged through the search
+   * bar's free-text panel. */
+  mission?: string;
   // F058 — priority-score bands (`high` / `medium` / `low` / `unscored`), same
   // repeated-param shape as the other multi-selects.
   score?: string | string[];
@@ -237,6 +245,7 @@ export default async function ClientsPage({
     tags: tagsParam,
     type: typeFilter,
     sector: sectorParam,
+    mission: missionParam,
     score: scoreParam,
     financials: financialsParam,
     stage: stageParam,
@@ -280,7 +289,7 @@ export default async function ClientsPage({
       supabase
         .from("organisations")
         .select(
-          "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id), financial_periods(income_band, total_income, period_end), grants(id, amount_awarded, funder_name, award_date), latest_scores(priority_score, priority_band, scored_at)",
+          "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, charity_activities, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id), financial_periods(income_band, total_income, period_end), grants(id, amount_awarded, funder_name, award_date), latest_scores(priority_score, priority_band, scored_at)",
         )
         .order("legal_name", { ascending: true })
         .order("id", { ascending: true })
@@ -400,6 +409,21 @@ export default async function ClientsPage({
   // Financial records filter: charity_commission, 360giving, any, none
   const financialValues = filterValues(financialsParam);
 
+  // F215 — mission search term. Parsed through the same safeValidate funnel as
+  // every other param: junk or over-long values filter nothing rather than
+  // throwing, and the banner below says so instead of pretending to search.
+  const missionTerm = parseMissionTerm(missionParam);
+  /**
+   * F215 AC2 — widen the term through Gemini when it is configured. Runs during
+   * the render request, after the (parallel) data fetch above, so the expansion
+   * overlaps nothing. All failure modes degrade to `keywords: []`, which the
+   * filter reads as plain keyword matching and the banner below reports.
+   * Cached per normalised query in the module, so revisiting the same view does
+   * not re-call the API.
+   */
+  const missionExpansion = missionTerm ? await expandMissionQuery(missionTerm) : null;
+  const missionKeywords = missionExpansion?.keywords ?? [];
+
   // BrandSearchBar always writes a multi-selected category as repeated params
   // (see its submitSearch), so this can legitimately arrive as one string or
   // several — normalise to an array once, here, rather than at every call site.
@@ -414,6 +438,11 @@ export default async function ClientsPage({
   matchingClients = filterBySector(matchingClients, sectorValues);
   matchingClients = filterByTags(matchingClients, tagFilter);
   matchingClients = searchClients(matchingClients, search);
+  // F215 — mission search sits in the same chain: it narrows what the other
+  // filters have already selected, and they narrow what it selects (AC3).
+  // With expansion present, a client matches its own words OR any expanded
+  // alternative; without, plain keyword matching (AC1).
+  matchingClients = searchClientsByMissionKeywords(matchingClients, missionTerm, missionKeywords);
   // F058 — bands narrow the searched set; unscored clients stay visible until a
   // band is actually chosen (the filter's own AC3, enforced inside the function).
   matchingClients = filterByPriorityScore(matchingClients, scoreBands);
@@ -484,6 +513,7 @@ export default async function ClientsPage({
     ownerFilter ||
       search ||
       askParam ||
+      missionTerm ||
       cityValues.length ||
       countryValues.length ||
       statusValues.length ||
@@ -518,6 +548,7 @@ export default async function ClientsPage({
     status,
     type: typeFilter,
     sector: sectorParam,
+    mission: missionTerm ?? undefined,
     owner: ownerFilter,
     score: scoreParam,
   });
@@ -613,6 +644,8 @@ export default async function ClientsPage({
       // listSort below: junk leaves the URL on the next click.
       score: scoreBands,
       financials: financialValues,
+      // The validated term, not the raw param — same junk-leaves-the-URL rule.
+      mission: missionTerm ?? undefined,
       stage: stageParam,
       sort: sortParam,
       dir: dirParam,
@@ -787,6 +820,10 @@ export default async function ClientsPage({
                   label: financialRecordFilterLabel(value),
                   value,
                 })),
+                // F215 — the mission term rides as one chip like any other filter.
+                ...(missionTerm
+                  ? [{ category: "Filter by mission", label: missionTerm, value: missionTerm }]
+                  : []),
               ]}
               params={{
                 "Filter by city": "city",
@@ -798,6 +835,7 @@ export default async function ClientsPage({
                 "Filter by tag": "tags",
                 "Filter by priority score": "score",
                 "Filter by financial records": "financials",
+                "Filter by mission": "mission",
               }}
               categories={{
                 "Filter by city": uniqueCities.map(c => ({ label: c, value: c })),
@@ -818,6 +856,24 @@ export default async function ClientsPage({
                   label: f.label,
                   value: f.value,
                 })),
+                // F215 — free-text: the category renders a text input, not an
+                // option list. Options stay empty so no stale list can appear.
+                "Filter by mission": [],
+              }}
+              freeTextCategories={{
+                "Filter by mission": {
+                  category: "Filter by mission",
+                  placeholder: "climate, youth education…",
+                  hint:
+                    missionTerm === null
+                      ? "Enter what a charity does — its mission, in your own words."
+                      : missionExpansion?.mode === "semantic"
+                        ? `Also matching charities whose mission says it differently: ${missionKeywords.slice(0, 4).join(", ")}.`
+                        : missionExpansion?.mode === "unavailable"
+                          ? "Widened matching is unavailable right now — matching your exact words only."
+                          : "Enter what a charity does — its mission, in your own words.",
+                  maxLength: MISSION_TERM_MAX_LENGTH,
+                },
               }}
             />
           }
@@ -966,6 +1022,50 @@ export default async function ClientsPage({
           </Rise>
         )}
 
+        {/* F215 — what the mission filter actually did. A widened net (AC2) is
+            worth naming so the CAM can trust it; a degraded one must not pose
+            as a semantic search. An invalid term says itself plainly. Shown
+            above the list like F214's interpretation panel, never inside it. */}
+        {missionParam?.trim() && (
+          <Rise>
+            {missionTerm === null ? (
+              <div
+                role="alert"
+                className="mb-8 rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4"
+              >
+                <p className="text-sm font-bold text-destructive">
+                  That mission search is too long or empty (up to {MISSION_TERM_MAX_LENGTH} characters).
+                </p>
+                <p className="mt-1.5 text-sm leading-[1.7] text-foreground/65">
+                  Your filters are unaffected — shorten it in the search bar, or{" "}
+                  <Link href={hrefWith({ mission: undefined })} className="font-bold underline">
+                    clear the mission filter
+                  </Link>
+                  .
+                </p>
+              </div>
+            ) : missionExpansion?.mode === "semantic" ? (
+              <div className="mb-8 rounded-2xl border border-foreground/10 bg-white px-5 py-4">
+                <p className="text-sm leading-[1.7] text-foreground/65">
+                  Mission matches for{" "}
+                  <span className="font-bold text-foreground">“{missionTerm}”</span>, widened to
+                  include{" "}
+                  <span className="font-bold text-foreground">{missionKeywords.join(", ")}</span>.
+                </p>
+              </div>
+            ) : missionExpansion?.mode === "unavailable" ? (
+              <div className="mb-8 rounded-2xl border border-foreground/10 bg-white px-5 py-4">
+                <p className="text-sm leading-[1.7] text-foreground/65">
+                  Mission matches for{" "}
+                  <span className="font-bold text-foreground">“{missionTerm}”</span> — matching
+                  your exact words only. Widened (similar-wording) matching is unavailable right
+                  now.
+                </p>
+              </div>
+            ) : null}
+          </Rise>
+        )}
+
         <Group className="space-y-4">
           {/* Where the pipeline stands before the list of it: the four stage
               totals, the stream between them, and the top-N groups. Counts
@@ -1001,7 +1101,13 @@ export default async function ClientsPage({
             <Rise>
               {clients.length === 0 ? (
                 <EmptyState
-                  message={emptyStateMessage({ isOwnedView, search, ask: askParam, filterActive })}
+                  message={emptyStateMessage({
+                    isOwnedView,
+                    search,
+                    ask: askParam,
+                    mission: missionTerm,
+                    filterActive,
+                  })}
                 />
               ) : (
                 <div className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm">

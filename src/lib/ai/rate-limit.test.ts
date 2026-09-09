@@ -45,7 +45,7 @@ describe("consumeAiGenerationAllowance", () => {
     );
     assert.deepEqual(calls, [{
       name: "consume_ai_generation_allowance",
-      args: { p_user_id: "user-1", p_limit: 3, p_window_seconds: 60 },
+      args: { p_user_id: "user-1", p_limit: 3, p_window_seconds: 60, p_bucket: "generation" },
     }]);
   });
 

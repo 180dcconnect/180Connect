@@ -236,6 +236,35 @@ export const SCHEMA: readonly EnvVarSpec[] = [
       "Gemini model id for booklet generation (F082), e.g. a Flash-tier model — copy the exact id from the Google AI Studio model picker rather than guessing, since Google retires model ids frequently. No hardcoded default in code for that reason; unset means booklet generation cannot run.",
   },
   {
+    name: "GEMINI_SEARCH_MODEL",
+    required: false,
+    secret: false,
+    description:
+      "Gemini model id for F214 natural language search. Separate from GEMINI_MODEL on purpose: interpreting a search query is a much easier job than writing a booklet, and the LLM Provider Research doc puts it on the cheaper Flash-Lite tier ($0.30/$2.50 per million tokens against $0.75/$3.75) — running search on the booklet's model costs roughly two and a half times as much for the same answer. Optional; unset falls back to GEMINI_MODEL and logs a warning, so search still works on an environment that has not been told about it.",
+  },
+  {
+    name: "AI_SEARCH_RATE_LIMIT",
+    required: false,
+    secret: false,
+    description:
+      "Maximum natural language search interpretations each authenticated user may run per window (F214). Counted in its own bucket, so searching never consumes the booklet/draft allowance. Optional; defaults to 40. Only searches that actually reach the model count: a repeated query is served from cache and a plain name search never calls the API at all.",
+    validate: (value) =>
+      /^\d+$/.test(value) && Number(value) > 0
+        ? null
+        : "must be a positive whole number of requests",
+  },
+  {
+    name: "AI_SEARCH_RATE_WINDOW_SECONDS",
+    required: false,
+    secret: false,
+    description:
+      "Fixed-window duration in seconds for AI_SEARCH_RATE_LIMIT. Optional; defaults to 86400 (one day) — a day rather than an hour because search is bursty: a CAM works a list hard for twenty minutes and then not at all.",
+    validate: (value) =>
+      /^\d+$/.test(value) && Number(value) > 0
+        ? null
+        : "must be a positive whole number of seconds",
+  },
+  {
     name: "AI_GENERATION_RATE_LIMIT",
     required: false,
     secret: false,

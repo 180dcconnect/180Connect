@@ -27,6 +27,7 @@ import { deriveBookletSources } from "@/lib/booklet/sources";
 import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { computeCostUsd } from "@/lib/outreach/generation-cost";
+import { loadModelRate } from "@/lib/ai/model-rate";
 
 // F084 — Use Website URL in Booklet: an optional URL the CAM pastes in, separate
 // from the stored organisation.website (which is always sent as a plain field
@@ -343,14 +344,19 @@ export async function POST(
   // the CAM just waited up to 90s and losing the booklet over an audit write
   // would trade a compliance nicety for a user-visible failure. It is reported
   // to ERROR_LOG so the gap is visible, not silent.
-  const { data: pricing } = await supabase
-    .from("model_pricing")
-    .select("input_usd_per_1k_tokens, output_usd_per_1k_tokens")
-    .eq("model", result.model)
-    .maybeSingle();
+  const pricing = await loadModelRate(
+    () =>
+      supabase
+        .from("model_pricing")
+        .select("input_usd_per_1k_tokens, output_usd_per_1k_tokens")
+        .eq("model", result.model)
+        .maybeSingle(),
+    result.model,
+    "clients.generate_booklet.load_pricing",
+  );
   const costUsd = computeCostUsd(
     { inputTokens: null, outputTokens: null },
-    pricing ? { inputUsdPer1kTokens: pricing.input_usd_per_1k_tokens, outputUsdPer1kTokens: pricing.output_usd_per_1k_tokens } : null,
+    pricing,
   );
   const { error: auditError } = await supabase.from("booklet_generations").insert({
     organisation_id: organisationId,

@@ -20,6 +20,7 @@ import {
 } from "@/lib/outreach/suppression-check";
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import { computeCostUsd } from "@/lib/outreach/generation-cost";
+import { loadModelRate } from "@/lib/ai/model-rate";
 import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
 
 export const maxDuration = 60;
@@ -308,26 +309,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // F213 — LLM Cost Tracking AC3, mirroring Stage 1: a pricing lookup failure must
   // never block saving a generation that already succeeded, so this is best-effort
   // — a missing or errored rate prices as unknown (null), never a fabricated 0.
-  const { data: pricing, error: pricingError } = await supabase
-    .from("model_pricing")
-    .select("input_usd_per_1k_tokens, output_usd_per_1k_tokens")
-    .eq("model", model)
-    .maybeSingle();
-  if (pricingError) {
-    await reportError(pricingError, {
-      operation: "outreach.stage_two.load_pricing",
-      organisationId,
-      model,
-    });
-  }
+  const pricing = await loadModelRate(
+    () =>
+      supabase
+        .from("model_pricing")
+        .select("input_usd_per_1k_tokens, output_usd_per_1k_tokens")
+        .eq("model", model)
+        .maybeSingle(),
+    model,
+    "outreach.stage_two.load_pricing",
+  );
   const costUsd = computeCostUsd(
     { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens },
-    pricing
-      ? {
-          inputUsdPer1kTokens: pricing.input_usd_per_1k_tokens,
-          outputUsdPer1kTokens: pricing.output_usd_per_1k_tokens,
-        }
-      : null,
+    pricing,
   );
 
   const { error: generationError } = await admin

@@ -345,6 +345,7 @@ export function BrandSearchBar({
    onSubmitQuery,
    recentKey,
    busy = false,
+   ask,
    openSignal,
    confirmSignal,
    confirm,
@@ -374,6 +375,39 @@ export function BrandSearchBar({
     * of hiding it behind a closed pill.
     */
    startOpen?: boolean;
+   /**
+    * F214 — an "ask in plain English" field at the top of the filter panel.
+    *
+    * Additive and opt-in: hosts that pass nothing render byte-identical output
+    * to before. It sits *above* the filter categories rather than replacing the
+    * query field, because the two are different acts — the query field searches
+    * for a name, this one describes what you are looking for — and a CAM whose
+    * description could not be interpreted needs the filters still sitting
+    * underneath it (F214 AC3), not a bar that has become an AI prompt.
+    */
+   ask?: {
+     /** Row label, e.g. "Ask in plain English". */
+     label: string;
+     /** Greyed example inside the field. */
+     placeholder?: string;
+     /** Pre-fills the field, so a submitted question stays visible on the page
+      *  it produced and can be edited rather than retyped. */
+     defaultValue?: string;
+     /**
+      * The query parameter the question is written to, e.g. "ask".
+      *
+      * The bar navigates itself rather than taking a callback: this component is
+      * rendered from server components (the clients list among them), which
+      * cannot hand a function across the boundary at all. It is also what the
+      * bar already does for the plain query field, so both submits behave the
+      * same way — a soft `router.push`, existing params preserved, `page`
+      * dropped so a new question starts at page one.
+      */
+     param: string;
+     /** Cap enforced in the field itself, so the limit is felt while typing
+      *  rather than reported after submitting. */
+     maxLength?: number;
+   };
    /**
     * Reactive open signal: whenever this value changes (after mount), the
     * panel opens. For failures that land while the panel is closed — the
@@ -521,7 +555,10 @@ export function BrandSearchBar({
   const [filterQuery, setFilterQuery] = useState("");
   const [selectedFilters, setSelectedFilters] = useState<(FilterOption & { category: string })[]>(defaultFilters);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
+  // `askPending` is a real signal, not a timed animation: the ask submit waits on
+  // the server round-trip that interprets the question, so the spinner should
+  // last exactly as long as that does.
+  const [askPending, startTransition] = useTransition();
   const [isSearching, setIsSearching] = useState(false);
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -529,6 +566,7 @@ export function BrandSearchBar({
   const frameRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
+  const askId = useId();
 
   /**
    * `compactRest` morphs between two boxes whose sizes are known, so both ends
@@ -645,6 +683,26 @@ export function BrandSearchBar({
   // Memoised so the options memo below doesn't re-run on every render — a
   // fresh object literal here would defeat it.
   const FILTER_CATEGORIES: Record<string, FilterOption[]> = useMemo(() => categories || DEFAULT_CATEGORIES, [categories]);
+
+  // F214 — the ask field owns its own text. Deliberately not folded into
+  // `query`: submitting a question and submitting a name search do different
+  // things, and sharing one piece of state would make the arrow disc ambiguous.
+  const [askValue, setAskValue] = useState(ask?.defaultValue ?? "");
+
+  const submitAsk = () => {
+    const question = askValue.trim();
+    if (!ask || !question) return;
+    setOpen(false);
+    setFocused(false);
+    const params = new URLSearchParams(window.location.search);
+    params.set(ask.param, question);
+    // A different question is a different result set, so it cannot land on
+    // page 4 of the last one.
+    params.delete("page");
+    startTransition(() => {
+      router.push(`${window.location.pathname}?${params.toString()}`);
+    });
+  };
   const FILTER_PARAMS: Record<string, string> = useMemo(() => paramNames || DEFAULT_PARAMS, [paramNames]);
 
   const [datePickerMode, setDatePickerMode] = useState<"day" | "range" | "presets">("day");
@@ -1448,6 +1506,53 @@ export function BrandSearchBar({
                   animate="show"
                   exit={{ opacity: 0, transition: { duration: 0.15 } }}
                 >
+                  {ask && (
+                    <motion.li key="__ask" variants={GLASS_ITEM} className="mb-1">
+                      <div className={`rounded-2xl px-3 py-2 ${T.fieldBg}`}>
+                        <label
+                          htmlFor={askId}
+                          className={`font-body block text-[13px] font-medium ${T.muted60}`}
+                        >
+                          {ask.label}
+                        </label>
+                        <div className="mt-1.5 flex items-center gap-2">
+                          <input
+                            id={askId}
+                            type="text"
+                            value={askValue}
+                            maxLength={ask.maxLength}
+                            onChange={(event) => setAskValue(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                submitAsk();
+                              }
+                              // Enter alone submits; the panel's own Escape
+                              // handling still closes, so nothing is trapped.
+                            }}
+                            placeholder={ask.placeholder}
+                            className={`font-body min-w-0 flex-1 bg-transparent text-base ${T.ink} ${T.faintPlaceholder} outline-none`}
+                          />
+                          <button
+                            type="button"
+                            aria-label={ask.label}
+                            disabled={askValue.trim().length === 0 || askPending}
+                            onClick={submitAsk}
+                            className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${T.disc} ${T.discHover} transition-colors disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
+                          >
+                            {askPending ? (
+                              <div
+                                className={`h-4 w-4 rounded-[4px] animate-spin ${T.spinner}`}
+                                style={{ animationDuration: "2.5s" }}
+                              />
+                            ) : (
+                              <ArrowRight className="h-4 w-4" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </motion.li>
+                  )}
                   {Object.keys(FILTER_CATEGORIES).map((filter) => {
                     const count = selectedFilters.filter((f) => f.category === filter).length;
                     return (

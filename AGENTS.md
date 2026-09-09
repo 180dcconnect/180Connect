@@ -119,6 +119,7 @@ What this means in practice:
 - [`docs/environment-variables.md`](docs/environment-variables.md) — every env var, where to get it
 - [`supabase/MIGRATIONS.md`](supabase/MIGRATIONS.md) — migration conventions and workflow
 - [`docs/audit-log-pattern.md`](docs/audit-log-pattern.md) — required pattern for privileged writes
+- [`docs/natural-language-search.md`](docs/natural-language-search.md) — F214: how a plain-English search becomes filters, why the model never sees a client record, and every control that keeps it at ~$0.0006 a search
 - [`docs/client-list-sorting.md`](docs/client-list-sorting.md) — how `/clients` is ordered, and the pipeline-status order
 - [`docs/ingestion.md`](docs/ingestion.md) — the whole ingestion pipeline: the four stages, every source, what runs on a schedule
 - [`docs/charity-register-import.md`](docs/charity-register-import.md) — how charity imports work; criteria are data (a query over a register file), never code

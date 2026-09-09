@@ -738,14 +738,21 @@ export function BrandSearchBar({
    * replaces the first, because the filter is one AND/OR expression, not a
    * bag of them. Picking the category again pre-fills the input with what is
    * staged so it can be edited rather than silently duplicated.
+   *
+   * Returns the list as staged, synchronously. Callers that submit straight
+   * away must pass it to submitSearch: the state update lands on the next
+   * render, and submitSearch's default reads this render's selectedFilters —
+   * the pre-stage snapshot — which would send the old (or no) value.
    */
-  const stageFreeText = (category: string) => {
+  const stageFreeText = (category: string): (FilterOption & { category: string })[] => {
     const trimmed = freeTextValue.trim();
-    setSelectedFilters((prev) => [
-      ...prev.filter((f) => f.category !== category),
+    const staged = [
+      ...selectedFilters.filter((f) => f.category !== category),
       ...(trimmed ? [{ category, label: trimmed, value: trimmed }] : []),
-    ]);
+    ];
+    setSelectedFilters(staged);
     setFreeTextValue("");
+    return staged;
   };
 
   const [datePickerMode, setDatePickerMode] = useState<"day" | "range" | "presets">("day");
@@ -1869,9 +1876,16 @@ export function BrandSearchBar({
                       onChange={(e) => setFreeTextValue(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
+                          // stopPropagation, not just preventDefault: the root
+                          // container's own Enter branch would otherwise also
+                          // fire handleEnter → submitSearch() with this render's
+                          // pre-stage filters, and its router.replace would land
+                          // after this one — resurrecting the stale value this
+                          // handler exists to avoid. (Same guard the main query
+                          // input carries.)
                           e.preventDefault();
-                          stageFreeText(activeFilter as string);
-                          submitSearch();
+                          e.stopPropagation();
+                          submitSearch(stageFreeText(activeFilter as string));
                           inputRef.current?.blur();
                         }
                       }}
@@ -1885,8 +1899,7 @@ export function BrandSearchBar({
                         type="button"
                         disabled={!freeTextValue.trim()}
                         onClick={() => {
-                          stageFreeText(activeFilter as string);
-                          submitSearch();
+                          submitSearch(stageFreeText(activeFilter as string));
                           inputRef.current?.blur();
                         }}
                         className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-[13px] font-bold transition-all shadow-xs disabled:opacity-40 disabled:cursor-not-allowed ${

@@ -1,12 +1,12 @@
 -- Migration: hoist_rls_helper_initplans_remaining
 -- Sequence: no schema change — the same policy-expression rewrite as
---   20260923133000_hoist_rls_helper_initplans.sql, applied to the other 40 tables.
+--   20260923133000_hoist_rls_helper_initplans.sql, applied to the other 41 tables.
 -- Story: performance — intermittent slow page loads.
 --
 -- WHAT THIS DOES
 --
 -- Wraps every zero-argument `app.*` helper call, and every bare `auth.uid()`,
--- in `(select ...)` across the 82 remaining policies. Nothing else changes: the
+-- in `(select ...)` across the 83 remaining policies. Nothing else changes: the
 -- same helpers, the same operators, the same order, the same role, the same
 -- `with check` clauses. Access is byte-for-byte identical.
 --
@@ -27,8 +27,8 @@
 --
 -- Generated from `pg_policies` on staging rather than typed by hand — the
 -- `create policy` statements are Postgres's own deparsed expressions with only
--- the helper calls rewritten. Eighty-two policies transcribed by hand is eighty-two
--- chances to quietly widen a permission.
+-- the helper calls rewritten. Eighty-three policies transcribed by hand is
+-- eighty-three chances to quietly widen a permission.
 --
 -- WHAT IS DELIBERATELY NOT WRAPPED
 --
@@ -376,6 +376,17 @@ create policy outcomes_update_admin on public.outcomes
 
 drop policy outreach_daily_send_limit_select_active on public.outreach_daily_send_limit;
 create policy outreach_daily_send_limit_select_active on public.outreach_daily_send_limit
+  for select to authenticated
+  using ((select app.is_active_user()));
+
+-- ── outreach_message_attachments ───────────────────────────────────────
+
+-- Added after the fact: F217's table (20260913090000) shipped with a bare call
+-- and was not in the set this file was generated over; tests.suite_rls_initplan
+-- caught it. Shared read, same shape as attachments_select_active above.
+
+drop policy outreach_message_attachments_select_active on public.outreach_message_attachments;
+create policy outreach_message_attachments_select_active on public.outreach_message_attachments
   for select to authenticated
   using ((select app.is_active_user()));
 

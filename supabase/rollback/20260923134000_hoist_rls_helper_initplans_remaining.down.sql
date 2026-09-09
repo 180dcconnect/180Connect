@@ -1,7 +1,7 @@
 -- Rollback for: 20260923134000_hoist_rls_helper_initplans_remaining.sql
 -- Apply manually against the target DB to reverse the paired migration.
 --
--- Restores the bare helper calls in all 82 policies. This is a pure performance
+-- Restores the bare helper calls in all 83 policies. This is a pure performance
 -- reversal: the policies admit exactly the same rows either way, so nobody gains
 -- or loses access in either direction. It reinstates per-row evaluation of the
 -- SECURITY DEFINER helpers, and with it the cost on every list-shaped read.
@@ -339,6 +339,13 @@ create policy outcomes_update_admin on public.outcomes
 
 drop policy outreach_daily_send_limit_select_active on public.outreach_daily_send_limit;
 create policy outreach_daily_send_limit_select_active on public.outreach_daily_send_limit
+  for select to authenticated
+  using (app.is_active_user());
+
+-- ── outreach_message_attachments ───────────────────────────────────────
+
+drop policy outreach_message_attachments_select_active on public.outreach_message_attachments;
+create policy outreach_message_attachments_select_active on public.outreach_message_attachments
   for select to authenticated
   using (app.is_active_user());
 

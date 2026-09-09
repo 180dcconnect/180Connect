@@ -3179,14 +3179,14 @@ begin
 
   return next is(
     tests.sqlstate_of(v_cam_a, format(
-      'select public.approve_manual_entry(%L, false, ''create_new'', null, null)',
+      'select public.approve_manual_entry(%L, ''create_new'', false, null, null)',
       v_approval_entry
     )),
     '42501', 'CAM cannot call the manual approval RPC');
 
   perform tests.login_as(v_admin);
   select public.approve_manual_entry(
-    v_approval_entry, false, 'create_new', null, 'Meets the target criteria'
+    v_approval_entry, 'create_new', false, null, 'Meets the target criteria'
   ) into v_created_org;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
   return next ok(v_created_org is not null, 'admin can approve a distinct manual entry');
@@ -3227,14 +3227,14 @@ begin
 
   return next is(
     tests.sqlstate_of(v_admin, format(
-      'select public.approve_manual_entry(%L, false, ''create_new'', %L, null)',
+      'select public.approve_manual_entry(%L, ''create_new'', false, %L, null)',
       v_duplicate_entry, v_created_org
     )),
     '22023', 'a likely duplicate cannot become a second client without a human explanation');
 
   perform tests.login_as(v_admin);
   select public.approve_manual_entry(
-    v_duplicate_entry, false, 'link_existing', v_created_org,
+    v_duplicate_entry, 'link_existing', false, v_created_org,
     'Same organisation despite the formatting difference'
   ) into v_linked_org;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
@@ -3251,21 +3251,21 @@ begin
 
   return next is(
     tests.sqlstate_of(v_admin, format(
-      'select public.approve_manual_entry(%L, true, null, null, null)',
+      'select public.approve_manual_entry(%L, null, true, null, null)',
       v_company_entry
     )),
     '22023', 'a null duplicate decision cannot bypass the approval decision');
 
   return next is(
     tests.sqlstate_of(v_admin, format(
-      'select public.approve_manual_entry(%L, null, ''create_new'', null, null)',
+      'select public.approve_manual_entry(%L, ''create_new'', null, null, null)',
       v_company_entry
     )),
     '22023', 'a null eligibility confirmation cannot bypass F047');
 
   return next is(
     tests.sqlstate_of(v_admin, format(
-      'select public.approve_manual_entry(%L, false, ''create_new'', null, null)',
+      'select public.approve_manual_entry(%L, ''create_new'', false, null, null)',
       v_company_entry
     )),
     '22023', 'ambiguous company cannot bypass the F047 human eligibility decision');
@@ -3278,7 +3278,7 @@ begin
     'Added directly by an administrator', true
   ) into v_admin_entry;
   select public.approve_manual_entry(
-    v_admin_entry, false, 'create_new', null, 'Submitted and self-approved by admin'
+    v_admin_entry, 'create_new', false, null, 'Submitted and self-approved by admin'
   ) into v_admin_org;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
   select count(*) into v_count from public.manual_entry_records

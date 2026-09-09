@@ -523,16 +523,23 @@ begin
 
     -- F044 (20260923114000): the approval is a write to the field, so the field
     -- history says a person corrected it, not that the old register still owns
-    -- the value. Restricted fields are admin-added text columns; only the seven
-    -- tracked ones land in FIELD_SOURCES, the rest are attributed by no-op.
-    perform public.record_field_source(
-      v_suggestion.organisation_id,
-      v_suggestion.field_name,
-      v_suggestion.proposed_value,
-      'manual',
-      null,
-      v_actor
-    );
+    -- the value. Provenance covers exactly the seven tracked fields; anything
+    -- else (runtime-restricted columns such as trading_name) is written with no
+    -- field history — the honest state, not an exception that would abort the
+    -- whole approval. Same guard as apply_admin_field_edits above.
+    if v_suggestion.field_name in
+      ('legal_name', 'website', 'contact_email', 'address_line_1', 'city',
+       'postcode', 'organisation_type')
+    then
+      perform public.record_field_source(
+        v_suggestion.organisation_id,
+        v_suggestion.field_name,
+        v_suggestion.proposed_value,
+        'manual',
+        null,
+        v_actor
+      );
+    end if;
   end if;
 
   update public.edit_suggestions

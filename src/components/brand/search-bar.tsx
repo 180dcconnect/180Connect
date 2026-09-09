@@ -181,6 +181,24 @@ function rankOption(label: string, query: string): number {
 export type FilterOption = { label: string; value: string; colour?: string };
 
 /**
+ * F215 — a category whose value is typed rather than picked: the panel shows a
+ * text field instead of an option list ("climate", "youth education"). The
+ * staged value becomes a normal removable chip and rides the same submit path
+ * as every other filter. Declared through `freeTextCategories` alongside the
+ * host's `categories`/`params`.
+ */
+export type FreeTextCategory = {
+  /** Category name — must match its key in `categories`. */
+  category: string;
+  /** Input placeholder. */
+  placeholder: string;
+  /** Description shown under the input. */
+  hint?: string;
+  /** Longest accepted input; longer keystrokes are not staged. */
+  maxLength?: number;
+};
+
+/**
  * One row in the as-you-type suggestions dropdown (opt-in via `suggestions`).
  * The bar bolds the query's match inside `title` itself, so hosts pass plain
  * strings. `subtitle` and `meta` render as the second line and the trailing
@@ -334,6 +352,7 @@ export function BrandSearchBar({
    clearRowOnOpen = false,
    promptButton = false,
    panelRows,
+   freeTextCategories,
    compactRest = false,
    anchorLeft = false,
    chipsBelow = true,
@@ -448,6 +467,11 @@ export function BrandSearchBar({
     * rather than filters.
     */
    panelRows?: PanelRow[];
+   /**
+    * Categories rendered as a text input instead of an option list. Keyed by
+    * category name; the value's query parameter still comes from `params`.
+    */
+   freeTextCategories?: Record<string, FreeTextCategory>;
    /**
     * Rest compact: the closed pill shrinks to its content instead of spanning
     * full width, then widens back on open before the panel unfolds — the
@@ -705,6 +729,32 @@ export function BrandSearchBar({
   };
   const FILTER_PARAMS: Record<string, string> = useMemo(() => paramNames || DEFAULT_PARAMS, [paramNames]);
 
+  // F215 — the free-text category's staged value. One input at a time is ever
+  // visible, so one piece of state serves every such category.
+  const [freeTextValue, setFreeTextValue] = useState("");
+
+  /**
+   * Free-text categories stage at most one value: typing a second mission term
+   * replaces the first, because the filter is one AND/OR expression, not a
+   * bag of them. Picking the category again pre-fills the input with what is
+   * staged so it can be edited rather than silently duplicated.
+   *
+   * Returns the list as staged, synchronously. Callers that submit straight
+   * away must pass it to submitSearch: the state update lands on the next
+   * render, and submitSearch's default reads this render's selectedFilters —
+   * the pre-stage snapshot — which would send the old (or no) value.
+   */
+  const stageFreeText = (category: string): (FilterOption & { category: string })[] => {
+    const trimmed = freeTextValue.trim();
+    const staged = [
+      ...selectedFilters.filter((f) => f.category !== category),
+      ...(trimmed ? [{ category, label: trimmed, value: trimmed }] : []),
+    ];
+    setSelectedFilters(staged);
+    setFreeTextValue("");
+    return staged;
+  };
+
   const [datePickerMode, setDatePickerMode] = useState<"day" | "range" | "presets">("day");
   const [customSingleDate, setCustomSingleDate] = useState<string>("");
   const [customRangeFrom, setCustomRangeFrom] = useState<string>("");
@@ -715,6 +765,10 @@ export function BrandSearchBar({
     const paramKey = FILTER_PARAMS[activeFilter] ?? "";
     return paramKey === "date" || activeFilter.toLowerCase().includes("date");
   }, [activeFilter, FILTER_PARAMS]);
+
+  /** F215 — the active category is the free-text kind, and its declaration. */
+  const isFreeTextCategory = Boolean(activeFilter && freeTextCategories?.[activeFilter]);
+  const freeTextCategory = activeFilter ? freeTextCategories?.[activeFilter] : undefined;
 
   const [prevDateCategoryFilter, setPrevDateCategoryFilter] = useState<string | null>(null);
   if (prevDateCategoryFilter !== activeFilter) {
@@ -1562,6 +1616,12 @@ export function BrandSearchBar({
                           onClick={() => {
                             setActiveFilter(filter);
                             setFilterQuery("");
+                            // F215 — a free-text category pre-fills from its
+                            // staged chip, so reopening edits the term rather
+                            // than appearing to have lost it.
+                            setFreeTextValue(
+                              selectedFilters.find((f) => f.category === filter)?.value ?? "",
+                            );
                           }}
                           className={`font-body flex w-full items-center justify-between rounded-2xl px-3 py-2 text-left text-lg font-medium ${T.bright} transition-colors ${T.hoverRow} ${T.hoverBright} focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
                         >
@@ -1783,6 +1843,80 @@ export function BrandSearchBar({
                       </motion.ul>
                     )}
                   </div>
+                </motion.div>
+              ) : isFreeTextCategory ? (
+                <motion.div
+                  key="free-text"
+                  className="flex flex-col h-[280px] px-4 py-4"
+                  variants={PANEL_STAGGER}
+                  initial="hidden"
+                  animate="show"
+                  exit={{ opacity: 0, transition: { duration: 0.15 } }}
+                >
+                  <motion.div variants={GLASS_ITEM} className="mb-4 flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveFilter(null);
+                        setFilterQuery("");
+                      }}
+                      className={`font-body flex items-center gap-1 shrink-0 rounded-2xl px-3 py-2 text-[15px] font-medium ${T.muted50} transition-colors ${T.hoverRowSoft} ${T.hoverInk} focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Back
+                    </button>
+                  </motion.div>
+
+                  <motion.div variants={GLASS_ITEM} className="flex flex-1 flex-col gap-3">
+                    <input
+                      type="text"
+                      value={freeTextValue}
+                      placeholder={freeTextCategory?.placeholder}
+                      maxLength={freeTextCategory?.maxLength}
+                      onChange={(e) => setFreeTextValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          // stopPropagation, not just preventDefault: the root
+                          // container's own Enter branch would otherwise also
+                          // fire handleEnter → submitSearch() with this render's
+                          // pre-stage filters, and its router.replace would land
+                          // after this one — resurrecting the stale value this
+                          // handler exists to avoid. (Same guard the main query
+                          // input carries.)
+                          e.preventDefault();
+                          e.stopPropagation();
+                          submitSearch(stageFreeText(activeFilter as string));
+                          inputRef.current?.blur();
+                        }
+                      }}
+                      className={`font-body w-full ${T.fieldBg} text-[15px] ${T.ink} ${T.faintPlaceholder} rounded-xl px-4 py-2.5 outline-none focus-visible:ring-2 ${T.ringVisibleFocus}`}
+                    />
+                    {freeTextCategory?.hint && (
+                      <p className={`text-[13px] leading-[1.6] ${T.muted60}`}>{freeTextCategory.hint}</p>
+                    )}
+                    <div className="mt-auto flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        disabled={!freeTextValue.trim()}
+                        onClick={() => {
+                          submitSearch(stageFreeText(activeFilter as string));
+                          inputRef.current?.blur();
+                        }}
+                        className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-[13px] font-bold transition-all shadow-xs disabled:opacity-40 disabled:cursor-not-allowed ${
+                          selectedFilters.some((f) => f.category === activeFilter)
+                            ? T.selectedBtn
+                            : "bg-[#e6f5c0] text-[#1a1a1a] hover:bg-[#d4e5a0]"
+                        }`}
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        <span>
+                          {selectedFilters.some((f) => f.category === activeFilter)
+                            ? "Search this mission"
+                            : "Add mission filter"}
+                        </span>
+                      </button>
+                    </div>
+                  </motion.div>
                 </motion.div>
               ) : (
                 <motion.div

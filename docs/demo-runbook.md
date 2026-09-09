@@ -254,23 +254,19 @@ quiet, and any client's history is auditable field by field.*
 
 ## What is not built
 
-**F214 (Natural Language Charity Search) and F215 (Search by Mission) do not
-exist** — not on this branch, not on `dev`, nowhere in the codebase. Client
-search is a case-insensitive substring match on the organisation's legal name
-(`searchClients` in `src/app/clients/visible-clients.ts`); it does not read
-mission statements and there is no query parser.
+**F214 (Natural Language Charity Search) is now on `dev`** (PR #555) — the
+search bar's "Ask in plain English" field interprets a question and converts it
+into filters. Demo it as built.
 
-Mission statements *are* in the database (`enrichment_results.mission_statement`,
-shown on the client record), so the data half of F215 exists — but nothing
-searches it.
-
-Two honest options for the demo:
-
-- **Leave them out.** Storyline 3 ends on team analytics, which is a stronger
-  close anyway.
-- **Show the ingredients and name it as next.** Open a client record, show the
-  mission statement on it, and say searching across those is the next piece of
-  work. Don't demo it as though it runs.
+~~F215 (Search by Mission)~~ — **now built** on the `feature/f215-search-by-mission`
+branch. The client list's search bar has a **"Filter by mission"** category:
+type "climate" or "youth education" and the list keeps charities whose filed
+mission text (ORGANISATIONS.charity_activities) contains those words, combined
+with every other filter on the page. When Gemini is configured it also widens
+the query to similar wording ("helping refugees" also matches missions saying
+"asylum seekers") and says so above the list; without Gemini — or on timeout,
+rate limit, or API failure — it falls back to exact-word matching and says that
+too. Nothing to configure for a demo beyond the usual `GEMINI_*` env vars.
 
 **A real send needs the branch mailbox configured.** The inbox composer and
 the client record both send through the branch Gmail mailbox. On a local dev

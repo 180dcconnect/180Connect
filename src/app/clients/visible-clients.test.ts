@@ -28,7 +28,11 @@ import {
   filterValues,
   parseListDirection,
   parseListSort,
+  MISSION_TERM_MAX_LENGTH,
+  parseMissionTerm,
   searchClients,
+  searchClientsByMission,
+  searchClientsByMissionKeywords,
   sortClients,
   visibleClients,
   type ClientListRow,
@@ -48,6 +52,179 @@ function org(overrides: Partial<ClientListRow> = {}): ClientListRow {
     org_tags: overrides.org_tags ?? [],
   };
 }
+describe("parseMissionTerm (F215)", () => {
+  it("trims and keeps a normal term", () => {
+    assert.equal(parseMissionTerm("  climate  "), "climate");
+  });
+
+  it("reads the first value when handed an array", () => {
+    assert.equal(parseMissionTerm(["climate", "youth"]), "climate");
+  });
+
+  it("returns null for missing, empty and whitespace values", () => {
+    assert.equal(parseMissionTerm(null), null);
+    assert.equal(parseMissionTerm(undefined), null);
+    assert.equal(parseMissionTerm(""), null);
+    assert.equal(parseMissionTerm("   "), null);
+    assert.equal(parseMissionTerm(["", "climate"]), null);
+  });
+
+  it("returns null past the length cap instead of throwing", () => {
+    assert.equal(parseMissionTerm("a".repeat(MISSION_TERM_MAX_LENGTH + 1)), null);
+    assert.equal(parseMissionTerm("a".repeat(MISSION_TERM_MAX_LENGTH)), "a".repeat(MISSION_TERM_MAX_LENGTH));
+  });
+});
+
+describe("searchClientsByMission (F215 AC1)", () => {
+  const climate = org({
+    id: "climate-1",
+    legal_name: "Green Futures",
+    charity_activities: "We campaign on climate change and promote renewable energy across the region.",
+  });
+  const youth = org({
+    id: "youth-1",
+    legal_name: "Young Minds Trust",
+    charity_activities: "Youth education programmes for disadvantaged children and young people.",
+  });
+  const noMission = org({ id: "none-1", legal_name: "No Mission Ltd", charity_activities: null });
+  // The page applies search after visibleClients(), which stamps the derived
+  // fields; mirror that here so the fixtures are the type the filter takes.
+  const clients = visibleClients([climate, youth, noMission], []);
+
+  it("matches a single keyword as a whole word in the mission text", () => {
+    const result = searchClientsByMission(clients, "climate");
+    assert.deepEqual(result.map((c) => c.id), ["climate-1"]);
+  });
+
+  it("requires every word of a multi-word phrase (AND)", () => {
+    assert.deepEqual(
+      searchClientsByMission(clients, "youth education").map((c) => c.id),
+      ["youth-1"],
+    );
+    // "education" alone also matches; "youth renewable" matches nothing.
+    assert.deepEqual(searchClientsByMission(clients, "education").map((c) => c.id), ["youth-1"]);
+    assert.deepEqual(searchClientsByMission(clients, "youth renewable"), []);
+  });
+
+  it("is case-insensitive", () => {
+    assert.deepEqual(searchClientsByMission(clients, "CLIMATE").map((c) => c.id), ["climate-1"]);
+  });
+
+  it("does not match inside words", () => {
+    // A fragment of "programmes" must not match: the whole-word rule that
+    // textContains applies to sector aliases applies here too.
+    assert.deepEqual(searchClientsByMission(clients, "gram"), []);
+    // The whole word does.
+    assert.deepEqual(searchClientsByMission(clients, "programmes").map((c) => c.id), ["youth-1"]);
+  });
+
+  it("never matches organisations with no mission text", () => {
+    assert.deepEqual(searchClientsByMission(clients.filter((c) => c.id === "none-1"), "climate"), []);
+    assert.deepEqual(
+      searchClientsByMission(clients.filter((c) => c.id === "none-1"), "anything at all"),
+      [],
+    );
+  });
+
+  it("returns the list unchanged for empty, blank or punctuation-only terms", () => {
+    assert.equal(searchClientsByMission(clients, null), clients);
+    assert.equal(searchClientsByMission(clients, ""), clients);
+    assert.equal(searchClientsByMission(clients, "   "), clients);
+    assert.equal(searchClientsByMission(clients, " !!! ??? "), clients);
+  });
+});
+
+describe("searchClientsByMissionKeywords (F215 AC2)", () => {
+  const refugees = org({
+    id: "ref-1",
+    legal_name: "Haven Foundation",
+    charity_activities: "Resettlement support for displaced families and asylum seekers.",
+  });
+  const exact = org({
+    id: "exact-1",
+    legal_name: "Refugee Aid",
+    charity_activities: "Helping refugees rebuild their lives.",
+  });
+  const unrelated = org({
+    id: "other-1",
+    legal_name: "Something Else",
+    charity_activities: "Community sports and recreation.",
+  });
+  const clients = visibleClients([refugees, exact, unrelated], []);
+
+  it("matches a client whose mission uses different wording with the same meaning", () => {
+    // "helping refugees" appears in only one mission; "asylum seekers" widens it.
+    assert.deepEqual(searchClientsByMission(clients, "helping refugees").map((c) => c.id), ["exact-1"]);
+    const widened = searchClientsByMissionKeywords(clients, "helping refugees", [
+      "asylum seekers",
+      "displaced families",
+    ]);
+    // Order follows the input list, not the match kind: both widened-in and
+    // exact matches appear.
+    assert.deepEqual(widened.map((c) => c.id), ["ref-1", "exact-1"]);
+  });
+
+  it("widening only adds clients, never removes an exact match", () => {
+    const plain = searchClientsByMission(clients, "refugees").map((c) => c.id);
+    const widened = searchClientsByMissionKeywords(clients, "refugees", ["community sports"]).map((c) => c.id);
+    assert.ok(plain.includes("exact-1"));
+    assert.ok(widened.includes("exact-1"));
+    assert.ok(widened.includes("other-1"));
+  });
+
+  it("degrades to plain keyword matching with an empty or blank expansion list", () => {
+    assert.deepEqual(
+      searchClientsByMissionKeywords(clients, "helping refugees", []).map((c) => c.id),
+      ["exact-1"],
+    );
+    assert.deepEqual(
+      searchClientsByMissionKeywords(clients, "helping refugees", ["   ", ""]).map((c) => c.id),
+      ["exact-1"],
+    );
+  });
+
+  it("matches on expansion alone when the caller passes no phrase", () => {
+    assert.deepEqual(
+      searchClientsByMissionKeywords(clients, null, ["asylum seekers"]).map((c) => c.id),
+      ["ref-1"],
+    );
+  });
+  it("a client with no mission text never matches, even on an expanded term", () => {
+    assert.equal(
+      searchClientsByMissionKeywords(
+        visibleClients([org({ id: "x", charity_activities: null })], []),
+        null,
+        ["anything"],
+      ).length,
+      0,
+    );
+  });
+
+  it("composes with the other filters (F215 AC3 shape)", () => {
+    // Same union the page applies: mission filter after city filter.
+    const bristolRefugees = org({
+      id: "bristol-1",
+      legal_name: "Bristol Haven",
+      city: "Bristol",
+      charity_activities: "Sanctuary and resettlement support for asylum seekers.",
+    });
+    const yorkRefugees = org({
+      id: "york-1",
+      legal_name: "York Haven",
+      city: "York",
+      charity_activities: "Resettlement support for asylum seekers.",
+    });
+    assert.deepEqual(
+      searchClientsByMissionKeywords(
+        filterByCity(visibleClients([bristolRefugees, yorkRefugees], []), "Bristol"),
+        "refugee support",
+        ["asylum seekers"],
+      ).map((c) => c.id),
+      ["bristol-1"],
+    );
+  });
+});
+
 describe("formatLocation", () => {
   it("uses the city when present", () => {
     assert.equal(formatLocation(org({ city: "Bristol", country_code: "GB" })), "Bristol");

@@ -46,7 +46,6 @@ import type { AddressableClient } from "@/lib/inbox/real-threads";
 import type { InboxThreadTag } from "@/lib/inbox-thread-view";
 import { attachmentFileTypeFromFilename } from "@/lib/inbox-thread-view";
 import { InboxAttachmentCard } from "./inbox-attachment-card";
-import { mockFillThreads } from "@/lib/inbox-mock-data";
 import { attachDraftFile } from "@/app/clients/[id]/outreach-actions";
 import {
   assignTagsBatchAction,
@@ -62,7 +61,6 @@ import {
   validateDraftAttachmentSet,
 } from "@/lib/attachments";
 import {
-  fillAsAddressableClients,
   resolveRecipientThread,
   searchRecipients,
   type RecipientMatch,
@@ -141,21 +139,19 @@ export type GmailComposeModalProps = {
   initialSubject?: string;
   /**
    * The clients this window may actually send to: every organisation the
-   * viewer can see that has an address on it, built from Supabase — never the
-   * design fill. `AddressableClient.id` is an organisation id (see
-   * @/lib/inbox/real-threads), which is what makes a picked recipient
-   * addressable by the approved send path.
+   * viewer can see that has an address on it, built from Supabase.
+   * `AddressableClient.id` is an organisation id (see @/lib/inbox/real-threads),
+   * which is what makes a picked recipient addressable by the approved send
+   * path.
    *
    * NOT the inbox's thread list. That list holds only organisations with
    * outreach history, so passing it here meant the only clients Compose could
    * find were ones already emailed — the first email to a client could not be
    * started from the inbox at all.
    *
-   * Recipient lookup runs against this list alone when it has entries, so what
-   * can be picked is exactly what can be sent to. With no directory — an empty
-   * database — the window falls back to searching the design fill and Send
-   * stays disabled, because a fill recipient resolves to no organisation and
-   * the send would write nothing.
+   * Recipient lookup runs against this list, so what can be picked is exactly
+   * what can be sent to. With no directory — an empty database — the recipient
+   * field finds nothing and Send stays disabled.
    */
   directory?: AddressableClient[];
   /**
@@ -788,28 +784,23 @@ export function GmailComposeModal({
   }
 
   // The client behind the recipient. Until an address is saved there is no
-  // record to show, so the context buttons have nothing to open.
-  // Real clients when the inbox has any; the design fill otherwise, which
-  // leaves Send disabled (see the `directory` prop).
+  // record to show, so the context buttons have nothing to open. Empty when
+  // the directory is empty, which leaves Send disabled (see the `directory`
+  // prop).
   const addressable = useMemo(
     () => (directory && directory.length > 0 ? directory : null),
     [directory],
   );
-  // Only built when there is no real directory to search.
-  const fillDirectory = useMemo(
-    () => (addressable ? [] : fillAsAddressableClients(mockFillThreads())),
-    [addressable],
-  );
   const client = useMemo(
-    () => resolveRecipientThread(savedTo ?? "", addressable ?? fillDirectory),
-    [savedTo, addressable, fillDirectory],
+    () => resolveRecipientThread(savedTo ?? "", addressable ?? []),
+    [savedTo, addressable],
   );
-  /** The client this draft can actually be sent to — null for a fill match. */
-  const sendableClient = addressable ? client : null;
+  /** The client this draft can actually be sent to. */
+  const sendableClient = client;
 
   // A resumed draft's organisation, resolved once from the recipient it
   // opened with — not from the live one, which the CAM may have changed
-  // since. Null for design-fill resumes (thread ids, not message rows).
+  // since.
   const resumedDraftOrganisationId = useMemo(() => {
     if (!resumedDraftId || !initialRecipient.trim() || !addressable) return null;
     return resolveRecipientThread(initialRecipient, addressable)?.id ?? null;
@@ -838,21 +829,20 @@ export function GmailComposeModal({
     [isScheduleDialogOpen],
   );
   const matches = useMemo(
-    () => searchRecipients(recipientQuery, 6, addressable ?? fillDirectory),
-    [recipientQuery, addressable, fillDirectory],
+    () => searchRecipients(recipientQuery, 6, addressable ?? []),
+    [recipientQuery, addressable],
   );
 
   /**
    * The client's saved booklet (F085/F086), fetched when the sheet is opened
    * for a real client.
    *
-   * This used to render `getMockBooklet(client)` — invented prose about the
-   * organisation's headcount, income mix and "openers that have worked",
-   * generated from the thread's own fields. On the design fill that was
-   * harmless set dressing; on a real charity it was fiction presented to a CAM
-   * as research, for an organisation they were about to email. So there is now
-   * only one source: `client_booklets`, through the same RLS-scoped read the
-   * client record uses. No saved booklet means the sheet says so.
+   * This used to render an invented booklet — prose about the organisation's
+   * headcount, income mix and "openers that have worked", generated from the
+   * thread's own fields — which was fiction presented to a CAM as research for
+   * an organisation they were about to email. There is now only one source:
+   * `client_booklets`, through the same RLS-scoped read the client record
+   * uses. No saved booklet means the sheet says so.
    */
   const clientId = sendableClient?.id ?? null;
   useEffect(() => {
@@ -899,7 +889,7 @@ export function GmailComposeModal({
     const trimmed = value.trim();
     return (
       EMAIL_PATTERN.test(trimmed) &&
-      searchRecipients(trimmed, 1, addressable ?? fillDirectory).length === 0
+      searchRecipients(trimmed, 1, addressable ?? []).length === 0
     );
   }
 
@@ -1912,7 +1902,7 @@ export function GmailComposeModal({
                         return "This address isn't on any client record.";
                       }
                       if (EMAIL_PATTERN.test(value)) return null;
-                      if (searchRecipients(value, 1, addressable ?? fillDirectory).length > 0) return null;
+                      if (searchRecipients(value, 1, addressable ?? []).length > 0) return null;
                       return "No client matches that — type a full email address.";
                     }}
                     onSubmit={(value) => {
@@ -1924,7 +1914,7 @@ export function GmailComposeModal({
                         handleSaveRecipient(typed);
                         return;
                       }
-                      const best = searchRecipients(typed, 1, addressable ?? fillDirectory)[0];
+                      const best = searchRecipients(typed, 1, addressable ?? [])[0];
                       if (best) handleSaveRecipient(best.contact.email);
                     }}
                   />

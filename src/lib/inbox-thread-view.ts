@@ -3,12 +3,10 @@
  * carrying everything the mailbox shell needs to draw a row, a folder and a
  * reading pane.
  *
- * This type used to be called `InboxThreadView` and lived in `inbox-mock-data.ts`,
- * back when the mailbox was a design harness with nothing behind it. It is now
- * what `/inbox` speaks: `buildRealInboxThreads` (./inbox/real-threads.ts)
- * builds these from Supabase rows, and the mock set in `inbox-mock-data.ts`
- * fills in behind them. Nothing here is mock-specific — the mock bends to this
- * shape, not the other way round.
+ * Back when the mailbox was a design harness with nothing behind it, this type
+ * and a mock data set lived together. It is now what `/inbox` speaks:
+ * `buildRealInboxThreads` (./inbox/real-threads.ts) builds these from Supabase
+ * rows.
  *
  * The pure helpers below travel with the type because they only read it:
  * formatting for the row's timestamp column, the file-size label, the date
@@ -103,9 +101,8 @@ export type InboxThreadView = {
   };
   /**
    * Every contact on the organisation's record, primary first. Present on
-   * threads built from the database; absent on the design fill, which has no
-   * CONTACTS rows behind it and derives stand-ins instead (see
-   * `threadContacts` in ./inbox/recipients.ts).
+   * threads built from the database; a source without CONTACTS rows offers no
+   * addresses (see `threadContacts` in ./inbox/recipients.ts).
    */
   contacts?: InboxContactView[];
   camOwner: {
@@ -137,9 +134,8 @@ export type InboxThreadView = {
   notesCount: number;
   handoversCount: number;
   /**
-   * Tags on this thread's organisation, primary sort by name. Present on
-   * threads built from the database; the design fill leaves it `[]`. Drives
-   * the sidebar's custom-label filter and the chips on a thread row.
+   * Tags on this thread's organisation, primary sort by name. Drives the
+   * sidebar's custom-label filter and the chips on a thread row.
    */
   tags: InboxThreadTag[];
 };

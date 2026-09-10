@@ -531,22 +531,6 @@ export function sortInboxThreads(
 }
 
 /**
- * Mock threads fill in behind the real ones while the live database is thin.
- * A real organisation always wins its own id — the fill can add rows, never
- * shadow one.
- *
- * Pure set union, no sorting: ordering is `sortInboxThreads`'s job, and doing
- * it here would hide that the merged list needs re-sorting at all.
- */
-export function mergeWithMockFill(
-  real: readonly InboxThreadView[],
-  mock: readonly InboxThreadView[],
-): InboxThreadView[] {
-  const realIds = new Set(real.map((thread) => thread.id));
-  return [...real, ...mock.filter((thread) => !realIds.has(thread.id))];
-}
-
-/**
  * One thread's messages, in reading order, for the reading pane. Called when a
  * thread is opened — never for the list.
  */

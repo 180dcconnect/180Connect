@@ -36,7 +36,6 @@ import {
   getSectorColor,
   getSectorTagStyle,
 } from "./gmail-sidebar";
-import { isDesignFillThread } from "@/lib/inbox-mock-data";
 import { InboxAttachmentCard } from "./inbox-attachment-card";
 import { ReplyComposer } from "@/components/outreach/reply-composer";
 
@@ -49,7 +48,7 @@ export type GmailReadingPaneProps = {
   /**
    * Scheduled threads only. Resolves with an error message to show, or null
    * on success (the shell refreshes and moves on). Absent, the banner is
-   * read-only — the design fill has no row behind it to cancel.
+   * read-only.
    */
   onCancelScheduled?: (messageId: string) => Promise<string | null>;
   /** Same contract: cancels the schedule, then reopens the text in Compose. */
@@ -62,8 +61,9 @@ function getInitials(name: string): string {
   return parts.slice(0, 2).map((p) => p[0].toUpperCase()).join("");
 }
 
-/** A CAM note against the client behind this thread. Mock-only — the inbox
-    preview has no notes store, so these live in component state. */
+/** A CAM note added in this drawer. Not persisted yet — the full notes store
+    lives on the client record; this drawer keeps what is typed here in
+    component state for the session. */
 type ClientNote = {
   id: string;
   author: string;
@@ -77,26 +77,6 @@ function formatNoteDate(iso: string): string {
     day: "numeric",
     month: "short",
   })} · ${d.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit" })}`;
-}
-
-/** Fills the panel with `thread.notesCount` plausible notes so the feature can
-    be seen without a backing table. Deterministic per thread. */
-function seedNotes(thread: InboxThreadView): ClientNote[] {
-  const bodies = [
-    `Left a voicemail for ${thread.primaryContact.name}. Follow up Thursday if no reply.`,
-    `${thread.orgName} confirmed budget sign-off sits with their trustees — expect a 2–3 week turnaround.`,
-    "Scoping call went well. They want help with fundraising strategy and volunteer operations.",
-    "Sent the engagement letter. Awaiting countersignature.",
-    `Flagged to ${thread.camOwner.name}: another 180DC branch may already be engaged here — check before proceeding.`,
-  ];
-  const count = Math.min(Math.max(thread.notesCount ?? 0, 0), bodies.length);
-  const baseTime = new Date(thread.lastActivityAt).getTime();
-  return Array.from({ length: count }, (_, i) => ({
-    id: `${thread.id}-note-${i}`,
-    author: thread.camOwner.name,
-    body: bodies[i],
-    createdAt: new Date(baseTime - (i + 1) * 37 * 60 * 60 * 1000).toISOString(),
-  }));
 }
 
 /** One header-icon button in the reading pane's top bar. */
@@ -282,7 +262,6 @@ function SingleMessageCard({
   isCollapsedByDefault,
   onReply,
   onSuppressClient,
-  suppressUnavailableReason,
   forceExpanded = false,
 }: {
   message: InboxEmailMessage;
@@ -292,8 +271,6 @@ function SingleMessageCard({
   onReply: (message: InboxEmailMessage) => void;
   /** Opens the pane-level suppress-client dialog. */
   onSuppressClient: () => void;
-  /** Non-null disables the suppress item with this explanation (design fill). */
-  suppressUnavailableReason: string | null;
   /** Printing expands every message: a collapsed card would print its
       100-character snippet instead of the email body. */
   forceExpanded?: boolean;
@@ -523,8 +500,6 @@ function SingleMessageCard({
                 <div className="my-1 border-t border-rule-soft" />
                 <button
                   type="button"
-                  disabled={suppressUnavailableReason !== null}
-                  title={suppressUnavailableReason ?? undefined}
                   onClick={() => {
                     setMenuOpen(false);
                     onSuppressClient();
@@ -594,7 +569,7 @@ export function GmailReadingPane({
   const [replyToMessageId, setReplyToMessageId] = useState<string | null>(null);
   const [suppressOpen, setSuppressOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
-  const [notes, setNotes] = useState<ClientNote[]>(() => seedNotes(thread));
+  const [notes, setNotes] = useState<ClientNote[]>([]);
   const [draftNote, setDraftNote] = useState("");
   const replyBoxRef = useRef<HTMLDivElement>(null);
   // True only while the browser's print dialog is open. Every message card
@@ -615,14 +590,14 @@ export function GmailReadingPane({
   const [scheduledBusy, setScheduledBusy] = useState<"cancel" | "edit" | null>(null);
   const [scheduledError, setScheduledError] = useState<string | null>(null);
 
-  // The pane instance is reused as the reader moves between threads — reseed the
+  // The pane instance is reused as the reader moves between threads — clear the
   // notes and drop any open sheet / half-typed note when the client changes.
   // Adjusting state during render (React's documented pattern) rather than in an
   // effect, so there is no extra commit with stale notes on screen.
   const [seededFor, setSeededFor] = useState(thread.id);
   if (seededFor !== thread.id) {
     setSeededFor(thread.id);
-    setNotes(seedNotes(thread));
+    setNotes([]);
     setNotesOpen(false);
     setReplyOpen(false);
     setReplyToMessageId(null);
@@ -648,7 +623,6 @@ export function GmailReadingPane({
   }
 
   const messages = thread.messages;
-  const isDesignFill = isDesignFillThread(thread.id);
   const latestReply = lastClientReply(thread);
   const replyTarget = messages.find((msg) => msg.id === replyToMessageId) ?? null;
 
@@ -663,11 +637,9 @@ export function GmailReadingPane({
     }, 60);
   }
   // The queued send the banner below manages, if the thread carries one.
-  // Design fill has bodies but no rows behind them, so its banner stays
-  // read-only.
-  const scheduledMessage = isDesignFill
-    ? undefined
-    : messages.find((message) => message.pendingKind === "scheduled");
+  const scheduledMessage = messages.find(
+    (message) => message.pendingKind === "scheduled",
+  );
 
   async function runScheduledAction(
     kind: "cancel" | "edit",
@@ -858,11 +830,6 @@ export function GmailReadingPane({
                 forceExpanded={printing}
                 onReply={handleMessageReply}
                 onSuppressClient={() => setSuppressOpen(true)}
-                suppressUnavailableReason={
-                  isDesignFill
-                    ? "Unavailable on design fill — there is no client record to suppress."
-                    : null
-                }
               />
             );
           })}
@@ -874,12 +841,7 @@ export function GmailReadingPane({
             database, and skipped suppression, ownership and the human-review
             gate entirely. ReplyComposer generates a Stage 2 draft and hands it
             to EmailReviewPanel, which is the one component allowed to render
-            the approval control (see lib/outreach/human-send-control.test.ts).
-
-            Mock fill has no organisation behind it, so there is no draft row to
-            write: on design fill the composer mounts in preview mode — the same
-            current UI, generating a local example with sending disabled, rather
-            than a dead-end notice. */}
+            the approval control (see lib/outreach/human-send-control.test.ts). */}
         <div className="pt-4 print:hidden" ref={replyBoxRef}>
           {!replyOpen ? (
             <button
@@ -926,19 +888,11 @@ export function GmailReadingPane({
               {/* F135: the reply being answered is the message the CAM hit Reply
                   on — a per-message Reply names it, otherwise the client's most
                   recent one in this thread. The Stage 2 route loads that row's
-                  text itself; only its id travels from here. On design fill the
-                  composer previews instead: same UI, example draft, no send. */}
+                  text itself; only its id travels from here. */}
                <ReplyComposer
                  className="mt-3"
                  key={replyToMessageId ?? "latest"}
                  organisationId={thread.id}
-                 preview={isDesignFill}
-                 previewContext={{
-                   contactName: thread.primaryContact.name,
-                   orgName: thread.orgName,
-                   camName: thread.camOwner.name,
-                 }}
-                 previewSubject={thread.subject}
                  recipientOnFile={thread.primaryContact.email || null}
                  replyEventId={replyTarget?.id ?? lastClientReply(thread)?.id}
                />
@@ -948,8 +902,8 @@ export function GmailReadingPane({
       </div>
 
       {/* Client notes — docks to the right at ~35% so the thread stays
-          visible alongside it. Mock-only: state lives in this component,
-          nothing is persisted. */}
+          visible alongside it. Not persisted yet: what is typed here lives in
+          component state for the session. */}
       <AnimatePresence>
         {notesOpen && (
           <motion.div

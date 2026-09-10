@@ -3,7 +3,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { logApiHealth } from "../api-health-log.ts";
 import { reportError } from "../error-logging.ts";
 import type { StageOneUsage } from "./stage-one-generation.ts";
-import type { ClosingApproach, EmailLength, EmailTone, EmailVoice } from "./stage-one-prompt.ts";
+import type { ClosingApproach, EmailLength, EmailRegister } from "./stage-one-prompt.ts";
 import { buildStageTwoPrompt, type StageTwoContext } from "./stage-two-prompt.ts";
 
 const TIMEOUT_MS = 30_000;
@@ -73,8 +73,7 @@ export async function generateStageTwoDraft(
   callModel: CallStageTwoModel,
   options: {
     length?: EmailLength;
-    voice?: EmailVoice;
-    tone?: EmailTone;
+    register?: EmailRegister;
     closing?: ClosingApproach;
     newsEnabled?: boolean;
   } = {},

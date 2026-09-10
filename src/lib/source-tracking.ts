@@ -17,10 +17,12 @@ export const SOURCE_LABELS: Readonly<Record<string, string>> = {
   charitybase: "CharityBase",
   companies_house: "Companies House",
   charity_commission: "Charity Commission",
+  charity_commission_bulk: "Charity Commission",
   "360giving": "360Giving",
   find_that_charity: "Find That Charity",
   globalgiving: "GlobalGiving",
   candid: "Candid",
+  website: "Website",
   manual: "Manual Entry",
 };
 

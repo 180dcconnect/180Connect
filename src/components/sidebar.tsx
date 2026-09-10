@@ -5,13 +5,22 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ComponentType } from "react";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
-import { ChartLine, ListChecks, MessageSquareHeart, ShieldCheck, UserPlus } from "lucide-react";
+import {
+  ChartLine,
+  ClipboardCheck,
+  Inbox,
+  ListChecks,
+  ShieldCheck,
+  SquareKanban,
+  UserPlus,
+} from "lucide-react";
 import { Cctv } from "@/components/animate-ui/icons/cctv";
 import { CloudDownload } from "@/components/animate-ui/icons/cloud-download";
 import { Compass } from "@/components/animate-ui/icons/compass";
 import { AnimateIcon } from "@/components/animate-ui/icons/icon";
 import { PanelLeftClose } from "@/components/animate-ui/icons/panel-left-close";
 import { PanelLeftOpen } from "@/components/animate-ui/icons/panel-left-open";
+import { Settings } from "@/components/animate-ui/icons/settings";
 import { Users } from "@/components/animate-ui/icons/users";
 import { ThumbsUp} from "@/components/animate-ui/icons/thumbs-up";
 import UsersGroupIcon from "@/components/ui/users-group-icon";
@@ -31,7 +40,22 @@ export type SidebarOnboarding = {
   show?: boolean;
 };
 
-export type SidebarIconName = "dashboard" | "admin" | "users" | "add" | "audit" | "import" | "clients" | "feedback" | "actions" | "analytics";
+export type SidebarIconName =
+  | "dashboard"
+  | "admin"
+  | "users"
+  | "add"
+  | "audit"
+  | "import"
+  | "clients"
+  | "feedback"
+  | "inbox"
+  | "review"
+  | "pipeline"
+  | "database"
+  | "settings"
+  | "actions"
+  | "analytics";
 
 export type SidebarNavItem = {
   href: string;
@@ -66,6 +90,11 @@ const ICONS: Record<SidebarIconName, RailIcon> = {
   audit: Cctv,
   import: CloudDownload,
   feedback: ThumbsUp,
+  inbox: Inbox,
+  review: ClipboardCheck,
+  pipeline: SquareKanban,
+  database: CloudDownload,
+  settings: Settings,
   actions: ListChecks,
   analytics: ChartLine,
 };
@@ -87,7 +116,7 @@ const ICON_SPRING = { type: "spring", stiffness: 420, damping: 17, mass: 0.6 } a
 const ICON_MOTION: Partial<Record<SidebarIconName, Variants>> = {
   admin: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: -6 } },
   feedback: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: 6 } },
-  // `dashboard`, `clients`, `users`, `audit`, and `import` are deliberately absent:
+  // `dashboard`, `clients`, `users`, `audit`, `import`, and `database` are deliberately absent:
   // those glyphs animate their own interiors, so a wrapper transform on top would
   // read as two gestures.
 };

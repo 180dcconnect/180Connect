@@ -67,6 +67,7 @@ export function ClaimButton({
         disabled={busy}
         onClick={claim}
         type="button"
+        variant="ink"
       >
         {busy ? "Claiming…" : "Claim this client"}
       </OriginButton>
@@ -76,8 +77,8 @@ export function ClaimButton({
           role={conflict ? "alert" : undefined}
           className={
             (compact ? "mt-1 text-xs " : "mt-2.5 text-[13px] leading-[1.6] ") +
-            "font-bold " +
-            (conflict ? "text-amber-800" : "text-destructive")
+            "font-semibold " +
+            (conflict ? "text-hold" : "text-stop")
           }
         >
           {message}

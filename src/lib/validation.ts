@@ -62,6 +62,22 @@ export function urlField(message = "Enter a valid URL.") {
 }
 
 /**
+ * Optional @mention choices echoed back by a note composer, capped at `max`
+ * entries. Each entry pairs the selected user id with the display name that
+ * was spliced into the draft (`MentionedUserInput` in @/lib/note-mentions):
+ * the server binds with the submitted name — the text actually in the note,
+ * so a rename between composing and saving keeps a genuine mention — while
+ * verifying the id is still an active user. Entries are machine-generated,
+ * so a malformed shape fails the payload rather than notifying half a list.
+ */
+export function optionalMentionedUsers(max: number) {
+  return z
+    .array(z.object({ id: z.uuid(), name: z.string().trim().min(1).max(200) }))
+    .max(max)
+    .optional();
+}
+
+/**
  * Whole number within an inclusive range.
  *
  * Coerces numeric strings ("5" -> 5) but rejects empty/whitespace-only strings

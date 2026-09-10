@@ -115,7 +115,7 @@ export function UploadAttachmentForm({ organisationId }: { organisationId: strin
         onChange={handleFileChange}
       />
       {error && (
-        <p aria-live="polite" role="alert" className="text-xs font-bold text-destructive">
+        <p aria-live="polite" role="alert" className="text-xs font-semibold text-stop">
           {error}
         </p>
       )}

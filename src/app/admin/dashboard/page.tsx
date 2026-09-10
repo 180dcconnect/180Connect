@@ -1,18 +1,14 @@
 // F180 — Admin Dashboard. Team-wide pipeline activity for admins.
 //
-// Read-only overview sitting above /admin/team-pipeline (the filtered table).
-// The team-pipeline route is the drill-down; this route is the summary — funnel,
-// stage strip, ownership load, stalled slice, growth curve, sector and band
-// breakdowns. Every filtered count links into team-pipeline with prefilled
-// search params so the dashboard stays navigational, not duplicative.
+// Read-only overview with funnel, stage strip, ownership load, stalled slice,
+// growth curve, sector and band breakdowns.
 //
-// Navigation (AC3): links out to Team Pipeline (/admin/team-pipeline, F182),
-// Review Queue (/admin/review, pending F181 dedicated approvals tab), and
-// Team Ownership (/admin/users + ?owner= drill-downs, F167) so the dashboard
-// stays high-level and navigational.
+// Navigation (AC3): links out to Review Queue (/admin/review, pending F181
+// dedicated approvals tab), and Team Ownership (/admin/users + ?owner=
+// drill-downs, F167) so the dashboard stays high-level and navigational.
 //
 // Freshness: dynamically rendered through the Supabase server client (request
-// cookies), same as team-pipeline. No cached snapshot in between — an admin who
+// cookies). No cached snapshot in between — an admin who
 // reloads sees every CAM's latest change.
 //
 // Tone performance (F209, P3) intentionally excluded — thin signal until F098
@@ -73,7 +69,7 @@ export default async function AdminDashboardPage() {
 
   const supabase = await createClient();
 
-  // Organisations: paginated walk, same as team-pipeline and CAM dashboard
+  // Organisations: paginated walk, same as CAM dashboard
   // (PostgREST caps at 1000). Include sector/city for the sector slice and
   // created_at for the 30-day growth series (reused from CAM dashboard).
   const all: OrgRow[] = [];
@@ -130,7 +126,7 @@ export default async function AdminDashboardPage() {
   }
 
   // Latest scores: admin-only read via RLS (active users can read), service_role
-  // writes only — same policy team-pipeline relies on. Paginated similarly.
+  // writes only. Paginated similarly.
   const scoreByOrg = new Map<string, ScoreRow>();
   let scoreError: { message: string } | null = null;
   let scFrom = 0;
@@ -234,13 +230,7 @@ export default async function AdminDashboardPage() {
             >
               Review queue →
             </Link>
-            {/* AC3 Team Pipeline: links to F182 full drill-down view */}
-            <Link
-              href="/admin/team-pipeline"
-              className="inline-flex shrink-0 items-center rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-bold hover:border-brand hover:text-brand"
-            >
-              Open team pipeline →
-            </Link>
+
           </div>
         </Rise>
 
@@ -352,7 +342,7 @@ export default async function AdminDashboardPage() {
               </Rise>
             </Group>
 
-            {/* Stage strip — mirrors team-pipeline counts, each pill links with ?status= */}
+            {/* Stage strip — each pill links with ?status= */}
             <Group className="space-y-3">
               <Rise>
                 <h2 className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
@@ -363,7 +353,7 @@ export default async function AdminDashboardPage() {
                 {counts.map(({ status, count }) => (
                   <Link
                     key={status}
-                    href={`/admin/team-pipeline?status=${encodeURIComponent(status)}`}
+                    href={`/admin/dashboard?status=${encodeURIComponent(status)}`}
                     className="whitespace-nowrap rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs font-bold tabular-nums text-foreground/70 hover:border-brand hover:text-brand"
                   >
                     {formatOutreachStatus(status)} · {count.toLocaleString()}
@@ -401,8 +391,8 @@ export default async function AdminDashboardPage() {
                           key={row.ownerId ?? "unassigned"}
                           href={
                             row.ownerId
-                              ? `/admin/team-pipeline?owner=${encodeURIComponent(row.ownerId)}`
-                              : "/admin/team-pipeline?owner=unassigned"
+                              ? `/admin/users?owner=${encodeURIComponent(row.ownerId)}`
+                              : "/admin/users?owner=unassigned"
                           }
                           className="flex items-center justify-between gap-4 px-5 py-3 text-sm hover:bg-black/[0.02]"
                         >

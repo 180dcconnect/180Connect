@@ -57,6 +57,31 @@ export const entranceSoft: Variants = {
 };
 
 /**
+ * `entranceSoft` with the blur-up removed, for a card that contains glass.
+ *
+ * Any ancestor carrying a non-none `filter` — `blur(0px)` counts — becomes a
+ * backdrop root, so a `backdrop-filter` inside it can only ever sample what is
+ * painted within that ancestor. The card has nothing behind its own glass, so
+ * the frost renders as flat tint and the page behind stays sharp. Clearing the
+ * filter after the entrance lands is not enough on its own: Motion owns that
+ * style property and re-flushes `blur(0px)` on the next render of the element,
+ * which on a record page arrives whenever the realtime refresher calls
+ * `router.refresh()` — hence frost that works for a few seconds and then dies
+ * for the rest of the session.
+ *
+ * Opacity and y alone still read as the house entrance; only the blur-up is
+ * lost, and only for the handful of cards that hold a frosted panel.
+ */
+export const entranceSoftFlat: Variants = {
+  hidden: { opacity: 0, y: 20 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.7, ease: EASE },
+  },
+};
+
+/**
  * `entranceSoft` for a list long enough that `staggerChildren` would run away
  * with it — a hundred audit rows at 0.04s apart is a four-second cascade, and
  * the reader is left watching the bottom of the page fill in.

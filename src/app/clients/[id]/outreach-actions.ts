@@ -1,33 +1,45 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+/**
+ * Every action here revalidates three paths, not one: the client page that owns
+ * the outreach section, the inbox thread for the same organisation, and the
+ * inbox list whose row summarises it. The thread view writes as well as reads
+ * now (its reply drawer calls these actions), so a reply sent from it would
+ * otherwise not appear in the thread it was sent from.
+ */
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { attachmentRpcFailure, MAX_COMBINED_ATTACHMENT_SIZE_BYTES } from "@/lib/attachments";
-import { canSendClientOutreach } from "@/lib/client-email-validation";
+import { canSendClientOutreach, onFileEmail } from "@/lib/client-email-validation";
 import { reportError } from "@/lib/error-logging";
 import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
 import { dailySendLimitMessage } from "@/lib/outreach/daily-send-limit";
 import { discardDraftSchema } from "@/lib/outreach/discard-draft";
 import { draftAttachmentSchema } from "@/lib/outreach/draft-attachments";
+import { flyerAttachment } from "@/lib/outreach/flyer";
 import { emailHtmlToPlainText, sanitizeEmailHtml } from "@/lib/outreach/email-html";
 import { HUMAN_REVIEW_REQUIRED_MESSAGE, humanReviewDecision } from "@/lib/outreach/human-review";
 import { assertContactPermission } from "@/lib/outreach/contact-permission";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { saveDraftSchema } from "@/lib/outreach/save-draft";
-import { reviewedEmailSchema } from "@/lib/outreach/send-reviewed";
+import { reviewedEmailSchema, scheduleSchema } from "@/lib/outreach/send-reviewed";
 import { emailLimitMessage, resolveEmailSendLimit } from "@/lib/outreach/send-rate-limit";
+import { checkScheduledAttachmentSet } from "@/lib/outreach/scheduled-worker";
 import { checkSuppressionBeforeSend, suppressionBlockedMessage } from "@/lib/outreach/suppression-check";
 import { buildScoreSnapshot } from "@/lib/scoring/build-score-snapshot";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { safeValidate } from "@/lib/validation";
+import {
+  createDefaultScrapeDependencies,
+  fetchWebsiteContext,
+} from "@/lib/booklet/scrape-website";
 import { z } from "zod";
 
 export type ReviewedSendResult =
   | { ok: true; message: string }
   | { ok: false; message: string };
 
-const scheduleSchema = reviewedEmailSchema.extend({ scheduledAt: z.iso.datetime() });
 
 /**
  * Releases an outreach_send claim after a definite, pre-Gmail-call refusal —
@@ -117,27 +129,34 @@ export async function scheduleReviewedEmail(input: unknown): Promise<ReviewedSen
     return { ok: false, message: "You can only schedule drafts you generated yourself." };
   }
 
-  // F217: the scheduled worker does not yet load attachment bytes. Refuse the
-  // transition instead of accepting a schedule that would silently send the
-  // email without the files the CAM reviewed.
-  const { count: attachmentCount, error: attachmentCountError } = await supabase
+  // Attachments CAN be scheduled now: the worker downloads the linked bytes
+  // after claiming (scheduled-worker.ts loadAttachments) and fails the
+  // message visibly if a file is missing — the silent-send-without-files case
+  // this refusal used to guard against is unrepresentable there. What remains
+  // here is the set-level caps check, so an over-cap set is refused at
+  // schedule time with an immediate answer instead of failing on the run.
+  // The branch flyer is not counted: it ships with the code, so the worker
+  // attaches it with no download at all (scheduled-worker.ts deliver()).
+  const { data: attachmentLinks, error: attachmentLinksError } = await supabase
     .from("outreach_message_attachments")
-    .select("attachment_id", { count: "exact", head: true })
+    .select("attachments(size_bytes)")
     .eq("outreach_message_id", messageId);
-  if (attachmentCountError || attachmentCount === null) {
-    if (attachmentCountError) {
-      await reportError(attachmentCountError, {
-        operation: "outreach.schedule.check_attachments",
-        messageId,
-      });
-    }
+  if (attachmentLinksError) {
+    await reportError(attachmentLinksError, {
+      operation: "outreach.schedule.check_attachments",
+      messageId,
+    });
     return { ok: false, message: "Attachments could not be checked. Nothing was scheduled." };
   }
-  if (attachmentCount > 0) {
-    return {
-      ok: false,
-      message: "Emails with attachments must be sent now; scheduled attachment delivery is not supported yet.",
-    };
+  type LinkedAttachmentSize = { size_bytes: number | null };
+  const linkedSizes = (attachmentLinks ?? [])
+    .map((row) => (Array.isArray(row.attachments) ? row.attachments[0] : row.attachments) as LinkedAttachmentSize | null)
+    .filter((row): row is LinkedAttachmentSize => row != null);
+  const attachmentViolation = checkScheduledAttachmentSet(
+    linkedSizes.map((row) => ({ sizeBytes: row.size_bytes })),
+  );
+  if (attachmentViolation) {
+    return { ok: false, message: attachmentViolation };
   }
 
   // Suppression at point-of-scheduling — the worker re-checks at point-of-send,
@@ -195,7 +214,8 @@ export async function scheduleReviewedEmail(input: unknown): Promise<ReviewedSen
     return { ok: false, message: "The email could not be scheduled. Try again." };
   }
 
-  revalidatePath(`/clients/${organisationId}`);
+  revalidatePath(`/clients/${organisationId}`, "layout");
+  revalidatePath("/inbox");
   return { ok: true, message: `Email scheduled for ${scheduledAtIso.toLocaleString("en-GB")}.` };
 }
 
@@ -226,7 +246,8 @@ export async function cancelScheduledEmail(input: unknown): Promise<ReviewedSend
     return { ok: false, message: "The scheduled email could not be cancelled." };
   }
 
-  revalidatePath(`/clients/${parsed.data.organisationId}`);
+  revalidatePath(`/clients/${parsed.data.organisationId}`, "layout");
+  revalidatePath("/inbox");
   return { ok: true, message: "Scheduled send cancelled. The email is a draft again." };
 }
 
@@ -267,7 +288,7 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   const supabase = await createClient();
   const { data: draft, error: draftError } = await supabase
     .from("outreach_messages")
-    .select("id, organisation_id, contact_id, send_status, sent_by_user_id, organisations(outreach_status)")
+    .select("id, organisation_id, contact_id, send_status, sent_by_user_id, attach_flyer, organisations(outreach_status)")
     .eq("id", messageId)
     .eq("organisation_id", organisationId)
     .maybeSingle();
@@ -275,6 +296,9 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
     if (draftError) await reportError(draftError, { operation: "outreach.send.load_draft", messageId });
     return { ok: false, message: "That draft could not be loaded. Refresh and try again." };
   }
+  // Read from the row, not from the caller: a scheduled send arrives here with
+  // no UI behind it, and the draft's own wording already assumes this value.
+  const wantsFlyer = draft.attach_flyer === true;
   // F121 stage label: the pipeline position decides whether this send is a
   // Stage 1 first contact or a Stage 2 follow-up — same rule the pipeline
   // advance at the end of this action uses.
@@ -492,6 +516,26 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
     }
   }
 
+  // The branch flyer, when this message was composed to carry one. It is not a
+  // linked attachment — it ships with the code rather than living in Storage
+  // (src/lib/outreach/flyer.ts) — so it is added here rather than being loaded
+  // with the client's own files above, and it does not count against the
+  // per-draft attachment limits, which govern what a CAM uploads.
+  //
+  // A missing flyer file does not fail the send. The draft may mention it, which
+  // is a real cost, but an introductory email that goes out without its flyer is
+  // a far smaller failure than one that does not go out at all — and unlike a
+  // linked attachment, nothing here implies the CAM chose a specific file that
+  // has since vanished.
+  if (wantsFlyer) {
+    const flyer = await flyerAttachment();
+    if (flyer) attachments = [...(attachments ?? []), flyer];
+    else await reportError(new Error("Outreach flyer missing from deployment"), {
+      operation: "outreach.send.flyer_unavailable",
+      messageId,
+    });
+  }
+
   const sent = await sendBranchOutreach({
     to: decision.recipient,
     subject,
@@ -589,7 +633,8 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
     if (eventError) await reportError(eventError, { operation: "outreach.send.record_event", messageId });
   }
 
-  revalidatePath(`/clients/${organisationId}`);
+  revalidatePath(`/clients/${organisationId}`, "layout");
+  revalidatePath("/inbox");
   return { ok: true, message: "Email sent from the Sheffield outreach mailbox." };
 }
 
@@ -656,7 +701,8 @@ export async function retryFailedEmail(input: unknown): Promise<RetryFailedResul
     return { ok: false, message: "This email is no longer waiting to be retried." };
   }
   // The row just changed state regardless of how the resend below goes.
-  revalidatePath(`/clients/${organisationId}`);
+  revalidatePath(`/clients/${organisationId}`, "layout");
+  revalidatePath("/inbox");
 
   // The reviewed recipient wins; fall back to the on-file record only for rows
   // that predate recipient review (F116). With neither, the draft is reopened
@@ -664,7 +710,7 @@ export async function retryFailedEmail(input: unknown): Promise<RetryFailedResul
   const contact = Array.isArray(failed.contacts) ? failed.contacts[0] : failed.contacts;
   const organisation = Array.isArray(failed.organisations) ? failed.organisations[0] : failed.organisations;
   const recipient =
-    failed.sent_to_email?.trim() || contact?.email?.trim() || organisation?.contact_email?.trim() || "";
+    failed.sent_to_email?.trim() || contact?.email?.trim() || onFileEmail(organisation?.contact_email) || "";
   if (!recipient) {
     return {
       ok: false,
@@ -681,6 +727,42 @@ export async function retryFailedEmail(input: unknown): Promise<RetryFailedResul
     body: failed.body,
     explicitlyApproved: true,
   });
+}
+
+export type ValidateWebsiteResult =
+  | { ok: true; hostname: string }
+  | { ok: false; message: string };
+
+/**
+ * Live verdict for the booklet composer's website field. Runs the exact
+ * `fetchWebsiteContext` the booklet route runs — format, robots, DNS, HTTP,
+ * readable text — so the droplet's tick means "generate will use this", not
+ * merely "this parses". A well-formed URL to a dead or refusing site ticks
+ * under a format check and then gets skipped on generate; this cannot.
+ *
+ * Gated on client:contact like every sibling action: settled keystrokes now
+ * trigger real outbound fetches, which must stay behind the same actors
+ * allowed to generate. The shared transport's ERROR_LOG rows on fetch
+ * failures apply here too — a pause on a half-typed host leaves a row, the
+ * price of verifying for real, kept small by the caller's debounce.
+ */
+export async function validateBookletWebsiteUrl(
+  input: unknown,
+): Promise<ValidateWebsiteResult> {
+  const parsed = safeValidate(z.object({ websiteUrl: z.string().max(2048) }), input);
+  if (!parsed.success) {
+    return { ok: false, message: "That doesn't look like a website address." };
+  }
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const result = await fetchWebsiteContext(
+    parsed.data.websiteUrl,
+    createDefaultScrapeDependencies(),
+  );
+  if (result.status === "used") return { ok: true, hostname: result.hostname };
+  return { ok: false, message: result.reason };
 }
 
 export type SaveDraftResult =
@@ -762,7 +844,8 @@ export async function saveEmailDraft(input: unknown): Promise<SaveDraftResult> {
     return { ok: false, message: "The draft could not be saved. Try again." };
   }
 
-  revalidatePath(`/clients/${organisationId}`);
+  revalidatePath(`/clients/${organisationId}`, "layout");
+  revalidatePath("/inbox");
   return { ok: true, message: "Draft saved." };
 }
 
@@ -821,6 +904,11 @@ export async function discardEmailDraft(input: unknown): Promise<DiscardDraftRes
     return { ok: false, message: "You can only discard drafts you generated yourself." };
   }
 
+  // Collected BEFORE the discard below: the RPC deletes the draft row and
+  // its link rows cascade with it, so afterwards there is nothing left to
+  // enumerate. Needed by the orphan sweep at the end.
+  const linkedAttachments = await listDraftAttachments(messageId);
+
   const { error: rpcError } = await supabase.rpc("discard_outreach_draft", { p_message_id: messageId });
   if (rpcError) {
     await reportError(rpcError, { operation: "outreach.discard_draft.write", messageId });
@@ -833,8 +921,103 @@ export async function discardEmailDraft(input: unknown): Promise<DiscardDraftRes
     return { ok: false, message: "The draft could not be discarded. Refresh and try again." };
   }
 
-  revalidatePath(`/clients/${organisationId}`);
+  // Orphan sweep: the RPC deletes the draft row (link rows cascade), but the
+  // attachment rows it pointed at and their Storage bytes survive — a draft
+  // discarded after Send uploaded its files would otherwise leak both into
+  // the quotas forever. Best-effort and strictly after the discard: a failure
+  // here is logged, never surfaced, because the draft itself is already gone.
+  // A file still linked to another draft is left alone — shared rows are
+  // somebody else's attachment.
+  await removeOrphanedDraftAttachments(messageId, linkedAttachments);
+
+  revalidatePath(`/clients/${organisationId}`, "layout");
+  revalidatePath("/inbox");
   return { ok: true, message: "Draft discarded." };
+}
+
+/**
+ * The draft's linked attachment rows, enumerated before a discard deletes the
+ * draft (and its link rows with it). Admin-read: the caller may own the draft
+ * without being able to read every linked row, and this list only ever feeds
+ * the post-discard sweep below, never the UI.
+ */
+async function listDraftAttachments(
+  messageId: string,
+): Promise<ReadonlyArray<{ id: string; storage_path: string }>> {
+  const admin = createAdminClient();
+  if (!admin) {
+    await reportError(new Error("No admin client available for attachment cleanup"), {
+      operation: "outreach.discard_draft.cleanup_no_admin_client",
+      messageId,
+    });
+    return [];
+  }
+  const { data: links, error: linksError } = await admin
+    .from("outreach_message_attachments")
+    .select("attachment:attachments(id, storage_path)")
+    .eq("outreach_message_id", messageId);
+  if (linksError) {
+    await reportError(linksError, { operation: "outreach.discard_draft.cleanup_links", messageId });
+    return [];
+  }
+  type LinkedRow = { id: string; storage_path: string };
+  return (links ?? [])
+    .map((row) => (Array.isArray(row.attachment) ? row.attachment[0] : row.attachment) as LinkedRow | null)
+    .filter((row): row is LinkedRow => row != null);
+}
+
+/**
+ * Deletes the attachment rows — and their Storage objects — that a discarded
+ * draft was the last to reference. Skips anything still linked elsewhere.
+ */
+async function removeOrphanedDraftAttachments(
+  messageId: string,
+  linked: ReadonlyArray<{ id: string; storage_path: string }>,
+): Promise<void> {
+  if (linked.length === 0) return;
+  const admin = createAdminClient();
+  if (!admin) {
+    await reportError(new Error("No admin client available for attachment cleanup"), {
+      operation: "outreach.discard_draft.cleanup_no_admin_client",
+      messageId,
+    });
+    return;
+  }
+  // Dedupe: one file attached twice links twice but cleans once.
+  const byId = new Map(linked.map((row) => [row.id, row]));
+  for (const row of byId.values()) {
+    const { count, error: countError } = await admin
+      .from("outreach_message_attachments")
+      .select("attachment_id", { count: "exact", head: true })
+      .eq("attachment_id", row.id);
+    if (countError) {
+      await reportError(countError, {
+        operation: "outreach.discard_draft.cleanup_link_count",
+        messageId,
+        attachmentId: row.id,
+      });
+      continue;
+    }
+    if ((count ?? 1) > 0) continue;
+    const { error: removeError } = await admin.storage
+      .from("client-attachments")
+      .remove([row.storage_path]);
+    if (removeError) {
+      await reportError(removeError, {
+        operation: "outreach.discard_draft.cleanup_storage",
+        messageId,
+        attachmentId: row.id,
+      });
+    }
+    const { error: rowError } = await admin.from("attachments").delete().eq("id", row.id);
+    if (rowError) {
+      await reportError(rowError, {
+        operation: "outreach.discard_draft.cleanup_row",
+        messageId,
+        attachmentId: row.id,
+      });
+    }
+  }
 }
 
 export type DraftAttachmentResult =

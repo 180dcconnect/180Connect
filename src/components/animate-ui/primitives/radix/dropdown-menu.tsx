@@ -255,8 +255,10 @@ function DropdownMenuHighlight({
       click={false}
       controlledItems
       transition={transition}
+      exitDelay={0}
       value={highlightedValue}
       {...props}
+      style={{ pointerEvents: 'none', ...(props as unknown as { style?: React.CSSProperties }).style }}
     />
   );
 }
@@ -293,7 +295,7 @@ function DropdownMenuContent({
   container,
   ...props
 }: DropdownMenuContentProps) {
-  const { isOpen } = useDropdownMenu();
+  const { isOpen, setHighlightedValue } = useDropdownMenu();
 
   return (
     <AnimatePresence>
@@ -326,6 +328,18 @@ function DropdownMenuContent({
               exit={{ opacity: 0, scale: 0.95 }}
               transition={transition}
               style={{ willChange: 'opacity, transform', ...style }}
+              onPointerLeave={(e: React.PointerEvent<HTMLDivElement>) => {
+                const related = e.relatedTarget as Node | null;
+                if (!related || !e.currentTarget.contains(related)) {
+                  setHighlightedValue(null);
+                }
+              }}
+              onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => {
+                const related = e.relatedTarget as Node | null;
+                if (!related || !e.currentTarget.contains(related)) {
+                  setHighlightedValue(null);
+                }
+              }}
               {...props}
             />
           </DropdownMenuPrimitive.Content>

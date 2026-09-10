@@ -79,3 +79,31 @@ export const SEARCH_GLASS = "rgba(28, 26, 24, 0.4)";
  * this opacity would be unreadable if the blur were doing the work.
  */
 export const SEARCH_GLASS_OPEN = "rgba(24, 22, 20, 0.72)";
+
+/**
+ * The frosted variant of the open pill (opt-in per instance). Same charcoal,
+ * far more translucent (0.5) with a 20px backdrop blur doing the work instead
+ * of the tint — the kunuminst.org recipe: their island is a 0.375 tint under a
+ * 20px blur, which is why its frost reads while a dark 0.72 tint with a small
+ * blur reads as flat. Kept at 0.5 rather than 0.375 so white filter names
+ * stay readable over dense page content rather than photography.
+ */
+export const SEARCH_GLASS_FROSTED = "rgba(24, 22, 20, 0.5)";
+
+/**
+ * Light tone for `BrandSearchBar` (`tone="light"`): the same pill on a light
+ * surface. A touch deeper than the sampled Gmail shade so it still reads
+ * against the shell background instead of camouflaging into it.
+ *
+ * Open is solid white like a focused Gmail field. Frosted is the opt-in the
+ * booklet composer wants: not white but a *lighter shade of the closed pill* —
+ * `#c9d6e9` at 0.35 composites to roughly `#ecf0f7` over the white card, under
+ * a 20px blur. The pill's top row is pinned to a fixed shade (`innerRow`,
+ * `#d8e1ef`) that sits between the closed pill and this panel, so it does not
+ * shift when the panel opens under it.
+ */
+export const SEARCH_GLASS_LIGHT = "#c9d6e9";
+
+export const SEARCH_GLASS_OPEN_LIGHT = "#ffffff";
+
+export const SEARCH_GLASS_FROSTED_LIGHT = "rgba(201, 214, 233, 0.35)";

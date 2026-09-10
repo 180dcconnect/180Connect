@@ -10,7 +10,11 @@
  * combination comes back exactly — true by construction rather than by care.
  */
 
-import { SECTOR_FILTER_LABELS, priorityScoreFilterLabel } from "./visible-clients.ts";
+import {
+  SECTOR_FILTER_LABELS,
+  financialRecordFilterLabel,
+  priorityScoreFilterLabel,
+} from "./visible-clients.ts";
 
 /**
  * The params a view remembers, and the order they are written back in.
@@ -28,6 +32,10 @@ import { SECTOR_FILTER_LABELS, priorityScoreFilterLabel } from "./visible-client
  * an array and written back as repeated params. No migration — which is why the
  * column is jsonb.
  *
+ * Mission (F215) is captured as a single string like `q`: it is free text the
+ * page re-interprets (including re-running query expansion) on every render, so
+ * a view restores the words the CAM searched, not a frozen result set.
+ *
  * Deliberately not captured: `page`, the insight band's `stage`/`sort`/`dir`, and
  * the list's own `listSort`/`listDir`. A saved view is a filter combination — the
  * AC says so — and pinning someone to page 4 of a list whose contents have since
@@ -41,8 +49,10 @@ export const SAVED_VIEW_FILTER_KEYS = [
   "status",
   "type",
   "sector",
+  "mission",
   "owner",
   "score",
+  "financials",
 ] as const;
 
 /** Keys whose URL form is a repeated param, stored as arrays in `filters`. */
@@ -53,6 +63,7 @@ export const SAVED_VIEW_MULTI_KEYS: readonly SavedViewFilterKey[] = [
   "type",
   "sector",
   "score",
+  "financials",
 ];
 
 export type SavedViewFilterKey = (typeof SAVED_VIEW_FILTER_KEYS)[number];
@@ -257,6 +268,8 @@ export function describeFilters(
   if (filters.country) parts.push(describeValues(filters.country));
   if (filters.status) parts.push(describeValues(filters.status));
   if (filters.sector) parts.push(describeSectorValues(filters.sector));
+  // F215 — reads like the search bar chip: the words the CAM searched by.
+  if (filters.mission) parts.push(`mission: ${filters.mission}`);
   if (filters.owner === "unassigned") {
     parts.push("Unassigned");
   } else if (filters.owner) {
@@ -266,6 +279,14 @@ export function describeFilters(
   // values, so a view's description says what selecting it will show.
   if (filters.score) {
     parts.push(describeValues(filters.score).split(", ").map((value) => priorityScoreFilterLabel(value)).join(", "));
+  }
+  if (filters.financials) {
+    parts.push(
+      describeValues(filters.financials)
+        .split(", ")
+        .map((value) => financialRecordFilterLabel(value))
+        .join(", "),
+    );
   }
   return parts.length > 0 ? parts.join(" · ") : "No filters — the whole list";
 }

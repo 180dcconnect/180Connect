@@ -67,6 +67,28 @@ export const REDACTED_EMAIL = "[redacted:personal-email]";
 export const REDACTED_PHONE = "[redacted:phone]";
 
 /**
+ * Whether a string still carries a redaction placeholder.
+ *
+ * The placeholder earns its visibility upstream — provenance, and an idempotent
+ * backfill — but downstream of storage it is the opposite of a value: it is the
+ * record of one having been removed. Anything that treats a field as *data*
+ * rather than as evidence (the contact email a CAM is expected to write to, the
+ * two sides of a discrepancy comparison) has to tell the two apart, and this is
+ * the one place that decision lives.
+ *
+ * A containment test rather than equality because redaction is in place: a
+ * registry's `email` field becomes the placeholder outright, while a scraped page
+ * becomes markup with placeholders sitting inside it. Both mean "no address
+ * here".
+ */
+export function containsRedactionPlaceholder(
+  value: string | null | undefined,
+): boolean {
+  if (!value) return false;
+  return value.includes(REDACTED_EMAIL) || value.includes(REDACTED_PHONE);
+}
+
+/**
  * Email addresses, as they appear in prose and in markup.
  *
  * Intentionally looser than a validating pattern: the goal is to find things that

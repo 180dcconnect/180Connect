@@ -3,9 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import {
+  normaliseFieldValue,
+  restrictedFieldLabel,
   suggestEditRpcFailure,
+  summariseBatch,
+  validateReason,
   validateSuggestEdit,
-  type SuggestEditState,
+  type EditBatchState,
+  type FieldSubmissionResult,
 } from "@/lib/edit-suggestions";
 import { reportError } from "@/lib/error-logging";
 import { createClient } from "@/lib/supabase/server";
@@ -18,27 +23,40 @@ import {
 } from "@/lib/attachments";
 
 /**
- * #79 + #23 (F077/F020) — submit a suggested edit for one of a client's restricted
- * fields.
+ * The same proposal, for several fields at once, with one note explaining all of
+ * them.
  *
- * The action is deliberately thin: permission gate, validation, RPC. Every rule that
- * matters (allowlist, current-value snapshot, supersede-own/block-others) is enforced
- * inside suggest_organisation_edit, because the Server Action is not the only door —
- * the RPC is reachable through PostgREST directly and must hold on its own. The one
- * thing the action adds is the live allowlist: since F020 the restricted set is data,
- * so validation runs against what RESTRICTED_EDIT_FIELDS says right now rather than a
- * compile-time constant.
+ * Corrections do not arrive one field at a time. An address is line 1 plus town
+ * plus postcode, and the single-field action made that three trips through a
+ * dialog, three pending rows, and three unrelated-looking decisions on the
+ * admin's desk. This takes the whole set the CAM edited in one sitting.
  *
- * No audit_log write here either, matching the RPC (submission is not a decision —
- * see the migration header). Unexpected failures go to ERROR_LOG via reportError.
+ * Still one `edit_suggestions` row per field — the schema is right, an admin
+ * must be able to approve the postcode and reject the town — but one action,
+ * one note, and one reported outcome.
+ *
+ * Fields are submitted in sequence rather than in parallel: each call to
+ * suggest_organisation_edit supersedes the caller's own pending row for that
+ * field, and the RPC's read-then-write is not something to run concurrently
+ * against itself.
  */
-export async function suggestEditAction(
-  _previous: SuggestEditState,
-  formData: FormData,
-): Promise<SuggestEditState> {
+export async function suggestEditsAction(input: {
+  organisationId: string;
+  reason: string | null;
+  changes: { fieldName: string; value: string }[];
+}): Promise<EditBatchState> {
   const authorization = await getCurrentActor("client:edit", { route: "/clients/[id]" });
   if (!authorization.ok) {
-    return { kind: "error", message: actorFailureMessage(authorization.reason) };
+    return { kind: "error", message: actorFailureMessage(authorization.reason), results: [] };
+  }
+
+  if (input.changes.length === 0) {
+    return { kind: "error", message: "Nothing has been changed yet.", results: [] };
+  }
+
+  const reason = validateReason(input.reason);
+  if (!reason.ok) {
+    return { kind: "error", message: reason.message, results: [] };
   }
 
   const supabase = await createClient();
@@ -48,44 +66,57 @@ export async function suggestEditAction(
     .eq("active", true);
   const allowedFields = (fieldRows ?? []).map((row) => row.field_name);
 
-  const parsed = validateSuggestEdit({
-    organisationId: formData.get("organisationId"),
-    fieldName: formData.get("fieldName"),
-    fieldValue: formData.get("fieldValue"),
-    allowedFields,
-  });
-  if (!parsed.success) {
-    return { kind: "error", message: parsed.message };
-  }
+  const results: FieldSubmissionResult[] = [];
 
-  const { error } = await supabase.rpc("suggest_organisation_edit", {
-    p_organisation_id: parsed.data.organisationId,
-    p_field_name: parsed.data.fieldName,
-    p_new_value: parsed.data.fieldValue,
-  });
-
-  if (error) {
-    const failure = suggestEditRpcFailure(error);
-    // Deliberate refusals (42501/23514/23505/55000/P0002) are user-facing messages,
-    // not incidents; anything else is an unexpected failure worth ERROR_LOG.
-    if (failure.status === 500) {
-      await reportError(error, {
-        operation: "clients.suggest_edit",
-        actorUserId: authorization.actor.id,
-        organisationId: parsed.data.organisationId,
-        fieldName: parsed.data.fieldName,
-      });
+  for (const change of input.changes) {
+    // Normalised before validation, so the length cap is measured against what
+    // will actually be stored and a value that only differs from the current one
+    // by a scheme or a stray space is caught here rather than by the RPC.
+    const value = normaliseFieldValue(change.fieldName, change.value);
+    const parsed = validateSuggestEdit({
+      organisationId: input.organisationId,
+      fieldName: change.fieldName,
+      fieldValue: value,
+      allowedFields,
+    });
+    if (!parsed.success) {
+      results.push({ fieldName: change.fieldName, ok: false, message: parsed.message });
+      continue;
     }
-    return { kind: "error", message: failure.error };
+
+    const { error } = await supabase.rpc("suggest_organisation_edit", {
+      p_organisation_id: parsed.data.organisationId,
+      p_field_name: parsed.data.fieldName,
+      p_new_value: parsed.data.fieldValue,
+      p_reason: reason.value,
+    });
+
+    if (error) {
+      const failure = suggestEditRpcFailure(error);
+      if (failure.status === 500) {
+        await reportError(error, {
+          operation: "clients.suggest_edits",
+          actorUserId: authorization.actor.id,
+          organisationId: input.organisationId,
+          fieldName: parsed.data.fieldName,
+        });
+      }
+      results.push({ fieldName: parsed.data.fieldName, ok: false, message: failure.error });
+      continue;
+    }
+
+    results.push({
+      fieldName: parsed.data.fieldName,
+      ok: true,
+      message: `${restrictedFieldLabel(parsed.data.fieldName)} sent for review.`,
+    });
   }
 
-  revalidatePath(`/clients/${parsed.data.organisationId}`);
+  if (results.some((result) => result.ok)) {
+    revalidatePath(`/clients/${input.organisationId}`, "layout");
+  }
 
-  return {
-    kind: "success",
-    fieldName: parsed.data.fieldName,
-    message: "Suggestion submitted for admin review.",
-  };
+  return summariseBatch(results, "proposed");
 }
 
 export type LinkAttachmentState =

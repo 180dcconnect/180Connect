@@ -1,6 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+  type ReactNode,
+} from "react";
+import { ExternalLink, Lock, Pencil, PencilLine, Plus } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { OriginButton } from "@/components/ui/origin-button";
 import { createClient } from "@/lib/supabase/browser";
 import {
   applyEnrichmentChange,
@@ -10,26 +19,267 @@ import {
   type BasicInfoState,
   type OrganisationDetailRow,
 } from "@/lib/client-basic-info";
+import {
+  idleEditBatchState,
+  isUnchanged,
+  normaliseFieldValue,
+  type EditBatchState,
+  type EditSuggestionRow,
+} from "@/lib/edit-suggestions";
+import type { AppRole } from "@/lib/auth/permissions.ts";
+import { containsRedactionPlaceholder } from "@/lib/ingestion/personal-data";
+import {
+  GEOGRAPHIC_REACH_OPTIONS,
+  ORGANISATION_TYPES,
+  formatCountryName,
+  formatGeographicReach,
+  formatOrganisationType,
+} from "@/lib/organisation-format";
 import { SectionCard } from "./section-card";
+import {
+  EditDraftBar,
+  InlineCityInput,
+  InlineEnumInput,
+  InlineFieldInput,
+  fieldErrorsFrom,
+  succeededFields,
+} from "./inline-edit";
+import { suggestEditsAction } from "./actions";
+import { adminDirectEditsAction } from "./admin-actions";
 
 /**
- * Field order is reading order, not schema order. `wide` fields span both
- * columns: mission is a sentence or two and looked broken wrapping inside a
- * half-width cell beside a one-word Type.
+ * Field order is reading order, not schema order.
+ *
+ * `column` is the organisations column the row edits in place — null only for
+ * pipeline stage, which has its own audited control in the header.
+ *
+ * `Type` is the one enum row. It is not a suggestion and never can be:
+ * `add_restricted_edit_field` refuses enum-typed columns, so a CAM has nowhere
+ * to send a correction to it — but `organisation_type` is in the admin's direct
+ * set (admin-actions.ts), so an admin can fix it here. That capability existed
+ * and was unreachable: the row was mapped to `column: null`, so nothing ever
+ * rendered a control for it. `options` marks the row as a closed set, and
+ * `raw` reads the stored enum value — `read` returns the human label, which is
+ * what the row displays but not what the column holds.
+ *
+ * `legal_name` is back. It was left out because the header already sets it as
+ * the page's h1 — true, but it is also the single most-corrected field on a
+ * record, and with the edit dialog gone this row is the only way to correct it.
+ * It reads as confirmation of the h1 rather than a repeat of it, because the
+ * value beside it is the *registered* name, spelled as the register spells it.
+ *
+ * Postcode has its own row for the same reason. It was folded into the address
+ * line for display, which is fine to read and impossible to edit — you cannot
+ * type a correction into half a composed string.
  */
+/**
+ * Both the row's geometry and the content inside it move on the same eased
+ * tween — no spring. A spring, even a bounceless one, spends its last third
+ * creeping toward the target, which on a 40px height change reads as the row
+ * hesitating rather than settling.
+ *
+ * The curve is the standard decelerate: quick off the mark, long slow finish,
+ * no overshoot. The swap runs shorter than the resize so the content is
+ * already in place while the row is still finding its height.
+ */
+const ROW_TRANSITION = { duration: 0.32, ease: [0.32, 0.72, 0, 1] } as const;
+const SWAP_TRANSITION = { duration: 0.18, ease: [0.32, 0.72, 0, 1] } as const;
+/**
+ * Smooth, slow-paced transition for the draft changes save bar appearing and disappearing.
+ * Uses a gentle, fluid decelerate curve so the bar glides into and out of place elegantly.
+ */
+const DRAFT_BAR_TRANSITION = {
+  duration: 0.52,
+  ease: [0.16, 1, 0.3, 1],
+  opacity: { duration: 0.42 },
+} as const;
+
+/**
+ * A website column safe to hang an `href` on.
+ *
+ * The value is whatever a register published, so it can be a bare domain (no
+ * scheme means the browser resolves it as a relative path — `/clients/<id>/x`),
+ * and in principle anything a `text` column can hold. Only http(s) survives:
+ * `javascript:` in this column would otherwise be a stored XSS with a link
+ * around it.
+ */
+function externalUrl(raw: string | null | undefined): string | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(value)
+    ? value
+    : `https://${value.replace(/^\/+/, "")}`;
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Google Maps search for the fullest address the record holds. */
+function mapsUrl(
+  organisation: Pick<
+    OrganisationDetailRow,
+    "address_line_1" | "city" | "postcode"
+  >,
+): string | null {
+  const query = [
+    organisation.address_line_1,
+    organisation.city,
+    organisation.postcode,
+  ]
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .join(", ");
+  if (!organisation.postcode?.trim()) return null;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+}
+
+/**
+ * What the row's button promises, which is not the same act for both roles: an
+ * admin writes the value, a CAM proposes one. "Suggest" on an empty row rather
+ * than "Suggest edit", because there is nothing there to edit.
+ */
+function rowActionLabel(isAdmin: boolean, missing: boolean): string {
+  if (isAdmin) return missing ? "Add" : "Edit";
+  return missing ? "Suggest" : "Suggest edit";
+}
+
+/**
+ * Values a row may need that are neither on the organisation row nor derivable
+ * from it — resolved on the server and passed down.
+ *
+ * There is one today. `natureOfBusiness` is the register's wording for the
+ * organisation's SIC codes, and the wording lives in the companies-register
+ * SQLite file, which a client component cannot open. The codes themselves do
+ * arrive on the organisation row and do flow through Realtime; only their
+ * titles are frozen at render, which is the right trade for a classification
+ * that changes when the registrar reclassifies a company, not when a CAM edits
+ * anything.
+ */
+type FieldExtras = { natureOfBusiness: string | null };
+
 const FIELDS: {
-  key: keyof ReturnType<typeof buildBasicInfo>;
   label: string;
-  wide?: boolean;
+  /** Live value, read from panel state so Realtime updates flow through. */
+  read: (
+    state: BasicInfoState,
+    info: ReturnType<typeof buildBasicInfo>,
+    extras: FieldExtras,
+  ) => string | null;
+  /** The organisations column (or `mission_statement`) this row edits. */
+  column: string | null;
+  /** Stored value behind a formatted `read`, for drafts and change detection. */
+  raw?: (state: BasicInfoState) => string | null;
+  /** Present when the column is a closed set: the row edits with a select. */
+  options?: readonly { value: string; label: string }[];
+  /** Where the value points, if anywhere. Opens in a new tab. */
+  link?: (state: BasicInfoState) => string | null;
+  /** Drop the row entirely when it has no value, instead of showing the
+   *  "Not provided" prompt. Only right for a row no viewer could ever fill —
+   *  a prompt to supply something unobtainable is worse than silence. */
+  hideWhenEmpty?: boolean;
 }[] = [
-  { key: "name", label: "Name", wide: true },
-  { key: "mission", label: "Mission", wide: true },
-  { key: "type", label: "Type" },
-  { key: "status", label: "Status" },
-  { key: "email", label: "Email" },
-  { key: "location", label: "Location" },
-  { key: "address", label: "Address", wide: true },
-  { key: "website", label: "Website", wide: true },
+  {
+    label: "Registered name",
+    read: (state) => state.organisation.legal_name,
+    column: "legal_name",
+  },
+  {
+    label: "Mission",
+    read: (state) => state.missionStatement,
+    column: "mission_statement",
+  },
+  {
+    // "Nature of business", not "Mission". A SIC code is the registrar's
+    // industry classification, and 118 of the 413 companies imported so far
+    // share 85590 "Other education n.e.c." — it says which drawer a company
+    // was filed in, not what it set out to do. Labelling it as a mission would
+    // put a classification where a reader expects a purpose statement, which
+    // is the same conflation the data model just stopped making when
+    // mission_statement was moved off LLM output onto register text.
+    //
+    // column: null — register-sourced and not correctable here, so no pencil,
+    // exactly like "Pipeline stage" below.
+    //
+    // hideWhenEmpty because a charity has no company registration and so can
+    // never have SIC codes. Every other row renders "Not provided" as a
+    // prompt — a gap a CAM could go and fill. This one would be a gap nobody
+    // can ever fill, on roughly two thousand of the two and a half thousand
+    // records in the book, which reads as broken rather than as informative.
+    label: "Nature of business",
+    read: (_state, _info, extras) => extras.natureOfBusiness,
+    column: null,
+    hideWhenEmpty: true,
+  },
+  {
+    label: "Type",
+    read: (_state, info) => info.type,
+    column: "organisation_type",
+    raw: (state) => state.organisation.organisation_type,
+    options: ORGANISATION_TYPES.map((value) => ({
+      value,
+      label: formatOrganisationType(value),
+    })),
+  },
+  {
+    label: "Pipeline stage",
+    read: (_state, info) => info.status,
+    column: null,
+  },
+  {
+    label: "Email",
+    // A redacted placeholder is not a value to display or to prefill an input
+    // with — a CAM opening the row would otherwise be editing `[redacted:…]`,
+    // and saving it would relaunder the placeholder as manually entered data.
+    // Null makes the row read as the gap it is, with the Add/Suggest
+    // affordance; Contactability below says why the gap is there.
+    read: (state) =>
+      containsRedactionPlaceholder(state.organisation.contact_email)
+        ? null
+        : state.organisation.contact_email,
+    column: "contact_email",
+  },
+  {
+    label: "Website",
+    read: (state) => state.organisation.website,
+    column: "website",
+    link: (state) => externalUrl(state.organisation.website),
+  },
+  {
+    label: "Address",
+    read: (state) => state.organisation.address_line_1,
+    column: "address_line_1",
+  },
+  {
+    label: "Town or city",
+    read: (state) => state.organisation.city,
+    column: "city",
+  },
+  {
+    label: "Postcode",
+    read: (state) => state.organisation.postcode,
+    column: "postcode",
+    // The whole address, not the postcode on its own: a bare UK postcode
+    // resolves to the unit centroid, which can be a few hundred metres and the
+    // wrong side of a road from the building someone is trying to visit.
+    link: (state) => mapsUrl(state.organisation),
+  },
+  {
+    label: "Country",
+    read: (state) => formatCountryName(state.organisation.country_code),
+    column: "country_code",
+  },
+  {
+    label: "Geographic reach",
+    read: (state) => formatGeographicReach(state.organisation.geographic_reach),
+    column: "geographic_reach",
+    raw: (state) => state.organisation.geographic_reach ?? null,
+    options: GEOGRAPHIC_REACH_OPTIONS,
+  },
 ];
 
 /**
@@ -47,16 +297,59 @@ export function BasicInfoPanel({
   organisation,
   missionStatement,
   missionEnrichedAt,
+  sicTitles = [],
+  editableFields,
+  actorId,
+  actorRole,
+  suggestions = [],
+  action,
 }: {
   organisation: OrganisationDetailRow;
   missionStatement: string | null;
   missionEnrichedAt: string | null;
+  /** The organisation's SIC codes with the register's own wording, resolved
+   *  server-side because the register file is not readable from the browser.
+   *  Empty for a charity, and for a deployment whose register file is absent. */
+  sicTitles?: readonly { sic: string; title: string }[];
+  /**
+   * Fields this viewer may write in place — the active RESTRICTED_EDIT_FIELDS
+   * names. Empty for viewers, so they get no pencils.
+   */
+  editableFields?: string[];
+  actorId?: string;
+  actorRole?: AppRole;
+  /** Every suggestion on this record, so a field another CAM is already
+   *  correcting can say so instead of offering an edit the RPC will refuse. */
+  suggestions?: EditSuggestionRow[];
+  /** Optional control pinned to the heading row. */
+  action?: ReactNode;
 }) {
+  const editable = new Set(editableFields ?? []);
+  const isAdmin = actorRole === "admin";
+  const isCam = actorRole === "cam";
   const [state, setState] = useState<BasicInfoState>({
     organisation,
     missionStatement,
     missionEnrichedAt,
   });
+
+  // Rows opened for editing, and what has been typed into them. Two maps rather
+  // than one: a row can be open with the value untouched, which is not a change
+  // and must not count toward the submit bar.
+  const [editMode, setEditMode] = useState(false);
+  const [editing, setEditing] = useState<string[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [reason, setReason] = useState("");
+  const [result, setResult] = useState<EditBatchState>(idleEditBatchState);
+  const [pending, startTransition] = useTransition();
+
+  const pendingByField = useMemo(() => {
+    const map = new Map<string, EditSuggestionRow>();
+    for (const row of suggestions) {
+      if (row.status === "pending") map.set(row.field_name, row);
+    }
+    return map;
+  }, [suggestions]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -127,34 +420,423 @@ export function BasicInfoPanel({
 
   const info = buildBasicInfo(state);
 
+  // Title first, code in parentheses, joined inline rather than one per line:
+  // the shared row renders its value in a single centred flex span, so a "\n"
+  // would collapse to a space and read as a run-on. The code is kept because
+  // it is the registrar's actual identifier — a CAM checking a company against
+  // Companies House searches the code, not the wording — but it goes second,
+  // since "Other education n.e.c." is the part a human reads.
+  const natureOfBusiness =
+    sicTitles.length > 0
+      ? sicTitles
+          // A code the register file cannot name comes back from sicTitles()
+          // with the code as its own title. Printing "85590 (85590)" would be
+          // absurd, so the parenthetical is dropped in that case.
+          .map(({ sic, title }) => (title === sic ? sic : `${title} (${sic})`))
+          .join(" · ")
+      : null;
+  const extras: FieldExtras = { natureOfBusiness };
+
+  // A hideWhenEmpty row with nothing to show is dropped before render rather
+  // than rendered blank — see the flag's definition on FIELDS.
+  const visibleFields = FIELDS.filter(
+    ({ read, hideWhenEmpty }) => !hideWhenEmpty || Boolean(read(state, info, extras)?.trim()),
+  );
+  const fieldErrors = fieldErrorsFrom(result);
+
+  /** Columns this viewer may write, in row order. */
+  const writableColumns = FIELDS.flatMap(({ column, options }) => {
+    if (!column) return [];
+    // Mission is not a column on organisations — it is the newest enrichment
+    // row — so it can never be a suggestion. An admin writes it directly; a CAM
+    // has nowhere to send it.
+    if (column === "mission_statement") return isAdmin ? [column] : [];
+    // Same shape for an enum column: it can never be in the restricted set, so
+    // it is never in `editable` and a CAM has no proposal route for it.
+    if (options) return isAdmin ? [column] : [];
+    if (!editable.has(column)) return [];
+    if (isAdmin) return [column];
+    if (!isCam) return [];
+    // A field another CAM is already correcting is not offered: the RPC refuses
+    // it, and an input that cannot be submitted is worse than no input.
+    const blocking = pendingByField.get(column);
+    return blocking && blocking.requested_by !== actorId ? [] : [column];
+  });
+
+  /** Rows whose draft actually differs from what is on record. */
+  const changes = FIELDS.flatMap(({ column, read, raw }) => {
+    if (!column) return [];
+    const draft = drafts[column];
+    if (draft === undefined) return [];
+    const value = normaliseFieldValue(column, draft);
+    if (!value) return [];
+    // Compared against the stored value, not the displayed one: picking
+    // "Social enterprise" on a row already holding `social_enterprise` is not a
+    // change, and comparing the label would call it one.
+    const current = raw ? raw(state) : read(state, info, extras);
+    if (isUnchanged(column, draft, current)) return [];
+    return [{ fieldName: column, value }];
+  });
+
+  /**
+   * Opens one row for editing, and makes sure the card is in edit mode — the
+   * Add button on an empty row is a shortcut into the same state, not a
+   * separate one.
+   */
+  function openRow(column: string) {
+    const row = FIELDS.find((candidate) => candidate.column === column);
+    setEditMode(true);
+    setEditing((rows) => (rows.includes(column) ? rows : [...rows, column]));
+    setDrafts((current) => ({
+      ...current,
+      [column]:
+        current[column] ??
+        (row?.raw ? row.raw(state) : row?.read(state, info, extras)) ??
+        "",
+    }));
+  }
+
+  function closeRow(column: string) {
+    setEditing((rows) => rows.filter((row) => row !== column));
+    setDrafts((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(([field]) => field !== column),
+      ),
+    );
+  }
+
+  function discardAll() {
+    setEditMode(false);
+    setEditing([]);
+    setDrafts({});
+    setReason("");
+    setResult(idleEditBatchState);
+  }
+
+  function submit() {
+    if (changes.length === 0) return;
+    startTransition(async () => {
+      const start = Date.now();
+      const next = isAdmin
+        ? await adminDirectEditsAction({
+            organisationId: organisation.id,
+            changes,
+          })
+        : await suggestEditsAction({
+            organisationId: organisation.id,
+            reason: reason.trim() || null,
+            changes,
+          });
+      // Brief minimum delay so the "Saving…" state is visible — an instant
+      // flash of the button text feels broken rather than fast.
+      const elapsed = Date.now() - start;
+      if (elapsed < 400) {
+        await new Promise((r) => setTimeout(r, 400 - elapsed));
+      }
+      setResult(next);
+
+      // Only the fields that landed close. Anything that failed stays open with
+      // its value and its own error, which is the whole point of reporting the
+      // batch per field rather than as one verdict.
+      const landed = new Set(succeededFields(next));
+      if (landed.size > 0) {
+        setEditing((rows) => rows.filter((row) => !landed.has(row)));
+        setDrafts((current) =>
+          Object.fromEntries(
+            Object.entries(current).filter(([field]) => !landed.has(field)),
+          ),
+        );
+        if (next.kind === "success") setReason("");
+      }
+    });
+  }
+
   return (
-    <SectionCard headingId="basic-info-heading" title="Basic info">
-      <dl className="mt-4 grid grid-cols-1 gap-x-8 sm:grid-cols-2">
-        {FIELDS.map(({ key, label, wide }) => {
-          // AC2: a field with no value still gets its row — greyed rather than
-          // dropped, so "we don't know" reads differently from "it's blank".
-          const missing = info[key] === NOT_PROVIDED;
+    <SectionCard
+      headingId="basic-info-heading"
+      title="General Information"
+      hint={
+        isCam
+          ? "Sourced from the registers above. A blank is a gap in the public record, not an error. Corrections go to an admin for review."
+          : "Sourced from the registers above. A blank is a gap in the public record, not an error."
+      }
+      action={
+        action ??
+        (writableColumns.length > 0 ? (
+          /* One control for the whole card, where "Suggest an edit" used to be.
+             A pencil on every row, permanently, was six affordances for an act
+             that happens once a month, crowding values that are mostly two
+             words long. Pressing this does not open anything — it arms the
+             card: the rows keep reading as rows and each one this viewer may
+             write grows its own Edit button. Opening every input at once was
+             the other extreme, and turned a record you were reading into a
+             form you had not asked for. */
+          <OriginButton
+            size="xs"
+            variant={editMode ? "outline" : "blue"}
+            onClick={() => (editMode ? discardAll() : setEditMode(true))}
+            type="button"
+          >
+            {/* "Done" while nothing has been typed, "Cancel" once something
+                has — pressing it throws the drafts away, and a button that
+                says Done has no business doing that silently. */}
+            {editMode ? (
+              changes.length > 0 ? (
+                "Cancel"
+              ) : (
+                "Done"
+              )
+            ) : (
+              <>
+                <PencilLine aria-hidden="true" className="size-3.5" />
+                {/* A CAM's edit is a proposal an admin has to approve, and a
+                    button that says "Edit" promises a change that will not
+                    happen when they press Save. */}
+                {isAdmin ? "Edit" : "Suggest edits"}
+              </>
+            )}
+          </OriginButton>
+        ) : null)
+      }
+    >
+      {/* Label-beside-value rather than label-above-value: these are short
+          field names against short values, and stacking them doubled the card's
+          height for no gain. */}
+      <dl className="mt-3.5 flex flex-col">
+        {visibleFields.map(({ label, read, column, raw: readRaw, options, link }) => {
+          const rawValue = readRaw ? readRaw(state) : read(state, info, extras);
+          const displayed = read(state, info, extras);
+          const href = link ? link(state) : null;
+          const display = displayed?.trim() ? displayed.trim() : NOT_PROVIDED;
+          const missing = display === NOT_PROVIDED;
+
+          const mayEdit = column !== null && writableColumns.includes(column);
+          const blocking = column ? pendingByField.get(column) : undefined;
+          const blockedByOther =
+            !isAdmin &&
+            blocking !== undefined &&
+            blocking.requested_by !== actorId;
+          const isOpen = column !== null && editing.includes(column);
+
           return (
-            <div
-              key={key}
-              className={`border-b border-black/[0.05] py-3 last:border-b-0 ${
-                wide ? "sm:col-span-2" : ""
+            /* `layout` on the row, not a height animation on the editor: the
+               capsule needs its overflow visible (the droplet flies past its
+               own box and the goo filter paints outside it), and animating a
+               height means clipping. Letting the row measure both states and
+               travel between them keeps the rows below from jumping while the
+               input is still on screen. */
+            <motion.div
+              layout
+              transition={ROW_TRANSITION}
+              key={label}
+              className={`grid gap-x-4 gap-y-0.5 border-t border-rule-soft py-2.5 first:border-t-0 first:pt-0 sm:grid-cols-[132px_minmax(0,1fr)] ${
+                isOpen ? "relative z-30" : ""
               }`}
             >
-              <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                {label}
-              </dt>
+              <dt className="text-[13px] text-dim">{label}</dt>
               <dd
-                className={`mt-1 text-sm leading-[1.6] ${
-                  missing ? "text-foreground/35" : "text-foreground/80"
+                className={`flex min-w-0 flex-col gap-1.5 text-sm leading-[1.55] ${
+                  missing ? "text-faint" : "text-ink"
                 }`}
               >
-                {info[key]}
+                {/* `wait`, so the outgoing state is gone before the incoming
+                    one starts: crossfading a 42px capsule over a line of text
+                    reads as a smear, and the row's own layout animation has
+                    nothing sensible to measure while both are present. */}
+                <AnimatePresence initial={false} mode="wait">
+                  {isOpen && column ? (
+                    <motion.div
+                      key="editing"
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={SWAP_TRANSITION}
+                      className="min-w-0"
+                    >
+                      {options ? (
+                        <InlineEnumInput
+                          label={label}
+                          value={drafts[column] ?? ""}
+                          options={options}
+                          error={fieldErrors[column]}
+                          onChange={(next) =>
+                            setDrafts((current) => ({
+                              ...current,
+                              [column]: next,
+                            }))
+                          }
+                          onCancel={() => closeRow(column)}
+                          pending={pending}
+                        />
+                      ) : column === "city" ? (
+                        <InlineCityInput
+                          label={label}
+                          value={drafts[column] ?? ""}
+                          currentValue={rawValue}
+                          error={fieldErrors[column]}
+                          onChange={(next) =>
+                            setDrafts((current) => ({
+                              ...current,
+                              [column]: next,
+                            }))
+                          }
+                          onCancel={() => closeRow(column)}
+                          onSubmit={submit}
+                          pending={pending}
+                        />
+                      ) : (
+                        <InlineFieldInput
+                          fieldName={column}
+                          label={label}
+                          value={drafts[column] ?? ""}
+                          currentValue={rawValue}
+                          error={fieldErrors[column]}
+                          onChange={(next) =>
+                            setDrafts((current) => ({
+                              ...current,
+                              [column]: next,
+                            }))
+                          }
+                          onCancel={() => closeRow(column)}
+                          onSubmit={submit}
+                          pending={pending}
+                        />
+                      )}
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="reading"
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 4 }}
+                      transition={SWAP_TRANSITION}
+                      className="flex min-w-0 items-center gap-2.5"
+                    >
+                      {href ? (
+                        /* `noreferrer` as well as `noopener`: these are
+                           third-party addresses off a public register, and the
+                           referrer would leak the client's record URL to them. */
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-w-0 items-center gap-1 break-words text-lead underline decoration-lead/30 underline-offset-2 transition-colors hover:decoration-lead focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none"
+                        >
+                          <span className="min-w-0 break-words">{display}</span>
+                          <ExternalLink
+                            aria-hidden="true"
+                            className="size-3 shrink-0 text-lead/60"
+                          />
+                          <span className="sr-only"> (opens in a new tab)</span>
+                        </a>
+                      ) : (
+                        <span className="min-w-0 break-words">{display}</span>
+                      )}
+
+                      {/* Add is always there on an empty row: a blank is a gap
+                        someone can close in one action, and the button is the
+                        only thing on an otherwise empty line, so it crowds
+                        nothing. Edit appears only once the card is armed. */}
+                      {mayEdit && (missing || editMode) && (
+                        <button
+                          type="button"
+                          aria-label={`${rowActionLabel(isAdmin, missing)} ${label.toLowerCase()}`}
+                          onClick={() => openRow(column)}
+                          className="inline-flex shrink-0 items-center gap-1 rounded-inset border border-rule bg-white px-2 py-0.5 text-[12px] font-semibold text-lead transition-colors hover:border-lead focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none"
+                        >
+                          {missing ? (
+                            <>
+                              <Plus aria-hidden="true" className="size-3" />
+                              {rowActionLabel(isAdmin, true)}
+                            </>
+                          ) : (
+                            <>
+                              <Pencil aria-hidden="true" className="size-3" />
+                              {rowActionLabel(isAdmin, false)}
+                            </>
+                          )}
+                        </button>
+                      )}
+
+                      {blockedByOther && (
+                        <span className="inline-flex shrink-0 items-center gap-1 text-[12px] text-faint">
+                          <Lock aria-hidden="true" className="size-3" />
+                          Correction pending
+                        </span>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* An open proposal by this CAM: the row still shows the live
+                    value, because that is what it is until an admin says
+                    otherwise. */}
+                {blocking && !blockedByOther && !isOpen && (
+                  <p className="text-[12px] text-dim">
+                    You proposed{" "}
+                    <span className="font-semibold text-ink">
+                      {blocking.proposed_value}
+                    </span>{" "}
+                    — awaiting review.
+                  </p>
+                )}
+
+                {/* A field that failed while its row is shut: the message would
+                    otherwise vanish with the input. */}
+                {column && !isOpen && fieldErrors[column] && (
+                  <p
+                    className="text-[12px] font-semibold text-stop"
+                    role="alert"
+                  >
+                    {fieldErrors[column]}
+                  </p>
+                )}
               </dd>
-            </div>
+            </motion.div>
           );
         })}
       </dl>
+
+      <AnimatePresence initial={false}>
+        {changes.length > 0 && (
+          <motion.div
+            key="draft-bar"
+            initial={{ opacity: 0, y: -14, scale: 0.98, height: 0, marginTop: 0 }}
+            animate={{ opacity: 1, y: 0, scale: 1, height: "auto", marginTop: 16 }}
+            exit={{ opacity: 0, y: -14, scale: 0.98, height: 0, marginTop: 0 }}
+            transition={DRAFT_BAR_TRANSITION}
+            className="overflow-hidden"
+          >
+            <EditDraftBar
+              count={changes.length}
+              isCam={!isAdmin}
+              reason={reason}
+              onReasonChange={setReason}
+              onSubmit={submit}
+              onDiscard={discardAll}
+              pending={pending}
+              state={result}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Nothing pending, but the last submission said something worth keeping
+          on screen — a success, or a failure that closed every row. */}
+      {changes.length === 0 && result.kind !== "idle" && result.message && (
+        <p
+          aria-live="polite"
+          className={`mt-3.5 text-[12.5px] font-semibold ${
+            result.kind === "success"
+              ? "text-go"
+              : result.kind === "partial"
+                ? "text-hold"
+                : "text-stop"
+          }`}
+        >
+          {result.message}
+        </p>
+      )}
     </SectionCard>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import Script from "next/script";
+import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 
 /**
@@ -69,6 +70,7 @@ export function TurnstileChallenge({
   action,
   gerund,
   resetKey,
+  pending = false,
   tone = "light",
 }: {
   solved: boolean;
@@ -77,6 +79,13 @@ export function TurnstileChallenge({
   action: string;
   /** The same thing as a gerund, for the failure sentence: "logging in". */
   gerund: string;
+  /**
+   * The form is mid-submit. The caller spends the token the moment it submits
+   * (`setSolved(false)`), so without this the hint would snap back to "complete
+   * the check above" while the button still says "Logging in…". The check *did*
+   * pass for this in-flight attempt, so keep saying so until it comes back.
+   */
+  pending?: boolean;
   /**
    * Change this to spend the current token and start a fresh challenge. A
    * Turnstile token is single-use, so an attempt that comes back as a failure
@@ -184,6 +193,10 @@ export function TurnstileChallenge({
     onSolvedChangeRef.current(false);
   }, [resetKey]);
 
+  // The check reads as passed while a solved token is still redeemable and while
+  // the attempt it was spent on is in flight. "Unavailable" always wins.
+  const showComplete = !unavailable && (solved || pending);
+
   return (
     <>
       <Script
@@ -192,26 +205,64 @@ export function TurnstileChallenge({
         onReady={() => setScriptReady(true)}
         onError={() => setUnavailable(true)}
       />
-      <div ref={containerRef} />
+      {/* min-h holds the widget's normal 65px so the row does not pop in when
+          Cloudflare's iframe finishes rendering. */}
+      <div ref={containerRef} className="min-h-[65px]" />
 
-      {!solved && (
-        <p
-          id={CAPTCHA_HINT_ID}
-          className={`font-body text-xs ${
-            unavailable
+      {/* Always mounted so solving the check does not collapse a text row out of
+          the dialog. The copy changes; the line stays. */}
+      <p
+        id={CAPTCHA_HINT_ID}
+        className={`flex items-center gap-1.5 font-body text-xs ${
+          unavailable
+            ? tone === "dark"
+              ? "text-amber-200"
+              : "text-amber-900"
+            : showComplete
               ? tone === "dark"
-                ? "text-amber-200"
-                : "text-amber-900"
+                ? "text-emerald-300"
+                : "text-emerald-700"
               : tone === "dark"
                 ? "text-[#f4f4ef]/55"
                 : "text-foreground/55"
-          }`}
-        >
-          {unavailable
-            ? `The security check could not load, so ${gerund} is not possible right now. Disable any ad or script blocker for this page and reload.`
+        }`}
+      >
+        {showComplete && (
+          // Same draw-on tick as the Terms & Conditions checkbox
+          // (animate-ui/primitives/radix/checkbox): identical path, pathLength
+          // 0 → 1, matched duration and easing.
+          <motion.svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="3.5"
+            aria-hidden="true"
+            className="size-3.5 shrink-0"
+            initial="hidden"
+            animate="visible"
+          >
+            <motion.path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M4.5 12.75l6 6 9-13.5"
+              variants={{
+                hidden: { pathLength: 0, opacity: 0 },
+                visible: {
+                  pathLength: 1,
+                  opacity: 1,
+                  transition: { duration: 0.2, delay: 0.1 },
+                },
+              }}
+            />
+          </motion.svg>
+        )}
+        {unavailable
+          ? `The security check could not load, so ${gerund} is not possible right now. Disable any ad or script blocker for this page and reload.`
+          : showComplete
+            ? "Security check complete."
             : `Complete the check above to ${action}.`}
-        </p>
-      )}
+      </p>
     </>
   );
 }

@@ -42,12 +42,29 @@ export async function SettingsShell({ children }: { children: React.ReactNode })
     });
   }
 
+  // Platform configuration — score weights, data handling rules, restricted
+  // fields. Moved out of the app sidebar: it is settings, not a daily-ops
+  // destination. Gated on the same permission the old sidebar entry used;
+  // each page keeps its own (differing) check.
+  const sections: SettingsNavSection[] = [personal];
+
+  if (hasPermission(actor.role, "platform-settings:manage")) {
+    sections.push({
+      label: "Platform",
+      items: [
+        { href: "/settings/score-settings", label: "Score settings" },
+        { href: "/settings/data-handling-rules", label: "Data handling rules" },
+        { href: "/settings/restricted-fields", label: "Restricted fields" },
+      ],
+    });
+  }
+
   return (
     <>
       <ShellWash />
       <div className="flex min-h-screen">
         <SettingsSidebar
-          sections={[personal]}
+          sections={sections}
           backHref="/dashboard"
           userName={actor.fullName}
           userEmail={actor.email}

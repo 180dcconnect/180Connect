@@ -1,6 +1,17 @@
 import type { RunSummary } from "@/lib/ingestion/type";
 import type { PromoteCounts } from "@/lib/standardize/write-organisations";
-import type { CharityCommissionImportState } from "./actions";
+import type {
+  CharityCommissionImportState,
+  CharityGrantCoverage,
+  CharityLookupOutcome,
+} from "./actions";
+
+/** What `findListedCharity` resolves to — the charity on the list, or nothing. */
+export type ListedCharity = {
+  organisationId: string;
+  name: string;
+  grants: CharityGrantCoverage;
+};
 
 /**
  * F049: a human-readable sentence for what happened during the promote step
@@ -60,4 +71,28 @@ export function importStateFromSummary(
         : "Charity Commission data was imported successfully.",
     counts,
   };
+}
+
+/**
+ * Turn the batch counters into the single-charity answer, given what was on the
+ * list before the run and what is on it after.
+ *
+ * Presence is decided by looking the charity up, not by reading `inserted`: a
+ * record can be held as a duplicate (`counts.flagged`) of an organisation that
+ * is already listed, which is a success from the reader's point of view and
+ * scores zero in every counter the old dialog rendered.
+ */
+export function lookupOutcome(
+  before: ListedCharity | null,
+  after: ListedCharity | null,
+  promoted: CharityCommissionImportState["promoted"],
+): CharityLookupOutcome {
+  if (after) {
+    return before
+      ? { kind: "already_listed", ...after }
+      : { kind: "added", ...after };
+  }
+  if ((promoted?.needsReview ?? 0) > 0) return { kind: "held_for_review" };
+  if ((promoted?.doesNotMeet ?? 0) > 0) return { kind: "does_not_meet" };
+  return { kind: "not_on_list" };
 }

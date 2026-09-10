@@ -23,14 +23,20 @@ export function RequestOwnershipForm({
   ownerName,
   existingStatus,
   decisionNote,
+  defaultOpen = false,
 }: {
   organisationId: string;
   ownerName: string | null;
   existingStatus: OwnershipRequestStatus | null;
   decisionNote: string | null;
+  /**
+   * Open straight into the form. Set from the record header's overflow menu,
+   * where the menu item is already the "I want to ask for this" step.
+   */
+  defaultOpen?: boolean;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +78,7 @@ export function RequestOwnershipForm({
     return (
       <p
         aria-live="polite"
-        className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-3.5 py-3 text-[13px] font-bold leading-[1.6] text-amber-800"
+        className="mt-3 rounded-inset border border-hold/25 bg-hold-wash px-3.5 py-3 text-[13px] font-semibold leading-[1.6] text-hold"
       >
         {pendingRequestNotice(ownerName)}
       </p>
@@ -82,7 +88,7 @@ export function RequestOwnershipForm({
   return (
     <div className="mt-3 space-y-3">
       {existingStatus && (
-        <p className="rounded-xl border border-black/[0.06] bg-black/[0.02] px-3.5 py-3 text-[13px] leading-[1.6] text-foreground/65">
+        <p className="rounded-inset border border-rule bg-paper px-3.5 py-3 text-[13px] leading-[1.6] text-dim">
           {decidedRequestNotice(existingStatus, decisionNote)}
         </p>
       )}
@@ -90,7 +96,7 @@ export function RequestOwnershipForm({
       {open ? (
         <form className="space-y-3" onSubmit={submit}>
           <label className="flex flex-col gap-1.5 text-sm">
-            <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+            <span className="text-[13px] font-medium text-dim">
               Why you should take this on
             </span>
             <Input
@@ -98,10 +104,10 @@ export function RequestOwnershipForm({
               value={reason}
               onChange={(event) => setReason(event.target.value)}
               placeholder="What the admin needs to know to decide"
-              className="rounded-xl bg-white"
+              className="rounded-inset bg-white"
             />
           </label>
-          <p className="text-[13px] leading-[1.6] text-foreground/45">
+          <p className="text-[13px] leading-[1.6] text-dim">
             This asks an admin to move the client to you. It does not move it — ownership
             stays with {ownerName ?? "the current owner"} unless an admin agrees.
           </p>
@@ -130,7 +136,7 @@ export function RequestOwnershipForm({
       )}
 
       {error && (
-        <p aria-live="polite" role="alert" className="text-[13px] font-bold text-destructive">
+        <p aria-live="polite" role="alert" className="text-[13px] font-semibold text-stop">
           {error}
         </p>
       )}

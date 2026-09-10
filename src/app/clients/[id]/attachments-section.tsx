@@ -45,7 +45,7 @@ export function AttachmentsSection({
 }) {
   if (error) {
     return (
-      <p className="mt-4 text-sm font-bold text-destructive" role="alert">
+      <p className="mt-3.5 text-sm font-semibold text-stop" role="alert">
         Attachments could not be loaded. Refresh and try again.
       </p>
     );
@@ -54,7 +54,7 @@ export function AttachmentsSection({
   const searching = Boolean(search);
 
   return (
-    <div className="mt-4 space-y-2.5">
+    <div className="mt-3.5 space-y-2.5">
       {(totalCount > 0 || searching) && (
         <form
           action={`/clients/${organisationId}`}
@@ -81,7 +81,7 @@ export function AttachmentsSection({
           </button>
           {searching && (
             <Link
-              className="text-xs font-bold text-brand-hover underline underline-offset-2 hover:text-brand"
+              className="text-xs font-semibold text-brand underline underline-offset-2"
               href={`/clients/${organisationId}`}
             >
               Clear search
@@ -91,18 +91,18 @@ export function AttachmentsSection({
       )}
 
       {search?.failed && (
-        <p className="text-xs font-bold text-destructive" role="alert">
+        <p className="text-xs font-semibold text-stop" role="alert">
           File search could not be run. Showing all files instead.
         </p>
       )}
 
       {attachments.length === 0 ? (
         searching ? (
-          <p className="text-sm leading-[1.7] text-foreground/45">
+          <p className="text-sm leading-[1.6] text-faint">
             No extracted file text matches “{search?.query}”. Searches look inside
             PDF text only — scanned or not-yet-extracted files can&apos;t match.{" "}
             <Link
-              className="font-bold text-brand-hover underline underline-offset-2 hover:text-brand"
+              className="font-semibold text-brand underline underline-offset-2"
               href={`/clients/${organisationId}`}
             >
               Clear search
@@ -110,7 +110,7 @@ export function AttachmentsSection({
             .
           </p>
         ) : (
-          <p className="text-sm leading-[1.7] text-foreground/45">
+          <p className="mt-3.5 text-sm leading-[1.6] text-faint">
             No files have been attached to this client yet.
           </p>
         )
@@ -135,14 +135,14 @@ export function AttachmentsSection({
                       behind it exchanges the row for a short-lived signed URL, since
                       the bucket is private. */}
                   <a
-                    className="break-all text-sm font-bold text-brand-hover underline underline-offset-2 hover:text-brand"
+                    className="break-all text-sm font-semibold text-lead underline underline-offset-2 hover:text-lead-mid"
                     href={`/api/clients/${organisationId}/attachments/${attachment.id}/download`}
                     rel="noreferrer"
                     target="_blank"
                   >
                     {attachment.filename}
                   </a>
-                  <p className="mt-0.5 text-[12px] text-foreground/40">
+                  <p className="mt-0.5 text-[12px] text-faint">
                     Added by {attachment.uploadedByName} on{" "}
                     {new Date(attachment.createdAt).toLocaleDateString("en-GB")}
                     {attachment.sizeLabel ? ` · ${attachment.sizeLabel}` : ""}
@@ -161,7 +161,7 @@ export function AttachmentsSection({
                   )}
                   {attachment.textExtractionStatus === "succeeded" && attachment.extractedText && (
                     <details className="mt-2 max-w-2xl text-xs text-foreground/65">
-                      <summary className="cursor-pointer font-bold text-brand-hover">
+                      <summary className="cursor-pointer font-semibold text-brand">
                         Text extracted{attachment.extractedPageCount ? ` · ${attachment.extractedPageCount} pages` : ""}
                         {attachment.extractedTextTruncated ? " · shortened" : ""}
                       </summary>
@@ -179,7 +179,7 @@ export function AttachmentsSection({
                     <form action={extractAttachmentTextForm} className="mt-2">
                       <input type="hidden" name="organisationId" value={organisationId} />
                       <input type="hidden" name="attachmentId" value={attachment.id} />
-                      <button className="text-xs font-bold text-brand-hover underline underline-offset-2" type="submit">
+                      <button className="text-xs font-semibold text-brand underline underline-offset-2" type="submit">
                         {attachment.textExtractionStatus === "failed" ? "Try extraction again" : "Extract text"}
                       </button>
                     </form>

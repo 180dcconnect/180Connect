@@ -6,6 +6,7 @@ import {
   formatDayLabel,
   formatDuration,
   formatRelativeTime,
+  formatShortDate,
   groupByDay,
   humaniseToken,
 } from "./display-format.ts";
@@ -102,5 +103,23 @@ describe("groupByDay", () => {
 describe("dayKeyOf", () => {
   it("keys on the local calendar date, zero-padded", () => {
     assert.equal(dayKeyOf(new Date(2026, 0, 5)), "2026-01-05");
+  });
+});
+
+describe("formatShortDate", () => {
+  it("formats date strings deterministically without locale drift", () => {
+    assert.equal(formatShortDate("2023-09-12"), "12 Sep 2023");
+    assert.equal(formatShortDate("2024-01-05"), "5 Jan 2024");
+    assert.equal(formatShortDate("2022-12-31"), "31 Dec 2022");
+  });
+
+  it("handles Date objects and timestamps", () => {
+    assert.equal(formatShortDate(new Date("2023-09-12T00:00:00.000Z")), "12 Sep 2023");
+  });
+
+  it("falls back gracefully on empty or null values", () => {
+    assert.equal(formatShortDate(null), "—");
+    assert.equal(formatShortDate(undefined), "—");
+    assert.equal(formatShortDate(""), "—");
   });
 });

@@ -52,10 +52,10 @@ export const TIMELINE_EVENT_LABEL: Record<TimelineEventType, string> = {
 };
 
 /**
- * The three tones this app's design system defines (docs/design-system.md), reused
+ * The three tones the client record's Pill defines (see section-card.tsx), reused
  * rather than inventing new ones.
  */
-export type TimelineTone = "brand" | "neutral" | "warn";
+export type TimelineTone = "go" | "neutral" | "hold";
 
 /**
  * How the event dot is drawn. Three states rather than the original two because
@@ -72,14 +72,14 @@ export type TimelineStyle = {
 };
 
 export const TIMELINE_EVENT_STYLE: Record<TimelineEventType, TimelineStyle> = {
-  email_sent: { tone: "brand", fill: "solid" },
-  reply_received: { tone: "brand", fill: "hollow" },
+  email_sent: { tone: "go", fill: "solid" },
+  reply_received: { tone: "go", fill: "hollow" },
   note_added: { tone: "neutral", fill: "solid" },
   note_edited: { tone: "neutral", fill: "hollow" },
-  status_changed: { tone: "warn", fill: "solid" },
-  ownership_reassigned: { tone: "warn", fill: "hollow" },
-  edit_applied: { tone: "brand", fill: "ring" },
-  edit_rejected: { tone: "warn", fill: "ring" },
+  status_changed: { tone: "hold", fill: "solid" },
+  ownership_reassigned: { tone: "hold", fill: "hollow" },
+  edit_applied: { tone: "go", fill: "ring" },
+  edit_rejected: { tone: "hold", fill: "ring" },
   attachment_added: { tone: "neutral", fill: "ring" },
 };
 
@@ -134,6 +134,10 @@ export type OutreachMessageRow = {
   send_status: "draft" | "scheduled" | "sent" | "failed";
   sent_at: string | null;
   sender: { full_name: string | null } | null;
+  /** Real columns, selected only where bodies are read (the hydrate route).
+      Optional so list queries that omit them keep typechecking. */
+  scheduled_at?: string | null;
+  created_at?: string;
 };
 
 export type ReplyEventRow = {

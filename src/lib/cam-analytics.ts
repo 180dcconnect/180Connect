@@ -49,6 +49,12 @@ export type CamReplyRow = {
   id: string;
   organisation_id: string;
   response_time_seconds?: number | null;
+  /**
+   * F209: the sent email this reply answers, when reply-tracking could link it.
+   * Optional so existing callers' narrower selects keep typing; only the tone
+   * breakdown reads it.
+   */
+  outreach_message_id?: string | null;
 };
 
 /**

@@ -16,21 +16,21 @@ export function FailedEmailList({
   organisationId: string;
   messages: { id: string; subject: string; reason: string }[];
 }) {
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ ok: boolean; message: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   if (messages.length === 0) return null;
   return (
     <div className="mt-4 space-y-2">
-      <h4 className="text-xs font-bold uppercase tracking-wide text-foreground/55">Failed sends</h4>
+      <h3 className="text-sm font-semibold text-ink">Failed sends</h3>
       {messages.map((message) => (
         <div
-          className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 p-3"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-inset border border-stop/25 bg-stop-wash p-3"
           key={message.id}
         >
           <p className="text-sm">
             <strong>{message.subject}</strong>
             <br />
-            <span className="text-xs text-red-800">{message.reason}</span>
+            <span className="text-xs text-stop">{message.reason}</span>
           </p>
           <OriginButton
             disabled={busy === message.id}
@@ -38,7 +38,7 @@ export function FailedEmailList({
               setBusy(message.id);
               setNotice(null);
               const result = await retryFailedEmail({ organisationId, messageId: message.id });
-              setNotice(result.message);
+              setNotice({ ok: result.ok, message: result.message });
               setBusy(null);
             }}
             size="sm"
@@ -50,8 +50,11 @@ export function FailedEmailList({
         </div>
       ))}
       {notice && (
-        <p className="text-xs font-bold text-red-800" role="status">
-          {notice}
+        <p
+          className={`text-xs font-semibold ${notice.ok ? "text-dim" : "text-stop"}`}
+          role={notice.ok ? "status" : "alert"}
+        >
+          {notice.message}
         </p>
       )}
     </div>

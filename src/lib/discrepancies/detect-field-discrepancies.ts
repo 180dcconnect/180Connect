@@ -31,6 +31,7 @@
 
 import type { createClient } from "../supabase/server.ts";
 import { reportError } from "../error-logging.ts";
+import { containsRedactionPlaceholder } from "../ingestion/personal-data.ts";
 import { standardizeCharityCommissionRecord } from "../standardize/charity-commission.ts";
 import { standardizeCompaniesHouseRecord } from "../standardize/companies-house.ts";
 import { resolveBySourcePriority } from "../standardize/source-priority.ts";
@@ -57,6 +58,13 @@ export type FieldDiscrepancy = {
  * Compares the fields both sides actually provide. A field is only flagged when
  * both the existing and incoming values are non-empty and differ — filling in a
  * field the existing record left blank is not a conflict, it's an improvement.
+ *
+ * A value F247 redacted counts as blank on either side. It is not a value the
+ * two sources disagree about — it is what we stored instead of one — and treating
+ * it as one would queue a conflict for every organisation whose register entry
+ * carried a personal email, on every subsequent confirmed match, with a
+ * resolution ("keep `[redacted:personal-email]`" or "restore the address we are
+ * required not to hold") that no admin should be offered.
  */
 export function findFieldDiscrepancies(
   incoming: Pick<StandardOrganisation, DiscrepancyField>,
@@ -68,6 +76,12 @@ export function findFieldDiscrepancies(
     const existingValue = existing[fieldName].trim();
     const incomingValue = incoming[fieldName].trim();
     if (existingValue === "" || incomingValue === "") continue;
+    if (
+      containsRedactionPlaceholder(existingValue) ||
+      containsRedactionPlaceholder(incomingValue)
+    ) {
+      continue;
+    }
     if (existingValue === incomingValue) continue;
     discrepancies.push({ fieldName, existingValue, incomingValue });
   }

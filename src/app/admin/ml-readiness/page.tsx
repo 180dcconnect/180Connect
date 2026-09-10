@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
@@ -6,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { outcomeReadiness } from "@/lib/ml-readiness";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
+import { BackButton } from "@/components/ui/back-button";
 
 /**
  * F099 — Minimum Outcome Threshold Tracking (#98).
@@ -56,9 +56,10 @@ export default async function MlReadinessPage() {
               close that is to the agreed minimum that makes training realistic.
             </p>
           </div>
-          <Link className="text-sm font-bold text-brand hover:underline" href="/admin">
-            ← Platform management
-          </Link>
+          <BackButton
+            variant="editorial-minimal"
+            href="/admin"
+          />
         </Rise>
 
         {error && (

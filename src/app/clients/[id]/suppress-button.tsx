@@ -2,31 +2,42 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { OriginButton } from "@/components/ui/origin-button";
+import { DeleteButton } from "@/components/ui/delete-button";
 
 export function SuppressButton({
   organisationId,
   selfApproves,
+  defaultExpanded = false,
 }: {
   organisationId: string;
   /** True for an admin caller — request_suppression self-approves, no pending step. */
   selfApproves: boolean;
+  /**
+   * Skip the collapsed trigger and open straight into the reason form. Set by
+   * the record header's overflow menu, where the menu item *is* the trigger and
+   * a second "Flag as Do Not Contact" button inside the dialog would be a step
+   * that asks the same question twice.
+   */
+  defaultExpanded?: boolean;
 }) {
   const router = useRouter();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [reason, setReason] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
+  async function handleConfirm() {
+    if (!reason.trim()) {
+      setMessage("A reason is required before flagging as Do Not Contact.");
+      return;
+    }
     setBusy(true);
     setMessage("");
     try {
       const response = await fetch(`/api/clients/${organisationId}/suppress`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason }),
+        body: JSON.stringify({ reason: reason.trim() }),
       });
       const body = await response.json();
       if (!response.ok) {
@@ -45,68 +56,74 @@ export function SuppressButton({
 
   if (!expanded) {
     return (
-      <OriginButton
-        variant="destructive"
+      <DeleteButton
+        label="Flag"
+        confirmLabel="Confirm"
+        variant="solid"
         size="sm"
-        onClick={() => setExpanded(true)}
-        type="button"
-      >
-        Flag as Do Not Contact
-      </OriginButton>
+        snapOnConfirm={false}
+        vanishOnComplete={false}
+        onConfirm={() => setExpanded(true)}
+      />
     );
   }
 
   return (
-    <form onSubmit={submit}>
+    <form onSubmit={(e) => { e.preventDefault(); handleConfirm(); }}>
       <label
-        className="block text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40"
+        className="block text-[13px] font-medium text-dim"
         htmlFor="suppress-reason"
       >
         Reason
       </label>
-      <p className="mt-1.5 text-[13px] leading-[1.6] text-foreground/50">
-        e.g. hard no, legal request, unsubscribe.{" "}
-        {selfApproves
-          ? "Required, and kept on file. Takes effect immediately."
-          : "Required, and kept on file. An admin reviews this before it takes effect."}
-      </p>
       <textarea
-        className="mt-2.5 w-full rounded-xl border border-input bg-white px-3 py-2 text-sm leading-[1.6] outline-none transition-[box-shadow,border-color] placeholder:text-foreground/35 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:opacity-50"
-        placeholder="Why this client must not be contacted"
+        className="mt-2 w-full rounded-inset border border-input bg-white px-3 py-2 text-sm leading-[1.6] outline-none transition-[box-shadow,border-color] placeholder:text-faint focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:opacity-50"
+        placeholder={
+          selfApproves
+            ? "e.g. hard no, legal request, unsubscribe. Required, and kept on file. Takes effect immediately."
+            : "e.g. hard no, legal request, unsubscribe. Required, and kept on file. An admin reviews this before it takes effect."
+        }
         disabled={busy}
         id="suppress-reason"
-        onChange={(event) => setReason(event.target.value)}
+        onChange={(event) => {
+          setReason(event.target.value);
+          if (message) setMessage("");
+        }}
         rows={3}
         value={reason}
       />
-      <div className="mt-4 flex flex-wrap gap-2.5">
-        <OriginButton
-          variant="destructive"
-          size="sm"
-          loading={busy}
+      <div className="mt-4 flex flex-wrap items-center gap-2.5">
+        <DeleteButton
           disabled={busy || reason.trim() === ""}
-          type="submit"
-        >
-          {busy
-            ? (selfApproves ? "Flagging…" : "Requesting…")
-            : (selfApproves ? "Flag as Do Not Contact" : "Request Do Not Contact")}
-        </OriginButton>
-        <OriginButton
-          variant="ghost"
-          size="sm"
-          disabled={busy}
-          onClick={() => {
-            setExpanded(false);
-            setReason("");
+          label="Flag"
+          confirmLabel="Confirm"
+          deletingLabel={selfApproves ? "Flagging…" : "Requesting…"}
+          onConfirm={handleConfirm}
+          onCancel={() => {
+            if (!defaultExpanded) setExpanded(false);
             setMessage("");
           }}
-          type="button"
-        >
-          Cancel
-        </OriginButton>
+          size="sm"
+          variant="solid"
+          snapOnConfirm={true}
+          vanishOnComplete={true}
+        />
+        {!defaultExpanded && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setExpanded(false);
+              setMessage("");
+            }}
+            className="text-xs font-semibold text-dim hover:text-ink px-3 py-1.5"
+          >
+            Cancel
+          </button>
+        )}
       </div>
       {message && (
-        <p aria-live="polite" role="alert" className="mt-3 text-[13px] font-bold text-destructive">
+        <p aria-live="polite" role="alert" className="mt-3 text-[13px] font-semibold text-stop">
           {message}
         </p>
       )}

@@ -3,6 +3,8 @@
 import { useId, useMemo, useState } from "react";
 import { ArrowDown, ArrowRight, ArrowUp } from "lucide-react";
 import { motion } from "motion/react";
+
+import { cn } from "@/lib/utils";
 import {
   ACCENTS,
   formatCompact,
@@ -53,6 +55,8 @@ export interface ProgressMetricCardProps {
   valueFormatter?: (value: number) => string;
   dateFormatter?: (date: string) => string;
   loading?: boolean;
+  /** When true, the chart and background grid span the full width (100%) of the card instead of 62%. */
+  fullWidth?: boolean;
   className?: string;
 }
 
@@ -131,18 +135,23 @@ export default function ProgressMetricCard({
   valueFormatter,
   dateFormatter,
   loading = false,
+  fullWidth = false,
   className = "",
 }: ProgressMetricCardProps) {
+  const regionWidth = fullWidth ? "100%" : `${REGION_W}%`;
   const hasFooter = showFooter && (showDelta || showStats);
   const gridId = `grid-${useId().replace(/:/g, "")}`;
   const sz = SIZES[size];
-  const shell = `relative flex ${sz.minH} w-full flex-col overflow-hidden rounded-[28px] border border-border bg-card shadow-[0_2px_10px_rgba(0,0,0,0.04)] ${className}`;
+  const shell = cn(
+    "relative flex w-full flex-col overflow-hidden rounded-[28px] border border-border bg-card shadow-[0_2px_10px_rgba(0,0,0,0.04)]",
+    sz.minH,
+    className,
+  );
 
   const periods = periodOptions ?? DEFAULT_PERIODS;
   // The whole selected option is kept (not just its label) because an applied
   // custom range is not one of the preset `periods` and carries from/to dates.
-  const defaultPeriod =
-    periods.find((p) => p.label === period) ?? periods[periods.length - 1];
+  const defaultPeriod = periods.find((p) => p.label === period) ?? periods[periods.length - 1];
   const [selected, setSelected] = useState<PeriodOption>(() => defaultPeriod);
   const [view, setView] = useState<ChartView>(defaultView);
 
@@ -161,6 +170,27 @@ export default function ProgressMetricCard({
       })),
     [baseSeries, selected],
   );
+
+  /**
+   * The first and last day the card actually holds data for, taken from the
+   * UNWINDOWED series — `visibleSeries` is already cut to the selected period,
+   * and bounding the calendar by the current selection would make it impossible
+   * to widen the window again.
+   *
+   * Handed to the custom-range calendar so days with nothing behind them are
+   * greyed out rather than selectable-then-empty.
+   */
+  const seriesBounds = useMemo(() => {
+    let min: string | null = null;
+    let max: string | null = null;
+    for (const entry of baseSeries) {
+      for (const point of entry.data) {
+        if (min === null || point.date < min) min = point.date;
+        if (max === null || point.date > max) max = point.date;
+      }
+    }
+    return { min, max };
+  }, [baseSeries]);
 
   const primary = visibleSeries[0];
   const isMulti = visibleSeries.length > 1;
@@ -274,98 +304,123 @@ export default function ProgressMetricCard({
 
   return (
     <div className={shell}>
-      {/* Chart region (right-hand side, behind the content) */}
-      <div className="absolute inset-y-0 right-0 z-0" style={{ width: `${REGION_W}%` }}>
-        <div
-          className="absolute inset-0"
-          style={{ background: `linear-gradient(to left, ${color.stroke}1f, transparent 75%)` }}
-        />
-        <div
-          className="absolute inset-0 text-foreground/[0.13]"
-          style={{
-            WebkitMaskImage: "linear-gradient(to right, transparent, black 55%)",
-            maskImage: "linear-gradient(to right, transparent, black 55%)",
-          }}
-        >
-          <svg className="h-full w-full" aria-hidden>
-            <defs>
-              <pattern id={gridId} width="14" height="14" patternUnits="userSpaceOnUse">
-                <circle cx="1" cy="1" r="1" fill="currentColor" />
-              </pattern>
-            </defs>
-            <rect width="100%" height="100%" fill={`url(#${gridId})`} />
-          </svg>
-        </div>
-
-        <MetricChart
-          series={chartSeries}
-          view={view}
-          defaultIndex={fallback}
-          valueFormatter={fmtFull}
-          dateFormatter={fmtDate}
-        />
-      </div>
-
-      {/* Main content */}
-      <div
-        className={`pointer-events-none relative z-10 flex flex-1 flex-col ${sz.pad} ${
-          !hasFooter ? (size === "lg" ? "pb-9" : size === "md" ? "pb-7" : "pb-5") : ""
-        }`}
-      >
-        {/* Header row */}
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <div className="flex min-w-0 items-center gap-3">
-            <h3 className={`${sz.title} font-semibold tracking-tight text-foreground`}>{title}</h3>
-            <ViewToggle value={view} onChange={setView} />
-          </div>
-          <div className="flex items-center gap-3.5 text-[14px]">
-            <motion.span
-              key={`trend-${selected.label}`}
-              initial={{ opacity: 0, y: -3 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.25 }}
-              className="flex items-center gap-1 font-medium"
-              style={{ color: color.text }}
+      {/*
+       * Plot area. A sibling of the footer rather than the whole card, so the
+       * chart's band bottom lands on the footer's top border instead of behind
+       * its opaque background — otherwise the low end of every series is cut
+       * off by the footer.
+       */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {/* Clipped background layer (gradient + grid) — respects rounded corners */}
+        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[28px]">
+          <div className="absolute inset-y-0 right-0" style={{ width: regionWidth }}>
+            <div
+              className="absolute inset-0"
+              style={{
+                background: fullWidth
+                  ? `linear-gradient(to top, ${color.stroke}18, transparent 75%)`
+                  : `linear-gradient(to left, ${color.stroke}1f, transparent 75%)`,
+              }}
+            />
+            <div
+              className="absolute inset-0 text-foreground/[0.13]"
+              style={{
+                WebkitMaskImage: fullWidth
+                  ? "linear-gradient(to right, transparent 2%, black 15%, black 85%, transparent 98%)"
+                  : "linear-gradient(to right, transparent, black 55%)",
+                maskImage: fullWidth
+                  ? "linear-gradient(to right, transparent 2%, black 15%, black 85%, transparent 98%)"
+                  : "linear-gradient(to right, transparent, black 55%)",
+              }}
             >
-              <TrendIcon size={16} strokeWidth={2.5} />
-              {displayPercent}
-            </motion.span>
-          <PeriodSelect
-            value={selected.label}
-            options={periods}
-            onChange={handlePeriodChange}
-            accentText={color.text}
-            allowCustomRange={allowCustomRange}
-            defaultOption={defaultPeriod}
-          />
+              <svg className="h-full w-full" aria-hidden>
+                <defs>
+                  <pattern id={gridId} width="14" height="14" patternUnits="userSpaceOnUse">
+                    <circle cx="1" cy="1" r="1" fill="currentColor" />
+                  </pattern>
+                </defs>
+                <rect width="100%" height="100%" fill={`url(#${gridId})`} />
+              </svg>
+            </div>
           </div>
         </div>
+        {/* Chart region — overflow-visible so tooltip is never clipped behind the border */}
+        <div className="absolute inset-y-0 right-0 overflow-visible" style={{ width: regionWidth }}>
+          <MetricChart
+            series={chartSeries}
+            view={view}
+            defaultIndex={fallback}
+            valueFormatter={fmtFull}
+            dateFormatter={fmtDate}
+            bandTop={fullWidth ? 42 : undefined}
+          />
+        </div>
 
-        {/* Legend (multi-series only) */}
-        {isMulti && (
-          <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1">
-            {chartSeries.map((s) => (
-              <span
-                key={s.name}
-                className="flex items-center gap-1.5 text-[12px] text-muted-foreground"
-              >
-                <span className="h-2 w-2 rounded-full" style={{ background: s.color }} />
-                {s.name}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Headline metric */}
-        <motion.div
-          key={`headline-${selected.label}`}
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, ease: [0.2, 0.7, 0.2, 1] }}
-          className={`mt-5 ${sz.headline} font-medium leading-none tracking-tight text-foreground`}
+        {/* Main content */}
+        <div
+          className={`pointer-events-none relative z-10 flex flex-1 flex-col ${sz.pad} ${
+            !hasFooter ? (size === "lg" ? "pb-9" : size === "md" ? "pb-7" : "pb-5") : ""
+          }`}
         >
-          {displayTotal}
-        </motion.div>
+          {/* Header row */}
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <div className="flex min-w-0 items-center gap-3">
+              <h3 className={`${sz.title} font-semibold tracking-tight text-foreground`}>
+                {title}
+              </h3>
+              <ViewToggle value={view} onChange={setView} />
+            </div>
+            <div className="flex items-center gap-3.5 text-[14px]">
+              <motion.span
+                key={`trend-${selected.label}`}
+                initial={{ opacity: 0, y: -3 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25 }}
+                className="flex items-center gap-1 font-medium"
+                style={{ color: color.text }}
+              >
+                <TrendIcon size={16} strokeWidth={2.5} />
+                {displayPercent}
+              </motion.span>
+              <PeriodSelect
+                value={selected.label}
+                options={periods}
+                onChange={handlePeriodChange}
+                accentText={color.text}
+                allowCustomRange={allowCustomRange}
+                defaultOption={defaultPeriod}
+                rangeMin={seriesBounds.min}
+                rangeMax={seriesBounds.max}
+              />
+            </div>
+          </div>
+
+          {/* Legend (multi-series only) */}
+          {isMulti && (
+            <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1">
+              {chartSeries.map((s) => (
+                <span
+                  key={s.name}
+                  className="flex items-center gap-1.5 text-[12px] text-muted-foreground"
+                >
+                  <span className="h-2 w-2 rounded-full" style={{ background: s.color }} />
+                  {s.name}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Headline metric */}
+          <motion.div
+            key={`headline-${selected.label}`}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, ease: [0.2, 0.7, 0.2, 1] }}
+            className={`mt-5 ${sz.headline} font-medium leading-none tracking-tight text-foreground`}
+          >
+            {displayTotal}
+          </motion.div>
+        </div>
       </div>
 
       {/* Opaque footer: delta on the left, secondary stats on the right */}
@@ -391,7 +446,8 @@ export default function ProgressMetricCard({
           {showStats && (
             <div className="ml-auto flex items-center gap-2.5 text-[12px] text-muted-foreground">
               <span>
-                <span className="font-medium text-foreground/80">{fmtCompact(stats.peak)}</span> peak
+                <span className="font-medium text-foreground/80">{fmtCompact(stats.peak)}</span>{" "}
+                peak
               </span>
               <span className="opacity-40">·</span>
               <span>

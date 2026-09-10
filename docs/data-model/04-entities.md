@@ -34,7 +34,10 @@
 | is_seed | boolean |  | No | Flag for seed data | System/Human | Set in the seed data script | False by default |
 | registered_on | date |  | Yes | Date the organisation entered its register | API | Charity Commission date_of_registration | Lets the app distinguish "no accounts due yet" from "overdue" — without it both render as an empty Financials tab |
 | charity_reporting_status | text |  | Yes | The register's own reporting status for a charity | API | Charity Commission reporting_status | Values are the regulator's: New / Submission Received / … Deliberately text, not an enum, so an unseen value can't fail an ingestion run |
-| charity_activities | text |  | Yes | The charity's own description of its work, as filed with the register | API | Charity Commission publicextract.charity.charity_activities | Canonical register text, distinct from ENRICHMENT_RESULTS.mission_statement, which is LLM-derived — a reader showing both must not present them as the same kind of claim. Externally authored free text: treat as untrusted input anywhere it reaches a model. |
+| charity_activities | text |  | Yes | The charity's own description of its work, as filed with the register | API | Charity Commission publicextract.charity.charity_activities | Canonical register text, and the source of ENRICHMENT_RESULTS.mission_statement, which mirrors it. Both are the regulator's filed text; neither is generated. Externally authored free text: treat as untrusted input anywhere it reaches a model. |
+| sic_codes | text[] |  | Yes | Companies House industry classifications | API | Companies House sic_codes; titles resolved from the SIC2007 table in the companies register file | Companies have no filed purpose statement — SIC is the only descriptive text either register publishes. Generic by design: 118 of 413 imported CICs share code 85590. |
+| cic_community_statement | text |  | Yes | The company's own filed description of the community it benefits and what it will do | API | Companies House CIC36 community interest statement, filed at incorporation; published only as a scanned page, so transcribed by OCR | Register-filed text, never generated. Sections A and B of the form, stored labelled and capped — the form's boxes clip mid-sentence and we capture what the box shows. Externally authored free text: treat as untrusted input anywhere it reaches a model. Only CICs file one; ordinary companies stay null. |
+| cic_statement_checked_at | timestamptz |  | Yes | When the company's filing history was last checked for a CIC36 | System | Set on every attempt by the CIC statement backfill, whether or not a statement was found | Cursor, not data. Same role grants_fetched_at plays for 360Giving: a company with no CIC36 is marked checked so it is never re-fetched. Null means never asked. |
 
 ## ORGANISATION_IDENTIFIERS
 
@@ -123,8 +126,8 @@
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
 | organisation_id | uuid | ORGANISATIONS | No | Organisation this enrichment belongs to | System | Set when enrichment runs |  |
-| mission_statement | text |  | Yes | Organisation's mission or purpose | LLM | Extracted from website and published materials |  |
-| mission_keywords | text[] |  | Yes | Key themes extracted from the mission | LLM | Classified by LLM from mission text |  |
+| mission_statement | text |  | Yes | Organisation's mission or purpose | API | Charity Commission publicextract.charity.charity_activities, mirrored from ORGANISATIONS.charity_activities. Companies: no source publishes one — left null. | Register text as filed, never generated. Coverage tracks charity age: 99% for charities registered ≤2022, 38% for 2026 — the field is filed with the first annual return, so a new registration has none until it files. |
+| mission_keywords | text[] |  | Yes | Key themes extracted from the mission | API | Charity Commission publicextract.charity_classification — the regulator's What/How/Who taxonomy. |  |
 | news_hooks | text[] |  | Yes | Recent news items relevant to outreach | LLM | Extracted from news sources |  |
 | sector | text |  | Yes | Primary sector classification | LLM | Classified from mission and activity data |  |
 | sub_sector | text |  | Yes | Sub-sector classification | LLM | Classified from mission and activity data |  |
@@ -373,8 +376,22 @@
 | model | text |  | No | AI model name this price applies to | Human | Entered by an admin directly in the database | One row per model (unique) |
 | input_usd_per_1k_tokens | decimal(12,6) |  | No | US dollars per 1,000 prompt tokens | Human | Copied from the provider's official pricing page by whoever owns billing | Zero or more |
 | output_usd_per_1k_tokens | decimal(12,6) |  | No | US dollars per 1,000 response tokens | Human | Same as above | Zero or more |
+| confirmed_on | date |  | Yes | The date a human last read this rate from the provider's published pricing page | Human | Entered by whoever verified the rate, in the migration that sets it | Not updated_at, which moves for any edit. This answers "when was this last verified against the source". A rate months past this date should be re-checked before anyone quotes totals built on it. Blank = never verified. |
+| source_url | text |  | Yes | Where the rate was read from | Human | Entered alongside confirmed_on | So re-verifying is a click rather than a search. Currently https://ai.google.dev/gemini-api/docs/pricing for both Gemini rows. |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last time the rate changed | System | Auto-updated on change |  |
+
+## AI_GENERATION_RATE_LIMIT
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated on row creation |  |
+| user_id | uuid | USERS | No | The user whose allowance this counts; unique with bucket | System | From the session | unique with bucket |
+| bucket | text |  | No | Which AI feature the counter is for: generation or search | System | Set when allowance checked | generation or search |
+| request_count | int |  | No | Requests consumed in the current fixed window | System | Incremented on each request |  |
+| window_started_at | timestamp |  | No | When the current fixed window opened | System | Set on window start / reset |  |
+| created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
+| updated_at | timestamp |  | No | Last time the counter changed | System | Auto-updated on change |  |
 
 ## IMPORT_FILTER_PRESETS
 
@@ -388,3 +405,17 @@
 | created_by_user_id | uuid | USERS | Yes | User who created the preset | System | auth.uid() at save time | FK → users.id, ON DELETE SET NULL |
 | created_at | timestamptz |  | No | Row creation timestamp | System | Auto-generated (now()) | now() |
 | updated_at | timestamptz |  | No | Last updated timestamp | System | Auto-updated on change (now()) | now() |
+
+## INBOX_THREAD_STATE
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated gen_random_uuid() | PK, gen_random_uuid() |
+| user_id | uuid | USERS | No | Whose view of the mailbox this is | System | From the session | on delete cascade. unique (user_id, organisation_id) |
+| organisation_id | uuid | ORGANISATIONS | No | The thread this state belongs to | System | From the opened thread | A thread is one organisation — OUTREACH_MESSAGES has no gmail_thread_id. on delete cascade. unique (user_id, organisation_id) |
+| is_starred | boolean |  | No | Whether this viewer starred the thread | User | Star control in the mailbox | Default false |
+| read_state | enum |  | Yes | Override of the server-derived read flag | User | Mark read / unread | read \| unread. NULL = no override, use the server's derivation |
+| is_trashed | boolean |  | No | Whether this viewer moved the thread to trash | User | Delete control | Default false. Capped at 200 per user. check that trashed_at is non-null exactly when is_trashed |
+| trashed_at | timestamptz |  | Yes | When it was trashed | System | Set by trigger, never by the client | Orders both the cap and the 30-day purge. check that trashed_at is non-null exactly when is_trashed |
+| created_at | timestamptz |  | No | Row creation timestamp | System | Default now() | now() |
+| updated_at | timestamptz |  | No | Last updated timestamp | System | set_updated_at() trigger | now() |

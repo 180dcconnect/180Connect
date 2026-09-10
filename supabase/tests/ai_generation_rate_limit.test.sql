@@ -134,7 +134,7 @@ begin
     'service_role',
     format('select public.consume_ai_generation_allowance(%L, 0, 3600)', v_user)
   );
-  return next is(v_state, 'P0001',
+  return next is(v_state, '22023',
     'non-positive limit configuration raises rather than silently allowing everything');
 
   -- Inactive accounts cannot consume allowance.

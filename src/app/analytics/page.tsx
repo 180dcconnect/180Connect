@@ -29,6 +29,29 @@ import {
   type CamReplyRow,
   type SentMessageRow,
 } from "@/lib/cam-analytics";
+import {
+  describeToneRow,
+  tonePerformanceSummary,
+  type ToneBreakdownRow,
+  type ToneStatusRow,
+} from "@/lib/tone-performance";
+
+/**
+ * F209 — a sent message with its generation rows, as PostgREST returns the
+ * embed. A regeneration stacks one ai_generations row per attempt (F111), so
+ * the breakdown reads the LATEST generation per message — the tone of the
+ * text that was actually reviewed and sent.
+ */
+type ToneMessageRow = {
+  id: string;
+  organisation_id: string;
+  ai_generations: {
+    id: string;
+    tone_register: string | null;
+    tone_length: string | null;
+    created_at: string;
+  }[];
+};
 
 /**
  * F206/F207/F208 — the CAM's own outreach performance, as opposed to the
@@ -76,6 +99,7 @@ export default async function AnalyticsPage() {
   let ownedRows: DashboardOrgRow[] = [];
   let sentMessages: SentMessageRow[] = [];
   let myReplies: CamReplyRow[] = [];
+  let toneMessages: ToneMessageRow[] = [];
   let loadFailed = false;
 
   if (canViewClients) {
@@ -110,7 +134,7 @@ export default async function AnalyticsPage() {
     // the three at all.
     const candidateIds = (organisations.data ?? []).map((row) => row.id);
 
-    const [openSuppressions, messages, replies] = await Promise.all([
+    const [openSuppressions, messages, replies, toneMessageResult] = await Promise.all([
       fetchPagedForOrgs<OpenSuppression>(candidateIds, (ids, from, to) =>
         supabase
           .from("suppressions")
@@ -135,12 +159,29 @@ export default async function AnalyticsPage() {
       fetchPagedForOrgs<CamReplyRow>(candidateIds, (ids, from, to) =>
         supabase
           .from("reply_events")
-          .select("id, organisation_id, response_time_seconds")
+          .select("id, organisation_id, response_time_seconds, outreach_message_id")
           .in("organisation_id", ids)
           .order("received_at", { ascending: true })
           .order("id", { ascending: true })
           .range(from, to)
           .overrideTypes<CamReplyRow[], { merge: false }>(),
+      ),
+      // F209 — the sent messages whose tone dials are known, read as one embed
+      // rather than a second org-scoped sweep of ai_generations: the generation
+      // rows travel behind the message they produced, and only the small columns
+      // the breakdown needs are selected — never prompt text.
+      fetchPagedForOrgs<ToneMessageRow>(candidateIds, (ids, from, to) =>
+        supabase
+          .from("outreach_messages")
+          .select(
+            "id, organisation_id, ai_generations(id, tone_register, tone_length, created_at)",
+          )
+          .eq("send_status", "sent")
+          .in("organisation_id", ids)
+          .order("sent_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to)
+          .overrideTypes<ToneMessageRow[], { merge: false }>(),
       ),
     ]);
 
@@ -162,6 +203,14 @@ export default async function AnalyticsPage() {
         operation: "analytics.reply_events",
       });
     }
+    if (toneMessageResult.error || !toneMessageResult.data) {
+      loadFailed = true;
+      await reportError(toneMessageResult.error ?? new Error("No tone rows returned"), {
+        operation: "analytics.tone_messages",
+      });
+    } else {
+      toneMessages = toneMessageResult.data;
+    }
 
     // Suppression filter first, ownership filter second — the same order
     // /dashboard and /clients use, so the counts on this page agree with theirs.
@@ -180,6 +229,7 @@ export default async function AnalyticsPage() {
     const ownedIds = new Set(ownedRows.map((row) => row.id));
     sentMessages = (messages.data ?? []).filter((row) => ownedIds.has(row.organisation_id));
     myReplies = (replies.data ?? []).filter((row) => ownedIds.has(row.organisation_id));
+    toneMessages = (toneMessageResult.data ?? []).filter((row) => ownedIds.has(row.organisation_id));
   }
 
   const replySummary = summariseTrackedReplies(myReplies, ownedRows);
@@ -187,6 +237,37 @@ export default async function AnalyticsPage() {
   const ratio = conversionVsNoResponse(ownedRows);
   const typical = typicalResponseTime(myReplies);
   const slowest = slowestClients(ownedRows, replySummary.responseTimeByClient, typical);
+
+  // F209 — flatten the embed to one tone record per sent message: the latest
+  // generation wins (a regeneration's dials describe the text that was sent,
+  // earlier attempts do not). Rows feed both dials; the module buckets them
+  // independently. A message with no generation row at all (blank drafts,
+  // pre-F112 sends) keeps its place as a row with both dials null — the module
+  // then counts it in the untracked disclosures (AC3's exclusion, made
+  // visible on the card) and never in a tone bucket.
+  const toneRows = toneMessages.map((message) => {
+    const latest = [...(message.ai_generations ?? [])].sort(
+      (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at),
+    )[0];
+    return {
+      id: message.id,
+      organisation_id: message.organisation_id,
+      tone_register: latest?.tone_register ?? null,
+      tone_length: latest?.tone_length ?? null,
+    };
+  });
+  // Conversions come from the client's current pipeline status — the same
+  // source the cards above read, so the two can never disagree.
+  const statusByOrg = new Map(
+    ownedRows.map((row) => [row.id, row.outreach_status] as const),
+  );
+  const toneStatusRows: ToneStatusRow[] = toneRows.flatMap((row) => {
+    const outreachStatus = statusByOrg.get(row.organisation_id);
+    return outreachStatus
+      ? [{ message_id: row.id, organisation_id: row.organisation_id, outreach_status: outreachStatus }]
+      : [];
+  });
+  const toneSummary = tonePerformanceSummary(toneRows, toneRows, myReplies, toneStatusRows);
 
   const share = (value: number) =>
     totals.contacted === 0 ? 0 : Math.min(value / totals.contacted, 1);
@@ -390,9 +471,122 @@ export default async function AnalyticsPage() {
                 </Rise>
               )}
             </Group>
+
+            {canViewClients && totals.clientsOwned > 0 && (
+              <Group className="space-y-4">
+                <Rise>
+                  <h2 className="font-body text-xl font-semibold tracking-[-0.02em]">
+                    What tone works
+                  </h2>
+                </Rise>
+                <Rise>
+                  <div className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+                      Reply and conversion rates by email tone (F107)
+                    </p>
+                    {(toneSummary.untrackedRegister > 0 || toneSummary.untrackedLength > 0) && (
+                      <div className="mt-2 space-y-1 text-[11px] text-foreground/40">
+                        {toneSummary.untrackedRegister > 0 && (
+                          <p>
+                            {toneSummary.untrackedRegister.toLocaleString()} sent email
+                            {toneSummary.untrackedRegister === 1 ? "" : "s"} predate register tracking or
+                            were generated without a register, so they are excluded from the tone table.
+                          </p>
+                        )}
+                        {toneSummary.untrackedLength > 0 && (
+                          <p>
+                            {toneSummary.untrackedLength.toLocaleString()} sent email
+                            {toneSummary.untrackedLength === 1 ? "" : "s"} predate length tracking or
+                            were generated without a length, so they are excluded from the length table.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    <ToneTable
+                      title="Tone"
+                      caption="How the email reads"
+                      rows={toneSummary.register}
+                    />
+                    <ToneTable
+                      title="Length"
+                      caption="How much of it there is"
+                      rows={toneSummary.length}
+                      className="mt-6"
+                    />
+                  </div>
+                </Rise>
+              </Group>
+            )}
           </>
         )}
       </Stage>
+    </div>
+  );
+}
+
+/**
+ * F209 — one dial's breakdown as a small table. Kept server-rendered and
+ * dumb: every interesting decision (exclusions, thresholds, rates) was made
+ * in tone-performance.ts and is testable there. Rows always render in enum
+ * order — a tone nobody has used yet shows as a row saying so, because a
+ * missing row would read as "this tone was removed".
+ */
+function ToneTable({
+  title,
+  caption,
+  rows,
+  className,
+}: {
+  title: string;
+  caption: string;
+  rows: ToneBreakdownRow[];
+  className?: string;
+}) {
+  const pct = (rate: number | null) =>
+    rate === null ? "—" : `${Math.round(rate * 100)}%`;
+
+  return (
+    <div className={className}>
+      <p className="mt-4 text-xs font-semibold text-foreground/75">
+        {title} <span className="font-normal text-foreground/40">· {caption}</span>
+      </p>
+      <table className="mt-2 w-full text-left text-sm">
+        <thead>
+          <tr className="border-b border-black/[0.06]">
+            <th scope="col" className="py-2 pr-3 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+              Setting
+            </th>
+            <th scope="col" className="py-2 pr-3 text-right text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+              Sent
+            </th>
+            <th scope="col" className="py-2 pr-3 text-right text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+              Reply rate
+            </th>
+            <th scope="col" className="py-2 text-right text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+              Converted
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.value} className="border-b border-black/[0.04] last:border-0">
+              <td className="py-2 pr-3 font-medium">{row.label}</td>
+              <td className="py-2 pr-3 text-right tabular-nums">{row.sent.toLocaleString()}</td>
+              <td className="py-2 pr-3 text-right tabular-nums">{pct(row.responseRate)}</td>
+              <td className="py-2 text-right tabular-nums">{pct(row.conversionRate)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <ul className="mt-2 space-y-1">
+        {rows
+          .filter((row) => row.sent > 0 && !row.hasEnoughData)
+          .map((row) => (
+            <li key={row.value} className="text-[11px] text-foreground/40">
+              {row.label}: {describeToneRow(row)}
+            </li>
+          ))}
+      </ul>
     </div>
   );
 }

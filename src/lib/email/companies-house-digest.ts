@@ -1,14 +1,18 @@
 /**
- * Admin email digests for the Companies House discovery and status-recheck jobs
+ * Admin email digest for the Companies House status-recheck job
  * (F032/F260 follow-on). Built on the existing platform-mail transport
- * (sendEmail/send.ts — Resend, console fallback when unconfigured) — this module
- * adds no new transport, only two message shapes and the admin recipient lookup.
+ * (sendEmail/send.ts — Resend, console fallback when unconfigured) — this
+ * module adds no new transport, only the message shape and the admin
+ * recipient lookup.
  *
- * Called from the shared run functions (companies-house-discovery.ts,
- * companies-house-status-recheck.ts), which run from both the manual "Import"
- * button (a signed-in Server Action) and the weekly cron route (no session at
- * all) — recipients are always resolved with the service-role admin client, never
- * from a request-scoped session, so both callers behave identically.
+ * Called from the shared run function (companies-house-status-recheck.ts),
+ * which runs from the weekly cron route with no session at all — recipients
+ * are always resolved with the service-role admin client, never from a
+ * request-scoped session.
+ *
+ * The discovery digest lived here too until the staged register retired the
+ * discovery job; the status watch is the only scheduled Companies House job
+ * left.
  */
 
 import { buildAdminClient } from "../supabase/admin-client-factory.ts";
@@ -32,32 +36,6 @@ async function loadAdminRecipients(): Promise<string[]> {
   return (data ?? [])
     .map((row) => (row as { email: string }).email)
     .filter((email): email is string => Boolean(email));
-}
-
-/**
- * Sent after a discovery run. Skipped entirely (not even a console-logged
- * no-op) when there's nothing to report — a weekly email that always says
- * "0 new, 0 flagged" trains admins to stop reading it.
- */
-export async function sendCompaniesHouseDiscoveryDigest(counts: {
-  newOrganisations: number;
-  flaggedForReview: number;
-}): Promise<void> {
-  if (counts.newOrganisations === 0 && counts.flaggedForReview === 0) return;
-
-  const to = await loadAdminRecipients();
-  if (to.length === 0) return;
-
-  const lines = [
-    `${counts.newOrganisations} new organisation(s) added automatically from Companies House.`,
-    `${counts.flaggedForReview} record(s) flagged for review — see the admin review queue.`,
-  ];
-
-  await sendEmail({
-    to,
-    subject: `Companies House import: ${counts.newOrganisations} added, ${counts.flaggedForReview} flagged`,
-    text: lines.join("\n"),
-  });
 }
 
 /**

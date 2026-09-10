@@ -1,5 +1,8 @@
+"use client";
+
 import type { ChangeHistoryEntry } from "@/lib/change-history";
 import { Pill } from "./section-card";
+import { PaginatedList } from "@/components/ui/paginated-list";
 
 function formatTimestamp(value: string): string {
   return new Date(value).toLocaleString("en-GB", {
@@ -53,60 +56,67 @@ export function ChangeHistorySection({
           history.
         </p>
       )}
-      <ul className="mt-4 space-y-3">
-        {entries.map((entry) => (
-          <li key={entry.id} className="rounded-xl border border-black/[0.06] p-3.5">
-            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <Pill tone={entry.action === "edit_suggestion_approved" ? "brand" : "neutral"}>
-                  {entry.label}
-                </Pill>
-                {entry.applied === false && <Pill tone="warn">Not applied</Pill>}
-                {entry.fieldLabel && (
-                  <span className="text-[13px] font-bold text-foreground/70">
-                    {entry.fieldLabel}
-                  </span>
-                )}
-                <span className="text-[13px] text-foreground/45">by</span>
-                <span className="text-[13px] font-bold text-foreground/70">{entry.actorName}</span>
-              </div>
-              <span className="text-[13px] text-foreground/45">
-                {formatTimestamp(entry.timestamp)}
-              </span>
-            </div>
+      <div className="mt-4">
+        <PaginatedList
+          items={entries}
+          render={(visible) => (
+            <ul className="space-y-3">
+              {visible.map((entry) => (
+                <li key={entry.id} className="rounded-xl border border-black/[0.06] p-3.5">
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Pill tone={entry.action === "edit_suggestion_approved" ? "go" : "neutral"}>
+                        {entry.label}
+                      </Pill>
+                      {entry.applied === false && <Pill tone="hold">Not applied</Pill>}
+                      {entry.fieldLabel && (
+                        <span className="text-[13px] font-bold text-foreground/70">
+                          {entry.fieldLabel}
+                        </span>
+                      )}
+                      <span className="text-[13px] text-foreground/45">by</span>
+                      <span className="text-[13px] font-bold text-foreground/70">{entry.actorName}</span>
+                    </div>
+                    <span className="text-[13px] text-foreground/45">
+                      {formatTimestamp(entry.timestamp)}
+                    </span>
+                  </div>
 
-            {/* Three shapes, each readable on its own:
-                - a full transition ("X → Y") for an applied change;
-                - "Set to Y" for the discrepancy resolvers, whose rows record
-                  only the winning value, not what it replaced;
-                - a rejected suggestion, where the trail proves what the
-                  record was kept as (`from`) — the proposal itself lives on
-                  the edit_suggestions row, not here. */}
-            {entry.applied === false && entry.from !== null && (
-              <p className="mt-2.5 text-sm leading-[1.65] text-foreground/55">
-                Record kept: &ldquo;{entry.from}&rdquo;
-              </p>
-            )}
-            {entry.applied !== false && entry.from !== null && (
-              <p className="mt-2.5 text-sm leading-[1.65] text-foreground/80">
-                {entry.from ?? <span className="text-foreground/35">(empty)</span>}
-                {" → "}
-                {entry.to ?? <span className="text-foreground/35">(empty)</span>}
-              </p>
-            )}
-            {entry.applied !== false && entry.from === null && entry.to !== null && (
-              <p className="mt-2.5 text-sm leading-[1.65] text-foreground/80">
-                Set to &ldquo;{entry.to}&rdquo;
-              </p>
-            )}
-            {entry.note && (
-              <p className="mt-1.5 whitespace-pre-wrap text-sm leading-[1.65] text-foreground/55">
-                {entry.note}
-              </p>
-            )}
-          </li>
-        ))}
-      </ul>
+                  {/* Three shapes, each readable on its own:
+                      - a full transition ("X → Y") for an applied change;
+                      - "Set to Y" for the discrepancy resolvers, whose rows record
+                        only the winning value, not what it replaced;
+                      - a rejected suggestion, where the trail proves what the
+                        record was kept as (`from`) — the proposal itself lives on
+                        the edit_suggestions row, not here. */}
+                  {entry.applied === false && entry.from !== null && (
+                    <p className="mt-2.5 text-sm leading-[1.65] text-foreground/55">
+                      Record kept: &ldquo;{entry.from}&rdquo;
+                    </p>
+                  )}
+                  {entry.applied !== false && entry.from !== null && (
+                    <p className="mt-2.5 text-sm leading-[1.65] text-foreground/80">
+                      {entry.from ?? <span className="text-foreground/35">(empty)</span>}
+                      {" → "}
+                      {entry.to ?? <span className="text-foreground/35">(empty)</span>}
+                    </p>
+                  )}
+                  {entry.applied !== false && entry.from === null && entry.to !== null && (
+                    <p className="mt-2.5 text-sm leading-[1.65] text-foreground/80">
+                      Set to &ldquo;{entry.to}&rdquo;
+                    </p>
+                  )}
+                  {entry.note && (
+                    <p className="mt-1.5 whitespace-pre-wrap text-sm leading-[1.65] text-foreground/55">
+                      {entry.note}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        />
+      </div>
     </>
   );
 }

@@ -33,9 +33,9 @@ on:
         required: false
         default: "Manual refresh"
 
-# Two refreshes at once would each spend twenty minutes producing the same file
-# and race to upload it. The second waits; it does not cancel the first, which
-# may be most of the way through.
+# Two refreshes at once would each download the same ~470MB and race to upload
+# the same file. The second waits; it does not cancel the first, which may be
+# most of the way through.
 concurrency:
   group: companies-register
   cancel-in-progress: false
@@ -46,9 +46,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Downloading ~470MB of zips and parsing ~2GB of CSV takes about twenty
-    # minutes. The ceiling is generous so a slow day at Companies House does
-    # not fail the run.
+    # Downloading ~470MB of zips and parsing ~2GB of CSV measured 2m 15s of
+    # build in a 3m 4s job (September 2026, all seven parts). The ceiling stays
+    # generous so a slow day at Companies House does not fail the run.
     timeout-minutes: 60
 
     steps:
@@ -76,7 +76,7 @@ jobs:
           # inputs are attacker-controlled by anyone who can dispatch this
           # workflow. Quoted expansion cannot execute, and the build script
           # itself rejects anything but YYYY-MM — the case below just keeps a
-          # typo from failing a twenty-minute run at argument parsing.
+          # typo from failing the whole run at argument parsing.
           SNAPSHOT_MONTH: ${{ github.event.inputs.month }}
         run: |
           MONTH_ARGS=""

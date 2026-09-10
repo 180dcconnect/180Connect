@@ -12,7 +12,7 @@ import {
 } from "@/lib/outreach/stage-two-generation";
 import { buildStageTwoGenerationInsert } from "@/lib/outreach/stage-two-persistence";
 import { emailHtmlToPlainText } from "@/lib/outreach/email-html";
-import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_TONES, EMAIL_VOICES } from "@/lib/outreach/stage-one-prompt";
+import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_REGISTERS } from "@/lib/outreach/stage-one-prompt";
 import {
   checkSuppressionBeforeSend,
   suppressionBlockedMessage,
@@ -20,8 +20,10 @@ import {
 } from "@/lib/outreach/suppression-check";
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import { computeCostUsd } from "@/lib/outreach/generation-cost";
+import { loadModelRate } from "@/lib/ai/model-rate";
 import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
 import { buildAttachmentEmailContext } from "@/lib/attachments";
+import { lookupLiveNewsHook } from "@/lib/outreach/news-hook";
 
 export const maxDuration = 60;
 
@@ -45,8 +47,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // RLS-protected storage holds, never a client-supplied string.
   const parsed = z.object({
     length: z.enum(EMAIL_LENGTHS).default("standard"),
-    voice: z.enum(EMAIL_VOICES).default("180dc"),
-    tone: z.enum(EMAIL_TONES).default("balanced"),
+    register: z.enum(EMAIL_REGISTERS).default("professional"),
     closing: z.enum(CLOSING_APPROACHES).default("soft_cta"),
     replyEventId: z.uuid().optional(),
   }).safeParse(await request.json().catch(() => ({})));
@@ -242,6 +243,31 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
   const attachmentText = buildAttachmentEmailContext(extractedAttachments ?? []);
 
+  // F110: pull one live news hook at draft-generation time (Exa, fail-open).
+  // lookupLiveNewsHook never throws and resolves to null on any failure, so the follow-up still generates. A live hit takes
+  // precedence (it is the fresh evidence AC1 asks for); otherwise the stored
+  // enrichment hooks keep the previous behaviour. newsSource/newsHook/newsUrl
+  // are additive in the response so the review UI can show a verifiable link.
+  const liveNews = await lookupLiveNewsHook({
+    organisationId,
+    organisationName: organisation.legal_name,
+    tradingName: organisation.trading_name,
+    website: organisation.website,
+  });
+  const storedHooks = enrichment?.news_hooks?.filter(Boolean) ?? [];
+  // The Source line persists the verification URL verbatim in
+  // ai_generations.prompt_user (F112): outreach_messages has no vessel for it,
+  // so without this the URL would exist only in the transient response below
+  // and be unverifiable once the draft is reopened. A model that cites the
+  // source in the draft is fine — the CAM reviews every word before approval.
+  const newsHooks =
+    liveNews?.url != null
+      ? [`${liveNews.text}\nSource: ${liveNews.url}`]
+      : liveNews
+        ? [liveNews.text]
+        : storedHooks;
+  const newsSource = liveNews ? "live" : storedHooks.length > 0 ? "stored" : "none";
+
   let callModel;
   let model: string;
   try {
@@ -279,9 +305,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       missionKeywords: enrichment?.mission_keywords,
       sector: enrichment?.sector,
       subSector: enrichment?.sub_sector,
-      newsHooks: enrichment?.news_hooks,
+      newsHooks,
       booklet: savedBooklet?.booklet_text ?? null,
       attachmentText,
+      senderName: authorization.actor.fullName,
       previousSubject: previousMessage.subject,
       // F117: the sent message's body may be HTML (new) or plain text (sent
       // before this feature) — either way the model prompt wants readable
@@ -292,16 +319,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     callModel,
     {
       length: parsed.data.length,
-      voice: parsed.data.voice,
-      tone: parsed.data.tone,
+      register: parsed.data.register,
       closing: parsed.data.closing,
-      newsEnabled: Boolean(enrichment?.news_hooks?.length),
+      newsEnabled: newsHooks.length > 0,
     },
   );
   if ("error" in result) return NextResponse.json({ error: result.error }, { status: 502 });
 
   // A generated follow-up is persisted only as a draft. This route contains no send
   // operation and cannot set sent_at/send_status, preserving the human checkpoint.
+  // The news columns travel with the draft row so a saved draft reopened later
+  // (inbox resume) still restores its verification link — a URL kept only in
+  // the transient response below would be unverifiable on reopen.
   const { data: message, error: draftError } = await supabase
     .from("outreach_messages")
     .insert({
@@ -311,6 +340,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       subject: result.draft.subject,
       body: result.draft.body,
       send_status: "draft",
+      news_source: liveNews ? "live" : null,
+      news_hook: liveNews?.text ?? null,
+      news_url: liveNews?.url ?? null,
     })
     .select("id")
     .single();
@@ -322,26 +354,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // F213 — LLM Cost Tracking AC3, mirroring Stage 1: a pricing lookup failure must
   // never block saving a generation that already succeeded, so this is best-effort
   // — a missing or errored rate prices as unknown (null), never a fabricated 0.
-  const { data: pricing, error: pricingError } = await supabase
-    .from("model_pricing")
-    .select("input_usd_per_1k_tokens, output_usd_per_1k_tokens")
-    .eq("model", model)
-    .maybeSingle();
-  if (pricingError) {
-    await reportError(pricingError, {
-      operation: "outreach.stage_two.load_pricing",
-      organisationId,
-      model,
-    });
-  }
+  const pricing = await loadModelRate(
+    () =>
+      supabase
+        .from("model_pricing")
+        .select("input_usd_per_1k_tokens, output_usd_per_1k_tokens")
+        .eq("model", model)
+        .maybeSingle(),
+    model,
+    "outreach.stage_two.load_pricing",
+  );
   const costUsd = computeCostUsd(
     { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens },
-    pricing
-      ? {
-          inputUsdPer1kTokens: pricing.input_usd_per_1k_tokens,
-          outputUsdPer1kTokens: pricing.output_usd_per_1k_tokens,
-        }
-      : null,
+    pricing,
   );
 
   const { error: generationError } = await admin
@@ -351,9 +376,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         outreachMessageId: message.id,
         draft: result.draft,
         model,
+        activity: "follow_up_email",
         usage: result.usage,
         costUsd,
         prompt: result.prompt,
+        // F209: the tone dials the reply composer sent, recorded at generation time.
+        toneRegister: parsed.data.register,
+        toneLength: parsed.data.length,
       }),
     );
   if (generationError) {
@@ -371,5 +400,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "The follow-up draft could not be saved safely. Try again." }, { status: 500 });
   }
 
-  return NextResponse.json({ id: message.id, ...result.draft }, { status: 201 });
+  return NextResponse.json(
+    {
+      id: message.id,
+      ...result.draft,
+      newsSource,
+      newsHook: liveNews?.text ?? null,
+      newsUrl: liveNews?.url ?? null,
+    },
+    { status: 201 },
+  );
 }

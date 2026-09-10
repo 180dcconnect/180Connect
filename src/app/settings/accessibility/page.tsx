@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { Rise, Stage } from "@/components/dashboard-stage";
+import { BackButton } from "@/components/ui/back-button";
 import { AccessibilityForm } from "./accessibility-form";
 import {
   parseAccessibilitySettings,
@@ -44,12 +44,11 @@ export default async function AccessibilitySettingsPage() {
                 Configure text size, contrast, line spacing, and motion across 180Connect.
               </p>
             </div>
-            <Link
-              className="text-sm font-bold text-brand hover:underline shrink-0"
+            <BackButton
+              variant="editorial-minimal"
               href="/dashboard"
-            >
-              Back to dashboard
-            </Link>
+              className="shrink-0"
+            />
           </div>
         </Rise>
 

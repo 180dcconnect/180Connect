@@ -92,6 +92,6 @@ describe("persistLatestScore — score_factors payload (F095)", () => {
 
     assert.equal(row.priority_score, result.ok && result.score);
     assert.equal(reproduced, row.priority_score);
-    assert.equal(computePriorityScore(org, [], weights).score, row.priority_score);
+    assert.equal(computePriorityScore(org, undefined, weights).score, row.priority_score);
   });
 });

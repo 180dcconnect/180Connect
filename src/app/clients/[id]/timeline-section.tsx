@@ -1,3 +1,5 @@
+"use client";
+
 import {
   TIMELINE_EVENT_LABEL,
   TIMELINE_EVENT_STYLE,
@@ -5,6 +7,7 @@ import {
   type TimelineTone,
 } from "@/lib/timeline";
 import { Pill } from "./section-card";
+import { PaginatedList } from "@/components/ui/paginated-list";
 
 function formatTimestamp(value: string): string {
   return new Date(value).toLocaleString("en-GB", {
@@ -27,15 +30,15 @@ function formatTimestamp(value: string): string {
  * share a combination.
  */
 const DOT_TONE_CLASS: Record<TimelineTone, string> = {
-  brand: "border-brand bg-brand",
-  neutral: "border-foreground/40 bg-foreground/40",
-  warn: "border-amber-600 bg-amber-600",
+  go: "border-go bg-go",
+  neutral: "border-faint bg-faint",
+  hold: "border-hold bg-hold",
 };
 
 const RING_TONE_CLASS: Record<TimelineTone, string> = {
-  brand: "border-brand bg-brand/10",
-  neutral: "border-foreground/40 bg-foreground/[0.06]",
-  warn: "border-amber-600 bg-amber-600/10",
+  go: "border-go bg-go-wash",
+  neutral: "border-faint bg-paper-sunk",
+  hold: "border-hold bg-hold-wash",
 };
 
 function EventDot({ type }: { type: TimelineEntry["type"] }) {
@@ -90,13 +93,13 @@ export function TimelineSection({
   if (entries.length === 0) {
     if (degraded) {
       return (
-        <p className="mt-4 text-sm font-bold text-destructive" role="alert">
+        <p className="mt-4 text-sm font-semibold text-stop" role="alert">
           The timeline could not be loaded. Refresh and try again.
         </p>
       );
     }
     return (
-      <p className="mt-4 text-sm leading-[1.7] text-foreground/45">
+      <p className="mt-4 text-sm leading-[1.7] text-dim">
         Nothing has happened with this client yet.
       </p>
     );
@@ -105,70 +108,80 @@ export function TimelineSection({
   return (
     <>
       {degraded && (
-        <p className="mt-4 text-sm font-bold text-destructive" role="alert">
+        <p className="mt-4 text-sm font-semibold text-stop" role="alert">
           Some timeline events could not be loaded. Refresh to see the full
           history.
         </p>
       )}
-      <ul className="mt-4 space-y-3">
-      {entries.map((entry) => (
-        <li key={entry.id} className="rounded-xl border border-black/[0.06] p-3.5">
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <EventDot type={entry.type} />
-              <Pill tone={TIMELINE_EVENT_STYLE[entry.type].tone}>
-                {TIMELINE_EVENT_LABEL[entry.type]}
-              </Pill>
-              <span className="text-[13px] font-bold text-foreground/70">{entry.actorName}</span>
-            </div>
-            <span className="text-[13px] text-foreground/45">{formatTimestamp(entry.timestamp)}</span>
-          </div>
+      <div className="mt-4">
+        <PaginatedList
+          items={entries}
+          render={(visible) => (
+            <ul className="space-y-3">
+            {visible.map((entry) => (
+              <li key={entry.id} className="rounded-inset border border-rule p-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <EventDot type={entry.type} />
+                    <Pill tone={TIMELINE_EVENT_STYLE[entry.type].tone}>
+                      {TIMELINE_EVENT_LABEL[entry.type]}
+                    </Pill>
+                    <span className="text-[13px] font-semibold text-dim">{entry.actorName}</span>
+                  </div>
+                  <span className="text-[13px] text-dim">{formatTimestamp(entry.timestamp)}</span>
+                </div>
 
-          {entry.handover ? (
-            // F257 AC5 — outgoing CAM, incoming CAM and reason each shown as
-            // their own labelled field, not folded into one sentence.
-            <dl className="mt-2.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm leading-[1.6]">
-              <dt className="text-foreground/45">From</dt>
-              <dd className="text-foreground/80">{entry.handover.fromName}</dd>
-              <dt className="text-foreground/45">To</dt>
-              <dd className="text-foreground/80">{entry.handover.toName}</dd>
-              <dt className="text-foreground/45">Reason</dt>
-              <dd className="text-foreground/80">{entry.handover.reason}</dd>
-            </dl>
-          ) : (
-            <>
-              <p className="mt-2.5 whitespace-pre-wrap text-sm leading-[1.65] text-foreground/80">
-                {entry.summary}
-              </p>
-              {entry.type === "reply_received" && (
-                <a
-                  className="mt-2 inline-block text-sm font-semibold text-brand underline underline-offset-2"
-                  href={`#thread-reply-${entry.id.slice("reply-".length)}`}
-                >
-                  View full email thread
-                </a>
-              )}
-            </>
-          )}
-          {entry.attachments && entry.attachments.length > 0 && (
-            <ul className="mt-2 space-y-1">
-              {entry.attachments.map((attachment) => (
-                <li key={attachment.id}>
-                  <a
-                    className="text-sm font-semibold text-brand underline underline-offset-2"
-                    href={`/api/clients/${organisationId}/attachments/${attachment.id}/download`}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    {attachment.filename}
-                  </a>
-                </li>
-              ))}
+                {entry.handover ? (
+                  // F257 AC5 — outgoing CAM, incoming CAM and reason each shown as
+                  // their own labelled field, not folded into one sentence.
+                  <dl className="mt-2.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm leading-[1.6]">
+                    <dt className="text-dim">From</dt>
+                    <dd className="text-ink">{entry.handover.fromName}</dd>
+                    <dt className="text-dim">To</dt>
+                    <dd className="text-ink">{entry.handover.toName}</dd>
+                    <dt className="text-dim">Reason</dt>
+                    <dd className="text-ink">{entry.handover.reason}</dd>
+                  </dl>
+                ) : (
+                  <>
+                    <p className="mt-2.5 whitespace-pre-wrap text-sm leading-[1.65] text-ink">
+                      {entry.summary}
+                    </p>
+                    {/* F136's jump to the thread, in the redesign's ink and lead
+                        rather than the old foreground/brand tokens the incoming
+                        branch was written against. */}
+                    {entry.type === "reply_received" && (
+                      <a
+                        className="mt-2 inline-block text-sm font-semibold text-lead underline underline-offset-2"
+                        href={`#thread-reply-${entry.id.slice("reply-".length)}`}
+                      >
+                        View full email thread
+                      </a>
+                    )}
+                  </>
+                )}
+                {entry.attachments && entry.attachments.length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {entry.attachments.map((attachment) => (
+                      <li key={attachment.id}>
+                        <a
+                          className="text-sm font-semibold text-brand underline underline-offset-2"
+                          href={`/api/clients/${organisationId}/attachments/${attachment.id}/download`}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          {attachment.filename}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
             </ul>
           )}
-        </li>
-      ))}
-      </ul>
+        />
+      </div>
     </>
   );
 }

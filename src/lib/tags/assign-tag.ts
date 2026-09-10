@@ -9,6 +9,7 @@ import { reportError } from "../error-logging.ts";
 import {
   assignTagsCore,
   ASSIGN_TAG_PERMISSION,
+  MAX_TAGS_PER_CLIENT,
   type AssignTagsResult,
   type OrgTagInsertClient,
 } from "./assign-tag-core.ts";
@@ -58,6 +59,25 @@ export async function assignTags(
       }
       return { ok: true };
     },
+    async listOrgTagIds(orgId) {
+      const { data, error } = await supabase
+        .from("org_tags")
+        .select("tag_id")
+        .eq("organisation_id", orgId);
+
+      if (error) {
+        await reportError(error, {
+          operation: "tags.assign.list",
+          actorUserId: authorization.actor.id,
+          organisationId: orgId,
+        });
+        // Degrade to "nothing assigned" rather than fail the batch: a read
+        // failure must not silently refuse an assignment, and the picker's
+        // own cap check is the primary guard anyway.
+        return [];
+      }
+      return (data ?? []).map((row) => row.tag_id);
+    },
   };
 
   const result = await assignTagsCore(
@@ -66,6 +86,13 @@ export async function assignTags(
     authorization.actor.id,
     client,
   );
+
+  if (result.limitReached) {
+    return {
+      ok: false,
+      message: `A client can have at most ${MAX_TAGS_PER_CLIENT} tags. Remove one before adding more.`,
+    };
+  }
 
   return { ok: true, result };
 }

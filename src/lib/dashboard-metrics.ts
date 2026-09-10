@@ -14,6 +14,18 @@ export type DashboardOrgRow = {
   owner_id: string | null;
   updated_at: string;
   created_at: string;
+  /** Read only by the dashboard's Performance section (SECTOR_PERFORMANCE rollup). */
+  sector?: string | null;
+  /**
+   * Read only by the organisation hover card, for the same reason the extra
+   * `users` columns exist on TeamUserRow: the dashboard already paginates every
+   * organisation row, so the preview can come off that read instead of being
+   * filled with nulls. Nothing in this module's metrics touches them.
+   */
+  organisation_type?: string | null;
+  city?: string | null;
+  country_code?: string | null;
+  website?: string | null;
 };
 
 export type OpenSuppression = { organisation_id: string; status: "pending" | "active" };
@@ -37,6 +49,9 @@ export type DashboardMetrics = {
   responsesReceived: number;
   respondingClients: number;
   converted: number;
+  contactRate: number;
+  replyRate: number;
+  conversionRate: number;
 };
 
 const RESPONSE_STATUSES = new Set([
@@ -76,12 +91,21 @@ export function computeDashboardMetrics(
     if (isConverted(row.outreach_status)) converted += 1;
   }
 
+  const totalCharities = rows.length;
+  // Counted from reply_events, not inferred from the pipeline status: a client
+  // can be moved to "responded" by hand, and two replies from one client are
+  // two replies. The rates below therefore divide by observed replies too.
+  const responsesReceived = replies?.totalReplies ?? 0;
+
   return {
-    totalCharities: rows.length,
+    totalCharities,
     contacted,
-    responsesReceived: replies?.totalReplies ?? 0,
+    responsesReceived,
     respondingClients: replies?.respondingClients ?? 0,
     converted,
+    contactRate: totalCharities > 0 ? contacted / totalCharities : 0,
+    replyRate: contacted > 0 ? responsesReceived / contacted : 0,
+    conversionRate: responsesReceived > 0 ? converted / responsesReceived : 0,
   };
 }
 

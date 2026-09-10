@@ -25,13 +25,15 @@
 //                   grants cheaply may omit the count; the scorer's documented
 //                   no-history neutral applies.
 //
-//   geography       scoreByGeography(city, priorityRegions), with priority
-//                   regions passed in by the caller. Today no caller has a
-//                   branch-level region list (OUTREACH_PREFERENCES is per-CAM
-//                   and must not leak into a shared base score), so this is
-//                   neutral too. The parameter exists so the day a branch
-//                   settings table lands, callers pass regions and every score
-//                   sharpens without another code change here.
+//   geography       scoreByGeography(city, priorityRegions), defaulting to
+//                   BRANCH_PRIORITY_REGIONS — the branch's own stated focus,
+//                   already agreed as policy in CLIENT_CRITERIA.priorityCities
+//                   (F047) and used by the import criteria check. Every caller
+//                   passed [] before this, so the factor stood at its neutral
+//                   for all 2,738 staging clients and a quarter of the weight
+//                   bought nothing. OUTREACH_PREFERENCES stays out of it: that
+//                   table is per-CAM, and a shared base score must not tilt to
+//                   whoever configured their queue last.
 //
 //   size            scoreByOrganisationSize(latest FINANCIAL_PERIODS
 //                   .total_income) — real signal, the same derivation the
@@ -51,6 +53,9 @@
 // SCOUT v1 config row (migration 20260831200000), so change both together —
 // the config row is the historical record of what produced existing scores.
 
+// Relative, not "@/lib/...": this module runs under `node --test` and in
+// scripts, neither of which reads Next's tsconfig path aliases.
+import { CLIENT_CRITERIA } from "../client-criteria-config.ts";
 import {
   calculatePriorityScore,
   sanitizeWeights,
@@ -71,6 +76,18 @@ export type PriorityBand = "high" | "medium" | "low";
  * Pending team confirmation — see the migration header before changing.
  */
 export const PRIORITY_BAND_THRESHOLDS = { high: 0.7, medium: 0.4 } as const;
+
+/**
+ * The branch's stated geographic focus, as scored by the geography factor.
+ *
+ * Deliberately the same list F047's import criteria already use rather than a
+ * second one that could drift: "which places matter to this branch" is one
+ * decision, and it is already written down and reviewed in
+ * client-criteria-config.ts. Callers may still pass their own regions — a
+ * branch-level settings table, when one exists, feeds this parameter instead of
+ * replacing it.
+ */
+export const BRANCH_PRIORITY_REGIONS: readonly string[] = CLIENT_CRITERIA.priorityCities;
 
 export function bandForScore(score: number): PriorityBand {
   if (score >= PRIORITY_BAND_THRESHOLDS.high) return "high";
@@ -128,7 +145,7 @@ export function latestTotalIncome(
  */
 export function priorityFactorsFor(
   org: ScoreableOrganisation,
-  priorityRegions: readonly string[] = [],
+  priorityRegions: readonly string[] = BRANCH_PRIORITY_REGIONS,
 ): PriorityFactors {
   return {
     // F089 — the sector scorer's own neutral covers both "no sector recorded"
@@ -168,7 +185,7 @@ export type ComputedScore = {
 
 export function computePriorityScore(
   org: ScoreableOrganisation,
-  priorityRegions: readonly string[] = [],
+  priorityRegions: readonly string[] = BRANCH_PRIORITY_REGIONS,
   weights?: unknown,
 ): ComputedScore {
   const effectiveWeights =

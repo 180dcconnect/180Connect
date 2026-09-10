@@ -156,7 +156,7 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     required: false,
     secret: true,
     description:
-      "Shared secret the cron route handlers check before doing any work, so an endpoint cannot be triggered by anyone who finds the URL. Consumed by src/app/api/cron/companies-house-import and companies-house-status-recheck (pg_cron-triggered, see supabase/migrations/20260809100400_schedule_companies_house_cron.sql), which also set the Q-02 precedent for the still-unbuilt scheduled-send worker in docs/open-questions.md.",
+      "Shared secret the cron route handlers check before doing any work, so an endpoint cannot be triggered by anyone who finds the URL. Consumed by src/app/api/cron/companies-house-status-recheck (pg_cron-triggered, see supabase/migrations/20260809100400_schedule_companies_house_cron.sql), which also set the Q-02 precedent for the still-unbuilt scheduled-send worker in docs/open-questions.md.",
   },
   {
     name: "NEXT_PUBLIC_SENTRY_DSN",
@@ -236,6 +236,35 @@ export const SCHEMA: readonly EnvVarSpec[] = [
       "Gemini model id for booklet generation (F082), e.g. a Flash-tier model — copy the exact id from the Google AI Studio model picker rather than guessing, since Google retires model ids frequently. No hardcoded default in code for that reason; unset means booklet generation cannot run.",
   },
   {
+    name: "GEMINI_SEARCH_MODEL",
+    required: false,
+    secret: false,
+    description:
+      "Gemini model id for F214 natural language search. Separate from GEMINI_MODEL on purpose: interpreting a search query is a much easier job than writing a booklet, and the LLM Provider Research doc puts it on the cheaper Flash-Lite tier ($0.30/$2.50 per million tokens against $0.75/$3.75) — running search on the booklet's model costs roughly two and a half times as much for the same answer. Optional; unset falls back to GEMINI_MODEL and logs a warning, so search still works on an environment that has not been told about it.",
+  },
+  {
+    name: "AI_SEARCH_RATE_LIMIT",
+    required: false,
+    secret: false,
+    description:
+      "Maximum natural language search interpretations each authenticated user may run per window (F214). Counted in its own bucket, so searching never consumes the booklet/draft allowance. Optional; defaults to 40. Only searches that actually reach the model count: a repeated query is served from cache and a plain name search never calls the API at all.",
+    validate: (value) =>
+      /^\d+$/.test(value) && Number(value) > 0
+        ? null
+        : "must be a positive whole number of requests",
+  },
+  {
+    name: "AI_SEARCH_RATE_WINDOW_SECONDS",
+    required: false,
+    secret: false,
+    description:
+      "Fixed-window duration in seconds for AI_SEARCH_RATE_LIMIT. Optional; defaults to 86400 (one day) — a day rather than an hour because search is bursty: a CAM works a list hard for twenty minutes and then not at all.",
+    validate: (value) =>
+      /^\d+$/.test(value) && Number(value) > 0
+        ? null
+        : "must be a positive whole number of seconds",
+  },
+  {
     name: "AI_GENERATION_RATE_LIMIT",
     required: false,
     secret: false,
@@ -304,15 +333,6 @@ export const SCHEMA: readonly EnvVarSpec[] = [
         : "must be a valid email address",
   },
   {
-    name: "CHARITY_COMMISSION_BACKFILL_START",
-    required: false,
-    secret: false,
-    description:
-      "Start date (YYYY-MM-DD) for Charity Commission imports via GetSearchCharityByRegDate (F033). Optional — defaults to 2000-01-01 if unset.",
-    validate: (value) =>
-      /^\d{4}-\d{2}-\d{2}$/.test(value) ? null : "must be in YYYY-MM-DD format",
-  },
-  {
     name: "NEXT_PUBLIC_ENV",
     required: false,
     secret: false,
@@ -324,13 +344,20 @@ export const SCHEMA: readonly EnvVarSpec[] = [
         : "must be one of: local, staging, production",
   },
   {
-    name: "CHARITY_COMMISSION_BACKFILL_END",
+    name: "NEWS_HOOK_PROVIDER",
     required: false,
     secret: false,
     description:
-      "End date (YYYY-MM-DD) for Charity Commission imports via GetSearchCharityByRegDate (F033). Optional — defaults to today if unset.",
+      "Live news hook provider for Stage 2 follow-ups (F110): 'exa' pulls one recent item per generation via the Exa API, 'none' disables the lookup so follow-ups generate without a hook. Optional; defaults to none when unset. Server-only — never prefixed with NEXT_PUBLIC_.",
     validate: (value) =>
-      /^\d{4}-\d{2}-\d{2}$/.test(value) ? null : "must be in YYYY-MM-DD format",
+      ["none", "exa"].includes(value) ? null : "must be one of: none, exa",
+  },
+  {
+    name: "EXA_API_KEY",
+    required: false,
+    secret: true,
+    description:
+      "Exa API key for the F110 live news hook. Server-only — never prefixed with NEXT_PUBLIC_. Free tier at exa.ai needs no card ($10 credits/month; requests are blocked, never billed, on exhaustion). Required when NEWS_HOOK_PROVIDER is exa — startup refuses that combination without it.",
   },
 ];
 
@@ -372,6 +399,7 @@ export function collectEnvProblems(
   problems.push(...requireOneSupabaseKey(source));
   problems.push(...requireSenderWhenSendingEmail(source));
   problems.push(...requireCompleteGmailConfiguration(source));
+  problems.push(...requireNewsHookKey(source));
 
   return problems;
 }
@@ -394,6 +422,27 @@ function requireCompleteGmailConfiguration(
       name,
       problem: "is required when any Gmail outreach setting is configured",
     }));
+}
+
+/**
+ * The F110 news hook is cost-capped by design (fail-open null, free-tier
+ * allowance, blocked-not-billed exhaustion), but a staging/production deploy
+ * that selects the exa provider without its key would silently generate every
+ * follow-up hookless. Catch that pair at startup instead — same shape as the
+ * Gmail all-or-nothing check above.
+ */
+function requireNewsHookKey(
+  source: Record<string, string | undefined>,
+): EnvProblem[] {
+  if (source.NEWS_HOOK_PROVIDER?.trim() !== "exa" || source.EXA_API_KEY?.trim()) {
+    return [];
+  }
+  return [
+    {
+      name: "EXA_API_KEY",
+      problem: "is required when NEWS_HOOK_PROVIDER is exa",
+    },
+  ];
 }
 
 /**

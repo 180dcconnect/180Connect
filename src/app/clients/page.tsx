@@ -14,6 +14,9 @@ import {
   filterByStatus,
   filterByTags,
   filterByPriorityScore,
+  filterByFinancialRecords,
+  FINANCIAL_RECORD_FILTERS,
+  financialRecordFilterLabel,
   hasActiveQueuePreferences,
   prioritiseQueue,
   filterByType,
@@ -21,22 +24,36 @@ import {
   filterValues,
   SECTOR_FILTER_LABELS,
   SECTOR_FILTER_OPTIONS,
-  LIST_SORT_DIRECTIONS,
-  LIST_SORT_FIELDS,
   PRIORITY_SCORE_FILTERS,
   parseListDirection,
   parseListSort,
+  MISSION_TERM_MAX_LENGTH,
+  parseMissionTerm,
   parsePriorityScoreFilter,
   priorityScoreFilterLabel,
   searchClients,
+  searchClientsByMissionKeywords,
   sortClients,
   visibleClients,
   type ClientListRow,
+  type ListSortField,
   type OpenSuppression,
   type VisibleClient,
 } from "./visible-clients.ts";
 import { BrandSearchBar } from "@/components/brand/search-bar";
-import { ClaimButton } from "./[id]/claim-button";
+import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  createDefaultRunNlSearchDeps,
+  runNlSearch,
+} from "@/lib/search/run-nl-search";
+import { applyNlPlan, resolvedPlanIsEmpty } from "@/lib/search/nl-search-apply";
+import {
+  describeResolvedPlan,
+  planFilterParams,
+  planHasUnconvertibleParts,
+} from "@/lib/search/nl-plan-describe";
+import { MAX_QUERY_LENGTH } from "@/lib/search/nl-search-plan";
+import { BackButton } from "@/components/ui/back-button";
 import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 import { Group, Rise } from "@/components/dashboard-stage";
 import { OriginButton } from "@/components/ui/origin-button";
@@ -44,6 +61,7 @@ import { SearchRail } from "@/components/search-rail";
 import {
   SOURCE_LABELS,
   breakdown,
+  parseBreakdownLimit,
   parseDirection,
   parseField,
   parseStage,
@@ -57,7 +75,11 @@ import {
   formatOrganisationType,
   formatOutreachStatus,
 } from "@/lib/organisation-format";
-import { PipelineReport } from "./pipeline-report";
+import {
+  PipelineReport,
+  type PipelineRowItem,
+  type PipelineStageItem,
+} from "./pipeline-report";
 import {
   captureFilters,
   describeFilters,
@@ -65,8 +87,14 @@ import {
   parseFilters,
   savedViewHref,
 } from "./saved-view-filters";
-import { SavedViewsPanel, type SavedViewSummary } from "./saved-views-panel";
-import { SortMenu as ListSortMenu } from "./sort-menu";
+import { type SavedViewSummary } from "./saved-views-panel";
+import { SavedViewsPopover } from "./saved-views-popover";
+import { expandMissionQuery } from "@/lib/ai/mission-query";
+import {
+  describeInsufficientData,
+  findSimilarClients,
+  isSimilarityReference,
+} from "@/lib/similar-clients";
 import { bulkStatusBlockedReason, canBulkUpdateStatus } from "@/lib/bulk-status";
 import { ClientSelectCheckbox, SelectPageCheckbox } from "./bulk-selection";
 import { BulkActionsBar } from "./bulk-actions-bar";
@@ -83,6 +111,10 @@ type SavedViewRow = { id: string; name: string; filters: unknown };
 type SearchParams = Promise<{
   owner?: string;
   q?: string;
+  /** F214 — a plain-English question. Separate from `q`, which is F052's literal
+   *  name search: the two are different acts and a CAM must be able to hold one
+   *  while clearing the other. */
+  ask?: string;
   page?: string;
   // F193 — tags is inherently multi-select (OR logic across selected tags),
   // so unlike the single-value filters above it can arrive as a string[]
@@ -98,14 +130,24 @@ type SearchParams = Promise<{
   // F055 — sector is multi-select like the filters above; values are the
   // canonical group keys (see CANONICAL_SECTOR_GROUPS) plus "unclassified".
   sector?: string | string[];
+  /** F215 — free-text mission search term ("climate", "youth education").
+   * Single-valued: one mission filter per view, staged through the search
+   * bar's free-text panel. */
+  mission?: string;
+  /** F216 — find clients similar to this one (a past successful client's id). */
+  similar?: string;
   // F058 — priority-score bands (`high` / `medium` / `low` / `unscored`), same
   // repeated-param shape as the other multi-selects.
   score?: string | string[];
+  // Filter by presence of financial records (charity commission, 360giving, any, none)
+  financials?: string | string[];
   /** Funnel stage the breakdown counts. */
   stage?: string;
   /** Field the breakdown groups by, and which end of it to show. */
   sort?: string;
   dir?: string;
+  /** Limit for breakdown rows (3, 5, 10, 20). */
+  top?: string;
   /** F060/F061 — field the *list* is ordered on, and which way. Separate from
    * `sort`/`dir` above on purpose: that pair drives the breakdown card, and
    * both controls are on screen together. */
@@ -154,8 +196,8 @@ function PriorityScorePill({ client }: { client: VisibleClient }) {
   );
 }
 
-/** Reserved width for the claim button, held whether or not the row has one. */
-const CLAIM_SLOT = "w-[6.5rem] shrink-0";
+/** Reserved width for the row action (View), held for every row so columns don't shift. */
+const ACTION_SLOT = "w-[6.5rem] shrink-0";
 
 /**
  * F062's checkbox column. Outside the row's Link, on the same reasoning the claim
@@ -202,6 +244,7 @@ export default async function ClientsPage({
   const {
     owner: ownerFilter,
     q: search,
+    ask: askParam,
     page: pageParam,
     city,
     country,
@@ -209,16 +252,20 @@ export default async function ClientsPage({
     tags: tagsParam,
     type: typeFilter,
     sector: sectorParam,
+    mission: missionParam,
+    similar: similarParam,
     score: scoreParam,
+    financials: financialsParam,
     stage: stageParam,
     sort: sortParam,
     dir: dirParam,
+    top: topParam,
     listSort: listSortParam,
     listDir: listDirParam,
   } = await searchParams;
 
   const supabase = await createClient();
-  const canClaim = hasPermission(authorization.actor.role, "client:edit");
+  const canAddClient = hasPermission(authorization.actor.role, "client:edit");
   /**
    * F062 AC1 names the CAM: "CAM can select multiple individual clients from the
    * list via checkboxes". Selection was gated on `isAdmin`, so the role the whole
@@ -250,7 +297,7 @@ export default async function ClientsPage({
       supabase
         .from("organisations")
         .select(
-          "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id), financial_periods(income_band, total_income, period_end), grants(id, amount_awarded, funder_name, award_date), latest_scores(priority_score, priority_band, scored_at)",
+          "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, charity_activities, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id), financial_periods(income_band, total_income, period_end), grants(id, amount_awarded, funder_name, award_date), latest_scores(priority_score, priority_band, scored_at)",
         )
         .order("legal_name", { ascending: true })
         .order("id", { ascending: true })
@@ -367,6 +414,62 @@ export default async function ClientsPage({
   // F058 — unknown values are dropped at parse time, so a hand-edited URL
   // carrying `?score=banana` filters nothing rather than matching nothing.
   const scoreBands = parsePriorityScoreFilter(scoreParam);
+  // Financial records filter: charity_commission, 360giving, any, none
+  const financialValues = filterValues(financialsParam);
+
+  // F215 — mission search term. Parsed through the same safeValidate funnel as
+  // every other param: junk or over-long values filter nothing rather than
+  // throwing, and the banner below says so instead of pretending to search.
+  const missionTerm = parseMissionTerm(missionParam);
+  /**
+   * F215 AC2 — widen the term through Gemini when it is configured. Runs during
+   * the render request, after the (parallel) data fetch above, so the expansion
+   * overlaps nothing. All failure modes degrade to `keywords: []`, which the
+   * filter reads as plain keyword matching and the banner below reports.
+   * Cached per normalised query in the module, so revisiting the same view does
+   * not re-call the API.
+   */
+  const missionExpansion = missionTerm ? await expandMissionQuery(missionTerm) : null;
+  const missionKeywords = missionExpansion?.keywords ?? [];
+
+  /**
+   * F216 — Search by Similarity. `?similar=<id>` asks: which visible clients
+   * look like this past successful one? The reference's F088 factors are
+   * recomputed from the same list rows every other filter reads (its own
+   * LATEST_SCORES row is not enough — the module needs the scorers' states,
+   * not just the total), so the comparison and the score-breakdown card can
+   * never disagree.
+   *
+   * The reference is looked up in `allVisibleClients`, NOT the filtered set:
+   * a CAM who found a converted client through a filter, hit "find similar",
+   * and then changed their mind about one chip should still get the same
+   * shortlist — the shortlist describes the reference, not the view it was
+   * requested from. Candidates are likewise every visible client, so the
+   * result is stable under filter changes and the suppression filter has
+   * already been applied once, by visibleClients().
+   */
+  const reference = similarParam
+    ? allVisibleClients.find((client) => client.id === similarParam) ?? null
+    : null;
+  // AC1's rule is enforced here, not just on the detail-page link: ?similar= is
+  // a plain URL parameter, so a hand-edited id must not buy a shortlist for a
+  // client that is not a past success. Same predicate the detail page gates
+  // the entry card with — one definition of "past successful client".
+  const similarIneligible =
+    reference !== null && !isSimilarityReference(reference.outreach_status);
+  const eligibleReference = similarIneligible ? null : reference;
+  /** F092's input is a matched grant count; the list embeds grant rows. */
+  const withGrantCounts = (client: VisibleClient) => ({
+    ...client,
+    matched_grant_count: client.grants?.length ?? 0,
+  });
+  const similarResult = eligibleReference
+    ? findSimilarClients(
+        withGrantCounts(eligibleReference),
+        allVisibleClients.map(withGrantCounts),
+      )
+    : null;
+  const similarDangling = Boolean(similarParam) && !reference;
 
   // BrandSearchBar always writes a multi-selected category as repeated params
   // (see its submitSearch), so this can legitimately arrive as one string or
@@ -382,16 +485,72 @@ export default async function ClientsPage({
   matchingClients = filterBySector(matchingClients, sectorValues);
   matchingClients = filterByTags(matchingClients, tagFilter);
   matchingClients = searchClients(matchingClients, search);
+  // F215 — mission search sits in the same chain: it narrows what the other
+  // filters have already selected, and they narrow what it selects (AC3).
+  // With expansion present, a client matches its own words OR any expanded
+  // alternative; without, plain keyword matching (AC1).
+  matchingClients = searchClientsByMissionKeywords(matchingClients, missionTerm, missionKeywords);
   // F058 — bands narrow the searched set; unscored clients stay visible until a
   // band is actually chosen (the filter's own AC3, enforced inside the function).
   matchingClients = filterByPriorityScore(matchingClients, scoreBands);
+  matchingClients = filterByFinancialRecords(matchingClients, financialValues);
+
+  /**
+   * F214 — Natural Language Charity Search (#209).
+   *
+   * Runs after the manual filters, on purpose: an interpretation narrows what
+   * the CAM already chose rather than replacing it, so a question asked inside
+   * "My clients" stays inside "My clients". It also means AC3's fallback needs
+   * no special path — when interpretation fails, every line above has already
+   * run and the list the CAM lands on is exactly the filtered list they would
+   * have had without asking.
+   *
+   * The vocabulary handed over is the cities and countries these very rows are
+   * in, which is what makes AC2 structural rather than a promise: the model
+   * never sees a client record and never returns one, and a place with no rows
+   * behind it cannot survive resolution into a filter.
+   */
+  const nlSearch = await runNlSearch(
+    askParam,
+    { cities: uniqueCities, countryCodes: uniqueCountries },
+    // createAdminClient() returns null when the service-role key is absent; the
+    // allowance then cannot be consumed and runNlSearch declines to call the
+    // API at all rather than running unmetered (fail closed, as in the booklet
+    // and draft routes).
+    createDefaultRunNlSearchDeps(createAdminClient()),
+    authorization.actor.id,
+  );
+  const nlPlan = nlSearch?.kind === "interpreted" ? nlSearch.plan : null;
+  // A plan that resolved to nothing narrows nothing — the question was
+  // understood as a question but had no filterable content in it. Treated as
+  // "no interpretation" so the list is not silently reordered by an empty plan.
+  const nlPlanApplies = nlPlan !== null && !resolvedPlanIsEmpty(nlPlan);
+  if (nlPlanApplies && nlPlan) {
+    matchingClients = applyNlPlan(matchingClients, nlPlan);
+  } else if (nlSearch?.kind === "literal") {
+    // The question read as a name, so it is one: F052's search, unpaid.
+    matchingClients = searchClients(matchingClients, nlSearch.query);
+  }
 
   // F196 / F197 / F199 / F094: Prioritise matching clients based on the CAM's
   // geographic, sector, size and grant-history preferences, layered on top of
   // the persisted base scores (F088) — preference total first, base score
   // breaks ties. This order is only a *default*: an explicit ?listSort= below
   // can still override it, but it is no longer clobbered by one.
-  matchingClients = prioritiseQueue(matchingClients, outreachPrefs.data);
+  // F214: an answered question is an explicit ordering request, exactly like an
+  // explicit ?listSort=, so the personal queue does not re-sort on top of it —
+  // that would throw away the relevance ranking (AC4) before it reached the
+  // screen. With no interpretation in play this is untouched F094 behaviour.
+  // F216 — a similarity result IS the answer, not one filter among many: the
+  // list becomes the ranked shortlist (agreement first, ties broken by base
+  // score — the same precedence the matches carry), which neither the legal_name
+  // fetch order nor a personal-queue re-sort would preserve. An explicit
+  // ?listSort= still wins below, exactly as it beats the F214 interpretation.
+  matchingClients = similarResult?.status === "ok"
+    ? similarResult.matches.map((match) => match.client)
+    : nlPlanApplies
+      ? matchingClients
+      : prioritiseQueue(matchingClients, outreachPrefs.data);
   const teamMembers = team.data ?? [];
   // The owner dropdown lists CAMs only (F163), but `?owner=` can name anyone who
   // holds clients — an admin, or a deactivated former member — because the team
@@ -407,13 +566,17 @@ export default async function ClientsPage({
   const filterActive = Boolean(
     ownerFilter ||
       search ||
+      askParam ||
+      missionTerm ||
+      similarParam ||
       cityValues.length ||
       countryValues.length ||
       statusValues.length ||
       typeValues.length ||
       sectorValues.length ||
       tagFilter.length ||
-      scoreBands.length,
+      scoreBands.length ||
+      financialValues.length,
   );
   // F166 AC1/AC3: this is the CAM viewing their own filter, not just any owner
   // filter — the heading, count label and empty state read "your clients" so the
@@ -440,6 +603,7 @@ export default async function ClientsPage({
     status,
     type: typeFilter,
     sector: sectorParam,
+    mission: missionTerm ?? undefined,
     owner: ownerFilter,
     score: scoreParam,
   });
@@ -520,6 +684,9 @@ export default async function ClientsPage({
     const base: Record<string, HrefValue> = {
       owner: ownerFilter,
       q: search,
+      // F214 — the question rides along like any other filter, so paging or
+      // sorting a set of answered results keeps the answer.
+      ask: askParam,
       // The multi-select filters carry every selected value, so a link that
       // changes the sort keeps all three chosen cities rather than the first.
       city: cityValues,
@@ -531,9 +698,16 @@ export default async function ClientsPage({
       // F058 — the parsed bands, not the raw param, for the same reason as
       // listSort below: junk leaves the URL on the next click.
       score: scoreBands,
+      financials: financialValues,
+      // The validated term, not the raw param — same junk-leaves-the-URL rule.
+      mission: missionTerm ?? undefined,
+      // F216 — a dangling or ineligible id is dropped here (the banner says
+      // so); a valid one rides along so paging/sorting keeps the mode.
+      similar: eligibleReference ? similarParam : undefined,
       stage: stageParam,
       sort: sortParam,
       dir: dirParam,
+      top: topParam !== undefined ? topLimit : undefined,
       // The parsed values, not the raw params: a pasted `?listSort=banana`
       // renders as name/ascending, and every link this page generates then
       // carries the canonical value, so the junk leaves the URL on the next
@@ -571,21 +745,59 @@ export default async function ClientsPage({
 
   const pageHref = (targetPage: number) => hrefWith({ page: targetPage });
 
+  /**
+   * F214 — everything the interpretation banner needs.
+   *
+   * `convertHref` is the CAM taking the interpretation over: it writes the plan's
+   * filters as ordinary repeated params and drops `ask`, so the list is from then
+   * on driven entirely by the F053-F058 chips — editable, removable, and costing
+   * nothing to change. It is the same escape hatch AC3 asks for on failure,
+   * offered on success as well.
+   */
+  const nlChips = nlPlan ? describeResolvedPlan(nlPlan) : [];
+  const clearAskHref = hrefWith({ ask: undefined });
+  // F216 — leaving similarity mode is one link; every other link on the page
+  // (paging, sorting, chips) carries the param via hrefWith so the mode holds.
+  const clearSimilarHref = hrefWith({ similar: undefined });
+  /** Row-level agreement, for the "N% similar" tag on each match. */
+  const similarityForId = new Map(
+    similarResult?.status === "ok"
+      ? similarResult.matches.map((match) => [match.client.id, match.similarity] as const)
+      : [],
+  );
+  const convertHref =
+    nlPlan && nlPlanApplies
+      ? hrefWith({ ask: undefined, ...planFilterParams(nlPlan) })
+      : null;
+
+  const columnSortHref = (field: ListSortField) => {
+    if (listSortField === field && explicitListSort) {
+      return hrefWith({
+        listSort: field,
+        listDir: listSortDirection === "ascending" ? "descending" : "ascending",
+      });
+    }
+    const defaultDir = field === "priority" ? "descending" : "ascending";
+    return hrefWith({ listSort: field, listDir: defaultDir });
+  };
+
   // The insight band reads the list you are actually looking at: filter to your
   // own clients and the funnel is yours, not the platform's. `caption` says which
   // of the two it is, so the numbers are never ambiguous.
   const stage: FunnelStageKey = parseStage(stageParam);
   const breakdownField = parseField(sortParam);
   const breakdownDirection = parseDirection(dirParam);
+  const topLimit = parseBreakdownLimit(topParam);
   const funnel = pipelineFunnel(matchingClients);
   // Every group carries all four stage counts, so the table reads across as that
-  // group's own funnel; `stage` only decides which column the top three is
+  // group's own funnel; `stage` only decides which column the top N is
   // ranked on.
   const breakdownRows = breakdown(
     matchingClients,
     breakdownField,
     breakdownDirection,
     stage,
+    topLimit,
   );
   const funnelCaption = filterActive
     ? `${matchingClients.length.toLocaleString()} filtered`
@@ -601,6 +813,16 @@ export default async function ClientsPage({
   const stageHref = (key: FunnelStageKey) =>
     hrefWith({ stage: key === "all" ? undefined : key });
 
+  const pipelineStages: PipelineStageItem[] = funnel.map((s) => ({
+    ...s,
+    href: stageHref(s.key),
+  }));
+
+  const pipelineRows: PipelineRowItem[] = breakdownRows.map((r) => ({
+    ...r,
+    href: r.filter ? rowHref(r.filter) : null,
+  }));
+
   // F255 step 2 — "review your assigned clients" is complete when the CAM has looked
   // at their own list, which is this page filtered to themselves. Recording it here
   // rather than on the guide's link means the step reflects what they did, not what
@@ -615,6 +837,13 @@ export default async function ClientsPage({
           headingClassName="mb-8"
           bar={
             <BrandSearchBar
+              ask={{
+                label: "Ask in plain English",
+                placeholder: "small education charities in Leeds",
+                defaultValue: askParam ?? "",
+                maxLength: MAX_QUERY_LENGTH,
+                param: "ask",
+              }}
               defaultQuery={search ?? ""}
               defaultFilters={[
                 // One chip per selected value, so a three-city filter reads as
@@ -653,6 +882,15 @@ export default async function ClientsPage({
                   label: priorityScoreFilterLabel(band),
                   value: band,
                 })),
+                ...financialValues.map((value) => ({
+                  category: "Filter by financial records",
+                  label: financialRecordFilterLabel(value),
+                  value,
+                })),
+                // F215 — the mission term rides as one chip like any other filter.
+                ...(missionTerm
+                  ? [{ category: "Filter by mission", label: missionTerm, value: missionTerm }]
+                  : []),
               ]}
               params={{
                 "Filter by city": "city",
@@ -663,6 +901,8 @@ export default async function ClientsPage({
                 "Filter by owner": "owner",
                 "Filter by tag": "tags",
                 "Filter by priority score": "score",
+                "Filter by financial records": "financials",
+                "Filter by mission": "mission",
               }}
               categories={{
                 "Filter by city": uniqueCities.map(c => ({ label: c, value: c })),
@@ -679,6 +919,28 @@ export default async function ClientsPage({
                   label: band.label,
                   value: band.value,
                 })),
+                "Filter by financial records": FINANCIAL_RECORD_FILTERS.map((f) => ({
+                  label: f.label,
+                  value: f.value,
+                })),
+                // F215 — free-text: the category renders a text input, not an
+                // option list. Options stay empty so no stale list can appear.
+                "Filter by mission": [],
+              }}
+              freeTextCategories={{
+                "Filter by mission": {
+                  category: "Filter by mission",
+                  placeholder: "climate, youth education…",
+                  hint:
+                    missionTerm === null
+                      ? "Enter what a charity does — its mission, in your own words."
+                      : missionExpansion?.mode === "semantic"
+                        ? `Also matching charities whose mission says it differently: ${missionKeywords.slice(0, 4).join(", ")}.`
+                        : missionExpansion?.mode === "unavailable"
+                          ? "Widened matching is unavailable right now — matching your exact words only."
+                          : "Enter what a charity does — its mission, in your own words.",
+                  maxLength: MISSION_TERM_MAX_LENGTH,
+                },
               }}
             />
           }
@@ -688,7 +950,7 @@ export default async function ClientsPage({
                 <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
                   {isOwnedView ? "My clients" : "Clients"}
                 </h1>
-                {canClaim && (
+                {canAddClient && (
                   <OriginButton
                     href="/clients/new"
                     size="md"
@@ -710,7 +972,7 @@ export default async function ClientsPage({
                     ownerFilter === authorization.actor.id ? "text-brand" : "text-foreground/65"
                   }`}
                 >
-                  My clients
+                  {ownerFilter === authorization.actor.id ? "Showing your clients" : "Show my clients only"}
                 </Link>
               )}
             </>
@@ -728,83 +990,266 @@ export default async function ClientsPage({
           </Rise>
         )}
 
-        <Group className="space-y-4">
-          {/* F066 — the CAM's saved filter combinations, above the report they
-              change. Selecting one is a link; saving one posts the filters this
-              render used. */}
+        {/* F214 — what the question was taken to mean, or why it could not be.
+            Always rendered above the list, never inside it: a CAM has to be able
+            to read the interpretation *before* they read the results, or the
+            results are just a list that changed for unexplained reasons. */}
+        {nlSearch && (
           <Rise>
-            <SavedViewsPanel
+            {nlSearch.kind === "error" ? (
+              <div
+                role="alert"
+                className="mb-8 rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4"
+              >
+                <p className="text-sm font-bold text-destructive">{nlSearch.message}</p>
+                {/* AC3 — the filters are right below and they still work. Saying
+                    so is the difference between a degraded search and a broken
+                    page. */}
+                <p className="mt-1.5 text-sm leading-[1.7] text-foreground/65">
+                  Your filters are unaffected — narrow the list with them, or{" "}
+                  <Link href={clearAskHref} className="font-bold underline">
+                    clear the question
+                  </Link>
+                  .
+                </p>
+              </div>
+            ) : (
+              <div className="mb-8 rounded-2xl border border-foreground/10 bg-white px-5 py-4">
+                <p className="text-sm leading-[1.7] text-foreground/65">
+                  {nlSearch.kind === "literal" ? (
+                    <>
+                      Searched for names matching{" "}
+                      <span className="font-bold text-foreground">“{nlSearch.query}”</span>.
+                      Add a place, a size or a sector to have it read as a question.
+                    </>
+                  ) : nlPlanApplies ? (
+                    <>
+                      <span className="font-bold text-foreground">“{nlSearch.query}”</span>{" "}
+                      read as:
+                    </>
+                  ) : (
+                    <>
+                      Nothing in{" "}
+                      <span className="font-bold text-foreground">“{nlSearch.query}”</span>{" "}
+                      matched a filter this list has, so every client is still shown.
+                    </>
+                  )}
+                </p>
+
+                {nlChips.length > 0 && (
+                  <ul className="mt-3 flex flex-wrap gap-2">
+                    {nlChips.map((chip) => (
+                      <li
+                        key={`${chip.category}-${chip.value}`}
+                        className="rounded-full border border-foreground/10 bg-[#f4f4ef] px-3 py-1 text-xs font-medium text-foreground/80"
+                      >
+                        <span className="text-foreground/50">{chip.category}</span>{" "}
+                        {chip.label}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {/* Named out loud rather than quietly ignored: a CAM who asked
+                    about somewhere this list holds nobody in should be told that,
+                    not shown an empty page. */}
+                {nlPlan && nlPlan.dropped.length > 0 && (
+                  <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
+                    No clients are in {nlPlan.dropped.join(", ")}, so that part was
+                    ignored.
+                  </p>
+                )}
+                {nlPlan && nlPlan.unsupported.length > 0 && (
+                  <p className="mt-1.5 text-sm leading-[1.7] text-foreground/65">
+                    This list cannot filter on {nlPlan.unsupported.join(", ")}.
+                  </p>
+                )}
+
+                <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                  {convertHref && (
+                    <Link href={convertHref} className="font-bold hover:underline">
+                      Convert to filters
+                    </Link>
+                  )}
+                  <Link
+                    href={clearAskHref}
+                    className="font-bold text-foreground/65 hover:underline"
+                  >
+                    Clear question
+                  </Link>
+                </p>
+                {convertHref && nlPlan && planHasUnconvertibleParts(nlPlan) && (
+                  <p className="mt-1.5 text-xs leading-[1.7] text-foreground/50">
+                    Converting keeps the filters above; the size and ranking parts
+                    of the question are dropped, since no manual filter holds them.
+                  </p>
+                )}
+              </div>
+            )}
+          </Rise>
+        )}
+
+        {/* F215 — what the mission filter actually did. A widened net (AC2) is
+            worth naming so the CAM can trust it; a degraded one must not pose
+            as a semantic search. An invalid term says itself plainly. Shown
+            above the list like F214's interpretation panel, never inside it. */}
+        {missionParam?.trim() && (
+          <Rise>
+            {missionTerm === null ? (
+              <div
+                role="alert"
+                className="mb-8 rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4"
+              >
+                <p className="text-sm font-bold text-destructive">
+                  That mission search is too long or empty (up to {MISSION_TERM_MAX_LENGTH} characters).
+                </p>
+                <p className="mt-1.5 text-sm leading-[1.7] text-foreground/65">
+                  Your filters are unaffected — shorten it in the search bar, or{" "}
+                  <Link href={hrefWith({ mission: undefined })} className="font-bold underline">
+                    clear the mission filter
+                  </Link>
+                  .
+                </p>
+              </div>
+            ) : missionExpansion?.mode === "semantic" ? (
+              <div className="mb-8 rounded-2xl border border-foreground/10 bg-white px-5 py-4">
+                <p className="text-sm leading-[1.7] text-foreground/65">
+                  Mission matches for{" "}
+                  <span className="font-bold text-foreground">“{missionTerm}”</span>, widened to
+                  include{" "}
+                  <span className="font-bold text-foreground">{missionKeywords.join(", ")}</span>.
+                </p>
+              </div>
+            ) : missionExpansion?.mode === "unavailable" ? (
+              <div className="mb-8 rounded-2xl border border-foreground/10 bg-white px-5 py-4">
+                <p className="text-sm leading-[1.7] text-foreground/65">
+                  Mission matches for{" "}
+                  <span className="font-bold text-foreground">“{missionTerm}”</span> — matching
+                  your exact words only. Widened (similar-wording) matching is unavailable right
+                  now.
+                </p>
+              </div>
+            ) : null}
+          </Rise>
+        )}
+
+        {/* F216 — what "similar" means here, said before the results: the
+            dimensions shared with the reference, so the ordering is readable
+            rather than an opaque score (AC2). A dangling id, a thin reference
+            or a thin shortlist each says so plainly (AC3) instead of posing as
+            a search that ran. */}
+        {similarParam && (
+          <Rise>
+            {similarIneligible ? (
+              <div
+                role="alert"
+                className="mb-8 rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4"
+              >
+                <p className="text-sm font-bold text-destructive">
+                  Similarity search starts from a converted client.
+                </p>
+                <p className="mt-1.5 text-sm leading-[1.7] text-foreground/65">
+                  <Link href={clearSimilarHref} className="font-bold underline">Show all clients</Link>.
+                </p>
+              </div>
+            ) : similarDangling ? (
+              <div
+                role="alert"
+                className="mb-8 rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4"
+              >
+                <p className="text-sm font-bold text-destructive">
+                  The client this search was started from no longer exists.
+                </p>
+                <p className="mt-1.5 text-sm leading-[1.7] text-foreground/65">
+                  It may have been removed. <Link href={clearSimilarHref} className="font-bold underline">Show all clients</Link>.
+                </p>
+              </div>
+            ) : similarResult && similarResult.status === "insufficient_data" ? (
+              <div
+                role="alert"
+                className="mb-8 rounded-2xl border border-foreground/10 bg-white px-5 py-4"
+              >
+                <p className="text-sm font-bold text-foreground">
+                  Not enough data to find similar clients yet
+                </p>
+                <p className="mt-1.5 text-sm leading-[1.7] text-foreground/65">
+                  {describeInsufficientData({
+                    status: "insufficient_data",
+                    reason: similarResult.reason ?? "too_few_matches",
+                    reference: similarResult.reference,
+                    matches: similarResult.matches,
+                  })}{" "}
+                  <Link href={clearSimilarHref} className="font-bold underline">
+                    Back to all clients
+                  </Link>
+                  .
+                </p>
+              </div>
+            ) : similarResult && similarResult.status === "ok" ? (
+              <div className="mb-8 rounded-2xl border border-foreground/10 bg-white px-5 py-4">
+                <p className="text-sm leading-[1.7] text-foreground/65">
+                  Clients similar to{" "}
+                  <Link
+                    href={`/clients/${similarResult.reference.id}`}
+                    className="font-bold text-foreground hover:underline"
+                  >
+                    {similarResult.reference.name}
+                  </Link>{" "}
+                  — ranked by how many of its recorded traits they share ({similarResult.reference.knownDimensions.map((d) => d.label.toLowerCase()).join(", ")}).
+                </p>
+                <p className="mt-1.5 text-sm leading-[1.7] text-foreground/65">
+                  <Link href={clearSimilarHref} className="font-bold underline">
+                    Clear similarity search
+                  </Link>
+                </p>
+              </div>
+            ) : null}
+          </Rise>
+        )}
+
+        <Group className="space-y-4">
+          {/* Where the pipeline stands before the list of it: the four stage
+              totals, the stream between them, and the top-N groups. Counts
+              whatever the list is currently showing. */}
+          <Rise>
+            <PipelineReport
+              stages={pipelineStages}
+              selected={stage}
+              caption={funnelCaption}
+              field={breakdownField}
+              direction={breakdownDirection}
+              rows={pipelineRows}
+              limit={topLimit}
+            />
+          </Rise>
+
+          {/* Table Toolbar / Saved Views Bar */}
+          <Rise className="flex items-center justify-between gap-4 pt-2">
+            <div className="flex items-center gap-2">
+              {personalQueueDefault && (
+                <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+                  Ordered for you
+                </span>
+              )}
+            </div>
+            <SavedViewsPopover
               views={savedViewSummaries}
               activeFilters={activeFilters}
               hasActiveFilters={filterActive}
             />
           </Rise>
 
-          {/* Where the pipeline stands before the list of it: the four stage
-              totals, the stream between them, and the top three groups. Counts
-              whatever the list is currently showing. */}
-          <Rise>
-            <PipelineReport
-              stages={funnel}
-              selected={stage}
-              stageHref={stageHref}
-              caption={funnelCaption}
-              field={breakdownField}
-              direction={breakdownDirection}
-              rows={breakdownRows}
-              rowHref={rowHref}
-            />
-          </Rise>
-
-          {matchingClients.length > 0 && (
-            <Rise className="flex items-baseline justify-between gap-4 pt-4">
-              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                {matchingClients.length} client{matchingClients.length === 1 ? "" : "s"}
-                {isOwnedView ? " you own" : ""}
-              </p>
-              {/* F060/F061 — the list's own sort. Same sentence control the
-                  breakdown card uses, on its own pair of params, sitting on
-                  the line that already introduces the list. Shown at every
-                  width: the column headers below it are lg-only.
-                  F094 — when the CAM's preferences are driving the default
-                  order and no explicit sort has been chosen over them, the
-                  sentence says so rather than quietly claiming "name,
-                  ascending" for an order it isn't. Choosing either word in
-                  the sentence applies that sort explicitly. */}
-              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                {personalQueueDefault ? "Ordered for you — override:" : "Sorted by"}{" "}
-                <ListSortMenu
-                  param="listSort"
-                  value={listSortField}
-                  ariaLabel="Sort the client list by"
-                  options={LIST_SORT_FIELDS.map((entry) => ({
-                    value: entry.key,
-                    label: entry.label,
-                  }))}
-                />
-                ,{" "}
-                <ListSortMenu
-                  param="listDir"
-                  value={listSortDirection}
-                  ariaLabel="Sort direction for the client list"
-                  options={LIST_SORT_DIRECTIONS.map((entry) => ({
-                    value: entry,
-                    label: entry,
-                  }))}
-                />
-              </p>
-              {totalPages > 1 && (
-                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                  Page {currentPage} of {totalPages}
-                </p>
-              )}
-            </Rise>
-          )}
-
             <Rise>
               {clients.length === 0 ? (
                 <EmptyState
-                  message={emptyStateMessage({ isOwnedView, search, filterActive })}
+                  message={emptyStateMessage({
+                    isOwnedView,
+                    search,
+                    ask: askParam,
+                    mission: missionTerm,
+                    similar: eligibleReference?.legal_name ?? (similarDangling || similarIneligible ? true : null),
+                    filterActive,
+                  })}
                 />
               ) : (
                 <div className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm">
@@ -820,18 +1265,88 @@ export default async function ClientsPage({
                     )}
                     <span className={`${ROW_GRID} min-w-0 flex-1`}>
                       <span />
-                      <span>Client</span>
-                      <span>Location</span>
-                      <span>Score</span>
-                      <span>Status</span>
+                      <Link
+                        href={columnSortHref("name")}
+                        className={`group/sort flex items-center gap-1 transition-colors hover:text-foreground ${
+                          explicitListSort && listSortField === "name" ? "text-foreground font-extrabold" : "text-foreground/40"
+                        }`}
+                        aria-label={`Sort by Client name (${explicitListSort && listSortField === "name" ? listSortDirection : "ascending"})`}
+                      >
+                        <span>Client</span>
+                        {explicitListSort && listSortField === "name" ? (
+                          <span className="text-[11px] text-brand" aria-hidden="true">
+                            {listSortDirection === "ascending" ? "↑" : "↓"}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] opacity-0 group-hover/sort:opacity-40 transition-opacity" aria-hidden="true">
+                            ↕
+                          </span>
+                        )}
+                      </Link>
+
+                      <Link
+                        href={columnSortHref("location")}
+                        className={`group/sort flex items-center gap-1 transition-colors hover:text-foreground ${
+                          explicitListSort && listSortField === "location" ? "text-foreground font-extrabold" : "text-foreground/40"
+                        }`}
+                        aria-label={`Sort by Location (${explicitListSort && listSortField === "location" ? listSortDirection : "ascending"})`}
+                      >
+                        <span>Location</span>
+                        {explicitListSort && listSortField === "location" ? (
+                          <span className="text-[11px] text-brand" aria-hidden="true">
+                            {listSortDirection === "ascending" ? "↑" : "↓"}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] opacity-0 group-hover/sort:opacity-40 transition-opacity" aria-hidden="true">
+                            ↕
+                          </span>
+                        )}
+                      </Link>
+
+                      <Link
+                        href={columnSortHref("priority")}
+                        className={`group/sort flex items-center gap-1 transition-colors hover:text-foreground ${
+                          explicitListSort && listSortField === "priority" ? "text-foreground font-extrabold" : "text-foreground/40"
+                        }`}
+                        aria-label={`Sort by Score (${explicitListSort && listSortField === "priority" ? listSortDirection : "descending"})`}
+                      >
+                        <span>Score</span>
+                        {explicitListSort && listSortField === "priority" ? (
+                          <span className="text-[11px] text-brand" aria-hidden="true">
+                            {listSortDirection === "ascending" ? "↑" : "↓"}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] opacity-0 group-hover/sort:opacity-40 transition-opacity" aria-hidden="true">
+                            ↕
+                          </span>
+                        )}
+                      </Link>
+
+                      <Link
+                        href={columnSortHref("status")}
+                        className={`group/sort flex items-center gap-1 transition-colors hover:text-foreground ${
+                          explicitListSort && listSortField === "status" ? "text-foreground font-extrabold" : "text-foreground/40"
+                        }`}
+                        aria-label={`Sort by Status (${explicitListSort && listSortField === "status" ? listSortDirection : "ascending"})`}
+                      >
+                        <span>Status</span>
+                        {explicitListSort && listSortField === "status" ? (
+                          <span className="text-[11px] text-brand" aria-hidden="true">
+                            {listSortDirection === "ascending" ? "↑" : "↓"}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] opacity-0 group-hover/sort:opacity-40 transition-opacity" aria-hidden="true">
+                            ↕
+                          </span>
+                        )}
+                      </Link>
+
                       <span>Owner</span>
                       <span />
                     </span>
-                    {canClaim && (
-                      <span className="flex shrink-0 items-center gap-2">
-                        <span className={CLAIM_SLOT} />
-                      </span>
-                    )}
+                    <span className="flex shrink-0 items-center gap-2">
+                      <span className={ACTION_SLOT} />
+                    </span>
                   </div>
 
                   <ul>
@@ -875,6 +1390,11 @@ export default async function ClientsPage({
                             </span>
                             <span className="hidden truncate text-[12px] text-foreground/40 lg:block">
                               {SOURCE_LABELS[client.organisation_type] ?? client.organisation_type}
+                              {similarityForId.get(client.id) !== undefined && (
+                                <span className="ml-2 rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] text-brand">
+                                  {Math.round(similarityForId.get(client.id)! * 100)}% similar
+                                </span>
+                              )}
                             </span>
                           </span>
 
@@ -922,17 +1442,20 @@ export default async function ClientsPage({
                           </span>
                         </Link>
 
-                        {/* A fixed slot rather than a conditional child: an owned
-                            row still reserves the width, so no column shifts as
-                            the list changes hands. The booklet action lives on
-                            the client's own page only, not in this list. */}
-                        {canClaim && (
-                          <span className={`${CLAIM_SLOT} flex shrink-0 justify-end`}>
-                            {!client.ownerName && (
-                              <ClaimButton compact organisationId={client.id} />
-                            )}
-                          </span>
-                        )}
+                        {/* View replaces Claim this client: every row offers the same
+                            explicit CTA (inverse sliding-door) rather than a
+                            conditional claim that shifted columns per ownership. */}
+                        <span className={`${ACTION_SLOT} flex shrink-0 justify-end`}>
+                          <BackButton
+                            href={`/clients/${client.id}`}
+                            label="View"
+                            variant="sliding-door-right"
+                            tone="bone"
+                            size="sm"
+                            icon="arrow"
+                            aria-label={`View ${client.legal_name}`}
+                          />
+                        </span>
                       </li>
                     ))}
                   </ul>
@@ -941,30 +1464,46 @@ export default async function ClientsPage({
             )}
           </Rise>
 
-          {totalPages > 1 && (
-            <Rise className="flex items-center justify-between gap-4 pt-4">
-              {currentPage > 1 ? (
-                <Link
-                  href={pageHref(currentPage - 1)}
-                  className="rounded-full bg-white px-5 py-2 text-[13px] font-bold shadow-sm ring-1 ring-black/[0.06] transition-shadow hover:shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-                >
-                  ← Previous
-                </Link>
-              ) : (
-                <div />
-              )}
-              {currentPage < totalPages ? (
-                <Link
-                  href={pageHref(currentPage + 1)}
-                  className="rounded-full bg-white px-5 py-2 text-[13px] font-bold shadow-sm ring-1 ring-black/[0.06] transition-shadow hover:shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-                >
-                  Next →
-                </Link>
-              ) : (
-                <div />
-              )}
-            </Rise>
-          )}
+          <Rise className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4">
+            <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+              {matchingClients.length.toLocaleString()} client{matchingClients.length === 1 ? "" : "s"}
+              {isOwnedView ? " you own" : ""}
+            </p>
+
+            {totalPages > 1 && (
+              <div className="flex items-center gap-4">
+                <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <div className="flex items-center gap-2">
+                  {currentPage > 1 ? (
+                    <Link
+                      href={pageHref(currentPage - 1)}
+                      className="rounded-full bg-white px-4 py-1.5 text-[12px] font-bold shadow-xs ring-1 ring-black/[0.06] transition-shadow hover:shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                    >
+                      ← Previous
+                    </Link>
+                  ) : (
+                    <span className="rounded-full bg-black/[0.02] px-4 py-1.5 text-[12px] font-bold text-foreground/20 cursor-not-allowed">
+                      ← Previous
+                    </span>
+                  )}
+                  {currentPage < totalPages ? (
+                    <Link
+                      href={pageHref(currentPage + 1)}
+                      className="rounded-full bg-white px-4 py-1.5 text-[12px] font-bold shadow-xs ring-1 ring-black/[0.06] transition-shadow hover:shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                    >
+                      Next →
+                    </Link>
+                  ) : (
+                    <span className="rounded-full bg-black/[0.02] px-4 py-1.5 text-[12px] font-bold text-foreground/20 cursor-not-allowed">
+                      Next →
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </Rise>
           </Group>
         </SearchRail>
         {canSelect && (

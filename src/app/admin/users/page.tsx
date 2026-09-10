@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
@@ -8,14 +7,76 @@ import { InlineAlert } from "@/components/ui/inline-alert";
 import type { PendingInvite } from "@/lib/admin/team-realtime";
 import { TeamPanel } from "./team-panel";
 import type { TeamUser } from "./user-management-table";
-import { Stage, Rise } from "@/components/dashboard-stage";
-import { InviteDialog } from "./invite-dialog";
+import { Rise } from "@/components/dashboard-stage";
+import { SearchRail } from "@/components/search-rail";
+import { BrandSearchBar } from "@/components/brand/search-bar";
+import { DarkInviteSheet } from "./invite-sheet-dark";
+import { allowedEmailDomains } from "@/lib/auth/email-domain";
+import {
+  CLIENT_COUNT_FILTER_OPTIONS,
+  LAST_ACTIVE_FILTER_OPTIONS,
+  parseArrayParam,
+  ROLE_FILTER_OPTIONS,
+  STATUS_FILTER_OPTIONS,
+  TEAM_SEARCH_CATEGORIES,
+  TEAM_SEARCH_PARAMS,
+  type TeamFilterCriteria,
+} from "@/lib/admin/team-filter";
 
-export default async function AdminUsersPage() {
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+export default async function AdminUsersPage({
+  searchParams,
+}: {
+  searchParams?: SearchParams;
+}) {
   const authorization = await getCurrentActor("user:manage", {
     route: "/admin/users",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
+
+  const resolvedParams = searchParams ? await searchParams : {};
+  const query = typeof resolvedParams.q === "string" ? resolvedParams.q : "";
+  const roleValues = parseArrayParam(resolvedParams.role);
+  const clientValues = parseArrayParam(resolvedParams.clients);
+  const lastActiveValues = parseArrayParam(resolvedParams.last_active);
+  const statusValues = parseArrayParam(resolvedParams.status);
+
+  const roleLabelMap = new Map(ROLE_FILTER_OPTIONS.map((o) => [o.value, o.label]));
+  const clientLabelMap = new Map(CLIENT_COUNT_FILTER_OPTIONS.map((o) => [o.value, o.label]));
+  const lastActiveLabelMap = new Map(LAST_ACTIVE_FILTER_OPTIONS.map((o) => [o.value, o.label]));
+  const statusLabelMap = new Map(STATUS_FILTER_OPTIONS.map((o) => [o.value, o.label]));
+
+  const defaultFilters = [
+    ...roleValues.map((value) => ({
+      category: "Filter by role",
+      label: roleLabelMap.get(value) ?? value,
+      value,
+    })),
+    ...clientValues.map((value) => ({
+      category: "Filter by client load",
+      label: clientLabelMap.get(value) ?? value,
+      value,
+    })),
+    ...lastActiveValues.map((value) => ({
+      category: "Filter by last active",
+      label: lastActiveLabelMap.get(value) ?? value,
+      value,
+    })),
+    ...statusValues.map((value) => ({
+      category: "Filter by status",
+      label: statusLabelMap.get(value) ?? value,
+      value,
+    })),
+  ];
+
+  const filterCriteria: TeamFilterCriteria = {
+    query,
+    roles: roleValues,
+    clientRanges: clientValues,
+    lastActiveRanges: lastActiveValues,
+    statuses: statusValues,
+  };
 
   const supabase = await createClient();
 
@@ -29,51 +90,52 @@ export default async function AdminUsersPage() {
   // were a real team member.
   const DELETED_USER_PLACEHOLDER_ID = "00000000-0000-0000-0000-000000000001";
 
-  const { data: users, error } = await supabase
-    .from("users")
-    .select("id, email, full_name, role, is_active, deactivated_at, last_seen_at")
-    .or("invited_at.is.null,invite_accepted_at.not.is.null")
-    .neq("id", DELETED_USER_PLACEHOLDER_ID)
-    .order("full_name");
+  // All four reads at once. None depends on another's result, so awaiting them
+  // in sequence made this page four round trips deep for no reason; the errors
+  // are still reported individually below, exactly as before.
+  //
+  // Owned-client counts drive the reassignment gate's warning (F014 AC2), so the
+  // admin sees "owns 3 clients" before starting rather than being refused after.
+  // Fetched separately because PostgREST cannot aggregate across the reverse of
+  // this FK in one select. A failure there is not fatal: deactivate_user recounts
+  // authoritatively.
+  //
+  // F167: the count in the table links through to /clients?owner=, and that list
+  // hides actively-suppressed clients (F051 AC4). Counting them here too would
+  // send the admin to a list shorter than the number they clicked. Kept as a
+  // second count rather than a narrower `owned` query: the reassignment gate
+  // still has to see every client the leaver holds, suppressed or not.
+  const [
+    { data: users, error },
+    { data: pendingInvites, error: pendingError },
+    { data: owned, error: ownedError },
+    { data: suppressed, error: suppressedError },
+  ] = await Promise.all([
+    supabase
+      .from("users")
+      .select("id, email, full_name, role, is_active, deactivated_at, last_seen_at")
+      .or("invited_at.is.null,invite_accepted_at.not.is.null")
+      .neq("id", DELETED_USER_PLACEHOLDER_ID)
+      .order("full_name"),
+    supabase
+      .from("users")
+      .select("id, email, invited_at, role")
+      .not("invited_at", "is", null)
+      .is("invite_accepted_at", null)
+      .order("invited_at", { ascending: false }),
+    supabase.from("organisations").select("id, owner_id").not("owner_id", "is", null),
+    supabase.from("suppressions").select("organisation_id").eq("status", "active"),
+  ]);
 
   if (error) {
     await reportError(error, { operation: "admin.users.page_list" });
   }
-
-  const { data: pendingInvites, error: pendingError } = await supabase
-    .from("users")
-    .select("id, email, invited_at, role")
-    .not("invited_at", "is", null)
-    .is("invite_accepted_at", null)
-    .order("invited_at", { ascending: false });
-
   if (pendingError) {
     await reportError(pendingError, { operation: "admin.users.pending_invites_list" });
   }
-
-  // Owned-client counts drive the reassignment gate's warning (F014 AC2), so the admin
-  // sees "owns 3 clients" before starting rather than being refused after. Fetched
-  // separately because PostgREST cannot aggregate across the reverse of this FK in one
-  // select. A failure here is not fatal: deactivate_user recounts authoritatively.
-  const { data: owned, error: ownedError } = await supabase
-    .from("organisations")
-    .select("id, owner_id")
-    .not("owner_id", "is", null);
-
   if (ownedError) {
     await reportError(ownedError, { operation: "admin.users.page_owned_counts" });
   }
-
-  // F167: the count in the table links through to /clients?owner=, and that list
-  // hides actively-suppressed clients (F051 AC4). Counting them here too would send
-  // the admin to a list shorter than the number they clicked. Kept as a second count
-  // rather than a narrower `owned` query: the reassignment gate above still has to
-  // see every client the leaver holds, suppressed or not.
-  const { data: suppressed, error: suppressedError } = await supabase
-    .from("suppressions")
-    .select("organisation_id")
-    .eq("status", "active");
-
   if (suppressedError) {
     await reportError(suppressedError, { operation: "admin.users.page_suppressions" });
   }
@@ -98,25 +160,44 @@ export default async function AdminUsersPage() {
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
-      <Stage className="mx-auto w-full max-w-6xl space-y-10">
-        <Rise className="flex flex-wrap items-end justify-between gap-x-8 gap-y-5">
-          <div className="min-w-0">
-            <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">Team members</h1>
-            <p className="mt-3 text-sm text-foreground/65">
-              Role changes apply on the user&apos;s next request.{" "}
-              <Link className="font-bold text-brand underline" href="/admin/offboard">
-                Reassign a leaver&apos;s clients
-              </Link>
-              {" "}or{" "}
-              <Link className="font-bold text-brand underline" href="/admin/cam-settings">
-                view CAM queue settings
-              </Link>
-              .
-            </p>
+      <SearchRail
+        className="max-w-6xl"
+        stageClassName="space-y-10"
+        heading={
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
+                Team members
+              </h1>
+            </div>
+            <div className="shrink-0 pt-1">
+              {/* Resolved here, not in the sheet: the allowlist lives in
+                  AUTH_ALLOWED_EMAIL_DOMAIN, and process.env is not readable
+                  from a Client Component. */}
+              <DarkInviteSheet
+                allowedDomains={allowedEmailDomains()}
+                pendingEmails={(pendingInvites ?? []).map((p) => p.email)}
+                existingUserEmails={(users ?? [])
+                  .filter((u) => !u.deactivated_at && u.is_active !== false)
+                  .map((u) => u.email)}
+                deactivatedEmails={(users ?? [])
+                  .filter((u) => Boolean(u.deactivated_at) || u.is_active === false)
+                  .map((u) => u.email)}
+              />
+            </div>
           </div>
-          <InviteDialog />
-        </Rise>
-
+        }
+        bar={
+          <BrandSearchBar
+            placeholder="Search team members for"
+            subjects={["team members", "roles", "CAMs", "admins"]}
+            defaultQuery={query}
+            params={TEAM_SEARCH_PARAMS}
+            categories={TEAM_SEARCH_CATEGORIES}
+            defaultFilters={defaultFilters}
+          />
+        }
+      >
         {error && (
           <Rise>
             <InlineAlert
@@ -129,12 +210,13 @@ export default async function AdminUsersPage() {
         {!error && (
           <TeamPanel
             currentUserId={authorization.actor.id}
+            filterCriteria={filterCriteria}
             initialPendingInvites={(pendingInvites as PendingInvite[] | null) ?? []}
             initialTeamUsers={teamUsers}
             pendingInvitesError={Boolean(pendingError)}
           />
         )}
-      </Stage>
+      </SearchRail>
     </div>
   );
 }

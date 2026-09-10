@@ -7,12 +7,19 @@ import { OriginButton } from "@/components/ui/origin-button";
 export function LiftSuppressionButton({
   organisationId,
   suppressionId,
+  defaultExpanded = false,
 }: {
   organisationId: string;
   suppressionId?: string;
+  /**
+   * Open straight into the reason form, and drop the standalone card chrome —
+   * used from the record header's overflow menu, where a dialog already
+   * supplies both the trigger and the surface.
+   */
+  defaultExpanded?: boolean;
 }) {
   const router = useRouter();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [reason, setReason] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -62,18 +69,23 @@ export function LiftSuppressionButton({
   }
 
   return (
-    <form onSubmit={submit} className="mt-3 rounded-xl border border-black/10 bg-white p-4 shadow-xs">
+    <form
+      onSubmit={submit}
+      className={
+        defaultExpanded ? "" : "mt-3 rounded-inset border border-rule bg-white p-4 shadow-xs"
+      }
+    >
       <label
-        className="block text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/70"
+        className="block text-[13px] font-medium text-dim"
         htmlFor="lift-reason"
       >
         Reason for lifting suppression
       </label>
-      <p className="mt-1 text-[13px] leading-[1.6] text-foreground/50">
+      <p className="mt-1 text-[13px] leading-[1.6] text-dim">
         Required, and kept on file. Restores visibility in the standard client list and unblocks outreach.
       </p>
       <textarea
-        className="mt-2.5 w-full rounded-xl border border-input bg-white px-3 py-2 text-sm leading-[1.6] outline-none transition-[box-shadow,border-color] placeholder:text-foreground/35 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:opacity-50"
+        className="mt-2.5 w-full rounded-inset border border-input bg-white px-3 py-2 text-sm leading-[1.6] outline-none transition-[box-shadow,border-color] placeholder:text-faint focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:opacity-50"
         placeholder="Why this suppression is being lifted (e.g. mistakenly suppressed, client re-engaged)"
         disabled={busy}
         id="lift-reason"
@@ -106,7 +118,7 @@ export function LiftSuppressionButton({
         </OriginButton>
       </div>
       {message && (
-        <p aria-live="polite" role="alert" className="mt-2 text-[13px] font-bold text-destructive">
+        <p aria-live="polite" role="alert" className="mt-2 text-[13px] font-semibold text-stop">
           {message}
         </p>
       )}

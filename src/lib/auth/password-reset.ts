@@ -97,12 +97,35 @@ export const passwordSchema = z
   });
 
 /**
- * Optional here because whether a name is actually required depends on
- * account state (does this user already have one?) that only the Server
- * Action can see — it re-checks and fills in `fieldErrors.fullName` itself.
- * See `setNewPassword` in `src/app/reset-password/actions.ts`.
+ * C0/C1 control characters, plus invisible formatting characters — zero-width
+ * space and joiners, bidi marks, word joiner, BOM — that survive a `trim()` and
+ * would otherwise let a name run past the length it appears to be.
  */
-export const fullNameSchema = z.string().trim().max(120, "Name is too long.").optional();
+const INVISIBLE_CHARACTERS =
+  /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\u2060\ufeff]/g;
+
+/**
+ * Collapses runs of whitespace and strips invisible formatting characters.
+ */
+export function normalizeFullName(value: string): string {
+  return value.replace(INVISIBLE_CHARACTERS, " ").replace(/\s+/g, " ").trim();
+}
+
+export const MAX_FULL_NAME_LENGTH = 120;
+export const REQUIRED_NAME_MESSAGE = "Enter your name.";
+export const NAME_TOO_LONG_MESSAGE = "Name is too long.";
+
+/**
+ * Normalises and bounds the display name input.
+ * Optional in base schema so that existing accounts resetting passwords without
+ * re-submitting a name pass schema validation, while the Server Action strictly
+ * enforces a non-empty name for all new accounts and invite acceptances.
+ */
+export const fullNameSchema = z
+  .string()
+  .transform(normalizeFullName)
+  .pipe(z.string().max(MAX_FULL_NAME_LENGTH, NAME_TOO_LONG_MESSAGE))
+  .optional();
 
 export const newPasswordSchema = z
   .object({

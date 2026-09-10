@@ -31,7 +31,7 @@ Project Root/
 | Category | Examples | Sensitive? | Local | Preview | Production |
 |---|---|---|---|---|---|
 | **Supabase** | URL, anon key, service role key | Yes (service key) | Dev project | Dev project | Prod project |
-| **Gmail/Email** | OAuth tokens, SMTP credentials | Yes | Dev Gmail account | Dev Gmail account | Production Gmail |
+| **Gmail/Email** | OAuth client + one shared-mailbox refresh token | Yes | Dev Gmail account | The branch outreach mailbox, `clients.sheffield@180dc.org` | Not yet set — see [end-of-project/outreach-prod-env.md](end-of-project/outreach-prod-env.md) |
 | **LLM** | API key for VOICE or Claude | Yes | Test/dev key | Test/dev key | Production key |
 | **Third-party APIs** | CharityBase, Companies House, etc. | Yes | Test credentials | Test credentials | Production credentials |
 | **Feature flags** | `ENABLE_AI_BOOKLETS`, log levels | No | Feature flags | Feature flags | Feature flags |
@@ -79,6 +79,8 @@ NEXT_PUBLIC_ENV=local
 
 # Email (Dev Gmail account — ask team)
 # These are used when manually testing email sending; CI/CD doesn't need them
+# These authorise ONE shared mailbox (clients.sheffield@180dc.org), not a per-CAM
+# account — see docs/email-sending.md
 GMAIL_REDIRECT_URI=http://localhost:3000/api/auth/gmail/callback
 GMAIL_CLIENT_ID=123456789-randomstring.apps.googleusercontent.com
 GMAIL_CLIENT_SECRET=GOCSPX-secretkey
@@ -89,15 +91,30 @@ GMAIL_REPLY_LOOKBACK_DAYS=2
 # LLM (Development API key — ask team)
 OPENAI_API_KEY=sk-proj-test-key-local-only
 
-# Gemini (F082 Client Booklet generation) — free-tier key from
-# aistudio.google.com; copy the model id from the AI Studio model picker
+# Gemini (F082 Client Booklet generation, F214 natural language search) —
+# free-tier key from aistudio.google.com; copy the model ids from the AI Studio
+# model picker. GEMINI_SEARCH_MODEL should be a Flash-Lite-tier model: search is
+# a far easier job than a booklet and the cheaper tier costs ~2.5x less.
 GEMINI_API_KEY=<redacted>
 GEMINI_MODEL=<model-id-from-ai-studio>
+GEMINI_SEARCH_MODEL=<flash-lite-model-id-from-ai-studio>
+
+# Live news hook for Stage 2 follow-ups (F110). "exa" pulls one recent item
+# per generation; "none" (the local default) generates without a hook.
+NEWS_HOOK_PROVIDER=none
+# SECRET. Exa API key, required when NEWS_HOOK_PROVIDER=exa. Free tier at
+# exa.ai needs no card ($10/month; blocked, never billed, on exhaustion).
+EXA_API_KEY=<redacted>
 
 # Feature flags & logging
 NEXT_PUBLIC_LOG_LEVEL=debug
 NEXT_PUBLIC_ENABLE_AI_BOOKLETS=true
 NEXT_PUBLIC_ENABLE_SCHEDULED_SENDS=true
+
+# Inbox design fill (mock threads behind the real rows on /inbox). On by
+# default; set to 0 and restart `npm run dev` once testing with the mock data
+# is done and the inbox renders real rows only. No code change needed.
+NEXT_PUBLIC_INBOX_MOCK_FILL=1
 
 # Seed scripts only — Postgres connection string for the DB `npm run seed` /
 # `npm run seed:clear` write to (F233). The app never reads this. Use the SESSION
@@ -147,14 +164,16 @@ GMAIL_REPLY_LOOKBACK_DAYS=2
 # LLM (Development API key)
 OPENAI_API_KEY=<redacted>
 
-# Gemini (F082 Client Booklet generation)
+# Gemini (F082 Client Booklet generation, F214 natural language search)
 GEMINI_API_KEY=<redacted>
 GEMINI_MODEL=<model-id-from-ai-studio>
+GEMINI_SEARCH_MODEL=<flash-lite-model-id-from-ai-studio>
 
 # Feature flags
 NEXT_PUBLIC_LOG_LEVEL=info
 NEXT_PUBLIC_ENABLE_AI_BOOKLETS=true
 NEXT_PUBLIC_ENABLE_SCHEDULED_SENDS=true
+NEXT_PUBLIC_INBOX_MOCK_FILL=1
 
 # Cron
 CRON_SECRET=<shared-secret>
@@ -197,14 +216,17 @@ GMAIL_REPLY_LOOKBACK_DAYS=2
 # LLM (Production API key)
 OPENAI_API_KEY=<redacted>
 
-# Gemini (F082 Client Booklet generation)
+# Gemini (F082 Client Booklet generation, F214 natural language search)
 GEMINI_API_KEY=<redacted>
 GEMINI_MODEL=<model-id-from-ai-studio>
+GEMINI_SEARCH_MODEL=<flash-lite-model-id-from-ai-studio>
 
 # Feature flags
 NEXT_PUBLIC_LOG_LEVEL=warn
 NEXT_PUBLIC_ENABLE_AI_BOOKLETS=true
 NEXT_PUBLIC_ENABLE_SCHEDULED_SENDS=true
+# Mock threads off in production: real mailbox only.
+NEXT_PUBLIC_INBOX_MOCK_FILL=0
 
 # Cron
 CRON_SECRET=<shared-secret>
@@ -234,20 +256,25 @@ NEXT_PUBLIC_SENTRY_DSN=<redacted>
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | `1x00000000000000000000AA` (test key) locally; real key on preview | real key | Always | **Required** (F003) — public site key for the login CAPTCHA. **Half of a pair:** the matching secret must be set in that project's Supabase **Authentication → Attack Protection**, or the widget renders, issues a token and nothing ever validates it. Setting this variable alone does *not* turn the CAPTCHA on. Each environment needs its own Cloudflare widget, or one rotation breaks the other. Production was misconfigured on both counts until 30 July 2026 and is now correct — the probe that proves it is in [production-deployment.md](production-deployment.md#the-captcha-needs-a-second-non-vercel-half) |
 | `TURNSTILE_SECRET_KEY` | test secret locally | not set | Only server-side | **SENSITIVE.** Only the local Supabase stack reads it, via `supabase/config.toml`. Hosted environments hold it in the Supabase dashboard instead |
 | `NEXT_PUBLIC_ENV` | `staging` | `production` | Always | Tells app which environment it's in |
-| `GMAIL_CLIENT_ID` | dev-id | prod-id | Always | Public OAuth client ID |
+| `GMAIL_CLIENT_ID` | dev-id | prod-id | Always | Public OAuth client ID for the Gmail send/reply-sync flow (PRD §12.1). Nothing to do with signing in — there is no login SSO |
 | `GMAIL_CLIENT_SECRET` | dev-secret | prod-secret | Only server-side | **SENSITIVE:** Never expose |
-| `GMAIL_REFRESH_TOKEN` | dev token | prod token | Only server-side | **SENSITIVE:** Authorises mailbox access |
+| `GMAIL_REFRESH_TOKEN` | dev token | prod token | Only server-side | **SENSITIVE:** Authorises mailbox access. **One token for the whole branch**, obtained once by authorising `clients.sheffield@180dc.org` — not one per CAM, because outreach leaves from a single shared Workspace mailbox ([email-sending.md](email-sending.md)). Revocation or expiry therefore stops outreach branch-wide, not for one person |
 | `GMAIL_SENDER_EMAIL` | outreach mailbox | outreach mailbox | Only server-side | Exact branch mailbox; no fallback sender |
 | `GMAIL_REPLY_LOOKBACK_DAYS` | positive whole days; default `2` | positive whole days; default `2` | Only server-side | Gmail inbox search window for replies; increase when clients commonly reply later |
 | `OPENAI_API_KEY` | test-key | prod-key | Only server-side | **SENSITIVE:** Never expose |
 | `GEMINI_API_KEY` | free-tier key from [aistudio.google.com](https://aistudio.google.com) | prod key | Only server-side | **SENSITIVE:** Never expose. Gemini key for LLM calls — F082 Client Booklet generation today, F100 email drafts later. Declared in `SCHEMA` (`src/lib/env.ts`) and passed explicitly to the AI SDK rather than read under its default `GOOGLE_GENERATIVE_AI_API_KEY` name. Unset ⇒ booklet generation returns a clear error |
 | `GEMINI_MODEL` | Flash-tier model id copied from the AI Studio model picker | same | Only server-side | Exact model id booklet generation calls (F082). No hardcoded default in code — Google retires model ids often enough that one would go stale. Unset ⇒ booklet generation cannot run |
+| `GEMINI_SEARCH_MODEL` | Flash-**Lite**-tier model id from the AI Studio model picker | same | Only server-side | Model that interprets F214 natural language searches. Separate from `GEMINI_MODEL` for cost: the LLM Provider Research doc puts search on the Flash-Lite tier ($0.30/$2.50 per million tokens) and booklets/drafts on Flash ($0.75/$3.75), so running search on the booklet model costs ~2.5× for an easier job. Optional — unset falls back to `GEMINI_MODEL` and logs a warning |
+| `NEWS_HOOK_PROVIDER` | `exa` | `exa` | Only server-side | Live news hook for Stage 2 follow-ups (F110): `exa` pulls one recent item per generation, `none` disables the lookup so follow-ups generate without a hook. Optional, defaults to `none` |
+| `EXA_API_KEY` | dev key | prod key (or same free key) | Only server-side | **SENSITIVE:** Exa key for the F110 news hook. Free tier at exa.ai needs no card ($10/month; blocked, never billed, on exhaustion). **Required when `NEWS_HOOK_PROVIDER` is `exa`** — startup fails otherwise |
+| `AI_SEARCH_RATE_LIMIT` | `40` | `40` | Only server-side | Maximum F214 search interpretations per user per window. Its own bucket, so searching never eats the booklet/draft allowance. Only calls that reach the API count — a repeated query is cached and a plain name search never calls it. Optional, defaults to 40 |
+| `AI_SEARCH_RATE_WINDOW_SECONDS` | `86400` | `86400` | Only server-side | Fixed-window duration for `AI_SEARCH_RATE_LIMIT`; optional, defaults to one day (search is bursty in a way generation is not) |
 | `AI_GENERATION_RATE_LIMIT` | `20` | `20` | Only server-side | Maximum Gemini requests per authenticated user in each fixed window; optional, defaults to 20 |
 | `AI_GENERATION_RATE_WINDOW_SECONDS` | `3600` | `3600` | Only server-side | AI fixed-window duration in seconds; optional, defaults to one hour |
 | `EMAIL_SEND_RATE_LIMIT` | `100` | `100` | Only server-side | Maximum outreach emails per CAM in each fixed window, manual sends and scheduled deliveries combined (F227); optional, defaults to 100 |
 | `EMAIL_SEND_RATE_WINDOW_SECONDS` | `3600` | `3600` | Only server-side | Email send fixed-window duration in seconds; optional, defaults to one hour |
 | `CRON_SECRET` | shared-secret | shared-secret | Only server-side | **SENSITIVE:** Auth for `/api/cron/*` routes |
-| `SESSION_ACTIVITY_SECRET` | random 32+ chars | random 32+ chars | Only server-side | **SENSITIVE:** Signs the inactivity record behind session expiry (F007). Optional — unset means sessions still expire after 30 idle minutes but the record is unsigned and forgeable, so set it everywhere hosted. `openssl rand -base64 32`. Rotating it signs every open session out once |
+| `SESSION_ACTIVITY_SECRET` | random 32+ chars | random 32+ chars | Only server-side | **SENSITIVE:** Signs the inactivity record behind session expiry (F007). Optional — unset means sessions still expire after 30 idle days but the record is unsigned and forgeable, so set it everywhere hosted. `openssl rand -base64 32`. Rotating it signs every open session out once |
 | `NEXT_PUBLIC_POSTHOG_KEY` | dev-key | prod-key | Always | Public analytics key |
 | `NEXT_PUBLIC_SENTRY_DSN` | dev-dsn | prod-dsn | Always | Public error reporting endpoint — where captured errors are sent (F226). Unset ⇒ errors log to the platform console instead |
 | `SENTRY_ENVIRONMENT` | `staging` | `production` | Only server-side | Environment tag on captured errors (F226). Optional — falls back to `VERCEL_ENV` |

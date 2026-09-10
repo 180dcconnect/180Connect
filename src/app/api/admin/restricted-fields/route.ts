@@ -28,7 +28,7 @@ function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
 
 export async function GET() {
   const authorization = await getCurrentActor("approval:manage", {
-    route: "/admin/restricted-fields",
+    route: "/settings/restricted-fields",
   });
   if (!authorization.ok) return denied(authorization.reason);
 

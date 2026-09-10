@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { Activity, BarChart3, CalendarRange, Check, ChevronDown } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { EASE } from "@/components/brand/motion";
+import { isCompleteRange, type RangeSelection } from "@/lib/date-range";
+import { DateRangeCalendar } from "./date-range-calendar";
 import type { ChartView } from "./metric-chart";
 
 /**
@@ -13,8 +16,81 @@ import type { ChartView } from "./metric-chart";
  */
 export type PeriodOption = { label: string; points?: number; from?: string; to?: string };
 
-const RANGE_INPUT =
-  "w-full rounded-lg border border-black/[0.06] dark:border-white/[0.10] bg-black/[0.03] dark:bg-white/[0.05] px-2 py-1.5 text-[12px] font-medium text-foreground outline-none transition-colors focus-visible:border-brand focus-visible:outline-none [color-scheme:light] dark:[color-scheme:dark]";
+/**
+ * The custom-range editor's own width, fixed on purpose.
+ *
+ * The popover shrink-wraps its content (`w-max`), so when the editor opens it is
+ * the editor that decides how wide the popover becomes. Animating `width: 0 →
+ * "auto"` needs "auto" to resolve to a stable number, and the calendar's cells
+ * are `w-full` — their natural width is whatever the parent gives them, which is
+ * circular. Pinning the editor breaks the circle.
+ *
+ * 16.5rem puts each of the seven day columns at ~35px, which is the smallest
+ * that keeps a two-digit date comfortably inside its tap target.
+ */
+const RANGE_EDITOR_WIDTH = "16.5rem";
+
+/* ─── Popover motion — the four numbers worth tuning ───────────────────────
+ *
+ * Everything about how the custom-range editor opens and closes is these
+ * constants. Change them here; nothing downstream hardcodes a duration.
+ *
+ * OPENING and CLOSING are deliberately NOT symmetrical, which is the whole
+ * reason the close needed its own pair of values:
+ *
+ *   EASE (opening) is [0.2, 0.7, 0.2, 1] — front-loaded, so the box is already
+ *   most of the way open in the first third of the animation. That is exactly
+ *   what you want on a press: the UI answers instantly, then settles.
+ *
+ *   Run that same curve backwards to close and it lurches away from the finger
+ *   and then crawls the last 20% — which is what read as "not smooth". So the
+ *   close uses COLLAPSE_EASE, the mathematical mirror of EASE (mirroring a
+ *   cubic-bezier x1,y1,x2,y2 is 1-x2, 1-y2, 1-x1, 1-y1). It starts gently,
+ *   accelerates, and is gone — an ease-IN to EASE's ease-OUT.
+ *
+ * HOW TO TUNE, in the order worth trying:
+ *
+ *   1. Close still too quick? Raise COLLAPSE_DURATION. 0.52 now; 0.6–0.7 is
+ *      luxurious, past ~0.8 it reads as broken rather than smooth.
+ *   2. Close feels sluggish to *start*? Drop the first number of COLLAPSE_EASE
+ *      (0.8 → 0.5). Lower = leaves rest sooner. Raise it for more hang.
+ *   3. Want open and close to match exactly? Set COLLAPSE to `EXPAND`. Do it to
+ *      feel the difference before deciding — it is the version that felt wrong.
+ *   4. The two FADE numbers control the calendar inside the box, not the box
+ *      itself. Opening delays the fade so the calendar arrives once there is
+ *      room; closing leads with it so the box is empty before it narrows. If you
+ *      can see the calendar squashing as it closes, LOWER FADE_OUT so it is gone
+ *      sooner. Keep it under COLLAPSE_DURATION or the fade outlives the box.
+ *
+ * ONE THING THE ANIMATION CANNOT FIX: pressing "Apply range" or "Reset" closes
+ * the whole popover (`setOpen(false)`) in the same tick, so the width collapse
+ * is never seen on that path — the popover has already unmounted. The collapse
+ * plays when you toggle "Custom range" shut, or press Escape. If you want it on
+ * apply too, that is a change in the onApply handler (drop its `setOpen(false)`
+ * and let the editor collapse first), not here.
+ */
+
+/** Shared with the public search bar, so the two expansions read as one gesture. */
+const EXPAND_DURATION = 0.42;
+/** Longer than the open: a close has no press to justify being abrupt. */
+const COLLAPSE_DURATION = 0.52;
+/** The mirror of EASE — gentle out of rest, accelerating away. */
+const COLLAPSE_EASE = [0.8, 0, 0.3, 0.8] as const;
+/** The calendar fades in behind the box, and out ahead of it. */
+const FADE_IN = { duration: 0.28, delay: 0.08 } as const;
+const FADE_OUT = { duration: 0.3 } as const;
+
+/**
+ * The popover shell itself (the whole dropdown fading/scaling in and out), as
+ * distinct from the editor widening inside it. This is the one that plays when
+ * you press Apply, Reset or Escape. It was 0.15s easeOut both ways, which is
+ * right on the way in and abrupt on the way out — hence the separate exit.
+ */
+const POPOVER_IN = { duration: 0.16, ease: EASE } as const;
+const POPOVER_OUT = { duration: 0.26, ease: COLLAPSE_EASE } as const;
+
+const EXPAND = { duration: EXPAND_DURATION, ease: EASE } as const;
+const COLLAPSE = { duration: COLLAPSE_DURATION, ease: COLLAPSE_EASE } as const;
 
 /** "12 Aug – 25 Aug", appending the year whenever either end isn't this year. */
 function formatRangeLabel(from: string, to: string): string {
@@ -42,48 +118,38 @@ function formatRangeLabel(from: string, to: string): string {
 function CustomRangeEditor({
   initial,
   canReset,
+  min,
+  max,
   onApply,
   onReset,
 }: {
   initial: { from: string; to: string } | null;
   /** Whether a custom range is currently active and can be reset. */
   canReset: boolean;
+  /** Inclusive selectable bounds — usually the extent of the loaded series. */
+  min?: string | null;
+  max?: string | null;
   onApply: (from: string, to: string) => void;
   onReset: () => void;
 }) {
-  const [from, setFrom] = useState(initial?.from ?? "");
-  const [to, setTo] = useState(initial?.to ?? "");
+  const [selection, setSelection] = useState<RangeSelection>(() => ({
+    from: initial?.from ?? null,
+    to: initial?.to ?? null,
+  }));
 
-  // ISO days compare correctly as plain strings.
-  const valid = from !== "" && to !== "" && from <= to;
+  const valid = isCompleteRange(selection);
 
   return (
     <form
       className="mt-1 space-y-2 rounded-xl bg-black/[0.03] p-2 dark:bg-white/[0.05]"
+      style={{ width: RANGE_EDITOR_WIDTH }}
       onSubmit={(event) => {
         event.preventDefault();
-        if (valid) onApply(from, to);
+        if (isCompleteRange(selection)) onApply(selection.from, selection.to);
       }}
     >
-      <div className="flex items-center gap-2">
-        <input
-          aria-label="From date"
-          type="date"
-          value={from}
-          max={to || undefined}
-          onChange={(event) => setFrom(event.target.value)}
-          className={RANGE_INPUT}
-        />
-        <span className="text-[11px] font-medium text-muted-foreground">to</span>
-        <input
-          aria-label="To date"
-          type="date"
-          value={to}
-          min={from || undefined}
-          onChange={(event) => setTo(event.target.value)}
-          className={RANGE_INPUT}
-        />
-      </div>
+      <DateRangeCalendar value={selection} onChange={setSelection} min={min} max={max} />
+
       <div className="flex items-center gap-1.5">
         <button
           type="submit"
@@ -163,6 +229,8 @@ export function PeriodSelect({
   accentText,
   allowCustomRange = false,
   defaultOption,
+  rangeMin,
+  rangeMax,
 }: {
   value: string;
   options: PeriodOption[];
@@ -172,6 +240,17 @@ export function PeriodSelect({
   allowCustomRange?: boolean;
   /** Where "Reset" sends the selection back to (usually the card's default). */
   defaultOption?: PeriodOption;
+  /**
+   * Inclusive ISO-day bounds the calendar may select within — normally the first
+   * and last day the series actually holds.
+   *
+   * Worth passing wherever it is known. Without them a user can pick a window
+   * the data does not cover and get an empty chart, which reads as "the
+   * dashboard is broken" rather than "there is nothing in that window"; with
+   * them, those days are visibly unavailable before the click.
+   */
+  rangeMin?: string | null;
+  rangeMax?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
@@ -212,9 +291,22 @@ export function PeriodSelect({
             role="listbox"
             initial={{ opacity: 0, scale: 0.95, y: -4 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -4 }}
-            transition={{ duration: 0.15, ease: "easeOut" }}
-            className="pointer-events-auto absolute right-0 top-full z-40 mt-1.5 min-w-[10.5rem] overflow-hidden rounded-2xl border border-black/[0.08] dark:border-white/[0.12] bg-popover/95 p-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur-md"
+            exit={{ opacity: 0, scale: 0.95, y: -4, transition: POPOVER_OUT }}
+            transition={POPOVER_IN}
+            /*
+             * `w-max` is what makes the widening animate at all. The popover used
+             * to be `min-w-[10.5rem]` with an auto width, so opening the custom
+             * range snapped the box to its new width in a single frame while the
+             * editor's height eased in underneath — the height was smooth and the
+             * width was not, which is the jump this fixes.
+             *
+             * Shrink-wrapped instead, the popover's width is whatever its widest
+             * child currently measures, so it follows the editor's own animated
+             * width frame by frame and no width has to be hardcoded here. The
+             * max-width is the viewport guard: the popover is anchored `right-0`
+             * and grows leftwards, and this keeps it on screen on a narrow phone.
+             */
+            className="pointer-events-auto absolute right-0 top-full z-40 mt-1.5 w-max min-w-[10.5rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-black/[0.08] dark:border-white/[0.12] bg-popover/95 p-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur-md"
           >
             {options.map((option) => {
               const isSelected = option.label === value;
@@ -287,15 +379,45 @@ export function PeriodSelect({
                   <AnimatePresence initial={false}>
                     {customOpen && (
                       <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: "auto" }}
-                        exit={{ opacity: 0, height: 0 }}
-                        transition={{ duration: 0.2, ease: "easeOut" }}
+                        /*
+                         * Width AND height, on the one curve. Animating only the
+                         * height left the popover's width to snap; growing the
+                         * editor's own width from 0 makes the shrink-wrapped
+                         * popover above widen with it, so the whole box opens as
+                         * a single motion. Opacity trails slightly behind the box
+                         * (see the per-key timings) so the fields fade in once
+                         * there is room for them rather than reflowing in view.
+                         */
+                        initial={{ opacity: 0, width: 0, height: 0 }}
+                        animate={{ opacity: 1, width: RANGE_EDITOR_WIDTH, height: "auto" }}
+                        /*
+                         * Closing gets its own, slower curve — see COLLAPSE at the
+                         * top of the file for why it is not just EXPAND reversed.
+                         * The opening fade delay must not apply here, or the fields
+                         * would still be on screen while the box narrows past them.
+                         */
+                        exit={{
+                          opacity: 0,
+                          width: 0,
+                          height: 0,
+                          transition: {
+                            width: COLLAPSE,
+                            height: COLLAPSE,
+                            opacity: { ...FADE_OUT, ease: COLLAPSE_EASE },
+                          },
+                        }}
+                        transition={{
+                          width: EXPAND,
+                          height: EXPAND,
+                          opacity: { ...FADE_IN, ease: EASE },
+                        }}
                         className="overflow-hidden"
                       >
                         <CustomRangeEditor
                           initial={appliedCustom}
                           canReset={isCustomSelected}
+                          min={rangeMin}
+                          max={rangeMax}
                           onReset={() => {
                             setAppliedCustom(null);
                             setCustomOpen(false);

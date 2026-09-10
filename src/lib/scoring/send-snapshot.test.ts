@@ -26,9 +26,8 @@ test("assembles the five factors plus score and band from org data", () => {
 
   // Sector is the documented neutral until F089 lands.
   assert.equal(payload.sector, 0.5);
-  // No priority regions configured → the geography neutral (0.5), whatever
-  // the city — "no preference set" must not penalise a recorded location.
-  assert.equal(payload.geography, 0.5);
+  // Sheffield is in BRANCH_PRIORITY_REGIONS (CLIENT_CRITERIA.priorityCities) → scores 0.8
+  assert.equal(payload.geography, 0.8);
   assert.ok(payload.size > 0 && payload.size <= 1);
   // Matched grants sit between the no-history neutral and the max bonus.
   assert.ok(

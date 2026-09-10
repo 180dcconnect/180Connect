@@ -65,10 +65,12 @@ function hasTextContent(node: React.ReactNode): boolean {
 
 export type OriginButtonVariant =
   | "default" // Signature landing glass (charcoal glass + lime #e6f5c0 hover fill)
+  | "ink" // Filed-record solid ink (client record; --ink + --lead-wash hover fill)
   | "card" // Clean light card + ink hover fill
   | "dark" // Flat ink + white wash
   | "outline" // Subtle outline
   | "ghost" // Transparent ghost
+  | "blue" // Blue tint (toned-down sky for Suggest an edit)
   | "destructive"; // Red destructive
 
 export type OriginButtonSize = "xs" | "sm" | "md" | "lg";
@@ -208,52 +210,62 @@ const OriginButton = React.forwardRef<HTMLButtonElement, OriginButtonProps>(
 
     // Resting background layer (fades out on hover so dark pixels never bleed into anti-aliased curved caps)
     const restBgLayer = {
+      ink: "bg-ink shadow-xs",
       default:
         "bg-[#1c1a18]/85 backdrop-blur-md ring-1 ring-white/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.3)] shadow-xs",
       card: "border-[0.5px] border-border bg-card shadow-xs dark:bg-muted",
       dark: "border-[0.5px] border-black/80 bg-[#0c1014] shadow-sm dark:bg-white dark:border-white/20",
       outline: "border border-black/15 bg-transparent",
       ghost: "border-transparent bg-transparent",
+      blue: "border border-lead/20 bg-transparent dark:border-lead/30 dark:bg-transparent",
       destructive: "border-[0.5px] border-destructive/20 bg-destructive/10",
     }[variant];
 
     // Active hovered border/rim layer
     const activeBorderLayer = {
+      ink: "ring-1 ring-black/[0.12] shadow-xs",
       default: "ring-1 ring-black/[0.08] shadow-xs",
       card: "border-[0.5px] border-black/20 shadow-xs",
       dark: "border-[0.5px] border-black/80 shadow-sm",
       outline: "border border-black/30",
       ghost: "border-transparent",
+      blue: "border border-lead dark:border-lead",
       destructive: "border-[0.5px] border-destructive/40",
     }[variant];
 
     // Expanding radial fill color
     const fillBg = {
+      ink: "bg-lead-wash",
       default: "bg-[#e6f5c0]",
       card: "bg-foreground dark:bg-neutral-50",
       dark: "bg-white/20 dark:bg-black/20",
       outline: "bg-[#e6f5c0]",
       ghost: "bg-foreground/10 dark:bg-white/10",
+      blue: "bg-lead dark:bg-lead",
       destructive: "bg-destructive text-white",
     }[variant];
 
     // Text color at rest
     const textRestColor = {
+      ink: "text-white",
       default: "text-[#f4f4ef]",
       card: "text-card-foreground dark:text-foreground",
       dark: "text-white dark:text-black",
       outline: "text-foreground",
       ghost: "text-foreground",
+      blue: "text-lead dark:text-lead-wash",
       destructive: "text-destructive",
     }[variant];
 
     // Text color when radial fill is active
     const textFilledColor = {
+      ink: "text-lead",
       default: "text-[#0c1014]",
       card: "text-background dark:text-neutral-950",
       dark: "text-white dark:text-black",
       outline: "text-[#0c1014]",
       ghost: "text-foreground",
+      blue: "text-white",
       destructive: "text-white",
     }[variant];
 

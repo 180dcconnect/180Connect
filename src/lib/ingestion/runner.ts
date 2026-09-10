@@ -21,6 +21,7 @@ import type {
   CommonRecord,
   DataSourceAdapter,
   DataSourceName,
+  FetchProgressCallback,
   IngestionStore,
   JobStatus,
   RawRecordRow,
@@ -182,7 +183,17 @@ async function runOneSource(
   }
 
   try {
-    const { records, truncated } = await source.fetch();
+    // Incremental progress for long per-organisation walks (360Giving): the
+    // adapter reports each completed lookup and the store persists it onto
+    // the run row, so an admin screen polling ingestion_runs sees a live
+    // walked/total count. Best-effort — a failed progress write is swallowed
+    // rather than failing the import, and finishRun still records the
+    // authoritative totals below.
+    const reportProgress: FetchProgressCallback = (progress) => {
+      void store.updateRunProgress(run.id, progress).catch(() => {});
+    };
+    const { records, truncated, walkedOrganisations, stats } =
+      await source.fetch(reportProgress);
     counts.fetched = records.length;
 
     const existing = await store.loadChecksums(
@@ -219,7 +230,7 @@ async function runOneSource(
     const status: JobStatus =
       truncated || invalid.length > 0 ? "partial" : "completed";
 
-    await store.finishRun(run.id, status, counts);
+    await store.finishRun(run.id, status, counts, undefined, stats);
 
     console.log(
       `[${source.name}] fetched ${counts.fetched}, written ${rows.length} ` +
@@ -228,7 +239,15 @@ async function runOneSource(
         `${truncated ? " — hit the source's result ceiling" : ""}`,
     );
 
-    return { source: source.name, status, counts, written, runId: run.id };
+    return {
+      source: source.name,
+      status,
+      counts,
+      written,
+      runId: run.id,
+      walkedOrganisations,
+      stats,
+    };
   } catch (err) {
     // Anything not yet written failed with the batch.
     counts.failed = counts.fetched - counts.inserted - counts.skipped;

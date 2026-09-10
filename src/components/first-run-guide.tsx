@@ -60,14 +60,36 @@ export function FirstRunGuide({
    * the ordinary path; this covers the other one, where the dashboard is sitting in a
    * second tab while the work happens in the first. Refreshing only while steps are
    * outstanding keeps a finished guide from re-fetching on every focus.
+   *
+   * Gated on how long the tab was actually away, because `visibilitychange` is a
+   * much broader event than "went off and completed a step": it fires on every
+   * tab switch, every window focus change and every OS app switch. Each one was
+   * triggering `router.refresh()`, and on this route that means re-running the
+   * whole dashboard render — which reads every organisation. Alt-tabbing to
+   * Slack and back cost a full dashboard refetch.
+   *
+   * Completing a step elsewhere takes seconds at minimum, so a brief flick away
+   * cannot have changed anything and is ignored. Anything longer still refreshes,
+   * so the case AC4 describes behaves exactly as before.
    */
   useEffect(() => {
     if (allDone) return;
-    function refreshOnReturn() {
-      if (document.visibilityState === "visible") router.refresh();
+
+    const MIN_AWAY_MS = 5_000;
+    let hiddenAt: number | null = null;
+
+    function onVisibilityChange() {
+      if (document.visibilityState !== "visible") {
+        hiddenAt = Date.now();
+        return;
+      }
+      const awayFor = hiddenAt === null ? Infinity : Date.now() - hiddenAt;
+      hiddenAt = null;
+      if (awayFor >= MIN_AWAY_MS) router.refresh();
     }
-    document.addEventListener("visibilitychange", refreshOnReturn);
-    return () => document.removeEventListener("visibilitychange", refreshOnReturn);
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
   }, [allDone, router]);
 
   function run(action: () => Promise<{ ok: boolean }>) {

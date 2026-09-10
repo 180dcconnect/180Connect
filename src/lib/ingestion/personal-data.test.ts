@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  containsRedactionPlaceholder,
   isPersonalEmail,
   redactPayload,
   redactText,
@@ -427,5 +428,26 @@ describe("redactPayload", () => {
 
     assert.deepEqual(twice.redacted, once.redacted);
     assert.deepEqual(twice.applied, []);
+  });
+});
+
+describe("containsRedactionPlaceholder", () => {
+  it("recognises a value that is nothing but a placeholder", () => {
+    assert.equal(containsRedactionPlaceholder(REDACTED_EMAIL), true);
+    assert.equal(containsRedactionPlaceholder(REDACTED_PHONE), true);
+  });
+
+  it("recognises a placeholder sitting inside surrounding text", () => {
+    assert.equal(
+      containsRedactionPlaceholder(`Email ${REDACTED_EMAIL} or call ${REDACTED_PHONE}`),
+      true,
+    );
+  });
+
+  it("leaves a real value, an empty string and a nullish one alone", () => {
+    assert.equal(containsRedactionPlaceholder("info@example.org"), false);
+    assert.equal(containsRedactionPlaceholder(""), false);
+    assert.equal(containsRedactionPlaceholder(null), false);
+    assert.equal(containsRedactionPlaceholder(undefined), false);
   });
 });

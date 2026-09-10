@@ -61,7 +61,7 @@ export function StatusSelect({
   }
 
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-2.5">
+    <div className="flex flex-wrap items-center gap-2">
       <label className="sr-only" htmlFor={`status-${organisationId}-${idSuffix}`}>
         Pipeline status
       </label>
@@ -70,7 +70,7 @@ export function StatusSelect({
         disabled={busy}
         onValueChange={(value) => setSelected(value as PipelineStatus)}
       >
-        <SelectTrigger id={`status-${organisationId}-${idSuffix}`} className="w-fit rounded-full bg-white text-sm">
+        <SelectTrigger id={`status-${organisationId}-${idSuffix}`} className="h-8 w-fit rounded-full border-rule bg-white text-[13.5px]">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -81,17 +81,22 @@ export function StatusSelect({
           ))}
         </SelectContent>
       </Select>
-      <OriginButton
-        type="button"
-        size="sm"
-        loading={busy}
-        disabled={busy || !dirty}
-        onClick={save}
-      >
-        {busy ? "Saving…" : "Save status"}
-      </OriginButton>
+      {/* Hidden until the value actually changes — a permanently disabled
+          button beside a select is noise in a header strip. */}
+      {(dirty || busy) && (
+        <OriginButton
+          type="button"
+          size="xs"
+          loading={busy}
+          disabled={busy}
+          onClick={save}
+          variant="ink"
+        >
+          {busy ? "Saving…" : "Save"}
+        </OriginButton>
+      )}
       {error && (
-        <p aria-live="polite" role="alert" className="w-full text-[13px] font-bold text-destructive">
+        <p aria-live="polite" role="alert" className="w-full text-[13px] font-semibold text-stop">
           {error}
         </p>
       )}
@@ -99,7 +104,7 @@ export function StatusSelect({
         // F149 AC3: 'responded' is intermediate — this status alone doesn't
         // conclude the interaction, so a CAM viewing it needs a nudge to
         // actually check the reply content and decide next steps.
-        <p className="w-full text-[13px] text-foreground/60">
+        <p className="ml-1 text-[13px] text-foreground/60">
           A reply has come in. Check the reply content and decide the next step.
         </p>
       )}

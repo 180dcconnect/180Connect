@@ -1,5 +1,8 @@
 import { formatOutreachStatus } from "./organisation-format.ts";
 import { formatRelativeTime, humaniseToken } from "./display-format.ts";
+import type { ActorPreview, OrganisationPreview } from "./recent-updates.ts";
+
+export type { ActorPreview, OrganisationPreview };
 
 export type RawTeamActivityRow = {
   id: string;
@@ -23,6 +26,10 @@ export type FormattedTeamActivity = {
   actionButton?: { label: string; href: string } | null;
   relativeTime: string;
   createdAt: string;
+  /** Optional preview data for the actor who performed the action. */
+  actorPreview?: ActorPreview;
+  /** Optional preview data for the target organisation. */
+  targetOrgPreview?: OrganisationPreview;
 };
 
 /**
@@ -39,6 +46,8 @@ export function formatTeamActivity(
   row: RawTeamActivityRow,
   now: Date = new Date(),
   ownedClientCount?: number,
+  actorPreviewMap?: ReadonlyMap<string, ActorPreview>,
+  orgPreviewMap?: ReadonlyMap<string, OrganisationPreview>,
 ): FormattedTeamActivity {
   const actorName = row.actor_name?.trim() || "A team member";
   const target = row.target_name?.trim() || "a client";
@@ -104,11 +113,12 @@ export function formatTeamActivity(
         actionLabel = "Joined";
         sentence = `${actorName} joined the team`;
         if (ownedClientCount === undefined || ownedClientCount === 0) {
+          const profileHref = row.actor_user_id ? `/team/${row.actor_user_id}` : "/team";
           actionButton = {
-            label: "Assign clients",
-            href: "/clients?owner=unassigned",
+            label: "View",
+            href: profileHref,
           };
-          targetHref = "/clients?owner=unassigned";
+          targetHref = profileHref;
         }
         break;
 
@@ -158,6 +168,10 @@ export function formatTeamActivity(
     actionButton,
     relativeTime: formatRelativeTime(when, now),
     createdAt: row.created_at,
+    actorPreview: actorPreviewMap?.get(row.actor_name ?? ''),
+    targetOrgPreview: row.target_table === "organisations" && row.target_id
+      ? orgPreviewMap?.get(row.target_id)
+      : undefined,
   };
 }
 
@@ -171,6 +185,8 @@ export function formatTeamActivities(
   excludeActorId?: string | null,
   now: Date = new Date(),
   ownedCounts?: Map<string, number>,
+  actorPreviewMap?: ReadonlyMap<string, ActorPreview>,
+  orgPreviewMap?: ReadonlyMap<string, OrganisationPreview>,
 ): FormattedTeamActivity[] {
   const filtered = excludeActorId
     ? rows.filter((row) => row.actor_user_id !== excludeActorId)
@@ -178,6 +194,6 @@ export function formatTeamActivities(
 
   return filtered.map((row) => {
     const count = row.actor_user_id ? ownedCounts?.get(row.actor_user_id) : undefined;
-    return formatTeamActivity(row, now, count);
+    return formatTeamActivity(row, now, count, actorPreviewMap, orgPreviewMap);
   });
 }

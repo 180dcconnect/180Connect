@@ -3,13 +3,32 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { NoteListItem } from "@/lib/note-history";
+import { splitNoteContentMentions } from "@/lib/note-mentions";
 
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+import { formatShortDate } from "@/lib/display-format";
+
+/**
+ * F485 (#485) — a saved note's `@Name` tokens render in the accent colour
+ * when they match a known teammate, so a mention reads as a mention rather
+ * than stray punctuation. Anything unresolvable (a renamed account, an
+ * email address, a bare `@`) renders as its typed text — the note is always
+ * readable as plain text.
+ */
+function NoteContent({ content, mentionNames }: { content: string; mentionNames: readonly string[] }) {
+  const parts = splitNoteContentMentions(content, mentionNames);
+  return (
+    <p className="mt-2.5 whitespace-pre-wrap text-sm leading-[1.65] text-ink">
+      {parts.map((part, index) =>
+        part.mention ? (
+          <span key={index} className="font-semibold text-lead">
+            {part.text}
+          </span>
+        ) : (
+          <span key={index}>{part.text}</span>
+        ),
+      )}
+    </p>
+  );
 }
 
 /**
@@ -37,10 +56,16 @@ export function NotesSection({
   notes,
   error,
   organisationId,
+  addNoteForm,
+  mentionNames = [],
 }: {
   notes: NoteListItem[];
   error: boolean;
   organisationId: string;
+  addNoteForm?: React.ReactNode;
+  /** Active teammates' display names, for @mention highlighting. Empty (or a
+   * failed lookup) renders every note as plain text — never an error. */
+  mentionNames?: readonly string[];
 }) {
   const router = useRouter();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -133,14 +158,19 @@ export function NotesSection({
 
   if (error) {
     return (
-      <p className="mt-4 text-sm font-bold text-destructive" role="alert">
+      <p className="mt-4 text-sm font-semibold text-stop" role="alert">
         Notes could not be loaded. Refresh and try again.
       </p>
     );
   }
 
   if (notes.length === 0) {
-    return <p className="mt-4 text-sm leading-[1.7] text-foreground/45">No notes yet.</p>;
+    return (
+      <div className="mt-4">
+        <p className="text-sm leading-[1.7] text-dim">No notes yet.</p>
+        {addNoteForm && <div className="mt-3">{addNoteForm}</div>}
+      </div>
+    );
   }
 
   return (
@@ -152,11 +182,11 @@ export function NotesSection({
         // pending too.
         const locked = busy || isRefreshing;
         return (
-          <li key={note.id} className="rounded-xl border border-black/[0.06] p-3.5">
-            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[13px] text-foreground/45">
-              <span className="font-bold text-foreground/70">{note.authorName}</span>
+          <li key={note.id} className="rounded-inset border border-rule p-3.5">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[13px] text-dim">
+              <span className="font-semibold text-dim">{note.authorName}</span>
               <span>
-                {formatDate(note.createdAt)}
+                {formatShortDate(note.createdAt)}
                 {note.edited ? " · edited" : ""}
               </span>
             </div>
@@ -168,7 +198,7 @@ export function NotesSection({
                 </label>
                 <textarea
                   id={`edit-note-${note.id}`}
-                  className="w-full rounded-lg border border-black/15 p-2.5 text-sm outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/20"
+                  className="w-full rounded-inset border border-rule p-2.5 text-sm outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-lead-mid/20"
                   disabled={locked}
                   onChange={(event) => setDraft(event.target.value)}
                   rows={3}
@@ -177,7 +207,7 @@ export function NotesSection({
                 <div className="mt-2 flex items-center gap-3">
                   <button
                     type="button"
-                    className="rounded-full border border-brand/30 px-3.5 py-1.5 text-xs font-bold text-brand hover:bg-brand/5 disabled:opacity-50"
+                    className="rounded-full border border-rule px-3.5 py-1.5 text-xs font-semibold text-lead hover:bg-lead-wash disabled:opacity-50"
                     disabled={locked}
                     onClick={() => saveEdit(note.id)}
                   >
@@ -185,14 +215,14 @@ export function NotesSection({
                   </button>
                   <button
                     type="button"
-                    className="text-xs font-bold text-foreground/45 hover:text-foreground/70 disabled:opacity-50"
+                    className="text-xs font-semibold text-dim hover:text-dim disabled:opacity-50"
                     disabled={locked}
                     onClick={cancelEdit}
                   >
                     Cancel
                   </button>
                   {errorNoteId === note.id && formError && (
-                    <p aria-live="polite" role="alert" className="text-xs font-bold text-destructive">
+                    <p aria-live="polite" role="alert" className="text-xs font-semibold text-stop">
                       {formError}
                     </p>
                   )}
@@ -200,14 +230,12 @@ export function NotesSection({
               </div>
             ) : (
               <>
-                <p className="mt-2.5 whitespace-pre-wrap text-sm leading-[1.65] text-foreground/80">
-                  {note.content}
-                </p>
+                <NoteContent content={note.content} mentionNames={mentionNames} />
                 {note.canManage && (
                   <div className="mt-2 flex items-center gap-3">
                     <button
                       type="button"
-                      className="text-xs font-bold text-foreground/45 hover:text-foreground/70 disabled:opacity-50"
+                      className="text-xs font-semibold text-dim hover:text-dim disabled:opacity-50"
                       disabled={locked}
                       onClick={() => startEdit(note)}
                     >
@@ -215,14 +243,14 @@ export function NotesSection({
                     </button>
                     <button
                       type="button"
-                      className="text-xs font-bold text-destructive/70 hover:text-destructive disabled:opacity-50"
+                      className="text-xs font-semibold text-stop/70 hover:text-stop disabled:opacity-50"
                       disabled={locked}
                       onClick={() => deleteNote(note)}
                     >
                       {busy ? "Deleting…" : "Delete"}
                     </button>
                     {errorNoteId === note.id && formError && (
-                      <p aria-live="polite" role="alert" className="text-xs font-bold text-destructive">
+                      <p aria-live="polite" role="alert" className="text-xs font-semibold text-stop">
                         {formError}
                       </p>
                     )}

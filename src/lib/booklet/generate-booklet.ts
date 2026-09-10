@@ -15,8 +15,10 @@ import { reportError } from "../error-logging.ts";
 import { logApiHealth } from "../api-health-log.ts";
 import {
   buildBookletPrompt,
+  EMPTY_BOOKLET_RECORD,
   type BookletEnrichmentInput,
   type BookletOrganisationInput,
+  type BookletRecordInput,
   type BookletWebsiteContext,
 } from "./build-prompt.ts";
 
@@ -106,6 +108,13 @@ export type GenerateBookletInput = {
   // called, same way organisation/enrichment are already DB reads the route does
   // up front — keeps this function's own concern limited to the Gemini call.
   websiteContext?: BookletWebsiteContext;
+  // PRD §6.7.2's financials, grants and source metadata. Read by the route in the
+  // same Promise.all as the two above, for the same reason: this function builds a
+  // prompt and calls Gemini, it does not decide what a client record contains.
+  record?: BookletRecordInput;
+  // Operator-typed steer, passed straight to the prompt builder (which places
+  // it outside the untrusted-data fence). Optional and capped by the route.
+  steer?: string | null;
 };
 
 /**
@@ -136,6 +145,8 @@ export async function generateBooklet(
     input.organisation,
     input.enrichment,
     input.websiteContext ?? null,
+    input.record ?? EMPTY_BOOKLET_RECORD,
+    input.steer ?? null,
   );
   const startedAt = Date.now();
 

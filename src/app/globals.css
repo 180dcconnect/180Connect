@@ -1,6 +1,27 @@
 @import "tailwindcss";
 
+/**
+ * The app is light-only. There is no `.dark` class applied anywhere, no theme
+ * toggle, and no dark palette — `docs/design-system.md` describes one ground
+ * (bone `#f4f4ef`) with white cards on it.
+ *
+ * Tailwind v4's stock `dark` variant is `@media (prefers-color-scheme: dark)`,
+ * so every stray `dark:` class left behind by a pasted component fired off the
+ * viewer's OS setting and rendered a dark control on a light page — the Add
+ * Note trigger came out near-black (`dark:bg-zinc-800`) on a bone card. Binding
+ * the variant to an explicit `.dark` ancestor that nothing ever sets neutralises
+ * all of them at once; light rendering is unchanged. `color-scheme: light` stops
+ * the browser dark-theming form controls and scrollbars for the same reason.
+ *
+ * If this app ever grows a real dark mode, this is the hook: put `.dark` on
+ * <html> and define the token overrides under it.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant print (@media print);
+
 :root {
+  color-scheme: light;
+
   --background: #ffffff;
   --foreground: #414042;
   --brand: #72b744;
@@ -37,6 +58,48 @@
    */
   --input: #e6e6e7;
   --ring: var(--brand);
+
+  /**
+   * ─── Filed Record ────────────────────────────────────────────────────
+   * The client record's visual language. Additive: nothing above changes,
+   * so every page still on the old tokens renders exactly as it did.
+   *
+   * Three problems these fix, in order of how much they were costing us:
+   *
+   * 1. `border-black/[0.06]` is #f0f0f0 on white — 1.06:1, invisible. White
+   *    cards on warm bone had no edges, so the page read as grey mush.
+   *    `--rule` is 1.35:1: a hairline you can actually see.
+   * 2. Three darks at two colour temperatures (#1c1a18 warm, #0c1014 and
+   *    #161b21 cool) sat next to each other. `--ink` replaces all three.
+   * 3. `--foreground: #414042` has zero hue. Text tinted toward the ground
+   *    (`--ink`, `--dim`) stops the page looking cheap.
+   *
+   * The ground moves off warm bone (#f4f4ef) to cool filing stock, because
+   * the record is assembled from public filings — Charity Commission,
+   * Companies House, 360Giving — and cool grey gives white something to sit
+   * against.
+   *
+   * `--lead` is the only structural accent, and appears in four places:
+   * active tab, links, focus ring, register keys. Buttons are `--ink`.
+   * The brand green survives as `--go` and nothing else — retuned from
+   * #72b744 (2.3:1 on white, unusable as text) to 4.9:1.
+   */
+  --paper: #ebedf0;
+  --paper-sunk: #e2e5ea;
+  --rule: #d4d8df;
+  --rule-soft: #e4e7ec;
+  --ink: #141a22;
+  --dim: #667080;
+  --faint: #8b94a1;
+  --lead: #23407a;
+  --lead-mid: #35589b;
+  --lead-wash: #e3e9f5;
+  --go: #3d7a2e;
+  --go-wash: #e6f0e2;
+  --hold: #8a5a00;
+  --hold-wash: #f6eedd;
+  --stop: #a32020;
+  --stop-wash: #f7e5e5;
   /* Text selection inside those controls (`selection:bg-primary`). */
   --primary: var(--brand);
   --primary-foreground: #ffffff;
@@ -64,6 +127,29 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-body: var(--font-lato);
+  --font-serif: var(--font-source-serif);
+
+  /* Filed Record — see the block above for why each exists. */
+  --color-paper: var(--paper);
+  --color-paper-sunk: var(--paper-sunk);
+  --color-rule: var(--rule);
+  --color-rule-soft: var(--rule-soft);
+  --color-ink: var(--ink);
+  --color-dim: var(--dim);
+  --color-faint: var(--faint);
+  --color-lead: var(--lead);
+  --color-lead-mid: var(--lead-mid);
+  --color-lead-wash: var(--lead-wash);
+  --color-go: var(--go);
+  --color-go-wash: var(--go-wash);
+  --color-hold: var(--hold);
+  --color-hold-wash: var(--hold-wash);
+  --color-stop: var(--stop);
+  --color-stop-wash: var(--stop-wash);
+
+  /* 10px reads as a document; rounded-2xl reads as a 2021 app card. */
+  --radius-panel: 10px;
+  --radius-inset: 6px;
 }
 
 /**
@@ -182,6 +268,68 @@ a:hover .mail-sprite {
   }
 }
 
+/* Verified registry check: fades, rotates, unblurs, bobs upward, and draws the
+   tick on first render. */
+.verified-check {
+  display: inline-block;
+  opacity: 0;
+  transform-origin: center;
+  filter: blur(10px);
+  translate: 0 40px;
+}
+
+.verified-check svg {
+  display: block;
+  overflow: visible;
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.verified-check svg path {
+  stroke-dasharray: 20;
+  stroke-dashoffset: 20;
+}
+
+.verified-check-in {
+  animation:
+    verified-check-fade 500ms cubic-bezier(0.22, 1, 0.36, 1) forwards,
+    verified-check-rotate 500ms cubic-bezier(0.22, 1, 0.36, 1) forwards,
+    verified-check-blur 500ms cubic-bezier(0.22, 1, 0.36, 1) forwards,
+    verified-check-bob 500ms cubic-bezier(0.34, 1.35, 0.64, 1) forwards;
+}
+
+.verified-check-in svg path {
+  animation: verified-check-draw 500ms cubic-bezier(0.22, 1, 0.36, 1) 80ms forwards;
+}
+
+@keyframes verified-check-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes verified-check-rotate { from { transform: rotate(80deg); } to { transform: rotate(0deg); } }
+@keyframes verified-check-blur { from { filter: blur(10px); } to { filter: blur(0); } }
+@keyframes verified-check-bob { from { translate: 0 40px; } to { translate: 0 0; } }
+@keyframes verified-check-draw { to { stroke-dashoffset: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .verified-check,
+  .verified-check-in,
+  .verified-check-in svg path {
+    animation: none !important;
+  }
+
+  .verified-check {
+    opacity: 1;
+    filter: blur(0);
+    translate: 0 0;
+  }
+
+  .verified-check svg path {
+    stroke-dashoffset: 0;
+  }
+}
+
 /* Entrance for popover-style overlays (Select, and anything else that only
    mounts while open) — a tiny scale + rise rather than a hard pop-in. */
 @keyframes popover-in {
@@ -202,6 +350,64 @@ a:hover .mail-sprite {
 @media (prefers-reduced-motion: reduce) {
   .animate-popover-in {
     animation: none;
+  }
+}
+
+/* The send button's paper plane.
+   Lifted out of a styled-components demo: this app has no styled-components SSR
+   registry, so the keyframes had to live in a real stylesheet or the button
+   would flash unstyled on first paint.
+
+   The whole hover choreography lives here rather than in Tailwind
+   `group-hover:` utilities, because the reduced-motion and mid-send cases both
+   need to *cancel* a transform. Expressing that as competing utilities
+   (`group-hover:translate-x-…` vs `motion-reduce:group-hover:transform-none`)
+   leaves the outcome to Tailwind's variant sort order; a plain cascade here is
+   decidable by reading it. `[data-pending]` is set while a send is in flight,
+   so the plane holds still under the "Sending…" label. */
+@keyframes send-plane-bob {
+  from {
+    transform: translateY(0.1em);
+  }
+  to {
+    transform: translateY(-0.1em);
+  }
+}
+
+.send-flight,
+.send-label {
+  transition: transform 300ms ease;
+}
+
+.send-flight {
+  transform-origin: center;
+}
+
+.group\/send:hover:not([data-pending]) .send-plane {
+  animation: send-plane-bob 0.6s ease-in-out infinite alternate;
+}
+
+.group\/send:hover:not([data-pending]) .send-flight {
+  transform: translateX(1.2em) rotate(45deg) scale(1.1);
+}
+
+.group\/send:hover:not([data-pending]) .send-label {
+  transform: translateX(5em);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .send-flight,
+  .send-label {
+    transition: none;
+  }
+
+  .group\/send:hover .send-plane {
+    animation: none;
+  }
+
+  .group\/send:hover .send-flight,
+  .group\/send:hover .send-label {
+    transform: none;
   }
 }
 
@@ -310,3 +516,103 @@ html[data-reduced-motion="reduced"] *::after {
   transition-duration: 0.001ms !important;
 }
 
+/* ─── Synthetic Nature hero page (scoped) ─────────────────────────────── */
+
+/* Garamond for the hero headings; Geist is already the body font. */
+@font-face {
+  font-family: "Garamond";
+  src: url("https://db.onlinewebfonts.com/c/2bf40ab72ea4897a3fd9b6e48b233a19?family=Garamond");
+  font-display: swap;
+}
+
+.font-garamond {
+  font-family: "Garamond", "Times New Roman", serif;
+}
+
+/* Liquid-glass CTA on the Synthetic Nature page. */
+.liquid-glass {
+  background: rgba(255, 255, 255, 0.01);
+  background-blend-mode: luminosity;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border: none;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+.liquid-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.4px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.45) 0%,
+    rgba(255, 255, 255, 0.15) 20%,
+    rgba(255, 255, 255, 0) 40%,
+    rgba(255, 255, 255, 0) 60%,
+    rgba(255, 255, 255, 0.15) 80%,
+    rgba(255, 255, 255, 0.45) 100%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.liquid-glass:hover {
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.15);
+}
+
+.liquid-glass:active {
+  transform: scale(0.98);
+}
+
+/* Mobile hamburger dropdown glass on the Synthetic Nature page. */
+.mobile-menu-glass {
+  background: rgba(10, 10, 10, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+
+/* ---------------------------------------------------------------------------
+ * Printing a mail thread from /inbox
+ *
+ * Gmail prints the open conversation only. Ours is buried several flex/overflow
+ * wrappers deep inside the app shell and the inbox list, so `window.print()`
+ * used to spool the whole screen — both sidebars included.
+ *
+ * The reading pane tags its conversation column `#inbox-print-region`. Here we
+ * hide everything else with `visibility` (keeps layout, drops the ink),
+ * un-clip the ancestor chain so the region is not cropped to one screen, and
+ * lift it to the top-left of the sheet. The notes drawer, the suppress dialog
+ * and the top action bar are siblings of the region, so they stay hidden.
+ * ------------------------------------------------------------------------- */
+@media print {
+  body * {
+    visibility: hidden;
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
+  #inbox-print-region,
+  #inbox-print-region * {
+    visibility: visible;
+  }
+
+  #inbox-print-region {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0;
+  }
+}

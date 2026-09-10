@@ -1,7 +1,38 @@
 "use client";
 
-import { useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
+import {
+  ArrowDown,
+  ArrowRight,
+  ArrowUp,
+  ArrowUpDown,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  Shield,
+  UserCheck,
+  UserX,
+  X,
+} from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { sortTeamUsers, type SortOrder, type TeamSortField } from "@/lib/admin/team-filter";
+import { Checkbox } from "@/components/animate-ui/components/radix/checkbox";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -9,9 +40,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { InlineAlert } from "@/components/ui/inline-alert";
-import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
-import { reportError } from "@/lib/error-logging";
+import { getPageNumbers } from "@/components/ui/feed-pagination";
 
 export type TeamUser = {
   id: string;
@@ -37,11 +66,16 @@ export type TeamUser = {
   listed_client_count: number;
 };
 
-type AccessState = "active" | "suspended" | "deactivated";
-
-function accessState(user: TeamUser): AccessState {
-  if (user.is_active) return "active";
-  return user.deactivated_at ? "deactivated" : "suspended";
+/** First letters of the first two words or email. */
+function initialsOf(name: string | null | undefined, email: string): string {
+  if (name?.trim()) {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return email.slice(0, 2).toUpperCase();
 }
 
 /**
@@ -57,12 +91,6 @@ function clientsLinkTitle(user: TeamUser): string {
     ? `${base} (${hidden} more suppressed, not listed)`
     : base;
 }
-
-const ACCESS_LABEL: Record<AccessState, string> = {
-  active: "Active",
-  suspended: "Suspended",
-  deactivated: "Deactivated",
-};
 
 function displayName(user: TeamUser) {
   return user.full_name ?? user.email;
@@ -82,452 +110,761 @@ function lastActiveLabel(lastSeenAt: string | null): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
-  return new Date(lastSeenAt).toLocaleDateString();
+  return new Date(lastSeenAt).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+  });
 }
+
+const ROLE_LABEL: Record<TeamUser["role"], string> = {
+  cam: "CAM",
+  admin: "Admin",
+  viewer: "Viewer",
+};
+
+const ROLE_STYLES: Record<TeamUser["role"], string> = {
+  admin: "bg-[#f5efc6]/60 text-ink border-[#f5efc6]",
+  cam: "bg-brand/10 text-brand-hover border-brand/20",
+  viewer: "bg-sky-50 text-sky-900 border-sky-100",
+};
+
+const emptySubscribe = () => () => {};
 
 export function UserManagementTable({
   users,
+  totalCount,
+  hasActiveFilters = false,
   setUsers,
   currentUserId,
 }: {
   users: TeamUser[];
-  /**
-   * Lifted to team-panel.tsx (F011) so a realtime change from another admin and a
-   * change this table just made through `/api/admin/users` land in the same state —
-   * the panel's subscription and this table's PATCH calls would otherwise race to
-   * overwrite each other's `setUsers`.
-   */
-  setUsers: Dispatch<SetStateAction<TeamUser[]>>;
-  currentUserId: string;
+  totalCount?: number;
+  hasActiveFilters?: boolean;
+  setUsers?: Dispatch<SetStateAction<TeamUser[]>>;
+  currentUserId?: string;
 }) {
-  const [status, setStatus] = useState<{ text: string; tone: "success" | "error" } | null>(null);
-  const [savingId, setSavingId] = useState<string | null>(null);
-  /** The user an offboarding is being composed for, or null when the form is closed. */
-  const [offboarding, setOffboarding] = useState<TeamUser | null>(null);
+  const isClient = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false,
+  );
+  const [sortBy, setSortBy] = useState<TeamSortField>("name");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  /**
-   * Re-reads the whole table. A reassignment changes a row the response does not
-   * describe — the clients land on someone else, and their count in the Clients
-   * column would otherwise stay stale until a manual refresh. Patching the two rows
-   * by hand would go wrong the moment the RPC moves anything else (F257 will), so the
-   * table is re-read from the source instead.
-   */
-  async function refreshUsers() {
-    try {
-      const response = await fetch("/api/admin/users");
-      if (!response.ok) return;
-      const result = await response.json();
-      if (Array.isArray(result.users)) setUsers(result.users);
-    } catch {
-      // The change itself landed; a stale count is not worth an error message over.
+  // Bulk action states
+  const [rolePopoverOpen, setRolePopoverOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  // Clear messages after a delay
+  useEffect(() => {
+    if (!bulkMessage) return;
+    const timer = setTimeout(() => setBulkMessage(null), 5000);
+    return () => clearTimeout(timer);
+  }, [bulkMessage]);
+
+  // Handle keyboard escape to clear selection
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !bulkBusy) {
+        setSelectedIds(new Set());
+        setRolePopoverOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedIds.size, bulkBusy]);
+
+  function handleSort(field: TeamSortField) {
+    if (sortBy === field) {
+      setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(field);
+      setSortOrder(field === "clients" || field === "last_active" ? "desc" : "asc");
+    }
+    setCurrentPage(1);
+  }
+
+  const sortedUsers = useMemo(() => {
+    return sortTeamUsers(users, sortBy, sortOrder);
+  }, [users, sortBy, sortOrder]);
+
+  const total = totalCount ?? users.length;
+  const isFiltered = hasActiveFilters && total !== sortedUsers.length;
+
+  const totalPages = Math.max(1, Math.ceil(sortedUsers.length / pageSize));
+  const activePage = Math.min(currentPage, totalPages);
+
+  const paginatedUsers = useMemo(() => {
+    const start = (activePage - 1) * pageSize;
+    return sortedUsers.slice(start, start + pageSize);
+  }, [sortedUsers, activePage, pageSize]);
+
+  const pageIds = useMemo(() => paginatedUsers.map((u) => u.id), [paginatedUsers]);
+  const isAllPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+  const isSomePageSelected = pageIds.some((id) => selectedIds.has(id)) && !isAllPageSelected;
+  const hasSelection = selectedIds.size > 0;
+
+  function toggleSelectAllPage() {
+    if (isAllPageSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of pageIds) next.delete(id);
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of pageIds) next.add(id);
+        return next;
+      });
     }
   }
 
-  /**
-   * One PATCH for every change a row supports: `{ role }` swaps the role (F012),
-   * `{ isActive }` suspends or reactivates (F013), and `{ deactivate: true, ... }`
-   * offboards (F014). The route reads whichever it is given and refuses anything
-   * carrying none of them.
-   */
-  async function updateUser(
-    userId: string,
-    change:
-      | { role: TeamUser["role"] }
-      | { isActive: boolean }
-      | {
-          deactivate: true;
-          reason: string;
-          reassignTo?: string;
-          releaseClients?: boolean;
-        },
-    successMessage: string,
-  ) {
-    setSavingId(userId);
-    setStatus(null);
-    try {
-      const response = await fetch("/api/admin/users", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, ...change }),
+  function toggleSelectUser(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleBulkRoleChange(newRole: "cam" | "admin" | "viewer") {
+    setRolePopoverOpen(false);
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+
+    // Filter out self if user selected their own account
+    const applicableIds = ids.filter((id) => id !== currentUserId);
+    const skippedSelf = ids.length !== applicableIds.length;
+
+    if (applicableIds.length === 0) {
+      setBulkMessage({
+        type: "error",
+        text: "You cannot change your own role through bulk actions.",
       });
-      const result = await response.json();
-      if (!response.ok) {
-        setStatus({ text: result.error ?? "The change was blocked.", tone: "error" });
-        return false;
+      return;
+    }
+
+    setBulkBusy(true);
+    setBulkMessage(null);
+
+    let successCount = 0;
+    let failCount = 0;
+
+    const results = await Promise.allSettled(
+      applicableIds.map(async (userId) => {
+        const res = await fetch("/api/admin/users", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, role: newRole }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error ?? "Failed to update role");
+        }
+        return userId;
+      }),
+    );
+
+    const succeededIds = new Set<string>();
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        successCount++;
+        succeededIds.add(result.value);
+      } else {
+        failCount++;
       }
-      setUsers((current) =>
-        current.map((user) =>
-          user.id === userId
-            ? { ...user, ...result.user, owned_client_count: 0, listed_client_count: 0 }
-            : user,
+    }
+
+    if (setUsers && succeededIds.size > 0) {
+      setUsers((prev) =>
+        prev.map((u) => (succeededIds.has(u.id) ? { ...u, role: newRole } : u)),
+      );
+    }
+
+    setBulkBusy(false);
+    setSelectedIds(new Set());
+
+    if (failCount === 0) {
+      setBulkMessage({
+        type: "success",
+        text: `Updated ${successCount} member${successCount === 1 ? "" : "s"} to ${ROLE_LABEL[newRole]}${skippedSelf ? " (skipped your account)" : ""}.`,
+      });
+    } else {
+      setBulkMessage({
+        type: "error",
+        text: `Updated ${successCount} member${successCount === 1 ? "" : "s"}, ${failCount} failed.`,
+      });
+    }
+  }
+
+  async function handleBulkStatusChange(isActive: boolean) {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+
+    // Filter out self for suspension
+    const applicableIds = !isActive ? ids.filter((id) => id !== currentUserId) : ids;
+    const skippedSelf = !isActive && ids.length !== applicableIds.length;
+
+    if (applicableIds.length === 0) {
+      setBulkMessage({
+        type: "error",
+        text: "You cannot suspend your own account.",
+      });
+      return;
+    }
+
+    setBulkBusy(true);
+    setBulkMessage(null);
+
+    let successCount = 0;
+    let failCount = 0;
+
+    const results = await Promise.allSettled(
+      applicableIds.map(async (userId) => {
+        const res = await fetch("/api/admin/users", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, isActive }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error ?? "Failed to update status");
+        }
+        return userId;
+      }),
+    );
+
+    const succeededIds = new Set<string>();
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        successCount++;
+        succeededIds.add(result.value);
+      } else {
+        failCount++;
+      }
+    }
+
+    if (setUsers && succeededIds.size > 0) {
+      setUsers((prev) =>
+        prev.map((u) =>
+          succeededIds.has(u.id)
+            ? { ...u, is_active: isActive, deactivated_at: isActive ? null : u.deactivated_at }
+            : u,
         ),
       );
-      setStatus({
-        text: result.clientsMoved
-          ? `${successMessage} ${result.clientsMoved} client${result.clientsMoved === 1 ? "" : "s"} moved.`
-          : successMessage,
-        tone: "success",
+    }
+
+    setBulkBusy(false);
+    setSelectedIds(new Set());
+
+    const actionText = isActive ? "Reactivated" : "Suspended";
+    if (failCount === 0) {
+      setBulkMessage({
+        type: "success",
+        text: `${actionText} ${successCount} member${successCount === 1 ? "" : "s"}${skippedSelf ? " (skipped your account)" : ""}.`,
       });
-      if (result.clientsMoved) await refreshUsers();
-      return true;
-    } catch (err) {
-      void reportError(err, { operation: "admin.users.update_user_client" });
-      setStatus({ text: NETWORK_ERROR_MESSAGE, tone: "error" });
-      return false;
-    } finally {
-      setSavingId(null);
+    } else {
+      setBulkMessage({
+        type: "error",
+        text: `${actionText} ${successCount} member${successCount === 1 ? "" : "s"}, ${failCount} failed.`,
+      });
     }
   }
 
-  /**
-   * Who a departing member's clients may be handed to. Viewers are excluded because
-   * they may not own anything, and inactive accounts because handing work to one
-   * recreates the problem this flow exists to solve. `deactivate_user` enforces both
-   * again — this list only keeps the admin from picking something it will refuse.
-   */
-  const eligibleOwners = offboarding
-    ? users.filter(
-        (user) =>
-          user.id !== offboarding.id &&
-          user.is_active &&
-          user.role !== "viewer",
-      )
-    : [];
+  const from = sortedUsers.length === 0 ? 0 : (activePage - 1) * pageSize + 1;
+  const to = Math.min(activePage * pageSize, sortedUsers.length);
+  const pageNumbers = getPageNumbers(activePage, totalPages);
 
   return (
-    <>
-      <div className="mb-2 min-h-5">
-        {status && <InlineAlert tone={status.tone} message={status.text} />}
-      </div>
-
-      {offboarding && (
-        <OffboardingForm
-          eligibleOwners={eligibleOwners}
-          onCancel={() => setOffboarding(null)}
-          onConfirm={async (change) => {
-            const ok = await updateUser(
-              offboarding.id,
-              { deactivate: true, ...change },
-              `${displayName(offboarding)} has been deactivated. They have been signed out and can no longer log in.`,
-            );
-            if (ok) setOffboarding(null);
-          }}
-          saving={savingId === offboarding.id}
-          user={offboarding}
-        />
+    <div className="relative">
+      {/* Action Notification Alert (if any) */}
+      {bulkMessage && (
+        <div
+          role="alert"
+          className={`flex items-center justify-between border-b px-5 py-2.5 text-xs font-semibold ${
+            bulkMessage.type === "success"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : "border-red-200 bg-red-50 text-red-800"
+          }`}
+        >
+          <span className="flex items-center gap-2">
+            {bulkMessage.type === "success" ? (
+              <Check className="size-4 shrink-0 text-emerald-600" />
+            ) : (
+              <X className="size-4 shrink-0 text-red-600" />
+            )}
+            <span>{bulkMessage.text}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setBulkMessage(null)}
+            className="cursor-pointer text-current opacity-60 hover:opacity-100"
+            aria-label="Dismiss notification"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
       )}
 
-      <div className="mt-3 overflow-x-auto">
-        <table className="w-full border-collapse text-left text-sm">
-          <thead>
-            <tr className="border-b border-black/10">
-              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Member</th>
-              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Role</th>
-              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Clients</th>
-              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Last active</th>
-              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Status</th>
-              <th className="p-3 pb-4 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Access</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((user) => {
-              const state = accessState(user);
-              return (
-                <tr className="border-b border-black/5" key={user.id}>
-                  <td className="p-3">
-                    <Link
-                      href={`/team/${user.id}`}
-                      className="block font-bold hover:text-brand hover:underline"
-                    >
-                      {user.full_name ?? "Unnamed user"}
-                    </Link>
-                    <span className="text-foreground/60">{user.email}</span>
-                    {user.role === "cam" && (
-                      <span className="block mt-1">
-                        <Link
-                          href={`/admin/cam-settings?user=${user.id}`}
-                          className="text-xs font-medium text-brand hover:underline"
-                        >
-                          Queue settings →
-                        </Link>
-                      </span>
-                    )}
-                  </td>
-                  <td className="p-3">
-                    <Select
-                      disabled={savingId === user.id || user.id === currentUserId}
-                      onValueChange={(value) =>
-                        updateUser(
-                          user.id,
-                          { role: value as TeamUser["role"] },
-                          "Role updated successfully.",
-                        )
-                      }
-                      value={user.role}
-                    >
-                      <SelectTrigger aria-label={`Role for ${user.email}`} className="w-fit bg-white">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="cam">CAM</SelectItem>
-                        <SelectItem value="admin">Admin</SelectItem>
-                        <SelectItem value="viewer">Viewer</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </td>
-                  <td className="p-3">
-                    {user.listed_client_count > 0 ? (
-                      <Link
-                        href={`/clients?owner=${user.id}`}
-                        className="font-bold text-brand hover:underline"
-                        title={clientsLinkTitle(user)}
-                      >
-                        {user.listed_client_count}
-                      </Link>
-                    ) : (
-                      <span className="text-foreground/40" title={clientsLinkTitle(user)}>
-                        {user.listed_client_count}
-                      </span>
-                    )}
-                  </td>
-                  <td className="p-3 text-foreground/60">{lastActiveLabel(user.last_seen_at)}</td>
-                  <td className="p-3">
-                    <span
-                      className={
-                        state === "active"
-                          ? "font-bold text-brand"
-                          : "font-bold text-red-700"
-                      }
-                    >
-                      {ACCESS_LABEL[state]}
-                    </span>
-                  </td>
-                  <td className="p-3">
-                    {/*
-                      Acting on yourself is refused by both RPCs and by the route before
-                      them; the buttons are hidden rather than disabled because there is
-                      no state in which an admin can press them.
-                    */}
-                    {user.id === currentUserId ? (
-                      <span className="text-foreground/50">—</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-2">
-                        {state !== "deactivated" && (
-                          <button
-                            className={
-                              user.is_active
-                                ? "rounded-lg border border-red-700/40 px-3 py-2 font-bold text-red-700 disabled:opacity-50"
-                                : "rounded-lg border border-black/15 px-3 py-2 font-bold disabled:opacity-50"
-                            }
-                            disabled={savingId === user.id}
-                            onClick={() =>
-                              updateUser(
-                                user.id,
-                                { isActive: !user.is_active },
-                                user.is_active
-                                  ? "Team member suspended. They have been signed out and can no longer log in."
-                                  : "Team member reactivated. They can log in again.",
-                              )
-                            }
-                            type="button"
-                          >
-                            {user.is_active ? "Suspend" : "Reactivate"}
-                          </button>
-                        )}
-                        {state === "deactivated" ? (
-                          <button
-                            className="rounded-lg border border-black/15 px-3 py-2 font-bold disabled:opacity-50"
-                            disabled={savingId === user.id}
-                            onClick={() =>
-                              updateUser(
-                                user.id,
-                                { isActive: true },
-                                "Team member reactivated. They can log in again — the clients reassigned at deactivation stay with their new owners.",
-                              )
-                            }
-                            type="button"
-                          >
-                            Reactivate
-                          </button>
-                        ) : (
-                          <button
-                            className="rounded-lg border border-red-700/40 bg-red-700/5 px-3 py-2 font-bold text-red-700 disabled:opacity-50"
-                            disabled={savingId === user.id}
-                            onClick={() => {
-                              setStatus(null);
-                              setOffboarding(user);
-                            }}
-                            type="button"
-                          >
-                            Deactivate
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </>
-  );
-}
-
-/**
- * The offboarding form. Deactivation asks for more than a button press: a written
- * reason (PRD §4.2) and, when the member owns clients, somewhere for those clients to
- * go (F014 AC2). Presented before the request rather than after a refusal, so the
- * admin composes the whole decision once.
- */
-function OffboardingForm({
-  user,
-  eligibleOwners,
-  saving,
-  onCancel,
-  onConfirm,
-}: {
-  user: TeamUser;
-  eligibleOwners: TeamUser[];
-  saving: boolean;
-  onCancel: () => void;
-  onConfirm: (change: {
-    reason: string;
-    reassignTo?: string;
-    releaseClients?: boolean;
-  }) => void;
-}) {
-  const [reason, setReason] = useState("");
-  const [destination, setDestination] = useState<"reassign" | "release">("reassign");
-  // Deliberately unset. Defaulting to the first eligible owner means the acting admin
-  // is usually preselected — they sort first as often as not — so a careless press
-  // silently moves every client onto the person doing the offboarding. Verified
-  // happening on 30 Jul 2026 before this was changed. Handing work to a named person
-  // is a decision; it should require making one.
-  const [reassignTo, setReassignTo] = useState("");
-
-  const ownsClients = user.owned_client_count > 0;
-  // With nobody eligible to take the clients on, releasing them to the unowned pool is
-  // the only way to close the account. Saying so beats a select with no options.
-  const noEligibleOwners = eligibleOwners.length === 0;
-  const mustRelease = ownsClients && noEligibleOwners;
-  const effectiveDestination = mustRelease ? "release" : destination;
-  const canSubmit =
-    reason.trim().length > 0 &&
-    !saving &&
-    (!ownsClients || effectiveDestination === "release" || reassignTo !== "");
-
-  return (
-    <form
-      aria-label={`Deactivate ${displayName(user)}`}
-      className="mt-3 rounded-xl border border-red-700/30 bg-red-50/60 p-5"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (!canSubmit) return;
-        onConfirm({
-          reason: reason.trim(),
-          ...(ownsClients
-            ? effectiveDestination === "release"
-              ? { releaseClients: true }
-              : { reassignTo }
-            : {}),
-        });
-      }}
-    >
-      <h2 className="text-lg font-bold">Deactivate {displayName(user)}</h2>
-      <p className="mt-2 text-sm text-foreground/70">
-        They will be signed out and blocked from logging in. Nothing is deleted — their
-        history stays in the audit trail, and the account can be reactivated later.
-      </p>
-
-      {ownsClients && (
-        <fieldset className="mt-4">
-          <legend className="text-sm font-bold">
-            {user.owned_client_count} client
-            {user.owned_client_count === 1 ? "" : "s"} need a new owner
-          </legend>
-          {mustRelease ? (
-            <p className="mt-2 text-sm text-foreground/70">
-              No other active CAM or admin is available to take them on, so they will be
-              released to the unowned pool for any CAM to claim.
-            </p>
-          ) : (
-            <>
-              <label className="mt-2 flex items-center gap-2 text-sm">
-                <input
-                  checked={effectiveDestination === "reassign"}
-                  name="destination"
-                  onChange={() => setDestination("reassign")}
-                  type="radio"
-                  value="reassign"
-                />
-                Reassign to
-                <Select
-                  disabled={effectiveDestination !== "reassign"}
-                  onValueChange={setReassignTo}
-                  value={reassignTo}
-                >
-                  <SelectTrigger aria-label="New owner" className="w-fit bg-white">
-                    <SelectValue placeholder="Choose a team member…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {eligibleOwners.map((owner) => (
-                      <SelectItem key={owner.id} value={owner.id}>
-                        {displayName(owner)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-              <label className="mt-2 flex items-center gap-2 text-sm">
-                <input
-                  checked={effectiveDestination === "release"}
-                  name="destination"
-                  onChange={() => setDestination("release")}
-                  type="radio"
-                  value="release"
-                />
-                Release to the unowned pool for any CAM to claim
-              </label>
-            </>
+      {sortedUsers.length === 0 ? (
+        <div className="py-12 px-5 text-center">
+          <p className="text-sm text-foreground/60">
+            {hasActiveFilters
+              ? "No team members match the current search or filter criteria."
+              : "No team members found."}
+          </p>
+          {hasActiveFilters && (
+            <div className="mt-4">
+              <Link
+                href="/admin/users"
+                className="inline-flex items-center justify-center rounded-xl bg-black/5 px-4 py-2 text-xs font-bold text-foreground transition-colors hover:bg-black/10"
+              >
+                Clear all filters
+              </Link>
+            </div>
           )}
-        </fieldset>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-left text-sm">
+            <thead>
+              <tr className="border-b border-black/[0.08] bg-black/[0.02]">
+                <th className="group/th w-11 px-4 py-3.5">
+                  <div
+                    className={`transition-opacity duration-150 ${
+                      hasSelection ? "opacity-100" : "opacity-0 group-hover/th:opacity-100"
+                    }`}
+                  >
+                    <Checkbox
+                      aria-label="Select all on this page"
+                      checked={
+                        isAllPageSelected ? true : isSomePageSelected ? "indeterminate" : false
+                      }
+                      onCheckedChange={toggleSelectAllPage}
+                    />
+                  </div>
+                </th>
+                <th className="px-4 py-3.5">
+                  <button
+                    type="button"
+                    onClick={() => handleSort("name")}
+                    className="group inline-flex items-center gap-1.5 text-[11px] font-bold tracking-[0.12em] text-foreground/50 uppercase hover:text-foreground"
+                  >
+                    <span>Member</span>
+                    {sortBy === "name" ? (
+                      sortOrder === "asc" ? (
+                        <ArrowUp className="size-3.5 text-foreground" />
+                      ) : (
+                        <ArrowDown className="size-3.5 text-foreground" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="size-3.5 opacity-0 transition-opacity group-hover:opacity-60" />
+                    )}
+                  </button>
+                </th>
+                <th className="w-36 px-4 py-3.5 text-center">
+                  <button
+                    type="button"
+                    onClick={() => handleSort("role")}
+                    className="group inline-flex items-center justify-center gap-1.5 text-[11px] font-bold tracking-[0.12em] text-foreground/50 uppercase hover:text-foreground"
+                  >
+                    <span className="size-3.5 shrink-0" aria-hidden="true" />
+                    <span>Role</span>
+                    {sortBy === "role" ? (
+                      sortOrder === "asc" ? (
+                        <ArrowUp className="size-3.5 shrink-0 text-foreground" />
+                      ) : (
+                        <ArrowDown className="size-3.5 shrink-0 text-foreground" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
+                    )}
+                  </button>
+                </th>
+                <th className="w-28 px-4 py-3.5 text-center">
+                  <button
+                    type="button"
+                    onClick={() => handleSort("clients")}
+                    className="group inline-flex items-center justify-center gap-1.5 text-[11px] font-bold tracking-[0.12em] text-foreground/50 uppercase hover:text-foreground"
+                  >
+                    <span className="size-3.5 shrink-0" aria-hidden="true" />
+                    <span>Clients</span>
+                    {sortBy === "clients" ? (
+                      sortOrder === "asc" ? (
+                        <ArrowUp className="size-3.5 shrink-0 text-foreground" />
+                      ) : (
+                        <ArrowDown className="size-3.5 shrink-0 text-foreground" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
+                    )}
+                  </button>
+                </th>
+                <th className="w-36 px-4 py-3.5">
+                  <button
+                    type="button"
+                    onClick={() => handleSort("last_active")}
+                    className="group inline-flex items-center gap-1.5 text-[11px] font-bold tracking-[0.12em] text-foreground/50 uppercase hover:text-foreground"
+                  >
+                    <span>Last active</span>
+                    {sortBy === "last_active" ? (
+                      sortOrder === "asc" ? (
+                        <ArrowUp className="size-3.5 shrink-0 text-foreground" />
+                      ) : (
+                        <ArrowDown className="size-3.5 shrink-0 text-foreground" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
+                    )}
+                  </button>
+                </th>
+                <th className="w-28 px-4 py-3.5 text-right text-[11px] font-bold tracking-[0.12em] text-foreground/40 uppercase">
+                  {hasActiveFilters ? (
+                    <Link
+                      href="/admin/users"
+                      className="inline-flex items-center gap-1 font-normal tracking-normal text-xs text-brand hover:underline"
+                    >
+                      <X className="size-3" />
+                      Reset filters
+                    </Link>
+                  ) : (
+                    <span>Action</span>
+                  )}
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-black/5">
+              {paginatedUsers.map((user) => {
+                const roleLabel = ROLE_LABEL[user.role] ?? user.role;
+                const roleStyle =
+                  ROLE_STYLES[user.role] ?? "bg-black/5 text-foreground/75 border-black/10";
+                const isSelected = selectedIds.has(user.id);
+                const isSelf = user.id === currentUserId;
+                const initials = initialsOf(user.full_name, user.email);
+
+                return (
+                  <tr
+                    key={user.id}
+                    className={`group/row transition-colors ${
+                      isSelected ? "bg-brand/[0.04]" : "hover:bg-black/[0.015]"
+                    }`}
+                  >
+                    <td className="w-11 px-4 py-3.5">
+                      <div
+                        className={`transition-opacity duration-150 ${
+                          hasSelection || isSelected
+                            ? "opacity-100"
+                            : "opacity-0 group-hover/row:opacity-100"
+                        }`}
+                      >
+                        <Checkbox
+                          aria-label={`Select ${displayName(user)}`}
+                          checked={isSelected}
+                          onCheckedChange={() => toggleSelectUser(user.id)}
+                        />
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-3">
+                        <div className="relative flex size-9 shrink-0 items-center justify-center rounded-full bg-paper font-mono text-[11px] font-bold text-ink shadow-2xs">
+                          {initials}
+                          <span
+                            className={`absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full border-2 border-white ${
+                              user.is_active ? "bg-emerald-500" : "bg-amber-500"
+                            }`}
+                            title={user.is_active ? "Active" : "Inactive"}
+                          />
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <Link
+                              href={`/team/${user.id}`}
+                              className="font-bold text-foreground transition-colors hover:text-brand hover:underline"
+                            >
+                              {user.full_name ?? "Unnamed user"}
+                            </Link>
+                            {isSelf && (
+                              <span className="rounded-full bg-black/[0.06] px-1.5 py-0.2 text-[10px] font-bold tracking-wider text-foreground/60 uppercase">
+                                You
+                              </span>
+                            )}
+                            {!user.is_active && (
+                              <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-bold tracking-wider text-red-700 uppercase">
+                                {user.deactivated_at ? "Deactivated" : "Suspended"}
+                              </span>
+                            )}
+                          </div>
+                          <span className="block text-xs text-foreground/60">{user.email}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5 text-center">
+                      <span
+                        aria-label={`Role for ${user.email}: ${roleLabel}`}
+                        title="Change role on the member's profile page or via bulk actions"
+                        className={`inline-flex items-center justify-center rounded-full border px-2.5 py-1 text-xs font-bold tracking-wide capitalize ${roleStyle}`}
+                      >
+                        {roleLabel}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5 text-center">
+                      {user.listed_client_count > 0 ? (
+                        <Link
+                          href={`/clients?owner=${user.id}`}
+                          className="font-bold text-brand hover:underline"
+                          title={clientsLinkTitle(user)}
+                        >
+                          {user.listed_client_count}
+                        </Link>
+                      ) : (
+                        <span className="text-foreground/40" title={clientsLinkTitle(user)}>
+                          {user.listed_client_count}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3.5 text-xs text-foreground/60">
+                      {lastActiveLabel(user.last_seen_at)}
+                    </td>
+                    <td className="px-4 py-3.5 text-right">
+                      <Link
+                        href={`/team/${user.id}`}
+                        className="group/btn inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white px-3.5 py-1.5 text-xs font-semibold text-foreground shadow-2xs transition-all hover:border-brand/40 hover:bg-brand/5 hover:text-brand"
+                      >
+                        <span>View</span>
+                        <ArrowRight className="size-3 text-foreground/40 transition-transform duration-200 group-hover/btn:translate-x-0.5 group-hover/btn:text-brand" />
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
-      <label className="mt-4 block text-sm font-bold" htmlFor="deactivation-reason">
-        Reason
-      </label>
-      <textarea
-        className="mt-1 w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm"
-        id="deactivation-reason"
-        maxLength={500}
-        onChange={(event) => setReason(event.target.value)}
-        required
-        rows={2}
-        value={reason}
-      />
-      <p className="mt-1 text-xs text-foreground/60">
-        Recorded in the audit trail against this account and every client that moves.
-      </p>
+      {/* Bottom Bar: Total Count Readout & Full Pagination Controls */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-black/[0.06] bg-black/[0.015] px-4 py-3 sm:px-5">
+        {/* Left: Total Count Readout & Rows per page */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1.5 text-[12px] text-foreground">
+            <span>Show</span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(val) => {
+                setPageSize(Number(val));
+                setCurrentPage(1);
+              }}
+            >
+              <SelectTrigger
+                size="sm"
+                className="h-6 w-auto min-w-[44px] gap-1 rounded-md border border-black/[0.08] bg-white px-2 py-0 text-[12px] font-semibold text-foreground shadow-2xs hover:bg-black/5"
+                aria-label="Items per page"
+              >
+                <SelectValue placeholder={String(pageSize)} />
+              </SelectTrigger>
+              <SelectContent align="start" className="min-w-[4.5rem]">
+                {[10, 25, 50].map((size) => (
+                  <SelectItem key={size} value={String(size)} className="text-xs">
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-[12px] font-medium text-foreground">per page</span>
+          </div>
 
-      <div className="mt-4 flex gap-2">
-        <button
-          className="rounded-lg bg-red-700 px-4 py-2 font-bold text-white disabled:opacity-50"
-          disabled={!canSubmit}
-          type="submit"
-        >
-          {saving ? "Deactivating…" : "Deactivate"}
-        </button>
-        <button
-          className="rounded-lg border border-black/15 px-4 py-2 font-bold"
-          disabled={saving}
-          onClick={onCancel}
-          type="button"
-        >
-          Cancel
-        </button>
+          <span className="hidden h-3 w-px bg-black/[0.08] sm:inline-block" />
+
+          <span className="text-[12px] font-medium text-foreground">
+            {isFiltered ? (
+              <span>
+                Showing <strong className="font-semibold text-foreground">{from}–{to}</strong> of{" "}
+                <strong className="font-semibold text-foreground">{sortedUsers.length}</strong> filtered (
+                <span className="text-foreground/60">{total} total</span>)
+              </span>
+            ) : (
+              <span>
+                Showing <strong className="font-semibold text-foreground">{from}–{to}</strong> of{" "}
+                <strong className="font-semibold text-foreground">{sortedUsers.length}</strong> team member
+                {sortedUsers.length === 1 ? "" : "s"}
+              </span>
+            )}
+          </span>
+        </div>
+
+        {/* Right: Page Navigation */}
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1 sm:gap-1.5">
+            <button
+              type="button"
+              disabled={activePage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              className="inline-flex items-center gap-0.5 rounded-lg px-2 py-1 text-xs font-semibold text-foreground/70 transition-colors hover:bg-black/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+              aria-label="Previous page"
+            >
+              <ChevronLeft className="size-3.5" />
+              <span className="hidden xs:inline">Prev</span>
+            </button>
+
+            <div className="flex items-center gap-1">
+              {pageNumbers.map((p, idx) =>
+                p === "..." ? (
+                  <span key={`ellipsis-${idx}`} className="px-1 text-xs text-foreground/30">
+                    …
+                  </span>
+                ) : (
+                  <button
+                    key={`page-${p}`}
+                    type="button"
+                    onClick={() => setCurrentPage(p as number)}
+                    className={`flex h-7 min-w-[28px] items-center justify-center rounded-lg px-1.5 text-xs font-semibold transition-colors ${
+                      activePage === p
+                        ? "bg-foreground text-background shadow-xs"
+                        : "text-foreground/60 hover:bg-black/5 hover:text-foreground"
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ),
+              )}
+            </div>
+
+            <button
+              type="button"
+              disabled={activePage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              className="inline-flex items-center gap-0.5 rounded-lg px-2 py-1 text-xs font-semibold text-foreground/70 transition-colors hover:bg-black/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+              aria-label="Next page"
+            >
+              <span className="hidden xs:inline">Next</span>
+              <ChevronRight className="size-3.5" />
+            </button>
+          </div>
+        )}
       </div>
-    </form>
+
+      {/* Floating Bulk Action Bar */}
+      {isClient &&
+        createPortal(
+          <AnimatePresence>
+            {selectedIds.size > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 15, scale: 0.95 }}
+                transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                className="fixed bottom-6 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/12 bg-[#141a22] px-4 py-2 text-white shadow-2xl backdrop-blur-md"
+              >
+                <div className="flex items-center gap-2 pr-2 border-r border-white/15 text-xs font-semibold">
+                  <span className="flex size-5 items-center justify-center rounded-full bg-brand text-[10px] font-bold text-white">
+                    {selectedIds.size}
+                  </span>
+                  <span>Selected</span>
+                </div>
+
+                {/* Role Changer Popover */}
+                <Popover open={rolePopoverOpen} onOpenChange={setRolePopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      disabled={bulkBusy}
+                      className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-white/15 disabled:opacity-50"
+                    >
+                      <Shield className="size-3.5 text-brand" />
+                      <span>Change role</span>
+                      <ChevronDown className="size-3 opacity-60" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    align="center"
+                    side="top"
+                    sideOffset={12}
+                    className="w-48 rounded-2xl border border-white/15 bg-[#161d26] p-1.5 text-white shadow-2xl backdrop-blur-lg z-[110]"
+                  >
+                    <div className="px-2.5 py-1 text-[10px] font-bold tracking-wider text-white/45 uppercase">
+                      Change role to
+                    </div>
+                    <div className="mt-1 space-y-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleBulkRoleChange("cam")}
+                        className="flex w-full cursor-pointer items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs font-semibold text-white transition-colors hover:bg-white/10"
+                      >
+                        <span>CAM</span>
+                        <span className="text-[10px] text-brand font-medium">Client Manager</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleBulkRoleChange("admin")}
+                        className="flex w-full cursor-pointer items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs font-semibold text-white transition-colors hover:bg-white/10"
+                      >
+                        <span>Admin</span>
+                        <span className="text-[10px] text-[#f5efc6] font-medium">Full Access</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleBulkRoleChange("viewer")}
+                        className="flex w-full cursor-pointer items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs font-semibold text-white transition-colors hover:bg-white/10"
+                      >
+                        <span>Viewer</span>
+                        <span className="text-[10px] text-sky-300 font-medium">Read Only</span>
+                      </button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                {/* Suspend Action */}
+                <button
+                  type="button"
+                  disabled={bulkBusy}
+                  onClick={() => handleBulkStatusChange(false)}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-500/20 hover:text-amber-300 disabled:opacity-50"
+                >
+                  <UserX className="size-3.5 text-amber-400" />
+                  <span>Suspend</span>
+                </button>
+
+                {/* Reactivate Action */}
+                <button
+                  type="button"
+                  disabled={bulkBusy}
+                  onClick={() => handleBulkStatusChange(true)}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-500/20 hover:text-emerald-300 disabled:opacity-50"
+                >
+                  <UserCheck className="size-3.5 text-emerald-400" />
+                  <span>Reactivate</span>
+                </button>
+
+                {/* Cancel / Deselect */}
+                <button
+                  type="button"
+                  disabled={bulkBusy}
+                  onClick={() => setSelectedIds(new Set())}
+                  aria-label="Deselect all"
+                  className="flex size-7 cursor-pointer items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+                >
+                  <X className="size-4" />
+                </button>
+
+                {bulkBusy && (
+                  <div className="flex items-center gap-1.5 pl-1 text-xs text-white/80">
+                    <Loader2 className="size-3.5 animate-spin text-brand" />
+                    <span>Saving…</span>
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>,
+          document.body,
+        )}
+    </div>
   );
 }

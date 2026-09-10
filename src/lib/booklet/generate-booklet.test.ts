@@ -11,10 +11,17 @@ const INPUT = {
   organisationId: "org-1",
   organisation: {
     legal_name: "Test Charity",
+    trading_name: null,
     organisation_type: "charity",
     website: "https://test-charity.org",
     city: "London",
     country_code: "GB",
+    sector: null,
+    sub_sector: null,
+    registered_on: null,
+    charity_reporting_status: null,
+    charity_activities: null,
+    sic_titles: null,
   },
   enrichment: null,
 };

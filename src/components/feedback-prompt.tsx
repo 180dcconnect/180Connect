@@ -28,7 +28,11 @@ export function FeedbackPrompt({ pageContext }: { pageContext?: string }) {
   const [submitted, setSubmitted] = useState(false);
   const [isPending, startTransition] = useTransition();
   const reduceMotion = useReducedMotion();
-  const dismissTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // `setTimeout` returns a number in the browser (and under react-native's
+  // global types, which the vendored CherryBlossomQRCode component pulls in),
+  // but NodeJS.Timeout when only node types are loaded. Derive the handle type
+  // instead of pinning either, so both resolve.
+  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSubmit = () => {
     if (rating === 0) return;
@@ -66,7 +70,7 @@ export function FeedbackPrompt({ pageContext }: { pageContext?: string }) {
           animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, filter: "blur(0px)", scale: 1 }}
           exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 12, filter: "blur(6px)", scale: 0.97 }}
           transition={{ duration: 0.5, ease: [0.2, 0.7, 0.2, 1] }}
-          className="fixed bottom-6 right-6 z-30 w-[340px] sm:w-[360px]"
+          className="fixed bottom-6 right-6 z-30 w-[340px] max-w-[calc(100vw-3rem)] sm:w-[360px]"
         >
           <div className="relative rounded-2xl border border-black/[0.06] bg-white px-6 py-5 shadow-lg shadow-black/[0.06]">
             {/* Close button */}
@@ -85,20 +89,20 @@ export function FeedbackPrompt({ pageContext }: { pageContext?: string }) {
                 <span className="text-2xl" role="img" aria-label="Thank you">
                   🙏
                 </span>
-                <p className="text-sm font-bold text-foreground/80">
+                <p className="text-sm font-bold text-foreground/80 font-body">
                   Thanks for your feedback!
                 </p>
-                <p className="text-xs text-foreground/50">
+                <p className="text-xs text-foreground/50 font-body">
                   We&apos;ll use it to make 180Connect better.
                 </p>
               </div>
             ) : (
               /* ── Rating form ─────────────────────────────────────── */
               <>
-                <h3 className="mt-1 text-base font-extrabold tracking-tight text-foreground/90">
+                <h3 className="mt-1 text-base font-extrabold tracking-tight text-foreground/90 font-body">
                   How&apos;s your experience?
                 </h3>
-                <p className="mt-1 text-xs leading-[1.6] text-foreground/50">
+                <p className="mt-1 text-xs leading-[1.6] text-foreground/50 font-body">
                   Rate your experience so far.
                 </p>
 

@@ -30,8 +30,24 @@ create table public.booklet_generations (
   prompt_user     text not null,
   output          text not null,
   model           text not null,
-  created_at      timestamptz not null default now()
+  input_tokens    integer,
+  output_tokens   integer,
+  total_tokens    integer,
+  cost_usd        numeric(12, 6),
+  created_at      timestamptz not null default now(),
+
+  constraint booklet_generations_tokens_non_negative check (
+    (input_tokens is null or input_tokens >= 0)
+    and (output_tokens is null or output_tokens >= 0)
+    and (total_tokens is null or total_tokens >= 0)
+  ),
+  constraint booklet_generations_cost_non_negative check (cost_usd is null or cost_usd >= 0)
 );
+
+comment on column public.booklet_generations.input_tokens is 'Provider-reported input token count for this booklet generation.';
+comment on column public.booklet_generations.output_tokens is 'Provider-reported output token count for this booklet generation.';
+comment on column public.booklet_generations.total_tokens is 'Provider-reported total token count for this booklet generation.';
+comment on column public.booklet_generations.cost_usd is 'Snapshotted USD cost for this booklet generation; null means unpriced.';
 
 comment on table public.booklet_generations is
   'Audit record of every client booklet generation: the exact system and user '

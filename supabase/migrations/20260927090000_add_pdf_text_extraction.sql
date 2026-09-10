@@ -14,7 +14,7 @@
 --   Documentation | Data Model/Data Dictionary source spreadsheet must be
 --                 | updated by its owner, then npm run export:data-model.
 -- Reversibility: paired rollback in
---   ../rollback/20260912170300_add_pdf_text_extraction.down.sql
+--   ../rollback/20260927090000_add_pdf_text_extraction.down.sql
 
 alter table public.attachments
   add column text_extraction_status text not null default 'not_applicable',

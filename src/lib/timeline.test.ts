@@ -50,6 +50,11 @@ function attachmentRow(overrides: Partial<AttachmentRow> = {}): AttachmentRow {
     created_at: "2026-08-06T09:00:00Z",
     timeline_context_type: "client",
     timeline_context_id: null,
+    text_extraction_status: "pending",
+    text_extraction_failure_reason: null,
+    extracted_text: null,
+    extracted_page_count: null,
+    extracted_text_truncated: false,
     uploaded_by_user: { full_name: "Ada Lovelace" },
     ...overrides,
   };

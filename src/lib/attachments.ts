@@ -19,6 +19,13 @@ export type AttachmentRow = {
   content_type: string | null;
   size_bytes: number | null;
   created_at: string;
+  // F220: extraction state and outcome columns (record_attachment_text_extraction).
+  text_extraction_status: "pending" | "succeeded" | "failed" | "not_applicable";
+  text_extraction_failure_reason: string | null;
+  extracted_text: string | null;
+  extracted_page_count: number | null;
+  extracted_text_truncated: boolean;
+  // F219: the timeline event (if any) an attachment is linked to.
   timeline_context_type: TimelineContextType;
   timeline_context_id: string | null;
   uploaded_by_user: { full_name: string | null } | null;
@@ -41,11 +48,73 @@ export type Attachment = {
   sizeLabel: string | null;
   createdAt: string;
   uploadedByName: string;
-  timelineContextType: TimelineContextType;
+  textExtractionStatus: AttachmentRow["text_extraction_status"];
+  // Stored reason (record_attachment_text_extraction) for a failed
+  // extraction — surfaced so the list can say something more precise than
+  // "may be scanned" for, e.g., a storage read failure.
+  textExtractionFailureReason: string | null;
+  extractedText: string | null;
+  extractedPageCount: number | null;
+  extractedTextTruncated: boolean;
+  timelineContextType: AttachmentRow["timeline_context_type"];
   timelineContextId: string | null;
 };
 
 const UNKNOWN_UPLOADER = "A former team member";
+export const MAX_ATTACHMENT_EMAIL_CONTEXT_CHARACTERS = 30_000;
+
+export const MAX_ATTACHMENT_SEARCH_QUERY_CHARACTERS = 200;
+
+/**
+ * Normalises a raw ?attachmentSearch= value before it reaches the full-text
+ * query. Two reasons:
+ *
+ * 1. PostgREST parses filter literals itself, and an unquoted comma (or other
+ *    punctuation) in the value is a parse error before Postgres ever sees it.
+ * 2. plainto_tsquery only ever turns letter/number lexemes into tsquery terms
+ *    anyway, so dropping punctuation costs nothing semantically.
+ *
+ * Keeps letters, numbers and whitespace (which plainto turns into AND terms),
+ * collapses runs of spaces, and caps the length so a pathological query can't
+ * ride along in the URL or the SQL.
+ */
+export function normaliseAttachmentSearchQuery(raw: string | null | undefined): string {
+  if (!raw) return "";
+  return raw
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_ATTACHMENT_SEARCH_QUERY_CHARACTERS);
+}
+
+/**
+ * Maps a stored text_extraction_failure_reason onto copy a CAM can act on.
+ * The reason tokens are written by extractPdfText (src/lib/pdf-text-extraction.ts:
+ * no_extractable_text / invalid_pdf) and by the extraction action's storage
+ * read failure (file_could_not_be_read). Anything unrecognised falls back to
+ * the original scanned-or-image-only message rather than inventing a claim.
+ */
+export function textExtractionFailureCopy(reason: string | null | undefined): string {
+  switch (reason) {
+    case "file_could_not_be_read":
+      return "Text could not be extracted — the PDF could not be read from storage. Try extraction again.";
+    case "invalid_pdf":
+      return "Text could not be extracted — the PDF could not be opened. It may be damaged or password-protected.";
+    default:
+      return "Text could not be extracted. This PDF may be scanned or image-only.";
+  }
+}
+
+/** Bounds attachment context before it reaches a paid model prompt. */
+export function buildAttachmentEmailContext(
+  rows: readonly { filename: string; extracted_text: string | null }[],
+): string | null {
+  const blocks = rows
+    .filter((row) => row.extracted_text?.trim())
+    .map((row) => `File: ${row.filename}\n${row.extracted_text!.trim()}`);
+  if (blocks.length === 0) return null;
+  return blocks.join("\n\n").slice(0, MAX_ATTACHMENT_EMAIL_CONTEXT_CHARACTERS);
+}
 
 /** Binary units, matching how a CAM would actually read a file size ("2.4 MB"). */
 export function formatFileSize(bytes: number | null | undefined): string | null {
@@ -79,6 +148,11 @@ export function formatAttachments(rows: readonly AttachmentRow[]): Attachment[] 
       sizeLabel: formatFileSize(row.size_bytes),
       createdAt: row.created_at,
       uploadedByName: row.uploaded_by_user?.full_name?.trim() || UNKNOWN_UPLOADER,
+      textExtractionStatus: row.text_extraction_status,
+      textExtractionFailureReason: row.text_extraction_failure_reason,
+      extractedText: row.extracted_text,
+      extractedPageCount: row.extracted_page_count,
+      extractedTextTruncated: row.extracted_text_truncated,
       timelineContextType: row.timeline_context_type,
       timelineContextId: row.timeline_context_id,
     }))

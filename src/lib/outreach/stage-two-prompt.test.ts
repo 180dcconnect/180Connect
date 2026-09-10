@@ -42,3 +42,13 @@ test("reply follow-up uses the actual reply and asks the model to answer it", ()
     /Answer the client's reply directly\. If it contains a question, address it using only the supplied context; if the answer is not available, acknowledge the question and propose a sensible next step without inventing an answer\./,
   );
 });
+
+test("Stage 2 prompt includes extracted PDF context (F220)", () => {
+  const result = buildStageTwoPrompt({
+    organisationName: "Example",
+    organisationType: "charity",
+    attachmentText: "File: strategy.pdf\nPriority is volunteer retention.",
+  });
+  assert.match(result.prompt, /strategy\.pdf/);
+  assert.match(result.prompt, /volunteer retention/);
+});

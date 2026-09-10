@@ -17,7 +17,12 @@ import {
   isNearSendLimit,
   resolveEmailSendLimit,
 } from "@/lib/outreach/send-rate-limit";
-import { formatAttachments, type AttachmentRow } from "@/lib/attachments";
+import {
+  formatAttachments,
+  normaliseAttachmentSearchQuery,
+  type Attachment,
+  type AttachmentRow,
+} from "@/lib/attachments";
 import {
   averageResponseTime,
   formatResponseTime,
@@ -56,6 +61,14 @@ import {
 // entire history loaded on every view; recent history is what a CAM compares.
 const BOOKLET_HISTORY_LIMIT = 20;
 
+// F220 — shared by the full attachment list and the text-search query below,
+// so the two result shapes can never drift apart column-wise. F219's
+// timeline_context_* columns are included so the same rows feed the
+// link-to-timeline control without a second query; the text_extraction_*
+// columns are what the extraction states, retry links and text search read.
+const ATTACHMENT_LIST_SELECT =
+  "id, filename, content_type, size_bytes, created_at, timeline_context_type, timeline_context_id, text_extraction_status, text_extraction_failure_reason, extracted_text, extracted_page_count, extracted_text_truncated, uploaded_by_user:users!attachments_uploaded_by_fkey(full_name)";
+
 type SavedBookletRow = {
   id: string;
   booklet_text: string;
@@ -83,10 +96,13 @@ type FailedEmailRow = { id: string; subject: string; updated_at: string };
  */
 export default async function ClientOutreachPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  /** F220 — the attachment-text search rides this tab's query string. */
+  searchParams: Promise<{ attachmentSearch?: string | string[] | undefined }>;
 }) {
-  const { id } = await params;
+  const [{ id }, query] = await Promise.all([params, searchParams]);
   const actor = await requireActor();
   const client = await loadClient(id);
   const supabase = await createClient();
@@ -167,9 +183,7 @@ export default async function ClientOutreachPage({
       // F080/F081: attachments uploaded to this client.
       supabase
         .from("attachments")
-        .select(
-          "id, filename, content_type, size_bytes, created_at, timeline_context_type, timeline_context_id, uploaded_by_user:users!attachments_uploaded_by_fkey(full_name)",
-        )
+        .select(ATTACHMENT_LIST_SELECT)
         .eq("organisation_id", id)
         .order("created_at", { ascending: false }),
       // F485: active teammates' display names, so saved-note @mentions can
@@ -216,6 +230,39 @@ export default async function ClientOutreachPage({
   const attachments = formatAttachments(
     (attachmentsResult.data ?? []) as unknown as AttachmentRow[],
   );
+
+  // F220 follow-up: ?attachmentSearch= drives the second query below, which
+  // runs through the attachments.extracted_text_search GIN index (the index
+  // has no consumer without it) scoped to this organisation, so "searchable"
+  // means a real search, not just a stored column.
+  const attachmentSearchQuery = normaliseAttachmentSearchQuery(
+    typeof query.attachmentSearch === "string" ? query.attachmentSearch : null,
+  );
+  let attachmentSearchMatches: Attachment[] | null = null;
+  let attachmentSearchFailed = false;
+  if (attachmentSearchQuery && !attachmentsResult.error) {
+    const { data: matchedRows, error: searchError } = await supabase
+      .from("attachments")
+      .select(ATTACHMENT_LIST_SELECT)
+      .eq("organisation_id", id)
+      .textSearch("extracted_text_search", attachmentSearchQuery)
+      .order("created_at", { ascending: false });
+    if (searchError) {
+      attachmentSearchFailed = true;
+      await reportError(searchError, {
+        operation: "clients.attachment_text_search",
+        organisationId: id,
+        query: attachmentSearchQuery,
+      });
+    } else {
+      attachmentSearchMatches = formatAttachments(
+        (matchedRows ?? []) as unknown as AttachmentRow[],
+      );
+    }
+  }
+  // Failed search degrades to the full list with an inline note, never to a
+  // blanked card — same independent-failure convention as the other sections.
+  const displayedAttachments = attachmentSearchMatches ?? attachments;
 
   // F219: an attachment is linked to the event it belongs to, so the picker
   // needs the same option keys the RPC accepts. The linkable events are the
@@ -616,8 +663,15 @@ export default async function ClientOutreachPage({
             >
               <AttachmentsSection
                 organisationId={client.id}
-                attachments={attachments}
+                attachments={displayedAttachments}
+                totalCount={attachments.length}
+                search={
+                  attachmentSearchQuery
+                    ? { query: attachmentSearchQuery, failed: attachmentSearchFailed }
+                    : null
+                }
                 error={Boolean(attachmentsResult.error)}
+                canExtract={canEdit}
                 canLink={canEdit}
                 timelineOptions={timelineLinkOptions}
               />

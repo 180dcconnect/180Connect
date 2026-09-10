@@ -22,6 +22,7 @@ import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import { computeCostUsd } from "@/lib/outreach/generation-cost";
 import { loadModelRate } from "@/lib/ai/model-rate";
 import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
+import { buildAttachmentEmailContext } from "@/lib/attachments";
 import { lookupLiveNewsHook } from "@/lib/outreach/news-hook";
 
 export const maxDuration = 60;
@@ -231,6 +232,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     await reportError(bookletError, { operation: "outreach.stage_two.load_booklet", organisationId });
   }
 
+  const { data: extractedAttachments, error: attachmentContextError } = await supabase
+    .from("attachments")
+    .select("filename, extracted_text")
+    .eq("organisation_id", organisationId)
+    .eq("text_extraction_status", "succeeded")
+    .order("created_at", { ascending: false });
+  if (attachmentContextError) {
+    await reportError(attachmentContextError, { operation: "outreach.stage_two.load_attachment_context", organisationId });
+  }
+  const attachmentText = buildAttachmentEmailContext(extractedAttachments ?? []);
+
   // F110: pull one live news hook at draft-generation time (Exa, fail-open).
   // lookupLiveNewsHook never throws and resolves to null on any failure, so the follow-up still generates. A live hit takes
   // precedence (it is the fresh evidence AC1 asks for); otherwise the stored
@@ -295,6 +307,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       subSector: enrichment?.sub_sector,
       newsHooks,
       booklet: savedBooklet?.booklet_text ?? null,
+      attachmentText,
       senderName: authorization.actor.fullName,
       previousSubject: previousMessage.subject,
       // F117: the sent message's body may be HTML (new) or plain text (sent

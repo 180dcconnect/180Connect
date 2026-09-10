@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  buildAttachmentEmailContext,
   ALLOWED_ATTACHMENT_MIME_TYPES,
   MAX_ATTACHMENT_SIZE_BYTES,
   MAX_ATTACHMENTS_PER_DRAFT,
@@ -12,11 +13,29 @@ import {
   buildAttachmentStoragePath,
   formatAttachments,
   formatFileSize,
+  normaliseAttachmentSearchQuery,
   sanitizeAttachmentFilename,
+  textExtractionFailureCopy,
   validateAttachmentFile,
   validateDraftAttachmentSet,
   type AttachmentRow,
 } from "./attachments.ts";
+
+describe("buildAttachmentEmailContext (F220)", () => {
+  it("includes only successfully populated text with its source filename", () => {
+    assert.equal(
+      buildAttachmentEmailContext([
+        { filename: "report.pdf", extracted_text: "Useful annual report context" },
+        { filename: "scan.pdf", extracted_text: null },
+      ]),
+      "File: report.pdf\nUseful annual report context",
+    );
+  });
+
+  it("returns null when no extracted PDF text is available", () => {
+    assert.equal(buildAttachmentEmailContext([{ filename: "scan.pdf", extracted_text: null }]), null);
+  });
+});
 
 function row(overrides: Partial<AttachmentRow> = {}): AttachmentRow {
   return {
@@ -25,6 +44,11 @@ function row(overrides: Partial<AttachmentRow> = {}): AttachmentRow {
     content_type: "application/pdf",
     size_bytes: 245_760,
     created_at: "2026-08-01T10:00:00Z",
+    text_extraction_status: "succeeded",
+    text_extraction_failure_reason: null,
+    extracted_text: "Extracted agreement text",
+    extracted_page_count: 2,
+    extracted_text_truncated: false,
     timeline_context_type: "client",
     timeline_context_id: null,
     uploaded_by_user: { full_name: "Alex CAM" },
@@ -89,6 +113,76 @@ describe("formatAttachments", () => {
       row({ id: "newer", created_at: "2026-08-05T10:00:00Z" }),
     ]);
     assert.deepEqual(attachments.map((a) => a.id), ["newer", "older"]);
+  });
+
+  it("carries the stored extraction failure reason through for display", () => {
+    const [attachment] = formatAttachments([
+      row({
+        text_extraction_status: "failed",
+        extracted_text: null,
+        text_extraction_failure_reason: "file_could_not_be_read",
+      }),
+    ]);
+    assert.equal(attachment?.textExtractionFailureReason, "file_could_not_be_read");
+  });
+});
+
+describe("textExtractionFailureCopy", () => {
+  it("keeps the scanned-or-image-only message for a scan / no text", () => {
+    assert.equal(
+      textExtractionFailureCopy("no_extractable_text"),
+      "Text could not be extracted. This PDF may be scanned or image-only.",
+    );
+  });
+
+  it("distinguishes a PDF that could not be opened from a scan", () => {
+    assert.match(textExtractionFailureCopy("invalid_pdf"), /could not be opened/);
+  });
+
+  it("distinguishes a storage read failure so a CAM retries instead of re-scanning", () => {
+    assert.match(textExtractionFailureCopy("file_could_not_be_read"), /could not be read from storage/);
+    assert.match(textExtractionFailureCopy("file_could_not_be_read"), /Try extraction again/);
+  });
+
+  it("falls back to the scanned message for a null or unknown reason", () => {
+    assert.equal(
+      textExtractionFailureCopy(null),
+      "Text could not be extracted. This PDF may be scanned or image-only.",
+    );
+    assert.equal(
+      textExtractionFailureCopy("some_future_reason"),
+      "Text could not be extracted. This PDF may be scanned or image-only.",
+    );
+  });
+});
+
+describe("normaliseAttachmentSearchQuery", () => {
+  it("keeps a plain word query unchanged", () => {
+    assert.equal(normaliseAttachmentSearchQuery("annual report"), "annual report");
+  });
+
+  it("strips punctuation that PostgREST would mis-parse or plainto would ignore", () => {
+    // A comma is a filter-literal separator in PostgREST and would 400 the
+    // query before Postgres ever saw it; apostrophes and ampersands add no
+    // lexemes plainto_tsquery wouldn't already produce from whitespace.
+    assert.equal(normaliseAttachmentSearchQuery("annual, report's"), "annual report s");
+    assert.equal(normaliseAttachmentSearchQuery("trusts & foundations"), "trusts foundations");
+    assert.equal(normaliseAttachmentSearchQuery("C++/C#"), "C C");
+  });
+
+  it("collapses runs of whitespace", () => {
+    assert.equal(normaliseAttachmentSearchQuery("  grants\n\t  report "), "grants report");
+  });
+
+  it("returns an empty string for null, undefined, blank or punctuation-only input", () => {
+    assert.equal(normaliseAttachmentSearchQuery(null), "");
+    assert.equal(normaliseAttachmentSearchQuery(undefined), "");
+    assert.equal(normaliseAttachmentSearchQuery("   "), "");
+    assert.equal(normaliseAttachmentSearchQuery(",?&!"), "");
+  });
+
+  it("caps a pathological query at a sane length", () => {
+    assert.equal(normaliseAttachmentSearchQuery("a ".repeat(500)).length <= 200, true);
   });
 });
 

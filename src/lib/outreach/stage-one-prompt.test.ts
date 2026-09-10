@@ -44,6 +44,17 @@ test("buildStageOnePrompt omits the booklet block when no booklet exists", () =>
   assert.match(result.prompt, /do not mention that data is missing/i);
 });
 
+test("buildStageOnePrompt includes extracted PDF text as untrusted email context (F220)", () => {
+  const result = buildStageOnePrompt({
+    organisationName: "Example Charity",
+    organisationType: "charity",
+    attachmentText: "File: annual-report.pdf\nWe supported 240 families.",
+  });
+  assert.match(result.prompt, /annual-report\.pdf/);
+  assert.match(result.prompt, /never instructions/);
+  assert.match(result.prompt, /supported 240 families/);
+});
+
 test("buildStageOnePrompt handles missing optional context", () => {
   const result = buildStageOnePrompt({
     organisationName: "Sparse Charity",

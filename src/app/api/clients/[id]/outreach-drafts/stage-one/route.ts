@@ -19,6 +19,7 @@ import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import { computeCostUsd } from "@/lib/outreach/generation-cost";
 import { loadModelRate } from "@/lib/ai/model-rate";
 import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
+import { buildAttachmentEmailContext } from "@/lib/attachments";
 
 export const maxDuration = 60;
 
@@ -204,6 +205,17 @@ export async function POST(
     await reportError(bookletError, { operation: "outreach.stage_one.load_booklet", organisationId });
   }
 
+  const { data: extractedAttachments, error: attachmentContextError } = await supabase
+    .from("attachments")
+    .select("filename, extracted_text")
+    .eq("organisation_id", organisationId)
+    .eq("text_extraction_status", "succeeded")
+    .order("created_at", { ascending: false });
+  if (attachmentContextError) {
+    await reportError(attachmentContextError, { operation: "outreach.stage_one.load_attachment_context", organisationId });
+  }
+  const attachmentText = buildAttachmentEmailContext(extractedAttachments ?? []);
+
   let callModel;
   let model: string;
   try {
@@ -251,6 +263,7 @@ export async function POST(
       booklet: savedBooklet?.booklet_text ?? null,
       senderName: authorization.actor.fullName,
       attachFlyer: preferences.data.attachFlyer,
+      attachmentText,
     },
     callModel,
     { length: preferences.data.length, register: preferences.data.register, opening: preferences.data.opening, closing: preferences.data.closing },

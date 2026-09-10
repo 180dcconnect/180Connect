@@ -17,7 +17,7 @@ import {
   mentionQueryAtCursor,
   noteNotificationLinkPath,
   ownerAlreadyMentioned,
-  resolveMentionRecipientIds,
+  sanitizeMentionedUsers,
   shouldNotifyOwner,
   splitNoteContentMentions,
   summariseNoteContent,
@@ -88,29 +88,69 @@ describe("shouldNotifyOwner (F485 owner half)", () => {
   });
 });
 
-describe("resolveMentionRecipientIds (F485 mention half)", () => {
-  it("passes through a single mention", () => {
-    assert.deepEqual(resolveMentionRecipientIds([BOB], ALICE), [BOB]);
+describe("sanitizeMentionedUsers (F485 mention half)", () => {
+  it("passes through a single mention pair", () => {
+    assert.deepEqual(sanitizeMentionedUsers([{ id: BOB, name: "Bob Osei" }], ALICE), [
+      { id: BOB, name: "Bob Osei" },
+    ]);
   });
 
   it("dedupes a repeated mention of the same user", () => {
-    assert.deepEqual(resolveMentionRecipientIds([BOB, BOB, BOB], ALICE), [BOB]);
+    const thrice = [
+      { id: BOB, name: "Bob Osei" },
+      { id: BOB, name: "Bob Osei" },
+      { id: BOB, name: "Bob Osei" },
+    ];
+    assert.deepEqual(sanitizeMentionedUsers(thrice, ALICE), [{ id: BOB, name: "Bob Osei" }]);
   });
 
   it("keeps multiple distinct mentions", () => {
-    assert.deepEqual(resolveMentionRecipientIds([BOB, CAROL], ALICE), [BOB, CAROL]);
+    assert.deepEqual(
+      sanitizeMentionedUsers(
+        [
+          { id: BOB, name: "Bob Osei" },
+          { id: CAROL, name: "Carol Danvers" },
+        ],
+        ALICE,
+      ),
+      [
+        { id: BOB, name: "Bob Osei" },
+        { id: CAROL, name: "Carol Danvers" },
+      ],
+    );
   });
 
   it("drops the author — the author is never notified about their own note", () => {
-    assert.deepEqual(resolveMentionRecipientIds([ALICE, BOB], ALICE), [BOB]);
-    assert.deepEqual(resolveMentionRecipientIds([ALICE], ALICE), []);
+    assert.deepEqual(
+      sanitizeMentionedUsers(
+        [
+          { id: ALICE, name: "Alice Ahmed" },
+          { id: BOB, name: "Bob Osei" },
+        ],
+        ALICE,
+      ),
+      [{ id: BOB, name: "Bob Osei" }],
+    );
   });
 
-  it("drops malformed ids rather than throwing", () => {
+  it("drops malformed pairs rather than throwing", () => {
     assert.deepEqual(
-      resolveMentionRecipientIds(["not-a-uuid", null, 42, BOB], ALICE),
-      [BOB],
+      sanitizeMentionedUsers(
+        ["not-a-pair", null, 42, { id: "not-a-uuid", name: "X" }, { id: BOB, name: "  " }, { id: BOB, name: "Bob Osei" }],
+        ALICE,
+      ),
+      [{ id: BOB, name: "Bob Osei" }],
     );
+  });
+
+  it("keeps a genuine mention across a rename (submitted name binds, id verifies)", () => {
+    // Alice Ahmed becomes Alice Smith after composing but before saving: the
+    // text still reads "@Alice Ahmed" and the pair still carries that name,
+    // so binding with the submitted name keeps her while the id check (done
+    // server-side against active users) still applies.
+    const content = "please review @Alice Ahmed";
+    const requested = sanitizeMentionedUsers([{ id: ALICE, name: "Alice Ahmed" }], BOB);
+    assert.deepEqual(limitMentionIdsByOccurrences(content, requested), [ALICE]);
   });
 });
 

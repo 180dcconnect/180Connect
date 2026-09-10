@@ -40,8 +40,10 @@ import { getMentionDirectory } from "@/lib/mention-directory";
  * downward over the note list (`align="end"`) instead of above it.
  *
  * F485 (#485) — typing `@` offers active users from
- * /api/users/mention-candidates and posts the chosen ids as
- * `mentionedUserIds`, so each mentioned user gets their own notification.
+ * /api/users/mention-candidates and posts each choice back as an id+name
+ * pair (`mentionedUsers`), so each mentioned user gets their own
+ * notification — including across a rename between composing and saving,
+ * since the server binds with the submitted name.
  * Routing on chosen ids (not on parsing `@Name` out of the text) is what
  * keeps an email address or a bare `@` from notifying anyone. The stored
  * content keeps the plain `@Full Name` text, so the note still reads if a
@@ -165,11 +167,14 @@ export function AddNoteForm({
     // Only ids whose `@Name` is still mentioned in the draft are sent, capped
     // per name at its occurrence count — a mention typed over, deleted, or
     // extended into a different name takes its id with it. Insertion order
-    // decides ties between teammates sharing a display name.
-    const mentionedUserIds = limitMentionIdsByOccurrences(
+    // decides ties between teammates sharing a display name. Each id echoes
+    // the name as inserted, so a rename before saving keeps the mention.
+    const mentionedUsers = limitMentionIdsByOccurrences(
       content,
       [...insertedRef.current.entries()].map(([id, name]) => ({ id, name })),
-    );
+    )
+      .map((id) => ({ id, name: insertedRef.current.get(id) ?? "" }))
+      .filter((user) => user.name !== "");
 
     setBusy(true);
     setError(null);
@@ -177,7 +182,7 @@ export function AddNoteForm({
       const response = await fetch(`/api/clients/${organisationId}/notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, replyEventId, mentionedUserIds }),
+        body: JSON.stringify({ content, replyEventId, mentionedUsers }),
       });
       if (response.ok) {
         setContent("");

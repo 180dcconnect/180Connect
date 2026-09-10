@@ -9,10 +9,11 @@
  *    owner (`NOTE_ADDED_TYPE`), unless the author is the owner themselves
  *    (`create_notification` also refuses self-notification; skipping up front
  *    just saves the RPC).
- * 2. **@mention** — the composer offers active users on `@` and posts their
- *    ids as `mentionedUserIds`; each mentioned user gets their own
- *    notification (`NOTE_MENTIONED_TYPE`), even when they do not own the
- *    client. The author is never notified about their own note.
+ * 2. **@mention** — the composer offers active users on `@` and posts each
+ *    choice back as an `{id, name}` pair (`mentionedUsers`); each mentioned
+ *    user gets their own notification (`NOTE_MENTIONED_TYPE`), even when
+ *    they do not own the client. The author is never notified about their
+ *    own note.
  *
  * No migration: `NOTIFICATIONS.notification_type` is an open token
  * (20260822090000) and `public.create_notification` is the sole write path —
@@ -21,11 +22,19 @@
  * retract a sent notification — acceptable, since notifications are
  * documented as ephemeral signals over a durable AUDIT_LOG trail.
  *
- * Routing on explicit ids (chosen from the autocomplete) rather than
- * free-text `@Name` parsing is deliberate: display names collide, change,
- * and — worst — an email address (`sam@180dc.org`) or a bare `@` would
- * otherwise become a notification. Mention-looking text with no chosen id
- * notifies nobody; the saved note still reads as plain text.
+ * Routing on explicit id+name pairs (chosen from the autocomplete) rather
+ * than free-text `@Name` parsing is deliberate: display names collide,
+ * change, and — worst — an email address (`sam@180dc.org`) or a bare `@`
+ * would otherwise become a notification. Mention-looking text with no chosen
+ * pair notifies nobody; the saved note still reads as plain text.
+ *
+ * The pair carries the name *as inserted*, not just the id, so a rename
+ * between composing and saving cannot drop a genuine mention: the server
+ * binds with the submitted name (the text that is actually in the note)
+ * while verifying the id is still an active user. A forged pair still needs
+ * an active id *and* its name present as an `@mention` in a note the author
+ * was allowed to write — attributable, capped, and no wider than a genuine
+ * mention.
  */
 
 import { isUuid } from "./validation.ts";
@@ -78,23 +87,40 @@ export function buildMentionNoteTitle(authorName: string, organisationName: stri
 }
 
 /**
- * Sanitises the composer's `mentionedUserIds` into the ids that should
- * actually be notified: well-formed uuids, deduped, capped, and never the
- * author. Active-status and read-access checks stay server-side (the pure
- * layer has no database); `create_notification` additionally skips inactive
- * recipients, so this failing open notifies nobody it should not.
+ * One @mention choice echoed back by the composer: the user id selected
+ * from the autocomplete and the display name spliced into the draft at that
+ * moment. The name is what the server binds against the saved text (so a
+ * rename between composing and saving keeps a genuine mention); the id is
+ * what the server verifies is still an active user.
  */
-export function resolveMentionRecipientIds(
-  mentionedUserIds: readonly unknown[],
+export type MentionedUserInput = {
+  id: string;
+  name: string;
+};
+
+/**
+ * Sanitises the composer's `mentionedUsers` into the pairs that should
+ * actually be notified: well-formed uuids with non-blank names, deduped by
+ * id (first wins), capped, and never the author. Malformed entries are
+ * dropped, never a reason to reject the payload. Active-status checks stay
+ * server-side (the pure layer has no database); `create_notification`
+ * additionally skips inactive recipients, so this failing open notifies
+ * nobody it should not.
+ */
+export function sanitizeMentionedUsers(
+  mentionedUsers: readonly unknown[],
   authorId: string,
-): string[] {
+): MentionedUserInput[] {
   const seen = new Set<string>();
-  const result: string[] = [];
-  for (const value of mentionedUserIds) {
-    if (typeof value !== "string" || !isUuid(value)) continue;
-    if (value === authorId || seen.has(value)) continue;
-    seen.add(value);
-    result.push(value);
+  const result: MentionedUserInput[] = [];
+  for (const value of mentionedUsers) {
+    if (typeof value !== "object" || value === null) continue;
+    const { id, name } = value as { id?: unknown; name?: unknown };
+    if (typeof id !== "string" || !isUuid(id)) continue;
+    if (typeof name !== "string" || name.trim() === "") continue;
+    if (id === authorId || seen.has(id)) continue;
+    seen.add(id);
+    result.push({ id, name: name.trim() });
     if (result.length >= MAX_MENTIONS_PER_NOTE) break;
   }
   return result;
@@ -261,10 +287,10 @@ export function countMentionOccurrences(content: string, name: string): number {
 /**
  * Binds candidate ids to actual mentions in the saved text. Both the
  * composer (whose candidates are its insertions, oldest first) and the API
- * routes (whose candidates are the requested active users) reconcile through
- * this one function, so a crafted `mentionedUserIds` naming users the text
- * never mentions notifies nobody, and a mention the author typed over or
- * deleted takes its id with it.
+ * routes (whose candidates are the requested pairs, matched on their
+ * submitted names) reconcile through this one function, so a crafted entry
+ * whose name never appears in the text notifies nobody, and a mention the
+ * author typed over or deleted takes its id with it.
  *
  * Matching is longest-name-first over claimed spans: `@Sam Lee` consumes
  * its text before the prefix `@Sam` is tested, so deleting a selected `@Sam`

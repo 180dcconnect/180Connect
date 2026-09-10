@@ -4,7 +4,7 @@ import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
-import { isUuid, nonEmptyTrimmed, optionalIdList, safeValidate } from "@/lib/validation";
+import { isUuid, nonEmptyTrimmed, optionalMentionedUsers, safeValidate } from "@/lib/validation";
 import { buildReplyNoteContent } from "@/lib/reply-note";
 import {
   MAX_MENTIONS_PER_NOTE,
@@ -15,9 +15,10 @@ import {
   limitMentionIdsByOccurrences,
   noteNotificationLinkPath,
   ownerAlreadyMentioned,
-  resolveMentionRecipientIds,
+  sanitizeMentionedUsers,
   shouldNotifyOwner,
   summariseNoteContent,
+  type MentionedUserInput,
 } from "@/lib/note-mentions";
 
 /**
@@ -45,15 +46,16 @@ const MAX_NOTE_LENGTH = 4000;
 const bodySchema = z.object({
   content: nonEmptyTrimmed(MAX_NOTE_LENGTH, "Write something before saving."),
   replyEventId: z.uuid().optional(),
-  // F485: ids the composer resolved through the @mention autocomplete
-  // (active users, not freehand names). Shared primitive with the bulk-note
-  // route (validation.ts); elements stay plain strings so a malformed id is
-  // dropped downstream, never a reason to reject the note. Routing on
-  // explicit ids — never on parsing `@Name` out of the text — is what keeps
-  // an email address or a bare `@` from becoming a notification, and the
-  // server binds each id to an actual `@Name` occurrence below, so
-  // request-provided ids alone notify nobody.
-  mentionedUserIds: optionalIdList(MAX_MENTIONS_PER_NOTE),
+  // F485: the composer's @mention choices, each an id paired with the
+  // display name spliced into the draft. Shared primitive with the bulk-note
+  // route (validation.ts). Pairs — not bare ids — so a rename between
+  // composing and saving keeps a genuine mention: the server binds with the
+  // submitted name (the text actually in the note) while verifying the id is
+  // still active. Routing on explicit pairs — never on parsing `@Name` out
+  // of the text — is what keeps an email address or a bare `@` from becoming
+  // a notification, and the server binds each pair to an actual `@Name`
+  // occurrence below, so request-provided pairs alone notify nobody.
+  mentionedUsers: optionalMentionedUsers(MAX_MENTIONS_PER_NOTE),
 });
 
 function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
@@ -167,7 +169,7 @@ export async function POST(
     content,
     authorId: authorization.actor.id,
     authorName: authorization.actor.fullName?.trim() || "A team member",
-    mentionedUserIds: parsed.data.mentionedUserIds ?? [],
+    mentionedUsers: parsed.data.mentionedUsers ?? [],
   });
 
   return NextResponse.json({ note: data }, { status: 201 });
@@ -180,7 +182,7 @@ export async function POST(
  *
  * Permission posture: organisations and notes are shared-read across all
  * active roles, so "could already read that client" reduces to `is_active`
- * today — enforced by filtering mentioned ids against active users here
+ * today — enforced by verifying mentioned ids against active users here
  * *and* by `create_notification` itself, which skips inactive recipients.
  * Should read ever scope per-user, this is the place that must learn the
  * narrower check; the notification body (a 240-char preview) must never go
@@ -192,7 +194,7 @@ async function notifyNoteRecipients(args: {
   content: string;
   authorId: string;
   authorName: string;
-  mentionedUserIds: string[];
+  mentionedUsers: MentionedUserInput[];
 }): Promise<void> {
   try {
     const supabase = await createClient();
@@ -214,31 +216,37 @@ async function notifyNoteRecipients(args: {
     const organisationName = org.legal_name?.trim() || "A client";
     const linkPath = noteNotificationLinkPath(args.organisationId);
     const body = summariseNoteContent(args.content);
-    const mentionIds = resolveMentionRecipientIds(args.mentionedUserIds, args.authorId);
+    const requested = sanitizeMentionedUsers(args.mentionedUsers, args.authorId);
 
-    // Only active users whose `@Name` is actually in the saved content are
-    // notifiable — request-provided ids alone notify nobody, so a crafted
-    // payload cannot ping arbitrary teammates. `create_notification`
-    // re-checks active status itself; binding to the text happens here
-    // because only this route holds both the ids and the content.
-    let activeMentionIds = mentionIds;
-    if (mentionIds.length > 0) {
+    // Only requested pairs whose submitted `@Name` is actually in the saved
+    // content — and whose id is still an active user — are notifiable. The
+    // name comes from the submission rather than today's `users` row, so a
+    // rename between composing and saving keeps a genuine mention instead of
+    // dropping it; the id check is what keeps a forged pair from notifying
+    // someone inactive. `create_notification` re-checks active status itself;
+    // binding to the text happens here because only this route holds both
+    // the pairs and the content.
+    let activeMentionIds: string[] = [];
+    if (requested.length > 0) {
       const { data: users, error: usersError } = await supabase
         .from("users")
-        .select("id, full_name")
-        .in("id", mentionIds)
+        .select("id")
+        .in(
+          "id",
+          requested.map((r) => r.id),
+        )
         .eq("is_active", true)
-        .returns<{ id: string; full_name: string | null }[]>();
+        .returns<{ id: string }[]>();
       if (usersError) {
         await reportError(usersError, {
           operation: "clients.notes_notify_mention_lookup",
           organisationId: args.organisationId,
         });
-        activeMentionIds = [];
       } else {
+        const active = new Set((users ?? []).map((u) => u.id));
         activeMentionIds = limitMentionIdsByOccurrences(
           args.content,
-          (users ?? []).map((u) => ({ id: u.id, name: u.full_name ?? "" })),
+          requested.filter((r) => active.has(r.id)),
         );
       }
     }

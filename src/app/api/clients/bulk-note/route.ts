@@ -4,7 +4,7 @@ import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
-import { optionalIdList, safeValidate } from "@/lib/validation";
+import { optionalMentionedUsers, safeValidate } from "@/lib/validation";
 import {
   MAX_BULK_NOTE_CLIENTS,
   MAX_NOTE_LENGTH,
@@ -25,8 +25,9 @@ import {
   groupBulkClientsByOwner,
   limitMentionIdsByOccurrences,
   noteNotificationLinkPath,
-  resolveMentionRecipientIds,
+  sanitizeMentionedUsers,
   summariseNoteContent,
+  type MentionedUserInput,
 } from "@/lib/note-mentions";
 
 /**
@@ -60,11 +61,11 @@ const bodySchema = z.object({
   // stops an unbounded string being parsed. Both have to be here: this one is
   // about the payload, that one is about what gets stored.
   comment: z.string().max(MAX_NOTE_LENGTH * 2),
-  // F485: ids the composer resolved through the @mention autocomplete.
-  // Shared primitive with the single-note route (validation.ts); the server
-  // binds each id to an actual `@Name` occurrence below, so
-  // request-provided ids alone notify nobody.
-  mentionedUserIds: optionalIdList(MAX_MENTIONS_PER_NOTE),
+  // F485: the composer's @mention choices as id+name pairs (see the
+  // single-note route for why pairs, not bare ids). Shared primitive with
+  // that route (validation.ts); the server binds each pair to an actual
+  // `@Name` occurrence below, so request-provided pairs alone notify nobody.
+  mentionedUsers: optionalMentionedUsers(MAX_MENTIONS_PER_NOTE),
 });
 
 function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
@@ -149,7 +150,7 @@ export async function POST(request: Request) {
     content: prepared.content,
     authorId: authorization.actor.id,
     authorName: authorization.actor.fullName?.trim() || "A team member",
-    mentionedUserIds: parsed.data.mentionedUserIds ?? [],
+    mentionedUsers: parsed.data.mentionedUsers ?? [],
   });
 
   return NextResponse.json({ ...result, message: bulkNoteSummary(result) }, { status: 200 });
@@ -163,7 +164,7 @@ export async function POST(request: Request) {
  *
  * Same permission posture as the single-note producer: organisations are
  * shared-read across all active roles, so "could already read that client"
- * reduces to `is_active` — enforced by filtering mentioned ids against
+ * reduces to `is_active` — enforced by verifying mentioned ids against
  * active users here *and* by `create_notification` itself.
  */
 async function notifyBulkNoteRecipients(args: {
@@ -172,7 +173,7 @@ async function notifyBulkNoteRecipients(args: {
   content: string;
   authorId: string;
   authorName: string;
-  mentionedUserIds: string[];
+  mentionedUsers: MentionedUserInput[];
 }): Promise<void> {
   try {
     const supabase = await createClient();
@@ -198,28 +199,31 @@ async function notifyBulkNoteRecipients(args: {
     }));
     const body = summariseNoteContent(args.content);
 
-    const mentionIds = resolveMentionRecipientIds(args.mentionedUserIds, args.authorId);
-    // Same binding as the single-note producer: only active users whose
-    // `@Name` is actually in the saved comment are notifiable, so
-    // request-provided ids alone notify nobody.
-    let activeMentionIds = mentionIds;
-    if (mentionIds.length > 0) {
+    const requested = sanitizeMentionedUsers(args.mentionedUsers, args.authorId);
+    // Same binding as the single-note producer: the submitted name (the text
+    // actually in the comment, surviving a rename between composing and
+    // saving) matched against the text, the id verified still active.
+    let activeMentionIds: string[] = [];
+    if (requested.length > 0) {
       const { data: users, error: usersError } = await supabase
         .from("users")
-        .select("id, full_name")
-        .in("id", mentionIds)
+        .select("id")
+        .in(
+          "id",
+          requested.map((r) => r.id),
+        )
         .eq("is_active", true)
-        .returns<{ id: string; full_name: string | null }[]>();
+        .returns<{ id: string }[]>();
       if (usersError) {
         await reportError(usersError, {
           operation: "clients.bulk_note_notify_mention_lookup",
           selectedCount: args.organisationIds.length,
         });
-        activeMentionIds = [];
       } else {
+        const active = new Set((users ?? []).map((u) => u.id));
         activeMentionIds = limitMentionIdsByOccurrences(
           args.content,
-          (users ?? []).map((u) => ({ id: u.id, name: u.full_name ?? "" })),
+          requested.filter((r) => active.has(r.id)),
         );
       }
     }

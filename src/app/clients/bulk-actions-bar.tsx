@@ -236,14 +236,18 @@ export function BulkActionsBar({
         // Only ids whose `@Name` is still mentioned in the draft are sent,
         // capped per name at its occurrence count — a mention typed over,
         // deleted, or extended into a different name takes its id with it.
-        const mentionedUserIds = limitMentionIdsByOccurrences(
+        // Each id echoes the name as inserted, so a rename before saving
+        // keeps the mention.
+        const mentionedUsers = limitMentionIdsByOccurrences(
           comment,
           [...insertedRef.current.entries()].map(([id, name]) => ({ id, name })),
-        );
+        )
+          .map((id) => ({ id, name: insertedRef.current.get(id) ?? "" }))
+          .filter((user) => user.name !== "");
         payload = {
           ids,
           comment: preparedComment.ok ? preparedComment.content : comment,
-          mentionedUserIds,
+          mentionedUsers,
         };
       } else {
         // assign

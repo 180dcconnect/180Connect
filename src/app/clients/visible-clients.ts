@@ -428,6 +428,7 @@ export function emptyStateMessage({
   search,
   ask,
   mission,
+  similar,
   filterActive,
 }: {
   isOwnedView: boolean;
@@ -441,6 +442,10 @@ export function emptyStateMessage({
    * "no results" is "no charity's filed mission says this", which is what a
    * CAM weighing whether to widen their words needs to hear. */
   mission?: string | null;
+  /** F216 — the similarity reference's name (or true when it is dangling):
+   * "no similar clients" names the client the search started from, or says
+   * plainly that it is gone. */
+  similar?: string | boolean | null;
   filterActive: boolean;
 }): string {
   const question = ask?.trim();
@@ -454,6 +459,12 @@ export function emptyStateMessage({
   }
   if (missionTerm) {
     return `No client's mission mentions “${missionTerm}”. Try fewer or broader words — or clear the mission filter.`;
+  }
+  const similarName = typeof similar === "string" ? similar.trim() : "";
+  if (similar === true || similarName) {
+    return similarName
+      ? `No clients similar to ${similarName} are visible to you. The client list may not hold enough comparable charities yet.`
+      : "The client this similarity search was started from no longer exists.";
   }
   if (isOwnedView) {
     return "You don't own any clients yet. Claim one from the list, or ask an admin to assign you one.";

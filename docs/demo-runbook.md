@@ -268,6 +268,17 @@ the query to similar wording ("helping refugees" also matches missions saying
 rate limit, or API failure — it falls back to exact-word matching and says that
 too. Nothing to configure for a demo beyond the usual `GEMINI_*` env vars.
 
+**F216 (Search by Similarity) is now on `dev`** — open a client whose pipeline
+status is **Converted** (or Future potential) and use **Find similar clients**
+on its Overview tab. The list reorders to clients sharing that client's
+recorded traits — same sector category, priority area, income band, matched
+grant history, outcome — each row tagged "N% similar", with the ranking stated
+above the list. If the reference is too thinly recorded or too few clients
+compare, the page says "Not enough data to find similar clients yet" rather
+than showing a thin list. To demo: make sure the demo data has at least three
+charities in the same sector/income band as the converted client, or the
+insufficient-data state is the honest thing to show.
+
 **A real send needs the branch mailbox configured.** The inbox composer and
 the client record both send through the branch Gmail mailbox. On a local dev
 server with no `GMAIL_*` variables set, a send is refused with *"The branch

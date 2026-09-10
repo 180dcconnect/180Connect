@@ -90,6 +90,10 @@ import {
 import { type SavedViewSummary } from "./saved-views-panel";
 import { SavedViewsPopover } from "./saved-views-popover";
 import { expandMissionQuery } from "@/lib/ai/mission-query";
+import {
+  describeInsufficientData,
+  findSimilarClients,
+} from "@/lib/similar-clients";
 import { bulkStatusBlockedReason, canBulkUpdateStatus } from "@/lib/bulk-status";
 import { ClientSelectCheckbox, SelectPageCheckbox } from "./bulk-selection";
 import { BulkActionsBar } from "./bulk-actions-bar";
@@ -129,6 +133,8 @@ type SearchParams = Promise<{
    * Single-valued: one mission filter per view, staged through the search
    * bar's free-text panel. */
   mission?: string;
+  /** F216 — find clients similar to this one (a past successful client's id). */
+  similar?: string;
   // F058 — priority-score bands (`high` / `medium` / `low` / `unscored`), same
   // repeated-param shape as the other multi-selects.
   score?: string | string[];
@@ -246,6 +252,7 @@ export default async function ClientsPage({
     type: typeFilter,
     sector: sectorParam,
     mission: missionParam,
+    similar: similarParam,
     score: scoreParam,
     financials: financialsParam,
     stage: stageParam,
@@ -424,6 +431,38 @@ export default async function ClientsPage({
   const missionExpansion = missionTerm ? await expandMissionQuery(missionTerm) : null;
   const missionKeywords = missionExpansion?.keywords ?? [];
 
+  /**
+   * F216 — Search by Similarity. `?similar=<id>` asks: which visible clients
+   * look like this past successful one? The reference's F088 factors are
+   * recomputed from the same list rows every other filter reads (its own
+   * LATEST_SCORES row is not enough — the module needs the scorers' states,
+   * not just the total), so the comparison and the score-breakdown card can
+   * never disagree.
+   *
+   * The reference is looked up in `allVisibleClients`, NOT the filtered set:
+   * a CAM who found a converted client through a filter, hit "find similar",
+   * and then changed their mind about one chip should still get the same
+   * shortlist — the shortlist describes the reference, not the view it was
+   * requested from. Candidates are likewise every visible client, so the
+   * result is stable under filter changes and the suppression filter has
+   * already been applied once, by visibleClients().
+   */
+  const reference = similarParam
+    ? allVisibleClients.find((client) => client.id === similarParam) ?? null
+    : null;
+  /** F092's input is a matched grant count; the list embeds grant rows. */
+  const withGrantCounts = (client: VisibleClient) => ({
+    ...client,
+    matched_grant_count: client.grants?.length ?? 0,
+  });
+  const similarResult = reference
+    ? findSimilarClients(
+        withGrantCounts(reference),
+        allVisibleClients.map(withGrantCounts),
+      )
+    : null;
+  const similarDangling = Boolean(similarParam) && !reference;
+
   // BrandSearchBar always writes a multi-selected category as repeated params
   // (see its submitSearch), so this can legitimately arrive as one string or
   // several — normalise to an array once, here, rather than at every call site.
@@ -494,9 +533,16 @@ export default async function ClientsPage({
   // explicit ?listSort=, so the personal queue does not re-sort on top of it —
   // that would throw away the relevance ranking (AC4) before it reached the
   // screen. With no interpretation in play this is untouched F094 behaviour.
-  matchingClients = nlPlanApplies
-    ? matchingClients
-    : prioritiseQueue(matchingClients, outreachPrefs.data);
+  // F216 — a similarity result IS the answer, not one filter among many: the
+  // list becomes the ranked shortlist (agreement first, ties broken by base
+  // score — the same precedence the matches carry), which neither the legal_name
+  // fetch order nor a personal-queue re-sort would preserve. An explicit
+  // ?listSort= still wins below, exactly as it beats the F214 interpretation.
+  matchingClients = similarResult?.status === "ok"
+    ? similarResult.matches.map((match) => match.client)
+    : nlPlanApplies
+      ? matchingClients
+      : prioritiseQueue(matchingClients, outreachPrefs.data);
   const teamMembers = team.data ?? [];
   // The owner dropdown lists CAMs only (F163), but `?owner=` can name anyone who
   // holds clients — an admin, or a deactivated former member — because the team
@@ -514,6 +560,7 @@ export default async function ClientsPage({
       search ||
       askParam ||
       missionTerm ||
+      similarParam ||
       cityValues.length ||
       countryValues.length ||
       statusValues.length ||
@@ -646,6 +693,9 @@ export default async function ClientsPage({
       financials: financialValues,
       // The validated term, not the raw param — same junk-leaves-the-URL rule.
       mission: missionTerm ?? undefined,
+      // F216 — a dangling id is dropped here (the banner says the client is
+      // gone); a valid one rides along so paging/sorting keeps the mode.
+      similar: reference ? similarParam : undefined,
       stage: stageParam,
       sort: sortParam,
       dir: dirParam,
@@ -698,6 +748,15 @@ export default async function ClientsPage({
    */
   const nlChips = nlPlan ? describeResolvedPlan(nlPlan) : [];
   const clearAskHref = hrefWith({ ask: undefined });
+  // F216 — leaving similarity mode is one link; every other link on the page
+  // (paging, sorting, chips) carries the param via hrefWith so the mode holds.
+  const clearSimilarHref = hrefWith({ similar: undefined });
+  /** Row-level agreement, for the "N% similar" tag on each match. */
+  const similarityForId = new Map(
+    similarResult?.status === "ok"
+      ? similarResult.matches.map((match) => [match.client.id, match.similarity] as const)
+      : [],
+  );
   const convertHref =
     nlPlan && nlPlanApplies
       ? hrefWith({ ask: undefined, ...planFilterParams(nlPlan) })
@@ -1066,6 +1125,68 @@ export default async function ClientsPage({
           </Rise>
         )}
 
+        {/* F216 — what "similar" means here, said before the results: the
+            dimensions shared with the reference, so the ordering is readable
+            rather than an opaque score (AC2). A dangling id, a thin reference
+            or a thin shortlist each says so plainly (AC3) instead of posing as
+            a search that ran. */}
+        {similarParam && (
+          <Rise>
+            {similarDangling ? (
+              <div
+                role="alert"
+                className="mb-8 rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4"
+              >
+                <p className="text-sm font-bold text-destructive">
+                  The client this search was started from no longer exists.
+                </p>
+                <p className="mt-1.5 text-sm leading-[1.7] text-foreground/65">
+                  It may have been removed. <Link href={clearSimilarHref} className="font-bold underline">Show all clients</Link>.
+                </p>
+              </div>
+            ) : similarResult && similarResult.status === "insufficient_data" ? (
+              <div
+                role="alert"
+                className="mb-8 rounded-2xl border border-foreground/10 bg-white px-5 py-4"
+              >
+                <p className="text-sm font-bold text-foreground">
+                  Not enough data to find similar clients yet
+                </p>
+                <p className="mt-1.5 text-sm leading-[1.7] text-foreground/65">
+                  {describeInsufficientData({
+                    status: "insufficient_data",
+                    reason: similarResult.reason ?? "too_few_matches",
+                    reference: similarResult.reference,
+                    matches: similarResult.matches,
+                  })}{" "}
+                  <Link href={clearSimilarHref} className="font-bold underline">
+                    Back to all clients
+                  </Link>
+                  .
+                </p>
+              </div>
+            ) : similarResult && similarResult.status === "ok" ? (
+              <div className="mb-8 rounded-2xl border border-foreground/10 bg-white px-5 py-4">
+                <p className="text-sm leading-[1.7] text-foreground/65">
+                  Clients similar to{" "}
+                  <Link
+                    href={`/clients/${similarResult.reference.id}`}
+                    className="font-bold text-foreground hover:underline"
+                  >
+                    {similarResult.reference.name}
+                  </Link>{" "}
+                  — ranked by how many of its recorded traits they share ({similarResult.reference.knownDimensions.map((d) => d.label.toLowerCase()).join(", ")}).
+                </p>
+                <p className="mt-1.5 text-sm leading-[1.7] text-foreground/65">
+                  <Link href={clearSimilarHref} className="font-bold underline">
+                    Clear similarity search
+                  </Link>
+                </p>
+              </div>
+            ) : null}
+          </Rise>
+        )}
+
         <Group className="space-y-4">
           {/* Where the pipeline stands before the list of it: the four stage
               totals, the stream between them, and the top-N groups. Counts
@@ -1106,6 +1227,7 @@ export default async function ClientsPage({
                     search,
                     ask: askParam,
                     mission: missionTerm,
+                    similar: reference?.legal_name ?? (similarDangling ? true : null),
                     filterActive,
                   })}
                 />
@@ -1248,6 +1370,11 @@ export default async function ClientsPage({
                             </span>
                             <span className="hidden truncate text-[12px] text-foreground/40 lg:block">
                               {SOURCE_LABELS[client.organisation_type] ?? client.organisation_type}
+                              {similarityForId.get(client.id) !== undefined && (
+                                <span className="ml-2 rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] text-brand">
+                                  {Math.round(similarityForId.get(client.id)! * 100)}% similar
+                                </span>
+                              )}
                             </span>
                           </span>
 

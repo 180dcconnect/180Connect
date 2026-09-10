@@ -61,3 +61,7 @@ the next export.
   question has no answer, and the audit log has no session data to source it
   from honestly. Descoped while triaging the Analytics backlog, 10 September
   2026.
+- [`recurring-follow-up.md`](recurring-follow-up.md) — F127's auto-recurring
+  send conflicts with the human-approval DoD requirement, and what's left
+  after that constraint is already covered by F160 + F126. Descoped while
+  triaging the Email Sending backlog, 10 September 2026.

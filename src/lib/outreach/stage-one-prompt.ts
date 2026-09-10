@@ -56,6 +56,12 @@ export const EMAIL_REGISTER_LABELS: Record<EmailRegister, string> = {
   direct: "Direct",
 };
 
+export const EMAIL_LENGTH_LABELS: Record<EmailLength, string> = {
+  short: "Short",
+  standard: "Standard",
+  detailed: "Detailed",
+};
+
 export const OPENING_APPROACHES = ["mission_led", "direct_intro", "news_hook"] as const;
 export type OpeningApproach = (typeof OPENING_APPROACHES)[number];
 export const CLOSING_APPROACHES = ["soft_cta", "meeting_request", "open_question"] as const;

@@ -326,6 +326,10 @@ export async function POST(
     // F113: the model in force at generation time, not a live lookup of the current
     // default — see the migration for why a later env change must never rewrite history.
     model,
+    // F209: the F107 tone dials this request chose, written once at generation time
+    // so the analytics group by what actually ran, not by today's defaults.
+    tone_register: preferences.data.register,
+    tone_length: preferences.data.length,
     activity: isRegeneration ? "email_regeneration" : "initial_email",
     // F112: the exact prompt this generation actually sent — every attempt (create
     // or regenerate) gets its own row here, never overwritten, so this is also the

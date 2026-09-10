@@ -44,6 +44,27 @@ test("persistence payload always carries every NOT NULL column", () => {
   assert.equal(payload.cost_usd, 0.000123);
 });
 
+test("F209: the tone dials ride on the insert, matching the request, not the defaults", () => {
+  const payload = buildStageTwoGenerationInsert({
+    outreachMessageId: "msg-3",
+    draft: { subject: "S", body: "B" },
+    model: "gemini-2.0-flash",
+    usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+    costUsd: null,
+    prompt: { system: "system", user: "user" },
+    toneRegister: "warm",
+    toneLength: "detailed",
+  });
+  assert.equal(payload.tone_register, "warm");
+  assert.equal(payload.tone_length, "detailed");
+
+  // A caller that omits them (a route that never chooses tone) stores nulls
+  // rather than pretending a default was used — null is what F209's AC3 excludes.
+  const bare = buildPayload();
+  assert.equal(bare.tone_register, null);
+  assert.equal(bare.tone_length, null);
+});
+
 test("the stored prompt is the exact system/user pair that was sent", () => {
   const payload = buildPayload();
   assert.equal(payload.prompt_system, "You draft Stage 2 follow-up outreach emails.");

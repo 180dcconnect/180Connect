@@ -22,6 +22,7 @@ import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import { computeCostUsd } from "@/lib/outreach/generation-cost";
 import { loadModelRate } from "@/lib/ai/model-rate";
 import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
+import { lookupLiveNewsHook } from "@/lib/outreach/news-hook";
 
 export const maxDuration = 60;
 
@@ -230,6 +231,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     await reportError(bookletError, { operation: "outreach.stage_two.load_booklet", organisationId });
   }
 
+  // F110: pull one live news hook at draft-generation time (Exa, fail-open).
+  // lookupLiveNewsHook never throws and resolves to null on any failure, so the follow-up still generates. A live hit takes
+  // precedence (it is the fresh evidence AC1 asks for); otherwise the stored
+  // enrichment hooks keep the previous behaviour. newsSource is additive and
+  // lets the UI — and a failure-diagnosis read of the logs — show where the
+  // hook came from.
+  const liveNews = await lookupLiveNewsHook({
+    organisationId,
+    organisationName: organisation.legal_name,
+    tradingName: organisation.trading_name,
+    website: organisation.website,
+  });
+  const storedHooks = enrichment?.news_hooks?.filter(Boolean) ?? [];
+  const newsHooks = liveNews ? [liveNews.text] : storedHooks;
+  const newsSource = liveNews ? "live" : storedHooks.length > 0 ? "stored" : "none";
+
   let callModel;
   let model: string;
   try {
@@ -267,7 +284,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       missionKeywords: enrichment?.mission_keywords,
       sector: enrichment?.sector,
       subSector: enrichment?.sub_sector,
-      newsHooks: enrichment?.news_hooks,
+      newsHooks,
       booklet: savedBooklet?.booklet_text ?? null,
       senderName: authorization.actor.fullName,
       previousSubject: previousMessage.subject,
@@ -282,7 +299,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       length: parsed.data.length,
       register: parsed.data.register,
       closing: parsed.data.closing,
-      newsEnabled: Boolean(enrichment?.news_hooks?.length),
+      newsEnabled: newsHooks.length > 0,
     },
   );
   if ("error" in result) return NextResponse.json({ error: result.error }, { status: 502 });
@@ -355,5 +372,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "The follow-up draft could not be saved safely. Try again." }, { status: 500 });
   }
 
-  return NextResponse.json({ id: message.id, ...result.draft }, { status: 201 });
+  return NextResponse.json(
+    { id: message.id, ...result.draft, newsSource, newsUrl: liveNews?.url ?? null },
+    { status: 201 },
+  );
 }

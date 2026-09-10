@@ -65,6 +65,34 @@ send before anyone means to go live.
 **Who decides.** `DECISION` — PM signs off that production may send live client
 outreach before the keys go in.
 
+## F110 news hook: provider vars to set in Vercel
+
+**What to set.** The Stage 2 live news hook (F110) reads two server-only
+variables. Until both scopes below carry them, every lookup resolves to
+`null` and follow-ups generate hookless — by design, silently:
+
+| Variable | Preview (staging) | Production |
+| --- | --- | --- |
+| `NEWS_HOOK_PROVIDER` | `exa` | `exa` (when prod goes live; until then leave unset = `none`) |
+| `EXA_API_KEY` | set (free-tier key, no card) | set (same free key, or a second one) |
+
+Set them via Vercel dashboard → `180connect` → Settings → Environment
+Variables (tick the scope), or `vercel env add <NAME> preview|production`.
+
+**Values.** One free-tier key from https://exa.ai covers both scopes: no
+card, $10 credits/month at ~$0.007 a lookup (thousands of follow-ups a
+month), requests blocked — never billed — on exhaustion. Startup refuses the
+`exa`-without-key combination outright (`requireNewsHookKey` in
+`src/lib/env.ts`), so a half-configured scope fails loudly at boot, not
+quietly at generation time.
+
+**Verify.** Generate a Stage 2 follow-up on staging and watch the logs for
+`API_HEALTH_LOGS { service: "exa", operation:
+"outreach.news_hook.lookup", ok: true, matched: true }`. `ok: false` with
+`reason: "credits_exhausted"` means the monthly allowance is spent (resets
+monthly); any other `false` is a provider outage — the follow-up still
+generates, hookless.
+
 ## Housekeeping: stale per-branch `GMAIL_CLIENT_ID` overrides
 
 `vercel env ls` also lists ~30 branch-scoped `GMAIL_CLIENT_ID` entries on

@@ -60,11 +60,10 @@ export type EmailReviewDraft = {
   savedRecipient?: string | null;
   /**
    * F110: live news hook behind this draft, when the Stage 2 route found one.
-   * Present only on freshly generated drafts — a reopened or saved draft no
-   * longer carries these (outreach_messages has no vessel; the URL persists
-   * in ai_generations.prompt_user instead). Absent means no hook, never a
-   * hidden one: the panel only renders the source line for a verifiable
-   * live URL.
+   * Present only on freshly generated drafts. A reopened draft restores these
+   * from its outreach_messages row (news_source/news_hook/news_url) through
+   * the inbox resume path instead. Absent means no hook, never a hidden one:
+   * the panel only renders the source line for a verifiable live URL.
    */
   newsSource?: "live" | "stored" | "none";
   newsHook?: string | null;

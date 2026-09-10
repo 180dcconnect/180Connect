@@ -460,6 +460,66 @@ describe("hydrateInboxThread", () => {
       [["draft", "<p>Half-written hello</p>"]],
     );
   });
+
+  it("restores a draft's news source so reopening keeps its verification link", () => {
+    const [thread] = buildRealInboxThreads({
+      messages: [],
+      replies: [],
+      pending: [pendingRow({ id: "msg-news" })],
+      organisations: [organisation()],
+      contacts: [],
+      now: NOW,
+    });
+
+    const hydrated = hydrateInboxThread(
+      thread,
+      [
+        {
+          ...sentMessage({ id: "msg-news", send_status: "draft", sent_at: null }),
+          body: "<p>Following up</p>",
+          news_source: "live",
+          news_hook: "Charity opens hub (BBC, August 2026)",
+          news_url: "https://www.bbc.co.uk/news/hook",
+        },
+      ],
+      [],
+    );
+
+    const draft = hydrated.messages.find((message) => message.pendingKind === "draft");
+    assert.ok(draft, "the draft hydrates into the pane");
+    assert.equal(draft.newsSource, "live");
+    assert.equal(draft.newsHook, "Charity opens hub (BBC, August 2026)");
+    assert.equal(draft.newsUrl, "https://www.bbc.co.uk/news/hook");
+  });
+
+  it("leaves sent mail and hookless drafts without news fields", () => {
+    const [thread] = buildRealInboxThreads({
+      messages: [sentMessage()],
+      replies: [],
+      pending: [pendingRow({ id: "msg-plain" })],
+      organisations: [organisation()],
+      contacts: [],
+      now: NOW,
+    });
+
+    const hydrated = hydrateInboxThread(
+      thread,
+      [
+        { ...sentMessage(), body: "<p>Our opening pitch</p>" },
+        {
+          ...sentMessage({ id: "msg-plain", send_status: "draft", sent_at: null }),
+          body: "<p>No hook here</p>",
+        },
+      ],
+      [],
+    );
+
+    for (const message of hydrated.messages) {
+      assert.equal(message.newsSource, undefined);
+      assert.equal(message.newsHook, undefined);
+      assert.equal(message.newsUrl, undefined);
+    }
+  });
 });
 
 describe("buildRealInboxThreads — thread tags", () => {

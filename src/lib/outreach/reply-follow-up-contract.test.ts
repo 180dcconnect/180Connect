@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
 async function source(relative: string) {
@@ -67,5 +67,36 @@ describe("F135 reply follow-up contract", () => {
     assert.match(panel, /draft\.newsSource === "live" && draft\.newsUrl/);
     assert.match(panel, /target="_blank"/);
     assert.match(panel, /rel="noreferrer"/);
+  });
+
+  it("persists the news triple on the draft row and restores it on reopen", async () => {
+    const route = await source("../../app/api/clients/[id]/outreach-drafts/stage-two/route.ts");
+    assert.match(route, /news_source: liveNews \? "live" : null/);
+    assert.match(route, /news_hook: liveNews\?\.text \?\? null/);
+    assert.match(route, /news_url: liveNews\?\.url \?\? null/);
+
+    const threadRoute = await source("../../app/api/inbox/[orgId]/thread/route.ts");
+    for (const column of ["news_source", "news_hook", "news_url"]) {
+      assert.match(threadRoute, new RegExp(column), `thread hydrate must select ${column}`);
+    }
+
+    const shell = await source("../../components/inbox/gmail-inbox-shell.tsx");
+    assert.match(shell, /newsUrl: last\?\.newsUrl/);
+    const modal = await source("../../components/inbox/gmail-compose-modal.tsx");
+    assert.match(modal, /initialNewsUrl\?: string \| null/);
+    assert.match(modal, /initialNewsSource === "live" && initialNewsUrl/);
+
+    // The migration filename carries a timestamp that is re-dated whenever
+    // dev moves ahead of the branch, so find it by suffix, not by name.
+    const migrations = await readdir(new URL("../../../supabase/migrations/", import.meta.url));
+    const migration = migrations.find((name) => name.endsWith("_add_stage_two_news_hook_columns.sql"));
+    assert.ok(migration, "the news columns migration must exist");
+    const sql = await readFile(
+      new URL(`../../../supabase/migrations/${migration}`, import.meta.url),
+      "utf8",
+    );
+    for (const column of ["news_source", "news_hook", "news_url"]) {
+      assert.match(sql, new RegExp(`add column if not exists ${column}`));
+    }
   });
 });

@@ -245,6 +245,10 @@ type ComposeWindow = {
   recipient?: string;
   subject?: string;
   body?: string;
+  /** F110: live news hook restored from the draft row on resume. */
+  newsSource?: "live" | "stored" | "none";
+  newsHook?: string | null;
+  newsUrl?: string | null;
   minimised: boolean;
 };
 
@@ -1054,6 +1058,9 @@ export function GmailInboxShell({
       recipient: thread.primaryContact?.email ?? undefined,
       subject: thread.subject,
       body: entry?.body ? emailHtmlToPlainText(entry.body) : undefined,
+      newsSource: entry?.newsSource,
+      newsHook: entry?.newsHook,
+      newsUrl: entry?.newsUrl,
     });
     setActiveThreadId(null);
     router.refresh();
@@ -1143,6 +1150,12 @@ export function GmailInboxShell({
       recipient: thread.primaryContact?.email ?? undefined,
       subject: thread.subject,
       body: last?.body ? emailHtmlToPlainText(last.body) : undefined,
+      // F110: a reopened Stage 2 draft restores its verification link from
+      // the row — without this the source exists only in the transient
+      // generation response and cannot be checked on reopen.
+      newsSource: last?.newsSource,
+      newsHook: last?.newsHook,
+      newsUrl: last?.newsUrl,
     });
   }
 
@@ -1651,6 +1664,9 @@ export function GmailInboxShell({
           initialRecipient={composer.recipient}
           initialSubject={composer.subject}
           initialBody={composer.body}
+          initialNewsSource={composer.newsSource}
+          initialNewsHook={composer.newsHook}
+          initialNewsUrl={composer.newsUrl}
           rightOffsetPx={composerOffsets[index]}
           isMinimised={composer.minimised}
           onMinimisedChange={(minimised) => setComposerMinimised(composer.key, minimised)}

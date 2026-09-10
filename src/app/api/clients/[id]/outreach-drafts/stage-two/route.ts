@@ -315,6 +315,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   // A generated follow-up is persisted only as a draft. This route contains no send
   // operation and cannot set sent_at/send_status, preserving the human checkpoint.
+  // The news columns travel with the draft row so a saved draft reopened later
+  // (inbox resume) still restores its verification link — a URL kept only in
+  // the transient response below would be unverifiable on reopen.
   const { data: message, error: draftError } = await supabase
     .from("outreach_messages")
     .insert({
@@ -324,6 +327,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       subject: result.draft.subject,
       body: result.draft.body,
       send_status: "draft",
+      news_source: liveNews ? "live" : null,
+      news_hook: liveNews?.text ?? null,
+      news_url: liveNews?.url ?? null,
     })
     .select("id")
     .single();

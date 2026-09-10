@@ -99,4 +99,13 @@ describe("F135 reply follow-up contract", () => {
       assert.match(sql, new RegExp(`add column if not exists ${column}`));
     }
   });
+
+  it("shares in-flight hydration so a double activation opens one composer", async () => {
+    const shell = await source("../../components/inbox/gmail-inbox-shell.tsx");
+    // Concurrent resumes of the same draft share the first request instead of
+    // the loser resolving null and opening a second, body-less composer the
+    // draft-id dedupe cannot collapse.
+    assert.match(shell, /inflightRef\.current\.run\(thread\.id/);
+    assert.doesNotMatch(shell, /hydratingRef/, "the null-on-inflight guard must be gone");
+  });
 });

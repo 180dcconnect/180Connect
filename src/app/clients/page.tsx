@@ -93,6 +93,7 @@ import { expandMissionQuery } from "@/lib/ai/mission-query";
 import {
   describeInsufficientData,
   findSimilarClients,
+  isSimilarityReference,
 } from "@/lib/similar-clients";
 import { bulkStatusBlockedReason, canBulkUpdateStatus } from "@/lib/bulk-status";
 import { ClientSelectCheckbox, SelectPageCheckbox } from "./bulk-selection";
@@ -450,14 +451,21 @@ export default async function ClientsPage({
   const reference = similarParam
     ? allVisibleClients.find((client) => client.id === similarParam) ?? null
     : null;
+  // AC1's rule is enforced here, not just on the detail-page link: ?similar= is
+  // a plain URL parameter, so a hand-edited id must not buy a shortlist for a
+  // client that is not a past success. Same predicate the detail page gates
+  // the entry card with — one definition of "past successful client".
+  const similarIneligible =
+    reference !== null && !isSimilarityReference(reference.outreach_status);
+  const eligibleReference = similarIneligible ? null : reference;
   /** F092's input is a matched grant count; the list embeds grant rows. */
   const withGrantCounts = (client: VisibleClient) => ({
     ...client,
     matched_grant_count: client.grants?.length ?? 0,
   });
-  const similarResult = reference
+  const similarResult = eligibleReference
     ? findSimilarClients(
-        withGrantCounts(reference),
+        withGrantCounts(eligibleReference),
         allVisibleClients.map(withGrantCounts),
       )
     : null;
@@ -693,9 +701,9 @@ export default async function ClientsPage({
       financials: financialValues,
       // The validated term, not the raw param — same junk-leaves-the-URL rule.
       mission: missionTerm ?? undefined,
-      // F216 — a dangling id is dropped here (the banner says the client is
-      // gone); a valid one rides along so paging/sorting keeps the mode.
-      similar: reference ? similarParam : undefined,
+      // F216 — a dangling or ineligible id is dropped here (the banner says
+      // so); a valid one rides along so paging/sorting keeps the mode.
+      similar: eligibleReference ? similarParam : undefined,
       stage: stageParam,
       sort: sortParam,
       dir: dirParam,
@@ -1132,7 +1140,19 @@ export default async function ClientsPage({
             a search that ran. */}
         {similarParam && (
           <Rise>
-            {similarDangling ? (
+            {similarIneligible ? (
+              <div
+                role="alert"
+                className="mb-8 rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4"
+              >
+                <p className="text-sm font-bold text-destructive">
+                  Similarity search starts from a converted client.
+                </p>
+                <p className="mt-1.5 text-sm leading-[1.7] text-foreground/65">
+                  <Link href={clearSimilarHref} className="font-bold underline">Show all clients</Link>.
+                </p>
+              </div>
+            ) : similarDangling ? (
               <div
                 role="alert"
                 className="mb-8 rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4"
@@ -1227,7 +1247,7 @@ export default async function ClientsPage({
                     search,
                     ask: askParam,
                     mission: missionTerm,
-                    similar: reference?.legal_name ?? (similarDangling ? true : null),
+                    similar: eligibleReference?.legal_name ?? (similarDangling || similarIneligible ? true : null),
                     filterActive,
                   })}
                 />

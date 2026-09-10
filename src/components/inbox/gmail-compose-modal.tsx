@@ -111,6 +111,13 @@ export type GmailComposeModalProps = {
   /** Body of a resumed draft, as the compose editor's plain text. */
   initialBody?: string;
   /**
+   * F110: live news hook restored from the draft row when a Stage 2 draft is
+   * resumed. Renders the verification link only — never sent, never edited.
+   */
+  initialNewsSource?: "live" | "stored" | "none";
+  initialNewsHook?: string | null;
+  initialNewsUrl?: string | null;
+  /**
    * Minimised state lives in the shell, not here: with several windows open
    * the shell has to be able to minimise one it did not click — the oldest,
    * when a new window would otherwise overflow the row.
@@ -616,6 +623,9 @@ export function GmailComposeModal({
   onDraftSaved,
   initialRecipient = "",
   initialSubject = "",
+  initialNewsSource,
+  initialNewsHook,
+  initialNewsUrl,
   directory,
   tags,
   assignedTagsByClientId,
@@ -1793,6 +1803,23 @@ export function GmailComposeModal({
       {/* Body Area (hidden when minimized) */}
       {!isMinimized && (
         <div className="relative z-10 flex-1 flex flex-col px-4 pt-1 pb-3 overflow-hidden">
+          {/* F110: a resumed Stage 2 draft restores its news verification link
+              from the row. Display only — never sent, never edited — and only
+              for a live URL, so an unverifiable hook renders nothing. */}
+          {initialNewsSource === "live" && initialNewsUrl && (
+            <p className="pb-1 text-xs text-slate-500">
+              News hook{initialNewsHook ? `: ${initialNewsHook}` : ""} — verify the{" "}
+              <a
+                className="font-semibold underline"
+                href={initialNewsUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                source
+              </a>
+              .
+            </p>
+          )}
           {/* Recipient — a gooey capsule that separates into field + droplet on
               tap, then merges back and turns lead once the address is saved. */}
           <div className="flex items-center pb-1 min-h-[58px]">

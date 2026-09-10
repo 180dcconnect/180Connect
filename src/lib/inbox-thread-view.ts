@@ -44,6 +44,15 @@ export type InboxEmailMessage = {
    * the "scheduled" one. Absent on sent mail and client replies.
    */
   pendingKind?: "draft" | "scheduled";
+  /**
+   * F110: live news hook behind a Stage 2 draft, restored from the
+   * outreach_messages row on hydrate so a reopened draft keeps its
+   * verification link. Present only with a live URL; absent means no hook,
+   * never a hidden one.
+   */
+  newsSource?: "live" | "stored" | "none";
+  newsHook?: string | null;
+  newsUrl?: string | null;
 };
 
 /**

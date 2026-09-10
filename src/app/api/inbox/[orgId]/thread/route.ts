@@ -59,7 +59,7 @@ export async function GET(
     supabase
       .from("outreach_messages")
       .select(
-        "id, subject, body, send_status, sent_at, scheduled_at, updated_at, created_at, organisation_id, sender:users!outreach_messages_sent_by_user_id_fkey(full_name)",
+        "id, subject, body, send_status, sent_at, scheduled_at, updated_at, created_at, organisation_id, news_source, news_hook, news_url, sender:users!outreach_messages_sent_by_user_id_fkey(full_name)",
       )
       .eq("organisation_id", orgId)
       .order("sent_at", { ascending: false })

@@ -22,6 +22,7 @@ import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import { computeCostUsd } from "@/lib/outreach/generation-cost";
 import { loadModelRate } from "@/lib/ai/model-rate";
 import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
+import { lookupLiveNewsHook } from "@/lib/outreach/news-hook";
 
 export const maxDuration = 60;
 
@@ -230,6 +231,31 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     await reportError(bookletError, { operation: "outreach.stage_two.load_booklet", organisationId });
   }
 
+  // F110: pull one live news hook at draft-generation time (Exa, fail-open).
+  // lookupLiveNewsHook never throws and resolves to null on any failure, so the follow-up still generates. A live hit takes
+  // precedence (it is the fresh evidence AC1 asks for); otherwise the stored
+  // enrichment hooks keep the previous behaviour. newsSource/newsHook/newsUrl
+  // are additive in the response so the review UI can show a verifiable link.
+  const liveNews = await lookupLiveNewsHook({
+    organisationId,
+    organisationName: organisation.legal_name,
+    tradingName: organisation.trading_name,
+    website: organisation.website,
+  });
+  const storedHooks = enrichment?.news_hooks?.filter(Boolean) ?? [];
+  // The Source line persists the verification URL verbatim in
+  // ai_generations.prompt_user (F112): outreach_messages has no vessel for it,
+  // so without this the URL would exist only in the transient response below
+  // and be unverifiable once the draft is reopened. A model that cites the
+  // source in the draft is fine — the CAM reviews every word before approval.
+  const newsHooks =
+    liveNews?.url != null
+      ? [`${liveNews.text}\nSource: ${liveNews.url}`]
+      : liveNews
+        ? [liveNews.text]
+        : storedHooks;
+  const newsSource = liveNews ? "live" : storedHooks.length > 0 ? "stored" : "none";
+
   let callModel;
   let model: string;
   try {
@@ -267,7 +293,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       missionKeywords: enrichment?.mission_keywords,
       sector: enrichment?.sector,
       subSector: enrichment?.sub_sector,
-      newsHooks: enrichment?.news_hooks,
+      newsHooks,
       booklet: savedBooklet?.booklet_text ?? null,
       senderName: authorization.actor.fullName,
       previousSubject: previousMessage.subject,
@@ -282,13 +308,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       length: parsed.data.length,
       register: parsed.data.register,
       closing: parsed.data.closing,
-      newsEnabled: Boolean(enrichment?.news_hooks?.length),
+      newsEnabled: newsHooks.length > 0,
     },
   );
   if ("error" in result) return NextResponse.json({ error: result.error }, { status: 502 });
 
   // A generated follow-up is persisted only as a draft. This route contains no send
   // operation and cannot set sent_at/send_status, preserving the human checkpoint.
+  // The news columns travel with the draft row so a saved draft reopened later
+  // (inbox resume) still restores its verification link — a URL kept only in
+  // the transient response below would be unverifiable on reopen.
   const { data: message, error: draftError } = await supabase
     .from("outreach_messages")
     .insert({
@@ -298,6 +327,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       subject: result.draft.subject,
       body: result.draft.body,
       send_status: "draft",
+      news_source: liveNews ? "live" : null,
+      news_hook: liveNews?.text ?? null,
+      news_url: liveNews?.url ?? null,
     })
     .select("id")
     .single();
@@ -355,5 +387,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "The follow-up draft could not be saved safely. Try again." }, { status: 500 });
   }
 
-  return NextResponse.json({ id: message.id, ...result.draft }, { status: 201 });
+  return NextResponse.json(
+    {
+      id: message.id,
+      ...result.draft,
+      newsSource,
+      newsHook: liveNews?.text ?? null,
+      newsUrl: liveNews?.url ?? null,
+    },
+    { status: 201 },
+  );
 }

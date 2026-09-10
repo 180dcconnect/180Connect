@@ -343,6 +343,22 @@ export const SCHEMA: readonly EnvVarSpec[] = [
         ? null
         : "must be one of: local, staging, production",
   },
+  {
+    name: "NEWS_HOOK_PROVIDER",
+    required: false,
+    secret: false,
+    description:
+      "Live news hook provider for Stage 2 follow-ups (F110): 'exa' pulls one recent item per generation via the Exa API, 'none' disables the lookup so follow-ups generate without a hook. Optional; defaults to none when unset. Server-only — never prefixed with NEXT_PUBLIC_.",
+    validate: (value) =>
+      ["none", "exa"].includes(value) ? null : "must be one of: none, exa",
+  },
+  {
+    name: "EXA_API_KEY",
+    required: false,
+    secret: true,
+    description:
+      "Exa API key for the F110 live news hook. Server-only — never prefixed with NEXT_PUBLIC_. Free tier at exa.ai needs no card ($10 credits/month; requests are blocked, never billed, on exhaustion). Required when NEWS_HOOK_PROVIDER is exa — startup refuses that combination without it.",
+  },
 ];
 
 export type EnvProblem = {
@@ -383,6 +399,7 @@ export function collectEnvProblems(
   problems.push(...requireOneSupabaseKey(source));
   problems.push(...requireSenderWhenSendingEmail(source));
   problems.push(...requireCompleteGmailConfiguration(source));
+  problems.push(...requireNewsHookKey(source));
 
   return problems;
 }
@@ -405,6 +422,27 @@ function requireCompleteGmailConfiguration(
       name,
       problem: "is required when any Gmail outreach setting is configured",
     }));
+}
+
+/**
+ * The F110 news hook is cost-capped by design (fail-open null, free-tier
+ * allowance, blocked-not-billed exhaustion), but a staging/production deploy
+ * that selects the exa provider without its key would silently generate every
+ * follow-up hookless. Catch that pair at startup instead — same shape as the
+ * Gmail all-or-nothing check above.
+ */
+function requireNewsHookKey(
+  source: Record<string, string | undefined>,
+): EnvProblem[] {
+  if (source.NEWS_HOOK_PROVIDER?.trim() !== "exa" || source.EXA_API_KEY?.trim()) {
+    return [];
+  }
+  return [
+    {
+      name: "EXA_API_KEY",
+      problem: "is required when NEWS_HOOK_PROVIDER is exa",
+    },
+  ];
 }
 
 /**

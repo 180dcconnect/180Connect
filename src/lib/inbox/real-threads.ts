@@ -552,7 +552,12 @@ export function mergeWithMockFill(
  */
 export function hydrateInboxThread(
   thread: InboxThreadView,
-  messages: readonly (InboxMessageRow & { body?: string | null })[],
+  messages: readonly (InboxMessageRow & {
+    body?: string | null;
+    news_source?: string | null;
+    news_hook?: string | null;
+    news_url?: string | null;
+  })[],
   replies: readonly InboxReplyRow[],
   contactNames: ReadonlyMap<string, string> = new Map(),
 ): InboxThreadView {
@@ -593,6 +598,12 @@ export function hydrateInboxThread(
       body: row.body ?? "",
       isFromClient: false,
       pendingKind: row.send_status,
+      // F110: restore the draft's news source so a reopened Stage 2 draft
+      // keeps its verification link. Only a live URL counts — anything else
+      // renders as no hook downstream, never a link that cannot be checked.
+      newsSource: row.news_source === "live" ? "live" : undefined,
+      newsHook: row.news_hook ?? undefined,
+      newsUrl: row.news_url ?? undefined,
     });
   }
 

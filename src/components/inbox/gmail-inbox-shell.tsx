@@ -35,6 +35,7 @@ import {
   type InboxThreadView,
 } from "@/lib/inbox-thread-view";
 import { threadMatchesLabels } from "@/lib/inbox/label-filter";
+import { InflightRequests } from "@/lib/inbox/inflight";
 import { createTagAction } from "@/lib/tags/tag-actions";
 import {
   mockFillThreads,
@@ -245,6 +246,10 @@ type ComposeWindow = {
   recipient?: string;
   subject?: string;
   body?: string;
+  /** F110: live news hook restored from the draft row on resume. */
+  newsSource?: "live" | "stored" | "none";
+  newsHook?: string | null;
+  newsUrl?: string | null;
   minimised: boolean;
 };
 
@@ -420,7 +425,7 @@ export function GmailInboxShell({
   const [activeThreadId, setActiveThreadId] = useState<string | null>(initialThreadId ?? null);
   // Threads whose bodies are already in flight, so re-opening one mid-fetch
   // does not fire a second request for the same conversation.
-  const hydratingRef = useRef<Set<string>>(new Set());
+  const inflightRef = useRef(new InflightRequests());
 
   // Sync state on popstate (browser back/forward button)
   useEffect(() => {
@@ -1054,6 +1059,9 @@ export function GmailInboxShell({
       recipient: thread.primaryContact?.email ?? undefined,
       subject: thread.subject,
       body: entry?.body ? emailHtmlToPlainText(entry.body) : undefined,
+      newsSource: entry?.newsSource,
+      newsHook: entry?.newsHook,
+      newsUrl: entry?.newsUrl,
     });
     setActiveThreadId(null);
     router.refresh();
@@ -1143,6 +1151,12 @@ export function GmailInboxShell({
       recipient: thread.primaryContact?.email ?? undefined,
       subject: thread.subject,
       body: last?.body ? emailHtmlToPlainText(last.body) : undefined,
+      // F110: a reopened Stage 2 draft restores its verification link from
+      // the row — without this the source exists only in the transient
+      // generation response and cannot be checked on reopen.
+      newsSource: last?.newsSource,
+      newsHook: last?.newsHook,
+      newsUrl: last?.newsUrl,
     });
   }
 
@@ -1157,24 +1171,32 @@ export function GmailInboxShell({
    * with its conversation already attached, so it never asks the server for
    * one that does not exist.
    */
-  async function hydrate(thread: InboxThreadView) {
-    if (thread.messages.length > 0 || hydratingRef.current.has(thread.id)) return;
-    hydratingRef.current.add(thread.id);
-    try {
-      const response = await fetch(`/api/inbox/${thread.id}/thread`);
-      if (!response.ok) return;
-      const hydrated = (await response.json()) as InboxThreadView;
-      // Message bodies are server data, not a viewer flag — they belong on the
-      // underlying list.
-      setServerThreads((prev) =>
-        prev.map((t) => (t.id === thread.id ? { ...t, messages: hydrated.messages } : t)),
-      );
-    } catch {
-      // A failed hydration leaves the pane's header and metadata intact; the
-      // conversation simply stays empty rather than the thread failing to open.
-    } finally {
-      hydratingRef.current.delete(thread.id);
-    }
+  async function hydrate(thread: InboxThreadView): Promise<InboxThreadView | null> {
+    // Callers that need the bodies inline (resumeDraft) read the return value,
+    // so hand back the thread with its messages rather than only mutating list
+    // state: an already-hydrated thread comes straight back, and a fresh fetch
+    // returns the merged copy. Concurrent activations share the in-flight
+    // request — a second hydrate that fired its own fetch would resolve with
+    // no data and open a duplicate body-less composer the draft-id dedupe in
+    // openComposer cannot collapse.
+    if (thread.messages.length > 0) return thread;
+    return inflightRef.current.run(thread.id, async () => {
+      try {
+        const response = await fetch(`/api/inbox/${thread.id}/thread`);
+        if (!response.ok) return null;
+        const hydrated = (await response.json()) as InboxThreadView;
+        // Message bodies are server data, not a viewer flag — they belong on the
+        // underlying list.
+        setServerThreads((prev) =>
+          prev.map((t) => (t.id === thread.id ? { ...t, messages: hydrated.messages } : t)),
+        );
+        return { ...thread, messages: hydrated.messages };
+      } catch {
+        // A failed hydration leaves the pane's header and metadata intact; the
+        // conversation simply stays empty rather than the thread failing to open.
+        return null;
+      }
+    });
   }
 
   // A thread reached by deep link (?thread=, or a browser back) opens without
@@ -1651,6 +1673,9 @@ export function GmailInboxShell({
           initialRecipient={composer.recipient}
           initialSubject={composer.subject}
           initialBody={composer.body}
+          initialNewsSource={composer.newsSource}
+          initialNewsHook={composer.newsHook}
+          initialNewsUrl={composer.newsUrl}
           rightOffsetPx={composerOffsets[index]}
           isMinimised={composer.minimised}
           onMinimisedChange={(minimised) => setComposerMinimised(composer.key, minimised)}

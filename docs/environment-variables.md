@@ -99,6 +99,13 @@ GEMINI_API_KEY=<redacted>
 GEMINI_MODEL=<model-id-from-ai-studio>
 GEMINI_SEARCH_MODEL=<flash-lite-model-id-from-ai-studio>
 
+# Live news hook for Stage 2 follow-ups (F110). "exa" pulls one recent item
+# per generation; "none" (the local default) generates without a hook.
+NEWS_HOOK_PROVIDER=none
+# SECRET. Exa API key, required when NEWS_HOOK_PROVIDER=exa. Free tier at
+# exa.ai needs no card ($10/month; blocked, never billed, on exhaustion).
+EXA_API_KEY=<redacted>
+
 # Feature flags & logging
 NEXT_PUBLIC_LOG_LEVEL=debug
 NEXT_PUBLIC_ENABLE_AI_BOOKLETS=true
@@ -258,6 +265,8 @@ NEXT_PUBLIC_SENTRY_DSN=<redacted>
 | `GEMINI_API_KEY` | free-tier key from [aistudio.google.com](https://aistudio.google.com) | prod key | Only server-side | **SENSITIVE:** Never expose. Gemini key for LLM calls — F082 Client Booklet generation today, F100 email drafts later. Declared in `SCHEMA` (`src/lib/env.ts`) and passed explicitly to the AI SDK rather than read under its default `GOOGLE_GENERATIVE_AI_API_KEY` name. Unset ⇒ booklet generation returns a clear error |
 | `GEMINI_MODEL` | Flash-tier model id copied from the AI Studio model picker | same | Only server-side | Exact model id booklet generation calls (F082). No hardcoded default in code — Google retires model ids often enough that one would go stale. Unset ⇒ booklet generation cannot run |
 | `GEMINI_SEARCH_MODEL` | Flash-**Lite**-tier model id from the AI Studio model picker | same | Only server-side | Model that interprets F214 natural language searches. Separate from `GEMINI_MODEL` for cost: the LLM Provider Research doc puts search on the Flash-Lite tier ($0.30/$2.50 per million tokens) and booklets/drafts on Flash ($0.75/$3.75), so running search on the booklet model costs ~2.5× for an easier job. Optional — unset falls back to `GEMINI_MODEL` and logs a warning |
+| `NEWS_HOOK_PROVIDER` | `exa` | `exa` | Only server-side | Live news hook for Stage 2 follow-ups (F110): `exa` pulls one recent item per generation, `none` disables the lookup so follow-ups generate without a hook. Optional, defaults to `none` |
+| `EXA_API_KEY` | dev key | prod key (or same free key) | Only server-side | **SENSITIVE:** Exa key for the F110 news hook. Free tier at exa.ai needs no card ($10/month; blocked, never billed, on exhaustion). **Required when `NEWS_HOOK_PROVIDER` is `exa`** — startup fails otherwise |
 | `AI_SEARCH_RATE_LIMIT` | `40` | `40` | Only server-side | Maximum F214 search interpretations per user per window. Its own bucket, so searching never eats the booklet/draft allowance. Only calls that reach the API count — a repeated query is cached and a plain name search never calls it. Optional, defaults to 40 |
 | `AI_SEARCH_RATE_WINDOW_SECONDS` | `86400` | `86400` | Only server-side | Fixed-window duration for `AI_SEARCH_RATE_LIMIT`; optional, defaults to one day (search is bursty in a way generation is not) |
 | `AI_GENERATION_RATE_LIMIT` | `20` | `20` | Only server-side | Maximum Gemini requests per authenticated user in each fixed window; optional, defaults to 20 |

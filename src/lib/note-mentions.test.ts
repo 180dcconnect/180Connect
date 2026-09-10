@@ -10,8 +10,10 @@ import {
   buildMentionNoteTitle,
   buildOwnerNoteTitle,
   bulkNotificationLinkPath,
+  countMentionOccurrences,
   filterMentionCandidates,
   groupBulkClientsByOwner,
+  limitMentionIdsByOccurrences,
   mentionQueryAtCursor,
   noteNotificationLinkPath,
   ownerAlreadyMentioned,
@@ -279,5 +281,64 @@ describe("groupBulkClientsByOwner (F485 on F065)", () => {
 
   it("links grouped notifications to the client list", () => {
     assert.equal(bulkNotificationLinkPath(), "/clients");
+  });
+});
+
+describe("countMentionOccurrences + limitMentionIdsByOccurrences (F485 review)", () => {
+  it("counts a plain mention", () => {
+    assert.equal(countMentionOccurrences("ask @Alice Ahmed today", "Alice Ahmed"), 1);
+  });
+
+  it("counts repeated mentions", () => {
+    assert.equal(countMentionOccurrences("@Bob and @Bob again", "Bob"), 2);
+  });
+
+  it("ignores @ inside an email address", () => {
+    assert.equal(countMentionOccurrences("mail sam@180dc.org", "180dc.org"), 0);
+  });
+
+  it("stops counting once the name is extended with more text", () => {
+    assert.equal(countMentionOccurrences("ask @Sam Leeds", "Sam Lee"), 0);
+  });
+
+  it("still counts a mention followed by punctuation", () => {
+    assert.equal(countMentionOccurrences("ask @Sam Lee, please", "Sam Lee"), 1);
+  });
+
+  it("matches regardless of casing", () => {
+    assert.equal(countMentionOccurrences("ask @alice ahmed", "Alice Ahmed"), 1);
+  });
+
+  it("binds requested ids to actual mentions, dropping the rest", () => {
+    assert.deepEqual(
+      limitMentionIdsByOccurrences("hi @Bob Osei", [
+        { id: ALICE, name: "Alice Ahmed" },
+        { id: BOB, name: "Bob Osei" },
+      ]),
+      [BOB],
+    );
+  });
+
+  it("drops an id whose mention was deleted from the draft", () => {
+    assert.deepEqual(
+      limitMentionIdsByOccurrences("no mentions here", [{ id: BOB, name: "Bob Osei" }]),
+      [],
+    );
+  });
+
+  it("drops an id whose mention was extended into a different name", () => {
+    assert.deepEqual(
+      limitMentionIdsByOccurrences("ask @Sam Leeds", [{ id: BOB, name: "Sam Lee" }]),
+      [],
+    );
+  });
+
+  it("caps same-named ids at the occurrence count", () => {
+    const sameName = [
+      { id: ALICE, name: "Sam Lee" },
+      { id: BOB, name: "Sam Lee" },
+    ];
+    assert.deepEqual(limitMentionIdsByOccurrences("hi @Sam Lee", sameName), [ALICE]);
+    assert.deepEqual(limitMentionIdsByOccurrences("@Sam Lee and @Sam Lee", sameName), [ALICE, BOB]);
   });
 });

@@ -173,14 +173,15 @@ export default async function ClientOutreachPage({
         .order("created_at", { ascending: false }),
       // F485: active teammates' display names, so saved-note @mentions can
       // highlight. Names only — no ids, no emails — and a failed lookup
-      // renders notes as plain text rather than an error.
+      // renders notes as plain text rather than an error. No LIMIT, matching
+      // the mention-candidates endpoint: a cap would silently leave later
+      // teammates' mentions unhighlighted.
       supabase
         .from("users")
         .select("full_name")
         .eq("is_active", true)
         .not("full_name", "is", null)
         .order("full_name", { ascending: true })
-        .limit(200)
         .returns<{ full_name: string | null }[]>(),
     ]);
 

@@ -13,6 +13,7 @@ import { OriginButton } from "@/components/ui/origin-button";
 import {
   applyMentionInsertion,
   filterMentionCandidates,
+  limitMentionIdsByOccurrences,
   mentionQueryAtCursor,
   type MentionCandidate,
 } from "@/lib/note-mentions";
@@ -161,11 +162,14 @@ export function AddNoteForm({
       return;
     }
 
-    // Only ids whose `@Name` text is still in the draft are sent — a
-    // mention the author edited away notifies nobody.
-    const mentionedUserIds = [...insertedRef.current.entries()]
-      .filter(([, name]) => content.includes(`@${name}`))
-      .map(([id]) => id);
+    // Only ids whose `@Name` is still mentioned in the draft are sent, capped
+    // per name at its occurrence count — a mention typed over, deleted, or
+    // extended into a different name takes its id with it. Insertion order
+    // decides ties between teammates sharing a display name.
+    const mentionedUserIds = limitMentionIdsByOccurrences(
+      content,
+      [...insertedRef.current.entries()].map(([id, name]) => ({ id, name })),
+    );
 
     setBusy(true);
     setError(null);

@@ -14,6 +14,7 @@ import { MAX_BULK_TAG_CLIENTS } from "@/lib/bulk-tags";
 import {
   applyMentionInsertion,
   filterMentionCandidates,
+  limitMentionIdsByOccurrences,
   mentionQueryAtCursor,
   type MentionCandidate,
 } from "@/lib/note-mentions";
@@ -232,11 +233,13 @@ export function BulkActionsBar({
         payload = { ids, status };
       } else if (action === "comment") {
         endpoint = "/api/clients/bulk-note";
-        // Only ids whose `@Name` text is still in the draft are sent — a
-        // mention the author edited away notifies nobody.
-        const mentionedUserIds = [...insertedRef.current.entries()]
-          .filter(([, name]) => comment.includes(`@${name}`))
-          .map(([id]) => id);
+        // Only ids whose `@Name` is still mentioned in the draft are sent,
+        // capped per name at its occurrence count — a mention typed over,
+        // deleted, or extended into a different name takes its id with it.
+        const mentionedUserIds = limitMentionIdsByOccurrences(
+          comment,
+          [...insertedRef.current.entries()].map(([id, name]) => ({ id, name })),
+        );
         payload = {
           ids,
           comment: preparedComment.ok ? preparedComment.content : comment,

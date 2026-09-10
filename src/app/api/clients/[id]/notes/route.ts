@@ -4,7 +4,7 @@ import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
-import { isUuid, nonEmptyTrimmed, safeValidate } from "@/lib/validation";
+import { isUuid, nonEmptyTrimmed, optionalIdList, safeValidate } from "@/lib/validation";
 import { buildReplyNoteContent } from "@/lib/reply-note";
 import {
   MAX_MENTIONS_PER_NOTE,
@@ -12,6 +12,7 @@ import {
   NOTE_MENTIONED_NOTIFICATION_TYPE,
   buildMentionNoteTitle,
   buildOwnerNoteTitle,
+  limitMentionIdsByOccurrences,
   noteNotificationLinkPath,
   ownerAlreadyMentioned,
   resolveMentionRecipientIds,
@@ -30,6 +31,13 @@ import {
  * layer). Forcing this through a SECURITY DEFINER RPC instead would contradict
  * that RLS design, not follow it. Editing (F073) and deleting (F074) follow
  * the same reasoning — see the sibling [noteId]/route.ts.
+ *
+ * F485's notification fan-out lives in this handler beside the insert
+ * deliberately: the ticket directs mention parsing to sit next to the
+ * `notes` write rather than in a trigger or a new write path, and migrating
+ * note creation itself to a Server Action is a separate refactor, not this
+ * ticket. The fan-out calls only the approved producer RPC
+ * (`create_notification`) and never writes notification rows directly.
  */
 
 const MAX_NOTE_LENGTH = 4000;
@@ -38,12 +46,14 @@ const bodySchema = z.object({
   content: nonEmptyTrimmed(MAX_NOTE_LENGTH, "Write something before saving."),
   replyEventId: z.uuid().optional(),
   // F485: ids the composer resolved through the @mention autocomplete
-  // (active users, not freehand names). Routing on explicit ids — never on
-  // parsing `@Name` out of the text — is what keeps an email address or a
-  // bare `@` from becoming a notification. Elements are plain strings here,
-  // not `z.uuid()`: a malformed id is dropped by
-  // `resolveMentionRecipientIds`, never a reason to reject the note itself.
-  mentionedUserIds: z.array(z.string()).max(MAX_MENTIONS_PER_NOTE).optional(),
+  // (active users, not freehand names). Shared primitive with the bulk-note
+  // route (validation.ts); elements stay plain strings so a malformed id is
+  // dropped downstream, never a reason to reject the note. Routing on
+  // explicit ids — never on parsing `@Name` out of the text — is what keeps
+  // an email address or a bare `@` from becoming a notification, and the
+  // server binds each id to an actual `@Name` occurrence below, so
+  // request-provided ids alone notify nobody.
+  mentionedUserIds: optionalIdList(MAX_MENTIONS_PER_NOTE),
 });
 
 function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
@@ -206,17 +216,19 @@ async function notifyNoteRecipients(args: {
     const body = summariseNoteContent(args.content);
     const mentionIds = resolveMentionRecipientIds(args.mentionedUserIds, args.authorId);
 
-    // Only active users are notifiable. `create_notification` re-checks
-    // this itself; filtering first keeps the intent (and the per-id error
-    // attribution) in this file rather than only in the migration.
+    // Only active users whose `@Name` is actually in the saved content are
+    // notifiable — request-provided ids alone notify nobody, so a crafted
+    // payload cannot ping arbitrary teammates. `create_notification`
+    // re-checks active status itself; binding to the text happens here
+    // because only this route holds both the ids and the content.
     let activeMentionIds = mentionIds;
     if (mentionIds.length > 0) {
       const { data: users, error: usersError } = await supabase
         .from("users")
-        .select("id")
+        .select("id, full_name")
         .in("id", mentionIds)
         .eq("is_active", true)
-        .returns<{ id: string }[]>();
+        .returns<{ id: string; full_name: string | null }[]>();
       if (usersError) {
         await reportError(usersError, {
           operation: "clients.notes_notify_mention_lookup",
@@ -224,8 +236,10 @@ async function notifyNoteRecipients(args: {
         });
         activeMentionIds = [];
       } else {
-        const active = new Set((users ?? []).map((u) => u.id));
-        activeMentionIds = mentionIds.filter((id) => active.has(id));
+        activeMentionIds = limitMentionIdsByOccurrences(
+          args.content,
+          (users ?? []).map((u) => ({ id: u.id, name: u.full_name ?? "" })),
+        );
       }
     }
 

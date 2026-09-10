@@ -27,13 +27,15 @@ export async function GET() {
   }
 
   const supabase = await createClient();
+  // No LIMIT: this is id + display name over the team table (tens of rows),
+  // and a cap would silently unmentionable-ise everyone past it —
+  // unselectable in both composers and unhighlighted in saved notes.
   const { data, error } = await supabase
     .from("users")
     .select("id, full_name")
     .eq("is_active", true)
     .not("full_name", "is", null)
     .order("full_name", { ascending: true })
-    .limit(200)
     .returns<CandidateRow[]>();
 
   if (error) {

@@ -4,7 +4,7 @@ import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
-import { safeValidate } from "@/lib/validation";
+import { optionalIdList, safeValidate } from "@/lib/validation";
 import {
   MAX_BULK_NOTE_CLIENTS,
   MAX_NOTE_LENGTH,
@@ -23,6 +23,7 @@ import {
   buildOwnerNoteTitle,
   bulkNotificationLinkPath,
   groupBulkClientsByOwner,
+  limitMentionIdsByOccurrences,
   noteNotificationLinkPath,
   resolveMentionRecipientIds,
   summariseNoteContent,
@@ -59,10 +60,11 @@ const bodySchema = z.object({
   // stops an unbounded string being parsed. Both have to be here: this one is
   // about the payload, that one is about what gets stored.
   comment: z.string().max(MAX_NOTE_LENGTH * 2),
-  // F485: ids the composer resolved through the @mention autocomplete. Plain
-  // strings, not `z.uuid()` — a malformed id is dropped by
-  // `resolveMentionRecipientIds`, never a reason to reject the comment itself.
-  mentionedUserIds: z.array(z.string()).max(MAX_MENTIONS_PER_NOTE).optional(),
+  // F485: ids the composer resolved through the @mention autocomplete.
+  // Shared primitive with the single-note route (validation.ts); the server
+  // binds each id to an actual `@Name` occurrence below, so
+  // request-provided ids alone notify nobody.
+  mentionedUserIds: optionalIdList(MAX_MENTIONS_PER_NOTE),
 });
 
 function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
@@ -197,14 +199,17 @@ async function notifyBulkNoteRecipients(args: {
     const body = summariseNoteContent(args.content);
 
     const mentionIds = resolveMentionRecipientIds(args.mentionedUserIds, args.authorId);
+    // Same binding as the single-note producer: only active users whose
+    // `@Name` is actually in the saved comment are notifiable, so
+    // request-provided ids alone notify nobody.
     let activeMentionIds = mentionIds;
     if (mentionIds.length > 0) {
       const { data: users, error: usersError } = await supabase
         .from("users")
-        .select("id")
+        .select("id, full_name")
         .in("id", mentionIds)
         .eq("is_active", true)
-        .returns<{ id: string }[]>();
+        .returns<{ id: string; full_name: string | null }[]>();
       if (usersError) {
         await reportError(usersError, {
           operation: "clients.bulk_note_notify_mention_lookup",
@@ -212,8 +217,10 @@ async function notifyBulkNoteRecipients(args: {
         });
         activeMentionIds = [];
       } else {
-        const active = new Set((users ?? []).map((u) => u.id));
-        activeMentionIds = mentionIds.filter((id) => active.has(id));
+        activeMentionIds = limitMentionIdsByOccurrences(
+          args.content,
+          (users ?? []).map((u) => ({ id: u.id, name: u.full_name ?? "" })),
+        );
       }
     }
     const mentionedOwners = new Set(activeMentionIds);

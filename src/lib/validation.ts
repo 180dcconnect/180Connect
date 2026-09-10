@@ -62,6 +62,19 @@ export function urlField(message = "Enter a valid URL.") {
 }
 
 /**
+ * Optional list of row ids supplied by the client, capped at `max` entries.
+ *
+ * F485's `mentionedUserIds` on both note routes: elements stay plain strings
+ * deliberately — a malformed entry is dropped downstream
+ * (`resolveMentionRecipientIds` in @/lib/note-mentions), never a reason to
+ * reject the payload itself. The cap bounds notification fan-out, not input
+ * size.
+ */
+export function optionalIdList(max: number) {
+  return z.array(z.string()).max(max).optional();
+}
+
+/**
  * Whole number within an inclusive range.
  *
  * Coerces numeric strings ("5" -> 5) but rejects empty/whitespace-only strings

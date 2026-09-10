@@ -227,6 +227,70 @@ export function splitNoteContentMentions(
   return parts;
 }
 
+// ─── Mention-to-text binding (F485 review) ─────────────────────────────
+
+/**
+ * How many times `@Name` is actually mentioned in `content`. A hit needs the
+ * composer's trigger on its left (start of text, whitespace, or `(` — so
+ * `sam@180dc.org` never counts) and a non-name character on its right, so a
+ * mention extended with extra text (`@Sam Lee` typed on into `@Sam Leeds`)
+ * stops counting as a mention of `Sam Lee`. Compared case-insensitively:
+ * re-casing a name edits its style, not its referent.
+ */
+export function countMentionOccurrences(content: string, name: string): number {
+  const needle = `@${name.trim()}`.toLowerCase();
+  if (needle.length <= 1) return 0;
+  const hay = content.toLowerCase();
+  let count = 0;
+  let from = 0;
+  while (true) {
+    const at = hay.indexOf(needle, from);
+    if (at === -1) return count;
+    const prev = at === 0 ? "" : (content[at - 1] ?? "");
+    const next = content[at + needle.length] ?? "";
+    if ((prev === "" || /[\s(]/.test(prev)) && (next === "" || !/[A-Za-z0-9.'\-]/.test(next))) {
+      count += 1;
+    }
+    from = at + needle.length;
+  }
+}
+
+/**
+ * Binds candidate ids to actual mentions in the saved text: each distinct
+ * name survives at most as many times as it is mentioned, in candidate
+ * order. Both the composer (whose candidates are its insertions, oldest
+ * first) and the API routes (whose candidates are the requested active
+ * users) reconcile through this one function, so a crafted `mentionedUserIds`
+ * naming users the text never mentions notifies nobody, and a mention the
+ * author typed over or deleted takes its id with it.
+ *
+ * Known limit, documented rather than hidden: two teammates sharing a
+ * display name are indistinguishable in plain text, so with one `@Sam Lee`
+ * occurrence the first-listed id wins. Counts stay exact; only identity
+ * among same-named users can blur.
+ */
+export function limitMentionIdsByOccurrences(
+  content: string,
+  candidates: readonly { id: string; name: string }[],
+): string[] {
+  const remaining = new Map<string, number>();
+  const result: string[] = [];
+  for (const candidate of candidates) {
+    const key = candidate.name.trim().toLowerCase();
+    if (key === "") continue;
+    let left = remaining.get(key);
+    if (left === undefined) {
+      left = countMentionOccurrences(content, candidate.name);
+      remaining.set(key, left);
+    }
+    if (left > 0) {
+      remaining.set(key, left - 1);
+      result.push(candidate.id);
+    }
+  }
+  return result;
+}
+
 // ─── Bulk fan-out (F485 on F065) ────────────────────────────────────────
 
 /**

@@ -234,9 +234,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // F110: pull one live news hook at draft-generation time (Exa, fail-open).
   // lookupLiveNewsHook never throws and resolves to null on any failure, so the follow-up still generates. A live hit takes
   // precedence (it is the fresh evidence AC1 asks for); otherwise the stored
-  // enrichment hooks keep the previous behaviour. newsSource is additive and
-  // lets the UI — and a failure-diagnosis read of the logs — show where the
-  // hook came from.
+  // enrichment hooks keep the previous behaviour. newsSource/newsHook/newsUrl
+  // are additive in the response so the review UI can show a verifiable link.
   const liveNews = await lookupLiveNewsHook({
     organisationId,
     organisationName: organisation.legal_name,
@@ -244,7 +243,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     website: organisation.website,
   });
   const storedHooks = enrichment?.news_hooks?.filter(Boolean) ?? [];
-  const newsHooks = liveNews ? [liveNews.text] : storedHooks;
+  // The Source line persists the verification URL verbatim in
+  // ai_generations.prompt_user (F112): outreach_messages has no vessel for it,
+  // so without this the URL would exist only in the transient response below
+  // and be unverifiable once the draft is reopened. A model that cites the
+  // source in the draft is fine — the CAM reviews every word before approval.
+  const newsHooks =
+    liveNews?.url != null
+      ? [`${liveNews.text}\nSource: ${liveNews.url}`]
+      : liveNews
+        ? [liveNews.text]
+        : storedHooks;
   const newsSource = liveNews ? "live" : storedHooks.length > 0 ? "stored" : "none";
 
   let callModel;
@@ -373,7 +382,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   return NextResponse.json(
-    { id: message.id, ...result.draft, newsSource, newsUrl: liveNews?.url ?? null },
+    {
+      id: message.id,
+      ...result.draft,
+      newsSource,
+      newsHook: liveNews?.text ?? null,
+      newsUrl: liveNews?.url ?? null,
+    },
     { status: 201 },
   );
 }

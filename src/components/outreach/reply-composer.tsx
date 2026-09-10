@@ -127,7 +127,15 @@ function buildPreviewReplyBody({
   return `${greeting}\n\n${core}\n\n${closer}\n\n${signoff}\n${camName}\n180 Degrees Consulting`;
 }
 
-type Draft = { id: string; subject: string; body: string };
+type Draft = {
+  id: string;
+  subject: string;
+  body: string;
+  /** F110: live news hook behind this draft, when the Stage 2 route found one. */
+  newsSource?: "live" | "stored" | "none";
+  newsHook?: string | null;
+  newsUrl?: string | null;
+};
 type Warning = { text: string; tone: "block" | "conflict" };
 
 export function ReplyComposer({

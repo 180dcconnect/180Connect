@@ -58,7 +58,11 @@
  * Nothing is stored: the hook text travels in the generation prompt (which
  * F112 already persists verbatim on ai_generations) and the article URL is
  * returned alongside so the CAM can verify it, adding no rows and no bytes
- * against the 500 MB budget.
+ * against the 500 MB budget. The route appends the URL as a `Source:` line
+ * to the prompt context, so the verification link survives in
+ * ai_generations.prompt_user after the transient response is gone —
+ * outreach_messages has no vessel for it, and a URL that exists only in a
+ * response the sole caller drops is unverifiable once the draft is reopened.
  */
 
 import { logApiHealth } from "../api-health-log.ts";

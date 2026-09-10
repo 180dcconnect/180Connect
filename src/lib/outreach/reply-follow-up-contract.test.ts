@@ -42,4 +42,30 @@ describe("F135 reply follow-up contract", () => {
     assert.match(route, /send_status: "draft"/);
     assert.doesNotMatch(route, /sendBranchOutreach|sendGmailMessage|messages\/send/);
   });
+
+  it("keeps the verifiable news source with the draft", async () => {
+    const route = await source("../../app/api/clients/[id]/outreach-drafts/stage-two/route.ts");
+
+    // The response carries the hook and its URL for review-time verification…
+    assert.match(route, /newsHook: liveNews\?\.text \?\? null/);
+    assert.match(route, /newsUrl: liveNews\?\.url \?\? null/);
+    // …and the URL is persisted verbatim in ai_generations.prompt_user via the
+    // prompt context, because outreach_messages has no vessel for it and a URL
+    // that lives only in the transient response is unverifiable on reopen.
+    assert.match(route, /Source: \$\{liveNews\.url\}/);
+  });
+
+  it("shows the live news source link for verification during review", async () => {
+    const panel = await source("../../components/outreach/email-review-panel.tsx");
+    const composer = await source("../../components/outreach/reply-composer.tsx");
+
+    for (const text of [panel, composer]) {
+      assert.match(text, /newsUrl\?: string \| null/);
+    }
+    // Unverifiable hooks render nothing: the line requires a live URL, and
+    // the link opens a new tab without leaking a referrer.
+    assert.match(panel, /draft\.newsSource === "live" && draft\.newsUrl/);
+    assert.match(panel, /target="_blank"/);
+    assert.match(panel, /rel="noreferrer"/);
+  });
 });

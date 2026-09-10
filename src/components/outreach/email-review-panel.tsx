@@ -58,6 +58,17 @@ export type EmailReviewDraft = {
    * generated draft (nothing saved yet).
    */
   savedRecipient?: string | null;
+  /**
+   * F110: live news hook behind this draft, when the Stage 2 route found one.
+   * Present only on freshly generated drafts — a reopened or saved draft no
+   * longer carries these (outreach_messages has no vessel; the URL persists
+   * in ai_generations.prompt_user instead). Absent means no hook, never a
+   * hidden one: the panel only renders the source line for a verifiable
+   * live URL.
+   */
+  newsSource?: "live" | "stored" | "none";
+  newsHook?: string | null;
+  newsUrl?: string | null;
 };
 
 /** What the parent needs to decide whether regenerating would lose work. */
@@ -329,6 +340,25 @@ export function EmailReviewPanel({
         </h3>
         <p className="mt-1 text-xs text-dim">{description}</p>
         {meta && <p className="mt-1 text-xs text-dim">{meta}</p>}
+        {/* F110: the follow-up may rest on a news hook the model was given, so
+            the CAM checks the source before approving — a hook without a
+            verifiable URL renders nothing, and a reopened draft (whose
+            news fields are gone with the transient response) stays silent
+            rather than implying a hook that cannot be checked. */}
+        {draft.newsSource === "live" && draft.newsUrl && (
+          <p className="mt-1 text-xs text-dim">
+            News hook{draft.newsHook ? `: ${draft.newsHook}` : ""} — verify the{" "}
+            <a
+              className="font-semibold underline"
+              href={draft.newsUrl}
+              rel="noreferrer"
+              target="_blank"
+            >
+              source
+            </a>
+            .
+          </p>
+        )}
       </div>
 
       <label className="block text-xs font-semibold text-dim">

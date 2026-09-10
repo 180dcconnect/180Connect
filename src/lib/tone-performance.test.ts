@@ -219,6 +219,26 @@ test("an unknown stored value still appears rather than vanishing", () => {
   assert.equal(whimsical.hasEnoughData, false);
 });
 
+test("an unknown stored value keeps its responses and conversions", () => {
+  // A legacy enum value must read like any other tone: its real results were
+  // once zeroed here, which made them vanish from the row emails display under.
+  const rows = [
+    reg("m1", "o1", "whimsical"),
+    reg("m2", "o2", "whimsical"),
+  ];
+  const replies = [reply("m1"), reply("m1")]; // two replies, one responding email
+  const statuses = [status("m1", "o1", "converted"), status("m2", "o2", "no_response")];
+
+  const summary = tonePerformanceSummary(rows, [], replies, statuses);
+  const whimsical = summary.register.find((r) => r.value === "whimsical");
+  assert.ok(whimsical);
+  assert.equal(whimsical.sent, 2);
+  assert.equal(whimsical.responses, 1);
+  assert.equal(whimsical.responseRate, 0.5);
+  assert.equal(whimsical.conversions, 1);
+  assert.equal(whimsical.conversionRate, 0.5);
+});
+
 test("empty inputs produce every row with zeros and no rates", () => {
   const summary = tonePerformanceSummary([], [], [], []);
   assert.equal(summary.register.length, 4);

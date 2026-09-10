@@ -166,7 +166,7 @@ function summariseDial(
   threshold: number,
 ): ToneBreakdownRow[] {
   const sample = new Map<string, { sent: number; responses: number; clients: Set<string>; converted: Set<string> }>();
-  const extra = new Map<string, number>();
+  const extra = new Set<string>();
 
   for (const row of rows) {
     const value = row[key];
@@ -180,21 +180,30 @@ function summariseDial(
     const converted = convertedClientsByMessage.get(row.id);
     if (converted) bucket.converted.add(converted);
     sample.set(value, bucket);
-    if (!values.includes(value)) extra.set(value, (extra.get(value) ?? 0) + 1);
+    if (!values.includes(value)) extra.add(value);
   }
 
   const known = buildRows(values, labels, sample, threshold);
-  const unknown: ToneBreakdownRow[] = Array.from(extra.entries()).map(([value, sent]) => ({
-    value,
-    label: value,
-    sent,
-    responses: 0,
-    responseRate: null,
-    conversions: 0,
-    conversionRate: null,
-    hasEnoughData: false,
-    threshold,
-  }));
+  // A value outside the current enum accumulated a real bucket above — keep
+  // its responses and conversions. Zeroing them (as this branch once did)
+  // made genuine results vanish from the row the email is displayed under.
+  const unknown: ToneBreakdownRow[] = Array.from(extra).map((value) => {
+    const bucket = sample.get(value);
+    const sent = bucket?.sent ?? 0;
+    const responses = bucket?.responses ?? 0;
+    const conversions = bucket?.converted.size ?? 0;
+    return {
+      value,
+      label: value,
+      sent,
+      responses,
+      responseRate: pct(responses, sent),
+      conversions,
+      conversionRate: pct(conversions, sent),
+      hasEnoughData: sent >= threshold,
+      threshold,
+    };
+  });
   return [...known, ...unknown];
 }
 

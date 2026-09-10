@@ -241,22 +241,20 @@ export default async function AnalyticsPage() {
   // F209 — flatten the embed to one tone record per sent message: the latest
   // generation wins (a regeneration's dials describe the text that was sent,
   // earlier attempts do not). Rows feed both dials; the module buckets them
-  // independently. Messages with no generation row (blank drafts, pre-F112
-  // sends) drop out here and are counted as untracked by the module instead —
-  // AC3's exclusion, made visible on the card.
-  const toneRows = toneMessages.flatMap((message) => {
+  // independently. A message with no generation row at all (blank drafts,
+  // pre-F112 sends) keeps its place as a row with both dials null — the module
+  // then counts it in the untracked disclosures (AC3's exclusion, made
+  // visible on the card) and never in a tone bucket.
+  const toneRows = toneMessages.map((message) => {
     const latest = [...(message.ai_generations ?? [])].sort(
       (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at),
     )[0];
-    if (!latest) return [];
-    return [
-      {
-        id: message.id,
-        organisation_id: message.organisation_id,
-        tone_register: latest.tone_register,
-        tone_length: latest.tone_length,
-      },
-    ];
+    return {
+      id: message.id,
+      organisation_id: message.organisation_id,
+      tone_register: latest?.tone_register ?? null,
+      tone_length: latest?.tone_length ?? null,
+    };
   });
   // Conversions come from the client's current pipeline status — the same
   // source the cards above read, so the two can never disagree.

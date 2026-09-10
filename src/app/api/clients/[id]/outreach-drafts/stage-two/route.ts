@@ -335,6 +335,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         usage: result.usage,
         costUsd,
         prompt: result.prompt,
+        // F209: the tone dials the reply composer sent, recorded at generation time.
+        toneRegister: parsed.data.register,
+        toneLength: parsed.data.length,
       }),
     );
   if (generationError) {

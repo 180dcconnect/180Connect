@@ -327,6 +327,10 @@ export async function POST(
           generated_subject: result.draft.subject,
           generated_body: result.draft.body,
           model,
+          // F209: the F107 tone dials this request chose, written once at generation
+          // time so the analytics group by what actually ran, not by today's defaults.
+          tone_register: preferences.data.register,
+          tone_length: preferences.data.length,
           activity: isRegeneration ? "email_regeneration" : "initial_email",
           prompt_system: result.prompt.system,
           prompt_user: result.prompt.user,

@@ -17,6 +17,9 @@ export type StageTwoGenerationInsert = {
   cost_usd: number | null;
   prompt_system: string;
   prompt_user: string;
+  /** F209: the F107 dials in force, written once at generation time. */
+  tone_register: string | null;
+  tone_length: string | null;
 };
 
 export function buildStageTwoGenerationInsert(input: {
@@ -31,6 +34,9 @@ export function buildStageTwoGenerationInsert(input: {
   };
   costUsd: number | null;
   prompt: { system: string; user: string };
+  /** F209: the tone dials the request carried. Null only if a caller omits them. */
+  toneRegister?: string | null;
+  toneLength?: string | null;
 }): StageTwoGenerationInsert {
   return {
     outreach_message_id: input.outreachMessageId,
@@ -50,5 +56,9 @@ export function buildStageTwoGenerationInsert(input: {
     // makes the regression test below exist.
     prompt_system: input.prompt.system,
     prompt_user: input.prompt.user,
+    // F209: recorded alongside the generation like F113's model — the dials in
+    // force at generation time, not the defaults a later request might send.
+    tone_register: input.toneRegister ?? null,
+    tone_length: input.toneLength ?? null,
   };
 }

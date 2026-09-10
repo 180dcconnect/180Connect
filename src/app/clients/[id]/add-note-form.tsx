@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, useTransition } from "react";
+import { useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   MorphingPopover,
@@ -10,6 +10,13 @@ import {
 import { motion } from "motion/react";
 import { ArrowLeftIcon } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
+import {
+  applyMentionInsertion,
+  filterMentionCandidates,
+  mentionQueryAtCursor,
+  type MentionCandidate,
+} from "@/lib/note-mentions";
+import { getMentionDirectory } from "@/lib/mention-directory";
 
 /**
  * F072 — posts to /api/clients/[id]/notes. Uses MorphingPopover so the trigger
@@ -30,6 +37,14 @@ import { OriginButton } from "@/components/ui/origin-button";
  *
  * It lives in the Notes card's heading `action` slot, so the composer opens
  * downward over the note list (`align="end"`) instead of above it.
+ *
+ * F485 (#485) — typing `@` offers active users from
+ * /api/users/mention-candidates and posts the chosen ids as
+ * `mentionedUserIds`, so each mentioned user gets their own notification.
+ * Routing on chosen ids (not on parsing `@Name` out of the text) is what
+ * keeps an email address or a bare `@` from notifying anyone. The stored
+ * content keeps the plain `@Full Name` text, so the note still reads if a
+ * mention cannot be resolved later.
  */
 export function AddNoteForm({
   organisationId,
@@ -52,12 +67,91 @@ export function AddNoteForm({
   const [isRefreshing, startRefresh] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+  // F485 mention state. `directory` is fetched once, on the first `@`
+  // trigger, so opening the composer costs nothing until mentions are used.
+  // `inserted` remembers every id chosen in this draft mapped to the name
+  // that was spliced in; save reconciles it against the text (a mention the
+  // author typed over or deleted notifies nobody).
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const insertedRef = useRef(new Map<string, string>());
+  const [cursor, setCursor] = useState(0);
+  const [directory, setDirectory] = useState<MentionCandidate[] | null>(null);
+  const [directoryFailed, setDirectoryFailed] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  // Escape dismisses the listbox without closing the composer. The trigger
+  // still matches, so the dismissed position is remembered until the draft
+  // or the caret moves elsewhere.
+  const [dismissedStart, setDismissedStart] = useState<number | null>(null);
+
   const saving = busy || isRefreshing;
   const isBlank = content.trim().length === 0;
+
+  const mentionTrigger = mentionQueryAtCursor(content, cursor);
+  const suggestions =
+    mentionTrigger && directory ? filterMentionCandidates(directory, mentionTrigger.query) : [];
+  const listOpen =
+    mentionTrigger !== null &&
+    mentionTrigger.start !== dismissedStart &&
+    !directoryFailed &&
+    (directory === null || suggestions.length > 0);
+
+  function ensureDirectory() {
+    if (directory !== null || directoryFailed) return;
+    // Shared session cache (mention-directory.ts): typing `@` in both note
+    // composers still costs a single request, and only when mentions are used.
+    void getMentionDirectory()
+      .then((users) => setDirectory(users))
+      .catch(() => setDirectoryFailed(true));
+  }
+
+  function syncCursor() {
+    setCursor(textareaRef.current?.selectionStart ?? content.length);
+  }
+
+  function chooseSuggestion(candidate: MentionCandidate) {
+    const next = applyMentionInsertion(content, cursor, candidate);
+    insertedRef.current.set(candidate.id, candidate.fullName);
+    setContent(next.value);
+    setActiveIndex(0);
+    setDismissedStart(null);
+    // The caret must land after the inserted name once React has painted
+    // the new value — setting it synchronously races the re-render.
+    requestAnimationFrame(() => {
+      textareaRef.current?.setSelectionRange(next.cursor, next.cursor);
+      setCursor(next.cursor);
+      textareaRef.current?.focus();
+    });
+  }
+
+  function onTextareaKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (!listOpen) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const items = directory === null ? [] : suggestions;
+      if (items.length === 0) return;
+      setActiveIndex((prev) =>
+        event.key === "ArrowDown"
+          ? (prev + 1) % items.length
+          : (prev - 1 + items.length) % items.length,
+      );
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      const candidate = directory === null ? undefined : suggestions[activeIndex];
+      if (candidate) {
+        event.preventDefault();
+        chooseSuggestion(candidate);
+      }
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      if (mentionTrigger) setDismissedStart(mentionTrigger.start);
+    }
+  }
 
   const closeMenu = () => {
     setContent("");
     setError(null);
+    setActiveIndex(0);
+    setDismissedStart(null);
+    insertedRef.current.clear();
     setIsOpen(false);
   };
 
@@ -67,16 +161,23 @@ export function AddNoteForm({
       return;
     }
 
+    // Only ids whose `@Name` text is still in the draft are sent — a
+    // mention the author edited away notifies nobody.
+    const mentionedUserIds = [...insertedRef.current.entries()]
+      .filter(([, name]) => content.includes(`@${name}`))
+      .map(([id]) => id);
+
     setBusy(true);
     setError(null);
     try {
       const response = await fetch(`/api/clients/${organisationId}/notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, replyEventId }),
+        body: JSON.stringify({ content, replyEventId, mentionedUserIds }),
       });
       if (response.ok) {
         setContent("");
+        insertedRef.current.clear();
         setIsOpen(false);
         startRefresh(() => router.refresh());
         return;
@@ -96,6 +197,7 @@ export function AddNoteForm({
     ? `add-note-${organisationId}-${replyEventId}`
     : `add-note-${organisationId}`;
   const triggerLabel = replyEventId ? "Note this reply" : "Add note";
+  const listboxId = `${fieldId}-mentions`;
 
   return (
     <MorphingPopover
@@ -142,12 +244,65 @@ export function AddNoteForm({
             </motion.span>
             <textarea
               id={fieldId}
+              ref={textareaRef}
               className="min-h-[7.5rem] w-full flex-1 resize-none rounded-t-2xl bg-transparent px-4 py-3 text-sm leading-[1.7] text-ink outline-none"
               autoFocus
               disabled={saving}
               value={content}
-              onChange={(e) => setContent(e.target.value)}
+              role="combobox"
+              aria-expanded={listOpen}
+              aria-controls={listOpen ? listboxId : undefined}
+              aria-activedescendant={
+                listOpen && directory !== null && suggestions[activeIndex]
+                  ? `${listboxId}-${suggestions[activeIndex].id}`
+                  : undefined
+              }
+              onChange={(e) => {
+                setContent(e.target.value);
+                setActiveIndex(0);
+                setDismissedStart(null);
+                setCursor(e.target.selectionStart ?? e.target.value.length);
+                if (mentionQueryAtCursor(e.target.value, e.target.selectionStart ?? 0)) {
+                  ensureDirectory();
+                }
+              }}
+              onSelect={syncCursor}
+              onKeyDown={onTextareaKeyDown}
             />
+            {listOpen && (
+              <div className="border-t border-rule-soft px-2 py-1.5">
+                {directory === null ? (
+                  <p className="px-2 py-1.5 text-xs text-dim" role="status">
+                    Finding teammates…
+                  </p>
+                ) : (
+                  <ul id={listboxId} role="listbox" aria-label="Mention a teammate">
+                    {suggestions.map((candidate, index) => (
+                      <li
+                        key={candidate.id}
+                        id={`${listboxId}-${candidate.id}`}
+                        role="option"
+                        aria-selected={index === activeIndex}
+                      >
+                        <button
+                          type="button"
+                          className={`flex w-full items-center rounded-inset px-2 py-1.5 text-left text-sm ${
+                            index === activeIndex
+                              ? "bg-paper font-semibold text-ink"
+                              : "text-dim"
+                          }`}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => chooseSuggestion(candidate)}
+                          onMouseEnter={() => setActiveIndex(index)}
+                        >
+                          {candidate.fullName}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
             <div className="flex items-center justify-between gap-3 border-t border-rule py-2.5 pr-3 pl-2">
               <button
                 type="button"

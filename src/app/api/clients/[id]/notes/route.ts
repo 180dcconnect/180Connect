@@ -6,6 +6,18 @@ import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
 import { isUuid, nonEmptyTrimmed, safeValidate } from "@/lib/validation";
 import { buildReplyNoteContent } from "@/lib/reply-note";
+import {
+  MAX_MENTIONS_PER_NOTE,
+  NOTE_ADDED_NOTIFICATION_TYPE,
+  NOTE_MENTIONED_NOTIFICATION_TYPE,
+  buildMentionNoteTitle,
+  buildOwnerNoteTitle,
+  noteNotificationLinkPath,
+  ownerAlreadyMentioned,
+  resolveMentionRecipientIds,
+  shouldNotifyOwner,
+  summariseNoteContent,
+} from "@/lib/note-mentions";
 
 /**
  * F072 — add a free-text note to a client, reached from /clients/[id]. No RPC:
@@ -25,6 +37,13 @@ const MAX_NOTE_LENGTH = 4000;
 const bodySchema = z.object({
   content: nonEmptyTrimmed(MAX_NOTE_LENGTH, "Write something before saving."),
   replyEventId: z.uuid().optional(),
+  // F485: ids the composer resolved through the @mention autocomplete
+  // (active users, not freehand names). Routing on explicit ids — never on
+  // parsing `@Name` out of the text — is what keeps an email address or a
+  // bare `@` from becoming a notification. Elements are plain strings here,
+  // not `z.uuid()`: a malformed id is dropped by
+  // `resolveMentionRecipientIds`, never a reason to reject the note itself.
+  mentionedUserIds: z.array(z.string()).max(MAX_MENTIONS_PER_NOTE).optional(),
 });
 
 function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
@@ -129,5 +148,142 @@ export async function POST(
     );
   }
 
+  // F485 — best-effort fan-out beside the insert, never a trigger (see the
+  // file header). A notification failure must never fail the note that
+  // caused it: the note is saved above, and everything below only reports.
+  await notifyNoteRecipients({
+    organisationId,
+    noteId: (data as { id: string }).id,
+    content,
+    authorId: authorization.actor.id,
+    authorName: authorization.actor.fullName?.trim() || "A team member",
+    mentionedUserIds: parsed.data.mentionedUserIds ?? [],
+  });
+
   return NextResponse.json({ note: data }, { status: 201 });
+}
+
+/**
+ * F485 producer: owner notification + @mention notifications for one saved
+ * note. Never throws — every failure is reported (ERROR_LOG via
+ * `reportError`) and swallowed, so the note itself always survives.
+ *
+ * Permission posture: organisations and notes are shared-read across all
+ * active roles, so "could already read that client" reduces to `is_active`
+ * today — enforced by filtering mentioned ids against active users here
+ * *and* by `create_notification` itself, which skips inactive recipients.
+ * Should read ever scope per-user, this is the place that must learn the
+ * narrower check; the notification body (a 240-char preview) must never go
+ * somewhere the full note could not be opened.
+ */
+async function notifyNoteRecipients(args: {
+  organisationId: string;
+  noteId: string;
+  content: string;
+  authorId: string;
+  authorName: string;
+  mentionedUserIds: string[];
+}): Promise<void> {
+  try {
+    const supabase = await createClient();
+
+    const { data: org, error: orgError } = await supabase
+      .from("organisations")
+      .select("owner_id, legal_name")
+      .eq("id", args.organisationId)
+      .maybeSingle<{ owner_id: string | null; legal_name: string | null }>();
+    if (orgError) {
+      await reportError(orgError, {
+        operation: "clients.notes_notify_owner_lookup",
+        organisationId: args.organisationId,
+      });
+      return;
+    }
+    if (!org) return;
+
+    const organisationName = org.legal_name?.trim() || "A client";
+    const linkPath = noteNotificationLinkPath(args.organisationId);
+    const body = summariseNoteContent(args.content);
+    const mentionIds = resolveMentionRecipientIds(args.mentionedUserIds, args.authorId);
+
+    // Only active users are notifiable. `create_notification` re-checks
+    // this itself; filtering first keeps the intent (and the per-id error
+    // attribution) in this file rather than only in the migration.
+    let activeMentionIds = mentionIds;
+    if (mentionIds.length > 0) {
+      const { data: users, error: usersError } = await supabase
+        .from("users")
+        .select("id")
+        .in("id", mentionIds)
+        .eq("is_active", true)
+        .returns<{ id: string }[]>();
+      if (usersError) {
+        await reportError(usersError, {
+          operation: "clients.notes_notify_mention_lookup",
+          organisationId: args.organisationId,
+        });
+        activeMentionIds = [];
+      } else {
+        const active = new Set((users ?? []).map((u) => u.id));
+        activeMentionIds = mentionIds.filter((id) => active.has(id));
+      }
+    }
+
+    const jobs: { recipientId: string; type: string; title: string }[] = [];
+
+    // Owner half: someone else noted on your client. Skipped when the owner
+    // is also @mentioned — the mention carries the signal and a second row
+    // about the same note would be noise.
+    const ownerId = org.owner_id;
+    if (
+      shouldNotifyOwner(ownerId, args.authorId) &&
+      ownerId !== null &&
+      !ownerAlreadyMentioned(ownerId, activeMentionIds)
+    ) {
+      jobs.push({
+        recipientId: ownerId,
+        type: NOTE_ADDED_NOTIFICATION_TYPE,
+        title: buildOwnerNoteTitle(args.authorName, organisationName),
+      });
+    }
+
+    // Mention half: each mentioned user is notified even when they do not
+    // own the client. The author can never appear here (resolved out
+    // above), and inactive/unreadable users were filtered above.
+    for (const recipientId of activeMentionIds) {
+      jobs.push({
+        recipientId,
+        type: NOTE_MENTIONED_NOTIFICATION_TYPE,
+        title: buildMentionNoteTitle(args.authorName, organisationName),
+      });
+    }
+
+    for (const job of jobs) {
+      const { error } = await supabase.rpc("create_notification", {
+        p_recipient_user_id: job.recipientId,
+        p_notification_type: job.type,
+        p_title: job.title,
+        p_body: body,
+        p_link_path: linkPath,
+        p_target_table: "notes",
+        p_target_id: args.noteId,
+        p_actor_user_id: args.authorId,
+      });
+      if (error) {
+        // One recipient's failure must not cancel the rest — continue the
+        // fan-out and record each failure with its own recipient.
+        await reportError(error, {
+          operation: "clients.notes_notify_create",
+          organisationId: args.organisationId,
+          notificationType: job.type,
+          recipientId: job.recipientId,
+        });
+      }
+    }
+  } catch (error) {
+    await reportError(error, {
+      operation: "clients.notes_notify",
+      organisationId: args.organisationId,
+    });
+  }
 }

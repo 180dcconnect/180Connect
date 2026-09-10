@@ -3,8 +3,33 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { NoteListItem } from "@/lib/note-history";
+import { splitNoteContentMentions } from "@/lib/note-mentions";
 
 import { formatShortDate } from "@/lib/display-format";
+
+/**
+ * F485 (#485) — a saved note's `@Name` tokens render in the accent colour
+ * when they match a known teammate, so a mention reads as a mention rather
+ * than stray punctuation. Anything unresolvable (a renamed account, an
+ * email address, a bare `@`) renders as its typed text — the note is always
+ * readable as plain text.
+ */
+function NoteContent({ content, mentionNames }: { content: string; mentionNames: readonly string[] }) {
+  const parts = splitNoteContentMentions(content, mentionNames);
+  return (
+    <p className="mt-2.5 whitespace-pre-wrap text-sm leading-[1.65] text-ink">
+      {parts.map((part, index) =>
+        part.mention ? (
+          <span key={index} className="font-semibold text-lead">
+            {part.text}
+          </span>
+        ) : (
+          <span key={index}>{part.text}</span>
+        ),
+      )}
+    </p>
+  );
+}
 
 /**
  * F071 (list) / F073 (edit) / F074 (delete): every note left against this
@@ -32,11 +57,15 @@ export function NotesSection({
   error,
   organisationId,
   addNoteForm,
+  mentionNames = [],
 }: {
   notes: NoteListItem[];
   error: boolean;
   organisationId: string;
   addNoteForm?: React.ReactNode;
+  /** Active teammates' display names, for @mention highlighting. Empty (or a
+   * failed lookup) renders every note as plain text — never an error. */
+  mentionNames?: readonly string[];
 }) {
   const router = useRouter();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -201,9 +230,7 @@ export function NotesSection({
               </div>
             ) : (
               <>
-                <p className="mt-2.5 whitespace-pre-wrap text-sm leading-[1.65] text-ink">
-                  {note.content}
-                </p>
+                <NoteContent content={note.content} mentionNames={mentionNames} />
                 {note.canManage && (
                   <div className="mt-2 flex items-center gap-3">
                     <button

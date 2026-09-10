@@ -65,3 +65,7 @@ the next export.
   send conflicts with the human-approval DoD requirement, and what's left
   after that constraint is already covered by F160 + F126. Descoped while
   triaging the Email Sending backlog, 10 September 2026.
+- [`monday-migration.md`](monday-migration.md) — Monday.com holds the only
+  outreach relationship history; the API integration (#239) is deferred per
+  PRD §5.3 and the replacement is a one-off CSV migration plus a Monday
+  retirement date. Parked 10 September 2026.

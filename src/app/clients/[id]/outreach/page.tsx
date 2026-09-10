@@ -1,6 +1,7 @@
 import { ArrowRight, Clock, Mail, Paperclip, Reply, StickyNote } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
+import { fetchPaged } from "@/lib/supabase/fetch-paged";
 import { reportError } from "@/lib/error-logging";
 import { onFileEmail } from "@/lib/client-email-validation";
 import { hasPermission } from "@/lib/auth/permissions";
@@ -173,16 +174,20 @@ export default async function ClientOutreachPage({
         .order("created_at", { ascending: false }),
       // F485: active teammates' display names, so saved-note @mentions can
       // highlight. Names only — no ids, no emails — and a failed lookup
-      // renders notes as plain text rather than an error. No LIMIT, matching
-      // the mention-candidates endpoint: a cap would silently leave later
-      // teammates' mentions unhighlighted.
-      supabase
-        .from("users")
-        .select("full_name")
-        .eq("is_active", true)
-        .not("full_name", "is", null)
-        .order("full_name", { ascending: true })
-        .returns<{ full_name: string | null }[]>(),
+      // renders notes as plain text rather than an error. Walked with
+      // fetchPaged like the mention-candidates endpoint: a bare select
+      // would silently truncate past PostgREST's 1000-row ceiling and leave
+      // later teammates' mentions unhighlighted.
+      fetchPaged<{ full_name: string | null }>((from, to) =>
+        supabase
+          .from("users")
+          .select("full_name")
+          .eq("is_active", true)
+          .not("full_name", "is", null)
+          .order("full_name", { ascending: true })
+          .range(from, to)
+          .returns<{ full_name: string | null }[]>(),
+      ),
     ]);
 
   for (const [operation, error] of [

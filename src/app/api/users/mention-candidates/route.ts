@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
+import { fetchPaged } from "@/lib/supabase/fetch-paged";
 
 /**
  * F485 (#485) — @mention autocomplete directory. Active users with a display
@@ -27,16 +28,20 @@ export async function GET() {
   }
 
   const supabase = await createClient();
-  // No LIMIT: this is id + display name over the team table (tens of rows),
-  // and a cap would silently unmentionable-ise everyone past it —
-  // unselectable in both composers and unhighlighted in saved notes.
-  const { data, error } = await supabase
-    .from("users")
-    .select("id, full_name")
-    .eq("is_active", true)
-    .not("full_name", "is", null)
-    .order("full_name", { ascending: true })
-    .returns<CandidateRow[]>();
+  // Walked with fetchPaged, not a bare select: PostgREST caps one response
+  // at 1000 rows, and a plain query would silently drop every teammate past
+  // that — unselectable in both composers and unhighlighted in saved notes.
+  // The team table is tens of rows, so this is one request in practice.
+  const { data, error } = await fetchPaged<CandidateRow>((from, to) =>
+    supabase
+      .from("users")
+      .select("id, full_name")
+      .eq("is_active", true)
+      .not("full_name", "is", null)
+      .order("full_name", { ascending: true })
+      .range(from, to)
+      .returns<CandidateRow[]>(),
+  );
 
   if (error) {
     await reportError(error, { operation: "users.mention_candidates" });

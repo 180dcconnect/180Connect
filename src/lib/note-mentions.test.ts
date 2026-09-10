@@ -364,4 +364,27 @@ describe("countMentionOccurrences + limitMentionIdsByOccurrences (F485 review)",
     assert.deepEqual(limitMentionIdsByOccurrences("hi @Sam Lee", sameName), [ALICE]);
     assert.deepEqual(limitMentionIdsByOccurrences("@Sam Lee and @Sam Lee", sameName), [ALICE, BOB]);
   });
+
+  it("does not notify a prefix name shadowed by a longer mention", () => {
+    // Deleting a selected @Sam while leaving @Sam Lee: the space inside the
+    // longer mention must not retain Sam's id.
+    const both = [
+      { id: ALICE, name: "Sam" },
+      { id: BOB, name: "Sam Lee" },
+    ];
+    assert.deepEqual(limitMentionIdsByOccurrences("ask @Sam Lee", both), [BOB]);
+    assert.deepEqual(
+      limitMentionIdsByOccurrences("ask @Sam Lee", [...both].reverse()),
+      [BOB],
+    );
+  });
+
+  it("keeps both names when each is genuinely mentioned", () => {
+    const both = [
+      { id: ALICE, name: "Sam" },
+      { id: BOB, name: "Sam Lee" },
+    ];
+    assert.deepEqual(limitMentionIdsByOccurrences("ask @Sam and @Sam Lee", both), [ALICE, BOB]);
+    assert.deepEqual(limitMentionIdsByOccurrences("ask @Sam Lee and @Sam", both), [ALICE, BOB]);
+  });
 });

@@ -259,13 +259,18 @@ export function countMentionOccurrences(content: string, name: string): number {
 }
 
 /**
- * Binds candidate ids to actual mentions in the saved text: each distinct
- * name survives at most as many times as it is mentioned, in candidate
- * order. Both the composer (whose candidates are its insertions, oldest
- * first) and the API routes (whose candidates are the requested active
- * users) reconcile through this one function, so a crafted `mentionedUserIds`
- * naming users the text never mentions notifies nobody, and a mention the
- * author typed over or deleted takes its id with it.
+ * Binds candidate ids to actual mentions in the saved text. Both the
+ * composer (whose candidates are its insertions, oldest first) and the API
+ * routes (whose candidates are the requested active users) reconcile through
+ * this one function, so a crafted `mentionedUserIds` naming users the text
+ * never mentions notifies nobody, and a mention the author typed over or
+ * deleted takes its id with it.
+ *
+ * Matching is longest-name-first over claimed spans: `@Sam Lee` consumes
+ * its text before the prefix `@Sam` is tested, so deleting a selected `@Sam`
+ * while leaving `@Sam Lee` notifies Sam Lee only — never Sam via the space
+ * inside the longer mention. Output stays in candidate order; among
+ * equal-length names insertion order wins.
  *
  * Known limit, documented rather than hidden: two teammates sharing a
  * display name are indistinguishable in plain text, so with one `@Sam Lee`
@@ -276,22 +281,56 @@ export function limitMentionIdsByOccurrences(
   content: string,
   candidates: readonly { id: string; name: string }[],
 ): string[] {
-  const remaining = new Map<string, number>();
-  const result: string[] = [];
-  for (const candidate of candidates) {
-    const key = candidate.name.trim().toLowerCase();
-    if (key === "") continue;
-    let left = remaining.get(key);
-    if (left === undefined) {
-      left = countMentionOccurrences(content, candidate.name);
-      remaining.set(key, left);
-    }
-    if (left > 0) {
-      remaining.set(key, left - 1);
-      result.push(candidate.id);
+  const hay = content.toLowerCase();
+  const consumed: { start: number; end: number }[] = [];
+  const kept = new Set<number>();
+  const order = candidates
+    .map((candidate, index) => index)
+    .filter((index) => candidates[index]?.name.trim() !== "")
+    .sort(
+      (a, b) =>
+        (candidates[b]?.name.trim().length ?? 0) - (candidates[a]?.name.trim().length ?? 0) ||
+        a - b,
+    );
+  for (const index of order) {
+    const needle = `@${candidates[index]?.name.trim()}`.toLowerCase();
+    const at = findUnconsumedMention(hay, content, needle, consumed);
+    if (at !== -1) {
+      consumed.push({ start: at, end: at + needle.length });
+      kept.add(index);
     }
   }
-  return result;
+  return candidates
+    .map((candidate, index) => ({ candidate, index }))
+    .filter(({ index }) => kept.has(index))
+    .map(({ candidate }) => candidate.id);
+}
+
+/**
+ * First offset where `needle` (already lowercased, `@Name` form) is a real
+ * mention — trigger on its left, word boundary on its right (same rules as
+ * countMentionOccurrences) — outside every already-claimed span. -1 when
+ * the text holds no further mention.
+ */
+function findUnconsumedMention(
+  hay: string,
+  content: string,
+  needle: string,
+  consumed: readonly { start: number; end: number }[],
+): number {
+  let from = 0;
+  while (true) {
+    const at = hay.indexOf(needle, from);
+    if (at === -1) return -1;
+    const end = at + needle.length;
+    const prev = at === 0 ? "" : (content[at - 1] ?? "");
+    const next = content[end] ?? "";
+    const bounded =
+      (prev === "" || /[\s(]/.test(prev)) && (next === "" || !/[A-Za-z0-9\-]/.test(next));
+    const free = consumed.every((span) => end <= span.start || at >= span.end);
+    if (bounded && free) return at;
+    from = at + 1;
+  }
 }
 
 // ─── Bulk fan-out (F485 on F065) ────────────────────────────────────────

@@ -184,7 +184,10 @@ export default async function ClientOutreachPage({
           .select("full_name")
           .eq("is_active", true)
           .not("full_name", "is", null)
+          // `id` tiebreaker, like the mention-candidates endpoint: duplicate
+          // display names need a total order or they slide across page windows.
           .order("full_name", { ascending: true })
+          .order("id", { ascending: true })
           .range(from, to)
           .returns<{ full_name: string | null }[]>(),
       ),

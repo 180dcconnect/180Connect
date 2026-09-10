@@ -38,7 +38,11 @@ export async function GET() {
       .select("id, full_name")
       .eq("is_active", true)
       .not("full_name", "is", null)
+      // `id` breaks ties among duplicate display names: without a total
+      // order, equal names can slide across `.range()` windows between page
+      // queries and a teammate is skipped or duplicated.
       .order("full_name", { ascending: true })
+      .order("id", { ascending: true })
       .range(from, to)
       .returns<CandidateRow[]>(),
   );

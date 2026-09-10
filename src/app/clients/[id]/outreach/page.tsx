@@ -1,6 +1,7 @@
 import { ArrowRight, Clock, Mail, Paperclip, Reply, StickyNote } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
+import { fetchPaged } from "@/lib/supabase/fetch-paged";
 import { reportError } from "@/lib/error-logging";
 import { onFileEmail } from "@/lib/client-email-validation";
 import { hasPermission } from "@/lib/auth/permissions";
@@ -104,6 +105,7 @@ export default async function ClientOutreachPage({
     replyResult,
     notesResult,
     attachmentsResult,
+    mentionNamesResult,
   ] =
     await Promise.all([
       loadOwner(id),
@@ -170,6 +172,25 @@ export default async function ClientOutreachPage({
         )
         .eq("organisation_id", id)
         .order("created_at", { ascending: false }),
+      // F485: active teammates' display names, so saved-note @mentions can
+      // highlight. Names only — no ids, no emails — and a failed lookup
+      // renders notes as plain text rather than an error. Walked with
+      // fetchPaged like the mention-candidates endpoint: a bare select
+      // would silently truncate past PostgREST's 1000-row ceiling and leave
+      // later teammates' mentions unhighlighted.
+      fetchPaged<{ full_name: string | null }>((from, to) =>
+        supabase
+          .from("users")
+          .select("full_name")
+          .eq("is_active", true)
+          .not("full_name", "is", null)
+          // `id` tiebreaker, like the mention-candidates endpoint: duplicate
+          // display names need a total order or they slide across page windows.
+          .order("full_name", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to)
+          .returns<{ full_name: string | null }[]>(),
+      ),
     ]);
 
   for (const [operation, error] of [
@@ -180,6 +201,7 @@ export default async function ClientOutreachPage({
     ["clients.detail_replies", replyResult.error],
     ["clients.detail_notes", notesResult.error],
     ["clients.detail_attachments", attachmentsResult.error],
+    ["clients.detail_mention_names", mentionNamesResult.error],
   ] as const) {
     if (error) await reportError(error, { operation, organisationId: id });
   }
@@ -188,6 +210,9 @@ export default async function ClientOutreachPage({
     id: actor.id,
     role: actor.role,
   });
+  const mentionNames = (mentionNamesResult.data ?? [])
+    .map((row) => row.full_name?.trim() ?? "")
+    .filter((name) => name !== "");
   const attachments = formatAttachments(
     (attachmentsResult.data ?? []) as unknown as AttachmentRow[],
   );
@@ -577,6 +602,7 @@ export default async function ClientOutreachPage({
                 error={Boolean(notesResult.error)}
                 organisationId={client.id}
                 addNoteForm={canEdit ? <AddNoteForm organisationId={client.id} /> : undefined}
+                mentionNames={mentionNames}
               />
             </SectionCard>
           </Rise>

@@ -11,6 +11,14 @@ import {
 import { MAX_BULK_STATUS_CLIENTS } from "@/lib/bulk-status";
 import { MAX_BULK_NOTE_CLIENTS, MAX_NOTE_LENGTH, prepareComment } from "@/lib/bulk-note";
 import { MAX_BULK_TAG_CLIENTS } from "@/lib/bulk-tags";
+import {
+  applyMentionInsertion,
+  filterMentionCandidates,
+  limitMentionIdsByOccurrences,
+  mentionQueryAtCursor,
+  type MentionCandidate,
+} from "@/lib/note-mentions";
+import { getMentionDirectory } from "@/lib/mention-directory";
 import { useBulkSelection } from "./bulk-selection";
 import { OriginButton } from "@/components/ui/origin-button";
 import {
@@ -83,6 +91,18 @@ export function BulkActionsBar({
   // Tags state (F063)
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
 
+  // F485 mention state for the comment composer. `directory` is the same
+  // /api/users/mention-candidates list the single-note composer uses —
+  // fetched once, on the first `@` trigger — and `inserted` remembers every
+  // id chosen in this draft so `apply` can reconcile it against the text (a
+  // mention typed over or deleted notifies nobody).
+  const insertedRef = useRef(new Map<string, string>());
+  const [commentCursor, setCommentCursor] = useState(0);
+  const [directory, setDirectory] = useState<MentionCandidate[] | null>(null);
+  const [directoryFailed, setDirectoryFailed] = useState(false);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [dismissedStart, setDismissedStart] = useState<number | null>(null);
+
   const count = ids.length;
   const overStatusLimit = count > MAX_BULK_STATUS_CLIENTS;
   const overNoteLimit = count > MAX_BULK_NOTE_CLIENTS;
@@ -92,7 +112,10 @@ export function BulkActionsBar({
 
   // Escape clears the whole selection while the bar is up (and closes any open
   // composer/popover first). Actually closing the confirm dialog takes priority:
-  // when pending, Escape dismisses it and does nothing more.
+  // when pending, Escape dismisses it and does nothing more. An open @mention
+  // listbox dismisses before any of that — the textarea's own key handler
+  // stops propagation in that case, so this listener never fires for it; the
+  // check here covers Escape reaching the document any other way.
   useEffect(() => {
     if (count === 0) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -101,7 +124,15 @@ export function BulkActionsBar({
         setPending(null);
         return;
       }
-      if (commentOpen) {
+      if (commentOpen && composerRef.current) {
+        const trigger = mentionQueryAtCursor(
+          composerRef.current.value,
+          composerRef.current.selectionStart ?? 0,
+        );
+        if (trigger && trigger.start !== dismissedStart) {
+          setDismissedStart(trigger.start);
+          return;
+        }
         setCommentOpen(false);
         return;
       }
@@ -109,7 +140,7 @@ export function BulkActionsBar({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [count, pending, commentOpen, clear]);
+  }, [count, pending, commentOpen, dismissedStart, clear]);
 
   // Focus the composer when it expands.
   useEffect(() => {
@@ -127,6 +158,66 @@ export function BulkActionsBar({
     [selected, deselect],
   );
 
+  // F485: the @mention trigger under the comment caret, if any. Routing on
+  // chosen ids (not on parsing `@Name` out of the text) is what keeps an
+  // email address or a bare `@` from becoming a notification.
+  const mentionTrigger = mentionQueryAtCursor(comment, commentCursor);
+  const mentionSuggestions =
+    mentionTrigger && directory ? filterMentionCandidates(directory, mentionTrigger.query) : [];
+  const mentionListOpen =
+    commentOpen &&
+    mentionTrigger !== null &&
+    mentionTrigger.start !== dismissedStart &&
+    !directoryFailed &&
+    (directory === null || mentionSuggestions.length > 0);
+
+  function ensureDirectory() {
+    if (directory !== null || directoryFailed) return;
+    // Shared session cache (mention-directory.ts): typing `@` in both note
+    // composers still costs a single request, and only when mentions are used.
+    void getMentionDirectory()
+      .then((users) => setDirectory(users))
+      .catch(() => setDirectoryFailed(true));
+  }
+
+  function chooseMention(candidate: MentionCandidate) {
+    const next = applyMentionInsertion(comment, commentCursor, candidate);
+    insertedRef.current.set(candidate.id, candidate.fullName);
+    setComment(next.value);
+    setMentionIndex(0);
+    setDismissedStart(null);
+    requestAnimationFrame(() => {
+      composerRef.current?.setSelectionRange(next.cursor, next.cursor);
+      setCommentCursor(next.cursor);
+      composerRef.current?.focus();
+    });
+  }
+
+  function onComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (!mentionListOpen) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (directory === null || mentionSuggestions.length === 0) return;
+      setMentionIndex((prev) =>
+        event.key === "ArrowDown"
+          ? (prev + 1) % mentionSuggestions.length
+          : (prev - 1 + mentionSuggestions.length) % mentionSuggestions.length,
+      );
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      const candidate = directory === null ? undefined : mentionSuggestions[mentionIndex];
+      if (candidate) {
+        event.preventDefault();
+        chooseMention(candidate);
+      }
+    } else if (event.key === "Escape") {
+      // Dismiss the listbox only — and stop the key reaching the document
+      // listener, which would otherwise close the whole composer.
+      event.preventDefault();
+      event.stopPropagation();
+      if (mentionTrigger) setDismissedStart(mentionTrigger.start);
+    }
+  }
+
   const showResult = result !== null && count === 0;
 
   if (count === 0 && !showResult) return null;
@@ -142,7 +233,22 @@ export function BulkActionsBar({
         payload = { ids, status };
       } else if (action === "comment") {
         endpoint = "/api/clients/bulk-note";
-        payload = { ids, comment: preparedComment.ok ? preparedComment.content : comment };
+        // Only ids whose `@Name` is still mentioned in the draft are sent,
+        // capped per name at its occurrence count — a mention typed over,
+        // deleted, or extended into a different name takes its id with it.
+        // Each id echoes the name as inserted, so a rename before saving
+        // keeps the mention.
+        const mentionedUsers = limitMentionIdsByOccurrences(
+          comment,
+          [...insertedRef.current.entries()].map(([id, name]) => ({ id, name })),
+        )
+          .map((id) => ({ id, name: insertedRef.current.get(id) ?? "" }))
+          .filter((user) => user.name !== "");
+        payload = {
+          ids,
+          comment: preparedComment.ok ? preparedComment.content : comment,
+          mentionedUsers,
+        };
       } else {
         // assign
         if (!assignOwnerId) {
@@ -174,6 +280,9 @@ export function BulkActionsBar({
         if (action === "status") setStatus(PLACEHOLDER);
         else if (action === "comment") {
           setComment("");
+          insertedRef.current.clear();
+          setMentionIndex(0);
+          setDismissedStart(null);
           setCommentOpen(false);
         } else {
           setAssignOwnerId("");
@@ -256,6 +365,9 @@ export function BulkActionsBar({
     setStatus(PLACEHOLDER);
     setComment("");
     setCommentOpen(false);
+    insertedRef.current.clear();
+    setMentionIndex(0);
+    setDismissedStart(null);
     setSelectedTagIds(new Set());
   };
 
@@ -299,8 +411,71 @@ export function BulkActionsBar({
                         value={comment}
                         maxLength={MAX_NOTE_LENGTH}
                         disabled={busy}
-                        onChange={(event) => setComment(event.target.value)}
+                        role="combobox"
+                        aria-expanded={mentionListOpen}
+                        aria-controls={mentionListOpen ? "bulk-comment-mentions" : undefined}
+                        aria-activedescendant={
+                          mentionListOpen &&
+                          directory !== null &&
+                          mentionSuggestions[mentionIndex]
+                            ? `bulk-comment-mentions-${mentionSuggestions[mentionIndex].id}`
+                            : undefined
+                        }
+                        onChange={(event) => {
+                          setComment(event.target.value);
+                          setMentionIndex(0);
+                          setDismissedStart(null);
+                          setCommentCursor(event.target.selectionStart ?? event.target.value.length);
+                          if (
+                            mentionQueryAtCursor(
+                              event.target.value,
+                              event.target.selectionStart ?? 0,
+                            )
+                          ) {
+                            ensureDirectory();
+                          }
+                        }}
+                        onSelect={(event) =>
+                          setCommentCursor(
+                            event.currentTarget.selectionStart ?? event.currentTarget.value.length,
+                          )
+                        }
+                        onKeyDown={onComposerKeyDown}
                       />
+                      {mentionListOpen && (
+                        <div className="rounded-xl border border-black/15 bg-white px-1.5 py-1">
+                          {directory === null ? (
+                            <p className="px-2 py-1.5 text-xs text-foreground/50" role="status">
+                              Finding teammates…
+                            </p>
+                          ) : (
+                            <ul id="bulk-comment-mentions" role="listbox" aria-label="Mention a teammate">
+                              {mentionSuggestions.map((candidate, index) => (
+                                <li
+                                  key={candidate.id}
+                                  id={`bulk-comment-mentions-${candidate.id}`}
+                                  role="option"
+                                  aria-selected={index === mentionIndex}
+                                >
+                                  <button
+                                    type="button"
+                                    className={`flex w-full items-center rounded-lg px-2 py-1.5 text-left text-sm transition-colors ${
+                                      index === mentionIndex
+                                        ? "bg-black/[0.04] font-bold"
+                                        : "hover:bg-black/[0.04]"
+                                    }`}
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => chooseMention(candidate)}
+                                    onMouseEnter={() => setMentionIndex(index)}
+                                  >
+                                    {candidate.fullName}
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
                       <div className="flex flex-wrap items-center gap-3">
                         <OriginButton
                           type="button"
@@ -616,7 +791,8 @@ export function BulkActionsBar({
                 <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
                   Each of the {count} selected client{count === 1 ? "" : "s"} gets its own copy of
                   this comment, saved against your name and the current time, including any that the
-                  current filter is not showing. There is no bulk undo — removing it means deleting
+                  current filter is not showing. Each client&apos;s owner is notified, and anyone you
+                  @mention is notified too. There is no bulk undo — removing it means deleting
                   the note on each client.
                 </p>
                 <p className="mt-3 max-h-40 overflow-y-auto whitespace-pre-wrap rounded-lg bg-black/[0.03] px-3 py-2 text-sm leading-[1.7]">

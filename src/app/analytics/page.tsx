@@ -486,12 +486,23 @@ export default async function AnalyticsPage() {
                     <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
                       Reply and conversion rates by email tone (F107)
                     </p>
-                    {toneSummary.untrackedRegister > 0 && (
-                      <p className="mt-2 text-[11px] text-foreground/40">
-                        {toneSummary.untrackedRegister.toLocaleString()} sent email
-                        {toneSummary.untrackedRegister === 1 ? "" : "s"} predate tone tracking or
-                        were generated without a tone, so they are excluded.
-                      </p>
+                    {(toneSummary.untrackedRegister > 0 || toneSummary.untrackedLength > 0) && (
+                      <div className="mt-2 space-y-1 text-[11px] text-foreground/40">
+                        {toneSummary.untrackedRegister > 0 && (
+                          <p>
+                            {toneSummary.untrackedRegister.toLocaleString()} sent email
+                            {toneSummary.untrackedRegister === 1 ? "" : "s"} predate register tracking or
+                            were generated without a register, so they are excluded from the tone table.
+                          </p>
+                        )}
+                        {toneSummary.untrackedLength > 0 && (
+                          <p>
+                            {toneSummary.untrackedLength.toLocaleString()} sent email
+                            {toneSummary.untrackedLength === 1 ? "" : "s"} predate length tracking or
+                            were generated without a length, so they are excluded from the length table.
+                          </p>
+                        )}
+                      </div>
                     )}
                     <ToneTable
                       title="Tone"

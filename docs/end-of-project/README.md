@@ -57,3 +57,7 @@ the next export.
   secrets are set on Vercel Preview only, so production cannot send or run
   scheduled outreach. Found checking whether send/schedule work, 9 September
   2026.
+- [`time-spent-tracking.md`](time-spent-tracking.md) — F211's own ethics
+  question has no answer, and the audit log has no session data to source it
+  from honestly. Descoped while triaging the Analytics backlog, 10 September
+  2026.

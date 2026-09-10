@@ -7,7 +7,6 @@ import {
   deriveFolder,
   deriveSector,
   hydrateInboxThread,
-  mergeWithMockFill,
   sortInboxThreads,
   type InboxContactRow,
   type InboxOrganisationRow,
@@ -268,32 +267,6 @@ describe("buildRealInboxThreads", () => {
 
     assert.equal(thread.notesCount, 3);
     assert.equal(thread.handoversCount, 1);
-  });
-});
-
-describe("mergeWithMockFill", () => {
-  const fill = (id: string): InboxThreadView =>
-    ({ id, orgName: `Fill ${id}`, lastActivityAt: "2026-01-01T00:00:00.000Z" }) as InboxThreadView;
-
-  it("lets a real thread win an id clash with the fill", () => {
-    const real = [
-      { id: ORG_A, orgName: "The real client", lastActivityAt: "2026-09-01T00:00:00.000Z" },
-    ] as InboxThreadView[];
-
-    const merged = mergeWithMockFill(real, [fill(ORG_A), fill("mock-org-other")]);
-
-    assert.equal(merged.length, 2);
-    assert.equal(merged.find((thread) => thread.id === ORG_A)?.orgName, "The real client");
-    assert.ok(merged.some((thread) => thread.id === "mock-org-other"));
-  });
-
-  it("adds fill without reordering — sorting is the caller's job", () => {
-    const real = [{ id: ORG_B, lastActivityAt: "2020-01-01T00:00:00.000Z" }] as InboxThreadView[];
-    const merged = mergeWithMockFill(real, [fill("mock-org-newer")]);
-    assert.deepEqual(
-      merged.map((thread) => thread.id),
-      [ORG_B, "mock-org-newer"],
-    );
   });
 });
 

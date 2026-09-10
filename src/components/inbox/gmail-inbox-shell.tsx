@@ -37,9 +37,6 @@ import {
 import { threadMatchesLabels } from "@/lib/inbox/label-filter";
 import { InflightRequests } from "@/lib/inbox/inflight";
 import { createTagAction } from "@/lib/tags/tag-actions";
-import {
-  mockFillThreads,
-} from "@/lib/inbox-mock-data";
 import type { AddressableClient } from "@/lib/inbox/real-threads";
 import { DEFAULT_FOLLOW_UP_THRESHOLDS } from "@/lib/outreach/follow-up-recommendations";
 import {
@@ -263,7 +260,7 @@ const COMPOSER_GAP_PX = 12;
 const COMPOSER_EDGE_PX = 32;
 
 export function GmailInboxShell({
-  initialThreads = mockFillThreads(),
+  initialThreads = [],
   initialThreadId,
   initialComposeClientId = null,
   addressableClients,
@@ -283,12 +280,6 @@ export function GmailInboxShell({
    * label concept, it shows the client record's tags.
    */
   initialTags?: InboxThreadTag[];
-  /**
-   * The subset of `initialThreads` that came from Supabase rather than the
-   * design fill. Compose can only send to these — their ids are organisation
-   * ids — so it is passed through rather than derived here, where the two
-   * kinds are already merged and indistinguishable by design.
-   */
   /**
    * Every client Compose may address — see `buildAddressableClients`. Distinct
    * from the thread list on purpose: a client with no outreach yet has no
@@ -796,7 +787,7 @@ export function GmailInboxShell({
   const threadHref = (threadId: string) => `?thread=${encodeURIComponent(threadId)}`;
 
   // Owner options for the search panel, derived from whoever holds threads
-  // right now — the mock set has no team endpoint, so the data is the list.
+  // right now — there is no separate team endpoint, so the data is the list.
   const ownerOptions = useMemo(() => {
     const seen = new Map<string, string>();
     threads.forEach((thread) => {
@@ -1165,11 +1156,9 @@ export function GmailInboxShell({
    *
    * The list query deliberately does not select `outreach_messages.body` —
    * pulling every email's HTML for every organisation would move megabytes on
-   * every page load, to render subjects and one-line snippets. A real thread
+   * every page load, to render subjects and one-line snippets. A thread
    * therefore reaches the browser with `messages: []`, and an empty `messages`
-   * is exactly the signal that it has not been hydrated yet. Mock fill arrives
-   * with its conversation already attached, so it never asks the server for
-   * one that does not exist.
+   * is exactly the signal that it has not been hydrated yet.
    */
   async function hydrate(thread: InboxThreadView): Promise<InboxThreadView | null> {
     // Callers that need the bodies inline (resumeDraft) read the return value,

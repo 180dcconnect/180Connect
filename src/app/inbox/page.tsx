@@ -17,7 +17,6 @@
  * blank the sent history), then:
  *
  *   rows → buildRealInboxThreads (one thread per organisation)
- *        → mergeWithMockFill     (design fill behind the real rows)
  *        → sortInboxThreads
  *
  * Deliberately no `body` in the message query. The list renders subjects and
@@ -37,11 +36,9 @@ import { GmailInboxShell } from "@/components/inbox/gmail-inbox-shell";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
-import { mockFillThreads } from "@/lib/inbox-mock-data";
 import {
   buildAddressableClients,
   buildRealInboxThreads,
-  mergeWithMockFill,
   sortInboxThreads,
   type InboxContactRow,
   type InboxOrganisationRow,
@@ -359,10 +356,7 @@ export default async function InboxPage({
     orgTags,
   });
 
-  // Design fill sits behind the real rows and never shadows one — see
-  // mergeWithMockFill. Clearing it takes no code change: set
-  // NEXT_PUBLIC_INBOX_MOCK_FILL=0 and restart, and mockFillThreads() is [].
-  const threads = sortInboxThreads(mergeWithMockFill(real, mockFillThreads()));
+  const threads = sortInboxThreads(real);
 
   // Who Compose may write to. Every organisation with an address, NOT just the
   // ones with outreach history — `real` excludes an organisation nobody has

@@ -43,11 +43,6 @@ import {
  * outreach_messages row, and an abandoned draft row cannot be told apart from a
  * live one by status alone. Reopening saved drafts stays a client-page job;
  * this composer only ever edits the draft it just generated.
- *
- * Preview mode (`preview`) is the design-fill exception: the same composer UI,
- * but Generate resolves a local example draft and the review panel mounts with
- * its own preview flag, so every committing action stays disabled and nothing
- * touches the network beyond rendering.
  */
 
 const STATUS_MESSAGES = [
@@ -69,64 +64,6 @@ const CLOSING_APPROACH_LABELS: Record<ClosingApproach, string> = {
   open_question: "Open question",
 };
 
-/** First name without a leading title, so "Dr. Marcus Vance" greets as Marcus. */
-function previewFirstName(contactName: string): string {
-  const parts = contactName.trim().split(/\s+/).filter(Boolean);
-  const withoutTitle =
-    parts.length > 1 && /^(dr|mr|mrs|ms|miss|prof)\.?$/i.test(parts[0] ?? "")
-      ? parts.slice(1)
-      : parts;
-  return withoutTitle[0] ?? contactName;
-}
-
-/**
- * A deterministic example reply for design-fill threads: no network, no draft
- * row, nothing persisted. It honours the three dials so the preview behaves
- * like the real composer — change the length, tone or closing and regenerate
- * to see the example change shape.
- */
-function buildPreviewReplyBody({
-  length,
-  register,
-  closing,
-  contactName,
-  orgName,
-  camName,
-}: {
-  length: EmailLength;
-  register: EmailRegister;
-  closing: ClosingApproach;
-  contactName: string;
-  orgName: string;
-  camName: string;
-}): string {
-  const firstName = previewFirstName(contactName);
-  const greeting = register === "formal" ? `Dear ${contactName},` : `Hi ${firstName},`;
-  const opener =
-    register === "direct"
-      ? `Thanks for the detail — here's how we'd take this forward with ${orgName}.`
-      : register === "warm"
-        ? `Thanks so much for getting back to us with the detail — it's exactly what we need to scope this properly.`
-        : `Thank you for getting back to us with the detail — it gives us a clear basis to scope the work.`;
-  const scope = `We'd love to take this forward as a 6-week pro-bono project: one analytical workstream, weekly check-ins with you and your team, and a final readout you can share internally.`;
-  const detailBullets = `Our suggested focus:\n• The question that matters most to your team, scoped to fit six weeks\n• A small team of four consultants plus a senior mentor from a top-tier practice\n• Weekly check-ins, so nothing drifts between the kickoff and the readout`;
-  const closer =
-    closing === "meeting_request"
-      ? `Could we book 20 minutes on Thursday at 3pm or Friday at 11am to confirm next steps?`
-      : closing === "open_question"
-        ? `What would a useful 6-week scope cover from your side?`
-        : `Would a short call next week be useful to confirm the scope?`;
-  const signoff =
-    register === "warm" ? "Warm regards," : register === "formal" ? "Kind regards," : "Best regards,";
-  const core =
-    length === "short"
-      ? `${opener} ${scope}`
-      : length === "detailed"
-        ? `${opener}\n\n${scope}\n\n${detailBullets}`
-        : `${opener}\n\n${scope}`;
-  return `${greeting}\n\n${core}\n\n${closer}\n\n${signoff}\n${camName}\n180 Degrees Consulting`;
-}
-
 type Draft = {
   id: string;
   subject: string;
@@ -144,9 +81,6 @@ export function ReplyComposer({
   replyEventId,
   blocked = false,
   blockedReason,
-  preview = false,
-  previewSubject,
-  previewContext,
   className = "",
 }: {
   organisationId: string;
@@ -160,20 +94,9 @@ export function ReplyComposer({
   replyEventId?: string;
   /** The client's email as held on the record — the mismatch-warning baseline. */
   recipientOnFile: string | null;
-  /** Suppressed, owned by another CAM, or a mock thread with no draft row to write. */
+  /** Suppressed, or owned by another CAM. */
   blocked?: boolean;
   blockedReason?: string;
-  /**
-   * Example mode for design-fill threads: the full current composer UI, but
-   * Generate produces a local example draft instead of calling the Stage 2
-   * endpoint, and the review panel mounts in its own preview mode (no sends,
-   * no saves). Overrides `blocked`.
-   */
-  preview?: boolean;
-  /** Thread subject the example draft replies to. */
-  previewSubject?: string;
-  /** Names the example draft is written with. Required when `preview`. */
-  previewContext?: { contactName: string; orgName: string; camName: string };
   className?: string;
 }) {
   // Every generation inserts a new draft row, so this id is enough to remount
@@ -223,30 +146,6 @@ export function ReplyComposer({
     setError(null);
     setWarning(null);
     try {
-      // Preview: same beat as a real generation (the loading state cycles
-      // through the same messages) but the "draft" is a local example —
-      // no preflight, no endpoint, no row.
-      if (preview) {
-        const context = previewContext ?? {
-          contactName: "there",
-          orgName: "your organisation",
-          camName: "Your CAM",
-        };
-        await new Promise((resolve) => setTimeout(resolve, 1400));
-        setDraft({
-          id: `preview-draft-${Date.now()}`,
-          subject: previewSubject ?? "Re: our conversation",
-          body: buildPreviewReplyBody({
-            length,
-            register,
-            closing,
-            contactName: context.contactName,
-            orgName: context.orgName,
-            camName: context.camName,
-          }),
-        });
-        return;
-      }
       // Same preflight the client page runs before paying for a generation:
       // suppression or an ownership change can land after this page rendered.
       const preflight = await fetch(`/api/clients/${organisationId}/outreach-preflight`, {
@@ -281,7 +180,7 @@ export function ReplyComposer({
     }
   }
 
-  if (blocked && !preview) {
+  if (blocked) {
     return (
       <p
         className={`text-[13px] leading-[1.6] font-semibold text-stop ${className}`}
@@ -355,18 +254,13 @@ export function ReplyComposer({
            id is exactly the signal to remount with the new content. */
         <EmailReviewPanel
           className="mt-5"
-          description={
-            preview
-              ? "An example of what a generated reply looks like. Review and edit it freely — approval and sending stay disabled."
-              : "Saved as a draft. Review and edit it, then approve below to send it from the branch mailbox."
-          }
+          description="Saved as a draft. Review and edit it, then approve below to send it from the branch mailbox."
           draft={{ ...draft, recipientOnFile }}
-          heading={preview ? "Example generated reply" : "Review generated reply"}
+          heading="Review generated reply"
           idPrefix="reply-review"
           key={draft.id}
           onDraftCleared={() => setDraft(null)}
           organisationId={organisationId}
-          preview={preview}
         />
       )}
     </section>

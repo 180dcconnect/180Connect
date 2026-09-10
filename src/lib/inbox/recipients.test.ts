@@ -1,17 +1,21 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import { MOCK_INBOX_THREADS } from "../inbox-mock-data.ts";
 import type { InboxThreadView } from "../inbox-thread-view.ts";
 import { resolveRecipientThread, searchRecipients, threadContacts } from "./recipients.ts";
 
-/** A real thread carries its CONTACTS rows; the fill does not. */
+const NORTHGATE_ID = "11111111-1111-4111-8111-111111111111";
+
+/** A thread built from the database carries its own CONTACTS rows. */
 function realThread(overrides: Partial<InboxThreadView> = {}): InboxThreadView {
-  const base = MOCK_INBOX_THREADS[0];
   return {
-    ...base,
-    id: "11111111-1111-4111-8111-111111111111",
+    id: NORTHGATE_ID,
     orgName: "Northgate Trust",
+    orgType: "Registered Charity",
+    city: "Leeds",
+    country: "United Kingdom",
+    sector: "Charities & NGOs",
+    labelColor: "#10b981",
     primaryContact: {
       name: "Dana Okafor",
       role: "Director",
@@ -20,7 +24,7 @@ function realThread(overrides: Partial<InboxThreadView> = {}): InboxThreadView {
     contacts: [
       {
         id: "c1",
-        organisationId: "11111111-1111-4111-8111-111111111111",
+        organisationId: NORTHGATE_ID,
         firstName: "Dana",
         lastName: "Okafor",
         email: "enquiries@northgate.org",
@@ -28,6 +32,20 @@ function realThread(overrides: Partial<InboxThreadView> = {}): InboxThreadView {
         isPrimary: true,
       },
     ],
+    camOwner: { name: "Ada Lovelace", email: "ada.lovelace@180dc.org" },
+    status: "replied",
+    subject: "Re: pro-bono support",
+    snippet: "Thanks for reaching out",
+    lastActivityAt: "2026-09-01T00:00:00.000Z",
+    isRead: true,
+    isStarred: false,
+    isImportant: false,
+    folder: "inbox",
+    messages: [],
+    attachments: [],
+    notesCount: 0,
+    handoversCount: 0,
+    tags: [],
     ...overrides,
   };
 }
@@ -54,10 +72,9 @@ describe("threadContacts", () => {
     );
   });
 
-  it("falls back to derived stand-ins for a design fill thread", () => {
-    const fill = MOCK_INBOX_THREADS[0];
-    assert.equal(fill.contacts, undefined);
-    assert.ok(threadContacts(fill).length >= 2);
+  it("offers no addresses when the source carries no CONTACTS rows", () => {
+    const contacts = threadContacts(realThread({ contacts: undefined }));
+    assert.deepEqual(contacts, []);
   });
 
   it("treats an empty contacts array as 'no addresses', not as missing", () => {

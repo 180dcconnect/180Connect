@@ -301,6 +301,18 @@ describe("countMentionOccurrences + limitMentionIdsByOccurrences (F485 review)",
     assert.equal(countMentionOccurrences("ask @Sam Leeds", "Sam Lee"), 0);
   });
 
+  it("treats a hyphenated extension as a different name", () => {
+    assert.equal(countMentionOccurrences("ask @Sam Lee-Smith", "Sam Lee"), 0);
+  });
+
+  it("still counts a mention ending the sentence", () => {
+    assert.equal(countMentionOccurrences("please ask @Sam Lee.", "Sam Lee"), 1);
+  });
+
+  it("still counts a possessive mention", () => {
+    assert.equal(countMentionOccurrences("use @Sam Lee's draft", "Sam Lee"), 1);
+  });
+
   it("still counts a mention followed by punctuation", () => {
     assert.equal(countMentionOccurrences("ask @Sam Lee, please", "Sam Lee"), 1);
   });
@@ -330,6 +342,17 @@ describe("countMentionOccurrences + limitMentionIdsByOccurrences (F485 review)",
     assert.deepEqual(
       limitMentionIdsByOccurrences("ask @Sam Leeds", [{ id: BOB, name: "Sam Lee" }]),
       [],
+    );
+  });
+
+  it("keeps an id whose mention ends with punctuation", () => {
+    assert.deepEqual(
+      limitMentionIdsByOccurrences("ask @Bob Osei.", [{ id: BOB, name: "Bob Osei" }]),
+      [BOB],
+    );
+    assert.deepEqual(
+      limitMentionIdsByOccurrences("use @Bob Osei's draft", [{ id: BOB, name: "Bob Osei" }]),
+      [BOB],
     );
   });
 

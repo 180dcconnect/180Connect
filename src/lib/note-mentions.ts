@@ -232,10 +232,13 @@ export function splitNoteContentMentions(
 /**
  * How many times `@Name` is actually mentioned in `content`. A hit needs the
  * composer's trigger on its left (start of text, whitespace, or `(` — so
- * `sam@180dc.org` never counts) and a non-name character on its right, so a
- * mention extended with extra text (`@Sam Lee` typed on into `@Sam Leeds`)
- * stops counting as a mention of `Sam Lee`. Compared case-insensitively:
- * re-casing a name edits its style, not its referent.
+ * `sam@180dc.org` never counts) and a word boundary on its right: end of
+ * text, whitespace, or punctuation. A mention extended with more word text
+ * (`@Sam Lee` typed on into `@Sam Leeds`, or hyphenated into `@Sam Lee-Smith`)
+ * stops counting as a mention of `Sam Lee` — but a period or apostrophe does
+ * not continue a word, so `@Sam Lee.` and `@Sam Lee's` still mention Sam Lee.
+ * Compared case-insensitively: re-casing a name edits its style, not its
+ * referent.
  */
 export function countMentionOccurrences(content: string, name: string): number {
   const needle = `@${name.trim()}`.toLowerCase();
@@ -248,7 +251,7 @@ export function countMentionOccurrences(content: string, name: string): number {
     if (at === -1) return count;
     const prev = at === 0 ? "" : (content[at - 1] ?? "");
     const next = content[at + needle.length] ?? "";
-    if ((prev === "" || /[\s(]/.test(prev)) && (next === "" || !/[A-Za-z0-9.'\-]/.test(next))) {
+    if ((prev === "" || /[\s(]/.test(prev)) && (next === "" || !/[A-Za-z0-9\-]/.test(next))) {
       count += 1;
     }
     from = at + needle.length;

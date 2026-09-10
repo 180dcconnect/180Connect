@@ -1157,21 +1157,28 @@ export function GmailInboxShell({
    * with its conversation already attached, so it never asks the server for
    * one that does not exist.
    */
-  async function hydrate(thread: InboxThreadView) {
-    if (thread.messages.length > 0 || hydratingRef.current.has(thread.id)) return;
+  async function hydrate(thread: InboxThreadView): Promise<InboxThreadView | null> {
+    // Callers that need the bodies inline (resumeDraft) read the return value,
+    // so hand back the thread with its messages rather than only mutating list
+    // state: an already-hydrated thread comes straight back, an in-flight one
+    // returns null, and a fresh fetch returns the merged copy.
+    if (thread.messages.length > 0) return thread;
+    if (hydratingRef.current.has(thread.id)) return null;
     hydratingRef.current.add(thread.id);
     try {
       const response = await fetch(`/api/inbox/${thread.id}/thread`);
-      if (!response.ok) return;
+      if (!response.ok) return null;
       const hydrated = (await response.json()) as InboxThreadView;
       // Message bodies are server data, not a viewer flag — they belong on the
       // underlying list.
       setServerThreads((prev) =>
         prev.map((t) => (t.id === thread.id ? { ...t, messages: hydrated.messages } : t)),
       );
+      return { ...thread, messages: hydrated.messages };
     } catch {
       // A failed hydration leaves the pane's header and metadata intact; the
       // conversation simply stays empty rather than the thread failing to open.
+      return null;
     } finally {
       hydratingRef.current.delete(thread.id);
     }

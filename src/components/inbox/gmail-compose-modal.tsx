@@ -135,6 +135,15 @@ export type GmailComposeModalProps = {
    * confirmation down with it — the toast has to live above this window.
    */
   onDraftSaved?: () => void;
+  /**
+   * Fires after a successful send (or schedule-send), so the shell can toast.
+   * Receives whether the send was scheduled so the message can differ.
+   */
+  onSent?: (scheduled: boolean) => void;
+  /**
+   * Fires after a draft is successfully discarded, so the shell can toast.
+   */
+  onDiscarded?: () => void;
   initialRecipient?: string;
   initialSubject?: string;
   /**
@@ -617,6 +626,8 @@ export function GmailComposeModal({
   onMinimisedChange,
   onSend,
   onDraftSaved,
+  onSent,
+  onDiscarded,
   initialRecipient = "",
   initialSubject = "",
   initialNewsSource,
@@ -1305,6 +1316,7 @@ export function GmailComposeModal({
     }
     resetDraft();
     router.refresh();
+    onDiscarded?.();
     return true;
   }
 
@@ -1325,7 +1337,7 @@ export function GmailComposeModal({
     }
     if (!sendableClient) {
       setSaveDraftError(
-        "Save a recipient from the database first — a draft needs a client to belong to.",
+        "Add a recipient.",
       );
       return false;
     }
@@ -1571,6 +1583,7 @@ export function GmailComposeModal({
           scheduledFor: scheduledFor ?? undefined,
         });
         resetDraft();
+        onSent?.(Boolean(scheduledFor));
         onClose();
       } else {
         setSendError(result.message);

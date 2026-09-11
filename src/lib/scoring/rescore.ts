@@ -31,7 +31,6 @@ type OrgRow = {
   city: string | null;
   sector: string | null;
   outreach_status: string;
-  total_income: number | null;
   financial_periods: { total_income: number | null; period_end: string | null }[] | null;
   grants: { count: number }[] | null;
   outreach_messages: { sent_at: string | null }[] | null;
@@ -75,7 +74,7 @@ export async function rescoreOrganisation(
   const { data: org, error } = await admin
     .from("organisations")
     .select(
-      "city, sector, outreach_status, total_income, financial_periods(total_income, period_end), grants(count), outreach_messages(sent_at)",
+      "city, sector, outreach_status, financial_periods(total_income, period_end), grants(count), outreach_messages(sent_at)",
     )
     // F093: only the newest sent message matters for the recency signal —
     // cap the embed server-side. nullsFirst: false because Postgres sorts
@@ -97,7 +96,6 @@ export async function rescoreOrganisation(
     city: org.city,
     sector: org.sector,
     outreach_status: org.outreach_status,
-    total_income: org.total_income,
     financial_periods: org.financial_periods ?? [],
     last_contacted_at: lastContactedFrom(org.outreach_messages),
     matched_grant_count: org.grants?.[0]?.count ?? null,

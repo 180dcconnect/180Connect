@@ -279,13 +279,24 @@ export function AddNoteForm({
               onKeyDown={onTextareaKeyDown}
             />
             {listOpen && (
-              <div className="border-t border-rule-soft px-2 py-1.5">
+              <motion.div
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.15, ease: "easeOut" }}
+                role="presentation"
+                className="absolute top-3 left-4 z-10 w-64 max-w-[calc(100%-2rem)] overflow-hidden rounded-panel border border-rule bg-white p-1 shadow-[0_18px_40px_-18px_rgba(20,26,34,0.32)]"
+              >
                 {directory === null ? (
-                  <p className="px-2 py-1.5 text-xs text-dim" role="status">
+                  <p className="px-2.5 py-2 text-xs text-dim" role="status">
                     Finding teammates…
                   </p>
                 ) : (
-                  <ul id={listboxId} role="listbox" aria-label="Mention a teammate">
+                  <ul
+                    id={listboxId}
+                    role="listbox"
+                    aria-label="Mention a teammate"
+                    className="max-h-36 overflow-y-auto"
+                  >
                     {suggestions.map((candidate, index) => (
                       <li
                         key={candidate.id}
@@ -295,24 +306,30 @@ export function AddNoteForm({
                       >
                         <button
                           type="button"
-                          className={`flex w-full items-center rounded-inset px-2 py-1.5 text-left text-sm ${
+                          className={`flex w-full items-center gap-1.5 rounded-inset px-2.5 py-1.5 text-left text-sm transition-colors ${
                             index === activeIndex
                               ? "bg-paper font-semibold text-ink"
-                              : "text-dim"
+                              : "text-dim hover:bg-paper/70 hover:text-ink"
                           }`}
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => chooseSuggestion(candidate)}
                           onMouseEnter={() => setActiveIndex(index)}
                         >
+                          <span
+                            aria-hidden="true"
+                            className={`font-semibold ${index === activeIndex ? "text-lead-mid" : "text-faint"}`}
+                          >
+                            @
+                          </span>
                           {candidate.fullName}
                         </button>
                       </li>
                     ))}
                   </ul>
                 )}
-              </div>
+              </motion.div>
             )}
-            <div className="flex items-center justify-between gap-3 border-t border-rule py-2.5 pr-3 pl-2">
+            <div className="flex items-center justify-between gap-3 py-2.5 pr-3 pl-2">
               <button
                 type="button"
                 className="flex cursor-pointer items-center rounded-full p-1.5 text-dim transition-colors hover:bg-paper-sunk hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead-mid disabled:opacity-50"

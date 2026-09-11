@@ -1384,7 +1384,7 @@ export function GmailInboxShell({
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
       {/* Main Mail Surface (borderless, shadowless) */}
       <div
-        className={`flex-1 flex flex-col min-w-0 min-h-0 bg-white rounded-t-panel overflow-hidden transition-[border-radius] duration-200 ${
+        className={`relative flex-1 flex flex-col min-w-0 min-h-0 bg-white rounded-t-panel overflow-hidden transition-[border-radius] duration-200 ${
           activeThread || isAtBottom ? "rounded-b-panel" : "rounded-b-none"
         }`}
       >
@@ -1626,34 +1626,35 @@ export function GmailInboxShell({
           </div>
         )}
         </div>
-      </div>
-      </div>
 
-      {/* Floating compose windows, stacked bottom-right like Gmail's. */}
-      <AnimatePresence>
-        {toast && (
-          <motion.div
-            key="shell-toast"
-            role="status"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 12 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-            className="fixed bottom-5 left-5 z-[80] flex items-center gap-2 rounded-xl bg-ink px-4 py-2.5 text-sm font-medium text-white shadow-[0_18px_40px_-16px_rgba(15,23,42,0.6)]"
-          >
-            <Check className="h-4 w-4 text-emerald-300" aria-hidden="true" />
-            {toast}
-            <button
-              type="button"
-              aria-label="Dismiss"
-              onClick={() => setToast(null)}
-              className="ml-1 rounded-full p-0.5 text-white/60 transition-colors hover:text-white"
+        {/* Inline toast — anchored at the bottom-left of the mail surface,
+            not the viewport, so it sits below the category tabs / thread list. */}
+        <AnimatePresence>
+          {toast && (
+            <motion.div
+              key="shell-toast"
+              role="status"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 12 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="absolute bottom-4 left-4 z-[80] flex items-center gap-2 rounded-xl bg-ink px-4 py-2.5 text-sm font-medium text-white shadow-[0_18px_40px_-16px_rgba(15,23,42,0.6)]"
             >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              <Check className="h-4 w-4 text-emerald-300" aria-hidden="true" />
+              {toast}
+              <button
+                type="button"
+                aria-label="Dismiss"
+                onClick={() => setToast(null)}
+                className="ml-1 rounded-full p-0.5 text-white/60 transition-colors hover:text-white"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+      </div>
       {composers.map((composer, index) => (
         <GmailComposeModal
           key={composer.key}
@@ -1674,6 +1675,10 @@ export function GmailInboxShell({
           assignedTagsByClientId={tagsByClientId}
           onSend={handleSendNewOutreach}
           onDraftSaved={() => showToast("Draft saved")}
+          onSent={(scheduled) =>
+            showToast(scheduled ? "Message scheduled" : "Message sent")
+          }
+          onDiscarded={() => showToast("Draft discarded")}
         />
       ))}
     </div>

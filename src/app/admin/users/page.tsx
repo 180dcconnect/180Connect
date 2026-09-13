@@ -83,21 +83,18 @@ export default async function AdminUsersPage({
   // Excludes rows with an invite still pending (invited_at set, not yet
   // accepted) — those are listed separately below, not mixed into the team
   // table, so the two lists stay mutually exclusive (F008 AC5).
-  // F188: excludes the fixed placeholder account (see
-  // create_deleted_user_placeholder_for_tags.sql) — a fake, never-active
-  // row that exists purely as a foreign-key target so a tag survives its
-  // real creator's account being deleted. It must never appear as if it
-  // were a real team member.
-  const DELETED_USER_PLACEHOLDER_ID = "00000000-0000-0000-0000-000000000001";
+  // Deleted accounts are not team members. That covers redacted accounts
+  // (delete_user with history) and the F188 tag placeholder, which
+  // 20260930090000 marks deleted for exactly this reason.
 
   // All four reads at once. None depends on another's result, so awaiting them
   // in sequence made this page four round trips deep for no reason; the errors
   // are still reported individually below, exactly as before.
   //
-  // Owned-client counts drive the reassignment gate's warning (F014 AC2), so the
-  // admin sees "owns 3 clients" before starting rather than being refused after.
+  // Owned-client counts drive the reassignment gate's warning, so the admin
+  // sees "owns 3 clients" before starting rather than being refused after.
   // Fetched separately because PostgREST cannot aggregate across the reverse of
-  // this FK in one select. A failure there is not fatal: deactivate_user recounts
+  // this FK in one select. A failure there is not fatal: delete_user recounts
   // authoritatively.
   //
   // F167: the count in the table links through to /clients?owner=, and that list
@@ -113,9 +110,9 @@ export default async function AdminUsersPage({
   ] = await Promise.all([
     supabase
       .from("users")
-      .select("id, email, full_name, role, is_active, deactivated_at, last_seen_at")
+      .select("id, email, full_name, role, is_active, last_seen_at")
       .or("invited_at.is.null,invite_accepted_at.not.is.null")
-      .neq("id", DELETED_USER_PLACEHOLDER_ID)
+      .is("deleted_at", null)
       .order("full_name"),
     supabase
       .from("users")
@@ -178,10 +175,10 @@ export default async function AdminUsersPage({
                 allowedDomains={allowedEmailDomains()}
                 pendingEmails={(pendingInvites ?? []).map((p) => p.email)}
                 existingUserEmails={(users ?? [])
-                  .filter((u) => !u.deactivated_at && u.is_active !== false)
+                  .filter((u) => u.is_active !== false)
                   .map((u) => u.email)}
-                deactivatedEmails={(users ?? [])
-                  .filter((u) => Boolean(u.deactivated_at) || u.is_active === false)
+                suspendedEmails={(users ?? [])
+                  .filter((u) => u.is_active === false)
                   .map((u) => u.email)}
               />
             </div>

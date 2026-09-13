@@ -99,13 +99,13 @@ export function UserHoverCard({
                 The active/inactive state was previously only a coloured dot on
                 the avatar, which went with it. It reads as a word instead — and
                 only when it is the exceptional case, since "this account still
-                works" is not news. A deactivated colleague still appears in the
+                works" is not news. A suspended or deleted colleague still appears in the
                 feed for work they did, and a reader chasing that work needs to
                 know nobody is behind the name any more.
               */}
               {!user.isActive && (
                 <span className="inline-flex shrink-0 items-center rounded-full border border-amber-200 bg-amber-100/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-900 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-100">
-                  Deactivated
+                  Inactive
                 </span>
               )}
             </div>

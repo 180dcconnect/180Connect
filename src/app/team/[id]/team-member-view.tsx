@@ -51,7 +51,6 @@ export type TeamMemberViewProps = {
     fullName: string | null;
     role: "cam" | "admin" | "viewer";
     isActive: boolean;
-    deactivatedAt: string | null;
     lastSeenAt: string | null;
     createdAt: string;
     inviterName: string | null;
@@ -650,7 +649,7 @@ export function TeamMemberView({
                 <div className="flex justify-between py-1.5 border-b border-rule/30">
                   <dt className="text-dim">Access State</dt>
                   <dd className="font-semibold text-ink">
-                    {member.isActive ? "Active" : member.deactivatedAt ? "Deactivated" : "Suspended"}
+                    {member.isActive ? "Active" : "Suspended"}
                   </dd>
                 </div>
                 <div className="flex justify-between py-1.5 border-b border-rule/30">

@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Stage, Rise } from "@/components/dashboard-stage";
 import { formatTeamActivity, type RawTeamActivityRow } from "@/lib/team-activity";
 
+import type { HandoverDestination } from "./account-controls";
 import { TeamMemberHeader, type TeamMemberHeaderData } from "./team-member-header";
 import { TeamMemberView, type MemberActivityItem, type MemberNoteItem } from "./team-member-view";
 import type { AssignedClientItem } from "./assigned-clients-card";
@@ -28,7 +29,7 @@ const loadTeamMember = cache(async (id: string) => {
   return supabase
     .from("users")
     .select(
-      "id, email, full_name, role, is_active, deactivated_at, last_seen_at, created_at, invited_at, invite_accepted_at, invited_by_user_id",
+      "id, email, full_name, role, is_active, deleted_at, last_seen_at, created_at, invited_at, invite_accepted_at, invited_by_user_id",
     )
     .eq("id", id)
     .maybeSingle();
@@ -96,7 +97,8 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
   ]);
 
   const user = userResult.data;
-  if (userResult.error || !user) {
+  // A deleted account has no profile. Its row survives only so history keeps an author.
+  if (userResult.error || !user || user.deleted_at) {
     notFound();
   }
 
@@ -160,6 +162,25 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
   const isSelf = authorization.actor.id === user.id;
   const isAdmin = authorization.actor.role === "admin";
 
+  // Who could take this member's clients on if an admin suspends or deletes them. Only
+  // loaded for the admin view that offers those actions; the RPC re-checks eligibility.
+  let destinations: HandoverDestination[] = [];
+  if (isAdmin && !isSelf) {
+    const { data: candidates } = await supabase
+      .from("users")
+      .select("id, full_name, email, role")
+      .eq("is_active", true)
+      .in("role", ["cam", "admin"])
+      .is("deleted_at", null)
+      .neq("id", user.id)
+      .order("full_name");
+    destinations = (candidates ?? []).map((candidate) => ({
+      id: candidate.id,
+      name: candidate.full_name?.trim() || candidate.email,
+      role: candidate.role as HandoverDestination["role"],
+    }));
+  }
+
   // Detailed Pipeline Breakdown
   const totalClients = clients.length;
   const discoveryCount = clients.filter((c) => c.outreach_status === "not_contacted").length;
@@ -194,13 +215,13 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
     fullName: user.full_name,
     role: user.role as "cam" | "admin" | "viewer",
     isActive: user.is_active,
-    deactivatedAt: user.deactivated_at,
     lastSeenAt: user.last_seen_at,
     createdAt: user.created_at,
     inviterName,
     isSelf,
     isAdmin,
     stats,
+    destinations,
   };
 
   return (
@@ -218,7 +239,6 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
               fullName: user.full_name,
               role: user.role as "cam" | "admin" | "viewer",
               isActive: user.is_active,
-              deactivatedAt: user.deactivated_at,
               lastSeenAt: user.last_seen_at,
               createdAt: user.created_at,
               inviterName,

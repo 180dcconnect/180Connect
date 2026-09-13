@@ -95,22 +95,21 @@ export type InviteState = {
  * Shown for an email that already has a row in `public.users` — active account
  * or invite already pending, this repo's schema cannot cheaply tell those two
  * apart (see the module doc), and the acceptance criteria only requires the
- * message be specific, not which one it was. Never shown for a deactivated
- * account — see `DEACTIVATED_ACCOUNT_MESSAGE`, checked first.
+ * message be specific, not which one it was. Never shown for a suspended
+ * account — see `SUSPENDED_ACCOUNT_MESSAGE`, checked first.
  */
 export const DUPLICATE_INVITE_MESSAGE =
   "This email already has an account or a pending invite.";
 
 /**
- * Shown for an email that belongs to a deactivated account (F014) rather than
- * an active one or a pending invite. Re-inviting would collide with the
- * existing `auth.users` row (`create_deactivate_user_rpc.sql`'s "A DEACTIVATED
- * PERSON WHO REJOINS IS REACTIVATED, NOT RE-INVITED" note) and mint a token
- * for an account GoTrue already considers real, so this steers the admin to
- * the team list's existing Reactivate action instead of attempting the invite.
+ * Shown for an email that belongs to a suspended account rather than an active one
+ * or a pending invite. Re-inviting would collide with the existing `auth.users` row
+ * and mint a token for an account GoTrue already considers real, so this steers the
+ * admin to reactivation instead. A *deleted* account never reaches this: delete_user
+ * either removes the auth user or overwrites its email, so the address is free.
  */
-export const DEACTIVATED_ACCOUNT_MESSAGE =
-  "This email belongs to a deactivated account. Reactivate them from the team list instead of sending a new invite.";
+export const SUSPENDED_ACCOUNT_MESSAGE =
+  "This email belongs to a suspended account. Reactivate them from their profile instead of sending a new invite.";
 
 /**
  * Shown on a resend when GoTrue refuses to mint a fresh `invite`-type link
@@ -135,9 +134,9 @@ export const INVITE_LINK_ERROR =
 
 /**
  * Looks up an existing `public.users` row by email, or returns `null`.
- * `deactivatedAt` is carried along so `sendInvite` can tell a deactivated
- * account apart from an active one or a pending invite, and steer the admin
- * to reactivation instead of a blocked, unexplained "duplicate" refusal.
+ * `isActive` is carried along so `sendInvite` can tell a suspended account
+ * apart from an active one or a pending invite, and steer the admin to
+ * reactivation instead of a blocked, unexplained "duplicate" refusal.
  *
  * A plain function rather than a slice of the Supabase client's method chain:
  * the real query builder is a thenable, not a `Promise`, and structurally
@@ -148,7 +147,7 @@ export const INVITE_LINK_ERROR =
  */
 export type LookupExistingUser = (
   email: string,
-) => Promise<{ id: string; deactivatedAt: string | null } | null>;
+) => Promise<{ id: string; isActive: boolean } | null>;
 
 /**
  * Minimal slice of the Supabase Admin API this module needs to mint the invite.
@@ -272,7 +271,7 @@ export async function sendInvite(
 
   const { email, role, fullName } = result.data;
 
-  let existing: { id: string; deactivatedAt: string | null } | null;
+  let existing: { id: string; isActive: boolean } | null;
   try {
     existing = await lookupExistingUser(email);
   } catch (error) {
@@ -285,14 +284,14 @@ export async function sendInvite(
     };
   }
 
-  if (existing?.deactivatedAt) {
-    logSecurityEvent("user.invite_rejected", { reason: "deactivated_account" });
+  if (existing && !existing.isActive) {
+    logSecurityEvent("user.invite_rejected", { reason: "suspended_account" });
     return {
       ok: false,
       state: {
         status: "error",
-        message: DEACTIVATED_ACCOUNT_MESSAGE,
-        fieldErrors: { email: [DEACTIVATED_ACCOUNT_MESSAGE] },
+        message: SUSPENDED_ACCOUNT_MESSAGE,
+        fieldErrors: { email: [SUSPENDED_ACCOUNT_MESSAGE] },
       },
     };
   }
@@ -600,7 +599,7 @@ export const INVITE_CANCEL_NOT_FOUND_MESSAGE = "This invite could not be found."
  * not a cancelled invite.
  */
 export const INVITE_CANCEL_ALREADY_ACCEPTED_MESSAGE =
-  "This is now a team member — use the team list to deactivate them instead.";
+  "This is now a team member — suspend or delete them from their profile instead.";
 
 /** The one call `cancelInvite` needs to record a cancellation, kept minimal so tests can fake it. */
 export type AuditLogWriter = {

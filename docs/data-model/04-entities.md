@@ -147,13 +147,13 @@
 | email | text |  | No | User's email address | System | Set at registration via Supabase Auth |  |
 | full_name | text |  | Yes | User's full name | Human | Set by user in their profile |  |
 | role | enum |  | No | User's role in the platform | Human | Set by admin at invite | cam / admin / viewer |
-| is_active | boolean |  | No | Whether the user can log in | System | True on activation; false if deactivated | Default true |
+| is_active | boolean |  | No | Whether the user can log in | System | True on activation; false while suspended, and permanently once deleted | Default true |
 | invited_by_user_id | uuid | USERS | Yes | Who sent the invite | System | Set when invite is created | Null for the first admin |
 | last_seen_at | timestamp |  | Yes | When the user was last active on any signed-in page — not just login | System | Updated by touch_last_seen(), throttled to once per 5 min per user, on every signed-in page load and admin API request |  |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
-| updated_at | timestamp |  | No | Last updated timestamp | System | Auto-updated on any change | Tracks when the account was last modified, used to audit role changes, name updates, and deactivations |
+| updated_at | timestamp |  | No | Last updated timestamp | System | Auto-updated on any change | Tracks when the account was last modified, used to audit role changes, name updates, suspensions and deletions |
 | is_seed | boolean |  | No | Flag for seed data | System/Human | Set in the seed data script | False by default |
-| deactivated_at | timestamp |  | Yes | When the account was deactivated | System | Set by deactivate_user; cleared on reactivation | Null on active and on merely, suspended accounts; distinguishes deactivation from suspension |
+| deleted_at | timestamp |  | Yes | When the account was deleted and its personal details redacted | System | Set by delete_user when the account had history; never cleared | Null on active and suspended accounts. An account with no history is physically deleted instead, so no row carries this. Deleted accounts cannot be reactivated |
 | invited_at | timestamp |  | Yes | When an admin invite created this row | System | Set by app.handle_new_auth_user from the invite's raw_user_meta_data | Null for rows not created by an invite (seed rows, first bootstrapped admin). Set with invite_accepted_at null = a pending invite |
 | invite_accepted_at | timestamp |  | Yes | When the invited person first confirmed their email | System | Set by app.handle_auth_user_confirmed when email_confirmed_at goes non-null | Null while invite pending. Setting it moves the row out of the admin's pending-invites list |
 | onboarding_completed_at | timestamp |  | Yes | When the user finished the onboarding flow | System | Set when user completes onboarding | Null until completed |

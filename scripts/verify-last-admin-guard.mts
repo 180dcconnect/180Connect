@@ -1,7 +1,7 @@
 /**
  * Proves matrix §6 gap 7 is actually closed (F012): admins racing each other — one
  * demoting the other via `set_user_role` while the second suspends the first via
- * `set_user_active`, or deactivates them via `deactivate_user` — must never jointly
+ * `set_user_active` / `suspend_user`, or deletes them via `delete_user` — must never jointly
  * commit to zero active admins.
  *
  *     npm run verify:last-admin
@@ -81,7 +81,7 @@ async function seedTwoAdmins(admin: Client): Promise<void> {
        ($1, 'verify-last-admin-a@180dc.org', 'Verify Admin A', 'admin', true, true),
        ($2, 'verify-last-admin-b@180dc.org', 'Verify Admin B', 'admin', true, true)
      on conflict (id) do update
-       set role = 'admin', is_active = true, deactivated_at = null, is_seed = true`,
+       set role = 'admin', is_active = true, is_seed = true`,
     [ADMIN_A, ADMIN_B],
   );
   await admin.query("commit");
@@ -106,7 +106,7 @@ type PgError = { message?: string; hint?: string };
  *
  * `label` names the door B comes through. Every RPC that writes `users.role` or
  * `users.is_active` needs a row here, or the race simply relocates to the one that
- * has none — which is exactly how `deactivate_user` was missed the first time.
+ * has none — which is exactly how the old `deactivate_user` was missed the first time.
  */
 async function race(
   admin: Client,
@@ -172,7 +172,7 @@ async function race(
 
   check(`${label}: connection B was refused, not silently applied`, bError !== null);
   check(
-    `${label}: the refusal carries the last_admin hint`,
+    `${label}: the refusal carries the last_admin hint (got ${bError?.hint ?? "none"}: ${bError?.message ?? "no error"})`,
     bError?.hint === "last_admin",
   );
 
@@ -218,8 +218,15 @@ async function main(): Promise<void> {
       admin,
       connA,
       connB,
-      "deactivate_user",
-      "select public.deactivate_user($1, 'verify-last-admin-guard')",
+      "suspend_user",
+      "select public.suspend_user($1::uuid)",
+    );
+    await race(
+      admin,
+      connA,
+      connB,
+      "delete_user",
+      "select public.delete_user($1::uuid, 'verify-last-admin-guard')",
     );
 
     if (failures.length > 0) {

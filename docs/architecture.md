@@ -110,7 +110,7 @@ Two related but distinct logging paths:
 
 A third, separate thing: **`public.audit_log`** is a database table, not an
 application logger. It is the append-only trail for privileged actions — role
-changes, deactivations — written by `SECURITY DEFINER` RPCs such as
+changes, suspensions, deletions — written by `SECURITY DEFINER` RPCs such as
 `public.set_user_role`, readable by admins only, with no insert/update/delete
 policy at all. Application code never writes to it directly. Spec:
 [`docs/rls-permission-matrix.md`](rls-permission-matrix.md) §3.8.

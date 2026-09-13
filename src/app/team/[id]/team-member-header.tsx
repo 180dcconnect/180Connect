@@ -13,6 +13,7 @@ import { BackButton } from "@/components/ui/back-button";
 import { Pill } from "@/app/clients/[id]/section-card";
 import { OriginButton } from "@/components/ui/origin-button";
 
+import { AccountControls, type HandoverDestination } from "./account-controls";
 import { CopyProfileButton } from "./copy-profile-button";
 import { TeamRoleEditor } from "./role-editor";
 import { PerformanceDial } from "./performance-dial";
@@ -23,7 +24,6 @@ export type TeamMemberHeaderData = {
   fullName: string | null;
   role: "cam" | "admin" | "viewer";
   isActive: boolean;
-  deactivatedAt: string | null;
   lastSeenAt: string | null;
   createdAt: string;
   inviterName: string | null;
@@ -39,6 +39,8 @@ export type TeamMemberHeaderData = {
     sentMessagesCount: number;
     notesCount: number;
   };
+  /** Active CAMs/admins who could take this member's clients on. Empty unless admin. */
+  destinations: HandoverDestination[];
 };
 
 function getInitials(name: string | null, email: string): string {
@@ -73,17 +75,8 @@ export function TeamMemberHeader({ member }: { member: TeamMemberHeaderData }) {
   const displayName = member.fullName?.trim() || member.email;
   const initials = getInitials(member.fullName, member.email);
 
-  const statusTone: "go" | "stop" | "neutral" = member.isActive
-    ? "go"
-    : member.deactivatedAt
-      ? "stop"
-      : "neutral";
-
-  const statusLabel = member.isActive
-    ? "Active"
-    : member.deactivatedAt
-      ? "Deactivated"
-      : "Suspended";
+  const statusTone: "go" | "stop" = member.isActive ? "go" : "stop";
+  const statusLabel = member.isActive ? "Active" : "Suspended";
 
   const inProgressCount = member.stats.outreachCount + member.stats.discussionCount;
 
@@ -114,6 +107,16 @@ export function TeamMemberHeader({ member }: { member: TeamMemberHeaderData }) {
               <span>Queue settings</span>
             </OriginButton>
           ) : null}
+
+          {member.isAdmin && !member.isSelf && (
+            <AccountControls
+              userId={member.id}
+              displayName={displayName}
+              isActive={member.isActive}
+              ownedClientCount={member.stats.totalClients}
+              destinations={member.destinations}
+            />
+          )}
         </div>
       </div>
 

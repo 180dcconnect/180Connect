@@ -6,7 +6,6 @@ export type TeamUser = {
   full_name: string | null;
   role: "cam" | "admin" | "viewer";
   is_active: boolean;
-  deactivated_at: string | null;
   /** Last time this user was seen on any signed-in page — not last login. Null if never. */
   last_seen_at: string | null;
   owned_client_count: number;
@@ -38,7 +37,7 @@ type RealtimeUserRow = {
   full_name?: string | null;
   role?: TeamUser["role"];
   is_active?: boolean;
-  deactivated_at?: string | null;
+  deleted_at?: string | null;
   last_seen_at?: string | null;
   invited_at?: string | null;
   invite_accepted_at?: string | null;
@@ -88,8 +87,10 @@ export function applyRealtimeUserChange(
   state: TeamPanelState,
   payload: RealtimeUserPayload,
 ): TeamPanelState {
-  if (payload.eventType === "DELETE") {
-    const removedId = payload.old.id;
+  // A redacted account (delete_user with history) arrives as an UPDATE, not a DELETE,
+  // but it has left the team all the same.
+  if (payload.eventType === "DELETE" || payload.new.deleted_at) {
+    const removedId = payload.eventType === "DELETE" ? payload.old.id : payload.new.id;
     if (!removedId) return state;
     return {
       teamUsers: state.teamUsers.filter((user) => user.id !== removedId),
@@ -131,7 +132,6 @@ export function applyRealtimeUserChange(
     full_name: row.full_name ?? existing?.full_name ?? null,
     role: row.role ?? existing?.role ?? "cam",
     is_active: row.is_active ?? existing?.is_active ?? true,
-    deactivated_at: row.deactivated_at ?? existing?.deactivated_at ?? null,
     last_seen_at: row.last_seen_at ?? existing?.last_seen_at ?? null,
     owned_client_count: existing?.owned_client_count ?? 0,
     listed_client_count: existing?.listed_client_count ?? 0,

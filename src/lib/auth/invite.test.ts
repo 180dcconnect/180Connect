@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it, mock } from "node:test";
 
 import {
-  DEACTIVATED_ACCOUNT_MESSAGE,
+  SUSPENDED_ACCOUNT_MESSAGE,
   DUPLICATE_INVITE_MESSAGE,
   INVITE_ALREADY_ACCEPTED_MESSAGE,
   INVITE_ALREADY_OPENED_MESSAGE,
@@ -76,7 +76,7 @@ const REDIRECT_TO = "https://180connect.vercel.app/auth/confirm";
 const INVITED_BY = "admin-1";
 
 type LookupBehaviour =
-  | { row: { id: string; deactivatedAt?: string | null } | null }
+  | { row: { id: string; isActive?: boolean } | null }
   | { error: string };
 
 function fakeLookupClient(behaviour: LookupBehaviour): {
@@ -89,9 +89,9 @@ function fakeLookupClient(behaviour: LookupBehaviour): {
     calls.push(email);
     if ("error" in behaviour) throw new Error(behaviour.error);
     if (!behaviour.row) return null;
-    // Defaults to null (not deactivated) so existing fixtures that don't care
-    // about deactivation don't need updating.
-    return { deactivatedAt: null, ...behaviour.row };
+    // Defaults to active so existing fixtures that don't care about suspension
+    // don't need updating.
+    return { isActive: true, ...behaviour.row };
   };
 
   return { lookup, calls };
@@ -246,9 +246,9 @@ describe("sendInvite", () => {
     assert.ok(logs.some((log) => log.includes("user.invite_rejected")));
   });
 
-  it("steers to reactivation for an email belonging to a deactivated account, without sending an invite", async () => {
+  it("steers to reactivation for an email belonging to a suspended account, without sending an invite", async () => {
     const { lookup } = fakeLookupClient({
-      row: { id: "existing-user", deactivatedAt: "2026-01-01T00:00:00Z" },
+      row: { id: "existing-user", isActive: false },
     });
     const { client: admin, calls: adminCalls } = fakeAdminClient({ ok: true });
 
@@ -258,7 +258,7 @@ describe("sendInvite", () => {
 
     assert.equal(result.ok, false);
     if (!result.ok) {
-      assert.equal(result.state.message, DEACTIVATED_ACCOUNT_MESSAGE);
+      assert.equal(result.state.message, SUSPENDED_ACCOUNT_MESSAGE);
     }
     assert.equal(adminCalls.length, 0);
     assert.ok(logs.some((log) => log.includes("user.invite_rejected")));

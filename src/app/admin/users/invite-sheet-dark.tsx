@@ -49,6 +49,7 @@ import {
   validateInviteName,
 } from "./invite-validation";
 import { DEFAULT_ALLOWED_EMAIL_DOMAIN, describeDomains } from "@/lib/auth/email-domain";
+import { CopyInviteLink } from "./copy-invite-link";
 
 type InviteMode = "single" | "multiple";
 
@@ -185,6 +186,10 @@ export function DarkInviteSheet({
     status: "idle" | "success" | "warning" | "error";
     message?: string;
   }>({ status: "idle" });
+  // Links minted by bulk sends, kept after the successful rows leave the
+  // staged list — otherwise the admin's only way to onboard someone whose
+  // email never arrives vanishes with the row.
+  const [bulkLinks, setBulkLinks] = useState<Array<{ email: string; link: string }>>([]);
   const [isPendingBulk, startBulkTransition] = useTransition();
   const isBulkFormValid =
     stagedRecipients.length > 0 &&
@@ -202,6 +207,7 @@ export function DarkInviteSheet({
     setRawEmailsInput("");
     setStagedRecipients([]);
     setBulkStatus({ status: "idle" });
+    setBulkLinks([]);
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     setDuplicateToast(null);
   }
@@ -525,6 +531,21 @@ export function DarkInviteSheet({
         const res = await sendBulkInvitesAction(payload);
         setBulkStatus({ status: res.status, message: res.message });
 
+        // Keep every minted link, including warning rows whose account was
+        // created but whose email never left — those need the link most.
+        // Successful rows leave the staged list below, so without this the
+        // admin's only copy of the link vanishes with the row.
+        const minted = res.results.flatMap((r) =>
+          r.success && r.link ? [{ email: r.email, link: r.link }] : [],
+        );
+        if (minted.length > 0) {
+          setBulkLinks((prev) => {
+            const next = new Map(prev.map((l) => [l.email, l.link] as const));
+            for (const r of minted) next.set(r.email, r.link);
+            return [...next].map(([email, link]) => ({ email, link }));
+          });
+        }
+
         // The aggregate message says "3 failed"; without this the admin has no
         // way to learn *which* three, or why.
         const failures = new Map(
@@ -829,15 +850,7 @@ export function DarkInviteSheet({
                     <span>{singleStatus.message}</span>
                   </div>
                   {singleStatus.link && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(singleStatus.link!);
-                      }}
-                      className="cursor-pointer text-left text-xs font-semibold text-amber-200 underline underline-offset-2 hover:opacity-80"
-                    >
-                      Copy the invite link and send it to them yourself
-                    </button>
+                    <CopyInviteLink link={singleStatus.link} tone="dark" />
                   )}
                 </div>
               ) : singleStatus.status === "success" && singleStatus.message ? (
@@ -847,15 +860,7 @@ export function DarkInviteSheet({
                     <span>{singleStatus.message}</span>
                   </div>
                   {singleStatus.link && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(singleStatus.link!);
-                      }}
-                      className="text-xs font-semibold text-[#e6f5c0] underline underline-offset-2 hover:opacity-80 text-left cursor-pointer"
-                    >
-                      Copy invite link to clipboard
-                    </button>
+                    <CopyInviteLink link={singleStatus.link} tone="dark" />
                   )}
                 </div>
               ) : null}
@@ -1091,6 +1096,28 @@ export function DarkInviteSheet({
                   )}
                 >
                   {bulkStatus.message}
+                </div>
+              )}
+              {/* Minted links survive their rows leaving the staged list above.
+                  If email is not arriving, these are the way in. */}
+              {bulkLinks.length > 0 && (
+                <div className="rounded-xl border border-white/15 bg-black/25 p-3">
+                  <p className="text-[11px] text-[#f4f4ef]/60">
+                    Email not arriving? Copy a link and send it yourself.
+                  </p>
+                  <ul className="mt-2 space-y-2">
+                    {bulkLinks.map(({ email, link }) => (
+                      <li
+                        key={email}
+                        className="flex flex-wrap items-center gap-x-3 gap-y-0.5"
+                      >
+                        <span className="min-w-0 flex-1 truncate text-xs text-[#f4f4ef]/80">
+                          {email}
+                        </span>
+                        <CopyInviteLink link={link} tone="dark" />
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </motion.div>

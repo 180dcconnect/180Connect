@@ -1,17 +1,63 @@
--- Rollback: 20261002090000_manual_entry_sector_reach_size
+-- Migration: manual_entry_sector_reach_size
+-- Story: Add a client — the hand-entered route collects what the score and the
+-- record's completeness checks read. Sequence step 28.4.
+-- Source: Data Model tab 03 MANUAL_ENTRY_RECORDS (six new optional fields) and
+-- tab 04 FINANCIAL_PERIODS.financial_source (new value 'manual').
+-- Compatibility: additive. save_manual_entry keeps its fourteen leading
+-- parameters and every new one defaults to null, so existing callers — the
+-- server action, the pgTAP suite — are unchanged.
+-- Security: no new table; writes stay RPC-only, RLS unchanged. Not audited
+-- beyond the existing submit/approve audit rows — no ownership, status, role or
+-- approval state changes here.
+-- Reversibility: ../rollback/20261002095000_manual_entry_sector_reach_size.down.sql
 --
--- Irreversible part, stated rather than hidden: Postgres cannot drop an enum
--- value, so 'manual' stays on public.financial_source. The periods that used it
--- are deleted, which leaves the value unused. Sector and geographic_reach values
--- already carried onto organisations are left in place — they are true facts
--- about those clients, and nothing after this rollback writes or reads them
--- differently.
+-- WHY THIS MIGRATION EXISTS: a client added by hand arrived with a name, an
+-- address and a mission and nothing else the app scores on. ORGANISATIONS.sector
+-- stayed null (the sector score fell back to neutral), geographic_reach stayed
+-- null (CAM queue preferences could not match it), and no FINANCIAL_PERIODS row
+-- existed, so the size score was neutral and the record's "Filed accounts" and
+-- "Headcount" completeness ticks could never fill. A register import brings all
+-- of that; this is the fallback route, and it now asks for the few facts a person
+-- can realistically know.
+--
+-- ── Why size is a financial period and not columns on ORGANISATIONS ──
+--
+-- Income, staff and volunteers already have a home: FINANCIAL_PERIODS, which
+-- the size score, the income-band preference and the completeness strip all read.
+-- A second copy on the organisation would be one more thing to keep in step. So
+-- the entry holds the figures and the year end they belong to, and approval files
+-- them as one period with financial_source = 'manual'.
+--
+-- ── Why sector is free text here ──
+--
+-- ORGANISATIONS.sector is free text (20260824100000) and the score matches it
+-- against the F197 taxonomy. The form offers only that taxonomy; the column stays
+-- text so this migration does not quietly invent the canonical enum F055 owns.
 
-delete from public.financial_periods where financial_source = 'manual';
+alter type public.financial_source add value if not exists 'manual';
 
-drop function public.save_manual_entry(uuid,text,text,public.organisation_type,text,text,text,text,text,text,text,text,text,boolean,text,public.geographic_reach,numeric,date,integer,integer);
+alter table public.manual_entry_records
+  add column sector text
+    check (sector is null or length(trim(sector)) between 1 and 100),
+  add column geographic_reach public.geographic_reach,
+  add column latest_income numeric
+    check (latest_income is null or latest_income >= 0),
+  add column accounts_year_end date,
+  add column staff_count integer
+    check (staff_count is null or staff_count >= 0),
+  add column volunteer_count integer
+    check (volunteer_count is null or volunteer_count >= 0),
+  add constraint manual_entry_size_has_year_end check (
+    (latest_income is null and staff_count is null and volunteer_count is null)
+    or accounts_year_end is not null
+  );
 
-create or replace function public.save_manual_entry(
+-- A new signature, not a replace: Postgres treats extra parameters as a different
+-- function, and leaving the fourteen-argument one beside it would make every
+-- existing positional call ambiguous.
+drop function public.save_manual_entry(uuid,text,text,public.organisation_type,text,text,text,text,text,text,text,text,text,boolean);
+
+create function public.save_manual_entry(
   p_entry_id uuid,
   p_legal_name text,
   p_mission_statement text,
@@ -25,7 +71,13 @@ create or replace function public.save_manual_entry(
   p_registry_name text,
   p_registry_number text,
   p_reason text,
-  p_submit boolean
+  p_submit boolean,
+  p_sector text default null,
+  p_geographic_reach public.geographic_reach default null,
+  p_latest_income numeric default null,
+  p_accounts_year_end date default null,
+  p_staff_count integer default null,
+  p_volunteer_count integer default null
 ) returns uuid
 language plpgsql
 security definer
@@ -58,6 +110,17 @@ begin
     raise exception 'complete every required manual-entry field before submission' using errcode = '22023';
   end if;
 
+  -- Size figures describe a set of accounts, so they need the year end they are
+  -- from — a financial period cannot be filed without one. Checked here for the
+  -- message; the table's CHECK constraint is the boundary that holds.
+  if (p_latest_income is not null or p_staff_count is not null or p_volunteer_count is not null)
+     and p_accounts_year_end is null then
+    raise exception 'add the accounts year end the size figures are from' using errcode = '22023';
+  end if;
+  if p_accounts_year_end is not null and p_accounts_year_end > current_date then
+    raise exception 'the accounts year end cannot be in the future' using errcode = '22023';
+  end if;
+
   if p_entry_id is not null then
     select * into v_existing
       from public.manual_entry_records
@@ -82,6 +145,12 @@ begin
       registry_name = nullif(trim(p_registry_name), ''),
       registry_number = nullif(trim(p_registry_number), ''),
       reason_for_manual_entry = nullif(trim(p_reason), ''),
+      sector = nullif(trim(p_sector), ''),
+      geographic_reach = p_geographic_reach,
+      latest_income = p_latest_income,
+      accounts_year_end = p_accounts_year_end,
+      staff_count = p_staff_count,
+      volunteer_count = p_volunteer_count,
       review_status = v_status
     where id = p_entry_id
     returning id into v_id;
@@ -89,14 +158,19 @@ begin
     insert into public.manual_entry_records (
       submitted_by_user_id, legal_name, mission_statement, organisation_type,
       address_line_1, city, postcode, country_code, website, contact_email,
-      registry_name, registry_number, reason_for_manual_entry, review_status
+      registry_name, registry_number, reason_for_manual_entry,
+      sector, geographic_reach, latest_income, accounts_year_end, staff_count, volunteer_count,
+      review_status
     ) values (
       v_actor, nullif(trim(p_legal_name), ''), nullif(trim(p_mission_statement), ''),
       p_organisation_type, nullif(trim(p_address_line_1), ''), nullif(trim(p_city), ''),
       nullif(trim(p_postcode), ''), nullif(upper(trim(p_country_code)), ''),
       nullif(trim(p_website), ''), nullif(trim(p_contact_email), ''),
       nullif(trim(p_registry_name), ''), nullif(trim(p_registry_number), ''),
-      nullif(trim(p_reason), ''), v_status
+      nullif(trim(p_reason), ''),
+      nullif(trim(p_sector), ''), p_geographic_reach, p_latest_income, p_accounts_year_end,
+      p_staff_count, p_volunteer_count,
+      v_status
     ) returning id into v_id;
   end if;
 
@@ -116,10 +190,10 @@ end;
 $$;
 
 revoke execute on function public.save_manual_entry(
-  uuid,text,text,public.organisation_type,text,text,text,text,text,text,text,text,text,boolean
+  uuid,text,text,public.organisation_type,text,text,text,text,text,text,text,text,text,boolean,text,public.geographic_reach,numeric,date,integer,integer
 ) from public, anon;
 grant execute on function public.save_manual_entry(
-  uuid,text,text,public.organisation_type,text,text,text,text,text,text,text,text,text,boolean
+  uuid,text,text,public.organisation_type,text,text,text,text,text,text,text,text,text,boolean,text,public.geographic_reach,numeric,date,integer,integer
 ) to authenticated;
 
 create or replace function public.approve_manual_entry(
@@ -261,18 +335,45 @@ begin
     insert into public.organisations (
       legal_name, trading_name, country_code, is_international, entry_method,
       is_verified, organisation_type, website, contact_email, address_line_1,
-      city, postcode, geographic_reach, data_completeness_score, owner_id, is_seed
+      city, postcode, geographic_reach, sector, data_completeness_score, owner_id, is_seed
     ) values (
       trim(v_entry.legal_name), '', v_entry.country_code, v_entry.country_code <> 'GB',
       'manual', false, v_entry.organisation_type, v_entry.website, v_entry.contact_email,
-      v_entry.address_line_1, v_entry.city, v_entry.postcode, null, v_score, null, false
+      v_entry.address_line_1, v_entry.city, v_entry.postcode, v_entry.geographic_reach,
+      v_entry.sector, v_score, null, false
     ) returning id into v_organisation_id;
 
     insert into public.enrichment_results (
-      organisation_id, mission_statement, website_url, confidence_score, needs_review
+      organisation_id, mission_statement, website_url, sector, confidence_score, needs_review
     ) values (
-      v_organisation_id, v_entry.mission_statement, v_entry.website, 1, false
+      v_organisation_id, v_entry.mission_statement, v_entry.website, v_entry.sector, 1, false
     );
+
+    -- 20261002095000: size, when the submitter gave it, as one manual financial
+    -- period ending on the accounts year end they named. The period is the year
+    -- to that date, the band is derived exactly as src/lib/income-band.ts derives
+    -- it, and the source says 'manual' so nothing reads it as a filed return.
+    if v_entry.accounts_year_end is not null then
+      insert into public.financial_periods (
+        organisation_id, period_start, period_end, total_income, income_band,
+        count_employees, count_volunteers, financial_source
+      ) values (
+        v_organisation_id,
+        (v_entry.accounts_year_end - interval '1 year' + interval '1 day')::date,
+        v_entry.accounts_year_end,
+        v_entry.latest_income,
+        case
+          when v_entry.latest_income is null then null
+          when v_entry.latest_income < 10000 then 'under_10k'
+          when v_entry.latest_income <= 100000 then '10k_100k'
+          when v_entry.latest_income <= 1000000 then '100k_1m'
+          else 'over_1m'
+        end::public.income_band,
+        v_entry.staff_count,
+        v_entry.volunteer_count,
+        'manual'
+      );
+    end if;
 
     if nullif(trim(v_entry.registry_number), '') is not null then
       insert into public.organisation_identifiers (
@@ -361,16 +462,13 @@ begin
 end;
 $$;
 
+comment on function public.approve_manual_entry(uuid,text,boolean,uuid,text) is
+  'F036/F042 manual-entry approval. 20260923114000: per-field provenance on '
+  'create_new. 20261002095000: also carries sector and geographic_reach onto '
+  'the organisation and files any size figures as one financial period with '
+  'financial_source = ''manual''. link_existing still writes neither.';
+
 revoke execute on function public.approve_manual_entry(uuid,text,boolean,uuid,text)
   from public, anon;
 grant execute on function public.approve_manual_entry(uuid,text,boolean,uuid,text)
   to authenticated;
-
-alter table public.manual_entry_records
-  drop constraint manual_entry_size_has_year_end,
-  drop column sector,
-  drop column geographic_reach,
-  drop column latest_income,
-  drop column accounts_year_end,
-  drop column staff_count,
-  drop column volunteer_count;

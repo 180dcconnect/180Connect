@@ -2,7 +2,7 @@
 -- cron.job_run_details live outside PostgREST's exposed schemas, so the
 -- inbox sidebar's outreach-engine status card cannot query them directly.
 --
--- Reversibility: ../rollback/20260927090100_create_outreach_cron_health_rpc.down.sql
+-- Reversibility: ../rollback/20261002091000_create_outreach_cron_health_rpc.down.sql
 
 create function public.get_outreach_cron_health(p_job_names text[])
 returns table (

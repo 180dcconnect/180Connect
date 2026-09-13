@@ -335,7 +335,7 @@ purge are service-role operations, never reachable from the application.
 
 Implementation debt this policy describes but the codebase does not yet have:
 
-- [x] `redact_user` for `USERS` — built as `delete_user` (20260930090000), which redacts both schemas per A.1
+- [x] `redact_user` for `USERS` — built as `delete_user` (20261002094000), which redacts both schemas per A.1
 - [ ] `redact_contact` procedure (Annex A is the manual stopgap)
 - [ ] `purge_record` (Level 3) with mandatory audit
 - [ ] Suppression list table and the pre-send check (§7)

@@ -52,7 +52,7 @@
 --                 | tab 04 USERS + tab 02.
 --                 | Approved by Bashir (Project Leader), 13 Sep 2026.
 --
--- Reversibility: paired rollback in ../rollback/20260930090000_replace_deactivation_with_delete.down.sql
+-- Reversibility: paired rollback in ../rollback/20261002094000_replace_deactivation_with_delete.down.sql
 --   The schema reverses; a redaction does not. That is the point of it.
 
 -- ---------------------------------------------------------------------------

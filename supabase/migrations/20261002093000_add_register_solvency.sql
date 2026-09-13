@@ -65,7 +65,7 @@
 --   Documentation | Data Model tab 04 gains the two rows; run
 --                 | `npm run export:data-model` to refresh docs/data-model/.
 --
--- Reversibility: ../rollback/20260928100000_add_register_solvency.down.sql
+-- Reversibility: ../rollback/20261002093000_add_register_solvency.down.sql
 
 alter table public.organisations
   add column if not exists insolvent boolean,

@@ -1,4 +1,5 @@
 import { cache } from "react";
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { getCurrentActor } from "@/lib/auth/actor";
@@ -44,6 +45,7 @@ export async function generateMetadata({
   const { data: user } = await loadTeamMember(id);
 
   if (!user) return { title: "Team Member · 180Connect" };
+  if (user.deleted_at) return { title: "Former team member · 180Connect" };
   const name = user.full_name?.trim() || user.email;
   return { title: `${name} · Team Member Profile` };
 }
@@ -97,9 +99,44 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
   ]);
 
   const user = userResult.data;
-  // A deleted account has no profile. Its row survives only so history keeps an author.
-  if (userResult.error || !user || user.deleted_at) {
+  if (userResult.error || !user) {
     notFound();
+  }
+
+  // A deleted account has no profile — its row survives only so history keeps an
+  // author. But activity feeds, audit rows and hover cards still name that author and
+  // link here, so the link lands on a plain statement of what happened rather than a
+  // 404 that reads like a broken page.
+  if (user.deleted_at) {
+    return (
+      <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+        <Stage className="mx-auto max-w-2xl">
+          <Rise>
+            <section className="rounded-panel border border-rule bg-white px-6 py-8">
+              <h1 className="font-body text-[clamp(1.75rem,3.5vw,2.25rem)] leading-[1.1] font-semibold tracking-[-0.02em] text-ink">
+                Former team member
+              </h1>
+              <p className="mt-3 text-sm leading-[1.7] text-dim">
+                This account was deleted on{" "}
+                {new Date(user.deleted_at).toLocaleDateString("en-GB", {
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                })}
+                . Their notes, emails and approvals stay on the records they belong to, credited
+                to a former member, but there is no profile to show.
+              </p>
+              <Link
+                className="mt-5 inline-block text-sm font-semibold text-lead hover:underline"
+                href="/dashboard"
+              >
+                Back to the dashboard
+              </Link>
+            </section>
+          </Rise>
+        </Stage>
+      </div>
+    );
   }
 
   // Fetch inviter if present

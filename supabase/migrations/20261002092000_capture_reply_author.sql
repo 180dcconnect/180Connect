@@ -44,7 +44,7 @@
 --   Documentation | Data Model tab 07 gains the sender_email row; run
 --                 | npm run export:data-model to refresh docs/data-model/.
 --
--- Reversibility: ../rollback/20260928090000_capture_reply_author.down.sql
+-- Reversibility: ../rollback/20261002092000_capture_reply_author.down.sql
 
 alter table public.reply_events
   add column if not exists sender_email text;

@@ -1,4 +1,4 @@
--- Rollback for 20260928090000_capture_reply_author.
+-- Rollback for 20261002092000_capture_reply_author.
 --
 -- Restores capture_gmail_reply exactly as 20260912160000 defined it — writing
 -- neither contact_id nor sender_email — and then drops the added column. The

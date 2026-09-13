@@ -23,6 +23,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { reportError } from "@/lib/error-logging";
 import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
+import { deleteTeamMember, reactivateTeamMember, suspendTeamMember } from "./account-actions";
 
 /** An active CAM or admin who can take on a departing member's clients. */
 export type HandoverDestination = {
@@ -91,23 +92,16 @@ export function AccountControls({
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch("/api/admin/users", {
-        method: change === "delete" ? "DELETE" : "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          change === "delete"
-            ? { userId, reason: reason.trim(), ...handoverFields() }
-            : {
-                userId,
-                isActive: false,
-                ...(movesWork ? { reason: reason.trim() } : {}),
-                ...handoverFields(),
-              },
-        ),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setError(result.error ?? "The change was blocked. Refresh and try again.");
+      const result =
+        change === "delete"
+          ? await deleteTeamMember({ userId, reason: reason.trim(), ...handoverFields() })
+          : await suspendTeamMember({
+              userId,
+              ...(movesWork ? { reason: reason.trim() } : {}),
+              ...handoverFields(),
+            });
+      if (!result.ok) {
+        setError(result.error);
         return;
       }
       setChange(null);
@@ -127,14 +121,9 @@ export function AccountControls({
     setBusy(true);
     setReactivateError(null);
     try {
-      const response = await fetch("/api/admin/users", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, isActive: true }),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setReactivateError(result.error ?? "The access change was blocked.");
+      const result = await reactivateTeamMember({ userId });
+      if (!result.ok) {
+        setReactivateError(result.error);
         return;
       }
       router.refresh();

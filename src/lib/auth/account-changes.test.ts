@@ -8,7 +8,7 @@ import {
   accountChangeFailureStatus,
 } from "./account-changes.ts";
 
-const MIGRATION = "supabase/migrations/20260930090000_replace_deactivation_with_delete.sql";
+const MIGRATION = "supabase/migrations/20261002094000_replace_deactivation_with_delete.sql";
 const GUARD_MIGRATION = "supabase/migrations/20260804153000_last_admin_guard.sql";
 
 /** The text of one `create or replace function <name>(` … `$$;` block. */

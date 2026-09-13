@@ -180,7 +180,7 @@ authoritative — widening it alone changes a form message and admits nobody. Th
 table is in `app`, unreachable through PostgREST, with RLS on and no policies.
 Recipe in [`auth/invite-email.md`](auth/invite-email.md).
 
-**Suspend and delete** (20260930090000, replacing F014's deactivation). There are two
+**Suspend and delete** (20261002094000, replacing F014's deactivation). There are two
 ways to remove someone's access, and they genuinely differ:
 
 - `public.suspend_user(user_id, reason, reassign_to, release_clients)` — reversible. It
@@ -1797,7 +1797,7 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    `delete_user`, which sets `is_active = false` on its own path. A guard on the first
    two would have left the same race open through the last (B deletes A while A demotes
    B), so all of them take the lock. (F014's `deactivate_user` was the original third
-   writer; `delete_user` replaced it in 20260930090000.) Any future RPC that writes either column has to call the guard too;
+   writer; `delete_user` replaced it in 20261002094000.) Any future RPC that writes either column has to call the guard too;
    that is the whole reason the lock lives in one shared function rather than inline.
 8. ~~**`revokeUserSessions` cannot work as written — sessions are never actually
    revoked.**~~ **Resolved on the F013 branch, 30 Jul 2026** —
@@ -1876,7 +1876,7 @@ body is sound (admin self-check, no self-change, writes `audit_log`), so this is
 process problem rather than a security one: nothing recreates it on `db reset`, and it
 cannot reach production through the release process. It needs capturing as a migration
 by whoever owns F013/F014. (`users.deactivated_at`, noted here at the time as missing from the database, was
-later added by F014 and then removed by 20260930090000.)
+later added by F014 and then removed by 20261002094000.)
 # F036 manual entry access
 
 `MANUAL_ENTRY_RECORDS` is readable by its creating CAM/admin and by admins.

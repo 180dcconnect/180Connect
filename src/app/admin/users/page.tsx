@@ -85,7 +85,7 @@ export default async function AdminUsersPage({
   // table, so the two lists stay mutually exclusive (F008 AC5).
   // Deleted accounts are not team members. That covers redacted accounts
   // (delete_user with history) and the F188 tag placeholder, which
-  // 20260930090000 marks deleted for exactly this reason.
+  // 20261002094000 marks deleted for exactly this reason.
 
   // All four reads at once. None depends on another's result, so awaiting them
   // in sequence made this page four round trips deep for no reason; the errors

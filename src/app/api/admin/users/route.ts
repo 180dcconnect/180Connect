@@ -4,6 +4,7 @@ import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import {
   accountChangeFailureMessage,
   accountChangeFailureStatus,
+  reactivateFailureMessage,
 } from "@/lib/auth/account-changes";
 import { canChangeAccess, canChangeRole } from "@/lib/auth/permissions";
 import { logRoleChangeDenial, roleFailureMessage } from "@/lib/auth/permission-denial";
@@ -11,6 +12,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
+import { safeValidate } from "@/lib/validation";
 
 const roleUpdateSchema = z.object({
   userId: z.uuid(),
@@ -36,31 +38,6 @@ const suspendSchema = z.object({
 });
 
 const updateUserSchema = z.union([roleUpdateSchema, reactivateSchema, suspendSchema]);
-
-/**
- * Delete. Irreversible: the database either removes the account outright or, when it
- * has history, redacts it. The admin must say where owned clients go; the database is
- * what decides whether that was required, since it is the only party that can count the
- * rows without a race.
- */
-const deleteSchema = z.object({
-  userId: z.uuid(),
-  reason: z.string().trim().min(1).max(500),
-  reassignTo: z.uuid().optional(),
-  releaseClients: z.boolean().optional(),
-});
-
-/** Reactivation's refusals — suspension and deletion go through account-changes.ts. */
-function reactivateFailureMessage(hint: string | null | undefined): string {
-  switch (hint) {
-    case "not_admin":
-      return "Only an admin can change a team member's access.";
-    case "user_deleted":
-      return "A deleted account cannot be reactivated.";
-    default:
-      return "The access change was blocked. Refresh and try again.";
-  }
-}
 
 function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
   const status = reason === "unauthenticated" ? 401 : 403;
@@ -158,11 +135,11 @@ export async function PATCH(request: Request) {
     );
   }
 
-  const parsed = updateUserSchema.safeParse(body.value);
+  const parsed = safeValidate(updateUserSchema, body.value);
   if (!parsed.success) {
     logSecurityEvent("validation.rejected", {
       route: "/api/admin/users",
-      fieldCount: parsed.error.issues.length,
+      fieldCount: Object.keys(parsed.fieldErrors).length,
     });
     return NextResponse.json(
       { error: "Choose a valid CAM, Admin, or Viewer role, or a valid access change." },
@@ -299,75 +276,5 @@ export async function PATCH(request: Request) {
   return NextResponse.json({
     user: data,
     ...(clientsMoved > 0 ? { clientsMoved } : {}),
-  });
-}
-
-export async function DELETE(request: Request) {
-  const authorization = await getCurrentActor("user:manage");
-  if (!authorization.ok) return denied(authorization.reason);
-
-  const body = await readJson(request);
-  if (!body.ok) {
-    return NextResponse.json(
-      { error: "The request body must be valid JSON." },
-      { status: 400 },
-    );
-  }
-
-  const parsed = deleteSchema.safeParse(body.value);
-  if (!parsed.success) {
-    logSecurityEvent("validation.rejected", {
-      route: "/api/admin/users",
-      fieldCount: parsed.error.issues.length,
-    });
-    return NextResponse.json(
-      { error: "Give a reason for deleting this team member." },
-      { status: 400 },
-    );
-  }
-
-  if (!canChangeAccess(authorization.actor.id, parsed.data.userId).ok) {
-    return NextResponse.json(
-      { error: accountChangeFailureMessage("delete", "self_access_change") },
-      { status: 400 },
-    );
-  }
-
-  const supabase = await createClient();
-  const { data: result, error: deleteError } = await supabase.rpc("delete_user", {
-    p_user_id: parsed.data.userId,
-    p_reason: parsed.data.reason,
-    p_reassign_to: parsed.data.reassignTo ?? null,
-    p_release_clients: parsed.data.releaseClients ?? false,
-  });
-
-  if (deleteError) {
-    // owns_active_clients is the reassignment gate doing its job, not a failure, so it
-    // is not reported as an error.
-    if (deleteError.hint !== "owns_active_clients") {
-      await reportError(deleteError, {
-        operation: "admin.users.delete",
-        targetUserId: parsed.data.userId,
-      });
-    }
-    return NextResponse.json(
-      {
-        error: accountChangeFailureMessage("delete", deleteError.hint),
-        hint: deleteError.hint ?? undefined,
-      },
-      { status: accountChangeFailureStatus(deleteError.code, deleteError.hint) },
-    );
-  }
-
-  const outcome = result as {
-    mode?: "deleted" | "redacted";
-    clients_moved?: number;
-    actions_moved?: number;
-  } | null;
-
-  return NextResponse.json({
-    mode: outcome?.mode ?? "deleted",
-    clientsMoved: outcome?.clients_moved ?? 0,
-    actionsMoved: outcome?.actions_moved ?? 0,
   });
 }

@@ -77,6 +77,21 @@ const FALLBACK: Record<AccountChange, string> = {
   delete: "The deletion was blocked. Refresh and try again.",
 };
 
+/**
+ * Reactivation's refusals. `set_user_active` attaches a HINT; switching on it rather
+ * than the message means rewording an exception cannot change what the admin reads.
+ */
+export function reactivateFailureMessage(hint: string | null | undefined): string {
+  switch (hint) {
+    case "not_admin":
+      return "Only an admin can change a team member's access.";
+    case "user_deleted":
+      return "A deleted account cannot be reactivated.";
+    default:
+      return "The access change was blocked. Refresh and try again.";
+  }
+}
+
 export function accountChangeFailureMessage(
   change: AccountChange,
   hint: string | null | undefined,

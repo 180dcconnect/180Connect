@@ -2167,7 +2167,7 @@ $$;
 -- Offboarding handovers move clients and open work together (F014 + F257)
 -- ---------------------------------------------------------------------------
 -- Regression suite for 20260804170000, now exercised through suspend_user (which
--- replaced deactivate_user in 20260930090000 and shares its handover). Before
+-- replaced deactivate_user in 20261002094000 and shares its handover). Before
 -- 20260804170000 the offboarding path moved organisations.owner_id itself and never
 -- touched public.actions, stranding every open action on a closed account. Uses its
 -- own identities: the shared fixture users are changed by other suites in this same
@@ -3124,7 +3124,7 @@ begin
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
   return next is(v_count, 1::bigint, 'manual source identifies the creating CAM to active users');
 
-  -- 20261002090000: sector, reach and size. A size figure needs the accounts
+  -- 20261002095000: sector, reach and size. A size figure needs the accounts
   -- year end it belongs to, and approval carries all three onto the client.
   return next is(
     tests.sqlstate_of(v_cam_a, $query$

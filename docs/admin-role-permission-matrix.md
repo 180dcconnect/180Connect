@@ -36,6 +36,7 @@ where email = '<approved-admin-email>';
 Record that operation in the deployment/change log. Subsequent role changes
 must use the admin UI/API, which calls `public.set_user_role`.
 
-Account activation and deactivation are intentionally display-only in F016. The
-database reserves `is_active` for a future audited deactivation RPC (F011); the
-Admin UI must not attempt a direct update.
+Account access is never updated directly. Suspension and reactivation go through
+`public.suspend_user` / `public.set_user_active`, and removal through
+`public.delete_user` — all audited, admin self-checked RPCs (see
+`rls-permission-matrix.md` §3.1). The Admin UI must not attempt a direct update.

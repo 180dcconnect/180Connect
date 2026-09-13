@@ -17,6 +17,7 @@ export default async function AdminOffboardPage() {
     .from("users")
     .select("id, email, full_name, role, is_active")
     .in("role", ["cam", "admin"])
+    .is("deleted_at", null)
     .order("full_name");
 
   if (error) {
@@ -24,7 +25,7 @@ export default async function AdminOffboardPage() {
   }
 
   // Everyone with a role that can hold clients may be the one leaving — including an
-  // inactive account, which is the usual case: deactivation often happens first and the
+  // inactive account, which is the usual case: suspension often happens first and the
   // work is found orphaned afterwards. Only active accounts can receive it, which the
   // RPC enforces independently.
   const candidates = (users ?? []) as HandoverUser[];

@@ -15,7 +15,6 @@ function createTestUser(overrides: Partial<TeamUser> = {}): TeamUser {
     full_name: "Sarah Hughes",
     role: "cam",
     is_active: true,
-    deactivated_at: null,
     last_seen_at: "2026-08-31T12:00:00.000Z",
     owned_client_count: 3,
     listed_client_count: 3,
@@ -75,7 +74,6 @@ const SAMPLE_USERS: TeamUser[] = [
     owned_client_count: 0,
     last_seen_at: "2026-05-01T12:00:00.000Z", // 123 days ago (> 90 days inactive)
     is_active: false,
-    deactivated_at: "2026-05-01T12:00:00.000Z",
   }),
   createTestUser({
     id: "u6",
@@ -212,8 +210,8 @@ describe("filterTeamUsers — status filter", () => {
     assert.ok(result.every((u) => u.is_active));
   });
 
-  it("filters by deactivated accounts", () => {
-    const result = filterTeamUsers(SAMPLE_USERS, { statuses: ["deactivated"] }, NOW);
+  it("filters by suspended accounts", () => {
+    const result = filterTeamUsers(SAMPLE_USERS, { statuses: ["suspended"] }, NOW);
     assert.equal(result.length, 1);
     assert.equal(result[0]?.id, "u5");
   });

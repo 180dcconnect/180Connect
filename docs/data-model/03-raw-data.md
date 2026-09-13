@@ -10,7 +10,7 @@
 
 | Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| id | uuid |  | No | Primary key | System | Auto-generated when the row is created | RLS: SELECT admin + CAM (active users), viewer none; INSERT admin only (migration 20260928110000_ingestion_runs_select_for_cams). CAMs see the run history on the Import status tab; they do not see RAW_SOURCE_RECORDS. No fields change, so tab 02 Data Dictionary stays as it is. |
+| id | uuid |  | No | Primary key | System | Auto-generated when the row is created | RLS: SELECT admin + CAM (active users), viewer none; INSERT admin only (migration 20261002100000_ingestion_runs_select_for_cams). CAMs see the run history on the Import status tab; they do not see RAW_SOURCE_RECORDS. No fields change, so tab 02 Data Dictionary stays as it is. |
 | api_source | enum |  | No | Which API the job pulled data from | System | Set by the job configuration |  |
 | triggered_by | enum |  | No | How the job was triggered: schedule or manual | System | Scheduler sets "schedule"; user action sets "manual" |  |
 | triggered_by_user_id | uuid | USERS | Yes | User who triggered the job when run manually | System | Set to the logged-in user ID; null when scheduled |  |

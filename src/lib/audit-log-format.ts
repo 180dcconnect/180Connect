@@ -93,7 +93,9 @@ export const AUDIT_ACTIONS: Record<string, ActionSpec> = {
 
   user_suspended: { label: "Account suspended", verb: "suspended", tone: "caution", icon: "access" },
   user_reactivated: { label: "Account reactivated", verb: "reactivated", tone: "positive", icon: "access" },
+  // No longer written (deactivation was replaced by delete_user); kept so history renders.
   user_deactivated: { label: "Account deactivated", verb: "deactivated", tone: "caution", icon: "access" },
+  user_deleted: { label: "Account deleted", verb: "deleted", tone: "caution", icon: "access" },
 
   invite_accepted: {
     label: "Invite accepted",

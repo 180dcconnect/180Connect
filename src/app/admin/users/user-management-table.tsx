@@ -48,12 +48,6 @@ export type TeamUser = {
   full_name: string | null;
   role: "cam" | "admin" | "viewer";
   is_active: boolean;
-  /**
-   * F014. Null on an active account and on a merely suspended one; set when the
-   * account was deactivated. `is_active` alone still decides whether they can log in —
-   * this only says which kind of inactive they are.
-   */
-  deactivated_at: string | null;
   /** Last time this user was seen on any signed-in page — not last login. Null if never. */
   last_seen_at: string | null;
   owned_client_count: number;
@@ -354,9 +348,7 @@ export function UserManagementTable({
     if (setUsers && succeededIds.size > 0) {
       setUsers((prev) =>
         prev.map((u) =>
-          succeededIds.has(u.id)
-            ? { ...u, is_active: isActive, deactivated_at: isActive ? null : u.deactivated_at }
-            : u,
+          succeededIds.has(u.id) ? { ...u, is_active: isActive } : u,
         ),
       );
     }
@@ -598,7 +590,7 @@ export function UserManagementTable({
                             )}
                             {!user.is_active && (
                               <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-bold tracking-wider text-red-700 uppercase">
-                                {user.deactivated_at ? "Deactivated" : "Suspended"}
+                                Suspended
                               </span>
                             )}
                           </div>

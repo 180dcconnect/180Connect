@@ -106,8 +106,8 @@ export interface DarkInviteSheetProps {
   pendingEmails?: readonly string[];
   /** Emails of already registered / active team members */
   existingUserEmails?: readonly string[];
-  /** Emails of previously deactivated team members */
-  deactivatedEmails?: readonly string[];
+  /** Emails of suspended team members */
+  suspendedEmails?: readonly string[];
 }
 
 /**
@@ -123,7 +123,7 @@ export function DarkInviteSheet({
   allowedDomains = [DEFAULT_ALLOWED_EMAIL_DOMAIN],
   pendingEmails = [],
   existingUserEmails = [],
-  deactivatedEmails = [],
+  suspendedEmails = [],
 }: DarkInviteSheetProps = {}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -132,7 +132,7 @@ export function DarkInviteSheet({
 
   const pendingSet = new Set((pendingEmails ?? []).map((e) => e.toLowerCase().trim()));
   const existingUsersSet = new Set((existingUserEmails ?? []).map((e) => e.toLowerCase().trim()));
-  const deactivatedSet = new Set((deactivatedEmails ?? []).map((e) => e.toLowerCase().trim()));
+  const suspendedSet = new Set((suspendedEmails ?? []).map((e) => e.toLowerCase().trim()));
 
   // Single mode state
   const [singleName, setSingleName] = useState("");
@@ -147,14 +147,14 @@ export function DarkInviteSheet({
 
   const isPendingInvite = pendingSet.has(singleEmail.toLowerCase().trim());
   const isExistingUser = existingUsersSet.has(singleEmail.toLowerCase().trim());
-  const isDeactivated = deactivatedSet.has(singleEmail.toLowerCase().trim());
+  const isSuspended = suspendedSet.has(singleEmail.toLowerCase().trim());
 
   const singleEmailBaseError = validateInviteEmail(singleEmail, allowedDomains);
   const singleEmailError =
     isPendingInvite
       ? "This email already has a pending invitation."
-      : isDeactivated
-      ? "This email belongs to a deactivated account. Reactivate them from the team list instead."
+      : isSuspended
+      ? "This email belongs to a suspended account. Reactivate them from their profile instead."
       : isExistingUser
       ? "A team member with this email address already exists."
       : singleEmailBaseError;
@@ -249,7 +249,7 @@ export function DarkInviteSheet({
     const duplicateEmails: string[] = [];
     const pendingSkipped: string[] = [];
     const existingUserSkipped: string[] = [];
-    const deactivatedSkipped: string[] = [];
+    const suspendedSkipped: string[] = [];
     let overflowCount = 0;
 
     extractedEntries.forEach((entry, idx) => {
@@ -260,8 +260,8 @@ export function DarkInviteSheet({
         return;
       }
 
-      if (deactivatedSet.has(lower)) {
-        deactivatedSkipped.push(lower);
+      if (suspendedSet.has(lower)) {
+        suspendedSkipped.push(lower);
         return;
       }
 
@@ -340,7 +340,7 @@ export function DarkInviteSheet({
       duplicateEmails.length +
       pendingSkipped.length +
       existingUserSkipped.length +
-      deactivatedSkipped.length;
+      suspendedSkipped.length;
 
     if (totalSkipped > 0) {
       let message = "";
@@ -348,7 +348,7 @@ export function DarkInviteSheet({
         pendingSkipped.length > 0 &&
         duplicateEmails.length === 0 &&
         existingUserSkipped.length === 0 &&
-        deactivatedSkipped.length === 0
+        suspendedSkipped.length === 0
       ) {
         const uniquePending = Array.from(new Set(pendingSkipped));
         message =
@@ -356,21 +356,21 @@ export function DarkInviteSheet({
             ? `Skipped: ${uniquePending[0]} already has a pending invitation.`
             : `${pendingSkipped.length} email(s) skipped: already have pending invitations.`;
       } else if (
-        deactivatedSkipped.length > 0 &&
+        suspendedSkipped.length > 0 &&
         duplicateEmails.length === 0 &&
         pendingSkipped.length === 0 &&
         existingUserSkipped.length === 0
       ) {
-        const uniqueDeactivated = Array.from(new Set(deactivatedSkipped));
+        const uniqueSuspended = Array.from(new Set(suspendedSkipped));
         message =
-          uniqueDeactivated.length === 1
-            ? `Skipped: ${uniqueDeactivated[0]} is deactivated (reactivate from team list).`
-            : `${deactivatedSkipped.length} email(s) skipped: deactivated accounts (reactivate from list).`;
+          uniqueSuspended.length === 1
+            ? `Skipped: ${uniqueSuspended[0]} is suspended (reactivate from their profile).`
+            : `${suspendedSkipped.length} email(s) skipped: suspended accounts (reactivate from their profile).`;
       } else if (
         existingUserSkipped.length > 0 &&
         duplicateEmails.length === 0 &&
         pendingSkipped.length === 0 &&
-        deactivatedSkipped.length === 0
+        suspendedSkipped.length === 0
       ) {
         const uniqueExisting = Array.from(new Set(existingUserSkipped));
         message =
@@ -381,7 +381,7 @@ export function DarkInviteSheet({
         duplicateEmails.length > 0 &&
         pendingSkipped.length === 0 &&
         existingUserSkipped.length === 0 &&
-        deactivatedSkipped.length === 0
+        suspendedSkipped.length === 0
       ) {
         const uniqueDupes = Array.from(new Set(duplicateEmails));
         message =
@@ -389,7 +389,7 @@ export function DarkInviteSheet({
             ? `Duplicate skipped: ${uniqueDupes[0]} is already staged.`
             : `${duplicateEmails.length} duplicate email(s) skipped (kept single copy).`;
       } else {
-        message = `${totalSkipped} email(s) skipped (duplicate, pending, deactivated, or existing).`;
+        message = `${totalSkipped} email(s) skipped (duplicate, pending, suspended, or existing).`;
       }
 
       setDuplicateToast(message);

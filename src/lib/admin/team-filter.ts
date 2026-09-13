@@ -10,7 +10,7 @@ export type LastActiveFilterValue =
   | "inactive_30d"
   | "inactive_90d"
   | "never";
-export type StatusFilterValue = "active" | "deactivated";
+export type StatusFilterValue = "active" | "suspended";
 
 export type TeamSortField = "name" | "role" | "clients" | "last_active";
 export type SortOrder = "asc" | "desc";
@@ -50,7 +50,7 @@ export const LAST_ACTIVE_FILTER_OPTIONS: FilterOption[] = [
 
 export const STATUS_FILTER_OPTIONS: FilterOption[] = [
   { label: "Active accounts", value: "active" },
-  { label: "Deactivated / Suspended", value: "deactivated" },
+  { label: "Suspended accounts", value: "suspended" },
 ];
 
 export const TEAM_SEARCH_CATEGORIES: Record<string, FilterOption[]> = {
@@ -126,7 +126,7 @@ function matchesStatus(isActive: boolean, status: string): boolean {
   switch (status) {
     case "active":
       return isActive;
-    case "deactivated":
+    case "suspended":
       return !isActive;
     default:
       return true;

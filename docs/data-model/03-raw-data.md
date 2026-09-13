@@ -10,7 +10,7 @@
 
 | Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| id | uuid |  | No | Primary key | System | Auto-generated when the row is created |  |
+| id | uuid |  | No | Primary key | System | Auto-generated when the row is created | RLS: SELECT admin + CAM (active users), viewer none; INSERT admin only (migration 20260928110000_ingestion_runs_select_for_cams). CAMs see the run history on the Import status tab; they do not see RAW_SOURCE_RECORDS. No fields change, so tab 02 Data Dictionary stays as it is. |
 | api_source | enum |  | No | Which API the job pulled data from | System | Set by the job configuration |  |
 | triggered_by | enum |  | No | How the job was triggered: schedule or manual | System | Scheduler sets "schedule"; user action sets "manual" |  |
 | triggered_by_user_id | uuid | USERS | Yes | User who triggered the job when run manually | System | Set to the logged-in user ID; null when scheduled |  |
@@ -145,6 +145,12 @@
 | imported_field_paths | jsonb |  | Yes | Paths of imported fields | System | Auto-generated |  |
 | import_notes | jsonb |  | Yes | Notes about the import | System | Auto-generated |  |
 | import_raw_record_id | uuid | RAW_SOURCE_RECORDS | Yes | Raw record ID for the import | System | Auto-generated |  |
+| sector | text |  | Yes | Sector the organisation works in | Human | Chosen by CAM from the F197 sector taxonomy | Copied to ORGANISATIONS.sector and ENRICHMENT_RESULTS.sector on approval |
+| geographic_reach | enum |  | Yes | How far the organisation operates | Human | Chosen by CAM | local / regional / national / international. Copied to ORGANISATIONS.geographic_reach on approval |
+| latest_income | numeric |  | Yes | Latest annual income in GBP | Human | Typed by CAM | Filed on approval as FINANCIAL_PERIODS.total_income (financial_source = manual) |
+| accounts_year_end | date |  | Yes | Year end the size figures are from | Human | Typed by CAM | Required when any size figure is given; not in the future. Becomes period_end, with period_start one year earlier |
+| staff_count | integer |  | Yes | Number of staff | Human | Typed by CAM | Filed as FINANCIAL_PERIODS.count_employees |
+| volunteer_count | integer |  | Yes | Number of volunteers | Human | Typed by CAM | Filed as FINANCIAL_PERIODS.count_volunteers |
 
 ## FIELD_SOURCES
 

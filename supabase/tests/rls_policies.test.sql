@@ -1263,7 +1263,7 @@ begin
   end if;
 
   if not tests.tables_exist('ingestion_runs', 'raw_source_records') then
-    return next skip(8, 'step 6 create_ingestion not yet migrated');
+    return next skip(10, 'step 6 create_ingestion not yet migrated');
     return;
   end if;
 
@@ -1281,7 +1281,8 @@ begin
     (v_record, v_run, 'companies_house', '00000001', '{"company_number":"00000001"}'::jsonb, 'deadbeef')
   on conflict (id) do nothing;
 
-  -- SELECT: admin yes, everyone else no.
+  -- SELECT on runs: admin and CAM (the Data imports group is theirs too), viewer no.
+  -- SELECT on raw payloads: admin only (SOP §4.3).
   perform tests.login_as(v_admin);
   select count(*) into v_count from public.ingestion_runs where id = v_run;
   execute 'reset role';
@@ -1296,10 +1297,22 @@ begin
     'admin reads raw source records the CAM cannot');
 
   perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.ingestion_runs where id = v_run;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'CAM reads ingestion runs');
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.raw_source_records;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'CAM sees zero raw source records');
+
+  perform tests.login_as(v_viewer);
   select count(*) into v_count from public.ingestion_runs;
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
-  return next is(v_count, 0::bigint, 'CAM sees zero ingestion runs');
+  return next is(v_count, 0::bigint, 'viewer sees zero ingestion runs');
 
   perform tests.login_as(v_viewer);
   select count(*) into v_count from public.raw_source_records;

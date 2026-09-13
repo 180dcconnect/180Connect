@@ -532,7 +532,7 @@ EXECUTE revoked from `public`/`anon`, granted to `authenticated` only.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `INGESTION_RUNS` | admin | admin (trigger refresh) | — | — |
+| `INGESTION_RUNS` | admin, cam | admin (trigger refresh) | — | — |
 | `RAW_SOURCE_RECORDS` | admin | — (service role) | — | admin |
 | `DATA_QUALITY_EVENTS` | admin | — (service role) | admin (resolve) | — |
 | `ORGANISATION_STATUS_FLAGS` | admin | — (service role, RPC only) | — (RPC only: acknowledge) | — |
@@ -542,6 +542,13 @@ EXECUTE revoked from `public`/`anon`, granted to `authenticated` only.
 `RAW_SOURCE_RECORDS` holds unfiltered third-party payloads. It is the
 "sensitive data check" in the testing notes: a CAM `select *` must return **zero rows**,
 not an error.
+
+`INGESTION_RUNS` is the exception to the section's admin-only rule. CAMs reach the
+Data imports group (they run Companies House and Charity Commission imports under
+`client:edit`), so they read the run history: source, outcome, counts, error message
+— no organisation data and no payload. The run detail page, which reads
+`RAW_SOURCE_RECORDS`, stays admin-only (migration
+`20260928110000_ingestion_runs_select_for_cams`).
 
 F043 exposes provenance without weakening that boundary. Active authenticated users
 may execute `get_organisation_sources(organisation_id)`, which returns only the source

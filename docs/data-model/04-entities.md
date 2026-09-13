@@ -82,7 +82,7 @@
 | total_expenditure | numeric |  | Yes | Total expenditure for the period | API | Pulled from financial filing |  |
 | income_band | enum |  | Yes | Banded income category | System | Computed from total_income | under_10k / 10k_100k / 100k_1m / over_1m |
 | filing_date | date |  | Yes | Date the accounts were filed | API | Pulled from Charity Commission | Populated from the bulk register extract's ar_received_date. The Charity Commission API publishes no accounts-submission date at any endpoint, so API-sourced periods leave this null. |
-| financial_source | enum |  | No | Which API provided this data | System | Set on ingestion | charitybase / charity_commission |
+| financial_source | enum |  | No | Which API provided this data | System | Set on ingestion | Values: charitybase / charity_commission / manual. 'manual' (20261002090000) marks a period entered by hand on Add a client — not a filed return. |
 | income_donations_legacies | numeric |  | Yes | Income from donations and legacies for the period | API | Charity Commission | Annual-return breakdown. Parts are not guaranteed to sum to total_income — smaller charities file totals only. Null = not published, never zero |
 | income_charitable_activities | numeric |  | Yes | Income from charitable activities | API | Charity Commission | " |
 | income_other_trading | numeric |  | Yes | Income from other trading activities | API | Charity Commission | " |

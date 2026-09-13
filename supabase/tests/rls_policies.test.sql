@@ -3105,10 +3105,12 @@ declare
   v_admin_org uuid;
   v_created_org uuid;
   v_linked_org uuid;
+  v_size_entry uuid;
+  v_size_org uuid;
   v_count bigint;
 begin
   if not tests.tables_exist('manual_entry_records', 'users', 'audit_log') then
-    return next skip(21, 'F036 manual entry migration not yet applied');
+    return next skip(25, 'F036 manual entry migration not yet applied');
     return;
   end if;
   perform tests.seed();
@@ -3228,6 +3230,48 @@ begin
    where source = 'manual' and source_actor_user_id = v_cam_a;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
   return next is(v_count, 1::bigint, 'manual source identifies the creating CAM to active users');
+
+  -- 20261002090000: sector, reach and size. A size figure needs the accounts
+  -- year end it belongs to, and approval carries all three onto the client.
+  return next is(
+    tests.sqlstate_of(v_cam_a, $query$
+      select public.save_manual_entry(
+        null, 'Size Without Year', null, null, null, null, null, 'GB',
+        null, null, null, null, null, false,
+        null, null, 50000, null, null, null
+      )
+    $query$),
+    '22023', 'a size figure without its accounts year end is refused');
+
+  perform tests.login_as(v_cam_a);
+  select public.save_manual_entry(
+    null, 'Sized F036 Charity', 'Runs youth clubs across Sheffield.', 'charity',
+    '5 Size Street', 'Sheffield', 'S1 5ZZ', 'GB', 'https://sized.example.org',
+    'hello@sized.example.org', 'Charity Commission', 'F036-SIZE',
+    'Not in the register files we hold', true,
+    'Youth & Children', 'local', 250000, date '2026-03-31', 12, 40
+  ) into v_size_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next ok(v_size_entry is not null, 'a submission can carry sector, reach and size');
+
+  perform tests.login_as(v_admin);
+  select public.approve_manual_entry(
+    v_size_entry, 'create_new', false, null, null
+  ) into v_size_org;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  select count(*) into v_count
+    from public.organisations
+   where id = v_size_org and sector = 'Youth & Children' and geographic_reach = 'local';
+  return next is(v_count, 1::bigint, 'approval carries sector and reach onto the client');
+
+  select count(*) into v_count
+    from public.financial_periods
+   where organisation_id = v_size_org and financial_source = 'manual'
+     and period_start = date '2025-04-01' and period_end = date '2026-03-31'
+     and total_income = 250000 and income_band = '100k_1m'
+     and count_employees = 12 and count_volunteers = 40;
+  return next is(v_count, 1::bigint, 'approval files the size as one manual financial period');
 
   perform tests.login_as(v_cam_b);
   select public.save_manual_entry(

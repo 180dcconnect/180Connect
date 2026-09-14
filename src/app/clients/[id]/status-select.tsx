@@ -22,10 +22,12 @@ export function StatusSelect({
   organisationId,
   currentStatus,
   idSuffix = "profile",
+  showNudge = true,
 }: {
   organisationId: string;
   currentStatus: string;
   idSuffix?: string;
+  showNudge?: boolean;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<PipelineStatus>(
@@ -70,7 +72,10 @@ export function StatusSelect({
         disabled={busy}
         onValueChange={(value) => setSelected(value as PipelineStatus)}
       >
-        <SelectTrigger id={`status-${organisationId}-${idSuffix}`} className="h-8 w-fit rounded-full border-rule bg-white text-[13.5px]">
+        <SelectTrigger
+          id={`status-${organisationId}-${idSuffix}`}
+          className="h-8 w-fit rounded-full border border-rule bg-white px-3 text-[13.5px] font-medium text-ink transition-colors hover:bg-paper focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none"
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -100,7 +105,7 @@ export function StatusSelect({
           {error}
         </p>
       )}
-      {currentStatus === "responded" && (
+      {showNudge && currentStatus === "responded" && (
         // F149 AC3: 'responded' is intermediate — this status alone doesn't
         // conclude the interaction, so a CAM viewing it needs a nudge to
         // actually check the reply content and decide next steps.

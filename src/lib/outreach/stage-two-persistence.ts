@@ -24,7 +24,14 @@ export type StageTwoGenerationInsert = {
 
 export function buildStageTwoGenerationInsert(input: {
   outreachMessageId: string;
-  draft: { subject: string; body: string };
+  /**
+   * The subject the draft row carries — the threaded `Re: <thread subject>`
+   * the route computed, never a generated value. Stage 2 output has no
+   * subject; see StageTwoDraft. Recorded here so the ai_generations row
+   * describes the same email the CAM reviewed and the client receives.
+   */
+  subject: string;
+  draft: { body: string };
   model: string;
   activity?: "follow_up_email";
   usage: {
@@ -40,7 +47,7 @@ export function buildStageTwoGenerationInsert(input: {
 }): StageTwoGenerationInsert {
   return {
     outreach_message_id: input.outreachMessageId,
-    generated_subject: input.draft.subject,
+    generated_subject: input.subject,
     generated_body: input.draft.body,
     // NOT NULL in ai_generations since F113: the model in force at generation
     // time, not a live lookup of the current default.

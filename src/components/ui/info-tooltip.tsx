@@ -21,6 +21,8 @@ export interface InfoTooltipProps {
   children?: ReactNode;
   /** Placement side of the tooltip. Defaults to "top". */
   side?: "top" | "bottom" | "left" | "right";
+  /** Alignment of the tooltip relative to the trigger. Defaults to "center". */
+  align?: "start" | "center" | "end";
   /** Offset distance from trigger in pixels. Defaults to 6. */
   sideOffset?: number;
   /** Optional extra classes for the tooltip container. */
@@ -31,6 +33,8 @@ export interface InfoTooltipProps {
   delayDuration?: number;
   /** Accessible label for the default trigger button. */
   label?: string;
+  /** Whether to show an arrow. Defaults to false. */
+  showArrow?: boolean;
 }
 
 /**
@@ -44,11 +48,13 @@ export function InfoTooltip({
   footer,
   children,
   side = "top",
+  align,
   sideOffset = 6,
   contentClassName,
   triggerClassName,
   delayDuration = 150,
   label,
+  showArrow = false,
 }: InfoTooltipProps) {
   if (!content && !title) {
     return <>{children}</>;
@@ -79,7 +85,9 @@ export function InfoTooltip({
       <TooltipTrigger asChild>{trigger}</TooltipTrigger>
       <TooltipContent
         side={side}
+        align={align}
         sideOffset={sideOffset}
+        showArrow={showArrow}
         className={cn(
           "w-max max-w-[18rem] rounded-inset border border-white/10 bg-[#161b21] px-3.5 py-2.5 text-left text-[12px] leading-[1.5] text-white shadow-lg",
           contentClassName,

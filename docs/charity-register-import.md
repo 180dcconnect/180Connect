@@ -117,6 +117,44 @@ The column exists because `ON CONFLICT` cannot target an expression index — th
 table originally carried the same rule as `(source, lower(btrim(name)))` and
 every save failed with `42P10` until `20260923130000` moved it into a column.
 
+## Solvency
+
+The extract publishes two flags per charity — `insolvent` and
+`in_administration` — and until `20260928100000_add_register_solvency.sql` the
+import discarded them. The screen had always been able to *filter* on them
+("Exclude insolvent or in administration"), which is the worst version of the
+problem: a criterion could be applied to a fact the client record could never
+show.
+
+The file now carries both onto the payload, the promote path stores them on
+`organisations`, and the client record shows a banner above its tabs when either
+is set. Both columns are **nullable and left null for anything the register has
+not been read for** — null is "never asked", which is not the same claim as
+`false`, "the register says this charity is solvent". `patchFor` in
+`profile-backfill.ts` treats null as a gap, so the existing **Mission and sector
+from the register** card on this screen backfills the whole book in one press;
+it filled 1,988 charities on staging, of which 9 were genuinely flagged.
+
+A payload written before this — a `raw_source_record` with neither key — leaves
+both columns untouched rather than clearing them, so re-promoting an old record
+cannot erase a flag a later refresh recorded.
+
+## Finding one charity by name
+
+`/clients/new` ("Add a client") can search both register files by name and
+postcode and file a match straight through the same promote path this screen
+uses, so a client added from a search box arrives with its filed accounts,
+registration number and sector rather than a blank record. See
+`src/lib/charity-register/sqlite.ts` → `searchCharities`. It needs no API key and
+no network: the file is already in the deployment.
+
+The two search results worth knowing about are built into the query rather than
+left to the caller. One is relevance order — an exact name, then a prefix, then a
+contains — because `charity_name`'s index is `collate nocase` and `LIKE` cannot
+use it, so this is a scan either way and there was nothing to lose by ordering it
+properly. The other is that a postcode typed **without a space is an outward
+code**: "S1" must return the S1 district, not S10, S11 and S12.
+
 ## Who can do it
 
 `client:edit` — CAMs and admins, not viewers. Wider than the rest of `/admin`, by

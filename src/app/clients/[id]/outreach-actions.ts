@@ -22,7 +22,12 @@ import { HUMAN_REVIEW_REQUIRED_MESSAGE, humanReviewDecision } from "@/lib/outrea
 import { assertContactPermission } from "@/lib/outreach/contact-permission";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { saveDraftSchema } from "@/lib/outreach/save-draft";
-import { reviewedEmailSchema, scheduleSchema } from "@/lib/outreach/send-reviewed";
+import {
+  isScheduleTimeAllowed,
+  reviewedEmailSchema,
+  SCHEDULE_MIN_LEAD_MESSAGE,
+  scheduleSchema,
+} from "@/lib/outreach/send-reviewed";
 import { emailLimitMessage, resolveEmailSendLimit } from "@/lib/outreach/send-rate-limit";
 import { checkScheduledAttachmentSet } from "@/lib/outreach/scheduled-worker";
 import { checkSuppressionBeforeSend, suppressionBlockedMessage } from "@/lib/outreach/suppression-check";
@@ -40,6 +45,14 @@ export type ReviewedSendResult =
   | { ok: true; message: string }
   | { ok: false; message: string };
 
+
+/**
+ * F217: the attach_flyer column write for an optional composer toggle. Absent
+ * writes nothing, so callers without a toggle never clear a row's flyer.
+ */
+function flyerUpdate(attachFlyer: boolean | undefined): { attach_flyer?: boolean } {
+  return attachFlyer === undefined ? {} : { attach_flyer: attachFlyer };
+}
 
 /**
  * Releases an outreach_send claim after a definite, pre-Gmail-call refusal —
@@ -182,9 +195,12 @@ export async function scheduleReviewedEmail(input: unknown): Promise<ReviewedSen
     };
   }
 
+  // Re-checked at commit time, not just at the schema boundary: whole
+  // database round trips sit between validation and this line, and a time
+  // that was a minute out can be the current minute by now.
   const scheduledAtIso = new Date(parsed.data.scheduledAt);
-  if (scheduledAtIso.getTime() <= Date.now()) {
-    return { ok: false, message: "Choose a future date and time." };
+  if (!isScheduleTimeAllowed(scheduledAtIso)) {
+    return { ok: false, message: SCHEDULE_MIN_LEAD_MESSAGE };
   }
 
   // Save the exact reviewed content FIRST, through the app's sanitizing write
@@ -194,7 +210,7 @@ export async function scheduleReviewedEmail(input: unknown): Promise<ReviewedSen
   // never inject raw markup for the cron worker to deliver.
   const { data: saved, error: saveError } = await supabase
     .from("outreach_messages")
-    .update({ subject, body, sent_by_user_id: authorization.actor.id })
+    .update({ subject, body, sent_by_user_id: authorization.actor.id, ...flyerUpdate(parsed.data.attachFlyer) })
     .eq("id", messageId)
     .eq("organisation_id", organisationId)
     .eq("send_status", "draft")
@@ -251,6 +267,263 @@ export async function cancelScheduledEmail(input: unknown): Promise<ReviewedSend
   return { ok: true, message: "Scheduled send cancelled. The email is a draft again." };
 }
 
+/**
+ * Changing a scheduled email from inside its thread — the time alone
+ * (rescheduleEmail) or the content and time together (updateScheduledEmail).
+ *
+ * ── Why there is no dedicated RPC ──
+ *
+ * Both are built from the two audited transitions that already exist:
+ * cancel_outreach_schedule (scheduled→draft), then, for a content edit, the
+ * sanitizing draft write, then schedule_outreach_send (draft→scheduled). So
+ * every authorisation, suppression and claim check still runs inside those
+ * functions, and the audit log records a cancel and a schedule.
+ *
+ * The cost is that the steps are not one transaction. The row is a draft for
+ * the moment between them — the worker only picks up scheduled rows, so it can
+ * never send a half-edited email — and if a later step fails, the original
+ * schedule is put back before anything is reported. What a person is told
+ * always matches what the row now holds.
+ *
+ * ── Why the schedule stays live while editing ──
+ *
+ * The old Edit cancelled first and reopened the text in Compose: close that
+ * window without rescheduling and the email quietly never went out. Now the
+ * schedule is only touched at the moment of saving. If the time arrives while
+ * someone is still typing, the cancel refuses (the send claim is held) or finds
+ * the row already sent, and the person is told it went out.
+ */
+type ServerSupabase = Awaited<ReturnType<typeof createClient>>;
+
+/** cancel_outreach_schedule's refusals, in the words of someone editing. */
+function scheduledChangeRefusal(error: unknown): string {
+  const message = error && typeof error === "object" && "message" in error ? String(error.message) : "";
+  if (message.includes("being delivered right now")) {
+    return "This email is being sent right now, so it can no longer be changed.";
+  }
+  if (message.includes("no longer scheduled")) {
+    return "This email is no longer scheduled — it may have just gone out.";
+  }
+  if (message.includes("only the client")) {
+    return "Only the client's owner or an admin can change this scheduled email.";
+  }
+  return "The scheduled email could not be changed. Nothing was altered.";
+}
+
+async function loadScheduledRow(supabase: ServerSupabase, organisationId: string, messageId: string) {
+  const { data } = await supabase
+    .from("outreach_messages")
+    .select("send_status, scheduled_at, sent_by_user_id")
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+  return data?.send_status === "scheduled" && data.scheduled_at ? data : null;
+}
+
+/** Puts a just-cancelled email back on its original time. False if it could not. */
+async function restoreSchedule(
+  supabase: ServerSupabase,
+  messageId: string,
+  originalAt: string,
+): Promise<boolean> {
+  if (new Date(originalAt).getTime() <= Date.now()) return false;
+  const { data, error } = await supabase.rpc("schedule_outreach_send", {
+    p_message_id: messageId,
+    p_scheduled_at: originalAt,
+  });
+  if (error || !data) {
+    await reportError(error ?? new Error("Restore matched no rows."), {
+      operation: "outreach.schedule.restore",
+      messageId,
+    });
+    return false;
+  }
+  return true;
+}
+
+const KEPT_AS_DRAFT =
+  "It could not be put back on its schedule, so it is now a draft — schedule it again from the thread.";
+
+/** Moves a scheduled email to a new time. Content is untouched, so no re-approval. */
+export async function rescheduleEmail(input: unknown): Promise<ReviewedSendResult> {
+  const parsed = safeValidate(
+    z.object({ organisationId: z.uuid(), messageId: z.uuid(), scheduledAt: z.iso.datetime() }),
+    input,
+  );
+  if (!parsed.success) {
+    return { ok: false, message: "That scheduled email could not be identified." };
+  }
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const { organisationId, messageId } = parsed.data;
+  const when = new Date(parsed.data.scheduledAt);
+  if (when.getTime() <= Date.now()) {
+    return { ok: false, message: "Choose a future date and time." };
+  }
+
+  const supabase = await createClient();
+  const permission = await assertContactPermission(supabase, {
+    organisationId,
+    actorId: authorization.actor.id,
+    actorRole: authorization.actor.role,
+  });
+  if (!permission.allowed) return { ok: false, message: permission.message };
+
+  const row = await loadScheduledRow(supabase, organisationId, messageId);
+  if (!row) return { ok: false, message: "This email is no longer scheduled — it may have just gone out." };
+  const originalAt = row.scheduled_at as string;
+
+  const { error: cancelError } = await supabase.rpc("cancel_outreach_schedule", { p_message_id: messageId });
+  if (cancelError) return { ok: false, message: scheduledChangeRefusal(cancelError) };
+
+  const { data: scheduled, error } = await supabase.rpc("schedule_outreach_send", {
+    p_message_id: messageId,
+    p_scheduled_at: when.toISOString(),
+  });
+  if (error || !scheduled) {
+    await reportError(error ?? new Error("Reschedule matched no rows."), { operation: "outreach.reschedule", messageId });
+    const restored = await restoreSchedule(supabase, messageId, originalAt);
+    revalidatePath(`/clients/${organisationId}`, "layout");
+    revalidatePath("/inbox");
+    return {
+      ok: false,
+      message: restored
+        ? "The new time could not be set. The email still goes out at its original time."
+        : `The new time could not be set. ${KEPT_AS_DRAFT}`,
+    };
+  }
+
+  revalidatePath(`/clients/${organisationId}`, "layout");
+  revalidatePath("/inbox");
+  return { ok: true, message: "Rescheduled." };
+}
+
+/**
+ * Saves edited content (and optionally a new time) to a scheduled email. The
+ * content changed, so it goes through the same F121 review gate as scheduling.
+ */
+export async function updateScheduledEmail(input: unknown): Promise<ReviewedSendResult> {
+  const parsed = safeValidate(scheduleSchema, input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: Object.values(parsed.fieldErrors).flat().find(Boolean) ?? "Check the email and try again.",
+    };
+  }
+
+  const review = humanReviewDecision("scheduled", parsed.data.explicitlyApproved);
+  if (!review.allowed) return { ok: false, message: review.message };
+
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const isAdmin = authorization.actor.role === "admin";
+  const { organisationId, messageId, subject } = parsed.data;
+
+  const body = sanitizeEmailHtml(parsed.data.body);
+  if (emailHtmlToPlainText(body).length === 0) {
+    return { ok: false, message: "Add email content before saving." };
+  }
+  const when = new Date(parsed.data.scheduledAt);
+  if (!isScheduleTimeAllowed(when)) {
+    return { ok: false, message: SCHEDULE_MIN_LEAD_MESSAGE };
+  }
+
+  const supabase = await createClient();
+  const permission = await assertContactPermission(supabase, {
+    organisationId,
+    actorId: authorization.actor.id,
+    actorRole: authorization.actor.role,
+  });
+  if (!permission.allowed) return { ok: false, message: permission.message };
+
+  const row = await loadScheduledRow(supabase, organisationId, messageId);
+  if (!row) return { ok: false, message: "This email is no longer scheduled — it may have just gone out." };
+  if (!isAdmin && row.sent_by_user_id !== authorization.actor.id) {
+    return { ok: false, message: "You can only edit emails you scheduled yourself." };
+  }
+  const originalAt = row.scheduled_at as string;
+
+  // Checked before anything moves, so a suppressed client is refused with the
+  // email still on its schedule rather than after it has been cancelled.
+  const suppression = await checkSuppressionBeforeSend(organisationId, async (id) => {
+    const { data, error } = await supabase
+      .from("suppressions")
+      .select("id, reason")
+      .eq("organisation_id", id)
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  });
+  if (!suppression.allowed) {
+    return {
+      ok: false,
+      message: suppression.kind === "suppressed"
+        ? suppressionBlockedMessage(suppression.reason)
+        : "Suppression status could not be verified. Nothing was changed.",
+    };
+  }
+
+  const { error: cancelError } = await supabase.rpc("cancel_outreach_schedule", { p_message_id: messageId });
+  if (cancelError) return { ok: false, message: scheduledChangeRefusal(cancelError) };
+
+  const finish = () => {
+    revalidatePath(`/clients/${organisationId}`, "layout");
+    revalidatePath("/inbox");
+  };
+
+  const { data: saved, error: saveError } = await supabase
+    .from("outreach_messages")
+    .update({ subject, body, sent_by_user_id: authorization.actor.id, ...flyerUpdate(parsed.data.attachFlyer) })
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .eq("send_status", "draft")
+    .select("id")
+    .single();
+  if (saveError || !saved) {
+    await reportError(saveError ?? new Error("Scheduled edit save matched no rows."), {
+      operation: "outreach.schedule.update_content",
+      messageId,
+    });
+    const restored = await restoreSchedule(supabase, messageId, originalAt);
+    finish();
+    return {
+      ok: false,
+      message: restored
+        ? "Your changes could not be saved. The email is still scheduled, unchanged."
+        : `Your changes could not be saved. ${KEPT_AS_DRAFT}`,
+    };
+  }
+
+  const { data: scheduled, error } = await supabase.rpc("schedule_outreach_send", {
+    p_message_id: messageId,
+    p_scheduled_at: when.toISOString(),
+  });
+  if (error || !scheduled) {
+    await reportError(error ?? new Error("Scheduled edit reschedule matched no rows."), {
+      operation: "outreach.schedule.update_time",
+      messageId,
+    });
+    const restored = await restoreSchedule(supabase, messageId, originalAt);
+    finish();
+    return {
+      ok: false,
+      message: restored
+        ? "Your changes were saved, but the new time could not be set. It still goes out at its original time."
+        : `Your changes were saved. ${KEPT_AS_DRAFT}`,
+    };
+  }
+
+  finish();
+  return { ok: true, message: "Changes saved. The email is still scheduled." };
+}
+
 /** F123/F250: the sole deliberate, human-approved outreach send action. */
 export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendResult> {
   const parsed = safeValidate(reviewedEmailSchema, input);
@@ -296,9 +569,10 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
     if (draftError) await reportError(draftError, { operation: "outreach.send.load_draft", messageId });
     return { ok: false, message: "That draft could not be loaded. Refresh and try again." };
   }
-  // Read from the row, not from the caller: a scheduled send arrives here with
-  // no UI behind it, and the draft's own wording already assumes this value.
-  const wantsFlyer = draft.attach_flyer === true;
+  // The composer's toggle at Send wins, and is persisted with the reviewed
+  // content below. Without one (a retry arrives here with no UI behind it),
+  // the row's own value stands.
+  const wantsFlyer = parsed.data.attachFlyer ?? draft.attach_flyer === true;
   // F121 stage label: the pipeline position decides whether this send is a
   // Stage 1 first contact or a Stage 2 follow-up — same rule the pipeline
   // advance at the end of this action uses.
@@ -408,7 +682,13 @@ export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendRes
   // leaves a trace of who the CAM aimed at rather than only the on-file record.
   const { data: saved, error: saveError } = await supabase
     .from("outreach_messages")
-    .update({ subject, body, sent_to_email: decision.recipient, sent_by_user_id: authorization.actor.id })
+    .update({
+      subject,
+      body,
+      sent_to_email: decision.recipient,
+      sent_by_user_id: authorization.actor.id,
+      ...flyerUpdate(parsed.data.attachFlyer),
+    })
     .eq("id", messageId)
     .eq("organisation_id", organisationId)
     .eq("send_status", "draft")
@@ -825,7 +1105,7 @@ export async function saveEmailDraft(input: unknown): Promise<SaveDraftResult> {
   // update that still tells the user "Draft saved."
   const { error: saveError } = await supabase
     .from("outreach_messages")
-    .update({ subject, body, sent_to_email: recipient })
+    .update({ subject, body, sent_to_email: recipient, ...flyerUpdate(parsed.data.attachFlyer) })
     .eq("id", messageId)
     .eq("organisation_id", organisationId)
     .eq("send_status", "draft")

@@ -443,6 +443,17 @@ export default async function ClientOutreachPage({
     }
   }
 
+  // The address the inbox composer should open with. The shell prefers its
+  // own directory hit (primary contact first) whenever the client is in it;
+  // this ?to= fallback covers the clients it cannot resolve — seed rows are
+  // excluded from its directory by design — so "Write in inbox" still arrives
+  // addressed. A redacted contact_email is not an address (see onFileEmail).
+  const composeRecipient = onFileEmail(client.contact_email);
+  const composeHref =
+    composeRecipient
+      ? `/inbox?compose=${client.id}&to=${encodeURIComponent(composeRecipient)}`
+      : `/inbox?compose=${client.id}`;
+
   return (
     <Stage>
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
@@ -513,6 +524,7 @@ export default async function ClientOutreachPage({
                     ownershipConflict.hasConflict ? ownershipConflict.warning : undefined
                   }
                   hasDraft={existingDraft !== null}
+                  recipientEmail={composeRecipient}
                 />
               </Rise>
 
@@ -622,7 +634,7 @@ export default async function ClientOutreachPage({
                   </p>
                 ) : (
                   <div className="mt-4">
-                    <OriginButton variant="ink" size="md" href={`/inbox?compose=${client.id}`}>
+                    <OriginButton variant="ink" size="md" href={composeHref}>
                       Follow up in inbox
                       <ArrowRight aria-hidden="true" className="h-4 w-4" />
                     </OriginButton>
@@ -673,6 +685,7 @@ export default async function ClientOutreachPage({
                 error={Boolean(attachmentsResult.error)}
                 canExtract={canEdit}
                 canLink={canEdit}
+                canDelete={canEdit}
                 timelineOptions={timelineLinkOptions}
               />
               {/* F081: upload sits inside the same card so the new file appears

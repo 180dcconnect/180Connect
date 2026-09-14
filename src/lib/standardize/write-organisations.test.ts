@@ -300,6 +300,86 @@ describe("promotePendingCharityCommissionRecords — website validation", () => 
   });
 });
 
+describe("promotePendingCharityCommissionRecords — register follow-up", () => {
+  const profile = {
+    organisationNumber: 1234567,
+    registeredCharityNumber: 1234567,
+    charityName: "Useful Charity",
+    activities: "Runs a community food bank.",
+    dateOfRegistration: "2010-05-01",
+    reportingStatus: "Submission Received",
+    classifications: ["The Prevention Or Relief Of Poverty"],
+    // The regulator published no solvency flag for this charity, which is the
+    // common case and the one that must leave both columns alone.
+    insolvent: null,
+    inAdministration: null,
+  };
+
+  it("annotates mission fields from the register file the API payload cannot carry", async () => {
+    const { store, annotations, scoreInputs } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Useful Charity", 1234567)];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionRecords(
+      store,
+      async () => ({ status: "reachable", url: "", message: null }),
+      criteriaPass,
+      () => profile,
+    );
+
+    assert.equal(counts.inserted, 1);
+    assert.equal(annotations.length, 1);
+    assert.equal(annotations[0].charityActivities, "Runs a community food bank.");
+    assert.equal(annotations[0].registeredOn, "2010-05-01");
+    assert.equal(annotations[0].charityReportingStatus, "Submission Received");
+    assert.equal(annotations[0].sector, "Poverty Relief");
+    // The sector also reaches the first score rather than landing after it.
+    assert.equal(scoreInputs[0]!.sector, "Poverty Relief");
+  });
+
+  it("writes nothing extra when the register file knows nothing about the number", async () => {
+    const { store, annotations, scoreInputs, inserted } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Brand New Charity", 99999998)];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionRecords(
+      store,
+      async () => ({ status: "reachable", url: "", message: null }),
+      criteriaPass,
+      () => null,
+    );
+
+    assert.equal(counts.inserted, 1);
+    assert.equal(annotations.length, 0);
+    assert.equal(scoreInputs[0]!.sector ?? null, null);
+    assert.equal(inserted.length, 1);
+  });
+
+  it("still inserts when the register lookup itself throws", async () => {
+    const { store, inserted } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Useful Charity", 1234567)];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionRecords(
+      store,
+      async () => ({ status: "reachable", url: "", message: null }),
+      criteriaPass,
+      () => {
+        throw new Error("register file unreadable");
+      },
+    );
+
+    assert.equal(counts.inserted, 1);
+    assert.equal(inserted.length, 1);
+  });
+});
+
 describe("promotePendingCharityCommissionRecords — duplicate candidate (F042)", () => {
   it("flags a match instead of inserting a second organisations row", async () => {
     const { store, inserted, flagged, statusUpdates } = fakeStore({
@@ -1582,6 +1662,116 @@ describe("promotePendingCharityCommissionBulkRecords", () => {
     assert.equal(statusUpdates[0].status, "validated");
   });
 
+  describe("geographic reach derivation at promote time", () => {
+    const areasStub = (
+      areas: { localAuthorities: string[]; regions: string[]; countries: string[] },
+    ) => () => ({
+      organisationNumber: 500001,
+      registeredCharityNumber: 1000001,
+      charityName: "Sheffield Example Trust",
+      ...areas,
+    });
+
+    it("derives reach from the register file's full areas, not the filter's matched subset", async () => {
+      // The payload's matched_areas holds only Sheffield (the priority
+      // authority the filter selected on). The file knows this charity also
+      // operates abroad — reach must follow the file, or every national
+      // charity would import as local.
+      const { store, inserted } = fakeStore({
+        async loadPendingRecords() {
+          return [bulkPendingRecord("raw-1", "Sheffield Example Trust")];
+        },
+      });
+
+      await promotePendingCharityCommissionBulkRecords(
+        store,
+        criteriaPass,
+        areasStub({ localAuthorities: ["Sheffield"], regions: [], countries: ["Kenya"] }),
+      );
+
+      assert.equal(inserted[0].geographic_reach, "international");
+    });
+
+    it("leaves reach null when the register file has nothing for the charity", async () => {
+      const { store, inserted } = fakeStore({
+        async loadPendingRecords() {
+          return [bulkPendingRecord("raw-1", "Sheffield Example Trust")];
+        },
+      });
+
+      await promotePendingCharityCommissionBulkRecords(store, criteriaPass, () => null);
+
+      assert.equal(inserted[0].geographic_reach, null);
+    });
+
+    it("still inserts when the areas lookup throws", async () => {
+      const { store, inserted } = fakeStore({
+        async loadPendingRecords() {
+          return [bulkPendingRecord("raw-1", "Sheffield Example Trust")];
+        },
+      });
+
+      const counts = await promotePendingCharityCommissionBulkRecords(
+        store,
+        criteriaPass,
+        () => {
+          throw new Error("register file unreadable");
+        },
+      );
+
+      assert.equal(counts.inserted, 1);
+      assert.equal(inserted[0].geographic_reach, null);
+    });
+
+    it("rescores the row with reach filled", async () => {
+      // The standardizer scores with reach empty; the stored column must match
+      // the stored row. Seven of eight scoreable fields filled, not six.
+      const withReach = fakeStore({
+        async loadPendingRecords() {
+          return [bulkPendingRecord("raw-1", "Sheffield Example Trust")];
+        },
+      });
+      await promotePendingCharityCommissionBulkRecords(
+        withReach.store,
+        criteriaPass,
+        areasStub({ localAuthorities: ["Sheffield"], regions: [], countries: [] }),
+      );
+
+      const withoutReach = fakeStore({
+        async loadPendingRecords() {
+          return [bulkPendingRecord("raw-1", "Sheffield Example Trust")];
+        },
+      });
+      await promotePendingCharityCommissionBulkRecords(
+        withoutReach.store,
+        criteriaPass,
+        () => null,
+      );
+
+      assert.equal(withReach.inserted[0].geographic_reach, "local");
+      assert.equal(withReach.inserted[0].data_completeness_score, 0.88);
+      assert.equal(withoutReach.inserted[0].data_completeness_score, 0.75);
+    });
+
+    it("derives reach on the API path from the same file", async () => {
+      const { store, inserted } = fakeStore({
+        async loadPendingRecords() {
+          return [pendingRecord("raw-1", "Sheffield Example Trust", 1000001)];
+        },
+      });
+
+      await promotePendingCharityCommissionRecords(
+        store,
+        undefined,
+        undefined,
+        undefined,
+        areasStub({ localAuthorities: ["Sheffield"], regions: ["England"], countries: [] }),
+      );
+
+      assert.equal(inserted[0].geographic_reach, "national");
+    });
+  });
+
   it("writes the sector the register classified the charity under", async () => {
     // The whole point of this import path: organisations.sector was empty for
     // every row, so the SCOUT sector factor was neutral across the book.
@@ -1695,6 +1885,66 @@ describe("promotePendingCharityCommissionBulkRecords", () => {
     await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
 
     assert.equal(annotations[0].charityActivities, null);
+  });
+
+  // The regulator's solvency flags. The import screen has always been able to
+  // *filter* on these ("Exclude insolvent or in administration"), and until
+  // 20260928100000 the fact itself was discarded on the way in — so a charity
+  // could enter administration and the client record would go on describing it
+  // as a perfectly good prospect. See that migration for the reasoning.
+  it("carries the regulator's solvency flags onto the annotation", async () => {
+    const { store, annotations } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          bulkPendingRecord("raw-1", "Sheffield Example Trust", {
+            charity_insolvent: true,
+            charity_in_administration: true,
+          }),
+        ];
+      },
+    });
+
+    await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+
+    assert.equal(annotations[0].insolvent, true);
+    assert.equal(annotations[0].inAdministration, true);
+  });
+
+  it("writes a published 'false' rather than dropping it", async () => {
+    // `false` is the register saying this charity is solvent — a fact worth
+    // storing. Dropping it would leave a null, which every reader shows as
+    // "never read", and the record would look unassessed forever.
+    const { store, annotations } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          bulkPendingRecord("raw-1", "Sheffield Example Trust", {
+            charity_insolvent: false,
+            charity_in_administration: false,
+          }),
+        ];
+      },
+    });
+
+    await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+
+    assert.equal(annotations[0].insolvent, false);
+    assert.equal(annotations[0].inAdministration, false);
+  });
+
+  it("leaves both flags untouched when the payload predates them", async () => {
+    // A raw record written before the import carried solvency must not clear a
+    // flag a later refresh legitimately recorded — undefined is "no answer",
+    // which the store turns into "do not touch this column".
+    const { store, annotations } = fakeStore({
+      async loadPendingRecords() {
+        return [bulkPendingRecord("raw-1", "Sheffield Example Trust")];
+      },
+    });
+
+    await promotePendingCharityCommissionBulkRecords(store, criteriaPass);
+
+    assert.equal(annotations[0].insolvent, undefined);
+    assert.equal(annotations[0].inAdministration, undefined);
   });
 
   it("writes the filed years from the payload, with the filing date and the counts", async () => {
@@ -1970,6 +2220,138 @@ describe("promotePendingCompaniesHouseRecords — SIC codes", () => {
     // This is the gap the migration's backfill exists to close: flagIfDuplicate
     // returns before the insert, so a company already on the client list can
     // never gain its codes from a re-import.
+    assert.equal(annotations.length, 0);
+  });
+});
+
+describe("duplicate re-import heals a missing mission", () => {
+  it("bulk path: a refresh carrying activities annotates the existing charity", async () => {
+    const { store, annotations, flagged } = fakeStore({
+      async loadPendingRecords() {
+        return [bulkPendingRecord("raw-1", "Sheffield Example Trust")];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [
+          {
+            id: "org-existing",
+            legal_name: "Sheffield Example Trust",
+            postcode: "S1 2HE",
+            registrationNumbers: ["1000001"],
+          },
+        ];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionBulkRecords(store);
+
+    assert.equal(counts.flagged, 1);
+    assert.equal(counts.inserted, 0);
+    assert.equal(flagged.length, 1);
+    assert.equal(annotations.length, 1);
+    assert.equal(annotations[0].organisationId, "org-existing");
+    assert.equal(
+      annotations[0].charityActivities,
+      "Provides free after-school tutoring across Sheffield.",
+    );
+    // Mission-only: a refresh must not restate sector, dates or status the
+    // insert already set — those are not gaps this refresh owns.
+    assert.ok(!("sector" in annotations[0]));
+    assert.ok(!("registeredOn" in annotations[0]));
+    assert.ok(!("charityReportingStatus" in annotations[0]));
+  });
+
+  it("bulk path: a refresh with no activities writes nothing", async () => {
+    const { store, annotations } = fakeStore({
+      async loadPendingRecords() {
+        return [
+          bulkPendingRecord("raw-1", "Sheffield Example Trust", { charity_activities: "   " }),
+        ];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [
+          {
+            id: "org-existing",
+            legal_name: "Sheffield Example Trust",
+            postcode: "S1 2HE",
+            registrationNumbers: ["1000001"],
+          },
+        ];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionBulkRecords(store);
+
+    assert.equal(counts.flagged, 1);
+    assert.equal(annotations.length, 0);
+  });
+
+  it("single path: a register profile with activities annotates the existing charity", async () => {
+    const { store, annotations } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Useful Charity", 1234567)];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [
+          {
+            id: "org-existing",
+            legal_name: "Useful Charity",
+            postcode: "",
+            registrationNumbers: ["1234567"],
+          },
+        ];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionRecords(
+      store,
+      async () => ({ status: "reachable", url: "", message: null }),
+      criteriaPass,
+      () => ({
+        organisationNumber: 1234567,
+        registeredCharityNumber: 1234567,
+        charityName: "Useful Charity",
+        activities: "Runs a community food bank.",
+        dateOfRegistration: "2010-05-01",
+        reportingStatus: "Submission Received",
+        classifications: ["The Prevention Or Relief Of Poverty"],
+        insolvent: null,
+        inAdministration: null,
+      }),
+    );
+
+    assert.equal(counts.flagged, 1);
+    assert.equal(counts.inserted, 0);
+    assert.equal(annotations.length, 1);
+    assert.equal(annotations[0].organisationId, "org-existing");
+    assert.equal(annotations[0].charityActivities, "Runs a community food bank.");
+    assert.ok(!("sector" in annotations[0]));
+  });
+
+  it("single path: no register profile means nothing to heal", async () => {
+    const { store, annotations } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingRecord("raw-1", "Useful Charity", 1234567)];
+      },
+      async loadExistingOrganisationsForMatching() {
+        return [
+          {
+            id: "org-existing",
+            legal_name: "Useful Charity",
+            postcode: "",
+            registrationNumbers: ["1234567"],
+          },
+        ];
+      },
+    });
+
+    const counts = await promotePendingCharityCommissionRecords(
+      store,
+      async () => ({ status: "reachable", url: "", message: null }),
+      criteriaPass,
+      () => null,
+    );
+
+    assert.equal(counts.flagged, 1);
     assert.equal(annotations.length, 0);
   });
 });

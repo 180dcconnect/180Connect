@@ -305,7 +305,7 @@ describe("filterByOwner (F163)", () => {
     assert.deepEqual(filterByOwner(clients, "").map((c) => c.id), ["a", "b", "c"]);
   });
 
-  it("isolates clients owned by a specific CAM", () => {
+  it("isolates clients owned by a specific team member", () => {
     assert.deepEqual(filterByOwner(clients, "cam-1").map((c) => c.id), ["a"]);
     assert.deepEqual(filterByOwner(clients, "cam-2").map((c) => c.id), ["b"]);
   });
@@ -314,7 +314,7 @@ describe("filterByOwner (F163)", () => {
     assert.deepEqual(filterByOwner(clients, "unassigned").map((c) => c.id), ["c"]);
   });
 
-  it("returns an empty list for a CAM who owns nothing in view", () => {
+  it("returns an empty list for a team member who owns nothing in view", () => {
     assert.deepEqual(filterByOwner(clients, "cam-3"), []);
   });
 

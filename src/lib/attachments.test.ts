@@ -8,6 +8,7 @@ import {
   MAX_ATTACHMENTS_PER_DRAFT,
   MAX_COMBINED_ATTACHMENT_SIZE_BYTES,
   attachmentRpcFailure,
+  attachmentDeleteRpcFailure,
   attachmentTimelineRpcFailure,
   attachmentUploadFailureMessage,
   buildAttachmentStoragePath,
@@ -366,6 +367,32 @@ describe("attachmentRpcFailure", () => {
 
   it("hides a message-less error too", () => {
     assert.equal(attachmentRpcFailure({ code: "42501", message: "  " }).status, 500);
+  });
+});
+
+describe("attachmentDeleteRpcFailure", () => {
+  it("passes through a deliberate permission refusal", () => {
+    assert.deepEqual(
+      attachmentDeleteRpcFailure({ code: "42501", message: "only a CAM or admin can delete a file" }),
+      { status: 403, error: "only a CAM or admin can delete a file" },
+    );
+  });
+
+  it("maps a missing attachment to 404", () => {
+    assert.equal(attachmentDeleteRpcFailure({ code: "P0002", message: "not found" }).status, 404);
+  });
+
+  it("hides an unexpected error behind a generic message", () => {
+    const failure = attachmentDeleteRpcFailure({
+      code: "42P01",
+      message: 'relation "public.attachments" does not exist',
+    });
+    assert.equal(failure.status, 500);
+    assert.ok(!failure.error.includes("relation"));
+  });
+
+  it("hides a message-less error too", () => {
+    assert.equal(attachmentDeleteRpcFailure({ code: "42501", message: "  " }).status, 500);
   });
 });
 

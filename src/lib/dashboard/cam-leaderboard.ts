@@ -83,7 +83,7 @@ function median(values: readonly number[]): number | null {
 }
 
 /**
- * One row per CAM in `cams` — including CAMs with no activity, who are absent
+ * One row per team member in `cams` — including members with no activity, who are absent
  * from `summary.people` and are precisely the rows an admin needs to see.
  *
  * Sorted by conversions, then replies, then emails sent, then name. Flags are
@@ -102,7 +102,7 @@ export function camLeaderboard(
     const conversions = current(person?.conversions);
     return {
       userId: cam.id,
-      name: cam.full_name?.trim() || "Unnamed CAM",
+      name: cam.full_name?.trim() || (cam.role === "admin" ? "Unnamed Admin" : "Unnamed CAM"),
       emailsSent,
       replies,
       conversions,

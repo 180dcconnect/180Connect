@@ -61,6 +61,8 @@ export type SidebarNavItem = {
   href: string;
   label: string;
   icon: SidebarIconName;
+  /** Other routes that select this row — a grouped entry's sibling tabs. */
+  matches?: readonly string[];
 };
 
 export type SidebarSection = {
@@ -253,7 +255,7 @@ export function Sidebar({
             )}
             <ul className="space-y-1">
               {section.items.map((item) => {
-                const active = pathname === item.href;
+                const active = pathname === item.href || Boolean(item.matches?.includes(pathname));
                 const Icon = ICONS[item.icon];
                 const link = (
                   <AnimateIcon animateOnHover={!reduceMotion} asChild>

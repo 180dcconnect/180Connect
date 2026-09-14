@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { isInviteExpired, type PendingInvite } from "@/lib/admin/team-realtime";
 import { cancelInviteAction, resendInviteAction } from "./invite-actions";
+import { CopyInviteLink } from "./copy-invite-link";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { DeleteButton } from "@/components/ui/delete-button";
 
@@ -29,7 +30,6 @@ export function PendingInvitesList({
   const router = useRouter();
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, ActionResult>>({});
   /**
    * Rows held in the DOM past the point the data says they're gone. The cancel
@@ -196,17 +196,7 @@ export function PendingInvitesList({
                     {result.text}
                   </p>
                   {result.link && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(result.link!);
-                        setCopiedId(invite.id);
-                        setTimeout(() => setCopiedId(null), 3000);
-                      }}
-                      className="cursor-pointer font-semibold text-xs text-brand underline underline-offset-2 hover:opacity-80"
-                    >
-                      {copiedId === invite.id ? "✓ Copied invite link" : "Copy invite link"}
-                    </button>
+                    <CopyInviteLink link={result.link} tone="light" />
                   )}
                 </div>
               ))}

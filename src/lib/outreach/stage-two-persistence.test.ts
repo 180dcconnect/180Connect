@@ -15,7 +15,8 @@ import { buildStageTwoGenerationInsert } from "./stage-two-persistence.ts";
 function buildPayload() {
   return buildStageTwoGenerationInsert({
     outreachMessageId: "msg-1",
-    draft: { subject: "Following up", body: "Checking back on my earlier email." },
+    subject: "Following up",
+    draft: { body: "Checking back on my earlier email." },
     model: "gemini-2.0-flash",
     usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
     costUsd: 0.000123,
@@ -47,7 +48,8 @@ test("persistence payload always carries every NOT NULL column", () => {
 test("F209: the tone dials ride on the insert, matching the request, not the defaults", () => {
   const payload = buildStageTwoGenerationInsert({
     outreachMessageId: "msg-3",
-    draft: { subject: "S", body: "B" },
+    subject: "S",
+    draft: { body: "B" },
     model: "gemini-2.0-flash",
     usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
     costUsd: null,
@@ -77,7 +79,8 @@ test("the stored prompt is the exact system/user pair that was sent", () => {
 test("absent usage counts and unknown pricing store nulls, never fabricated zeros", () => {
   const payload = buildStageTwoGenerationInsert({
     outreachMessageId: "msg-2",
-    draft: { subject: "S", body: "B" },
+    subject: "S",
+    draft: { body: "B" },
     model: "gemini-2.0-flash",
     usage: { inputTokens: undefined, outputTokens: undefined, totalTokens: undefined },
     costUsd: null,

@@ -115,7 +115,7 @@ export const loadClient = cache(async (id: string) => {
   const { data, error } = await supabase
     .from("organisations")
     .select(
-      "id, legal_name, organisation_type, website, contact_email, address_line_1, city, postcode, country_code, outreach_status, sector, sub_sector, created_at, geographic_reach, sic_codes",
+      "id, legal_name, organisation_type, website, contact_email, address_line_1, city, postcode, country_code, outreach_status, sector, sub_sector, created_at, geographic_reach, sic_codes, charity_activities, cic_community_statement, insolvent, in_administration",
     )
     .eq("id", id)
     .maybeSingle<OrganisationDetailRow>();

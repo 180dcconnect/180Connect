@@ -295,7 +295,7 @@ export function validateAssignAction(input: {
     return { success: false, message: "Choose a client for this action." };
   }
   if (typeof input.assigneeUserId !== "string" || !UUID_RE.test(input.assigneeUserId)) {
-    return { success: false, message: "Choose a CAM to assign this to." };
+    return { success: false, message: "Choose a team member to assign this to." };
   }
 
   const parsed = safeValidate(

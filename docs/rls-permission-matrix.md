@@ -70,7 +70,7 @@ reviewers do not assume the matrix alone is sufficient.
 | "Set pipeline status — CAM (own client) or admin, no reason required" | RLS is row-level; it cannot let a client's owner write one column (`outreach_status`) while a general policy governs the rest of the row, and the write needs an audit row | `set_outreach_status(org_id, status)`, a `SECURITY DEFINER` RPC (F145, `20260807100000_redefine_outreach_status_pipeline.sql`) locks the row, checks the caller owns it or is admin, and writes an `audit_log` row (`status_changed`) in the same transaction. `outreach_status` is off the general `organisations` UPDATE grant entirely — see §3.2 | **shipped**, F145 — see §3.2 |
 | "Set pipeline status on several clients at once" (F064) | Nothing in RLS makes a multi-row write atomic *and* audited; the app doing it row by row is N transactions, so it can half-apply | `set_outreach_status_bulk(org_ids[], status)`, a `SECURITY DEFINER` RPC (F064, `20260826000000_create_bulk_outreach_status_rpc.sql`) locks every target row in id order, requires the caller own **all** of them or be admin, writes one `status_changed` audit row per real transition, and caps a batch at 500. Same rule as `set_outreach_status` — bulk is a convenience, never a wider permission | **shipped**, F064 — see §3.2 |
 | "Override pipeline stage — **reason required**" | Postgres cannot require a justification string as a condition of an UPDATE | `SECURITY DEFINER` RPC `override_outreach_status(org_id, status, reason)`. `reason` is `not null` and lands in the audit log. Distinct from `set_outreach_status` above — this is the admin escape hatch, not the ordinary path | to build (F224) |
-| "Reassign ownership: admin only" | Same column-level problem | `reassign_ownership(org_ids, new_owner_id, reason, from_user_id)` (F257, `20260802100000_create_reassign_ownership_rpc.sql`, unified `20260804170000`) is the only write path — the org UPDATE policy's admin branch could set any `owner_id` directly with no audit row until `20260810110000_close_admin_owner_id_direct_write.sql` revoked `owner_id` from the table's UPDATE grant entirely (same column-level-REVOKE mechanism as `outreach_status`, §3.2). F163's admin assign-owner form (`/clients/[id]`, `assign-owner-form.tsx`) calls it with a single organisation id and no `from_user_id`. The **offboarding** case is also covered: `deactivate_user` (F014) reassigns every organisation the departing user owns, with a required reason and one `ownership_reassigned` audit row per organisation, in the same transaction that closes the account, delegating to `reassign_ownership` so the departing user's **open actions travel with their clients**. See §3.2, §3.11 |
+| "Reassign ownership: admin only" | Same column-level problem | `reassign_ownership(org_ids, new_owner_id, reason, from_user_id)` (F257, `20260802100000_create_reassign_ownership_rpc.sql`, unified `20260804170000`) is the only write path — the org UPDATE policy's admin branch could set any `owner_id` directly with no audit row until `20260810110000_close_admin_owner_id_direct_write.sql` revoked `owner_id` from the table's UPDATE grant entirely (same column-level-REVOKE mechanism as `outreach_status`, §3.2). F163's admin assign-owner form (`/clients/[id]`, `assign-owner-form.tsx`) calls it with a single organisation id and no `from_user_id`. The **offboarding** case is also covered: `suspend_user` (optionally) and `delete_user` (always, when the user owns clients) reassign every organisation the departing user owns, with a required reason and one `ownership_reassigned` audit row per organisation, in the same transaction that suspends or deletes the account, delegating to `reassign_ownership` via `app.transfer_user_work` so the departing user's **open actions travel with their clients**. See §3.2, §3.11 |
 | Audit entries are immutable | RLS controls who writes, not whether a row can later change | `AUDIT_LOG` gets **no** UPDATE or DELETE policy for any role. Append-only by omission | needs the table (§6) |
 
 **Rule that follows:** where a capability needs a *condition*, a *reason string*, a
@@ -147,7 +147,7 @@ a table ever needs a column granted for one purpose but protected for another.
 | `USERS` | SELECT | all | all (team directory, F011) | all |
 | `USERS` | INSERT | — (invite is service-role RPC, F008) | — | — |
 | `USERS` | UPDATE | all rows | own row, granted columns only | own row, granted columns only |
-| `USERS` | DELETE | — (deactivate, never delete) | — | — |
+| `USERS` | DELETE | — (`delete_user` RPC only: hard delete, or redaction when the account has history) | — | — |
 
 `role` is writable only through `public.set_user_role(user_id, role)` (F012) — a
 SECURITY DEFINER RPC that self-checks `app.is_admin()`, refuses a self-change, and
@@ -164,7 +164,7 @@ suspended user keeps a working token, and a logged-in-looking shell, until it ex
 Measured on GoTrue v2.193.1: with the session row gone, `GET /auth/v1/user` goes
 `200 → 403` and a refresh returns `400`. This replaces an application-side
 `auth.admin.signOut(userId)` call that could never work — that parameter is a JWT, not
-a user id, and GoTrue has no by-user-id logout endpoint. `deactivate_user` revokes the
+a user id, and GoTrue has no by-user-id logout endpoint. `suspend_user` (which ends in `set_user_active`) and `delete_user` revoke the
 same way.
 
 Which addresses may hold an account at all is decided one layer lower, by
@@ -180,16 +180,37 @@ authoritative — widening it alone changes a form message and admits nobody. Th
 table is in `app`, unreachable through PostgREST, with RLS on and no policies.
 Recipe in [`auth/invite-email.md`](auth/invite-email.md).
 
-`deactivated_at` (F014) is written only by `public.deactivate_user(user_id, reason,
-reassign_to, release_clients)` and cleared only by `set_user_active(..., true)`. It is a
-**marker, not a gate**: `is_active` alone decides whether anyone may log in or read a
-row, and no policy or helper consults `deactivated_at`. It exists so the UI can tell a
-suspension from an offboarding, which are otherwise the same `is_active = false`. The
-constraint `users_deactivated_at_matches_inactive` makes the contradictory combination
-(active *and* carrying a deactivation timestamp) unwritable by anyone, including a
-future RPC. `deactivate_user` additionally refuses to close an account while it still
-owns organisations unless given a destination, and moves them in the same transaction —
-see §3.2.
+**Suspend and delete** (20261002094000, replacing F014's deactivation). There are two
+ways to remove someone's access, and they genuinely differ:
+
+- `public.suspend_user(user_id, reason, reassign_to, release_clients)` — reversible. It
+  is `set_user_active(user_id, false)` plus an *optional* handover of the user's clients
+  and open actions (to an active CAM/admin, or the unowned pool) in the same
+  transaction. A reason is required only when work moves. Handing a suspended user's
+  work on later is allowed.
+- `public.delete_user(user_id, reason, reassign_to, release_clients)` — irreversible.
+  Refuses while the user owns clients unless given a destination (`owns_active_clients`).
+  Then: an account with **no history** is physically deleted from `auth.users`
+  (cascading to `public.users` and the user's own settings tables); an account **with
+  history** is redacted (data-lifecycle-policy §5.3 Level 2, Annex A.1) — `email` →
+  `redacted+<id>@invalid`, `full_name` → `Former member`, `deleted_at` stamped, the
+  `auth.users` copy, identities and MFA factors scrubbed — and the row kept so every note,
+  approval and audit row keeps its author. "History" means any row in any table whose
+  foreign key to `users` is not `ON DELETE CASCADE`, read from `pg_constraint`, so a table
+  added later is covered without editing the function. Writes `user_deleted`, identified
+  by id only.
+
+`deleted_at` is written only by `delete_user` and never cleared. Like the old marker it
+is **not a gate** — `is_active` alone decides access — but it is enforced:
+`users_deleted_at_implies_inactive` makes a deleted-yet-active row unwritable, and
+`set_user_active` / `set_user_role` refuse a deleted account (`user_deleted`). Every team
+list filters `deleted_at is null`; the F188 tag placeholder is marked deleted for the
+same reason. Both handovers delegate to `reassign_ownership` / `reassign_actions` via
+`app.transfer_user_work` — see §3.2.
+
+`deactivate_user` and `users.deactivated_at` were removed. Previously deactivated
+accounts are ordinary suspended accounts; historical `user_deactivated` audit rows are
+kept and still rendered.
 
 `last_seen_at` — "last active", not last login — is written only by
 `public.touch_last_seen()` (20260816230000), a SECURITY DEFINER RPC that updates only
@@ -532,7 +553,7 @@ EXECUTE revoked from `public`/`anon`, granted to `authenticated` only.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `INGESTION_RUNS` | admin | admin (trigger refresh) | — | — |
+| `INGESTION_RUNS` | admin, cam | admin (trigger refresh) | — | — |
 | `RAW_SOURCE_RECORDS` | admin | — (service role) | — | admin |
 | `DATA_QUALITY_EVENTS` | admin | — (service role) | admin (resolve) | — |
 | `ORGANISATION_STATUS_FLAGS` | admin | — (service role, RPC only) | — (RPC only: acknowledge) | — |
@@ -542,6 +563,13 @@ EXECUTE revoked from `public`/`anon`, granted to `authenticated` only.
 `RAW_SOURCE_RECORDS` holds unfiltered third-party payloads. It is the
 "sensitive data check" in the testing notes: a CAM `select *` must return **zero rows**,
 not an error.
+
+`INGESTION_RUNS` is the exception to the section's admin-only rule. CAMs reach the
+Data imports group (they run Companies House and Charity Commission imports under
+`client:edit`), so they read the run history: source, outcome, counts, error message
+— no organisation data and no payload. The run detail page, which reads
+`RAW_SOURCE_RECORDS`, stays admin-only (migration
+`20261002100000_ingestion_runs_select_for_cams`).
 
 F043 exposes provenance without weakening that boundary. Active authenticated users
 may execute `get_organisation_sources(organisation_id)`, which returns only the source
@@ -1383,8 +1411,19 @@ what actually stops an over-limit or wrong-type upload, not application code.
 Two policies on `storage.objects`: SELECT mirrors `attachments_select_active`
 (any active user, needed for `createSignedUrl` to succeed on open/download);
 INSERT requires `app.can_write()`. No UPDATE/DELETE policy for either —
-replacing or removing an uploaded file is out of both tickets' AC and stays
-`service_role`-only.
+replacing an uploaded file stays `service_role`-only.
+
+**Delete** removes the row and the bytes together. `delete_attachment(
+attachment_id, organisation_id)` is `SECURITY DEFINER`, self-checks
+`app.can_write()`, verifies the row belongs to the organisation in the URL (a
+mismatched pair is "not found", never an existence oracle), deletes the row —
+draft links cascade with it — and returns the `storage_path`. The colocated
+server action then removes that object through the service-role Storage API,
+since Postgres cannot call Storage and a SQL delete of the `storage.objects`
+row would orphan the bytes on disk. No direct DELETE grant on either side, and
+no `audit_log` entry: deleting a file changes no ownership/status/role/
+approval state (`docs/audit-log-pattern.md` §1), same reasoning as
+`record_attachment` and `NOTES`.
 
 **Known limitation, not a gap**: a failure between the Storage upload
 succeeding and `record_attachment` running leaves an orphaned object with no
@@ -1688,7 +1727,7 @@ RLS, so a suite written against it proves nothing.
 | 10 | log entry created | Test 3 produces exactly one `AUDIT_LOG` row |
 | 11 | bypass attempt | Direct PostgREST call with `anon` key against every table → 0 rows / `42501` |
 | 12 | coverage gate | No table in `public` has `rowsecurity = false` or zero policies |
-| 13 | concurrency | Two admins race each other — one calls `set_user_role` to demote the other while the second removes them via `set_user_active` or `deactivate_user` — and the platform is left with exactly one active admin, never zero |
+| 13 | concurrency | Two admins race each other — one calls `set_user_role` to demote the other while the second removes them via `set_user_active` / `suspend_user` or `delete_user` — and the platform is left with exactly one active admin, never zero |
 
 Test 11 is the acceptance criterion "even if the application-layer permission check
 were bypassed". It must be run against the API, not through the app's own client.
@@ -1764,11 +1803,12 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    [`scripts/verify-last-admin-guard.mts`](../scripts/verify-last-admin-guard.mts),
    which opens genuinely concurrent connections — see §5 row 13.
 
-   **Three RPCs, not two.** `role` and `is_active` are writable only through
-   `set_user_role`, `set_user_active` and — since F014 — `deactivate_user`, which sets
-   `is_active = false` on its own path. A guard on the first two would have left the
-   same race open through the third (B deactivates A while A demotes B), so all three
-   take the lock. Any future RPC that writes either column has to call the guard too;
+   **Every writer, not two.** `role` and `is_active` are writable only through
+   `set_user_role`, `set_user_active` (and `suspend_user`, which calls it) and
+   `delete_user`, which sets `is_active = false` on its own path. A guard on the first
+   two would have left the same race open through the last (B deletes A while A demotes
+   B), so all of them take the lock. (F014's `deactivate_user` was the original third
+   writer; `delete_user` replaced it in 20261002094000.) Any future RPC that writes either column has to call the guard too;
    that is the whole reason the lock lives in one shared function rather than inline.
 8. ~~**`revokeUserSessions` cannot work as written — sessions are never actually
    revoked.**~~ **Resolved on the F013 branch, 30 Jul 2026** —
@@ -1846,8 +1886,8 @@ MIGRATIONS.md forbids ("never make an untracked manual change to a live database
 body is sound (admin self-check, no self-change, writes `audit_log`), so this is a
 process problem rather than a security one: nothing recreates it on `db reset`, and it
 cannot reach production through the release process. It needs capturing as a migration
-by whoever owns F013/F014. Note also that `users.deactivated_at` is now in the Data
-Model but exists in neither the database nor a migration.
+by whoever owns F013/F014. (`users.deactivated_at`, noted here at the time as missing from the database, was
+later added by F014 and then removed by 20261002094000.)
 # F036 manual entry access
 
 `MANUAL_ENTRY_RECORDS` is readable by its creating CAM/admin and by admins.

@@ -4,8 +4,11 @@ import { sendDueReviewedEmails } from "@/lib/outreach/scheduled-worker";
 
 /**
  * F126 (#122): deliver due scheduled outreach emails, triggered by pg_cron via
- * net.http_post every five minutes
- * (supabase/migrations/20260902120100_schedule_scheduled_outreach_cron.sql) —
+ * net.http_post — within about 10 seconds of an email becoming due
+ * (scheduled_outreach_on_time, which only calls this when something is due),
+ * plus a five-minute catch-all sweep for retries
+ * (supabase/migrations/20261003120000_scheduled_outreach_on_time.sql,
+ * originally 20260902120100_schedule_scheduled_outreach_cron.sql) —
  * same convention as the Companies House and Charity Commission jobs
  * (20260811090200_schedule_charity_commission_cron.sql), including the Vercel
  * deployment-protection bypass query param and the shared vault secrets.

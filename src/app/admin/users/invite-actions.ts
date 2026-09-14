@@ -90,11 +90,11 @@ export async function sendInviteAction(
   const lookupExistingUser = async (email: string) => {
     const { data, error } = await supabase
       .from("users")
-      .select("id, deactivated_at")
+      .select("id, is_active")
       .eq("email", email)
-      .maybeSingle<{ id: string; deactivated_at: string | null }>();
+      .maybeSingle<{ id: string; is_active: boolean }>();
     if (error) throw new Error(error.message);
-    return data ? { id: data.id, deactivatedAt: data.deactivated_at } : null;
+    return data ? { id: data.id, isActive: data.is_active } : null;
   };
 
   const outcome = await sendInvite(
@@ -218,11 +218,11 @@ export async function sendBulkInvitesAction(
   const lookupExistingUser = async (email: string) => {
     const { data, error } = await supabase
       .from("users")
-      .select("id, deactivated_at")
+      .select("id, is_active")
       .eq("email", email)
-      .maybeSingle<{ id: string; deactivated_at: string | null }>();
+      .maybeSingle<{ id: string; is_active: boolean }>();
     if (error) throw new Error(error.message);
-    return data ? { id: data.id, deactivatedAt: data.deactivated_at } : null;
+    return data ? { id: data.id, isActive: data.is_active } : null;
   };
 
   const results: Array<{

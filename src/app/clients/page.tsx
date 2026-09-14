@@ -101,7 +101,7 @@ import { BulkActionsBar } from "./bulk-actions-bar";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ClientOwnerBadge } from "./client-owner-badge";
 
-type TeamMember = { id: string; full_name: string | null };
+type TeamMember = { id: string; full_name: string | null; role?: string | null };
 
 /** F066 — a saved view as it comes out of the table. `filters` is jsonb. */
 type SavedViewRow = { id: string; name: string; filters: unknown };
@@ -215,9 +215,10 @@ const SELECT_SLOT = "flex w-5 shrink-0 justify-center";
  * a button nested in an anchor is invalid markup and would fire both handlers on
  * click. Only unassigned rows show it, and only to an actor who can edit clients.
  *
- * F163 (#163): owner filter. The team dropdown lists CAMs only (not admins) —
- * the AC asks for "any CAM on the team", and an admin who owns a client via the
- * admin assign path is the rare edge case, not the filter's job to cover.
+ * F163 (#163): owner filter. The team dropdown lists every owner-eligible
+ * team member — active CAMs and admins — because either role can own a client
+ * (reassign_ownership enforces `role in ('cam','admin')`). `?owner=` can still
+ * name anyone who holds clients.
  *
  * F166 (#162) View My Owned Clients: AC1 asks for "the same list view as F051 with
  * the owner filter (F057) pre-applied" — deliberately not a separate page, so
@@ -321,8 +322,9 @@ export default async function ClientsPage({
     fetchAllOpenSuppressions(),
     supabase
       .from("users")
-      .select("id, full_name")
-      .eq("role", "cam")
+      .select("id, full_name, role")
+      .in("role", ["cam", "admin"])
+      .eq("is_active", true)
       .order("full_name")
       .overrideTypes<TeamMember[], { merge: false }>(),
     supabase
@@ -552,11 +554,12 @@ export default async function ClientsPage({
       ? matchingClients
       : prioritiseQueue(matchingClients, outreachPrefs.data);
   const teamMembers = team.data ?? [];
-  // The owner dropdown lists CAMs only (F163), but `?owner=` can name anyone who
-  // holds clients — an admin, or a deactivated former member — because the team
-  // table links straight to this page (F167). Falling back to the name carried on
-  // the clients themselves keeps the filter chip visible, so the list always says
-  // whose it is and can always be cleared.
+  // The owner dropdown lists every owner-eligible team member (active CAMs and
+  // admins), but `?owner=` can name anyone who holds clients — a deactivated
+  // former member, for example — because the team table links straight to this
+  // page (F167). Falling back to the name carried on the clients themselves
+  // keeps the filter chip visible, so the list always says whose it is and can
+  // always be cleared.
   const ownerFilterLabel =
     ownerFilter && ownerFilter !== "unassigned"
       ? (teamMembers.find((member) => member.id === ownerFilter)?.full_name ??
@@ -610,8 +613,8 @@ export default async function ClientsPage({
   const savedViewSummaries: SavedViewSummary[] = (savedViews.data ?? []).map((row) => {
     const filters = parseFilters(row.filters);
     // The owner filter stores a user id. Name it from the team list, or say "you"
-    // when it is the caller — an admin filtering to themselves is not in that list
-    // (it is CAMs only), and reading "a former team member" about yourself is worse
+    // when it is the caller — a former team member holding clients is not in
+    // that list, and reading "a former team member" about yourself is worse
     // than the raw id it replaces.
     const ownerName =
       filters.owner === authorization.actor.id
@@ -912,7 +915,10 @@ export default async function ClientsPage({
                 "Filter by sector": SECTOR_FILTER_OPTIONS,
                 "Filter by owner": [
                   { label: "Unassigned", value: "unassigned" },
-                  ...teamMembers.map(m => ({ label: m.full_name || "Unnamed CAM", value: m.id }))
+                  ...teamMembers.map(m => ({
+                    label: m.full_name || (m.role === "admin" ? "Unnamed Admin" : "Unnamed CAM"),
+                    value: m.id
+                  }))
                 ],
                 "Filter by tag": availableTags.map((t) => ({ label: t.name, value: t.id, colour: t.colour ?? undefined })),
                 "Filter by priority score": PRIORITY_SCORE_FILTERS.map((band) => ({
@@ -955,7 +961,7 @@ export default async function ClientsPage({
                     href="/clients/new"
                     size="md"
                   >
-                    Add client manually
+                    Add a client
                   </OriginButton>
                 )}
               </div>

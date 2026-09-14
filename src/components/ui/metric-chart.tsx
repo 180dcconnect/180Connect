@@ -2,6 +2,7 @@
 
 import { useId, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import { cn } from "@/lib/utils";
 
 /** One point on a metric line: a value and the label for its x position. */
 export type SeriesPoint = { value: number; date: string };
@@ -73,7 +74,7 @@ export function formatCompact(value: number): string {
  * the bottom for its opaque footer — the chart sits behind both.
  */
 const BAND_TOP = 34;
-const BAND_BOTTOM = 99.5;
+const BAND_BOTTOM = 100;
 // Left keeps a small inset so the start of the line isn't glued to the card
 // edge; right is 0 so the last data point reaches the edge itself — stopping it
 // short read as if the series ended a day early.
@@ -241,6 +242,7 @@ export function MetricChart({
   dateFormatter,
   bandBottom = BAND_BOTTOM,
   bandTop = BAND_TOP,
+  className,
 }: {
   series: ChartSeries[];
   view: ChartView;
@@ -250,6 +252,7 @@ export function MetricChart({
   dateFormatter: (date: string) => string;
   bandBottom?: number;
   bandTop?: number;
+  className?: string;
 }) {
   const rawId = useId().replace(/:/g, "");
   const [hovered, setHovered] = useState<number | null>(null);
@@ -290,7 +293,7 @@ export function MetricChart({
 
   return (
     <div
-      className="relative h-full w-full select-none touch-none overflow-visible"
+      className={cn("relative h-full w-full select-none touch-none overflow-visible", className)}
       onPointerLeave={() => setHovered(null)}
       ref={(node) => {
         if (!node || hasEnteredView) return;
@@ -308,7 +311,11 @@ export function MetricChart({
       onPointerDown={handlePointer}
       onPointerMove={handlePointer}
     >
-      <div className="absolute inset-0 overflow-hidden rounded-r-[28px]">
+      {/*
+       * Clips the plot to the chart region, inheriting the enclosing card's
+       * right-hand corner radius (e.g. rounded-2xl or rounded-[28px]) dynamically.
+       */}
+      <div className="absolute inset-0 overflow-hidden rounded-r-[inherit]">
         <svg
           className="h-full w-full"
           viewBox="0 0 100 100"

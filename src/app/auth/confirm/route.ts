@@ -1,8 +1,9 @@
-import { type NextRequest } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import {
   completeRecoveryLanding,
   invalidLinkResponse,
 } from "@/lib/auth/recovery-landing";
+import { inviteTokenFromForm } from "@/lib/auth/password-reset";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -13,13 +14,15 @@ import { createClient } from "@/lib/supabase/server";
  * phone or in a different browser. See `docs/auth/recovery-email.md` and
  * `docs/auth/invite-email.md` for the email templates that produce it.
  *
- * An invite lands here for the same reason recovery does: verifying it opens a
- * real Supabase session, and the invited person needs to choose a password
- * before that session is good for anything else — exactly the "set a password"
- * step recovery already has. Landing on `/reset-password` reuses that step
- * rather than building a second one; the copy there is generic enough to read
- * correctly either way ("choose a new password" also describes choosing the
- * first one).
+ * An invite lands here for the same reason recovery does — and then, unlike
+ * recovery, it is NOT verified here. Verifying would consume the single-use
+ * token before any password exists, stranding whoever opens the link without
+ * finishing the form. Instead the hash rides on to `/reset-password`, which
+ * verifies it when the password is submitted: opening the link as many times
+ * as it takes burns nothing, and only completing the form consumes the token.
+ * Recovery keeps verifying on landing — resetting an existing account's
+ * password is the higher-stakes flow, and its session confinement assumes a
+ * verified session from the first byte.
  */
 const BOT_USER_AGENT_REGEX =
   /whatsapp|facebookexternalhit|slackbot|twitterbot|telegrambot|discordbot|applebot|linkedinbot|skypeteamsbot|googlebot|bingbot|duckduckbot|bytespider|yandex|crawling|crawler|spider|preview|fetch/i;
@@ -70,13 +73,27 @@ export async function GET(request: NextRequest) {
     return invalidLinkResponse(request, type === "invite" ? "invite" : "recovery");
   }
 
+  if (type === "invite") {
+    // Deferred verification: carry the hash to the password form untouched.
+    // Trimmed and non-blank only — `verifyOtp` at submit time is the
+    // validator, and a blank hash reads as a malformed link, same as a
+    // missing one.
+    const inviteToken = inviteTokenFromForm(tokenHash);
+    if (!inviteToken) return invalidLinkResponse(request, "invite");
+    const url = new URL("/reset-password", request.url);
+    url.searchParams.set("flow", "invite");
+    url.searchParams.set("token_hash", inviteToken);
+    return NextResponse.redirect(url);
+  }
+
+  // Past the invite branch above, only recovery remains.
   return completeRecoveryLanding(
     request,
-    type === "invite" ? "invite-token-verification" : "password-recovery-token-verification",
-    type,
+    "password-recovery-token-verification",
+    "recovery",
     async () => {
       const supabase = await createClient();
-      return supabase.auth.verifyOtp({ token_hash: tokenHash, type });
+      return supabase.auth.verifyOtp({ token_hash: tokenHash, type: "recovery" });
     },
   );
 }

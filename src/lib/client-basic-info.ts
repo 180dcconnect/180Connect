@@ -37,6 +37,21 @@ export type OrganisationDetailRow = {
    *  the panel as `sicTitles`, because the file is not readable from a client
    *  component. */
   sic_codes?: string[] | null;
+  /** Filed purpose text. Charity Commission activities for charities, the CIC36
+   *  community-interest statement for CICs — the two canonical inputs to
+   *  resolveMission, selected wherever the row is loaded for AI context. */
+  charity_activities?: string | null;
+  cic_community_statement?: string | null;
+  /**
+   * The Charity Commission's solvency flags, as the regulator published them.
+   *
+   * Three-valued on purpose: `null` means the register has never been read for
+   * this organisation, which is not the same claim as `false` (the register
+   * says it is solvent). Nine tenths of the client list reads null, because it
+   * was imported before the columns existed.
+   */
+  insolvent?: boolean | null;
+  in_administration?: boolean | null;
   created_at?: string;
 };
 

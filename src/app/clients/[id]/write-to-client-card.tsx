@@ -23,6 +23,7 @@ export function WriteToClientCard({
   suppressionReason,
   ownershipWarning,
   hasDraft,
+  recipientEmail,
 }: {
   organisationId: string;
   blocked: boolean;
@@ -30,8 +31,20 @@ export function WriteToClientCard({
   suppressionReason?: string;
   ownershipWarning?: string;
   hasDraft: boolean;
+  /**
+   * The address on file (primary contact, else the organisation's own —
+   * already redaction-filtered by the caller). Travels as ?to= so the inbox
+   * composer opens addressed even when this client is absent from its
+   * directory (seed rows are excluded there by design). Null when nothing is
+   * on file: the window then opens blank, as before.
+   */
+  recipientEmail?: string | null;
 }) {
   const stopped = blocked || ownershipBlocked;
+  const composeHref =
+    recipientEmail?.trim()
+      ? `/inbox?compose=${organisationId}&to=${encodeURIComponent(recipientEmail.trim())}`
+      : `/inbox?compose=${organisationId}`;
   return (
     <SectionCard
       headingId="outreach-compose-heading"
@@ -56,8 +69,11 @@ export function WriteToClientCard({
       ) : (
         <div className="mt-4">
           {/* ?compose= resolves to a window already addressed to this client,
-              so the trip to the inbox costs no retyping. */}
-          <OriginButton variant="ink" size="md" href={`/inbox?compose=${organisationId}`}>
+              so the trip to the inbox costs no retyping. ?to= carries the
+              on-file address for clients the inbox directory cannot resolve
+              (seed rows are excluded there); the shell prefers its own
+              directory hit whenever it has one. */}
+          <OriginButton variant="ink" size="md" href={composeHref}>
             {hasDraft ? "Continue draft in inbox" : "Write in inbox"}
             <ArrowRight aria-hidden="true" className="h-4 w-4" />
           </OriginButton>

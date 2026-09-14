@@ -1,5 +1,5 @@
 import { formatOutreachStatus } from "./organisation-format.ts";
-import type { FollowUpUrgency } from "./outreach/follow-up-recommendations.ts";
+import type { FollowUpRecommendation, FollowUpUrgency } from "./outreach/follow-up-recommendations.ts";
 import type { ReplyTrackingSummary } from "./reply-analytics.ts";
 
 /**
@@ -63,11 +63,6 @@ const RESPONSE_STATUSES = new Set([
   "loss_due_timing",
 ]);
 
-const NEEDS_ATTENTION_STATUSES = new Set([
-  "initial_outreach_sent",
-  "follow_up_sent",
-  "no_response",
-]);
 
 /**
  * The three pipeline readings above, as predicates over a single status. Exported
@@ -160,10 +155,18 @@ export function organisationGrowthSeries(
   return points;
 }
 
+export type NeedsAttentionTrigger =
+  | "overdue_action"
+  | "inbound_reply"
+  | "follow_up_due"
+  | "stalled";
+
 export type NeedsAttentionItem = {
   id: string;
   legalName: string;
+  outreachStatus?: string;
   outreachStatusLabel: string;
+  trigger?: NeedsAttentionTrigger;
   /**
    * F160 — set when the client's silence has crossed the owner's follow-up
    * thresholds. Absent for clients still inside the window; `urgent` marks the
@@ -178,6 +181,9 @@ export type NeedsAttentionItem = {
    * candidate set below, not just a label on rows already there.
    */
   overdueAction?: { title: string; dueDate: string };
+  isInboundReply?: boolean;
+  isUnreadReply?: boolean;
+  isStalled?: boolean;
 };
 
 /** Minimal shape `needsAttention` needs from an overdue ACTIONS row — see @/lib/actions's isActionOverdue for how "overdue" is decided. */
@@ -187,28 +193,42 @@ export type OverdueActionCandidate = {
   dueDate: string;
 };
 
+export type NeedsAttentionOptions = {
+  overdueActions?: readonly OverdueActionCandidate[];
+  followUps?: readonly FollowUpRecommendation[];
+  unreadOrgIds?: ReadonlySet<string>;
+};
+
 /**
- * F027 — the logged-in CAM's own clients sent an outreach that hasn't come back
- * yet, now unioned with F172's overdue-action candidates (AC3: "also surface in
- * the CAM's Needs Attention panel", not only the Actions tab). Personal, not
- * platform-wide: the outreach half still filters to `owner_id === actorId`; the
- * overdue-action half doesn't need to, since `overdueActions` is already scoped
- * to this actor's own assigned actions by the caller's query — an action stays
- * with its assignee even if the client's ownership moves on (F257), and it is
- * still this CAM's work to chase.
+ * Action Center filter: surfaces clients that genuinely need the CAM's attention:
+ * - Overdue actions (open tasks past their due date)
+ * - Inbound replies awaiting response (responded)
+ * - Due / urgent follow-ups (silence exceeded thresholds)
+ * - Stalled clients (no response after full outreach cycle)
  *
- * Longest-waiting first for the outreach-only rows (oldest updated_at, existing
- * behaviour); a row that owes its place to an overdue action instead sorts by
- * how overdue that action is (earliest due date first) when there is no
- * outreach signal to sort by.
+ * In-flight outreach within the normal silence window is intentionally excluded.
  */
 export function needsAttention(
-  rows: DashboardOrgRow[],
+  rows: readonly DashboardOrgRow[],
   actorId: string,
-  overdueActions: readonly OverdueActionCandidate[] = [],
+  overdueActionsOrOptions: readonly OverdueActionCandidate[] | NeedsAttentionOptions = [],
+  legacyFollowUps: readonly FollowUpRecommendation[] = [],
 ): NeedsAttentionItem[] {
-  // Earliest (most overdue) action per client, when a CAM has more than one
-  // overdue action on the same client — one badge per row, not a list.
+  let overdueActions: readonly OverdueActionCandidate[] = [];
+  let followUps: readonly FollowUpRecommendation[] = [];
+  let unreadOrgIds: ReadonlySet<string> | undefined;
+
+  if (!Array.isArray(overdueActionsOrOptions) && typeof overdueActionsOrOptions === "object" && overdueActionsOrOptions !== null && ("overdueActions" in overdueActionsOrOptions || "followUps" in overdueActionsOrOptions || "unreadOrgIds" in overdueActionsOrOptions)) {
+    const opts = overdueActionsOrOptions as NeedsAttentionOptions;
+    overdueActions = opts.overdueActions ?? [];
+    followUps = opts.followUps ?? [];
+    unreadOrgIds = opts.unreadOrgIds;
+  } else {
+    overdueActions = (overdueActionsOrOptions as readonly OverdueActionCandidate[]) ?? [];
+    followUps = legacyFollowUps;
+  }
+
+  // Earliest (most overdue) action per client
   const overdueByOrg = new Map<string, OverdueActionCandidate>();
   for (const candidate of overdueActions) {
     const existing = overdueByOrg.get(candidate.organisationId);
@@ -217,37 +237,111 @@ export function needsAttention(
     }
   }
 
+  const followUpByOrg = new Map<string, FollowUpRecommendation>();
+  for (const rec of followUps) {
+    followUpByOrg.set(rec.organisationId, rec);
+  }
+
   const rowsById = new Map(rows.map((row) => [row.id, row]));
   const candidateIds = new Set<string>();
+
   for (const row of rows) {
-    if (row.owner_id === actorId && NEEDS_ATTENTION_STATUSES.has(row.outreach_status)) {
+    if (row.owner_id !== actorId) continue;
+
+    // Trigger 1: Inbound reply awaiting response (highest outreach priority)
+    if (row.outreach_status === "responded") {
       candidateIds.add(row.id);
+      continue;
     }
+
+    // Trigger 2: Follow-up is due or urgent (passed silence threshold)
+    if (followUpByOrg.has(row.id)) {
+      candidateIds.add(row.id);
+      continue;
+    }
+
+    // Trigger 3: Truly stalled clients (no response after outreach cycle)
+    if (row.outreach_status === "no_response") {
+      candidateIds.add(row.id);
+      continue;
+    }
+
+    // Trigger 4: Overdue action on this client
+    if (overdueByOrg.has(row.id)) {
+      candidateIds.add(row.id);
+      continue;
+    }
+
+    // In-flight outreach within normal silence window is intentionally excluded.
   }
-  for (const organisationId of overdueByOrg.keys()) {
-    // A candidate action can reference a client this actor no longer owns, or
-    // one this fetch's `rows` doesn't include (e.g. now suppressed) — skip
-    // rather than render a row with no client data behind it.
-    if (rowsById.has(organisationId)) candidateIds.add(organisationId);
+
+  // Also include any organisation with an overdue action assigned to this actor,
+  // even if ownership of the client has moved (F172 AC3 / F257).
+  for (const orgId of overdueByOrg.keys()) {
+    if (rowsById.has(orgId)) candidateIds.add(orgId);
   }
 
   return [...candidateIds]
     .map((id) => rowsById.get(id)!)
-    .sort((a, b) => {
-      const overdueA = overdueByOrg.get(a.id)?.dueDate;
-      const overdueB = overdueByOrg.get(b.id)?.dueDate;
-      if (overdueA && overdueB) return overdueA < overdueB ? -1 : overdueA > overdueB ? 1 : 0;
-      if (overdueA) return -1;
-      if (overdueB) return 1;
-      return a.updated_at.localeCompare(b.updated_at);
-    })
     .map((row) => {
       const overdue = overdueByOrg.get(row.id);
+      const followUp = followUpByOrg.get(row.id);
+      const isInboundReply = row.owner_id === actorId && row.outreach_status === "responded";
+      const isStalled = row.owner_id === actorId && row.outreach_status === "no_response";
+
+      let trigger: NeedsAttentionTrigger = "follow_up_due";
+      if (overdue) {
+        trigger = "overdue_action";
+      } else if (isInboundReply) {
+        trigger = "inbound_reply";
+      } else if (followUp) {
+        trigger = "follow_up_due";
+      } else if (isStalled) {
+        trigger = "stalled";
+      }
+
       return {
         id: row.id,
         legalName: row.legal_name,
+        outreachStatus: row.outreach_status,
         outreachStatusLabel: formatOutreachStatus(row.outreach_status),
+        trigger,
         ...(overdue ? { overdueAction: { title: overdue.title, dueDate: overdue.dueDate } } : {}),
+        ...(followUp
+          ? { followUp: { daysWaiting: followUp.daysWaiting, urgency: followUp.urgency } }
+          : {}),
+        ...(isInboundReply
+          ? { isInboundReply: true, isUnreadReply: unreadOrgIds?.has(row.id) ?? false }
+          : {}),
+        ...(isStalled ? { isStalled: true } : {}),
       };
+    })
+    .sort((a, b) => {
+      const getTier = (item: NeedsAttentionItem) => {
+        if (item.overdueAction) return 1;
+        if (item.followUp?.urgency === "urgent") return 1;
+        if (item.isInboundReply && item.isUnreadReply) return 1;
+        if (item.isInboundReply) return 2;
+        if (item.followUp?.urgency === "due") return 2;
+        return 3;
+      };
+
+      const tierA = getTier(a);
+      const tierB = getTier(b);
+      if (tierA !== tierB) return tierA - tierB;
+
+      if (a.overdueAction && b.overdueAction) {
+        return a.overdueAction.dueDate.localeCompare(b.overdueAction.dueDate);
+      }
+      if (a.overdueAction) return -1;
+      if (b.overdueAction) return 1;
+
+      if (a.followUp && b.followUp) {
+        return b.followUp.daysWaiting - a.followUp.daysWaiting;
+      }
+
+      const rowA = rowsById.get(a.id);
+      const rowB = rowsById.get(b.id);
+      return (rowA?.updated_at ?? "").localeCompare(rowB?.updated_at ?? "");
     });
 }

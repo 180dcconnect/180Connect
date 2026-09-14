@@ -113,11 +113,17 @@ export function ResetPasswordForm({
   isInvite,
   email,
   existingFullName,
+  inviteTokenHash,
 }: {
   linkError?: string;
   isInvite?: boolean;
   email?: string;
   existingFullName?: string | null;
+  /**
+   * Deferred invite token from the link, verified when this form submits —
+   * opening the link must not consume it. Hidden and never rendered.
+   */
+  inviteTokenHash?: string;
 }) {
   const [state, action, pending] = useActionState(setNewPassword, initialState);
   const [password, setPassword] = useState("");
@@ -152,6 +158,7 @@ export function ResetPasswordForm({
 
   return (
     <form action={action} className="mt-6 flex flex-col gap-5" noValidate>
+      {inviteTokenHash && <input type="hidden" name="tokenHash" value={inviteTokenHash} />}
       {state.message && (
         <div role="alert" className={bannerClass("light", "error")}>
           {state.message}

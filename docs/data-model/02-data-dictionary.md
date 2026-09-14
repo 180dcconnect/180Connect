@@ -177,7 +177,7 @@
 | 04 Entities | USERS | created_at | timestamp |  |  |
 | 04 Entities | USERS | updated_at | timestamp |  |  |
 | 04 Entities | USERS | is_seed | boolean |  |  |
-| 04 Entities | USERS | deactivated_at | timestamp |  |  |
+| 04 Entities | USERS | deleted_at | timestamp |  | When the account was deleted and its personal details redacted |
 | 04 Entities | USERS | invited_at | timestamp |  |  |
 | 04 Entities | USERS | invite_accepted_at | timestamp |  |  |
 | 04 Entities | USERS | onboarding_completed_at | timestamp |  | When the user finished the onboarding flow |
@@ -444,7 +444,7 @@
 | 08 System Analytics | ERROR_LOG | created_at | timestamp |  | Row creation timestamp |
 | 08 System Analytics | AUDIT_LOG | id | uuid |  | Primary key |
 | 08 System Analytics | AUDIT_LOG | action_user_id | uuid | USERS | id of user who acted |
-| 08 System Analytics | AUDIT_LOG | action | text |  | Machine token: role_changed, user_deactivated |
+| 08 System Analytics | AUDIT_LOG | action | text |  | Machine token: role_changed, user_suspended, user_deleted |
 | 08 System Analytics | AUDIT_LOG | target_table | text |  | Table the action targeted |
 | 08 System Analytics | AUDIT_LOG | target_id | uuid |  | Row targeted |
 | 08 System Analytics | AUDIT_LOG | detail | jsonb |  | Action Context: before/after, reason |

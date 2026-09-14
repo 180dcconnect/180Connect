@@ -35,9 +35,38 @@ export const reviewedEmailSchema = z.object({
   explicitlyApproved: z.literal(true, {
     error: "Review the email and confirm approval before sending.",
   }),
+  // F217: the composer's "Attach flyer" toggle as it stood at Send. The draft
+  // row's attach_flyer was only ever written when the row was created, so a
+  // toggle flipped afterwards — or a draft created by a path that never set it
+  // — silently sent without the flyer. Absent (retries, the worker) means
+  // "keep whatever the row already says".
+  attachFlyer: z.boolean().optional(),
 });
 
 export type ReviewedEmailInput = z.infer<typeof reviewedEmailSchema>;
+
+/** Refusal when the picked send time is in the past or the current minute. */
+export const SCHEDULE_MIN_LEAD_MESSAGE =
+  "Choose a future date and time outside the current minute.";
+
+/**
+ * The minute floor a scheduled send must clear: the start of the next
+ * minute. Anything earlier is either already gone or effectively send-now
+ * wearing a schedule — the worker fires on a minute cadence, so a time
+ * inside the current minute has no meaningful "later" to wait for.
+ */
+export function startOfNextMinute(now: Date = new Date()): Date {
+  return new Date(Math.floor(now.getTime() / 60000) * 60000 + 60000);
+}
+
+/**
+ * Whether `when` is schedulable as of `now`: strictly after the current
+ * minute. Invalid dates fail closed (`NaN` comparisons are false), so a
+ * garbage instant can never read as allowed.
+ */
+export function isScheduleTimeAllowed(when: Date, now: Date = new Date()): boolean {
+  return when.getTime() >= startOfNextMinute(now).getTime();
+}
 
 /**
  * F126: the payload for scheduleReviewedEmail — the reviewed email plus when it
@@ -51,7 +80,11 @@ export type ReviewedEmailInput = z.infer<typeof reviewedEmailSchema>;
  * email address before sending" with a filled-in recipient field on screen.
  */
 export const scheduleSchema = reviewedEmailSchema.extend({
-  scheduledAt: z.iso.datetime(),
+  scheduledAt: z.iso
+    .datetime()
+    .refine((value) => isScheduleTimeAllowed(new Date(value)), {
+      message: SCHEDULE_MIN_LEAD_MESSAGE,
+    }),
 });
 
 export type ScheduleReviewedEmailInput = z.infer<typeof scheduleSchema>;

@@ -33,6 +33,10 @@ import { LoaderPinwheel } from "@/components/animate-ui/icons/loader-pinwheel";
 import { AiThinkingState } from "@/components/ui/ai-thinking-state";
 import { StreamingDraftText } from "@/components/ui/streaming-draft-text";
 import { useStageOneDraftStream } from "@/components/outreach/use-stage-one-draft-stream";
+import {
+  TakeOwnershipDialog,
+  claimClientOwnership,
+} from "@/components/outreach/take-ownership-dialog";
 import { GooeyEmailInput } from "@/components/ui/gooey-email-input";
 import { SendButton } from "@/components/ui/send-button";
 import {
@@ -66,6 +70,11 @@ import {
   type RecipientMatch,
 } from "@/lib/inbox/recipients";
 import {
+  isScheduleTimeAllowed,
+  SCHEDULE_MIN_LEAD_MESSAGE,
+  startOfNextMinute,
+} from "@/lib/outreach/send-reviewed";
+import {
   EMAIL_LENGTHS,
   EMAIL_REGISTER_LABELS,
   EMAIL_REGISTERS,
@@ -77,9 +86,10 @@ import {
   type ClosingApproach,
 } from "@/lib/outreach/stage-one-prompt";
 import { getSectorColor, getSectorTagStyle } from "./gmail-sidebar";
-import {
-
-} from "@/components/outreach/email-review-panel";
+/**
+ * Outreach sends route through the approved server actions (sendReviewedEmail / scheduleReviewedEmail),
+ * ensuring the same human review, suppression, and rate limit checks as EmailReviewPanel.
+ */
 import { composeBodyToHtml } from "@/lib/outreach/compose-body-html";
 import {
   formatScheduleLong,
@@ -87,6 +97,60 @@ import {
   scheduleSuggestions,
   toLocalInputValue,
 } from "@/components/outreach/schedule-send-dialog";
+
+/**
+ * Enough of a compose window to reopen it exactly as it was — the Undo half
+ * of the shell's delayed-commit toasts. `draftId` is the outreach_messages
+ * row the window was editing (null only for a compose that never touched the
+ * server); `body` is the editor's plain text.
+ */
+export type ComposerSnapshot = {
+  draftId: string | null;
+  recipient?: string;
+  subject?: string;
+  body?: string;
+  newsSource?: "live" | "stored" | "none";
+  newsHook?: string | null;
+  newsUrl?: string | null;
+};
+
+/**
+ * A send the shell holds behind an Undo window (Gmail-style delayed commit).
+ * The modal has already prepared everything the commit needs — the draft row
+ * exists and staged files are uploaded — but nothing has been sent yet, which
+ * is what makes Undo honest: until the window lapses the email exists only
+ * as this draft row. `bodyHtml` is the exact HTML the commit step sends,
+ * captured at Send time so later edits can't change what's in flight.
+ */
+export type PendingSendRequest = {
+  snapshot: ComposerSnapshot;
+  to: string;
+  subject: string;
+  bodyHtml: string;
+  /** ISO instant a scheduled send is due; absent means send now. */
+  scheduledFor?: string;
+  organisationId: string;
+  messageId: string;
+  /** The composer's "Attach flyer" toggle at Send; absent keeps the row's value. */
+  attachFlyer?: boolean;
+};
+
+/**
+ * A discard the shell holds behind an Undo window. The row still exists —
+ * the discard RPC only fires when the window lapses — so Undo just reopens
+ * `snapshot`. Null ids mean a pure-local compose that never reached the
+ * server: the commit is a no-op and Undo restores unsaved text.
+ *
+ * Staged-but-unuploaded files are NOT in the snapshot: they live as browser
+ * File objects with blob-URL previews, and Undo restores the text only —
+ * files need re-attaching. Attachments already uploaded onto the draft row
+ * survive either way.
+ */
+export type PendingDiscardRequest = {
+  organisationId: string | null;
+  messageId: string | null;
+  snapshot: ComposerSnapshot;
+};
 
 export type GmailComposeModalProps = {
   isOpen: boolean;
@@ -122,13 +186,12 @@ export type GmailComposeModalProps = {
    */
   isMinimised?: boolean;
   onMinimisedChange?: (minimised: boolean) => void;
-  onSend: (message: {
-    to: string;
-    subject: string;
-    body: string;
-    /** ISO instant a scheduled send is due; absent means send now. */
-    scheduledFor?: string;
-  }) => void;
+  /**
+   * Hands a prepared send to the shell, which holds it behind an Undo window
+   * before committing (see PendingSendRequest). The window closes at once;
+   * the shell toasts "Sending… · Undo" and fires the result toast after.
+   */
+  onSend: (request: PendingSendRequest) => void;
   /**
    * Fires after Save-as-draft persists, so the shell can toast. The window
    * closes immediately after saving, which would take any modal-local
@@ -136,14 +199,11 @@ export type GmailComposeModalProps = {
    */
   onDraftSaved?: () => void;
   /**
-   * Fires after a successful send (or schedule-send), so the shell can toast.
-   * Receives whether the send was scheduled so the message can differ.
+   * Hands a discard to the shell, which holds it behind an Undo window before
+   * calling the discard RPC (see PendingDiscardRequest). The window closes at
+   * once; Undo reopens it from the snapshot.
    */
-  onSent?: (scheduled: boolean) => void;
-  /**
-   * Fires after a draft is successfully discarded, so the shell can toast.
-   */
-  onDiscarded?: () => void;
+  onDiscardRequest?: (request: PendingDiscardRequest) => void;
   initialRecipient?: string;
   initialSubject?: string;
   /**
@@ -626,8 +686,7 @@ export function GmailComposeModal({
   onMinimisedChange,
   onSend,
   onDraftSaved,
-  onSent,
-  onDiscarded,
+  onDiscardRequest,
   initialRecipient = "",
   initialSubject = "",
   initialNewsSource,
@@ -698,12 +757,30 @@ export function GmailComposeModal({
   const [isScheduleMenuOpen, setIsScheduleMenuOpen] = useState(false);
   const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
   const [customWhen, setCustomWhen] = useState<string | null>(null);
+  // A custom time inside the past or the current minute never reaches the
+  // confirm step: refused here, where the picker still stands.
+  const [scheduleTimeError, setScheduleTimeError] = useState<string | null>(null);
   // The schedule dialog is a three-step flow: pick a time, confirm you mean it
   // (no more editing after), then a "scheduled for …" acknowledgement before
   // the window closes. `pendingWhen` carries the picked time across the steps.
   const [scheduleStep, setScheduleStep] = useState<"pick" | "confirm" | "done">("pick");
   const [pendingWhen, setPendingWhen] = useState<Date | null>(null);
   const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
+  // Take-ownership confirmation: sending to an unowned client makes the
+  // sender its owner, and that is an explicit decision, not a side effect.
+  const [isOwnershipDialogOpen, setIsOwnershipDialogOpen] = useState(false);
+  const [isClaiming, setIsClaiming] = useState(false);
+  // The client the confirmation was accepted for. Claiming makes the
+  // directory stale (it still reads unowned), so the gate remembers the
+  // acceptance per client rather than re-asking on the resumed send.
+  const [ownershipAcceptedFor, setOwnershipAcceptedFor] = useState<string | null>(null);
+  // A scheduled send carries its due time into the dialog and back out, so
+  // confirming resumes the same send rather than converting it to send-now.
+  const pendingOwnershipScheduledFor = useRef<string | undefined>(undefined);
+  // Set when the dialog is dismissed mid-claim (Cancel, X, backdrop,
+  // Escape): a late claim success must not send after the CAM walked away —
+  // the composer keeps everything and Send can simply be pressed again.
+  const ownershipAbortedRef = useRef(false);
   // Files chosen in this window but not yet anywhere: they are uploaded to the
   // client's attachment store and linked to the draft only once Send has
   // created that draft (see handleSend). Held as raw File objects until then.
@@ -1216,13 +1293,21 @@ export function GmailComposeModal({
     setScheduleStep("pick");
     setPendingWhen(null);
     setCustomWhen(null);
+    setScheduleTimeError(null);
   }
 
   /** A time was picked: hold it and ask for confirmation rather than sending
       straight away. A draft missing a recipient or subject can't be scheduled,
-      so that is caught here before the confirm step is shown. */
+      so that is caught here before the confirm step is shown. A time inside
+      the past or the current minute is refused even earlier, inline, so the
+      picked value survives to be corrected. */
   function beginSchedule(when: Date) {
     if (Number.isNaN(when.getTime())) return;
+    if (!isScheduleTimeAllowed(when)) {
+      setScheduleTimeError(SCHEDULE_MIN_LEAD_MESSAGE);
+      return;
+    }
+    setScheduleTimeError(null);
     const nextErrors: { to?: string; subject?: string } = {};
     if (!savedTo?.trim()) nextErrors.to = "Save a recipient first.";
     if (!subject.trim()) nextErrors.subject = "Add a subject.";
@@ -1280,43 +1365,40 @@ export function GmailComposeModal({
   }
 
   /**
-   * The trash tap and the close dialog's Discard share this: a real delete,
-   * never a silent orphan. A server draft row (AI-generated, blank-created
-   * or resumed) goes through the audited discard RPC under its own
-   * organisation; a pure-local compose with no row just clears. Returns
-   * false — leaving the window open with the reason shown — when the RPC
-   * refuses, so a failed delete never reads as a successful one.
+   * The trash tap and the close dialog's Discard share this: a handoff, never
+   * a delete. The shell holds the request behind an Undo window and only then
+   * calls the audited discard RPC under the draft's own organisation — so a
+   * discarded draft is recoverable until the window lapses, and a failed
+   * delete still surfaces (as a shell toast, since this window is gone by
+   * then) rather than reading as success.
+   *
+   * Always true: the handoff itself cannot fail, and the commit step reports
+   * its own outcome. A pure-local compose (no row) hands null ids — the
+   * commit is a no-op and Undo restores the unsent text.
    */
   async function discardWholeDraft(): Promise<boolean> {
     const draftMessageId = generatedDraft?.id ?? resumedDraftId ?? null;
     const draftOrganisationId =
       generatedDraft?.organisationId ?? resumedDraftOrganisationId;
-    if (!draftMessageId || !draftOrganisationId) {
-      resetDraft();
-      return true;
-    }
     setIsDiscarding(true);
     try {
-      const { discardEmailDraft } = await import(
-        "@/app/clients/[id]/outreach-actions"
-      );
-      const result = await discardEmailDraft({
+      onDiscardRequest?.({
         organisationId: draftOrganisationId,
         messageId: draftMessageId,
+        snapshot: {
+          draftId: draftMessageId,
+          recipient: savedTo ?? undefined,
+          subject,
+          body,
+          newsSource: initialNewsSource,
+          newsHook: initialNewsHook ?? null,
+          newsUrl: initialNewsUrl ?? null,
+        },
       });
-      if (!result.ok) {
-        setSendError(result.message);
-        return false;
-      }
-    } catch {
-      setSendError("The draft could not be discarded. Refresh and try again.");
-      return false;
     } finally {
       setIsDiscarding(false);
     }
     resetDraft();
-    router.refresh();
-    onDiscarded?.();
     return true;
   }
 
@@ -1386,6 +1468,7 @@ export function GmailComposeModal({
         subject,
         body: composeBodyToHtml(body),
         recipient: savedTo ?? undefined,
+        attachFlyer,
       });
       if (!result.ok) {
         setSaveDraftError(result.message);
@@ -1490,7 +1573,7 @@ export function GmailComposeModal({
    * A scheduled send arrives here the same way: the time is carried into the
    * panel's own schedule control rather than sent from this window.
    */
-  async function handleSend(scheduledFor?: string) {
+  async function handleSend(scheduledFor?: string, justClaimedOwnershipFor?: string) {
     const recipient = savedTo ?? "";
     const nextErrors: { to?: string; subject?: string } = {};
     if (!recipient.trim()) nextErrors.to = "Save a recipient first.";
@@ -1502,6 +1585,24 @@ export function GmailComposeModal({
       return;
     }
     if (!sendableClient) return;
+
+    // Every client in outreach has an owner, so sending to an unowned one
+    // makes the sender its owner — explicitly. The dialog states that plainly
+    // and the claim below is what enforces it: claim_organisation is atomic,
+    // audited and idempotent for the current owner, so a stale directory hint
+    // can only ever over-ask, never over-claim. Claiming first also means a
+    // refused send strands nothing: no draft row exists yet, and the composer
+    // keeps everything that was typed.
+    if (
+      sendableClient.ownerId == null &&
+      ownershipAcceptedFor !== sendableClient.id &&
+      justClaimedOwnershipFor !== sendableClient.id
+    ) {
+      pendingOwnershipScheduledFor.current = scheduledFor;
+      setSendError(null);
+      setIsOwnershipDialogOpen(true);
+      return;
+    }
 
     setIsScheduleMenuOpen(false);
     setSendError(null);
@@ -1548,52 +1649,91 @@ export function GmailComposeModal({
         return;
       }
 
-      // Send directly — no review panel step. The send action re-checks
-      // suppression, ownership, rate limits and human review server-side.
-      const sendInput = {
-        organisationId: sendableClient.id,
-        messageId: draftId,
-        recipient,
-        subject,
-        body: composeBodyToHtml(body),
-        explicitlyApproved: true as const,
-      };
-
-      let result;
-      if (scheduledFor) {
-        const { scheduleReviewedEmail } = await import(
-          "@/app/clients/[id]/outreach-actions"
-        );
-        result = await scheduleReviewedEmail({
-          ...sendInput,
-          scheduledAt: scheduledFor,
-        });
-      } else {
-        const { sendReviewedEmail } = await import(
-          "@/app/clients/[id]/outreach-actions"
-        );
-        result = await sendReviewedEmail(sendInput);
-      }
-
-      if (result.ok) {
-        onSend({
-          to: recipient,
+      // Delayed commit — no review panel step, and no send yet either. The shell
+      // holds this behind an Undo window and only then calls the send action,
+      // which re-checks suppression, ownership, rate limits and human review
+      // server-side. Until the window lapses the email exists only as this
+      // draft row, which is what makes Undo honest: nothing has left the building.
+      onSend({
+        snapshot: {
+          draftId,
+          recipient,
           subject,
           body,
-          scheduledFor: scheduledFor ?? undefined,
-        });
-        resetDraft();
-        onSent?.(Boolean(scheduledFor));
-        onClose();
-      } else {
-        setSendError(result.message);
-      }
+          newsSource: initialNewsSource,
+          newsHook: initialNewsHook ?? null,
+          newsUrl: initialNewsUrl ?? null,
+        },
+        to: recipient,
+        subject,
+        bodyHtml: composeBodyToHtml(body),
+        scheduledFor: scheduledFor ?? undefined,
+        organisationId: sendableClient.id,
+        messageId: draftId,
+        attachFlyer,
+      });
+      resetDraft();
+      onClose();
     } catch {
       setSendError(
         "The network dropped before the email could be sent. Nothing was sent.",
       );
     } finally {
       setIsSending(false);
+    }
+  }
+
+  /**
+   * Backs out of the ownership dialog with nothing claimed and nothing sent —
+   * the composer underneath keeps everything that was typed.
+   */
+  function cancelOwnershipDialog() {
+    ownershipAbortedRef.current = true;
+    pendingOwnershipScheduledFor.current = undefined;
+    setIsOwnershipDialogOpen(false);
+  }
+
+  /**
+   * The ownership dialog's confirm: claims the client first, sends second.
+   *
+   * The shared claim helper reuses the profile's claim route rather than a
+   * second write path — the RPC stays the single audited door, and its 409
+   * is the race answer: if someone else owns the client now, the send stops
+   * with that message instead of overriding them. A viewer reaching this
+   * dialog is refused the same way, before any draft row exists.
+   */
+  async function confirmOwnershipAndSend() {
+    if (!sendableClient) return;
+    const organisationId = sendableClient.id;
+    const scheduledFor = pendingOwnershipScheduledFor.current;
+    ownershipAbortedRef.current = false;
+    setIsClaiming(true);
+    try {
+      const result = await claimClientOwnership(organisationId);
+      if (!result.ok) {
+        // Dismissed mid-claim: stay silent — surfacing a failure for an
+        // attempt the CAM walked away from is noise. Acceptance stays unset,
+        // so the next Send asks again (and a 409 then reports properly).
+        if (ownershipAbortedRef.current) return;
+        setIsOwnershipDialogOpen(false);
+        pendingOwnershipScheduledFor.current = undefined;
+        setSendError(result.message);
+        return;
+      }
+      // The claim landed even if the dialog was dismissed while it flew:
+      // record the acceptance so the next Send proceeds without re-asking,
+      // but never send after a walk-away.
+      setOwnershipAcceptedFor(organisationId);
+      if (ownershipAbortedRef.current) return;
+      setIsOwnershipDialogOpen(false);
+      pendingOwnershipScheduledFor.current = undefined;
+      await handleSend(scheduledFor, organisationId);
+    } catch {
+      setIsOwnershipDialogOpen(false);
+      pendingOwnershipScheduledFor.current = undefined;
+      setSendError("Could not reach the server. Check your connection and try again.");
+    } finally {
+      setIsClaiming(false);
     }
   }
 
@@ -2628,24 +2768,34 @@ export function GmailComposeModal({
                         Pick date &amp; time
                       </button>
                     ) : (
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="datetime-local"
-                          value={customWhen}
-                          min={toLocalInputValue(new Date())}
-                          onChange={(event) => setCustomWhen(event.target.value)}
-                          aria-label="Send date and time"
-                          className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-[12px] text-slate-800 focus:border-lead focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          disabled={!customWhen}
-                          onClick={() => beginSchedule(new Date(customWhen))}
-                          className="shrink-0 rounded-md bg-lead px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-[#1b3160] disabled:opacity-50 cursor-pointer"
-                        >
-                          Schedule
-                        </button>
-                      </div>
+                      <>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="datetime-local"
+                            value={customWhen}
+                            min={toLocalInputValue(startOfNextMinute())}
+                            onChange={(event) => {
+                              setCustomWhen(event.target.value);
+                              setScheduleTimeError(null);
+                            }}
+                            aria-label="Send date and time"
+                            className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-[12px] text-slate-800 focus:border-lead focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            disabled={!customWhen}
+                            onClick={() => beginSchedule(new Date(customWhen))}
+                            className="shrink-0 rounded-md bg-lead px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-[#1b3160] disabled:opacity-50 cursor-pointer"
+                          >
+                            Schedule
+                          </button>
+                        </div>
+                        {scheduleTimeError && (
+                          <p className="pt-1.5 text-[11px] font-semibold text-red-600" role="alert">
+                            {scheduleTimeError}
+                          </p>
+                        )}
+                      </>
                     )}
                   </div>
                 </>
@@ -2799,6 +2949,19 @@ export function GmailComposeModal({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Take-ownership confirmation: sending to an unowned client makes the
+          sender its owner. Shared with the reply composer so the two send
+          surfaces cannot drift — see take-ownership-dialog.tsx. */}
+      {sendableClient && (
+        <TakeOwnershipDialog
+          open={isOwnershipDialogOpen}
+          orgName={sendableClient.orgName}
+          claiming={isClaiming}
+          onCancel={cancelOwnershipDialog}
+          onConfirm={() => void confirmOwnershipAndSend()}
+        />
+      )}
 
       {/* Staged files no browser can preview (Word, Excel…) cannot open in a
           tab — tapping the name asks first, downloads on agreement. Same
@@ -3282,6 +3445,8 @@ function ProfileView({ client }: { client: AddressableClient }) {
           knows which client it is writing to. */}
       <a
         href={`/clients/${client.id}`}
+        target="_blank"
+        rel="noopener noreferrer"
         className="mt-4 flex items-center gap-1.5 rounded-inset px-2.5 py-1.5 text-[13px] font-semibold text-lead transition-colors hover:bg-lead-wash"
       >
         <span>Open client record</span>

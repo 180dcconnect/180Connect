@@ -29,6 +29,60 @@ const organisationTypeSchema = z.enum([
   "other",
 ]);
 
+/**
+ * Sector, reach and size — optional on both the draft and the submission.
+ *
+ * Numbers arrive from FormData as strings, so they are checked as whole-number
+ * strings here and converted in the action. A size figure needs the accounts
+ * year end it belongs to: the database files them as one financial period, and a
+ * period has to end somewhere (20261002090000).
+ */
+const wholeNumberText = (label: string) =>
+  z
+    .string()
+    .trim()
+    .regex(/^\d{0,12}$/, `${label} must be a whole number.`);
+
+// `.optional()` on each: these are extras, so every existing caller of the
+// schemas (field review, criteria checks, their tests) stays valid without them.
+const sizeAndFocusFields = {
+  sector: z.string().trim().max(100).optional(),
+  geographicReach: z.enum(["local", "regional", "national", "international"]).or(z.literal("")).optional(),
+  latestIncome: wholeNumberText("Annual income").optional(),
+  accountsYearEnd: z
+    .string()
+    .trim()
+    .regex(/^(\d{4}-\d{2}-\d{2})?$/, "Enter the accounts year end as a date.")
+    .optional(),
+  staffCount: wholeNumberText("Staff").optional(),
+  volunteerCount: wholeNumberText("Volunteers").optional(),
+};
+
+/** The fields the year-end rule reads — all optional, like the schema's. */
+type SizeAndFocus = {
+  latestIncome?: string;
+  accountsYearEnd?: string;
+  staffCount?: string;
+  volunteerCount?: string;
+};
+
+function sizeNeedsYearEnd(value: SizeAndFocus, ctx: z.RefinementCtx) {
+  if ((value.latestIncome || value.staffCount || value.volunteerCount) && !value.accountsYearEnd) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["accountsYearEnd"],
+      message: "Add the accounts year end those figures are from.",
+    });
+  }
+  if (value.accountsYearEnd && value.accountsYearEnd > new Date().toISOString().slice(0, 10)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["accountsYearEnd"],
+      message: "The accounts year end cannot be in the future.",
+    });
+  }
+}
+
 export const manualEntryDraftSchema = z.object({
   legalName: z.string().trim().max(200),
   missionStatement: z.string().trim().max(5000),
@@ -42,7 +96,8 @@ export const manualEntryDraftSchema = z.object({
   registryName: z.string().trim().max(200),
   registryNumber: z.string().trim().max(200),
   reason: z.string().trim().max(2000),
-});
+  ...sizeAndFocusFields,
+}).superRefine(sizeNeedsYearEnd);
 
 export const manualEntrySchema = z.object({
   legalName: z.string().trim().min(1, "Enter the organisation name.").max(200),
@@ -57,7 +112,8 @@ export const manualEntrySchema = z.object({
   registryName: z.string().trim().min(1, "Enter the registry name.").max(200),
   registryNumber: z.string().trim().min(1, "Enter the registry number.").max(200),
   reason: z.string().trim().min(10, "Explain why manual entry is needed (at least 10 characters).").max(2000),
-});
+  ...sizeAndFocusFields,
+}).superRefine(sizeNeedsYearEnd);
 
 export type ManualEntryInput = z.infer<typeof manualEntrySchema>;
 export type ManualEntryDraftInput = z.infer<typeof manualEntryDraftSchema>;

@@ -5,31 +5,38 @@ import { AnimatePresence, motion } from "motion/react";
 
 const MAX_STICKS = 10;
 
+export interface StackedStickBucket {
+  dateNumber: string;
+  shortLabel: string;
+  fullLabel?: string;
+}
+
 export interface StackedStickColumnsProps {
-  /** Explicit 7-number array for the 7 days. */
+  /** Explicit 7-number array for the 7 days/intervals. */
   data?: number[];
-  /** Total value used to derive a proportional 7-day distribution if data is omitted. */
-  total?: number;
   /** Custom unit/label for the tooltip, e.g. "emails", "replies", "conversions". */
   unit?: string;
   /** Active stick color class, e.g. "bg-slate-900 dark:bg-slate-100" or "bg-brand". */
   activeColorClass?: string;
+  /** Explicit 7-bucket metadata for custom period subdivisions (e.g. 7 quadrants over 30 or 90 days). */
+  buckets?: StackedStickBucket[];
   className?: string;
 }
 
 export function StackedStickColumns({
   data,
-  total,
   unit = "",
   activeColorClass = "bg-foreground/85 dark:bg-foreground/90",
+  buckets,
   className = "",
 }: StackedStickColumnsProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [hasEnteredView, setHasEnteredView] = useState(false);
   const compId = useId();
 
-  // Generate date labels for the trailing 7 days
+  // Generate date labels (use custom buckets if provided, or default to trailing 7 days)
   const dateMetadata = useMemo(() => {
+    if (buckets && buckets.length === 7) return buckets;
     const today = new Date();
     const result = [];
     for (let i = 6; i >= 0; i--) {
@@ -45,24 +52,13 @@ export function StackedStickColumns({
       });
     }
     return result;
-  }, []);
+  }, [buckets]);
 
-  // If daily data is provided, use it. Otherwise generate a realistic 7-day curve based on total.
+  // Only display real daily/bucket data. If data is omitted, show zero sticks (never synthesize fake curves).
   const counts = useMemo(() => {
     if (data && data.length === 7) return data;
-    if (total === undefined || total === 0) return [0, 0, 0, 0, 0, 0, 0];
-
-    // Standard business-week distribution weights for trailing 7 days
-    const weights = [0.12, 0.22, 0.26, 0.18, 0.14, 0.05, 0.03];
-    let distributed = weights.map((w) => Math.round(w * total));
-
-    // Ensure the sum doesn't drift due to rounding if total is non-zero
-    const sum = distributed.reduce((a, b) => a + b, 0);
-    if (sum === 0 && total > 0) {
-      distributed = [1, 2, 3, 2, 1, 0, 0];
-    }
-    return distributed;
-  }, [data, total]);
+    return [0, 0, 0, 0, 0, 0, 0];
+  }, [data]);
 
   const maxCount = Math.max(...counts, 1);
 
@@ -102,18 +98,18 @@ export function StackedStickColumns({
                 {isHovered && (
                   <motion.div
                     initial={{ opacity: 0, y: 4, scale: 0.92 }}
-                    animate={{ opacity: 1, y: -6, scale: 1 }}
+                    animate={{ opacity: 1, y: -4, scale: 1 }}
                     exit={{ opacity: 0, y: 4, scale: 0.92 }}
                     transition={{ duration: 0.15, ease: "easeOut" }}
-                    className="pointer-events-none absolute -top-8 z-50 whitespace-nowrap rounded-md bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white shadow-md backdrop-blur-md dark:bg-white dark:text-slate-950"
+                    className="pointer-events-none absolute -top-7 z-50 whitespace-nowrap rounded-md bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white shadow-md backdrop-blur-md dark:bg-white dark:text-slate-950"
                   >
                     {meta.shortLabel}: {val.toLocaleString()} {unit}
                   </motion.div>
                 )}
               </AnimatePresence>
 
-              {/* Vertical Stack of up to 10 Squarish Sticks (stacked bottom-to-top) — only reached bars show, the rest stay empty for the aesthetic */}
-              <div className="flex h-[68px] flex-col-reverse justify-start gap-[2px] p-0.5 sm:h-[78px]">
+              {/* Vertical Stack of up to 10 Sticks (stacked bottom-to-top) — only reached bars show, the rest stay empty for the aesthetic */}
+              <div className="flex h-[42px] flex-col-reverse justify-start gap-[1.5px] p-0.5 sm:h-[50px]">
                 {Array.from({ length: stickCount }, (_, stickIdx) => {
                   return (
                     <motion.div
@@ -124,7 +120,7 @@ export function StackedStickColumns({
                         scaleY: hasEnteredView ? (isHovered ? 1.1 : 1) : 0,
                       }}
                       transition={{ duration: 0.18, delay: stickIdx * 0.01 }}
-                      className={`h-[5px] w-[9px] sm:h-[6px] sm:w-[10px] rounded-[1.5px] transition-all ${activeColorClass}`}
+                      className={`h-[2.5px] w-[9px] sm:h-[3.5px] sm:w-[10px] rounded-[1px] transition-all ${activeColorClass}`}
                     />
                   );
                 })}

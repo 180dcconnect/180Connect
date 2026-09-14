@@ -70,6 +70,29 @@ export const CLOSING_APPROACHES = ["soft_cta", "meeting_request", "open_question
 export type ClosingApproach = (typeof CLOSING_APPROACHES)[number];
 
 /**
+ * Reply-shaped closings for Stage 2 (the reply composer), kept apart from
+ * CLOSING_APPROACHES on purpose: those are first-contact moves — a "short
+ * INTRODUCTORY call", "whether support could be useful" — and read wrong
+ * inside a conversation the client already joined. `soft_cta` belongs to both
+ * sets (a low-pressure continue works anywhere), so it is listed here too
+ * rather than unioned at each use site. The intro three stay valid Stage 2
+ * values for back-compat; the reply composer simply stops offering two of
+ * them.
+ */
+export const REPLY_CLOSING_APPROACHES = [
+  "soft_cta",
+  "answer_next_step",
+  "clarifying_question",
+  "short_call",
+  /** The two ends of a conversation the others have no shape for: a decline,
+   *  and a reply that hands us somebody else. Neither can be written with a
+   *  "propose a next step" close. */
+  "graceful_close",
+  "referral_next_step",
+] as const;
+export type ReplyClosingApproach = (typeof REPLY_CLOSING_APPROACHES)[number];
+
+/**
  * Who the sender is. The model cannot describe 180DC from its own knowledge —
  * "180 Degrees Consulting" is a global network and its other branches do work
  * this branch does not — so everything it may claim about us is stated here.
@@ -117,13 +140,17 @@ Over 20 projects delivered for mission-driven organisations. State that count pl
 - Building a database of potential audiences to find gaps in a charity's outreach strategy.`;
 
 /**
- * Rules that hold for every draft regardless of which dials were chosen.
+ * Rules that hold for every draft regardless of which dials were chosen and
+ * whichever stage it belongs to.
  *
  * The placeholder ban is here rather than left implicit because the user prompt
  * ends by telling the model to write a general introduction when context is
  * thin — which is exactly the situation where a model reaches for "[Charity
  * Name]" or "[insert detail]" and produces a draft that looks sendable and is
  * not.
+ *
+ * This is deliberately only the rules that are TRUE in both stages. Anything
+ * that assumes nobody has replied lives in FIRST_CONTACT_RULES below.
  */
 /**
  * How to write the organisation's name.
@@ -151,21 +178,69 @@ Read the name for meaning, not just for spelling. Many organisations state who t
 Keep that detail in the sentence about THEM. The sentences describing 180 Degrees Consulting Sheffield are the same for every charity we write to, and must never be narrowed to this one's field, community or cause. "We support organisations delivering mental health support for Sheffield's African and Caribbean communities" is a lie: we are a general consultancy, and that is a claim about them wearing our sentence. Say what they do in their sentence, say what we do in ours, and let the connection between the two be the point of the email rather than a merger of the two descriptions.
 Use only what the name actually states. Never infer beliefs, politics, religion or funding from a name, and never guess at what an ambiguous name might mean.`;
 
-export const BASE_RULES = `Write in British English throughout: -ise and -isation endings, never -ize or -ization (organisation, recognise, prioritise, specialised), plus programme, favour, centre and behaviour.
+export const SHARED_RULES = `Write in British English throughout: -ise and -isation endings, never -ize or -ization (organisation, recognise, prioritise, specialised), plus programme, favour, centre and behaviour.
 Write as "we": the email comes from the team, never from one named individual.
 Use only facts supplied in the client context below. Never invent achievements, needs, people, partnerships, or news.
 Never write square brackets, placeholders, merge fields, or any text a reader would recognise as unfilled — for example "[Name]" or "[insert detail]". Every sentence must be ready to send exactly as written.
-Do not promise outcomes. Do not imply an existing relationship, previous contact, or that we have been watching, following or monitoring the organisation — this is the first time we have written to them.
+Do not promise outcomes.
 Do not speculate about what the organisation is currently planning, facing or exploring. Sentences of the shape "as you continue to grow you may be looking to…" or "you are likely facing…" invent priorities we have not been told about, and read as filler to anyone who knows their own organisation. Offer help; do not diagnose.
 Do not describe the organisation's size or maturity at all, in any wording — "established", "growing", "small", "well-resourced" and the like are inferences from its finances and must not surface.
 Do not flatter. Avoid "vital", "incredible", "amazing", "truly inspiring" and similar praise of work supplied only as a register record: one specific, accurate observation is worth more than any adjective, and unearned praise reads as a mail-merge.`;
+
+/**
+ * Rules that only hold before anyone has replied.
+ *
+ * These lived in the shared rule block until Stage 2 inherited them, and one of
+ * them — "this is the first time we have written to them" — is flatly false in
+ * a reply, sitting in the same system prompt as the instruction to answer the
+ * client's reply. Two absolute and contradictory rules in one prompt is worse
+ * than either alone, because the model resolves the clash silently and
+ * differently each run: sometimes acknowledging the conversation, sometimes
+ * writing as if nobody had ever written back.
+ *
+ * Keeping the first-contact de-duplication here means a Stage 2 draft is never
+ * told it is a first contact, while a Stage 1 draft keeps the ban that stops it
+ * implying a relationship the branch does not have.
+ */
+export const FIRST_CONTACT_RULES = `Do not imply an existing relationship, previous contact, or that we have been watching, following or monitoring the organisation — this is the first time we have written to them.`;
 
 /**
  * Greeting is specified because `contactName` is frequently absent and the
  * fallback was previously the model's choice, so the same pipeline produced
  * "Dear Sir/Madam", "Hello", and "Dear Team" for identical missing data.
  */
-export const GREETING_RULE = `Greeting: if a primary contact name is supplied, address them by first name only ("Dear Sarah,"). If no contact name is supplied, write "Dear <organisation> team," using the organisation's everyday name. Never write "Dear Sir/Madam", and never guess or invent a name.`;
+/** Titles that are part of how a name is written but never part of the greeting. */
+const HONORIFICS = /^(mr|mrs|ms|miss|dr|prof|professor|sir|dame|rev|reverend)\.?\s+/i;
+
+export function greetingRule({
+  contactName,
+  organisationName,
+}: {
+  /**
+   * The person who will read this — the named contact for a first email, the
+   * person who actually wrote in for a reply. Null when nobody is known.
+   */
+  contactName?: string | null;
+  /** The everyday name, for the team fallback. */
+  organisationName?: string | null;
+}): string {
+  const name = contactName?.trim();
+  // Resolved here rather than left to the model as a conditional. The old rule
+  // told the model to choose, so identical missing data produced "Dear
+  // Sir/Madam", "Hello" and "Dear Team" across runs. Handing it one decided
+  // instruction — and, in a reply, the person who actually wrote — removes the
+  // choice and with it the drift.
+  if (name) {
+    // The example has to be this person's, not a generic "Sarah" — a model
+    // shown "address Ada Lovelace ... 'Dear Sarah,'" has two contradicting
+    // instructions and picks whichever it prefers. Honorifics are dropped
+    // first so "Dr Jane Smith" opens "Dear Jane," rather than "Dear Dr,".
+    const first = name.replace(HONORIFICS, "").split(/\s+/)[0] || name;
+    return `Greeting: address ${name} by first name only — "Dear ${first},". Use exactly that person and no other, and never write "Dear Sir/Madam" or a placeholder.`;
+  }
+  const org = organisationName?.trim();
+  return `Greeting: no individual name is known. Open with "Dear ${org ? `${org} team` : "<the organisation's everyday name> team"}," using the name given in the client context (never its registered ALL-CAPS form). Never write "Dear Sir/Madam", and never guess or invent a name.`;
+}
 
 /**
  * Subject rules. Deliverability lives or dies here and the field previously
@@ -425,11 +500,14 @@ export function buildStageOnePrompt(
 
 ${ORG_FACTS}${PAST_WORK ? `\n${PAST_WORK}` : ""}
 
-${BASE_RULES}
+${SHARED_RULES}\n${FIRST_CONTACT_RULES}
 
 ${NAME_RULE}
 
-${GREETING_RULE}
+${greetingRule({
+  contactName: context.contactName,
+  organisationName: context.tradingName ?? context.organisationName,
+})}
 ${SUBJECT_RULE}
 ${LENGTH_INSTRUCTIONS[length]}
 ${REGISTER_INSTRUCTIONS[register]}

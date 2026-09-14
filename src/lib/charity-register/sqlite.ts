@@ -37,6 +37,7 @@ function getDatabaseSync(): (new (path: string, options?: { readOnly?: boolean }
 
 import { SCHEMA_VERSION } from "./sqlite-schema.ts";
 import {
+  charitySearchQuery,
   countQuery,
   LABEL_KIND,
   labelValuesQuery,
@@ -268,6 +269,61 @@ export function selectCharities(
   }));
 }
 
+/**
+ * One charity by its organisation number, with its filed returns attached.
+ *
+ * The same pair `selectCharities` returns, for one row instead of a filter set.
+ * Added for the add-a-client lookup, which chooses a single charity by hand and
+ * then needs the identical staging shape the filter-driven import produces —
+ * `importCharityNumber` feeds this straight into the same `toRawPayload` the
+ * bulk path uses, so a charity added from a search box and one added by a saved
+ * filter set arrive as the same record.
+ *
+ * Null means the file does not hold that number, which is the caller's cue to
+ * say so rather than to write an empty record.
+ */
+export function charityByOrganisationNumber(
+  organisationNumber: number,
+): { charity: RegisterCharity; returns: Record<string, unknown>[] } | null {
+  const handle = open();
+  if (!handle) return null;
+
+  const charity = handle.db
+    .prepare("select * from charity where organisation_number = ? limit 1")
+    .get(organisationNumber) as RegisterCharity | undefined;
+  if (!charity) return null;
+
+  const returns = handle.db
+    .prepare("select * from charity_return where organisation_number = ? order by period_end")
+    .all(organisationNumber) as Record<string, unknown>[];
+
+  return { charity: { ...charity }, returns: returns.map((row) => ({ ...row })) };
+}
+
+/**
+ * The name and postcode the register holds for a registered charity number.
+ *
+ * For the add-a-client form's number check: a person typed a number, and the
+ * useful answer is which charity it belongs to, so they can see whether it is
+ * the one they meant. The main charity is preferred over its linked subsidiaries,
+ * which share the registered number.
+ *
+ * Null when the file is missing or does not hold the number.
+ */
+export function charityByRegisteredNumber(
+  registeredNumber: number,
+): { name: string; postcode: string | null } | null {
+  const handle = open();
+  if (!handle) return null;
+  const row = handle.db
+    .prepare(
+      "select charity_name, postcode from charity where registered_charity_number = ? " +
+        "order by organisation_number limit 1",
+    )
+    .get(registeredNumber) as { charity_name: string; postcode: string | null } | undefined;
+  return row ? { name: row.charity_name, postcode: row.postcode } : null;
+}
+
 /** Every value the file holds for one label kind — the location pickers use it. */
 export function labelValues(kind: string): string[] {
   const handle = open();
@@ -484,6 +540,12 @@ export type RegisterProfile = {
   /** "What the charity does" values, in the extract's own spelling, for
    *  `bulkSector` to map. */
   classifications: string[];
+  /**
+   * The regulator's solvency flags. Null when the extract published neither,
+   * which the profile backfill reads as "not known" — distinct from false.
+   */
+  insolvent: boolean | null;
+  inAdministration: boolean | null;
 };
 
 export function lookupCharityProfile(identifier: string | number): RegisterProfile | null {
@@ -497,8 +559,8 @@ export function lookupCharityProfile(identifier: string | number): RegisterProfi
   const row = handle.db
     .prepare(
       "select organisation_number, registered_charity_number, charity_name, " +
-        "activities, date_of_registration, reporting_status from charity " +
-        "where registered_charity_number = ? or organisation_number = ? limit 1",
+        "activities, date_of_registration, reporting_status, insolvent, in_administration " +
+        "from charity where registered_charity_number = ? or organisation_number = ? limit 1",
     )
     .get(numeric, numeric) as
     | {
@@ -508,6 +570,8 @@ export function lookupCharityProfile(identifier: string | number): RegisterProfi
         activities: string | null;
         date_of_registration: string | null;
         reporting_status: string | null;
+        insolvent: number | null;
+        in_administration: number | null;
       }
     | undefined;
   if (!row) return null;
@@ -524,5 +588,100 @@ export function lookupCharityProfile(identifier: string | number): RegisterProfi
     dateOfRegistration: row.date_of_registration?.slice(0, 10) || null,
     reportingStatus: row.reporting_status?.trim() || null,
     classifications: charityLabels(row.organisation_number, LABEL_KIND.what),
+    insolvent: row.insolvent === null ? null : row.insolvent === 1,
+    inAdministration: row.in_administration === null ? null : row.in_administration === 1,
   };
+}
+
+/**
+ * One candidate from a name search, in the shape the add-a-client screen needs.
+ *
+ * Deliberately wider than `RegisterPreviewRow`: that one exists to preview a
+ * *filter*, so it carries only what a filter can select on. This one exists to
+ * decide whether this is the organisation somebody meant and to prefill a form
+ * from it, so it carries the contact details, the registry cross-reference and
+ * the solvency flags as well.
+ */
+export type RegisterCharityMatch = {
+  organisationNumber: number;
+  registeredCharityNumber: number | null;
+  charityName: string;
+  charityType: string | null;
+  reportingStatus: string | null;
+  dateOfRegistration: string | null;
+  latestIncome: number | null;
+  postcode: string | null;
+  addressLines: string | null;
+  contactEmail: string | null;
+  contactWebsite: string | null;
+  /** Set when the charity also carries a company number — a CIO or a charitable company. */
+  companyNumber: string | null;
+  isCio: boolean;
+  insolvent: boolean;
+  inAdministration: boolean;
+  /** The charity's own filed description of its work. Untrusted free text. */
+  activities: string | null;
+  /** The register's "What the charity does" values, in the register's spelling. */
+  classifications: string[];
+};
+
+/**
+ * Finds charities by name, postcode, or both — the lookup behind "add a client".
+ *
+ * The clause rules, the escaping, the relevance ordering and the measurements
+ * all live in `charitySearchQuery` (sqlite-query.ts), which is pure and has its
+ * own tests. This function only opens the file, runs the query and shapes the
+ * rows.
+ */
+export function searchCharities(
+  input: Parameters<typeof charitySearchQuery>[0],
+  limit = 8,
+): RegisterCharityMatch[] {
+  const handle = open();
+  if (!handle) return [];
+
+  const { sql, params } = charitySearchQuery(input, limit);
+  const rows = handle.db.prepare(sql).all(...params) as Array<{
+    organisation_number: number;
+    registered_charity_number: number | null;
+    charity_name: string;
+    charity_type: string | null;
+    reporting_status: string | null;
+    date_of_registration: string | null;
+    latest_income: number | null;
+    postcode: string | null;
+    address_lines: string | null;
+    contact_email: string | null;
+    contact_website: string | null;
+    company_number: string | null;
+    is_cio: number | null;
+    insolvent: number | null;
+    in_administration: number | null;
+    activities: string | null;
+  }>;
+
+  return rows.map((row) => ({
+    organisationNumber: row.organisation_number,
+    registeredCharityNumber: row.registered_charity_number,
+    charityName: row.charity_name,
+    charityType: row.charity_type?.trim() || null,
+    reportingStatus: row.reporting_status?.trim() || null,
+    // The extract publishes a full timestamp; everything downstream treats
+    // `registered_on` as a date.
+    dateOfRegistration: row.date_of_registration?.slice(0, 10) || null,
+    latestIncome: row.latest_income,
+    postcode: row.postcode?.trim() || null,
+    addressLines: row.address_lines,
+    contactEmail: row.contact_email?.trim() || null,
+    contactWebsite: row.contact_website?.trim() || null,
+    companyNumber: row.company_number?.trim() || null,
+    isCio: row.is_cio === 1,
+    // The file stores these as 0/1 and may hold null, which means the regulator
+    // published neither flag. Coerced to booleans here so no caller has to know
+    // the file's integer encoding — the same contract RegisterProfile follows.
+    insolvent: row.insolvent === 1,
+    inAdministration: row.in_administration === 1,
+    activities: row.activities?.trim() || null,
+    classifications: charityLabels(row.organisation_number, LABEL_KIND.what),
+  }));
 }

@@ -11,11 +11,12 @@ import { lookupCharityProfile } from "./sqlite.ts";
  * ── The gap this closes ──
  *
  * `organisations.charity_activities`, `sector`, `registered_on` and
- * `charity_reporting_status` are written in exactly one place:
- * `annotateOrganisation`, called from the bulk import's promote loop
- * (`write-organisations.ts`). That call sits *after* `flagIfDuplicate`, which
- * `continue`s on a charity already on the client list — so the annotate step is
- * reachable only on the insert path, for a charity arriving for the first time.
+ * `charity_reporting_status` are written on the bulk insert path
+ * (`annotateOrganisation`, called from the bulk import's promote loop in
+ * `write-organisations.ts`) and, for single-charity lookups, by that loop's
+ * own register-file follow-up — the API payload carries none of these fields,
+ * so the loop reads them from the register file under the same charity number
+ * before and after the insert.
  *
  * Every charity imported by the retired API discovery path is therefore stuck
  * without these four fields, permanently, because re-running the import
@@ -62,6 +63,13 @@ const PROFILE_COLUMNS = [
   "sector",
   "registered_on",
   "charity_reporting_status",
+  // The regulator's solvency flags, added in 20260928100000. They belong on
+  // this job rather than a new one: they are read from the same register row,
+  // filled only where the column is still null, and written in the same single
+  // update — so the "Fill in all of them" button on the import screen catches
+  // up the whole book on solvency without a second pass over 171,800 rows.
+  "insolvent",
+  "in_administration",
 ] as const;
 
 type ProfileColumn = (typeof PROFILE_COLUMNS)[number];
@@ -73,10 +81,17 @@ export type StoredProfile = {
   sector: string | null;
   registered_on: string | null;
   charity_reporting_status: string | null;
+  /**
+   * Three-valued, and the distinction is load-bearing: null is "the register
+   * has never been read for this organisation", which is a gap worth filling,
+   * while false is the register saying it is solvent, which is not.
+   */
+  insolvent: boolean | null;
+  in_administration: boolean | null;
 };
 
 /** The write this job would make for one organisation. */
-export type ProfilePatch = Partial<Record<ProfileColumn, string>>;
+export type ProfilePatch = Partial<Record<ProfileColumn, string | boolean>>;
 
 export type BackfillTarget = {
   organisationId: string;
@@ -115,6 +130,8 @@ export function patchFor(
     dateOfRegistration: string | null;
     reportingStatus: string | null;
     classifications: readonly string[];
+    insolvent: boolean | null;
+    inAdministration: boolean | null;
   },
 ): ProfilePatch {
   const patch: ProfilePatch = {};
@@ -127,6 +144,15 @@ export function patchFor(
   }
   if (stored.charity_reporting_status === null && fromRegister.reportingStatus !== null) {
     patch.charity_reporting_status = fromRegister.reportingStatus;
+  }
+  // `!== null` on both sides: `false` is the register answering "not insolvent",
+  // which is worth storing, and a truthiness test here would leave every
+  // solvent charity looking permanently unassessed.
+  if (stored.insolvent === null && fromRegister.insolvent !== null) {
+    patch.insolvent = fromRegister.insolvent;
+  }
+  if (stored.in_administration === null && fromRegister.inAdministration !== null) {
+    patch.in_administration = fromRegister.inAdministration;
   }
   if (stored.sector === null) {
     // The same mapping the bulk import applies, off the same "What the charity
@@ -141,9 +167,17 @@ export function patchFor(
   return patch;
 }
 
-/** How many fields a patch fills. */
+/**
+ * How many fields a patch fills.
+ *
+ * `!== undefined`, not truthiness: a solvency flag of `false` is a real patch
+ * and the entry beside it in the pending-fields count would otherwise vanish.
+ */
 export function patchSize(patch: ProfilePatch): number {
-  return PROFILE_COLUMNS.reduce((count, column) => count + (patch[column] ? 1 : 0), 0);
+  return PROFILE_COLUMNS.reduce(
+    (count, column) => count + (patch[column] === undefined ? 0 : 1),
+    0,
+  );
 }
 
 /** Organisation ids per `in (...)` filter — same ceiling as the Part B backfill:
@@ -176,7 +210,7 @@ async function readAll<Row>(
 }
 
 const ORGANISATION_COLUMNS =
-  "id, charity_activities, sector, registered_on, charity_reporting_status";
+  "id, charity_activities, sector, registered_on, charity_reporting_status, insolvent, in_administration";
 
 /**
  * Every organisation the register can still say something about.

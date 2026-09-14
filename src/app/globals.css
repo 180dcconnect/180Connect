@@ -94,6 +94,8 @@
   --lead: #23407a;
   --lead-mid: #35589b;
   --lead-wash: #e3e9f5;
+  --converted: #06402b;
+  --scored: #ae7168;
   --go: #3d7a2e;
   --go-wash: #e6f0e2;
   --hold: #8a5a00;
@@ -140,6 +142,8 @@
   --color-lead: var(--lead);
   --color-lead-mid: var(--lead-mid);
   --color-lead-wash: var(--lead-wash);
+  --color-converted: var(--converted);
+  --color-scored: var(--scored);
   --color-go: var(--go);
   --color-go-wash: var(--go-wash);
   --color-hold: var(--hold);

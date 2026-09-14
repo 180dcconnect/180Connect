@@ -188,7 +188,7 @@ export async function POST(
   const { data: organisationRow, error: organisationError } = await supabase
     .from("organisations")
     .select(
-      "legal_name, trading_name, organisation_type, website, city, country_code, sector, sub_sector, registered_on, charity_reporting_status, charity_activities, sic_codes",
+      "legal_name, trading_name, organisation_type, website, city, country_code, sector, sub_sector, registered_on, charity_reporting_status, charity_activities, cic_community_statement, sic_codes",
     )
     .eq("id", organisationId)
     .maybeSingle<Omit<BookletOrganisationInput, "sic_titles"> & { sic_codes: string[] | null }>();
@@ -354,10 +354,9 @@ export async function POST(
     result.model,
     "clients.generate_booklet.load_pricing",
   );
-  const costUsd = computeCostUsd(
-    { inputTokens: null, outputTokens: null },
-    pricing,
-  );
+  const inputTokens = result.usage.inputTokens ?? null;
+  const outputTokens = result.usage.outputTokens ?? null;
+  const costUsd = computeCostUsd({ inputTokens, outputTokens }, pricing);
   const { error: auditError } = await supabase.from("booklet_generations").insert({
     organisation_id: organisationId,
     generated_by: authorization.actor.id,
@@ -366,9 +365,9 @@ export async function POST(
     output: result.booklet,
     model: result.model,
     activity: "client_booklet",
-    input_tokens: null,
-    output_tokens: null,
-    total_tokens: null,
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    total_tokens: result.usage.totalTokens ?? null,
     cost_usd: costUsd,
   });
   if (auditError) {

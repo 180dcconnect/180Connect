@@ -52,6 +52,13 @@ import {
   standardizeCharityCommissionBulkRecord,
   type RawCharityCommissionBulkRecord,
 } from "./charity-commission-bulk.ts";
+import { patchFor } from "../charity-register/profile-backfill.ts";
+import {
+  lookupCharityOperatingAreas,
+  lookupCharityProfile,
+  type CharityOperatingAreas,
+  type RegisterProfile,
+} from "../charity-register/sqlite.ts";
 import {
   buildFinancialPeriodsFromBulk,
   type BulkFinancialPeriodRow,
@@ -79,7 +86,8 @@ import {
   type RawFindThatCharityRecord,
 } from "./find-that-charity.ts";
 import { sourcePriority } from "./source-priority.ts";
-import type { StandardOrganisation } from "./types.ts";
+import { deriveGeographicReach } from "./geographic-reach.ts";
+import { computeCompletenessScore, type StandardOrganisation } from "./types.ts";
 import type { ScoreableOrganisation } from "../scoring/score-client.ts";
 
 // F044: the six ORGANISATIONS fields FIELD_SOURCES tracks provenance for — must
@@ -144,8 +152,13 @@ function newCounts(read: number): PromoteCounts {
  * Shared by every promotePending*Records function below: check a mapped,
  * criteria-passed candidate against existing organisations (loaded once per
  * run — see callers) and flag it in entity_match_candidates instead of
- * inserting a second row. Returns true if the record was flagged (caller
- * should skip insertion and move on).
+ * inserting a second row.
+ *
+ * Returns whether the record was flagged (caller should skip insertion and
+ * move on) plus which organisation it matched, so charity paths can still
+ * heal a gap on the existing row — a re-import carrying freshly filed
+ * activities must fill the mission of the 2026 charity it duplicates, not
+ * just be counted as "already here" (see backfillMissingMissionOrReport).
  */
 async function flagIfDuplicate(
   store: OrganisationWriteStore,
@@ -155,14 +168,14 @@ async function flagIfDuplicate(
   existingOrganisations: ExistingOrganisationForMatch[],
   source: string,
   registrationNumbers: string[] | undefined,
-): Promise<boolean> {
+): Promise<{ flagged: boolean; matchedOrganisationId: string | null }> {
   const dismissedOrganisationIds = await store.loadDismissedMatches(record.id);
   const match = findDuplicateMatch(
     { legal_name: org.legal_name, postcode: org.postcode, registrationNumbers },
     existingOrganisations,
     new Set(dismissedOrganisationIds),
   );
-  if (!match) return false;
+  if (!match) return { flagged: false, matchedOrganisationId: null };
 
   const flagResult = await store.flagPotentialDuplicate({
     rawRecordId: record.id,
@@ -188,12 +201,12 @@ async function flagIfDuplicate(
     });
     await store.markRecordStatus(record.id, "error");
     counts.failed++;
-    return true;
+    return { flagged: true, matchedOrganisationId: null };
   }
 
   await store.markRecordStatus(record.id, "matched", match.organisationId);
   counts.flagged++;
-  return true;
+  return { flagged: true, matchedOrganisationId: match.organisationId };
 }
 
 const WEBSITE_VALIDATION_CONCURRENCY = 5;
@@ -424,6 +437,17 @@ export interface OrganisationWriteStore {
     charityReportingStatus?: string | null;
     charityActivities?: string | null;
     sicCodes?: readonly string[] | null;
+    /**
+     * The register's solvency flags.
+     *
+     * `undefined` means "this source cannot answer" and leaves the column alone;
+     * `true`/`false` means the register published a flag and it is written.
+     * The distinction is the whole reason these are not `boolean | null` like
+     * the fields above: a source that knows nothing about solvency must not be
+     * able to clear a flag the register already recorded.
+     */
+    insolvent?: boolean;
+    inAdministration?: boolean;
   }): Promise<{ ok: true } | { error: string }>;
 }
 
@@ -687,12 +711,19 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
       charityReportingStatus,
       charityActivities,
       sicCodes,
+      insolvent,
+      inAdministration,
     }) {
-      const patch: Record<string, string | string[]> = {};
+      const patch: Record<string, string | string[] | boolean> = {};
       if (sector) patch.sector = sector;
       if (registeredOn) patch.registered_on = registeredOn;
       if (charityReportingStatus) patch.charity_reporting_status = charityReportingStatus;
       if (charityActivities) patch.charity_activities = charityActivities;
+      // `!== undefined`, not truthiness: `false` is the register saying this
+      // charity is solvent, which is a fact worth storing, and dropping it would
+      // leave a null that every reader shows as "not known".
+      if (insolvent !== undefined) patch.insolvent = insolvent;
+      if (inAdministration !== undefined) patch.in_administration = inAdministration;
       // An empty array is not a fact about the company — it is the register
       // declining to classify it — and storing {} would make "we asked and
       // there were none" indistinguishable from null everywhere downstream.
@@ -1058,10 +1089,155 @@ function requireStore(
   }
 }
 
+/**
+ * The register-file read for the single-charity path. The API payload carries
+ * no activities, registration date, reporting status or classifications, so
+ * without this every single-lookup charity lands with none of them and stays
+ * that way — re-import dedups before any backfill could reach it, and the
+ * profile backfill needs an identifier the old path did write but new rows
+ * only gain below. A local SQLite read per inserted charity: cheap, and null
+ * when the deployment ships no register file or the number is unknown, which
+ * the caller treats as "annotate nothing" rather than a failure.
+ */
+function readSingleRegisterProfileOrReport(
+  charityNumber: string | undefined,
+  record: PendingRecord,
+  lookup: typeof lookupCharityProfile,
+): RegisterProfile | null {
+  if (!charityNumber?.trim()) return null;
+  try {
+    return lookup(charityNumber);
+  } catch (error) {
+    // Best-effort like every other annotation: a broken register file must
+    // not fail an otherwise good import. Fire-and-forget is wrong here —
+    // reportError is awaited everywhere else on this page.
+    void reportError(error instanceof Error ? error : new Error(String(error)), {
+      operation: "standardize.charity_commission.register_lookup",
+      rawRecordId: record.id,
+    });
+    return null;
+  }
+}
+
+/**
+ * The register-file read for reach derivation. Same best-effort contract as
+ * readSingleRegisterProfileOrReport above: a local SQLite read per freshly
+ * inserted charity, null when the deployment ships no register file or the
+ * number is unknown — "annotate nothing", never a failure.
+ *
+ * Reads the charity's FULL declared areas (local authorities, regions,
+ * countries), not the import filter's matched subset: deriving reach from
+ * matched_areas would call a national charity local the moment only one of
+ * its areas was a priority one.
+ */
+function readOperatingAreasOrReport(
+  source: string,
+  identifier: string | number | null | undefined,
+  record: PendingRecord,
+  lookup: typeof lookupCharityOperatingAreas,
+): CharityOperatingAreas | null {
+  if (identifier === null || identifier === undefined || String(identifier).trim() === "") {
+    return null;
+  }
+  try {
+    return lookup(identifier);
+  } catch (error) {
+    // Best-effort like every other annotation: a broken register file must
+    // not fail an otherwise good import.
+    void reportError(error instanceof Error ? error : new Error(String(error)), {
+      operation: `standardize.${source}.operating_areas`,
+      rawRecordId: record.id,
+    });
+    return null;
+  }
+}
+
+/**
+ * Fills a fresh insert's geographic reach from its declared operating areas.
+ *
+ * Runs after the duplicate check, so it only ever touches rows about to be
+ * inserted — never a value a human corrected since, and never a duplicate's
+ * existing row. Recomputes the completeness score with the field filled: the
+ * standardizer scored the row with reach empty, and the stored column must
+ * match the stored row.
+ */
+function applyDerivedReach(
+  org: StandardOrganisation,
+  areas: CharityOperatingAreas | null,
+): void {
+  const reach = deriveGeographicReach(areas);
+  if (!reach) return;
+  org.geographic_reach = reach;
+  org.data_completeness_score = computeCompletenessScore(org);
+}
+
+/**
+ * Writes the profile read above. A fresh insert holds nulls in all four
+ * columns, so patchFor's gap-only rule reduces to "everything the register
+ * has" — the rule still matters: it is what keeps a re-run or a future
+ * caller from restating a value a human corrected since.
+ */
+async function annotateSingleFromRegisterOrReport(
+  store: OrganisationWriteStore,
+  organisationId: string,
+  profile: RegisterProfile | null,
+  record: PendingRecord,
+): Promise<void> {
+  if (!profile) return;
+  const patch = patchFor(
+    {
+      id: organisationId,
+      charity_activities: null,
+      sector: null,
+      registered_on: null,
+      charity_reporting_status: null,
+      insolvent: null,
+      in_administration: null,
+    },
+    profile,
+  );
+  if (Object.keys(patch).length === 0) return;
+  try {
+    const result = await store.annotateOrganisation({
+      organisationId,
+      // Each field is narrowed by its own type rather than passed straight
+      // through: ProfilePatch is `string | boolean` because it now also carries
+      // the two solvency flags, and the store takes each argument at its own
+      // type. `as` would hide a genuine mismatch between the two.
+      sector: typeof patch.sector === "string" ? patch.sector : undefined,
+      registeredOn: typeof patch.registered_on === "string" ? patch.registered_on : undefined,
+      charityReportingStatus:
+        typeof patch.charity_reporting_status === "string"
+          ? patch.charity_reporting_status
+          : undefined,
+      charityActivities:
+        typeof patch.charity_activities === "string" ? patch.charity_activities : undefined,
+      insolvent: typeof patch.insolvent === "boolean" ? patch.insolvent : undefined,
+      inAdministration:
+        typeof patch.in_administration === "boolean" ? patch.in_administration : undefined,
+    });
+    if ("error" in result) throw new Error(result.error);
+  } catch (error) {
+    await reportError(error instanceof Error ? error : new Error(String(error)), {
+      operation: "standardize.charity_commission.annotate_register",
+      rawRecordId: record.id,
+      organisationId,
+    });
+  }
+}
+
 export async function promotePendingCharityCommissionRecords(
   store: OrganisationWriteStore | null = createDefaultOrganisationWriteStore(),
   checkWebsite: (value: string) => Promise<WebsiteStatus> = checkWebsiteReachability,
   criteriaCheck: (input: Parameters<typeof checkClientCriteria>[0]) => ClientCriteriaResult = checkClientCriteria,
+  // Injectable like the two above so tests can stub the register file: the
+  // default is the real local lookup, which returns null when the deployment
+  // ships no register file.
+  lookupRegisterProfile: typeof lookupCharityProfile = lookupCharityProfile,
+  // Same seam for reach derivation: the real local operating-areas lookup,
+  // stubbed in tests. Null when the file is absent — fresh inserts then keep
+  // today's null reach.
+  lookupOperatingAreas: typeof lookupCharityOperatingAreas = lookupCharityOperatingAreas,
 ): Promise<PromoteCounts> {
   requireStore(store);
 
@@ -1130,17 +1306,44 @@ export async function promotePendingCharityCommissionRecords(
       companyNumber?.identifierValue,
     ].filter((n): n is string => Boolean(n));
 
-    if (
-      await flagIfDuplicate(
-        store,
-        counts,
-        record,
-        org,
-        existingOrganisations,
-        "charity_commission",
-        registrationNumbers.length > 0 ? registrationNumbers : undefined,
-      )
-    ) {
+    // The API payload is the register *summary* — name, address, income,
+    // status — and carries no activities field at all, so a charity arriving
+    // down this path would otherwise never gain mission text, a registration
+    // date or a sector. The register file holds all three under the same
+    // charity number this record was looked up by: one local read, before the
+    // insert so the sector also reaches the first score rather than landing
+    // after it. Null when the file is absent or knows nothing about this
+    // number, in which case everything below degrades to today's behaviour.
+    //
+    // Read before dedup, not after: when this record duplicates a charity
+    // already on the client list (the 2026 cohort, imported before their first
+    // annual return filed any activities), the profile is what heals the
+    // existing row's mission below instead of the refresh being skipped as
+    // "already here".
+    const registerProfile = readSingleRegisterProfileOrReport(
+      charityNumber?.identifierValue,
+      record,
+      lookupRegisterProfile,
+    );
+
+    const duplicate = await flagIfDuplicate(
+      store,
+      counts,
+      record,
+      org,
+      existingOrganisations,
+      "charity_commission",
+      registrationNumbers.length > 0 ? registrationNumbers : undefined,
+    );
+    if (duplicate.flagged) {
+      if (duplicate.matchedOrganisationId) {
+        await backfillMissingMissionOrReport(
+          store,
+          duplicate.matchedOrganisationId,
+          registerProfile?.activities,
+          record,
+        );
+      }
       continue;
     }
 
@@ -1151,8 +1354,23 @@ export async function promotePendingCharityCommissionRecords(
       record.raw_payload as RawCharityCommissionRecord,
     );
 
+    // Reach from the register file's full declared areas, after dedup so only
+    // fresh inserts are touched. The API payload carries no areas itself, and
+    // the standardizer stays pure — this is the same best-effort annotation
+    // seam as the profile read above.
+    applyDerivedReach(
+      org,
+      readOperatingAreasOrReport(
+        "charity_commission",
+        charityNumber?.identifierValue,
+        record,
+        lookupOperatingAreas,
+      ),
+    );
+
     const result = await store.insertOrganisationAndLink(org, record.id, {
       totalIncome: financialPeriod?.totalIncome ?? null,
+      sector: registerProfile ? bulkSector(registerProfile.classifications) : null,
     });
     if ("error" in result) {
       await reportError(new Error(result.error), {
@@ -1195,6 +1413,10 @@ export async function promotePendingCharityCommissionRecords(
       financialPeriod,
       record,
     );
+    // Register profile read above, written here: activities, registration date,
+    // reporting status and sector for a path whose payload carries none of
+    // them. Same best-effort contract as every other annotation on this page.
+    await annotateSingleFromRegisterOrReport(store, result.id, registerProfile, record);
     counts.inserted++;
     // Intra-batch dedup: make this newly inserted organisation visible to
     // subsequent records in the same run. Without this, two raws with the
@@ -1262,15 +1484,17 @@ export async function promotePendingCompaniesHouseRecords(
 
     const companyNumber = companiesHouseIdentifier(record.source_record_id);
     if (
-      await flagIfDuplicate(
-        store,
-        counts,
-        record,
-        org,
-        existingOrganisations,
-        "companies_house",
-        companyNumber ? [companyNumber.identifierValue] : undefined,
-      )
+      (
+        await flagIfDuplicate(
+          store,
+          counts,
+          record,
+          org,
+          existingOrganisations,
+          "companies_house",
+          companyNumber ? [companyNumber.identifierValue] : undefined,
+        )
+      ).flagged
     ) {
       continue;
     }
@@ -1357,15 +1581,17 @@ export async function promotePendingFindThatCharityRecords(
     }
 
     if (
-      await flagIfDuplicate(
-        store,
-        counts,
-        record,
-        org,
-        existingOrganisations,
-        "find_that_charity",
-        findThatCharityRegistrationNumbers(record.raw_payload as RawFindThatCharityRecord),
-      )
+      (
+        await flagIfDuplicate(
+          store,
+          counts,
+          record,
+          org,
+          existingOrganisations,
+          "find_that_charity",
+          findThatCharityRegistrationNumbers(record.raw_payload as RawFindThatCharityRecord),
+        )
+      ).flagged
     ) {
       continue;
     }
@@ -1426,6 +1652,12 @@ export async function promotePendingFindThatCharityRecords(
 export async function promotePendingCharityCommissionBulkRecords(
   store: OrganisationWriteStore | null = createDefaultOrganisationWriteStore(),
   criteriaCheck: (input: Parameters<typeof checkClientCriteria>[0]) => ClientCriteriaResult = checkClientCriteria,
+  // Best-effort reach derivation per fresh insert: the real local
+  // operating-areas lookup, stubbed in tests. Null when the file is absent —
+  // inserts then keep today's null reach. Covers the scheduled bulk ingestion
+  // and the admin register import alike: both write
+  // record_source "charity_commission_bulk" and promote through here.
+  lookupOperatingAreas: typeof lookupCharityOperatingAreas = lookupCharityOperatingAreas,
 ): Promise<PromoteCounts> {
   requireStore(store);
 
@@ -1460,17 +1692,29 @@ export async function promotePendingCharityCommissionBulkRecords(
       companyIdentifier?.identifierValue,
     ].filter((n): n is string => Boolean(n));
 
-    if (
-      await flagIfDuplicate(
-        store,
-        counts,
-        record,
-        org,
-        existingOrganisations,
-        "charity_commission_bulk",
-        registrationNumbers.length > 0 ? registrationNumbers : undefined,
-      )
-    ) {
+    // A re-import carrying freshly filed activities must heal the existing
+    // row it duplicates — otherwise a charity imported before its first
+    // annual return (the 2026 cohort) keeps a blank mission forever, no matter
+    // how many refreshes run. Mission-only, deliberately: sector, dates and
+    // status were set at insert and are not gaps this refresh owns.
+    const bulkDuplicate = await flagIfDuplicate(
+      store,
+      counts,
+      record,
+      org,
+      existingOrganisations,
+      "charity_commission_bulk",
+      registrationNumbers.length > 0 ? registrationNumbers : undefined,
+    );
+    if (bulkDuplicate.flagged) {
+      if (bulkDuplicate.matchedOrganisationId) {
+        await backfillMissingMissionOrReport(
+          store,
+          bulkDuplicate.matchedOrganisationId,
+          raw.charity?.charity_activities,
+          record,
+        );
+      }
       continue;
     }
 
@@ -1481,6 +1725,19 @@ export async function promotePendingCharityCommissionBulkRecords(
     // is on it — so a fully classified charity with five filed years still
     // scored the neutrals for both.
     const bulkPeriods = buildFinancialPeriodsFromBulk(raw.annual_returns ?? []);
+
+    // Reach from the register file's full declared areas — never from the
+    // payload's matched_areas, which holds only the priority authorities the
+    // filter selected on. After dedup, so only fresh inserts are touched.
+    applyDerivedReach(
+      org,
+      readOperatingAreasOrReport(
+        "charity_commission_bulk",
+        raw.charity?.registered_charity_number,
+        record,
+        lookupOperatingAreas,
+      ),
+    );
 
     const result = await store.insertOrganisationAndLink(org, record.id, {
       sector: bulkSector(raw.matched_classifications),
@@ -1583,6 +1840,37 @@ async function annotateCompanyOrReport(
 }
 
 /** Sector, registration date, reporting status and filed activities — best-effort, never fatal. */
+async function backfillMissingMissionOrReport(
+  store: OrganisationWriteStore,
+  organisationId: string,
+  charityActivities: string | null | undefined,
+  record: PendingRecord,
+): Promise<void> {
+  // Trimmed here, same convention as the insert path: a whitespace-only
+  // description is an absent one. Blank means "this refresh carries nothing
+  // new" — not an error, just no backfill — so it returns before touching the
+  // store. annotateOrganisation itself only patches non-empty values, so an
+  // existing mission is never blanked; a refreshed register text overwrites,
+  // which is correct because the column is register-owned (no admin or CAM
+  // edit path writes it — a hand-written mission lives in enrichment_results).
+  const activities = charityActivities?.trim() || null;
+  if (!activities) return;
+  try {
+    const result = await store.annotateOrganisation({
+      organisationId,
+      charityActivities: activities,
+    });
+    if ("error" in result) throw new Error(result.error);
+  } catch (error) {
+    await reportError(error instanceof Error ? error : new Error(String(error)), {
+      operation: "standardize.charity_mission_backfill",
+      rawRecordId: record.id,
+      organisationId,
+    });
+  }
+}
+
+/** Sector, registration date, reporting status and filed activities — best-effort, never fatal. */
 async function annotateOrganisationOrReport(
   store: OrganisationWriteStore,
   organisationId: string,
@@ -1599,6 +1887,11 @@ async function annotateOrganisationOrReport(
       // description is an absent one, and "" would be stored as a present value
       // that every downstream `is null` check then misses.
       charityActivities: raw.charity?.charity_activities?.trim() || null,
+      // `?? undefined`, not `?? null`: a payload written before the register
+      // import carried these two must leave the column untouched rather than
+      // write a null over a flag a later refresh legitimately recorded.
+      insolvent: raw.charity?.charity_insolvent ?? undefined,
+      inAdministration: raw.charity?.charity_in_administration ?? undefined,
     });
     if ("error" in result) throw new Error(result.error);
   } catch (error) {

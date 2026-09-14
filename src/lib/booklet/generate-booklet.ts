@@ -48,11 +48,20 @@ const TIMEOUT_MS = 90_000;
 // re-checking finishReason on a live call, not just reading this comment.
 const MAX_OUTPUT_TOKENS = 2048;
 
+// Provider-reported usage, carried out to the route so booklet_generations
+// records tokens and cost the same way ai_generations does. Undefined when the
+// provider omitted a figure — never fabricated as 0.
+export type BookletUsage = {
+  inputTokens: number | undefined;
+  outputTokens: number | undefined;
+  totalTokens: number | undefined;
+};
+
 export type CallGeminiFn = (input: {
   system: string;
   prompt: string;
   timeoutMs: number;
-}) => Promise<{ text: string; model: string }>;
+}) => Promise<{ text: string; model: string; usage: BookletUsage }>;
 
 export interface GenerateBookletDeps {
   callGemini: CallGeminiFn;
@@ -77,7 +86,7 @@ function realCallGemini(): CallGeminiFn {
     }
     const google = createGoogleGenerativeAI({ apiKey });
 
-    const { text } = await generateText({
+    const { text, usage } = await generateText({
       model: google(model),
       system,
       prompt,
@@ -92,7 +101,15 @@ function realCallGemini(): CallGeminiFn {
       // models tolerate can't be hardcoded here. MAX_OUTPUT_TOKENS's headroom is
       // the actual defence against a thinking-model truncating its output.
     });
-    return { text, model };
+    return {
+      text,
+      model,
+      usage: {
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        totalTokens: usage.totalTokens,
+      },
+    };
   };
 }
 
@@ -136,6 +153,7 @@ export async function generateBooklet(
   | {
       booklet: string;
       model: string;
+      usage: BookletUsage;
       systemPrompt: string;
       userPrompt: string;
     }
@@ -151,7 +169,7 @@ export async function generateBooklet(
   const startedAt = Date.now();
 
   try {
-    const { text, model } = await deps.callGemini({ system, prompt, timeoutMs: TIMEOUT_MS });
+    const { text, model, usage } = await deps.callGemini({ system, prompt, timeoutMs: TIMEOUT_MS });
     const booklet = text.trim();
     if (!booklet) {
       // Treated as a failure, not success-with-nothing-to-show: AC3 wants a clear
@@ -161,7 +179,7 @@ export async function generateBooklet(
     logApiHealth("gemini", "booklet.generate", true, startedAt, {
       organisationId: input.organisationId,
     });
-    return { booklet, model, systemPrompt: system, userPrompt: prompt };
+    return { booklet, model, usage, systemPrompt: system, userPrompt: prompt };
   } catch (error) {
     logApiHealth("gemini", "booklet.generate", false, startedAt, {
       organisationId: input.organisationId,

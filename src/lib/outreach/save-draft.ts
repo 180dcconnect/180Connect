@@ -18,6 +18,8 @@ export const saveDraftSchema = z.object({
   // typed is exactly what a save mid-edit looks like. Empty/absent means "no
   // reviewed recipient yet" and persists as null.
   recipient: z.string().max(320, "Must be 320 characters or fewer.").optional(),
+  // F217: the flyer toggle is draft state too — see send-reviewed.ts.
+  attachFlyer: z.boolean().optional(),
 });
 
 export type SaveDraftInput = z.infer<typeof saveDraftSchema>;

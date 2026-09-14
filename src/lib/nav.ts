@@ -27,8 +27,8 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
   {
     href: "/clients/new",
-    label: "Add client manually",
-    description: "Submit an organisation that is not available from an API.",
+    label: "Add a client",
+    description: "Find one organisation in a register, read it from its website, or type it in.",
     permission: "client:edit",
   },
   {
@@ -65,8 +65,8 @@ export const NAV_ITEMS: readonly NavItem[] = [
     href: "/admin/import-status",
     label: "Data imports",
     description:
-      "Ingestion runs, plus the Companies House, Charity Commission and 360Giving importers they report on.",
-    permission: "platform-settings:manage",
+      "Ingestion runs, adding a single client, and the register importers the runs report on.",
+    permission: "client:edit",
   },
   {
     href: "/settings/score-settings",

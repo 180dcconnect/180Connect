@@ -104,7 +104,7 @@ jobs:
       - name: RLS behaviour tests
         run: supabase test db
 
-      # Matrix §6 gap 7: proves set_user_role, set_user_active and deactivate_user
+      # Matrix §6 gap 7: proves set_user_role, set_user_active, suspend_user and delete_user
       # actually serialize against each other under real concurrency, which pgTAP's
       # single-session suite structurally cannot exercise (see the script's header).
       - name: Last-admin concurrency guard

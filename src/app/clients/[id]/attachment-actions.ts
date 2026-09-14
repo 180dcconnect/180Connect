@@ -3,9 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
-import { attachmentRpcFailure, textExtractionFailureCopy } from "@/lib/attachments";
+import { attachmentDeleteRpcFailure, attachmentRpcFailure, textExtractionFailureCopy } from "@/lib/attachments";
 import { reportError } from "@/lib/error-logging";
 import { extractPdfText } from "@/lib/pdf-text-extraction";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { nonEmptyTrimmed, safeValidate } from "@/lib/validation";
 
@@ -18,6 +19,7 @@ const recordSchema = z.object({
   sizeBytes: z.number().int().nonnegative().nullable().optional(),
 });
 const extractSchema = z.object({ organisationId: z.uuid(), attachmentId: z.uuid() });
+const deleteSchema = z.object({ organisationId: z.uuid(), attachmentId: z.uuid() });
 
 export type AttachmentActionResult = {
   ok: boolean;
@@ -136,4 +138,59 @@ export async function extractAttachmentTextForm(formData: FormData): Promise<voi
     organisationId: formData.get("organisationId"),
     attachmentId: formData.get("attachmentId"),
   });
+}
+
+export type DeleteAttachmentResult = { ok: boolean; message: string };
+
+/**
+ * Deletes one of a client's files: the metadata row through the
+ * delete_attachment RPC, then the bytes through the service-role Storage API.
+ *
+ * The RPC runs first deliberately. It is the authorization boundary
+ * (self-checks app.can_write() and the attachment/client pairing), so the
+ * Storage removal only ever happens after an authorized row delete — never
+ * before. There is intentionally no DELETE policy on the bucket for client
+ * roles; the service-role client is the only path that can remove the object.
+ *
+ * A Storage cleanup failure is logged, never surfaced: the row the CAM sees
+ * is already gone, so reporting an error would read as a failure the refresh
+ * contradicts. The orphaned object appears in nobody's list — the same
+ * accepted trade-off as the discard-draft sweep in outreach-actions.ts.
+ */
+export async function deleteClientAttachment(input: unknown): Promise<DeleteAttachmentResult> {
+  const parsed = safeValidate(deleteSchema, input);
+  if (!parsed.success) return { ok: false, message: "That attachment could not be identified." };
+  const authorization = await getCurrentActor("client:edit", { route: "/clients/[id]" });
+  if (!authorization.ok) return { ok: false, message: actorFailureMessage(authorization.reason) };
+  const { organisationId, attachmentId } = parsed.data;
+  const supabase = await createClient();
+  const { data: storagePath, error } = await supabase.rpc("delete_attachment", {
+    p_attachment_id: attachmentId,
+    p_organisation_id: organisationId,
+  });
+  if (error) {
+    await reportError(error, { operation: "clients.delete_attachment", organisationId, attachmentId });
+    return { ok: false, message: attachmentDeleteRpcFailure(error).error };
+  }
+  const admin = createAdminClient();
+  if (!admin) {
+    await reportError(new Error("No admin client available for attachment storage cleanup"), {
+      operation: "clients.delete_attachment.cleanup_no_admin_client",
+      organisationId,
+      attachmentId,
+    });
+  } else if (typeof storagePath === "string" && storagePath) {
+    const { error: removeError } = await admin.storage
+      .from(ATTACHMENTS_BUCKET)
+      .remove([storagePath]);
+    if (removeError) {
+      await reportError(removeError, {
+        operation: "clients.delete_attachment.cleanup_storage",
+        organisationId,
+        attachmentId,
+      });
+    }
+  }
+  revalidatePath(`/clients/${organisationId}`);
+  return { ok: true, message: "File deleted." };
 }

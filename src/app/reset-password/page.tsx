@@ -13,9 +13,9 @@ export const metadata: Metadata = { title: "Set Password | 180Connect" };
 export default async function ResetPasswordPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; flow?: string; email?: string }>;
+  searchParams: Promise<{ error?: string; flow?: string; email?: string; token_hash?: string }>;
 }) {
-  const { error, flow, email } = await searchParams;
+  const { error, flow, email, token_hash: tokenHash } = await searchParams;
   const isInvite = flow === "invite";
 
   let existingFullName: string | null = null;
@@ -65,6 +65,12 @@ export default async function ResetPasswordPage({
           isInvite={isInvite}
           email={email}
           existingFullName={existingFullName}
+          // Deferred invite verification: the token this link carried rides
+          // the form as a hidden field and is verified when the password is
+          // submitted — never rendered, never logged. Recovery never carries
+          // one (it verifies on landing), so a stray hash on that flow is
+          // ignored rather than trusted.
+          inviteTokenHash={isInvite ? tokenHash : undefined}
         />
       </section>
     </main>

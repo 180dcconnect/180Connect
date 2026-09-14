@@ -58,7 +58,7 @@
 | id | uuid | Primary Key |
 | :--- | :--- | :--- |
 | actor_user_id | uuid | Foreign Key to USERS for user who acted; null for system actions |
-| action | text | Machine Token: role changed, user_deactivated, etc |
+| action | text | Machine Token: role_changed, user_suspended, user_deleted, etc |
 | target_table | text | Table the action targeted |
 | target_id | uuid | Row targeted |
 | detail | jsonb | Action context: before/after, reason |

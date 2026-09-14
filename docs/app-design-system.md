@@ -32,14 +32,24 @@ the one you're editing is how the old one keeps spreading. Copy these instead:
 
 | Screen | Path | What to take from it |
 | --- | --- | --- |
-| **Client record** | `src/app/clients/[id]/` | **The reference.** Surfaces, borders, type scale, pills, tabs. When this doc and another screen disagree, this wins. |
+| **Client record** | `src/app/clients/[id]/` | **The token reference.** Surfaces, borders, type scale, pills, tabs. When this doc and another screen disagree on *how a card looks*, this wins. |
+| **Data imports** | `src/app/admin/charity-commission/` | **The structure reference.** Page shell, the heading block and its tab row, the rail of facts under it, the two-view console, and stat cards (big numeral, hint, `HorizontalStickGauge`, action zone). Take the *skeleton* from here. |
 | **Dashboard** | `src/app/dashboard/page.tsx` | Page composition only — the `Stage`/`Group`/`Rise` structure, the display heading, cards floating on the ground rather than one box holding everything. Its *surfaces* are the old language; do not copy those. |
 
 Not references, for now:
 
 - `src/app/clients/page.tsx` — work in progress.
-- `src/app/admin/*` — several pages still on `#f1f2f4`, which is two grounds
-  stale. Never copy an admin page.
+
+**On `src/app/admin/*`.** This doc used to say "never copy an admin page", because
+several pages were on `#f1f2f4`, two grounds stale. That is now half wrong and the
+wrong half is the dangerous one. The **tokens** are still not to be copied from
+there: `recent-runs.tsx`, `group-tabs.tsx` and `lookup-dialog.tsx` are on the old
+language (`rounded-2xl`, `border-black/[0.07]`, `text-foreground/40`, `text-brand`),
+and copying those is how the old system keeps spreading. The **structure** is a
+different matter — the Data imports screens are the app's most-developed version of
+the heading-block-plus-console page, and `/clients/new` was rebuilt onto it
+deliberately. So: take the skeleton from an admin Data-imports page, take every
+colour, border and radius from the client record or from `globals.css`.
 
 ## Filed Record
 

@@ -27,6 +27,7 @@
  */
 
 import { parseFilters, type CompanyRegisterFilters } from "./filters.ts";
+import { lettersInOrderPattern, normalisedNameSql, searchWords } from "../register-search-term.ts";
 
 export type SqlQuery = { sql: string; params: (string | number)[] };
 
@@ -201,5 +202,129 @@ export function sicTitlesQuery(codes: readonly string[]): SqlQuery {
       `select sic, title from sic_label ` +
       `where sic in (${placeholders(codes.length)}) order by sic`,
     params: [...codes],
+  };
+}
+
+/** Shorter than this and a contains-scan is not worth running. */
+export const SEARCH_MIN_LENGTH = 2;
+
+/** `%`, `_` and the backslash itself, escaped for a LIKE pattern. */
+export function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+/** `company.name` as `searchWords` compares it. */
+const COMPANY_NAME_NORMALISED = normalisedNameSql("name");
+
+/** Columns the name search returns — everything an add-a-client form needs. */
+const SEARCH_COLUMNS = `
+  number, name, cat_slug, status_raw, status_norm, incorp_date, postcode,
+  postcode_area, town, address_line_1, is_cic
+`;
+
+/**
+ * Finds companies by name, postcode, or both — the Companies House half of the
+ * add-a-client lookup, and the twin of `charitySearchQuery`.
+ *
+ * ── What this file can and cannot answer ──
+ *
+ * It holds a filtered ~12% of the register (docs/companies-register-import.md), so
+ * a company missing from it is *not* evidence the company does not exist. That
+ * distinction belongs to the caller: this returns the same empty list for "no
+ * such company" and "not in our slice", and
+ * `companiesRegisterUnavailableReason()` is the one place that separates both
+ * of those from "no file".
+ *
+ * Same scan and the same reasoning as the charity twin — `company.name` has no
+ * index this can use. Measured against the 2026-09 file (223MB): ~150ms.
+ * Ordering is relevance: exact name, then prefix, then contains, because a
+ * registered name is what is being typed and "sheffield" should reach
+ * SHEFFIELD something before the hundred with Sheffield in the middle.
+ *
+ * ── The postcode rule ──
+ *
+ * Identical to the charity twin, and for the same reason: "S1" without a space
+ * is an outward code and must not drag in S10, S11 and S12.
+ */
+export function companySearchQuery(
+  input: {
+    name?: string | null;
+    postcode?: string | null;
+    /** A UK town, matched against the register's `town` column. */
+    town?: string | null;
+    /** An exact company number (the primary key). When set, it is the only clause. */
+    number?: string | null;
+  },
+  limit = 8,
+): SqlQuery {
+  const name = (input.name ?? "").trim();
+  const postcode = (input.postcode ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+  const town = (input.town ?? "").trim().toLowerCase();
+  const number = (input.number ?? "").trim().toUpperCase();
+
+  const clauses: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (number) {
+    clauses.push("number = ?");
+    params.push(number);
+  }
+
+  // Word by word, as in the charity twin: every typed word somewhere in the
+  // name, punctuation and `&` normalised on both sides.
+  if (!number && name.length >= SEARCH_MIN_LENGTH) {
+    const words = searchWords(name);
+    if (words.length > 0) {
+      for (const word of words) {
+        // Cheap letters-in-order test first, so the normalising only runs on
+        // names that could match (see `lettersInOrderPattern`).
+        clauses.push("lower(name) like ?");
+        params.push(lettersInOrderPattern(word));
+        clauses.push(`${COMPANY_NAME_NORMALISED} like ? escape '\\'`);
+        params.push(`%${escapeLike(word)}%`);
+      }
+    } else {
+      clauses.push("lower(name) like ? escape '\\'");
+      params.push(`%${escapeLike(name.toLowerCase())}%`);
+    }
+  }
+
+  if (!number && town.length >= SEARCH_MIN_LENGTH) {
+    clauses.push("lower(coalesce(town, '')) like ? escape '\\'");
+    params.push(`%${escapeLike(town)}%`);
+  }
+
+  if (!number && postcode.length >= SEARCH_MIN_LENGTH) {
+    if (postcode.includes(" ")) {
+      clauses.push("lower(coalesce(postcode, '')) like ? escape '\\'");
+      params.push(`${escapeLike(postcode)}%`);
+    } else {
+      clauses.push(
+        "(lower(coalesce(postcode, '')) like ? escape '\\' " +
+          "or lower(coalesce(postcode, '')) = ?)",
+      );
+      params.push(`${escapeLike(postcode)} %`, postcode);
+    }
+  }
+
+  return {
+    sql:
+      // `0` rather than an empty clause list — see the charity twin: a
+      // too-short term must return no rows, not invalid SQL.
+      `select ${SEARCH_COLUMNS} from company where ${clauses.length > 0 ? clauses.join(" and ") : "0"} ` +
+      "order by " +
+      "  case " +
+      "    when lower(name) = ? then 0 " +
+      "    when lower(name) like ? escape '\\' then 1 " +
+      "    else 2 " +
+      "  end, " +
+      "  lower(name) " +
+      "limit ?",
+    params: [
+      ...params,
+      escapeLike(name.toLowerCase()),
+      `${escapeLike(name.toLowerCase())}%`,
+      Math.max(1, Math.min(limit, 25)),
+    ],
   };
 }

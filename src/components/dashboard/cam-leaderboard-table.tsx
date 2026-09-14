@@ -47,7 +47,15 @@ export function CamLeaderboardTable({ board }: { board: Leaderboard }) {
       </div>
 
       <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[540px] border-collapse text-[13px] tabular-nums">
+        <table className="w-full min-w-[540px] border-collapse text-[13px] tabular-nums table-fixed">
+          <colgroup>
+            <col className="w-auto" />
+            <col className="w-16" />
+            <col className="w-16" />
+            <col className="w-20" />
+            <col className="w-14" />
+            <col className="w-20" />
+          </colgroup>
           <thead>
             <tr className="border-b border-black/[0.06] text-[10px] font-bold uppercase tracking-[0.1em] text-foreground/35">
               <th scope="col" className="pb-2 text-left font-bold">CAM</th>
@@ -130,6 +138,7 @@ export function CamLeaderboardTable({ board }: { board: Leaderboard }) {
             </tfoot>
           )}
         </table>
+
       </div>
 
       <p className="mt-3 text-[11px] leading-[1.6] text-foreground/35">

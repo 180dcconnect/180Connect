@@ -41,5 +41,8 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  // Edge Functions run on Deno (Deno.serve, Deno.env) and are type-checked by
+  // the Supabase CLI at deploy. Their pure logic.ts files are still checked
+  // here, through the node tests that import them.
+  "exclude": ["node_modules", "supabase/functions"]
 }

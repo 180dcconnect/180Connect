@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { applyDataHandling, type DataHandlingPolicy } from "../ingestion/apply-data-handling.ts";
 import { hashPayload } from "../ingestion/checksum.ts";
 import type { CharityRegisterFilters } from "./filters.ts";
-import { selectCharities, type RegisterCharity } from "./sqlite.ts";
+import { charityByOrganisationNumber, selectCharities, type RegisterCharity } from "./sqlite.ts";
 
 /**
  * Copies the charities a filter set selects out of the register file and into
@@ -116,6 +116,18 @@ export function toRawPayload(
       charity_company_registration_number: charity.company_number,
       charity_is_cio: charity.is_cio === 1,
       charity_activities: charity.activities,
+      // The regulator's solvency flags. Carried on the payload rather than
+      // dropped here because the promote path stores them as read-only register
+      // facts — and because they were already selectable as an import criterion
+      // ("Exclude insolvent or in administration") while being impossible to
+      // read back off a client once it was imported.
+      //
+      // `=== 1` rather than the raw integer, and null rather than false when the
+      // file holds null: null means the regulator published no flag, which is a
+      // different claim from "the register says this charity is solvent".
+      charity_insolvent: charity.insolvent === null ? null : charity.insolvent === 1,
+      charity_in_administration:
+        charity.in_administration === null ? null : charity.in_administration === 1,
     },
     annual_returns: returns.map(toExtractReturn),
     // Every classification the register gives this charity, not the subset the
@@ -155,7 +167,48 @@ export async function importSelection(
   limit?: number,
   labelsFor?: (organisationNumber: number) => CharityLabels,
 ): Promise<ImportOutcome | { error: string }> {
-  const selected = selectCharities(filters, limit);
+  return importSelected(supabase, selectCharities(filters, limit), ingestionRunId, policy, labelsFor);
+}
+
+/**
+ * One charity, picked by hand on the add-a-client screen.
+ *
+ * Split out of `importSelection` by the same reasoning that put the two entry
+ * points side by side: the staging half (raw record shape, data-handling, the
+ * checksum dedup, the lean-payload rule) is identical whether the selection came
+ * from a saved filter set or from somebody typing a name into a search box, and
+ * the only thing that differs is where the list of charities comes from.
+ *
+ * Reading the charity back from the file rather than trusting what the browser
+ * sent is deliberate — the browser-rendered result is not evidence of anything,
+ * and this is the same rule `lookupCharity` follows for the API path.
+ */
+export async function importCharityNumber(
+  supabase: SupabaseClient,
+  organisationNumber: number,
+  ingestionRunId: string,
+  policy: DataHandlingPolicy,
+  labelsFor?: (organisationNumber: number) => CharityLabels,
+): Promise<ImportOutcome | { error: string }> {
+  const row = charityByOrganisationNumber(organisationNumber);
+  if (!row) return { error: "That charity is not in the register this deployment holds." };
+  return importSelected(supabase, [row], ingestionRunId, policy, labelsFor);
+}
+
+/**
+ * The staging half, over an already-chosen list.
+ *
+ * Takes the selection rather than a filter set so the same body serves both
+ * entry points; everything below is unchanged from the version that took
+ * filters, including the batching and the checksum contract.
+ */
+async function importSelected(
+  supabase: SupabaseClient,
+  selected: ReturnType<typeof selectCharities>,
+  ingestionRunId: string,
+  policy: DataHandlingPolicy,
+  labelsFor?: (organisationNumber: number) => CharityLabels,
+): Promise<ImportOutcome | { error: string }> {
   if (selected.length === 0) return { selected: 0, written: 0, unchanged: 0 };
 
   const numbers = selected.map((row) => row.charity.organisation_number);

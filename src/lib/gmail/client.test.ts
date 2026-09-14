@@ -3,6 +3,14 @@ import { afterEach, describe, it } from "node:test";
 
 import { resolveGmailConfig, sendGmailMessage } from "./client.ts";
 
+// These tests must never reach Google. Run with real credentials loaded (e.g.
+// `--env-file=.env.local`), the env-resolving paths below would send a real
+// email to charity@example.org and bounce into the branch inbox. Wipe them so
+// every such path sees "not configured" instead.
+for (const key of Object.keys(process.env)) {
+  if (key.startsWith("GMAIL_")) delete process.env[key];
+}
+
 const config = { clientId: "client", clientSecret: "secret", refreshToken: "refresh" };
 const message = {
   from: "clients.sheffield@180dc.org",
@@ -55,7 +63,11 @@ describe("sendGmailMessage", () => {
 
   it("fails closed without a complete configuration", async () => {
     await quiet(async () => {
-      const result = await sendGmailMessage(message, {});
+      const result = await sendGmailMessage(message, {
+        fetchImpl: async () => {
+          throw new Error("must not reach the network");
+        },
+      });
       assert.deepEqual(result, { ok: false, retryable: false, reason: "Gmail is not configured." });
     });
   });

@@ -19,8 +19,8 @@ const RICH_ORG = {
   registered_on: "1998-04-01",
   charity_reporting_status: "Submission Received",
   charity_activities: "Runs weekly employability workshops for 16-24 year olds.",
-  // A charity, so no company registration and no SIC codes — the register
-  // publishes none and the column stays null.
+  // A charity, so no company registration, no CIC statement and no SIC codes.
+  cic_community_statement: null,
   sic_titles: null,
 };
 
@@ -36,6 +36,7 @@ const SPARSE_ORG = {
   registered_on: null,
   charity_reporting_status: null,
   charity_activities: null,
+  cic_community_statement: null,
   sic_titles: null,
 };
 
@@ -110,6 +111,7 @@ describe("buildBookletPrompt", () => {
     assert.match(prompt, /Register reporting status: Not provided/);
     assert.match(prompt, /Recent news hooks: Not provided/);
     assert.match(prompt, /Activities as filed with the register: Not provided/);
+    assert.match(prompt, /Community purpose as filed \(CIC statement\): Not provided/);
   });
 
   // The register's own filed text and the LLM's mission_statement are different
@@ -128,6 +130,21 @@ describe("buildBookletPrompt", () => {
     const { prompt } = buildBookletPrompt(RICH_ORG, null);
     assert.match(prompt, /Mission \(enrichment\): Not provided/);
     assert.match(prompt, /Activities as filed with the register: Runs weekly employability workshops/);
+  });
+
+  it("sends the filed CIC statement as its own line, never as a mission", () => {
+    const { prompt } = buildBookletPrompt(
+      {
+        ...SPARSE_ORG,
+        legal_name: "Test CIC",
+        organisation_type: "company",
+        cic_community_statement: "Benefits the Sheffield community.",
+        sic_titles: ["Other education n.e.c. (85590)"],
+      },
+      null,
+    );
+    assert.match(prompt, /Community purpose as filed \(CIC statement\): Benefits the Sheffield community\./);
+    assert.match(prompt, /Registered nature of business \(SIC classification, not a mission\): Other education/);
   });
 
   it("fences a hostile filed-activities value inside the profile block", () => {

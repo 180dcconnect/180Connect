@@ -3,6 +3,11 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { CalendarClock, Check, X } from "lucide-react";
+import {
+  isScheduleTimeAllowed,
+  SCHEDULE_MIN_LEAD_MESSAGE,
+  startOfNextMinute,
+} from "@/lib/outreach/send-reviewed";
 
 /**
  * Choosing when a reviewed email goes out: three presets, a pick-your-own row,
@@ -105,6 +110,10 @@ export function ScheduleSendDialog({
   const [step, setStep] = useState<Step>("pick");
   const [pendingWhen, setPendingWhen] = useState<Date | null>(null);
   const [customWhen, setCustomWhen] = useState<string | null>(null);
+  // A custom time inside the past or the current minute never reaches the
+  // confirm step: it is refused here, where the picker still stands, rather
+  // than after the commitment wording.
+  const [customError, setCustomError] = useState<string | null>(null);
 
   const suggestions = scheduleSuggestions();
 
@@ -124,6 +133,7 @@ export function ScheduleSendDialog({
     setStep("pick");
     setPendingWhen(null);
     setCustomWhen(null);
+    setCustomError(null);
   }
 
   function close() {
@@ -218,29 +228,47 @@ export function ScheduleSendDialog({
                       Pick date &amp; time
                     </button>
                   ) : (
-                    <div className="flex items-center gap-2">
-                      <input
-                        aria-label="Send date and time"
-                        className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-1.5 text-[12px] text-slate-800 focus:border-lead focus:outline-none"
-                        // F126: the input itself refuses a past instant, and
-                        // scheduleReviewedEmail refuses one again server-side.
-                        min={toLocalInputValue(new Date())}
-                        onChange={(event) => setCustomWhen(event.target.value)}
-                        type="datetime-local"
-                        value={customWhen}
-                      />
-                      <button
-                        className="shrink-0 cursor-pointer rounded-md bg-lead px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-[#1b3160] disabled:opacity-50"
-                        disabled={!customWhen}
-                        onClick={() => {
-                          setPendingWhen(new Date(customWhen));
-                          setStep("confirm");
-                        }}
-                        type="button"
-                      >
-                        Schedule
-                      </button>
-                    </div>
+                    <>
+                      <div className="flex items-center gap-2">
+                        <input
+                          aria-label="Send date and time"
+                          className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-1.5 text-[12px] text-slate-800 focus:border-lead focus:outline-none"
+                          // F126: the input itself refuses anything up to the
+                          // current minute, and scheduleReviewedEmail refuses it
+                          // again server-side. The minute floor (not now) is what
+                          // keeps the current minute unpickable.
+                          min={toLocalInputValue(startOfNextMinute())}
+                          onChange={(event) => {
+                            setCustomWhen(event.target.value);
+                            setCustomError(null);
+                          }}
+                          type="datetime-local"
+                          value={customWhen}
+                        />
+                        <button
+                          className="shrink-0 cursor-pointer rounded-md bg-lead px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-[#1b3160] disabled:opacity-50"
+                          disabled={!customWhen}
+                          onClick={() => {
+                            const picked = new Date(customWhen);
+                            if (!isScheduleTimeAllowed(picked)) {
+                              setCustomError(SCHEDULE_MIN_LEAD_MESSAGE);
+                              return;
+                            }
+                            setCustomError(null);
+                            setPendingWhen(picked);
+                            setStep("confirm");
+                          }}
+                          type="button"
+                        >
+                          Schedule
+                        </button>
+                      </div>
+                      {customError && (
+                        <p className="pt-1.5 text-[11px] font-semibold text-red-600" role="alert">
+                          {customError}
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
               </>

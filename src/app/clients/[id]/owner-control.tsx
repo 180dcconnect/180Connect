@@ -12,7 +12,7 @@ import {
 
 import { AssignOwnerForm } from "./assign-owner-form";
 
-type TeamMember = { id: string; full_name: string | null };
+type TeamMember = { id: string; full_name: string | null; role?: string | null };
 
 /** First letters of the first two words. */
 function initialsOf(name: string | null | undefined): string {
@@ -91,7 +91,16 @@ export function OwnerControl({
   async function handleAssign(e?: React.FormEvent) {
     e?.preventDefault();
     if (!selectedId) {
-      setError("Choose a team member.");
+      setError("Choose a team member or Unassigned.");
+      return;
+    }
+    const targetOwnerId = selectedId === "unassigned" ? null : selectedId;
+    if (targetOwnerId === ownerId) {
+      setError(
+        targetOwnerId === null
+          ? "This client is already unassigned."
+          : "Choose a different owner to change ownership.",
+      );
       return;
     }
     if (!reason.trim()) {
@@ -104,7 +113,7 @@ export function OwnerControl({
       const res = await fetch(`/api/clients/${organisationId}/assign-owner`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ownerId: selectedId, reason }),
+        body: JSON.stringify({ ownerId: targetOwnerId, reason }),
       });
       if (res.ok) {
         setDropdownOpen(false);
@@ -243,10 +252,27 @@ export function OwnerControl({
                   aria-label="Search team members"
                 />
                 <div className="max-h-64 overflow-y-auto">
-                  {filtered.length === 0 ? (
+                  {filtered.length === 0 && search.trim() ? (
                     <p className="px-2 py-2 text-xs text-dim">No matching team members.</p>
                   ) : (
                     <ul className="space-y-1" role="listbox">
+                      <li>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={selectedId === "unassigned"}
+                          onClick={() => setSelectedId("unassigned")}
+                          className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs font-medium transition-colors hover:bg-paper ${selectedId === "unassigned" ? "bg-lead-wash text-lead" : "text-ink"}`}
+                        >
+                          <span className="flex items-center gap-2 truncate">
+                            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-black/10 font-mono text-[8px] font-semibold text-ink">
+                              UA
+                            </span>
+                            Unassigned
+                          </span>
+                          {selectedId === "unassigned" && <span aria-hidden="true">✓</span>}
+                        </button>
+                      </li>
                       {filtered.map((m) => (
                         <li key={m.id}>
                           <button
@@ -261,6 +287,11 @@ export function OwnerControl({
                                 {initialsOf(m.full_name) || "?"}
                               </span>
                               {m.full_name ?? "Unnamed"}
+                              {m.role === "admin" && (
+                                <span className="ml-1 rounded bg-black/5 px-1 py-0.5 text-[9px] font-semibold text-dim">
+                                  Admin
+                                </span>
+                              )}
                             </span>
                             {selectedId === m.id && <span aria-hidden="true">✓</span>}
                           </button>
@@ -288,7 +319,7 @@ export function OwnerControl({
                         disabled={busy}
                         className="rounded-full bg-lead px-3 py-1.5 text-xs font-bold text-white hover:bg-lead-mid disabled:opacity-50"
                       >
-                        {busy ? "Assigning…" : "Confirm assign"}
+                        {busy ? "Updating…" : selectedId === "unassigned" ? "Confirm unassign" : "Confirm assign"}
                       </button>
                       <button
                         type="button"

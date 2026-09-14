@@ -1,0 +1,44 @@
+# Deploys Supabase Edge Functions.
+# Staging on push to dev, production on push to main — the same branch model as
+# migrations.yml. Function SECRETS are not deployed from here; they are set once
+# per project with `supabase secrets set` (docs/gmail-reply-check.md).
+name: Edge functions
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - 'supabase/functions/**'
+      - 'supabase/config.toml'
+      - '.github/workflows/edge-functions.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  STAGING_REF: ${{ vars.SUPABASE_STAGING_REF }}
+  PROD_REF: ${{ vars.SUPABASE_PROD_REF }}
+  # Same pin as migrations.yml; bump both together.
+  SUPABASE_CLI_VERSION: 2.110.0
+
+jobs:
+  deploy:
+    name: Deploy edge functions
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main'
+    concurrency:
+      group: supabase-functions-${{ github.ref_name }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+
+      - name: Deploy gmail-reply-check
+        run: |
+          if [ "$GITHUB_REF_NAME" = "main" ]; then REF="$PROD_REF"; else REF="$STAGING_REF"; fi
+          supabase functions deploy gmail-reply-check --project-ref "$REF" --use-api

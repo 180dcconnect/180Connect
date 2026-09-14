@@ -73,7 +73,22 @@ const NEUTRAL_PCT = 0.5;
 
 const SIZES: Record<
   CardSize,
-  { minH: string; pad: string; footer: string; title: string; headline: string }
+  {
+    minH: string;
+    pad: string;
+    footer: string;
+    title: string;
+    headline: string;
+    /**
+     * The headline's line box, spelled out.
+     *
+     * The loaded card renders the headline with `leading-none`, so its height
+     * *is* its font size — which means the placeholder can be exactly right
+     * instead of nearly right. The old loading state drew a 56px bar for every
+     * size, which is 32px short of the lg headline and 32px too tall for sm.
+     */
+    headlineH: string;
+  }
 > = {
   sm: {
     minH: "min-h-[220px] sm:min-h-[260px]",
@@ -81,6 +96,7 @@ const SIZES: Record<
     footer: "px-5 py-3 sm:px-6",
     title: "text-[15px]",
     headline: "text-[38px] sm:text-[46px]",
+    headlineH: "h-[38px] sm:h-[46px]",
   },
   md: {
     minH: "min-h-[300px] sm:min-h-[380px]",
@@ -88,13 +104,15 @@ const SIZES: Record<
     footer: "px-5 py-3 sm:px-8 sm:py-4",
     title: "text-[16px] sm:text-[17px]",
     headline: "text-[46px] sm:text-[72px]",
+    headlineH: "h-[46px] sm:h-[72px]",
   },
   lg: {
     minH: "min-h-[320px] sm:min-h-[460px]",
     pad: "px-5 pt-6 sm:px-10 sm:pt-9",
     footer: "px-5 py-4 sm:px-10 sm:py-5",
-    title: "text-[16px] sm:text-[19px]",
+    title: "text-[26px] sm:text-[29px]",
     headline: "text-[48px] sm:text-[88px]",
+    headlineH: "h-12 sm:h-[88px]",
   },
 };
 
@@ -143,7 +161,7 @@ export default function ProgressMetricCard({
   const gridId = `grid-${useId().replace(/:/g, "")}`;
   const sz = SIZES[size];
   const shell = cn(
-    "relative flex w-full flex-col overflow-hidden rounded-[28px] border border-border bg-card shadow-[0_2px_10px_rgba(0,0,0,0.04)]",
+    "relative flex w-full flex-col rounded-[28px] border border-border bg-card shadow-[0_2px_10px_rgba(0,0,0,0.04)]",
     sz.minH,
     className,
   );
@@ -271,17 +289,52 @@ export default function ProgressMetricCard({
   if (loading) {
     return (
       <div className={shell} aria-busy="true">
-        <div className={`flex flex-1 flex-col ${sz.pad}`}>
-          <div className="flex items-center justify-between">
-            <div className="h-5 w-32 animate-pulse rounded bg-muted" />
-            <div className="h-5 w-24 animate-pulse rounded bg-muted" />
+        {/*
+         * The loaded card's own layout, bar for bar: the header row with its
+         * title, view toggle, trend and period control; the headline; the
+         * footer.
+         *
+         * The title bar is the title's *actual* line box — the real string sits
+         * invisible inside it (`invisible` keeps its box and paints nothing), so
+         * no font metric is guessed and a title that wraps to two lines reserves
+         * exactly two lines. The old version drew a fixed 20px bar in the header
+         * position, which is 6px short of an sm title, 9px short of an lg one,
+         * and would have been a third of a wrapped title.
+         */}
+        <div className={`relative z-20 flex flex-1 flex-col ${sz.pad}`}>
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <div className="flex min-w-0 items-center gap-3">
+              <span
+                className={`block w-fit max-w-full animate-pulse rounded bg-muted ${sz.title}`}
+              >
+                <span className="invisible select-none">{title}</span>
+              </span>
+              <span className="block h-[30px] w-16 shrink-0 animate-pulse rounded-full bg-muted" />
+            </div>
+            <div className="flex items-center gap-3.5">
+              <span className="block h-4 w-16 animate-pulse rounded bg-muted" />
+              <span className="block h-7 w-28 animate-pulse rounded-full bg-muted" />
+            </div>
           </div>
-          <div className="mt-6 h-14 w-48 animate-pulse rounded-lg bg-muted" />
+
+          <span
+            className={`mt-5 block w-fit max-w-full animate-pulse rounded-lg bg-muted ${sz.headlineH}`}
+          >
+            <span className="invisible leading-none select-none">000</span>
+          </span>
+
+          {/* Where the chart will be: bottom-anchored, as the plot area is. */}
           <div className="mt-auto h-24 w-full animate-pulse rounded-lg bg-muted/50" />
         </div>
-        <div className={`border-t border-foreground/[0.06] ${sz.footer}`}>
-          <div className="h-4 w-40 animate-pulse rounded bg-muted" />
-        </div>
+
+        {hasFooter && (
+          <div
+            className={`relative z-10 flex items-center justify-between gap-4 border-t border-foreground/[0.06] bg-card ${sz.footer}`}
+          >
+            <span className="block h-4 w-32 animate-pulse rounded bg-muted" />
+            <span className="block h-4 w-40 animate-pulse rounded bg-muted" />
+          </div>
+        )}
       </div>
     );
   }
@@ -310,9 +363,19 @@ export default function ProgressMetricCard({
        * its opaque background — otherwise the low end of every series is cut
        * off by the footer.
        */}
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        {/* Clipped background layer (gradient + grid) — respects rounded corners */}
-        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[28px]">
+      <div
+        className={cn(
+          "relative flex min-h-0 flex-1 flex-col rounded-t-[inherit]",
+          !hasFooter && "rounded-b-[inherit]",
+        )}
+      >
+        {/*
+         * Clipped background layer (gradient + grid). Inherits the card's
+         * corner radius dynamically (e.g. rounded-2xl or rounded-[28px])
+         * so the wash reaches the top-right and bottom-right corners without
+         * gaps while allowing the outer shell to stay overflow-visible for dropdowns.
+         */}
+        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]">
           <div className="absolute inset-y-0 right-0" style={{ width: regionWidth }}>
             <div
               className="absolute inset-0"
@@ -345,7 +408,10 @@ export default function ProgressMetricCard({
           </div>
         </div>
         {/* Chart region — overflow-visible so tooltip is never clipped behind the border */}
-        <div className="absolute inset-y-0 right-0 overflow-visible" style={{ width: regionWidth }}>
+        <div
+          className="absolute inset-y-0 right-0 overflow-visible rounded-r-[inherit]"
+          style={{ width: regionWidth }}
+        >
           <MetricChart
             series={chartSeries}
             view={view}
@@ -353,19 +419,20 @@ export default function ProgressMetricCard({
             valueFormatter={fmtFull}
             dateFormatter={fmtDate}
             bandTop={fullWidth ? 42 : undefined}
+            className="rounded-r-[inherit]"
           />
         </div>
 
         {/* Main content */}
         <div
-          className={`pointer-events-none relative z-10 flex flex-1 flex-col ${sz.pad} ${
+          className={`pointer-events-none relative z-20 flex flex-1 flex-col ${sz.pad} ${
             !hasFooter ? (size === "lg" ? "pb-9" : size === "md" ? "pb-7" : "pb-5") : ""
           }`}
         >
           {/* Header row */}
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
             <div className="flex min-w-0 items-center gap-3">
-              <h3 className={`${sz.title} font-semibold tracking-tight text-foreground`}>
+              <h3 className={`${sz.title} font-semibold font-body tracking-tight text-foreground`}>
                 {title}
               </h3>
               <ViewToggle value={view} onChange={setView} />
@@ -426,7 +493,7 @@ export default function ProgressMetricCard({
       {/* Opaque footer: delta on the left, secondary stats on the right */}
       {hasFooter && (
         <div
-          className={`relative z-10 flex items-center justify-between gap-4 border-t border-foreground/[0.06] bg-card ${sz.footer} text-[14px]`}
+          className={`relative z-10 flex items-center justify-between gap-4 border-t border-foreground/[0.06] bg-card ${sz.footer} text-[14px] rounded-b-[inherit]`}
         >
           {showDelta && (
             <div>

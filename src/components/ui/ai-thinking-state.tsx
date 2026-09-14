@@ -15,7 +15,9 @@ import type { StageOneDisplayStage, StageOneStreamStage } from "@/components/out
  * the request's own milestones (sent → first token → body flowing → saving),
  * not a narration of the model's internals.
  */
-const STEPS: ReadonlyArray<{ key: StageOneStreamStage; label: string }> = [
+export type ThinkingStep = { key: StageOneStreamStage; label: string };
+
+export const DEFAULT_THINKING_STEPS: ReadonlyArray<ThinkingStep> = [
   { key: "reading", label: "Reading booklet & profile" },
   { key: "drafting", label: "Drafting your email" },
   { key: "saving", label: "Saving draft" },
@@ -43,11 +45,13 @@ export function AiThinkingState({
   stage,
   startedAt,
   heading = "Thinking",
+  steps = DEFAULT_THINKING_STEPS,
 }: {
   stage: StageOneDisplayStage | null;
   /** Epoch ms generation began. Null on the first render before it is set. */
   startedAt: number | null;
   heading?: string;
+  steps?: ReadonlyArray<ThinkingStep>;
 }) {
   const reducedMotion = useReducedMotion();
   // Render-safe fallback for the one frame before the hook reports back —
@@ -80,7 +84,7 @@ export function AiThinkingState({
         </p>
       </div>
       <ul className="mt-3 space-y-1.5">
-        {STEPS.map((step) => {
+        {steps.map((step) => {
           const state = stepState(step.key, stage);
           return (
             <motion.li

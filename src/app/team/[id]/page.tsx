@@ -1,4 +1,5 @@
 import { cache } from "react";
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { getCurrentActor } from "@/lib/auth/actor";
@@ -6,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Stage, Rise } from "@/components/dashboard-stage";
 import { formatTeamActivity, type RawTeamActivityRow } from "@/lib/team-activity";
 
+import type { HandoverDestination } from "./account-controls";
 import { TeamMemberHeader, type TeamMemberHeaderData } from "./team-member-header";
 import { TeamMemberView, type MemberActivityItem, type MemberNoteItem } from "./team-member-view";
 import type { AssignedClientItem } from "./assigned-clients-card";
@@ -28,7 +30,7 @@ const loadTeamMember = cache(async (id: string) => {
   return supabase
     .from("users")
     .select(
-      "id, email, full_name, role, is_active, deactivated_at, last_seen_at, created_at, invited_at, invite_accepted_at, invited_by_user_id",
+      "id, email, full_name, role, is_active, deleted_at, last_seen_at, created_at, invited_at, invite_accepted_at, invited_by_user_id",
     )
     .eq("id", id)
     .maybeSingle();
@@ -43,6 +45,7 @@ export async function generateMetadata({
   const { data: user } = await loadTeamMember(id);
 
   if (!user) return { title: "Team Member · 180Connect" };
+  if (user.deleted_at) return { title: "Former team member · 180Connect" };
   const name = user.full_name?.trim() || user.email;
   return { title: `${name} · Team Member Profile` };
 }
@@ -98,6 +101,42 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
   const user = userResult.data;
   if (userResult.error || !user) {
     notFound();
+  }
+
+  // A deleted account has no profile — its row survives only so history keeps an
+  // author. But activity feeds, audit rows and hover cards still name that author and
+  // link here, so the link lands on a plain statement of what happened rather than a
+  // 404 that reads like a broken page.
+  if (user.deleted_at) {
+    return (
+      <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+        <Stage className="mx-auto max-w-2xl">
+          <Rise>
+            <section className="rounded-panel border border-rule bg-white px-6 py-8">
+              <h1 className="font-body text-[clamp(1.75rem,3.5vw,2.25rem)] leading-[1.1] font-semibold tracking-[-0.02em] text-ink">
+                Former team member
+              </h1>
+              <p className="mt-3 text-sm leading-[1.7] text-dim">
+                This account was deleted on{" "}
+                {new Date(user.deleted_at).toLocaleDateString("en-GB", {
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                })}
+                . Their notes, emails and approvals stay on the records they belong to, credited
+                to a former member, but there is no profile to show.
+              </p>
+              <Link
+                className="mt-5 inline-block text-sm font-semibold text-lead hover:underline"
+                href="/dashboard"
+              >
+                Back to the dashboard
+              </Link>
+            </section>
+          </Rise>
+        </Stage>
+      </div>
+    );
   }
 
   // Fetch inviter if present
@@ -160,6 +199,25 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
   const isSelf = authorization.actor.id === user.id;
   const isAdmin = authorization.actor.role === "admin";
 
+  // Who could take this member's clients on if an admin suspends or deletes them. Only
+  // loaded for the admin view that offers those actions; the RPC re-checks eligibility.
+  let destinations: HandoverDestination[] = [];
+  if (isAdmin && !isSelf) {
+    const { data: candidates } = await supabase
+      .from("users")
+      .select("id, full_name, email, role")
+      .eq("is_active", true)
+      .in("role", ["cam", "admin"])
+      .is("deleted_at", null)
+      .neq("id", user.id)
+      .order("full_name");
+    destinations = (candidates ?? []).map((candidate) => ({
+      id: candidate.id,
+      name: candidate.full_name?.trim() || candidate.email,
+      role: candidate.role as HandoverDestination["role"],
+    }));
+  }
+
   // Detailed Pipeline Breakdown
   const totalClients = clients.length;
   const discoveryCount = clients.filter((c) => c.outreach_status === "not_contacted").length;
@@ -194,13 +252,13 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
     fullName: user.full_name,
     role: user.role as "cam" | "admin" | "viewer",
     isActive: user.is_active,
-    deactivatedAt: user.deactivated_at,
     lastSeenAt: user.last_seen_at,
     createdAt: user.created_at,
     inviterName,
     isSelf,
     isAdmin,
     stats,
+    destinations,
   };
 
   return (
@@ -218,7 +276,6 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
               fullName: user.full_name,
               role: user.role as "cam" | "admin" | "viewer",
               isActive: user.is_active,
-              deactivatedAt: user.deactivated_at,
               lastSeenAt: user.last_seen_at,
               createdAt: user.created_at,
               inviterName,

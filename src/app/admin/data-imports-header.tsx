@@ -13,7 +13,8 @@
 
 import Image from "next/image";
 import { GroupTabs } from "@/components/ui/group-tabs";
-import { DATA_IMPORTS_TABS } from "./import-group";
+import { getCurrentActor } from "@/lib/auth/actor";
+import { dataImportsTabsFor } from "./import-group";
 
 type SourceMark = {
   /** The register or publisher this tab imports from. */
@@ -32,6 +33,7 @@ type SourceMark = {
  */
 const HEADINGS: Record<string, { title: string; mark?: SourceMark }> = {
   "/admin/import-status": { title: "Import status" },
+  "/clients/new": { title: "Add a client" },
   "/admin/companies-house": {
     title: "Companies House",
     mark: {
@@ -79,7 +81,7 @@ const HEADINGS: Record<string, { title: string; mark?: SourceMark }> = {
  */
 const MARK_ROW = "flex min-h-20 items-center gap-4 sm:min-h-24 md:min-h-28";
 
-export function DataImportsHeader({
+export async function DataImportsHeader({
   current,
   children,
 }: {
@@ -91,6 +93,11 @@ export function DataImportsHeader({
   const heading = HEADINGS[current];
   if (!heading) return null;
   const { title, mark } = heading;
+
+  // The row shows only the tabs this role's pages would let it into. The
+  // profile read is request-cached, so the AppShell above already paid for it.
+  const actor = await getCurrentActor();
+  const tabs = actor.ok ? dataImportsTabsFor(actor.actor.role) : [];
 
   return (
     <>
@@ -116,7 +123,7 @@ export function DataImportsHeader({
           {title}
         </h1>
       </div>
-      <GroupTabs className="mt-4" tabs={DATA_IMPORTS_TABS} current={current} />
+      <GroupTabs className="mt-4" tabs={tabs} current={current} />
       {children}
     </>
   );

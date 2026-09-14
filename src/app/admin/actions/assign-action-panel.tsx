@@ -18,7 +18,7 @@ import {
   type TeamActionRow,
 } from "@/lib/actions";
 
-type TeamMember = { id: string; full_name: string | null };
+type TeamMember = { id: string; full_name: string | null; role?: string | null };
 type ClientOption = { id: string; legal_name: string };
 
 const STATUS_STYLE: Record<TeamActionRow["status"], string> = {
@@ -73,7 +73,7 @@ export function AssignActionPanel({
       return;
     }
     if (!assigneeUserId) {
-      setError("Choose which CAM to assign this to.");
+      setError("Choose which team member to assign this to.");
       return;
     }
     if (!title.trim()) {
@@ -152,12 +152,13 @@ export function AssignActionPanel({
             </span>
             <Select value={assigneeUserId} onValueChange={setAssigneeUserId} disabled={busy}>
               <SelectTrigger className="w-full rounded-lg bg-white text-sm">
-                <SelectValue placeholder="Choose a CAM" />
+                <SelectValue placeholder="Choose a team member" />
               </SelectTrigger>
               <SelectContent>
                 {team.map((member) => (
                   <SelectItem key={member.id} value={member.id}>
-                    {member.full_name ?? "Unnamed CAM"}
+                    {member.full_name ?? (member.role === "admin" ? "Unnamed Admin" : "Unnamed CAM")}
+                    {member.role === "admin" ? " (Admin)" : ""}
                   </SelectItem>
                 ))}
               </SelectContent>

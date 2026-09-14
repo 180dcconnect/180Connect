@@ -99,7 +99,14 @@ function formatOrdinalDate(label: string): string {
   });
 }
 
-export function ImportFeed({ groups }: { groups: RunDayGroup[] }) {
+export function ImportFeed({
+  groups,
+  canInspect,
+}: {
+  groups: RunDayGroup[];
+  /** Whether the run detail page (raw source records, admin-only) is reachable. */
+  canInspect: boolean;
+}) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const reduceMotion = useReducedMotion();
 
@@ -129,6 +136,7 @@ export function ImportFeed({ groups }: { groups: RunDayGroup[] }) {
                 open={expanded === run.id}
                 onToggle={() => setExpanded((current) => (current === run.id ? null : run.id))}
                 reduceMotion={Boolean(reduceMotion)}
+                canInspect={canInspect}
               />
             ))}
           </ul>
@@ -144,12 +152,14 @@ function RunRow({
   open,
   onToggle,
   reduceMotion,
+  canInspect,
 }: {
   run: RunView;
   index: number;
   open: boolean;
   onToggle: () => void;
   reduceMotion: boolean;
+  canInspect: boolean;
 }) {
   const Icon = ICONS[run.tone];
 
@@ -229,14 +239,16 @@ function RunRow({
           </span>
 
           <span className="flex shrink-0 items-center gap-3 pt-0.5">
-            <Link
-              href={`/admin/import-status/${run.id}`}
-              onClick={(e) => e.stopPropagation()}
-              className="hidden sm:inline-flex items-center gap-1 rounded-lg bg-black/[0.04] px-2.5 py-1 text-xs font-bold text-foreground/75 hover:bg-brand/10 hover:text-brand transition-colors"
-            >
-              <span>View records</span>
-              <ArrowRight className="h-3 w-3" />
-            </Link>
+            {canInspect && (
+              <Link
+                href={`/admin/import-status/${run.id}`}
+                onClick={(e) => e.stopPropagation()}
+                className="hidden sm:inline-flex items-center gap-1 rounded-lg bg-black/[0.04] px-2.5 py-1 text-xs font-bold text-foreground/75 hover:bg-brand/10 hover:text-brand transition-colors"
+              >
+                <span>View records</span>
+                <ArrowRight className="h-3 w-3" />
+              </Link>
+            )}
             <span
               className="hidden text-right font-body text-xs font-semibold tabular-nums text-foreground/45 sm:block"
               title={run.startedExact}
@@ -321,7 +333,8 @@ function RunRow({
                   </dl>
                 </div>
 
-                {/* Direct Action Link to Inspect Records */}
+                {/* Direct Action Link to Inspect Records — admin-only page */}
+                {canInspect && (
                 <div className="mt-5 flex flex-col gap-3 rounded-xl border border-black/[0.06] bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h4 className="text-xs font-bold text-foreground">
@@ -339,6 +352,7 @@ function RunRow({
                     <ExternalLink className="h-3.5 w-3.5" />
                   </Link>
                 </div>
+                )}
 
                 {run.errorMessage && (
                   <div className="mt-5">

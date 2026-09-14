@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { buildWhere, countQuery, previewQuery, selectionQuery } from "./sqlite-query.ts";
+import {
+  buildWhere,
+  charitySearchQuery,
+  countQuery,
+  escapeLike,
+  previewQuery,
+  selectionQuery,
+} from "./sqlite-query.ts";
+import { normalisedNameSql } from "../register-search-term.ts";
 
 const where = (filters: Parameters<typeof buildWhere>[0]) => buildWhere(filters);
 
@@ -157,5 +165,95 @@ describe("query shapes", () => {
 
   it("omits the limit entirely when there is none", () => {
     assert.doesNotMatch(selectionQuery({}).sql, /limit/);
+  });
+});
+
+// The add-a-client lookup. The one thing it must never do is throw: it is
+// driven directly by whatever somebody types into a search box.
+describe("charitySearchQuery — matching", () => {
+  it("matches a name anywhere in the registered name", () => {
+    const { sql, params } = charitySearchQuery({ name: "Sheffield" }, 5);
+    assert.ok(sql.includes(`${normalisedNameSql("charity_name")} like ? escape`));
+    assert.deepEqual(params.slice(0, 2), ["%s%h%e%f%f%i%e%l%d%", "%sheffield%"]);
+  });
+
+  it("ranks an exact name first, then a prefix, then a contains", () => {
+    const { sql, params } = charitySearchQuery({ name: "artregen" });
+    assert.match(sql, /when lower\(charity_name\) = \? then 0/);
+    assert.match(sql, /when lower\(charity_name\) like \? escape '[^']*' then 1/);
+    // Relevance bindings come after the where clauses, before the limit.
+    assert.deepEqual(params.slice(2, 4), ["artregen", "artregen%"]);
+  });
+
+  it("requires every typed word, in any order, and ignores stopwords", () => {
+    const { params } = charitySearchQuery({ name: "The Trust Sheffield" });
+    // Each word is a letters-in-order prefilter, then the normalised match.
+    assert.deepEqual(params.slice(0, 4), ["%t%r%u%s%t%", "%trust%", "%s%h%e%f%f%i%e%l%d%", "%sheffield%"]);
+  });
+
+  it("looks a registered number up exactly, ignoring everything else", () => {
+    const { sql, params } = charitySearchQuery({ registeredNumber: 1012345, name: "ignored", postcode: "S1" });
+    assert.match(sql, /where registered_charity_number = \? order by/);
+    assert.equal(params[0], 1012345);
+  });
+
+  it("narrows by town through the address lines", () => {
+    const { sql, params } = charitySearchQuery({ name: "community", town: "Sheffield" });
+    assert.match(sql, /lower\(coalesce\(address_lines, ''\)\) like \?/);
+    assert.deepEqual(params.slice(1, 3), ["%community%", "%sheffield%"]);
+  });
+
+  it("combines a name and a postcode with AND", () => {
+    const { sql, params } = charitySearchQuery({ name: "community", postcode: "S1 4FW" });
+    assert.ok(sql.includes(`${normalisedNameSql("charity_name")} like ? escape '\\' and `));
+    assert.deepEqual(params.slice(1, 3), ["%community%", "s1 4fw%"]);
+  });
+
+  it("reads a bare postcode as an outward code, not a prefix", () => {
+    // "S1" must not match S10, S11 or S12 — three different districts.
+    const { sql, params } = charitySearchQuery({ postcode: "S1" });
+    assert.match(sql, /or lower\(coalesce\(postcode, ''\)\) = \?\)/);
+    assert.deepEqual(params.slice(0, 2), ["s1 %", "s1"]);
+  });
+
+  it("treats a spaced postcode as the start of a full one", () => {
+    const { sql, params } = charitySearchQuery({ postcode: "S1 4" });
+    assert.doesNotMatch(sql, /or lower\(coalesce\(postcode, ''\)\) = \?/);
+    assert.deepEqual(params.slice(0, 1), ["s1 4%"]);
+  });
+
+  it("collapses repeated whitespace so one spelling reaches one query", () => {
+    const { params } = charitySearchQuery({ postcode: "S1   4FW" });
+    assert.deepEqual(params.slice(0, 1), ["s1 4fw%"]);
+  });
+
+  it("matches nothing at all when both terms are too short", () => {
+    const { sql } = charitySearchQuery({ name: "s" });
+    // Not an empty clause list, which would emit `where order by` and throw.
+    assert.match(sql, /from charity where 0 order by/);
+  });
+
+  it("ignores a term of only whitespace", () => {
+    assert.match(charitySearchQuery({ name: "   " }).sql, /where 0/);
+  });
+
+  it("caps the page and refuses a caller asking for the whole register", () => {
+    assert.equal(charitySearchQuery({ name: "ab" }, 500).params.at(-1), 25);
+    assert.equal(charitySearchQuery({ name: "ab" }, 0).params.at(-1), 1);
+  });
+});
+
+describe("escapeLike", () => {
+  it("escapes the wildcards so a typed % cannot match everything", () => {
+    assert.equal(escapeLike("50%"), "50\\%");
+    assert.equal(escapeLike("a_b"), "a\\_b");
+  });
+
+  it("escapes the escape character itself", () => {
+    assert.equal(escapeLike("a\\b"), "a\\\\b");
+  });
+
+  it("leaves ordinary text alone", () => {
+    assert.equal(escapeLike("sheffield community centre"), "sheffield community centre");
   });
 });

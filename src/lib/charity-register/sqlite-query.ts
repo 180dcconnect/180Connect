@@ -19,6 +19,7 @@
  */
 
 import { parseFilters, type CharityRegisterFilters } from "./filters.ts";
+import { lettersInOrderPattern, normalisedNameSql, searchWords } from "../register-search-term.ts";
 
 export type SqlQuery = { sql: string; params: (string | number)[] };
 
@@ -218,5 +219,157 @@ export function labelValuesQuery(kind: string): SqlQuery {
   return {
     sql: "select value from label where kind = ? order by value",
     params: [kind],
+  };
+}
+
+/** `charity_name` as `searchWords` compares it. */
+const CHARITY_NAME_NORMALISED = normalisedNameSql("charity_name");
+
+/** Shorter than this and a contains-scan is not worth running. */
+export const SEARCH_MIN_LENGTH = 2;
+
+/**
+ * `%`, `_` and the escape character itself, escaped for a LIKE pattern.
+ *
+ * Without this a term containing `50%` searches for "50 followed by anything",
+ * and a term ending in a backslash produces a pattern SQLite rejects outright —
+ * an unhandled throw out of a search box. Lives here rather than in `sqlite.ts`
+ * so the escaping is testable without a database, like every other clause rule.
+ */
+export function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+/** Columns the name search returns — everything an add-a-client form needs. */
+const SEARCH_COLUMNS = `
+  organisation_number, registered_charity_number, charity_name, charity_type,
+  reporting_status, date_of_registration, latest_income, postcode, address_lines,
+  contact_email, contact_website, company_number, is_cio, insolvent,
+  in_administration, activities
+`;
+
+/**
+ * Finds charities by name, postcode, or both.
+ *
+ * This is the *other* direction from `lookupCharityProfile`, which parses digits
+ * out of its argument and so can only answer a question you already knew the
+ * number to. Everything else that could find a charity by name talks to the
+ * network (the live Commission API, F037's URL import); the register file is
+ * already in the deployment and holds all 171,800 of them, but nothing could
+ * search it.
+ *
+ * ── Why this is a scan, and why that is fine ──
+ *
+ * `charity_name`'s index is `collate nocase`, which SQLite can only use for an
+ * equality test — and `LIKE` cannot use a `nocase` index at all, only a
+ * `BINARY` one. So both an equality and a contains test read the table.
+ * Measured against the 2026-09 file (171,800 rows): 40–75ms, in-process, on a
+ * file that never leaves the server. The import screen's own filter preview
+ * already spends 100–200ms and is described as cheap enough to run on every
+ * keystroke. A trigram index to shave that is not worth the file size.
+ *
+ * ── Ordering is relevance, not recency or size ──
+ *
+ * An exact name first, then names starting with the term, then names containing
+ * it. Somebody searching "Sheffield" wants the charity *called* Sheffield
+ * something before the fifty with Sheffield in the middle of their name, and
+ * this `case` is the whole of that judgement.
+ *
+ * ── The postcode rule ──
+ *
+ * A postcode typed without a space is an outward code: "S1" means the S1
+ * district. Matching that as a bare prefix also returns S10, S11 and S12 —
+ * three different districts of Sheffield, none of them asked for. With a space
+ * it is the beginning of a full postcode and a plain prefix is exactly right.
+ */
+export function charitySearchQuery(
+  input: {
+    name?: string | null;
+    postcode?: string | null;
+    /** A UK town, matched against the register's address lines. */
+    town?: string | null;
+    /** An exact registered charity number. When set, it is the only clause. */
+    registeredNumber?: number | null;
+  },
+  limit = 8,
+): SqlQuery {
+  const name = (input.name ?? "").trim();
+  // Collapsed to single spaces so "S1  4FW" and "S1 4FW" behave the same.
+  const postcode = (input.postcode ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+  const town = (input.town ?? "").trim().toLowerCase();
+
+  const clauses: string[] = [];
+  const params: (string | number)[] = [];
+
+  const byNumber =
+    typeof input.registeredNumber === "number" && Number.isInteger(input.registeredNumber);
+  if (byNumber) {
+    // Indexed (`charity_reg_number`), exact, and the whole question.
+    clauses.push("registered_charity_number = ?");
+    params.push(input.registeredNumber as number);
+  }
+
+  // ── Name, word by word ──
+  //
+  // Each typed word must appear somewhere in the name, in any order, compared
+  // after both sides drop apostrophes and full stops and read `&` as "and" — so
+  // "St Marys" finds "ST. MARY'S" and "Trust Sheffield" finds "Sheffield Trust".
+  // A term with no usable words ("a_b") falls back to the literal contains-match.
+  if (!byNumber && name.length >= SEARCH_MIN_LENGTH) {
+    const words = searchWords(name);
+    if (words.length > 0) {
+      for (const word of words) {
+        // Cheap letters-in-order test first, so the normalising only runs on
+        // names that could match (see `lettersInOrderPattern`).
+        clauses.push("lower(charity_name) like ?");
+        params.push(lettersInOrderPattern(word));
+        clauses.push(`${CHARITY_NAME_NORMALISED} like ? escape '\\'`);
+        params.push(`%${escapeLike(word)}%`);
+      }
+    } else {
+      clauses.push("lower(charity_name) like ? escape '\\'");
+      params.push(`%${escapeLike(name.toLowerCase())}%`);
+    }
+  }
+
+  if (!byNumber && town.length >= SEARCH_MIN_LENGTH) {
+    clauses.push("lower(coalesce(address_lines, '')) like ? escape '\\'");
+    params.push(`%${escapeLike(town)}%`);
+  }
+
+  if (!byNumber && postcode.length >= SEARCH_MIN_LENGTH) {
+    if (postcode.includes(" ")) {
+      clauses.push("lower(coalesce(postcode, '')) like ? escape '\\'");
+      params.push(`${escapeLike(postcode)}%`);
+    } else {
+      clauses.push(
+        "(lower(coalesce(postcode, '')) like ? escape '\\' " +
+          "or lower(coalesce(postcode, '')) = ?)",
+      );
+      params.push(`${escapeLike(postcode)} %`, postcode);
+    }
+  }
+
+  return {
+    sql:
+      // `0` rather than an empty clause list: a caller that passes a one-letter
+      // term in both boxes must get no rows, not a run-on `where order by` that
+      // SQLite rejects. Making the builder total means no call site has to
+      // remember the guard.
+      `select ${SEARCH_COLUMNS} from charity where ${clauses.length > 0 ? clauses.join(" and ") : "0"} ` +
+      "order by " +
+      "  case " +
+      "    when lower(charity_name) = ? then 0 " +
+      "    when lower(charity_name) like ? escape '\\' then 1 " +
+      "    else 2 " +
+      "  end, " +
+      "  lower(charity_name) " +
+      "limit ?",
+    params: [
+      ...params,
+      escapeLike(name.toLowerCase()),
+      `${escapeLike(name.toLowerCase())}%`,
+      Math.max(1, Math.min(limit, 25)),
+    ],
   };
 }

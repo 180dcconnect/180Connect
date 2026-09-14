@@ -5,8 +5,8 @@ import type { MentionCandidate } from "./note-mentions.ts";
  * (`/api/users/mention-candidates`), used by both note composers (the
  * record's `AddNoteForm` and the list's `BulkActionsBar`).
  *
- * WHY NOT THE BULK BAR'S `team` PROP: that list is CAMs only
- * (`page.tsx` queries `users` with `eq("role", "cam")`, unfiltered by
+ * WHY NOT THE BULK BAR'S `team` PROP: that list is owner-eligible members only
+ * (`page.tsx` queries `users` with `in("role", ["cam", "admin"])`, filtered by
  * `is_active`, with nullable names) because it feeds owner assignment and
  * filters. Mentions must offer every active teammate — admins and viewers
  * can read a client, so they must be mentionable — which is exactly what

@@ -13,7 +13,7 @@ describe("F135 reply follow-up contract", () => {
     assert.match(route, /replyEventId: z\.uuid\(\)\.optional\(\)/);
     assert.doesNotMatch(route, /replyBody: z\./, "reply text must never be trusted from the browser");
     assert.match(route, /\.from\("reply_events"\)[\s\S]*?\.eq\("id", parsed\.data\.replyEventId\)[\s\S]*?\.eq\("organisation_id", organisationId\)/);
-    assert.match(route, /replyBody: replyEvent\?\.reply_body \?\? null/);
+    assert.match(route, /replyBody: replyEvent\?\.reply_body/);
   });
 
   it("wires each reply to its own draft trigger", async () => {
@@ -107,5 +107,13 @@ describe("F135 reply follow-up contract", () => {
     // draft-id dedupe cannot collapse.
     assert.match(shell, /inflightRef\.current\.run\(thread\.id/);
     assert.doesNotMatch(shell, /hydratingRef/, "the null-on-inflight guard must be gone");
+  });
+
+  it("uses AiThinkingState and StreamingDraftText for the reply generation flow", async () => {
+    const composer = await source("../../components/outreach/reply-composer.tsx");
+    assert.match(composer, /AiThinkingState/);
+    assert.match(composer, /StreamingDraftText/);
+    assert.match(composer, /useReplyDraftStream/);
+    assert.doesNotMatch(composer, /AiLoadingState/, "legacy AiLoadingState must be replaced");
   });
 });

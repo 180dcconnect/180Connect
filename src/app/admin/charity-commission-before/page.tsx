@@ -18,7 +18,7 @@ import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { parseFilters } from "@/lib/charity-register/filters";
 import { labelValues, registerMeta } from "@/lib/charity-register/sqlite";
 import { LABEL_KIND } from "@/lib/charity-register/sqlite-query";
-import { DATA_IMPORTS_TABS } from "../import-group";
+import { dataImportsTabsFor } from "../import-group";
 import { CharityCommissionLookupForm } from "./lookup-form";
 import { FilterBuilder, type PresetSummary } from "./filter-builder";
 import { PipelinesGuide } from "./pipelines-guide";
@@ -110,7 +110,7 @@ export default async function CharityCommissionBeforePage() {
           </h1>
           <GroupTabs
             className="mt-4"
-            tabs={DATA_IMPORTS_TABS}
+            tabs={dataImportsTabsFor(authorization.actor.role)}
             current="/admin/charity-commission"
           />
           <p className="mt-3 max-w-xl text-sm leading-[1.7] text-foreground/65">

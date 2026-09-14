@@ -180,8 +180,12 @@ mind:
 - **One OAuth grant, one `GMAIL_REFRESH_TOKEN`, server-side.** Not a per-user
   token store — and revocation or expiry is therefore a branch-wide outage, not
   one person's problem.
-- **One reply-sync job** covers the whole branch
-  (`src/app/api/cron/gmail-replies/route.ts`).
+- **One reply-sync pipeline** covers the whole branch. A 30-second Supabase
+  Edge Function check ([gmail-reply-check.md](gmail-reply-check.md)) triggers
+  the sync (`src/app/api/cron/gmail-replies/route.ts`) when a new message
+  lands; a five-minute full sweep is the safety net. Gmail push
+  ([gmail-push-setup.md](gmail-push-setup.md)) is built but unused — it needs
+  IAM grants in the OAuth client's Google Cloud project.
 - **Attribution lives in our database, not in the headers.** Every message looks
   identical from outside, so `outreach_messages.sent_by_user_id` is the only
   record of who sent what. It is deliberately never rewritten by a handover.

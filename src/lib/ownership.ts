@@ -14,8 +14,8 @@ const GENERIC_ASSIGN_FAILURE = "This client could not be assigned. Refresh and t
 const Uuid = z.uuid();
 
 /**
- * Shown when the CAM picked already owns the client. reassign_ownership would
- * happily run and write an audit row saying ownership moved from a CAM to
+ * Shown when the picked team member already owns the client. reassign_ownership would
+ * happily run and write an audit row saying ownership moved from someone to
  * themselves, which is noise in the very history F164 exists to keep readable.
  */
 export const NO_OP_REASSIGNMENT_MESSAGE =
@@ -32,15 +32,25 @@ export const NO_OP_REASSIGNMENT_MESSAGE =
  */
 export function isNoOpReassignment(
   currentOwnerId: string | null | undefined,
-  newOwnerId: string,
+  newOwnerId: string | null | undefined,
 ): boolean {
-  if (typeof currentOwnerId !== "string") return false;
-  return currentOwnerId.trim().toLowerCase() === newOwnerId.trim().toLowerCase();
+  const current =
+    typeof currentOwnerId === "string" && currentOwnerId.trim()
+      ? currentOwnerId.trim().toLowerCase()
+      : null;
+  const target =
+    typeof newOwnerId === "string" && newOwnerId.trim()
+      ? newOwnerId.trim().toLowerCase()
+      : null;
+  if (!current && !target) return true;
+  if (!current || !target) return false;
+  return current === target;
 }
 
 export type ValidateReassignOwnershipInput = {
   organisationId: unknown;
-  newOwnerId: unknown;
+  newOwnerId?: unknown;
+  ownerId?: unknown;
   reason: unknown;
   /** Optional: when given, a no-op reassignment is rejected too. */
   currentOwnerId?: unknown;
@@ -51,7 +61,7 @@ export type ValidateReassignOwnershipResult =
       ok: true;
       data: {
         organisationId: string;
-        newOwnerId: string;
+        newOwnerId: string | null;
         reason: string;
       };
     }
@@ -62,7 +72,8 @@ export type ValidateReassignOwnershipResult =
 
 /**
  * Validates the shape of an assign (F163) or change-owner (F164) request:
- * a real client, a chosen CAM, and a reason the handover can be read back from.
+ * a real client, a chosen team member (an active CAM or admin) or unassigned,
+ * and a reason the handover can be read back from.
  */
 export function validateReassignOwnership(
   input: ValidateReassignOwnershipInput,
@@ -72,9 +83,14 @@ export function validateReassignOwnership(
     return { ok: false, error: "That client could not be found." };
   }
 
-  const newOwnerId = Uuid.safeParse(input.newOwnerId);
-  if (!newOwnerId.success) {
-    return { ok: false, error: "Choose a CAM to assign." };
+  const rawOwnerId = input.newOwnerId !== undefined ? input.newOwnerId : input.ownerId;
+  let targetOwnerId: string | null = null;
+  if (rawOwnerId !== null && rawOwnerId !== "unassigned" && rawOwnerId !== "") {
+    const parsed = Uuid.safeParse(rawOwnerId);
+    if (!parsed.success) {
+      return { ok: false, error: "Choose a team member to assign." };
+    }
+    targetOwnerId = parsed.data;
   }
 
   const reason = typeof input.reason === "string" ? input.reason.trim() : "";
@@ -86,8 +102,11 @@ export function validateReassignOwnership(
   }
 
   if (
-    typeof input.currentOwnerId === "string" &&
-    isNoOpReassignment(input.currentOwnerId, newOwnerId.data)
+    input.currentOwnerId !== undefined &&
+    isNoOpReassignment(
+      typeof input.currentOwnerId === "string" ? input.currentOwnerId : null,
+      targetOwnerId,
+    )
   ) {
     return { ok: false, error: NO_OP_REASSIGNMENT_MESSAGE };
   }
@@ -96,7 +115,7 @@ export function validateReassignOwnership(
     ok: true,
     data: {
       organisationId: organisationId.data,
-      newOwnerId: newOwnerId.data,
+      newOwnerId: targetOwnerId,
       reason,
     },
   };
@@ -104,7 +123,8 @@ export function validateReassignOwnership(
 
 export type ValidateBulkReassignOwnershipInput = {
   organisationIds: unknown;
-  newOwnerId: unknown;
+  newOwnerId?: unknown;
+  ownerId?: unknown;
   reason: unknown;
 };
 
@@ -113,7 +133,7 @@ export type ValidateBulkReassignOwnershipResult =
       ok: true;
       data: {
         organisationIds: string[];
-        newOwnerId: string;
+        newOwnerId: string | null;
         reason: string;
       };
     }
@@ -124,7 +144,8 @@ export type ValidateBulkReassignOwnershipResult =
 
 /**
  * Validates the shape of a bulk assign (F253) request:
- * at least one client selected, a valid target CAM, and a reason for the handover.
+ * at least one client selected, a valid target team member (an active CAM or
+ * admin) or unassigned, and a reason for the handover.
  */
 export function validateBulkReassignOwnership(
   input: ValidateBulkReassignOwnershipInput,
@@ -142,9 +163,14 @@ export function validateBulkReassignOwnership(
     parsedIds.push(parsed.data);
   }
 
-  const newOwnerId = Uuid.safeParse(input.newOwnerId);
-  if (!newOwnerId.success) {
-    return { ok: false, error: "Choose a CAM to assign." };
+  const rawOwnerId = input.newOwnerId !== undefined ? input.newOwnerId : input.ownerId;
+  let targetOwnerId: string | null = null;
+  if (rawOwnerId !== null && rawOwnerId !== "unassigned" && rawOwnerId !== "") {
+    const parsed = Uuid.safeParse(rawOwnerId);
+    if (!parsed.success) {
+      return { ok: false, error: "Choose a team member to assign." };
+    }
+    targetOwnerId = parsed.data;
   }
 
   const reason = typeof input.reason === "string" ? input.reason.trim() : "";
@@ -159,14 +185,14 @@ export function validateBulkReassignOwnership(
     ok: true,
     data: {
       organisationIds: parsedIds,
-      newOwnerId: newOwnerId.data,
+      newOwnerId: targetOwnerId,
       reason,
     },
   };
 }
 
 /**
- * Maps a Postgres error from claim_organisation onto something safe to show a CAM.
+ * Maps a Postgres error from claim_organisation onto something safe to show a team member.
  *
  * Every errcode below is one the RPC raises deliberately, with a message written to
  * be read by the caller (see 20260806140000_create_claim_organisation_rpc.sql) — no

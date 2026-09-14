@@ -173,7 +173,7 @@ describe("validateReassignOwnership (F163/F164)", () => {
 
     assert.deepEqual(result, {
       ok: false,
-      error: "Choose a CAM to assign.",
+      error: "Choose a team member to assign.",
     });
   });
 
@@ -213,6 +213,48 @@ describe("validateReassignOwnership (F163/F164)", () => {
 
     assert.equal(result.ok, true);
   });
+
+  it("allows unassigning a client with null or unassigned newOwnerId", () => {
+    const result = validateReassignOwnership({
+      organisationId: validOrgId,
+      newOwnerId: null,
+      reason: "Releasing back to pool",
+      currentOwnerId: differentOwnerId,
+    });
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.data.newOwnerId, null);
+      assert.equal(result.data.reason, "Releasing back to pool");
+    }
+  });
+
+  it("supports ownerId field alias as well", () => {
+    const result = validateReassignOwnership({
+      organisationId: validOrgId,
+      ownerId: validOwnerId,
+      reason: "Reassigning",
+    });
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.data.newOwnerId, validOwnerId);
+    }
+  });
+
+  it("rejects unassigning if the client is already unassigned", () => {
+    const result = validateReassignOwnership({
+      organisationId: validOrgId,
+      newOwnerId: null,
+      reason: "Releasing",
+      currentOwnerId: null,
+    });
+
+    assert.deepEqual(result, {
+      ok: false,
+      error: NO_OP_REASSIGNMENT_MESSAGE,
+    });
+  });
 });
 
 describe("isNoOpReassignment (F164)", () => {
@@ -237,6 +279,16 @@ describe("isNoOpReassignment (F164)", () => {
     assert.equal(isNoOpReassignment(null, ownerId), false);
     assert.equal(isNoOpReassignment(undefined, ownerId), false);
   });
+
+  it("is false when unassigning an owned client", () => {
+    assert.equal(isNoOpReassignment(ownerId, null), false);
+    assert.equal(isNoOpReassignment(ownerId, undefined), false);
+  });
+
+  it("is true when unassigning an already unowned client", () => {
+    assert.equal(isNoOpReassignment(null, null), true);
+    assert.equal(isNoOpReassignment(undefined, null), true);
+  });
 });
 
 describe("validateBulkReassignOwnership (F253)", () => {
@@ -248,14 +300,40 @@ describe("validateBulkReassignOwnership (F253)", () => {
     const result = validateBulkReassignOwnership({
       organisationIds: [validOrg1, validOrg2],
       newOwnerId: validOwner,
-      reason: "Redistributing portfolio",
+      reason: "Redistributing",
     });
 
     assert.equal(result.ok, true);
     if (result.ok) {
       assert.deepEqual(result.data.organisationIds, [validOrg1, validOrg2]);
       assert.equal(result.data.newOwnerId, validOwner);
-      assert.equal(result.data.reason, "Redistributing portfolio");
+      assert.equal(result.data.reason, "Redistributing");
+    }
+  });
+
+  it("supports unassigning multiple clients with null or 'unassigned'", () => {
+    const result = validateBulkReassignOwnership({
+      organisationIds: [validOrg1, validOrg2],
+      newOwnerId: null,
+      reason: "Releasing to pool",
+    });
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.data.newOwnerId, null);
+    }
+  });
+
+  it("supports ownerId field alias in bulk reassignment", () => {
+    const result = validateBulkReassignOwnership({
+      organisationIds: [validOrg1],
+      ownerId: validOwner,
+      reason: "Assigning via ownerId field",
+    });
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.data.newOwnerId, validOwner);
     }
   });
 
@@ -274,7 +352,7 @@ describe("validateBulkReassignOwnership (F253)", () => {
 
   it("rejects non-array organisation IDs", () => {
     const result = validateBulkReassignOwnership({
-      organisationIds: null,
+      organisationIds: "not-an-array",
       newOwnerId: validOwner,
       reason: "Redistributing",
     });
@@ -287,7 +365,7 @@ describe("validateBulkReassignOwnership (F253)", () => {
 
   it("rejects invalid organisation ID within the array", () => {
     const result = validateBulkReassignOwnership({
-      organisationIds: [validOrg1, "invalid-uuid"],
+      organisationIds: [validOrg1, "bad-id"],
       newOwnerId: validOwner,
       reason: "Redistributing",
     });
@@ -307,7 +385,7 @@ describe("validateBulkReassignOwnership (F253)", () => {
 
     assert.deepEqual(result, {
       ok: false,
-      error: "Choose a CAM to assign.",
+      error: "Choose a team member to assign.",
     });
   });
 

@@ -110,7 +110,32 @@ export type InboxThreadView = {
     email: string;
     avatarUrl?: string;
   };
+  /**
+   * Current owner id, null when unowned. The reply composer's send gate reads
+   * this (not the display name) to decide whether replying needs the
+   * take-ownership confirmation — an owner removed mid-conversation must not
+   * silently leave the next reply ownerless.
+   */
+  ownerId: string | null;
   status: "replied" | "awaiting" | "sent" | "draft";
+  /**
+   * Whether this organisation has ever had an outbound email sent, regardless
+   * of `status` — which tracks who sent *last*, not whether a send happened
+   * at all. A thread with `status: "replied"` still needs this true to stay
+   * in the Sent mailbox folder once its client responds; without a field
+   * fixed at build time, the Sent folder had nothing reliable to filter on
+   * for a list-level thread, since `messages` (the hydrated body list) is
+   * empty until the thread is opened.
+   */
+  hasSentMessage: boolean;
+  /**
+   * The client's pipeline status (ORGANISATIONS.outreach_status) — the human
+   * decision behind the conversation, as opposed to `status`, which is only
+   * who sent last. Decided outcomes leave the triage tabs (see
+   * ./inbox/category-tabs.ts) and the reading pane offers this for editing.
+   * Null when unknown; unknown never hides a thread.
+   */
+  outreachStatus: string | null;
   replyIntent?: "interested" | "not_interested" | "more_info" | "referral" | null;
   subject: string;
   snippet: string;

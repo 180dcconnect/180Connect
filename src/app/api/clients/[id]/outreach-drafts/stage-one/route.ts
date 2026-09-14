@@ -20,6 +20,7 @@ import { computeCostUsd } from "@/lib/outreach/generation-cost";
 import { loadModelRate } from "@/lib/ai/model-rate";
 import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
 import { buildAttachmentEmailContext } from "@/lib/attachments";
+import { resolveMissionText } from "@/lib/mission";
 
 export const maxDuration = 60;
 
@@ -90,7 +91,7 @@ export async function POST(
   const { data: organisation, error: organisationError } = await supabase
     .from("organisations")
     .select(
-      "id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach, sector, sub_sector, owner_id, contact_email, owner:users!organisations_owner_id_fkey(full_name)",
+      "id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach, sector, sub_sector, owner_id, contact_email, charity_activities, cic_community_statement, owner:users!organisations_owner_id_fkey(full_name)",
     )
     .eq("id", organisationId)
     .maybeSingle<{
@@ -106,6 +107,8 @@ export async function POST(
       sub_sector: string | null;
       owner_id: string | null;
       contact_email: string | null;
+      charity_activities: string | null;
+      cic_community_statement: string | null;
       owner: { full_name: string | null } | null;
     }>();
   if (organisationError || !organisation) {
@@ -252,7 +255,15 @@ export async function POST(
       incomeBand: financialPeriod?.income_band,
       contactName: contact ? [contact.first_name, contact.last_name].filter(Boolean).join(" ") : null,
       contactJobTitle: contact?.job_title,
-      missionStatement: enrichment?.mission_statement,
+      // Canonical register purpose first, enrichment mission as the fallback —
+      // the same resolution the booklet applies. Reading only enrichment left
+      // every company (and every charity with filed activities but no
+      // enrichment row) generating from "Mission: Not provided".
+      missionStatement: resolveMissionText({
+        charity_activities: organisation.charity_activities,
+        cic_community_statement: organisation.cic_community_statement,
+        enrichment_mission: enrichment?.mission_statement,
+      }),
       missionKeywords: enrichment?.mission_keywords,
       // Canonical ORGANISATIONS column first, LLM enrichment as the fallback —
       // the same resolution build-prompt.ts applies for the booklet. Reading only

@@ -16,6 +16,7 @@ import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import { computeCostUsd } from "@/lib/outreach/generation-cost";
 import { loadModelRate } from "@/lib/ai/model-rate";
 import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
+import { resolveMissionText } from "@/lib/mission";
 
 export const maxDuration = 60;
 
@@ -104,7 +105,7 @@ export async function POST(
   const { data: organisation, error: organisationError } = await supabase
     .from("organisations")
     .select(
-      "id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach, sector, sub_sector, owner_id, contact_email, owner:users!organisations_owner_id_fkey(full_name)",
+      "id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach, sector, sub_sector, owner_id, contact_email, charity_activities, cic_community_statement, owner:users!organisations_owner_id_fkey(full_name)",
     )
     .eq("id", organisationId)
     .maybeSingle<{
@@ -120,6 +121,8 @@ export async function POST(
       sub_sector: string | null;
       owner_id: string | null;
       contact_email: string | null;
+      charity_activities: string | null;
+      cic_community_statement: string | null;
       owner: { full_name: string | null } | null;
     }>();
   if (organisationError || !organisation) {
@@ -263,7 +266,13 @@ export async function POST(
             incomeBand: financialRow?.income_band,
             contactName: contactRow ? [contactRow.first_name, contactRow.last_name].filter(Boolean).join(" ") : null,
             contactJobTitle: contactRow?.job_title,
-            missionStatement: enrichmentRow?.mission_statement,
+            // Same canonical-first mission resolution as the non-streaming
+            // route beside it: register purpose, then enrichment.
+            missionStatement: resolveMissionText({
+              charity_activities: organisation.charity_activities,
+              cic_community_statement: organisation.cic_community_statement,
+              enrichment_mission: enrichmentRow?.mission_statement,
+            }),
             missionKeywords: enrichmentRow?.mission_keywords,
             sector: organisation.sector?.trim() || enrichmentRow?.sector,
             subSector: organisation.sub_sector?.trim() || enrichmentRow?.sub_sector,
@@ -282,7 +291,7 @@ export async function POST(
         const { data: message, error: draftError } = isRegeneration
           ? await supabase
               .from("outreach_messages")
-              .update({ subject: result.draft.subject, body: result.draft.body })
+              .update({ subject: result.draft.subject, body: result.draft.body, attach_flyer: preferences.data.attachFlyer })
               .eq("id", draftId)
               .eq("organisation_id", organisationId)
               .select("id")
@@ -295,6 +304,7 @@ export async function POST(
                 sent_by_user_id: actorId,
                 subject: result.draft.subject,
                 body: result.draft.body,
+                attach_flyer: preferences.data.attachFlyer,
                 send_status: "draft",
               })
               .select("id")

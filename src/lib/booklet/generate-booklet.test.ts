@@ -21,20 +21,33 @@ const INPUT = {
     registered_on: null,
     charity_reporting_status: null,
     charity_activities: null,
+    cic_community_statement: null,
     sic_titles: null,
   },
   enrichment: null,
 };
+
+const NO_USAGE = { inputTokens: undefined, outputTokens: undefined, totalTokens: undefined };
 
 function fakeDeps(callGemini: CallGeminiFn) {
   return { callGemini };
 }
 
 describe("generateBooklet", () => {
+  it("carries the provider's token usage out for the audit row", async () => {
+    const usage = { inputTokens: 1200, outputTokens: 450, totalTokens: 1650 };
+    const result = await generateBooklet(
+      INPUT,
+      fakeDeps(async () => ({ text: "booklet text", model: "gemini-test", usage })),
+    );
+    assert.ok(!("error" in result));
+    assert.deepEqual(result.usage, usage);
+  });
+
   it("returns the trimmed booklet text, model, and exact prompts on success", async () => {
     const result = await generateBooklet(
       INPUT,
-      fakeDeps(async () => ({ text: "  A short booklet about Test Charity.  ", model: "gemini-test" })),
+      fakeDeps(async () => ({ text: "  A short booklet about Test Charity.  ", model: "gemini-test", usage: NO_USAGE })),
     );
     assert.ok(!("error" in result));
     assert.equal(result.booklet, "A short booklet about Test Charity.");
@@ -52,7 +65,7 @@ describe("generateBooklet", () => {
         assert.match(input.prompt, /Test Charity/);
         assert.match(input.system, /never invent/i);
         assert.equal(typeof input.timeoutMs, "number");
-        return { text: "booklet text", model: "gemini-test" };
+        return { text: "booklet text", model: "gemini-test", usage: NO_USAGE };
       }),
     );
     assert.equal(calls, 1);
@@ -78,7 +91,7 @@ describe("generateBooklet", () => {
       fakeDeps(async (input) => {
         calls += 1;
         assert.match(input.prompt, /We run weekly youth clubs\./);
-        return { text: "booklet text", model: "gemini-test" };
+        return { text: "booklet text", model: "gemini-test", usage: NO_USAGE };
       }),
     );
     assert.equal(calls, 1);
@@ -89,7 +102,7 @@ describe("generateBooklet", () => {
       { ...INPUT, websiteContext: null },
       fakeDeps(async (input) => {
         assert.doesNotMatch(input.prompt, /Extracted text from/);
-        return { text: "booklet text", model: "gemini-test" };
+        return { text: "booklet text", model: "gemini-test", usage: NO_USAGE };
       }),
     );
   });
@@ -97,7 +110,7 @@ describe("generateBooklet", () => {
   it("treats an empty response as a failure rather than an empty success", async () => {
     const result = await generateBooklet(
       INPUT,
-      fakeDeps(async () => ({ text: "   ", model: "gemini-test" })),
+      fakeDeps(async () => ({ text: "   ", model: "gemini-test", usage: NO_USAGE })),
     );
     assert.ok("error" in result);
   });

@@ -95,29 +95,32 @@ export type InviteState = {
  * Shown for an email that already has a row in `public.users` — active account
  * or invite already pending, this repo's schema cannot cheaply tell those two
  * apart (see the module doc), and the acceptance criteria only requires the
- * message be specific, not which one it was. Never shown for a deactivated
- * account — see `DEACTIVATED_ACCOUNT_MESSAGE`, checked first.
+ * message be specific, not which one it was. Never shown for a suspended
+ * account — see `SUSPENDED_ACCOUNT_MESSAGE`, checked first.
  */
 export const DUPLICATE_INVITE_MESSAGE =
   "This email already has an account or a pending invite.";
 
 /**
- * Shown for an email that belongs to a deactivated account (F014) rather than
- * an active one or a pending invite. Re-inviting would collide with the
- * existing `auth.users` row (`create_deactivate_user_rpc.sql`'s "A DEACTIVATED
- * PERSON WHO REJOINS IS REACTIVATED, NOT RE-INVITED" note) and mint a token
- * for an account GoTrue already considers real, so this steers the admin to
- * the team list's existing Reactivate action instead of attempting the invite.
+ * Shown for an email that belongs to a suspended account rather than an active one
+ * or a pending invite. Re-inviting would collide with the existing `auth.users` row
+ * and mint a token for an account GoTrue already considers real, so this steers the
+ * admin to reactivation instead. A *deleted* account never reaches this: delete_user
+ * either removes the auth user or overwrites its email, so the address is free.
  */
-export const DEACTIVATED_ACCOUNT_MESSAGE =
-  "This email belongs to a deactivated account. Reactivate them from the team list instead of sending a new invite.";
+export const SUSPENDED_ACCOUNT_MESSAGE =
+  "This email belongs to a suspended account. Reactivate them from their profile instead of sending a new invite.";
 
 /**
- * Shown on a resend when GoTrue refuses to mint a fresh `invite`-type link
- * because the email is already `email_confirmed` — the previous link was
- * opened once (which confirms the email) but the invited person never
- * finished choosing a password. See `mintAndSendInvite`'s `email_exists`
- * branch for the mechanics.
+ * Shown when GoTrue refuses to mint a fresh `invite`-type link because the
+ * email is already `email_confirmed`. Before deferred verification shipped,
+ * that meant the previous link had been opened (consuming the token, which
+ * confirms the email) but the password never set — the stuck state this
+ * message escapes. It is now reachable only for invites burned that way
+ * before the change (or confirmed through another path): opening a link no
+ * longer confirms anything, so a resend for a pending invite mints cleanly.
+ * The fix stays cancel-and-reinvite — a new `auth.users` row starts
+ * unconfirmed again — and retrying the resend still does nothing.
  */
 export const INVITE_ALREADY_OPENED_MESSAGE =
   "This invite link was already opened once but never completed. Cancel this invite, then send a new one.";
@@ -135,9 +138,9 @@ export const INVITE_LINK_ERROR =
 
 /**
  * Looks up an existing `public.users` row by email, or returns `null`.
- * `deactivatedAt` is carried along so `sendInvite` can tell a deactivated
- * account apart from an active one or a pending invite, and steer the admin
- * to reactivation instead of a blocked, unexplained "duplicate" refusal.
+ * `isActive` is carried along so `sendInvite` can tell a suspended account
+ * apart from an active one or a pending invite, and steer the admin to
+ * reactivation instead of a blocked, unexplained "duplicate" refusal.
  *
  * A plain function rather than a slice of the Supabase client's method chain:
  * the real query builder is a thenable, not a `Promise`, and structurally
@@ -148,7 +151,7 @@ export const INVITE_LINK_ERROR =
  */
 export type LookupExistingUser = (
   email: string,
-) => Promise<{ id: string; deactivatedAt: string | null } | null>;
+) => Promise<{ id: string; isActive: boolean } | null>;
 
 /**
  * Minimal slice of the Supabase Admin API this module needs to mint the invite.
@@ -231,11 +234,17 @@ export type SendInviteOutcome =
 
 /**
  * Validates the email, checks nobody already holds it, and — only if both pass —
- * asks Supabase Auth to mint a single-use invite token, then emails it. Supabase
- * is the token authority here rather than a hand-rolled one: it already
- * generates, stores and expires it, and the link carries the same
- * `token_hash` shape `docs/auth/recovery-email.md` uses for password reset, so
- * it lands on `/auth/confirm` and works in whichever browser opens it.
+ * asks Supabase Auth to mint an invite token, then emails it. Supabase is the
+ * token authority here rather than a hand-rolled one: it already generates,
+ * stores and expires it, and the link carries the same `token_hash` shape
+ * `docs/auth/recovery-email.md` uses for password reset, so it lands on
+ * `/auth/confirm` and works in whichever browser opens it.
+ *
+ * The token is verified when the password is submitted, not when the link is
+ * opened (`/auth/confirm` carries it through to the form untouched): opening
+ * the link as many times as it takes burns nothing, and only completing the
+ * form consumes it. An abandoned password form leaves the invite pending and
+ * the same link working.
  *
  * Never throws: a lookup or send failure comes back as a state the caller can
  * render, matching `attemptLogin`'s contract.
@@ -272,7 +281,7 @@ export async function sendInvite(
 
   const { email, role, fullName } = result.data;
 
-  let existing: { id: string; deactivatedAt: string | null } | null;
+  let existing: { id: string; isActive: boolean } | null;
   try {
     existing = await lookupExistingUser(email);
   } catch (error) {
@@ -285,14 +294,14 @@ export async function sendInvite(
     };
   }
 
-  if (existing?.deactivatedAt) {
-    logSecurityEvent("user.invite_rejected", { reason: "deactivated_account" });
+  if (existing && !existing.isActive) {
+    logSecurityEvent("user.invite_rejected", { reason: "suspended_account" });
     return {
       ok: false,
       state: {
         status: "error",
-        message: DEACTIVATED_ACCOUNT_MESSAGE,
-        fieldErrors: { email: [DEACTIVATED_ACCOUNT_MESSAGE] },
+        message: SUSPENDED_ACCOUNT_MESSAGE,
+        fieldErrors: { email: [SUSPENDED_ACCOUNT_MESSAGE] },
       },
     };
   }
@@ -396,14 +405,14 @@ async function mintAndSendInvite(
 
     if (error) {
       // GoTrue refuses to mint an `invite`-type link for an email it already
-      // considers confirmed — which happens whenever the previous link was
-      // opened (consuming the token, which sets `email_confirmed_at`) but the
-      // invited person never finished choosing a password. Our own "pending"
-      // definition (`invite_accepted_at is null`) doesn't track that, so this
-      // is the one place the mismatch surfaces. `INVITE_CANCEL_NOT_FOUND_MESSAGE`-
-      // adjacent, not a generic failure: retrying does nothing, the fix is to
-      // cancel the stuck invite and send a fresh one (a new `auth.users` row
-      // starts unconfirmed again).
+      // considers confirmed. Since verification moved to submit time, opening
+      // a link no longer confirms anything, so this is now only reachable for
+      // invites burned the old way (opened, token consumed, password never
+      // set) before that change — or confirmed through another path. Our own
+      // "pending" definition (`invite_accepted_at is null`) doesn't track
+      // that, so this is the one place the mismatch surfaces. Retrying does
+      // nothing; the fix is to cancel the stuck invite and send a fresh one
+      // (a new `auth.users` row starts unconfirmed again).
       if (error.code === "email_exists") {
         logSecurityEvent("user.invite_rejected", { reason: "email_exists" });
         return { ok: false, state: { status: "error", message: INVITE_ALREADY_OPENED_MESSAGE } };
@@ -600,7 +609,7 @@ export const INVITE_CANCEL_NOT_FOUND_MESSAGE = "This invite could not be found."
  * not a cancelled invite.
  */
 export const INVITE_CANCEL_ALREADY_ACCEPTED_MESSAGE =
-  "This is now a team member — use the team list to deactivate them instead.";
+  "This is now a team member — suspend or delete them from their profile instead.";
 
 /** The one call `cancelInvite` needs to record a cancellation, kept minimal so tests can fake it. */
 export type AuditLogWriter = {
@@ -737,7 +746,7 @@ export function inviteEmail(input: {
     "Choose a password to finish setting up your account:",
     link,
     "",
-    `This link expires in ${expiryHours} hours and can only be used once. If it has expired, ask ${inviterName} to send you a new one.`,
+    `This link expires in ${expiryHours} hours. You can open it as many times as you need — only setting your password uses it up, so an unfinished attempt never strands you. If it has expired, ask ${inviterName} to send you a new one.`,
     "",
     "If you weren't expecting this, you can ignore this email — no account will be created.",
   ].join("\n");
@@ -768,7 +777,7 @@ export function inviteEmail(input: {
         </tr>
         <tr>
           <td style="font-size:13px;line-height:20px;color:#5c5c5c;padding-bottom:20px;">
-            This link expires in ${expiryHours} hours and can only be used once.
+            This link expires in ${expiryHours} hours. You can open it as many times as you need — only setting your password uses it up.
           </td>
         </tr>
         <tr>

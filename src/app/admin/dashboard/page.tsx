@@ -28,6 +28,9 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { StatCard } from "@/components/stat-card";
 import ProgressMetricCard from "@/components/ui/progress-metric-card";
+import { DutyQueueCard } from "@/components/dashboard/duty-queue-card";
+import { ImportHealthCard } from "@/components/dashboard/import-health-card";
+import { fetchAdminQueueTally } from "@/lib/dashboard/admin-queue";
 import { filterActiveSuppressed } from "@/lib/dashboard-metrics";
 import type { DashboardOrgRow, OpenSuppression } from "@/lib/dashboard-metrics";
 import { formatOutreachStatus } from "@/lib/organisation-format";
@@ -40,8 +43,19 @@ import {
   sectorCounts,
 } from "@/lib/admin/dashboard-metrics";
 import type { DashboardClient } from "@/lib/admin/dashboard-metrics";
+import { summariseImportHealth } from "./import-health";
+import type { IngestionRunRow } from "../import-status/run-format";
 
 const FETCH_STEP = 1000;
+
+/**
+ * How much of the run history one visit reads — the same window
+ * `/admin/import-status` opens with. The card only ever shows the latest run
+ * per source, but the window is what decides whether a second run for the same
+ * source is in hand to compare against, and it keeps this read bounded as the
+ * table grows.
+ */
+const INGESTION_WINDOW = 100;
 
 type OrgRow = {
   id: string;
@@ -150,6 +164,29 @@ export default async function AdminDashboardPage() {
     await reportError(scoreError, { operation: "admin.dashboard.page_scores" });
   }
 
+  // The two things this page is supposed to answer that it never did: is
+  // anything waiting on an admin, and is the register still moving. Both are
+  // about the machine rather than the pipeline, and both fail soft — a broken
+  // queue count must not take the funnel down with it.
+  const [queueResult, ingestionResult] = await Promise.all([
+    fetchAdminQueueTally(supabase),
+    supabase
+      .from("ingestion_runs")
+      .select(
+        "id, api_source, job_status, records_fetched, records_inserted, records_skipped, records_failed, records_flagged, started_at, completed_at, error_message, triggered_by",
+      )
+      .order("started_at", { ascending: false })
+      .limit(INGESTION_WINDOW)
+      .overrideTypes<IngestionRunRow[], { merge: false }>(),
+  ]);
+
+  if (queueResult.error) {
+    await reportError(queueResult.error, { operation: "admin.dashboard.page_admin_queues" });
+  }
+  if (ingestionResult.error) {
+    await reportError(ingestionResult.error, { operation: "admin.dashboard.page_ingestion_runs" });
+  }
+
   const filteredRows: DashboardOrgRow[] = filterActiveSuppressed(
     all.map((r) => ({
       id: r.id,
@@ -201,6 +238,26 @@ export default async function AdminDashboardPage() {
   );
   const suppressedCount = all.length - clients.length;
 
+  // One clock for the whole page, so a run's "2 hours ago" and the growth
+  // curve's day boundaries cannot disagree about when now is.
+  const now = new Date();
+  const importHealth = ingestionResult.error
+    ? null
+    : summariseImportHealth(ingestionResult.data ?? [], now);
+  const unassignedOrgs = clients.filter((client) => client.owner_id === null).length;
+  const dutyCounts = {
+    unassignedOrgs,
+    pendingSuppressions: queueResult.tally?.pendingSuppressions ?? 0,
+    ownershipRequests: queueResult.tally?.ownershipRequests ?? 0,
+    suggestedEdits: queueResult.tally?.suggestedEdits ?? 0,
+    discrepancies: queueResult.tally?.discrepancies ?? 0,
+  };
+  // The number the header pill carries. Unassigned clients are part of it: they
+  // are the queue an admin is most likely able to fix in one sitting.
+  const openQueueTotal = queueResult.tally
+    ? queueResult.tally.total + unassignedOrgs
+    : null;
+
   const share = (value: number) =>
     funnel.totalCharities === 0 ? 0 : value / funnel.totalCharities;
 
@@ -223,14 +280,22 @@ export default async function AdminDashboardPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            {/* AC3 Approvals: links to unified review queue (/admin/review) pending F181 dedicated approvals tab */}
+            {/* AC3 Approvals: links to unified review queue (/admin/review)
+                pending F181 dedicated approvals tab. It carries the count now:
+                an admin landing on their own home page could not previously
+                tell whether anything was waiting on them. */}
             <Link
               href="/admin/review"
-              className="inline-flex shrink-0 items-center rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-bold hover:border-brand hover:text-brand"
+              className="inline-flex shrink-0 items-center gap-2 rounded-full border border-rule bg-white px-4 py-2 text-sm font-bold text-ink transition-colors hover:border-lead-mid hover:text-lead focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
             >
-              Review queue →
+              Review queue
+              {openQueueTotal !== null && openQueueTotal > 0 && (
+                <span className="rounded-full bg-lead px-2 py-0.5 text-[12px] leading-none font-semibold tabular-nums text-paper">
+                  {openQueueTotal.toLocaleString()}
+                </span>
+              )}
+              <span aria-hidden="true">→</span>
             </Link>
-
           </div>
         </Rise>
 
@@ -267,6 +332,31 @@ export default async function AdminDashboardPage() {
                 />
               </Rise>
             )}
+            {/* The machine, before the pipeline. An admin's first question on
+                this page is "is anything waiting, and is anything broken" — the
+                queue counts and the import runs are the two halves of that, and
+                neither was on this screen until now. */}
+            <div className="grid items-start gap-6 lg:grid-cols-2">
+              <Rise>
+                {queueResult.tally ? (
+                  <DutyQueueCard counts={dutyCounts} />
+                ) : (
+                  <section className="rounded-panel border border-rule bg-white px-5 py-4">
+                    <h2 className="font-body text-[18px] leading-[1.3] font-semibold tracking-[-0.01em] text-ink">
+                      Duty queue
+                    </h2>
+                    <p className="mt-1 font-body text-[13px] leading-[1.55] text-dim">
+                      The queue counts could not be loaded. Refresh and try again.
+                    </p>
+                  </section>
+                )}
+              </Rise>
+
+              <Rise>
+                <ImportHealthCard summary={importHealth} />
+              </Rise>
+            </div>
+
             {/* Growth curve — same 30-day cumulative as CAM dashboard, last point = total */}
             <Group className="space-y-4">
               <Rise>

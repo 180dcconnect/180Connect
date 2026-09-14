@@ -154,7 +154,10 @@ pg_cron calls Vercel routes under `/api/cron/*`, each guarded by `CRON_SECRET`.
 | `companies_house_status_recheck_weekly` | Thu 02:00 | Companies dissolved or struck off |
 | `charity_commission_financial_refresh_weekly` | Wed 03:00 | Refreshes filed accounts per charity, then fills Part B from the register file |
 | `provenance_audit_daily` | 04:41 | Checks field provenance is intact |
-| `gmail_reply_sync` | every 5 min | Captures replies to outreach |
+| `gmail_reply_check` | every 30 s | Supabase Edge Function: calls the Vercel reply sync only when a new inbox message exists ([docs](gmail-reply-check.md)) |
+| `gmail_reply_sync` | every 5 min (3,8,…) | Captures replies to outreach — full-lookback safety net behind `gmail_reply_check` |
+| `cron_run_log_prune_daily` | 03:52 | Deletes `cron.job_run_details` rows older than a day |
+| `gmail_watch_renew` | 03:47, 15:47 | Renews the Gmail inbox watch behind push reply sync (expires after 7 days) |
 | `scheduled_outreach_delivery` | every 5 min | Sends queued outreach |
 | `stall_detection_daily` | 04:17 | Flags stalled conversations |
 | `three_sixty_giving_backfill` | every 15 min | Asks 360Giving about the next slice of organisations |

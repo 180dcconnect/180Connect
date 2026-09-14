@@ -22,7 +22,8 @@ import {
 const TIMEOUT_MS = 55_000;
 
 /**
- * Shared model options for both stage-one call shapes (one-shot and stream).
+ * Shared model options for every draft generation (stage-one one-shot and
+ * stream, stage-two replies).
  *
  * `thinkingLevel: "minimal"` is the load-bearing half. Gemini 3 Flash thinks
  * by default, and thinking tokens count against `maxOutputTokens` — with the
@@ -59,8 +60,21 @@ export type CallStageOneModel = (input: {
   prompt: string;
 }) => Promise<{ text: string; usage: StageOneUsage }>;
 
-function parseDraft(text: string): StageOneDraft {
-  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+/**
+ * Parses a draft out of model output, shared by both stages. Tolerant of
+ * chatty wrappers — a leading sentence, ```json fences, trailing chatter:
+ * the JSON object is sliced from the first `{` to the last `}` — but strict
+ * about the contract itself: exactly one object with non-empty subject and
+ * body strings, with the same error messages both stages have always used. A
+ * TRUNCATED response still throws (there is no honest way to complete a
+ * cut-off email); the callers' retry exists for exactly that case.
+ */
+export function parseDraftJson(text: string): StageOneDraft {
+  const trimmed = text.trim();
+  const withoutFences = trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const start = withoutFences.indexOf("{");
+  const end = withoutFences.lastIndexOf("}");
+  const cleaned = start !== -1 && end > start ? withoutFences.slice(start, end + 1) : withoutFences;
   const parsed: unknown = JSON.parse(cleaned);
   if (!parsed || typeof parsed !== "object") throw new Error("Gemini returned invalid draft JSON.");
   const { subject, body } = parsed as Record<string, unknown>;
@@ -118,7 +132,7 @@ export async function generateStageOneDraft(
   const startedAt = Date.now();
   try {
     const { text, usage } = await callModel(prompt);
-    const draft = parseDraft(text);
+    const draft = parseDraftJson(text);
     logApiHealth("gemini", "outreach.stage_one.generate", true, startedAt, { organisationId });
     return { draft, sizeTemplate: prompt.sizeTemplate, usage, prompt: { system: prompt.system, user: prompt.prompt } };
   } catch (error) {

@@ -73,6 +73,12 @@ function htmlToText(html: string): string {
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
     .replace(/<br\s*\/?\s*>/gi, "\n")
     .replace(/<\/p>/gi, "\n")
+    // Gmail (and most clients) wrap the quoted history in a plain <div
+    // class="gmail_quote">, not a <p> — with no newline inserted here, that
+    // div's "On ... wrote:"/"From: ..." line runs onto the client's own last
+    // line with no line break, so stripQuotedReply's line-anchored regexes
+    // never see it as its own line and the quote survives into reply_body.
+    .replace(/<\/?(div|blockquote|li|tr)\b[^>]*>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
@@ -84,6 +90,54 @@ function htmlToText(html: string): string {
 
 function cleanBody(value: string): string {
   return value.replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/**
+ * An inbound reply with the quoted history removed — the client's own words.
+ *
+ * A reply as it arrives carries our entire previous email quoted underneath it.
+ * Left in place, that text reaches the reply prompt inside the block the model
+ * is told is *the client's reply*, so the model is handed our own sentences as
+ * though they were the client's: duplicated against the copy it receives
+ * separately as `<previous_email>`, and — worse — an opportunity to attribute a
+ * position to the client that they never took. Gmail, Outlook and Apple Mail
+ * all hide this text for the same reason.
+ *
+ * Two deliberate limits:
+ *
+ * - It cuts at an attribution header or separator, and then drops `>`-quoted
+ *   lines, rather than cutting at the first `>`. Inline replies interleave the
+ *   client's answers with the quoted text, and truncating at the first quoted
+ *   line would throw away everything they wrote below it.
+ * - It never returns nothing. A message whose entire content is a quotation is
+ *   still a message that arrived; emptying it would mean the reply was never
+ *   captured, and a missed reply is far worse than a noisy one.
+ *
+ * Not a signature stripper: "Kind regards / Sarah" is a signature and also
+ * something people type as the substance of a short reply, and the prompt is
+ * already told not to treat boilerplate as content.
+ */
+export function stripQuotedReply(value: string): string {
+  const lines = value.replace(/\r\n/g, "\n").split("\n");
+
+  const attribution = lines.findIndex((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    // Gmail and Apple Mail: "On Mon, 8 Sep 2026 at 10:00, Ada Lovelace wrote:"
+    if (/^on\b.{0,200}\bwrote:\s*$/i.test(trimmed)) return true;
+    // Outlook's forwarded-message block and its separator rule.
+    if (/^-{2,}\s*(original message|forwarded message)\s*-{2,}$/i.test(trimmed)) return true;
+    if (/^_{5,}$/.test(trimmed)) return true;
+    if (/^from:\s+\S/i.test(trimmed)) return true;
+    return false;
+  });
+
+  const kept = lines
+    .slice(0, attribution === -1 ? lines.length : attribution)
+    .filter((line) => !line.trimStart().startsWith(">"));
+
+  const cleaned = cleanBody(kept.join("\n"));
+  return cleaned || value.trim();
 }
 
 export function isAutomatedInbound(headers: readonly GmailHeader[]): boolean {
@@ -108,7 +162,7 @@ export function parseInboundReply(message: GmailInboundMessage): ParsedInboundRe
 
   const plain = textParts(message.payload, "text/plain").join("\n");
   const html = textParts(message.payload, "text/html").join("\n");
-  const body = cleanBody(plain || htmlToText(html));
+  const body = stripQuotedReply(cleanBody(plain || htmlToText(html)));
   const from = emailAddressOf(header(headers, "From"));
   const to = emailAddressOf(header(headers, "To"));
   if (!from || !to || !body) return null;

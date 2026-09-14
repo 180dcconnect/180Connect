@@ -34,7 +34,7 @@ type Result = {
 
 function label(user: HandoverUser) {
   const name = user.full_name ?? user.email;
-  return user.is_active ? name : `${name} (deactivated)`;
+  return user.is_active ? name : `${name} (suspended)`;
 }
 
 export function OffboardPanel({ users }: { users: HandoverUser[] }) {

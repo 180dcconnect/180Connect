@@ -6,6 +6,7 @@ import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
 import { isUuid, nonEmptyTrimmed, optionalMentionedUsers, safeValidate } from "@/lib/validation";
 import { buildReplyNoteContent } from "@/lib/reply-note";
+import { canManageNote } from "@/lib/note-history";
 import {
   MAX_MENTIONS_PER_NOTE,
   NOTE_ADDED_NOTIFICATION_TYPE,
@@ -173,6 +174,45 @@ export async function POST(
   });
 
   return NextResponse.json({ note: data }, { status: 201 });
+}
+
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const authorization = await getCurrentActor("client:view", { route: "/clients/[id]" });
+  if (!authorization.ok) return denied(authorization.reason);
+
+  const { id: organisationId } = await params;
+  if (!isUuid(organisationId)) {
+    return NextResponse.json({ error: "That client could not be found." }, { status: 400 });
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("notes")
+    .select(
+      "id, content, created_at, updated_at, author_id, author:users!notes_author_id_fkey(full_name, id)",
+    )
+    .eq("organisation_id", organisationId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    await reportError(error, { operation: "clients.notes_get", organisationId });
+    return NextResponse.json({ error: "Could not load notes." }, { status: 500 });
+  }
+
+  // The thread-notes drawer renders its own delete affordance, so each row
+  // carries whether this viewer may manage it — the same author-or-admin
+  // predicate the [noteId] route enforces (and `note-history.ts` shares),
+  // computed here so the client never re-derives permissions itself.
+  const actor = { id: authorization.actor.id, role: authorization.actor.role };
+  const notes = (data ?? []).map((note) => ({
+    ...note,
+    can_manage: canManageNote({ author_id: note.author_id }, actor),
+  }));
+
+  return NextResponse.json({ notes });
 }
 
 /**

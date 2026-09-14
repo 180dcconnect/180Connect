@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { logAuthApiHealth, logAuthError } from "@/lib/auth/observability";
 import {
+  inviteTokenFromForm,
   newPasswordSchema,
   normalizeFullName,
   RECOVERY_COOKIE_NAME,
@@ -11,6 +12,7 @@ import {
   REQUIRED_NAME_MESSAGE,
   RESET_LINK_ERROR,
 } from "@/lib/auth/password-reset";
+import { INVITE_LINK_ERROR } from "@/lib/auth/invite";
 import type { ResetPasswordState } from "@/lib/auth/password-reset";
 import { signOutAndReport } from "@/lib/auth/sign-out";
 import { createClient } from "@/lib/supabase/server";
@@ -35,30 +37,59 @@ export async function setNewPassword(
 
   const cookieStore = await cookies();
 
-  // The marker is signed, so a session holder cannot mint one for themselves
-  // and change a password without going through the emailed link — see
-  // `src/lib/auth/password-reset.ts`. An unverifiable marker reads as absent.
-  const recoveryUserId = await readRecoveryMarker(
-    cookieStore.get(RECOVERY_COOKIE_NAME)?.value,
-  );
-  if (!recoveryUserId) return { status: "error", message: RESET_LINK_ERROR };
+  // Deferred invite verification lives here, not on the link landing (see
+  // `/auth/confirm`): the token is verified when the password is submitted,
+  // so opening the link as many times as it takes burns nothing, and only
+  // completing the form consumes it. A freshly verified token is the same
+  // proof of mailbox ownership the marker cookie carries for recovery, so
+  // from here the two flows share one tail.
+  const inviteTokenHash = inviteTokenFromForm(formData.get("tokenHash"));
 
   let supabase;
+  let authedUserId: string;
   try {
     supabase = await createClient();
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    // The marker proves nothing without the session it was issued alongside,
-    // and that session must still belong to the user it names.
-    if (userError || !userData.user || userData.user.id !== recoveryUserId) {
-      cookieStore.delete(RECOVERY_COOKIE_NAME);
-      return { status: "error", message: RESET_LINK_ERROR };
+    if (inviteTokenHash) {
+      const startedAt = Date.now();
+      const { data: verifyData, error: verifyError } = await supabase.auth.verifyOtp({
+        token_hash: inviteTokenHash,
+        type: "invite",
+      });
+      logAuthApiHealth("invite-token-verification", !verifyError, startedAt, {
+        error_code: verifyError?.code,
+      });
+      if (verifyError || !verifyData.user) {
+        logAuthError(
+          "authentication.password_recovery_link_rejected",
+          verifyError ?? new Error("no user returned"),
+          { error_code: verifyError?.code },
+        );
+        return { status: "error", message: INVITE_LINK_ERROR };
+      }
+      authedUserId = verifyData.user.id;
+    } else {
+      // The marker is signed, so a session holder cannot mint one for themselves
+      // and change a password without going through the emailed link — see
+      // `src/lib/auth/password-reset.ts`. An unverifiable marker reads as absent.
+      const recoveryUserId = await readRecoveryMarker(
+        cookieStore.get(RECOVERY_COOKIE_NAME)?.value,
+      );
+      if (!recoveryUserId) return { status: "error", message: RESET_LINK_ERROR };
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      // The marker proves nothing without the session it was issued alongside,
+      // and that session must still belong to the user it names.
+      if (userError || !userData.user || userData.user.id !== recoveryUserId) {
+        cookieStore.delete(RECOVERY_COOKIE_NAME);
+        return { status: "error", message: RESET_LINK_ERROR };
+      }
+      authedUserId = recoveryUserId;
     }
 
     // Look up existing user row to check current full_name and invite status
     const { data: existingUser } = await supabase
       .from("users")
       .select("full_name, invited_at, invite_accepted_at")
-      .eq("id", recoveryUserId)
+      .eq("id", authedUserId)
       .maybeSingle<{ full_name: string | null; invited_at: string | null; invite_accepted_at: string | null }>();
 
     const submittedName = typeof parsed.data.fullName === "string" ? normalizeFullName(parsed.data.fullName) : "";
@@ -110,7 +141,7 @@ export async function setNewPassword(
       const { error: nameError } = await supabase
         .from("users")
         .update({ full_name: nameToSave })
-        .eq("id", recoveryUserId);
+        .eq("id", authedUserId);
       if (nameError) {
         logAuthError("user.full_name_update_failed", nameError);
       }

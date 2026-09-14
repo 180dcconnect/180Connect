@@ -67,6 +67,8 @@ function fakeAdmin(options: {
   organisation?: OrgRow | null;
   user?: UserRow | null;
   rpcResults?: Record<string, unknown[]>;
+  /** Gmail ids audit_log already records as gmail_reply_captured. */
+  capturedIds?: string[];
 }) {
   const rpcCalls: { name: string; args: Record<string, unknown> }[] = [];
   const queues: Record<string, unknown[]> = {};
@@ -76,7 +78,17 @@ function fakeAdmin(options: {
     from(table: string) {
       if (table === "audit_log") {
         return {
-          select() {
+          select(columns: string) {
+            if (columns === "detail") {
+              return {
+                eq: () => ({
+                  in: () => Promise.resolve({
+                    data: (options.capturedIds ?? []).map((id) => ({ detail: { provider_message_id: id } })),
+                    error: null,
+                  }),
+                }),
+              };
+            }
             return {
               eq() {
                 return {
@@ -268,6 +280,37 @@ describe("syncGmailReplies", () => {
     }));
     assert.deepEqual(result, { scanned: 1, captured: 0, duplicates: 0, ignored: 0, unmatched: 0, failed: 1 });
     assert.deepEqual(sends, []);
+  });
+
+  it("skips messages already captured without fetching them again", async () => {
+    const fetched: string[] = [];
+    const inner = fetchStub({ "gmail-old": inboundMessage({ id: "gmail-old" }), "gmail-1": inboundMessage() });
+    const fetchImpl = (async (input: string | URL | Request) => {
+      fetched.push(String(input));
+      return inner(input);
+    }) as typeof fetch;
+    const { admin, rpcCalls } = fakeAdmin({
+      sentRows: [{ target_id: "outreach-1", detail: { organisation_id: "org-1", provider_thread_id: "thread-1", sent_to: "contact@charity.org" } }],
+      rpcResults: { capture_gmail_reply: ["reply-id-1"] },
+      capturedIds: ["gmail-old"],
+    });
+    const result = await syncGmailReplies({ admin, config, sender, tokenProvider, fetchImpl });
+    assert.deepEqual(result, { scanned: 2, captured: 1, duplicates: 1, ignored: 0, unmatched: 0, failed: 0 });
+    assert.equal(fetched.some((url) => url.includes("/messages/gmail-old")), false);
+    assert.equal(rpcCalls.length, 1);
+  });
+
+  it("lists only the recent window on a push-triggered run", async () => {
+    const listed: string[] = [];
+    const inner = fetchStub({});
+    const fetchImpl = (async (input: string | URL | Request) => {
+      if (String(input).includes("/messages?")) listed.push(new URL(String(input)).searchParams.get("q") ?? "");
+      return inner(input);
+    }) as typeof fetch;
+    const before = Math.floor((Date.now() - 15 * 60_000) / 1000);
+    await syncGmailReplies({ admin: fakeAdmin({}).admin, config, sender, tokenProvider, fetchImpl }, { sinceMinutes: 15 });
+    const after = Number(listed[0]?.match(/^in:inbox after:(\d+)$/)?.[1]);
+    assert.ok(after >= before && after <= before + 5, `unexpected query ${listed[0]}`);
   });
 
   it("throws when the reply sync is not configured", async () => {

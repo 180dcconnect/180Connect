@@ -29,8 +29,10 @@ pg_cron cron_run_log_prune_daily → keeps cron.job_run_details to one day
 ### Why not Gmail push?
 
 Push needs Pub/Sub IAM grants in the Google Cloud project that owns the Gmail
-OAuth client, which the global team administers. The push code is in the repo
-and does nothing while its env vars are unset ([gmail-push-setup.md](gmail-push-setup.md)).
+OAuth client, which the global team administers. It was built and then removed:
+besides the IAM block, its webhook and watch-renewal routes took the deployment
+past Vercel Hobby's 12-function limit (the app sat at 11). Anything that adds an
+API route should be checked against that limit first.
 
 ## Quota
 

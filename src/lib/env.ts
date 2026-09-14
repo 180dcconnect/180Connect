@@ -333,35 +333,6 @@ export const SCHEMA: readonly EnvVarSpec[] = [
         : "must be a valid email address",
   },
   {
-    name: "GMAIL_PUBSUB_TOPIC",
-    required: false,
-    secret: false,
-    description:
-      "Cloud Pub/Sub topic Gmail publishes branch-inbox changes to, for push reply sync (docs/gmail-push-setup.md). Same value in every environment — Gmail keeps one watch per mailbox. Unset means no push; replies still arrive on the five-minute poll.",
-    validate: (value) =>
-      /^projects\/[^/]+\/topics\/[^/]+$/.test(value)
-        ? null
-        : "must be a full topic name: projects/<project>/topics/<topic>",
-  },
-  {
-    name: "GMAIL_PUSH_AUDIENCE",
-    required: false,
-    secret: false,
-    description:
-      "OIDC audience configured on this environment's Pub/Sub push subscription. /api/webhooks/gmail rejects tokens minted for any other audience.",
-  },
-  {
-    name: "GMAIL_PUSH_SERVICE_ACCOUNT",
-    required: false,
-    secret: false,
-    description:
-      "Service account the Pub/Sub push subscription signs its tokens as. /api/webhooks/gmail accepts only tokens for this email.",
-    validate: (value) =>
-      /^[^@\s]+@[^@\s]+\.iam\.gserviceaccount\.com$/i.test(value)
-        ? null
-        : "must be a service account email (…@<project>.iam.gserviceaccount.com)",
-  },
-  {
     name: "NEXT_PUBLIC_ENV",
     required: false,
     secret: false,
@@ -428,26 +399,9 @@ export function collectEnvProblems(
   problems.push(...requireOneSupabaseKey(source));
   problems.push(...requireSenderWhenSendingEmail(source));
   problems.push(...requireCompleteGmailConfiguration(source));
-  problems.push(...requireCompleteGmailPushConfiguration(source));
   problems.push(...requireNewsHookKey(source));
 
   return problems;
-}
-
-/** Push reply sync is all-or-nothing: a partial set leaves the webhook refusing every notification. */
-function requireCompleteGmailPushConfiguration(
-  source: Record<string, string | undefined>,
-): EnvProblem[] {
-  const names = ["GMAIL_PUBSUB_TOPIC", "GMAIL_PUSH_AUDIENCE", "GMAIL_PUSH_SERVICE_ACCOUNT"] as const;
-  const configured = names.filter((name) => source[name]?.trim());
-  if (configured.length === 0 || configured.length === names.length) return [];
-
-  return names
-    .filter((name) => !source[name]?.trim())
-    .map((name) => ({
-      name,
-      problem: "is required when any Gmail push setting is configured",
-    }));
 }
 
 function requireCompleteGmailConfiguration(

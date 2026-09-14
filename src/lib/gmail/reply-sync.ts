@@ -149,8 +149,8 @@ async function alreadyCaptured(admin: SupabaseClient, ids: readonly string[]): P
 
 export type ReplySyncOptions = {
   /**
-   * Push-triggered runs (src/app/api/webhooks/gmail) look only at the last few
-   * minutes of inbox instead of the full day lookback. Absent = the poll's
+   * Runs triggered by the gmail-reply-check Edge Function look only at the last
+   * few minutes of inbox instead of the full day lookback. Absent = the poll's
    * GMAIL_REPLY_LOOKBACK_DAYS window.
    */
   sinceMinutes?: number;

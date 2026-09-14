@@ -87,11 +87,6 @@ GMAIL_CLIENT_SECRET=GOCSPX-secretkey
 GMAIL_REFRESH_TOKEN=<authorised-outreach-mailbox-refresh-token>
 GMAIL_SENDER_EMAIL=clients.sheffield@180dc.org
 GMAIL_REPLY_LOOKBACK_DAYS=2
-# Gmail push reply sync — optional locally (Pub/Sub cannot reach localhost;
-# the five-minute poll still works). See docs/gmail-push-setup.md
-GMAIL_PUBSUB_TOPIC=
-GMAIL_PUSH_AUDIENCE=
-GMAIL_PUSH_SERVICE_ACCOUNT=
 
 # LLM (Development API key — ask team)
 OPENAI_API_KEY=sk-proj-test-key-local-only
@@ -258,9 +253,6 @@ NEXT_PUBLIC_SENTRY_DSN=<redacted>
 | `GMAIL_REFRESH_TOKEN` | dev token | prod token | Only server-side | **SENSITIVE:** Authorises mailbox access. **One token for the whole branch**, obtained once by authorising `clients.sheffield@180dc.org` — not one per CAM, because outreach leaves from a single shared Workspace mailbox ([email-sending.md](email-sending.md)). Revocation or expiry therefore stops outreach branch-wide, not for one person |
 | `GMAIL_SENDER_EMAIL` | outreach mailbox | outreach mailbox | Only server-side | Exact branch mailbox; no fallback sender |
 | `GMAIL_REPLY_LOOKBACK_DAYS` | positive whole days; default `2` | positive whole days; default `2` | Only server-side | Gmail inbox search window for replies; increase when clients commonly reply later |
-| `GMAIL_PUBSUB_TOPIC` | `projects/<id>/topics/gmail-replies` | same topic | Only server-side | Pub/Sub topic Gmail publishes inbox changes to. **Same value in every environment** — Gmail keeps one watch per mailbox ([setup](gmail-push-setup.md)). Unset ⇒ no push; replies arrive on the five-minute poll |
-| `GMAIL_PUSH_AUDIENCE` | `180connect-gmail-push-staging` | `180connect-gmail-push-production` | Only server-side | The OIDC audience set on that environment's push subscription; `/api/webhooks/gmail` rejects tokens for any other |
-| `GMAIL_PUSH_SERVICE_ACCOUNT` | `gmail-push-invoker@<id>.iam.gserviceaccount.com` | same | Only server-side | Service account the push subscription signs as; the webhook accepts only tokens for this email |
 | `OPENAI_API_KEY` | test-key | prod-key | Only server-side | **SENSITIVE:** Never expose |
 | `GEMINI_API_KEY` | free-tier key from [aistudio.google.com](https://aistudio.google.com) | prod key | Only server-side | **SENSITIVE:** Never expose. Gemini key for LLM calls — F082 Client Booklet generation today, F100 email drafts later. Declared in `SCHEMA` (`src/lib/env.ts`) and passed explicitly to the AI SDK rather than read under its default `GOOGLE_GENERATIVE_AI_API_KEY` name. Unset ⇒ booklet generation returns a clear error |
 | `GEMINI_MODEL` | Flash-tier model id copied from the AI Studio model picker | same | Only server-side | Exact model id booklet generation calls (F082). No hardcoded default in code — Google retires model ids often enough that one would go stale. Unset ⇒ booklet generation cannot run |

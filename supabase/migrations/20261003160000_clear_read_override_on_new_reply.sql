@@ -26,8 +26,14 @@
 -- No table/column change — INBOX_THREAD_STATE.read_state already exists and
 -- is nullable by design (20260924090000).
 -- Reversibility: ../rollback/20261003160000_clear_read_override_on_new_reply.down.sql
+--
+-- Re-appliable on purpose (`or replace`, `drop trigger if exists`): staging
+-- received these same objects early under 20260913231412, a version that never
+-- landed in git and was forgotten via `migration repair --status reverted`
+-- (Sep 2026). A plain CREATE would fail there with "already exists" while a
+-- fresh replay must still build them — the guards satisfy both.
 
-create function public.clear_read_override_on_new_reply()
+create or replace function public.clear_read_override_on_new_reply()
 returns trigger
 language plpgsql
 security definer
@@ -48,6 +54,7 @@ comment on function public.clear_read_override_on_new_reply() is
 
 revoke execute on function public.clear_read_override_on_new_reply() from public, anon, authenticated;
 
+drop trigger if exists reply_events_clear_read_override on public.reply_events;
 create trigger reply_events_clear_read_override
   after insert on public.reply_events
   for each row execute function public.clear_read_override_on_new_reply();

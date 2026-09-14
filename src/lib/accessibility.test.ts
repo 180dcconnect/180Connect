@@ -2,6 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   parseAccessibilitySettings,
+  readAccessibilityCookies,
+  settingsFromAccountJson,
+  accessibilityAttributes,
+  sameAccessibilitySettings,
+  isDefaultAccessibilitySettings,
+  ACCESSIBILITY_FIELDS,
   DEFAULT_ACCESSIBILITY_SETTINGS,
   FONT_SIZES,
   FONT_SIZE_LABELS,
@@ -15,6 +21,17 @@ import {
   REDUCED_MOTIONS,
   REDUCED_MOTION_LABELS,
   REDUCED_MOTION_DESCRIPTIONS,
+  UNDERLINE_LINKS,
+  UNDERLINE_LINKS_LABELS,
+  UNDERLINE_LINKS_DESCRIPTIONS,
+  FOCUS_INDICATORS,
+  FOCUS_INDICATOR_LABELS,
+  FOCUS_INDICATOR_DESCRIPTIONS,
+  STATUS_COLOURS,
+  STATUS_COLOURS_LABELS,
+  STATUS_COLOURS_DESCRIPTIONS,
+  COOKIE_FONT_SIZE,
+  COOKIE_REDUCED_MOTION,
 } from "./accessibility.ts";
 
 test("returns default settings when given empty input", () => {
@@ -25,45 +42,20 @@ test("returns default settings when given empty input", () => {
   });
 });
 
-test("accepts valid font size options", () => {
-  for (const fontSize of FONT_SIZES) {
-    const result = parseAccessibilitySettings({ fontSize });
-    assert.equal(result.ok, true);
-    if (result.ok) {
-      assert.equal(result.value.fontSize, fontSize);
-      assert.equal(result.value.contrast, "normal");
-      assert.equal(result.value.lineSpacing, "normal");
-      assert.equal(result.value.reducedMotion, "normal");
-    }
+test("every field's first value is its default", () => {
+  for (const field of ACCESSIBILITY_FIELDS) {
+    assert.equal(DEFAULT_ACCESSIBILITY_SETTINGS[field.key], field.values[0]);
   }
 });
 
-test("accepts valid contrast modes", () => {
-  for (const contrast of CONTRAST_MODES) {
-    const result = parseAccessibilitySettings({ contrast });
-    assert.equal(result.ok, true);
-    if (result.ok) {
-      assert.equal(result.value.contrast, contrast);
-    }
-  }
-});
-
-test("accepts valid line spacing options", () => {
-  for (const lineSpacing of LINE_SPACINGS) {
-    const result = parseAccessibilitySettings({ lineSpacing });
-    assert.equal(result.ok, true);
-    if (result.ok) {
-      assert.equal(result.value.lineSpacing, lineSpacing);
-    }
-  }
-});
-
-test("accepts valid reduced motion options", () => {
-  for (const reducedMotion of REDUCED_MOTIONS) {
-    const result = parseAccessibilitySettings({ reducedMotion });
-    assert.equal(result.ok, true);
-    if (result.ok) {
-      assert.equal(result.value.reducedMotion, reducedMotion);
+test("accepts every allowed value of every field, leaving the others default", () => {
+  for (const field of ACCESSIBILITY_FIELDS) {
+    for (const value of field.values) {
+      const result = parseAccessibilitySettings({ [field.key]: value });
+      assert.equal(result.ok, true);
+      if (result.ok) {
+        assert.deepEqual(result.value, { ...DEFAULT_ACCESSIBILITY_SETTINGS, [field.key]: value });
+      }
     }
   }
 });
@@ -73,7 +65,10 @@ test("accepts a full custom configuration", () => {
     fontSize: "extra-large",
     contrast: "high",
     lineSpacing: "relaxed",
-    reducedMotion: "reduced",
+    reducedMotion: "off",
+    underlineLinks: "on",
+    focusIndicator: "strong",
+    statusColours: "colour-blind",
   };
   const result = parseAccessibilitySettings(custom);
   assert.deepEqual(result, {
@@ -88,6 +83,9 @@ test("safely falls back to defaults for invalid or unknown values", () => {
     contrast: "ultra-high",
     lineSpacing: "triple",
     reducedMotion: "none",
+    underlineLinks: "sometimes",
+    focusIndicator: "neon",
+    statusColours: "rainbow",
   };
   const result = parseAccessibilitySettings(invalid);
   assert.deepEqual(result, {
@@ -102,6 +100,7 @@ test("safely handles non-string or nullish properties", () => {
     contrast: null,
     lineSpacing: undefined,
     reducedMotion: false,
+    underlineLinks: {},
   };
   const result = parseAccessibilitySettings(malformed);
   assert.deepEqual(result, {
@@ -110,26 +109,55 @@ test("safely handles non-string or nullish properties", () => {
   });
 });
 
-test("provides readable labels and descriptions for all options (F205)", () => {
-  for (const fontSize of FONT_SIZES) {
-    assert.ok(fontSize in FONT_SIZE_LABELS);
-    assert.ok(fontSize in FONT_SIZE_DESCRIPTIONS);
-    assert.ok(FONT_SIZE_LABELS[fontSize].length > 0);
-  }
-  for (const contrast of CONTRAST_MODES) {
-    assert.ok(contrast in CONTRAST_LABELS);
-    assert.ok(contrast in CONTRAST_DESCRIPTIONS);
-    assert.ok(CONTRAST_LABELS[contrast].length > 0);
-  }
-  for (const lineSpacing of LINE_SPACINGS) {
-    assert.ok(lineSpacing in LINE_SPACING_LABELS);
-    assert.ok(lineSpacing in LINE_SPACING_DESCRIPTIONS);
-    assert.ok(LINE_SPACING_LABELS[lineSpacing].length > 0);
-  }
-  for (const reducedMotion of REDUCED_MOTIONS) {
-    assert.ok(reducedMotion in REDUCED_MOTION_LABELS);
-    assert.ok(reducedMotion in REDUCED_MOTION_DESCRIPTIONS);
-    assert.ok(REDUCED_MOTION_LABELS[reducedMotion].length > 0);
-  }
+test("reads settings from a cookie-shaped getter", () => {
+  const jar: Record<string, string> = {
+    [COOKIE_FONT_SIZE]: "large",
+    [COOKIE_REDUCED_MOTION]: "bogus",
+  };
+  const settings = readAccessibilityCookies((name) => jar[name]);
+  assert.deepEqual(settings, { ...DEFAULT_ACCESSIBILITY_SETTINGS, fontSize: "large" });
 });
 
+test("account JSON: null for anything that is not an object, parsed otherwise", () => {
+  assert.equal(settingsFromAccountJson(null), null);
+  assert.equal(settingsFromAccountJson("large"), null);
+  assert.equal(settingsFromAccountJson([]), null);
+  assert.deepEqual(settingsFromAccountJson({ contrast: "high", extra: 1 }), {
+    ...DEFAULT_ACCESSIBILITY_SETTINGS,
+    contrast: "high",
+  });
+});
+
+test("html attributes are omitted for defaults and set otherwise", () => {
+  const attributes = accessibilityAttributes({
+    ...DEFAULT_ACCESSIBILITY_SETTINGS,
+    statusColours: "colour-blind",
+  });
+  assert.equal(attributes["data-status-colours"], "colour-blind");
+  assert.equal(attributes["data-font-size"], undefined);
+});
+
+test("equality and default checks", () => {
+  assert.equal(isDefaultAccessibilitySettings(DEFAULT_ACCESSIBILITY_SETTINGS), true);
+  const changed = { ...DEFAULT_ACCESSIBILITY_SETTINGS, focusIndicator: "strong" as const };
+  assert.equal(isDefaultAccessibilitySettings(changed), false);
+  assert.equal(sameAccessibilitySettings(changed, { ...changed }), true);
+});
+
+test("provides readable labels and descriptions for all options (F205)", () => {
+  const pairs: Array<[readonly string[], Record<string, string>, Record<string, string>]> = [
+    [FONT_SIZES, FONT_SIZE_LABELS, FONT_SIZE_DESCRIPTIONS],
+    [CONTRAST_MODES, CONTRAST_LABELS, CONTRAST_DESCRIPTIONS],
+    [LINE_SPACINGS, LINE_SPACING_LABELS, LINE_SPACING_DESCRIPTIONS],
+    [REDUCED_MOTIONS, REDUCED_MOTION_LABELS, REDUCED_MOTION_DESCRIPTIONS],
+    [UNDERLINE_LINKS, UNDERLINE_LINKS_LABELS, UNDERLINE_LINKS_DESCRIPTIONS],
+    [FOCUS_INDICATORS, FOCUS_INDICATOR_LABELS, FOCUS_INDICATOR_DESCRIPTIONS],
+    [STATUS_COLOURS, STATUS_COLOURS_LABELS, STATUS_COLOURS_DESCRIPTIONS],
+  ];
+  for (const [values, labels, descriptions] of pairs) {
+    for (const value of values) {
+      assert.ok(labels[value]?.length > 0);
+      assert.ok(descriptions[value]?.length > 0);
+    }
+  }
+});

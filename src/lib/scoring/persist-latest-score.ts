@@ -12,6 +12,7 @@
 import { DEFAULT_WEIGHTS, type ScoutWeights } from "./calculate-priority-score.ts";
 import { computePriorityScore } from "./score-client.ts";
 import type { ScoreableOrganisation } from "./score-client.ts";
+import type { ScoringRules } from "./scout-config.ts";
 
 /** Structural slice of a PostgREST client — just the upsert this module needs. */
 type UpsertDb = {
@@ -59,12 +60,20 @@ export async function persistLatestScore(
   // so every row in a rescore is scored under the same generation. Defaults to
   // the MVP equal weights for callers that predate configurable scoring.
   weights: ScoutWeights = DEFAULT_WEIGHTS,
+  // What each check rewards and which towns count as priority, from the same
+  // active config as `weights`. Omitted → the code defaults.
+  rules?: ScoringRules,
 ): Promise<PersistedScoreResult> {
   // Regions default to BRANCH_PRIORITY_REGIONS inside computePriorityScore.
   // Passing [] here (as this call used to) meant "no preference set", which
   // pinned the geography factor to its neutral for every client the platform
   // has ever scored.
-  const { score, band, factors, weights: applied } = computePriorityScore(org, undefined, weights);
+  const { score, band, factors, weights: applied } = computePriorityScore(
+    org,
+    rules?.geography.priorityTowns,
+    weights,
+    rules,
+  );
   const scoreFactors: ScoreFactorsRecord = { factors, weights: applied };
   const { error } = await db
     .from("latest_scores")

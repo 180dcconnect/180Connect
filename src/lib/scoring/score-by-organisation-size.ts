@@ -54,7 +54,7 @@ export type SizeScoreResult = {
  * either direction; the team may want the opposite, or a different curve
  * entirely).
  */
-const BAND_SCORES: Record<IncomeBand, number> = {
+export const DEFAULT_SIZE_BAND_SCORES: Readonly<Record<IncomeBand, number>> = {
   under_10k: 0.2,
   "10k_100k": 0.4,
   "100k_1m": 0.6,
@@ -70,6 +70,9 @@ const DEFAULT_FOR_MISSING_SIZE = 0.5;
 
 export function scoreByOrganisationSize(
   income: number | null | undefined,
+  // The admin's per-band scores from score settings (src/lib/scoring/scout-config.ts);
+  // the placeholder scores above when none are given.
+  bandScores: Readonly<Record<IncomeBand, number>> = DEFAULT_SIZE_BAND_SCORES,
 ): SizeScoreResult {
   if (
     income === null ||
@@ -92,5 +95,5 @@ export function scoreByOrganisationSize(
     return { score: DEFAULT_FOR_MISSING_SIZE, band: null, usedDefault: true };
   }
 
-  return { score: BAND_SCORES[band], band, usedDefault: false };
+  return { score: bandScores[band], band, usedDefault: false };
 }

@@ -63,6 +63,7 @@ import {
   type ScoutWeights,
 } from "./calculate-priority-score.ts";
 import { scoreByGeography } from "./score-by-geography.ts";
+import type { ScoringRules } from "./scout-config.ts";
 import { scoreBySector } from "./score-by-sector.ts";
 import { scoreByOrganisationSize } from "./score-by-organisation-size.ts";
 import { scoreByPartnershipHistory } from "./score-by-partnership-history.ts";
@@ -146,13 +147,22 @@ export function latestTotalIncome(
 export function priorityFactorsFor(
   org: ScoreableOrganisation,
   priorityRegions: readonly string[] = BRANCH_PRIORITY_REGIONS,
+  // What each check rewards, from the active SCOUT config. Omitted → the code
+  // defaults, which is every caller from before score settings owned these.
+  rules?: ScoringRules,
 ): PriorityFactors {
   return {
     // F089 — the sector scorer's own neutral covers both "no sector recorded"
     // and "free text matching nothing"; this layer just passes the value through.
-    sector: scoreBySector(org.sector ?? null).score,
-    geography: scoreByGeography(org.city, priorityRegions).score,
-    size: scoreByOrganisationSize(latestTotalIncome(org)).score,
+    sector: scoreBySector(org.sector ?? null, rules?.sectorScores).score,
+    geography: scoreByGeography(
+      org.city,
+      priorityRegions,
+      rules
+        ? { inside: rules.geography.insideScore, outside: rules.geography.outsideScore }
+        : undefined,
+    ).score,
+    size: scoreByOrganisationSize(latestTotalIncome(org), rules?.sizeScores).score,
     partnershipHistory: scoreByPartnershipHistory(org.matched_grant_count).score,
     previousContact: scoreByPreviousContact(
       org.outreach_status,
@@ -187,10 +197,11 @@ export function computePriorityScore(
   org: ScoreableOrganisation,
   priorityRegions: readonly string[] = BRANCH_PRIORITY_REGIONS,
   weights?: unknown,
+  rules?: ScoringRules,
 ): ComputedScore {
   const effectiveWeights =
     weights === undefined ? sanitizeWeights(undefined) : sanitizeWeights(weights);
-  const factors = priorityFactorsFor(org, priorityRegions);
+  const factors = priorityFactorsFor(org, priorityRegions, rules);
   const score = calculatePriorityScore(factors, effectiveWeights);
   return { score, band: bandForScore(score), factors, weights: effectiveWeights };
 }

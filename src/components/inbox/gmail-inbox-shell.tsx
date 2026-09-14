@@ -11,7 +11,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import type { AppRole } from "@/lib/auth/permissions";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotionConfig } from "motion/react";
 import {
   Inbox,
   MessageSquare,
@@ -374,7 +374,7 @@ export function GmailInboxShell({
   engineHealth?: OutreachEngineHealth;
   className?: string;
 }) {
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useReducedMotionConfig();
   // The list exactly as the server built it. Everything downstream reads
   // `threads` below, which is this with the viewer's own flags laid over it.
   const [serverThreads, setServerThreads] = useState<InboxThreadView[]>(initialThreads);

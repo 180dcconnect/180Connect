@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotionConfig } from "motion/react";
 
 /**
  * Cycling status line + pulsing dots for a one-shot AI generation that can run
@@ -16,7 +16,7 @@ export function AiLoadingState({
   messages: readonly string[];
   reducedMotionLabel: string;
 }) {
-  const reducedMotion = useReducedMotion();
+  const reducedMotion = useReducedMotionConfig();
   const [messageIndex, setMessageIndex] = useState(0);
 
   useEffect(() => {

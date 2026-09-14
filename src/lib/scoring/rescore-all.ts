@@ -156,7 +156,13 @@ export async function rescoreAllOrganisations(): Promise<RescoreAllResult> {
             last_contacted_at: lastContactedFrom(row.outreach_messages),
             matched_grant_count: row.grants?.[0]?.count ?? null,
           };
-          const result = await persistLatestScore(admin, row.id, scoreable, config.weights);
+          const result = await persistLatestScore(
+            admin,
+            row.id,
+            scoreable,
+            config.weights,
+            config.rules,
+          );
           if (result.ok) {
             scored += 1;
           } else {

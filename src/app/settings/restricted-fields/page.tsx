@@ -4,9 +4,31 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
-import type { RestrictedFieldRow } from "@/lib/edit-suggestions";
+import { Group, Rise, Stage } from "@/components/dashboard-stage";
+import {
+  KNOWN_RESTRICTABLE_FIELDS,
+  type RestrictedFieldRow,
+} from "@/lib/edit-suggestions";
 import { RestrictedFieldsPanel } from "./restricted-fields-panel";
 
+/**
+ * Restricted fields (F020, #23): which parts of a client record a CAM cannot
+ * change directly, only suggest a change to for an admin to approve.
+ *
+ * ── Who this is for ──
+ *
+ * An admin, not a developer (AGENTS.md, "Who will maintain this app"). So the
+ * page never shows or asks for a column name: the fields that can be locked come
+ * from the database as a list (`list_restrictable_edit_fields`) and are shown by
+ * their plain-English names, and the words are "lock" / "unlock" rather than
+ * restrict / retire.
+ *
+ * ── The layout ──
+ *
+ * The Data imports skeleton in the Filed Record language
+ * (`docs/app-design-system.md`), as on Profile & account: a heading, one rail of
+ * facts, then a card per job — what is locked now, and locking another field.
+ */
 export default async function RestrictedFieldsPage() {
   const authorization = await getCurrentActor("approval:manage", {
     route: "/settings/restricted-fields",
@@ -15,36 +37,69 @@ export default async function RestrictedFieldsPage() {
 
   const supabase = await createClient();
 
-  const { data, error } = await supabase
-    .from("restricted_edit_fields")
-    .select("field_name, reason, active")
-    .order("active", { ascending: false })
-    .order("field_name")
-    .overrideTypes<RestrictedFieldRow[], { merge: false }>();
+  const [rowsResult, optionsResult] = await Promise.all([
+    supabase
+      .from("restricted_edit_fields")
+      .select("field_name, reason, active")
+      .order("active", { ascending: false })
+      .order("field_name")
+      .overrideTypes<RestrictedFieldRow[], { merge: false }>(),
+    supabase.rpc("list_restrictable_edit_fields"),
+  ]);
 
-  if (error) {
-    await reportError(error, { operation: "admin.restricted_fields.page_list" });
+  if (rowsResult.error) {
+    await reportError(rowsResult.error, { operation: "admin.restricted_fields.page_list" });
   }
 
-  return (
-    <main className="min-h-screen bg-[#f1f2f4] p-6">
-      <section className="mx-auto w-full max-w-4xl rounded-2xl bg-white p-8 shadow-sm">
-        <h1 className="text-2xl font-bold">Restricted client fields</h1>
-        <p className="mt-3 text-sm text-foreground/65">
-          Fields listed here as active cannot be saved directly by a CAM — their only
-          route is a suggested edit that an admin approves or rejects (#23). Changes
-          take effect immediately and are audited. Retired fields keep their history;
-          they simply stop being enforced.
-        </p>
+  // The dropdown degrades to the fields the app already knows how to describe
+  // rather than disappearing: the add RPC re-checks whatever is chosen, so the
+  // fallback can offer too much but never let a bad field through.
+  let lockableFields: string[] = [...KNOWN_RESTRICTABLE_FIELDS];
+  if (optionsResult.error) {
+    await reportError(optionsResult.error, {
+      operation: "admin.restricted_fields.list_restrictable",
+    });
+  } else if (Array.isArray(optionsResult.data)) {
+    lockableFields = (optionsResult.data as Array<{ field_name: string }>).map(
+      (row) => row.field_name,
+    );
+  }
 
-        {error && (
-          <div className="mt-5">
-            <InlineAlert variant="page" message="The restricted fields could not be loaded. Refresh and try again." />
-          </div>
+  const rows = rowsResult.data ?? [];
+  const lockedCount = rows.filter((row) => row.active).length;
+
+  return (
+    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+      <Stage className="w-full space-y-8">
+        <Rise>
+          <h1 className="font-body text-[clamp(2rem,4vw,2.75rem)] leading-[1] font-semibold tracking-[-0.03em] text-ink">
+            Restricted fields
+          </h1>
+          <p className="mt-5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-dim">
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-lead" />
+            <span>
+              <span className="font-semibold text-ink">
+                {lockedCount} {lockedCount === 1 ? "field" : "fields"} locked
+              </span>
+              {" · "}
+              CAMs suggest changes to these, and an admin approves them
+            </span>
+          </p>
+        </Rise>
+
+        {rowsResult.error && (
+          <Rise>
+            <InlineAlert
+              variant="page"
+              message="The restricted fields could not be loaded. Refresh the page to try again."
+            />
+          </Rise>
         )}
 
-        <RestrictedFieldsPanel initialFields={data ?? []} />
-      </section>
-    </main>
+        <Group className="space-y-4">
+          <RestrictedFieldsPanel initialFields={rows} lockableFields={lockableFields} />
+        </Group>
+      </Stage>
+    </div>
   );
 }

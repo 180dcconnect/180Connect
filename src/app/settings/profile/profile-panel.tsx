@@ -1,19 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition, type FormEvent } from "react";
-import { Pencil } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { OriginButton } from "@/components/ui/origin-button";
+import { Check, Loader2 } from "lucide-react";
 import { MAX_FULL_NAME_LENGTH } from "@/lib/account-settings";
 import { saveAccountSettingsAction, type AccountSettingsState } from "./actions";
+import {
+  CARD,
+  CARD_HINT,
+  CARD_TITLE,
+  FIELD_LABEL,
+  FOOTNOTE,
+  INPUT,
+  PRIMARY_BUTTON,
+  QUIET_BUTTON,
+  ROW,
+  ROW_ACTION,
+} from "../styles";
 
 const initialState: AccountSettingsState = { status: "idle" };
-
-const FIELD_LABEL =
-  "text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40";
-
-const ROW =
-  "flex flex-wrap items-baseline justify-between gap-x-8 gap-y-2 py-5";
 
 /**
  * The profile and account settings screen (F200 / F201):
@@ -34,11 +38,14 @@ const ROW =
 export function ProfilePanel({
   initialFullName,
   email,
-  role,
+  roleLabel,
+  roleDescription,
 }: {
   initialFullName: string;
   email: string | null;
-  role: string;
+  roleLabel: string;
+  /** What the role can do — the invite sheet's copy for it. */
+  roleDescription: string | null;
 }) {
   // Submitted through `useTransition` rather than `useActionState`, because
   // this form has to *do* something when the action returns — close the row and
@@ -82,106 +89,117 @@ export function ProfilePanel({
   }
 
   return (
-    <form onSubmit={handleSubmit} noValidate>
-      <div className="rounded-2xl border border-black/[0.06] bg-white px-6 shadow-sm">
-        {editing ? (
-          <div className="py-6 space-y-6">
-            <div>
-              <label htmlFor="full_name" className={FIELD_LABEL}>
-                Display name
-              </label>
-              <Input
-                ref={inputRef}
-                id="full_name"
-                name="full_name"
-                type="text"
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    cancel();
-                  }
-                }}
-                maxLength={MAX_FULL_NAME_LENGTH}
-                autoComplete="name"
-                required
-                aria-invalid={state.status === "error" || undefined}
-                aria-describedby="full_name_hint"
-                className="mt-2.5 bg-white"
-              />
-              <p
-                id="full_name_hint"
-                className="mt-2.5 text-sm leading-[1.7] text-foreground/65"
-              >
-                The name your team sees on clients you own and in the activity feed.
-              </p>
-            </div>
+    <section aria-labelledby="profile-heading" className={CARD}>
+      <h2 id="profile-heading" className={CARD_TITLE}>
+        Your details
+      </h2>
+      <p className={CARD_HINT}>
+        How you appear to the team — on clients you own and in the activity feed.
+      </p>
 
-            <div className="pt-2 flex flex-wrap items-center gap-3">
-              <OriginButton type="submit" loading={pending} disabled={pending} size="sm">
-                {pending ? "Saving..." : "Save changes"}
-              </OriginButton>
-              <OriginButton
+      <form onSubmit={handleSubmit} noValidate className="mt-4">
+        {editing ? (
+          <div className="border-t border-rule-soft pt-4">
+            <label htmlFor="full_name" className={FIELD_LABEL}>
+              Display name
+            </label>
+            <input
+              ref={inputRef}
+              id="full_name"
+              name="full_name"
+              type="text"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  cancel();
+                }
+              }}
+              maxLength={MAX_FULL_NAME_LENGTH}
+              autoComplete="name"
+              required
+              aria-invalid={state.status === "error" || undefined}
+              aria-describedby="full_name_hint"
+              className={`mt-2 ${INPUT}`}
+            />
+            <p id="full_name_hint" className="mt-2 text-[13px] leading-[1.55] text-dim">
+              Up to {MAX_FULL_NAME_LENGTH} characters. Press Esc to cancel.
+            </p>
+
+            <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+              <button
+                type="submit"
+                disabled={pending}
+                aria-busy={pending || undefined}
+                className={PRIMARY_BUTTON}
+              >
+                {pending && <Loader2 className="size-3.5 animate-spin" strokeWidth={2.2} />}
+                {pending ? "Saving…" : "Save name"}
+              </button>
+              <button
                 type="button"
-                variant="ghost"
-                size="sm"
                 onClick={cancel}
                 disabled={pending}
+                className={QUIET_BUTTON}
               >
                 Cancel
-              </OriginButton>
+              </button>
               {state.status === "error" && state.message ? (
-                <p aria-live="polite" className="text-sm font-bold text-destructive">
+                <p aria-live="polite" className="text-[13px] font-semibold text-stop">
                   {state.message}
                 </p>
               ) : null}
             </div>
           </div>
         ) : (
-          <div>
-            <div className={`${ROW} border-b border-black/[0.06]`}>
-              <span className={FIELD_LABEL}>Display name</span>
-              <span className="flex items-center gap-3 text-sm text-foreground/85">
-                {savedName.trim() || "Not set"}
-                <button
-                  type="button"
-                  onClick={startEditing}
-                  className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-bold text-brand transition-colors hover:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
-                >
-                  <Pencil className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
-                  Edit<span className="sr-only"> account details</span>
+          <dl>
+            <div className={ROW}>
+              <dt className={FIELD_LABEL}>Display name</dt>
+              <dd className="flex items-center gap-3 text-sm text-ink">
+                {savedName.trim() || <span className="text-faint">Not set</span>}
+                <button type="button" onClick={startEditing} className={ROW_ACTION}>
+                  Edit<span className="sr-only"> display name</span>
                 </button>
-              </span>
+              </dd>
             </div>
-
-            <dl>
-              <div className={`${ROW} border-b border-black/[0.06]`}>
-                <dt className={FIELD_LABEL}>Email</dt>
-                <dd className="text-sm text-foreground/85">{email ?? "—"}</dd>
-              </div>
-              <div className={ROW}>
-                <dt className={FIELD_LABEL}>Role</dt>
-                <dd className="text-sm text-foreground/85">{role}</dd>
-              </div>
-            </dl>
-          </div>
+            <div className={ROW}>
+              <dt className={FIELD_LABEL}>Email</dt>
+              <dd className="text-sm text-ink">{email ?? "—"}</dd>
+            </div>
+            <div className={`${ROW} items-start`}>
+              <dt className="min-w-0 flex-1">
+                <span className={FIELD_LABEL}>Role</span>
+                {roleDescription && (
+                  <span className="mt-1 block text-[13px] leading-[1.55] text-dim">
+                    {roleDescription}
+                  </span>
+                )}
+              </dt>
+              <dd className="text-sm text-ink">{roleLabel}</dd>
+            </div>
+          </dl>
         )}
-      </div>
+      </form>
 
-      <p className="mt-4 px-1 text-sm leading-[1.7] text-foreground/65">
-        Your email is changed through your login details, and your role is set by
-        an administrator — neither can be edited here. Notification delivery
-        frequency is set under Notifications in the menu.
-      </p>
-
-      {/* Success lives outside the row so it survives the switch back to view
-          mode, where the edit form and its inline error are gone. */}
-      {state.status === "success" && !editing && state.message ? (
-        <p aria-live="polite" className="mt-3 px-1 text-sm font-bold text-brand">
-          {state.message}
+      <div className="mt-4 border-t border-rule-soft pt-4">
+        {/* Success lives outside the form so it survives the switch back to
+            view mode, where the edit form and its inline error are gone. */}
+        {state.status === "success" && !editing && state.message ? (
+          <p
+            aria-live="polite"
+            className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-go"
+          >
+            <Check aria-hidden="true" className="size-3.5 shrink-0" strokeWidth={2.5} />
+            {state.message}
+          </p>
+        ) : null}
+        <p className={FOOTNOTE}>
+          Your email is changed through your login details, and your role is set
+          by an administrator — neither can be edited here. Notification delivery
+          is set under Notifications.
         </p>
-      ) : null}
-    </form>
+      </div>
+    </section>
   );
 }

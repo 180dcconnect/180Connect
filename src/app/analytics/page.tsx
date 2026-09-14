@@ -10,6 +10,7 @@ import { InlineAlert } from "@/components/ui/inline-alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatCard } from "@/components/stat-card";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
+import { AnalyticsHeader } from "@/app/admin/analytics-header";
 import {
   filterActiveSuppressed,
   type DashboardOrgRow,
@@ -55,7 +56,8 @@ type ToneMessageRow = {
 
 /**
  * F206/F207/F208 — the CAM's own outreach performance, as opposed to the
- * platform-wide readings on /dashboard.
+ * platform-wide readings on /dashboard. One tab of the Analytics group — see
+ * `src/app/admin/analytics-group.ts`.
  *
  * Every figure here describes *clients you own*. The eyebrow says so on screen,
  * because a personal analytics page that quietly showed team totals would be
@@ -276,14 +278,12 @@ export default async function AnalyticsPage() {
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="mx-auto w-full max-w-6xl space-y-10">
         <Rise>
-          <header>
-            <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-              Clients you own · you only
+          <AnalyticsHeader current="/analytics">
+            <p className="mt-3 text-sm leading-[1.7] text-dim">
+              Only the clients you own — never team totals. For the whole
+              team&rsquo;s numbers, an admin opens the Team analytics tab.
             </p>
-            <h1 className="mt-2 font-body text-[clamp(2rem,4vw,2.75rem)] font-semibold leading-[1] tracking-[-0.03em]">
-              Your analytics
-            </h1>
-          </header>
+          </AnalyticsHeader>
         </Rise>
 
         {loadFailed && (

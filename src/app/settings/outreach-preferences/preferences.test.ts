@@ -100,7 +100,8 @@ describe("outreach preferences constants and configuration (F195 / F196 / F197 /
 
   it("enforces sensible max caps for custom cities and sectors", () => {
     assert.equal(MAX_CITY_LENGTH, 60);
-    assert.equal(MAX_CITIES, 20);
+    // Covers all 174 local authorities, so a regional group can always be added.
+    assert.equal(MAX_CITIES, 200);
     assert.equal(MAX_SECTOR_LENGTH, 60);
     assert.equal(MAX_SECTORS, 20);
   });

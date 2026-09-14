@@ -15,6 +15,8 @@ import {
   describePendingSuggestion,
   isSensitiveOrgField,
   pendingSuggestionNotice,
+  KNOWN_RESTRICTABLE_FIELDS,
+  restrictedFieldDescription,
   restrictedFieldLabel,
   restrictedFieldRpcFailure,
   validateDeactivateRestrictedFieldInput,
@@ -280,8 +282,31 @@ describe("restrictedFieldLabel (F020)", () => {
     assert.equal(restrictedFieldLabel("city"), "Town or city");
   });
 
-  it("derives a readable label for an admin-added field", () => {
-    assert.equal(restrictedFieldLabel("trading_name"), "trading name");
+  it("uses the curated label for other known client fields", () => {
+    assert.equal(restrictedFieldLabel("trading_name"), "Trading name");
+    assert.equal(restrictedFieldLabel("sub_sector"), "Sub-sector");
+  });
+
+  it("derives a sentence-case label for a column with no curated label", () => {
+    assert.equal(restrictedFieldLabel("some_new_column"), "Some new column");
+  });
+});
+
+describe("restrictedFieldDescription", () => {
+  it("explains every field the settings screen offers by default", () => {
+    for (const field of KNOWN_RESTRICTABLE_FIELDS) {
+      assert.ok(restrictedFieldDescription(field), `missing description for ${field}`);
+    }
+  });
+
+  it("covers the seeded six", () => {
+    for (const field of SENSITIVE_ORG_FIELDS) {
+      assert.ok(KNOWN_RESTRICTABLE_FIELDS.includes(field), `${field} not offered`);
+    }
+  });
+
+  it("returns null for an unknown column", () => {
+    assert.equal(restrictedFieldDescription("some_new_column"), null);
   });
 });
 
@@ -384,12 +409,18 @@ describe("restrictedFieldRpcFailure (F020)", () => {
       { status: 403, error: "only an admin may change restricted editing" },
     );
     assert.deepEqual(
-      restrictedFieldRpcFailure({ code: "23514", message: "not a restrictable client field" }),
-      { status: 400, error: "not a restrictable client field" },
+      restrictedFieldRpcFailure({ code: "23514", message: "trading_x is not a restrictable client field" }),
+      {
+        status: 400,
+        error: "That field can't be locked. Refresh the page and choose one from the list.",
+      },
     );
     assert.deepEqual(
       restrictedFieldRpcFailure({ code: "P0002", message: "no active restriction found" }),
-      { status: 404, error: "no active restriction found" },
+      {
+        status: 404,
+        error: "That field is already unlocked. Refresh the page to see the latest list.",
+      },
     );
   });
 

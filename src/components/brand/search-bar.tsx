@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
+import { AnimatePresence, motion, useReducedMotionConfig, type Variants } from "motion/react";
 import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { ArrowRight, Check, ChevronLeft, History, Mail, Plus, Search, SlidersHorizontal, X } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -306,7 +306,7 @@ const DEFAULT_PARAMS: Record<string, string> = {
  * stillness.
  */
 function StatusLine({ messages, tone = "dark" }: { messages: readonly string[]; tone?: SearchBarTone }) {
-  const reducedMotion = useReducedMotion();
+  const reducedMotion = useReducedMotionConfig();
   const [index, setIndex] = useState(0);
 
   useEffect(() => {

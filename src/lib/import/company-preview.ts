@@ -35,6 +35,8 @@ import {
   type SourceIdentifier,
 } from "../standardize/write-organisations.ts";
 import { checkClientCriteria, type ClientCriteriaResult } from "../client-criteria.ts";
+import type { ClientCriteriaConfig } from "../client-criteria-config.ts";
+import { loadClientCriteria } from "../client-criteria-loader.ts";
 import type { StandardOrganisation } from "../standardize/types.ts";
 
 export type CompanyProfilePayload = RawCompaniesHouseRecord & {
@@ -75,6 +77,12 @@ export type CompanyPreviewDependencies = {
   fetchRecord: (
     lookup: CompaniesHouseLookup,
   ) => Promise<{ record: CompanyProfilePayload; companyNumber: string } | null>;
+  /**
+   * The criteria config with the priority towns saved in score settings, so the
+   * preview's "local" verdict matches the import's. Omitted (tests) → the
+   * built-in CLIENT_CRITERIA.
+   */
+  loadCriteriaConfig?: () => Promise<ClientCriteriaConfig>;
 };
 
 const READABLE_FETCH_ERRORS = new Set([
@@ -98,6 +106,7 @@ export function createDefaultCompanyPreviewDependencies(): CompanyPreviewDepende
         companyNumber: first.source_record_id,
       };
     },
+    loadCriteriaConfig: loadClientCriteria,
   };
 }
 
@@ -130,10 +139,13 @@ export async function previewCompany(
   const identifier = companiesHouseIdentifier(companyNumber);
   const sourceConfidence = classifyCompaniesHouseSourceConfidence(raw);
   const tier = classifyCompaniesHouseTier(raw);
-  const criteria = checkClientCriteria({
-    ...buildCriteriaInput(organisation),
-    sourceConfidence,
-  });
+  const criteria = checkClientCriteria(
+    {
+      ...buildCriteriaInput(organisation),
+      sourceConfidence,
+    },
+    await deps.loadCriteriaConfig?.(),
+  );
 
   const status = (raw.company_status ?? "unknown").toLowerCase();
   const isActive = status === "active";

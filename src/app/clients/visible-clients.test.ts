@@ -667,6 +667,57 @@ describe("prioritiseBySize (F198 / F091 / F094)", () => {
   });
 });
 
+describe("prioritiseBySize with an income range (F198)", () => {
+  const clients = visibleClients(
+    [
+      org({ id: "1", legal_name: "Alpha 40k", financial_periods: [{ total_income: 40_000, period_end: "2025-03-31" }] }),
+      org({ id: "2", legal_name: "Beta 300k", financial_periods: [{ total_income: 300_000, period_end: "2025-03-31" }] }),
+      org({ id: "3", legal_name: "Gamma 1.8m", total_income: 1_800_000 }),
+      org({ id: "4", legal_name: "Delta 3m", total_income: 3_000_000 }),
+      org({ id: "5", legal_name: "Epsilon Unfiled" }),
+    ],
+    [],
+  );
+
+  it("matches real income inside the range, not whole bands", () => {
+    // £250k – £2m: Beta and Gamma. Delta is over £1m but above the range, so a
+    // band-based match (100k_1m + over_1m) would wrongly have included it.
+    const result = prioritiseBySize(clients, {
+      preferred_income_min: 250_000,
+      preferred_income_max: 2_000_000,
+    });
+    assert.deepEqual(result.map((c) => c.id), ["2", "3", "1", "4", "5"]);
+  });
+
+  it("uses the range over any legacy bands on the same row", () => {
+    const result = prioritiseBySize(clients, {
+      preferred_income_bands: ["under_10k"],
+      preferred_income_min: 1_000_000,
+      preferred_income_max: null,
+    });
+    assert.deepEqual(result.map((c) => c.id), ["4", "3", "1", "2", "5"]);
+  });
+
+  it("reads the newest period that carries an income", () => {
+    const [client] = visibleClients(
+      [
+        org({
+          financial_periods: [
+            { total_income: 20_000, period_end: "2023-03-31" },
+            { total_income: null, period_end: "2025-03-31" },
+          ],
+        }),
+      ],
+      [],
+    );
+    assert.equal(client.latest_income, 20_000);
+  });
+
+  it("counts a range as an active preference", () => {
+    assert.equal(hasActiveQueuePreferences({ preferred_income_max: 50_000 }), true);
+  });
+});
+
 describe("prioritiseByGrants (F199 / F092 / F094)", () => {
   const clients = visibleClients(
     [

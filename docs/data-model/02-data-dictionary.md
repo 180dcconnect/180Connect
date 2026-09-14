@@ -83,6 +83,15 @@
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | imported_field_paths | jsonb |  | Paths of imported fields |
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | import_notes | jsonb |  | Notes about the import |
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | import_raw_record_id | uuid | RAW_SOURCE_RECORDS | Raw record ID for the import |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | sector | text |  | Sector the organisation works in |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | geographic_reach | enum |  | How far the organisation operates |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | latest_income | numeric |  | Latest annual income in GBP |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | accounts_year_end | date |  | Year end the size figures are from |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | staff_count | integer |  | Number of staff |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | volunteer_count | integer |  | Number of volunteers |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | email_role | text |  | Role or job function of the contact email recipient |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | email_role_confirmed | boolean |  | Whether the email recipient role has been confirmed by CAM |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | email_role_confirmed_at | timestamp |  | Timestamp when the email recipient role was confirmed |
 | 04 Entities | ORGANISATIONS | id | uuid |  |  |
 | 04 Entities | ORGANISATIONS | legal_name | text |  |  |
 | 04 Entities | ORGANISATIONS | trading_name | text |  |  |
@@ -182,6 +191,9 @@
 | 04 Entities | USERS | invite_accepted_at | timestamp |  |  |
 | 04 Entities | USERS | onboarding_completed_at | timestamp |  | When the user finished the onboarding flow |
 | 04 Entities | USERS | onboarding_dismissed_at | timestamp |  | When the user dismissed the onboarding flow |
+| 04 Entities | USERS | notification_frequency | enum |  | Notification cadence: immediate, daily or weekly digest |
+| 04 Entities | USERS | email_notification_types | text[] |  | Notification types also sent by email |
+| 04 Entities | USERS | accessibility_settings | jsonb |  | Accessibility preferences stored on the account; null = never saved |
 | 04 Entities | USER_ONBOARDING_STEPS | user_id | uuid | USERS | User completing the step |
 | 04 Entities | USER_ONBOARDING_STEPS | step_key | text |  | Key of the onboarding step |
 | 04 Entities | USER_ONBOARDING_STEPS | completed_at | timestamp |  | When the step was completed |
@@ -220,7 +232,11 @@
 | 04 Entities | OUTREACH_PREFERENCES | preferred_cities | text[] |  | City/location values to prioritise, matched against ORGANISATIONS.city |
 | 04 Entities | OUTREACH_PREFERENCES | preferred_sectors | text[] |  | Sector values to prioritise, matched against ORGANISATIONS.sector |
 | 04 Entities | OUTREACH_PREFERENCES | preferred_income_bands | enum[] |  | Subset of income_band values to prioritise |
+| 04 Entities | OUTREACH_PREFERENCES | preferred_income_min | bigint |  | Bottom of the preferred annual income range in pounds; null = from £0 |
+| 04 Entities | OUTREACH_PREFERENCES | preferred_income_max | bigint |  | Top of the preferred annual income range in pounds; null = no upper limit |
 | 04 Entities | OUTREACH_PREFERENCES | prioritise_grant_recipients | boolean |  | Prioritise organisations with previous grant/funding history (360Giving) |
+| 04 Entities | OUTREACH_PREFERENCES | first_follow_up_days | integer |  | Days of silence before the first follow-up reminder; default 7 |
+| 04 Entities | OUTREACH_PREFERENCES | second_follow_up_days | integer |  | Days of silence before the second reminder and the move to No response; default 14 |
 | 04 Entities | OUTREACH_PREFERENCES | created_at | timestamp |  | Row creation timestamp |
 | 04 Entities | OUTREACH_PREFERENCES | updated_at | timestamp |  | Last edit timestamp |
 | 04 Entities | SUPPRESSIONS | id | uuid |  | Primary key |

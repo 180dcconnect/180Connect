@@ -1,16 +1,17 @@
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
+import { hasPermission } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
-import { Rise, Stage } from "@/components/dashboard-stage";
+import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { isNotificationFrequency } from "@/lib/notification-preferences";
-import { NotificationFrequencyForm } from "./notification-frequency-form";
+import { notificationsForAbilities } from "@/lib/notification-catalogue";
 import {
   DEFAULT_EMAIL_NOTIFICATION_TYPES,
   parseEmailNotificationTypes,
 } from "@/lib/email-notification-preferences";
-import { EmailNotificationsForm } from "./email-notifications-form";
+import { NotificationPreferencesForm } from "./preferences-form";
 
 /**
  * One notification-preferences page for both preferences:
@@ -24,9 +25,12 @@ import { EmailNotificationsForm } from "./email-notifications-form";
  * addition to in-app" (AC1). `users.email_notification_types` defaults to
  * `{client_reply_received}` at the column level (AC3), so a CAM who never
  * opens this page still gets reply emails unless they explicitly come here
- * and uncheck the box. The email preference lives on the same page as the
- * frequency preference — F179's own dependency list names F178 — rather
- * than a second, competing "notifications" route.
+ * and uncheck the box.
+ *
+ * Same skeleton as Profile & account and Accessibility: heading, one rail of
+ * facts, cards, one save bar — Filed Record tokens (`docs/app-design-system.md`).
+ * The notification list comes from `src/lib/notification-catalogue.ts`,
+ * filtered to what this role can actually receive.
  */
 export default async function NotificationSettingsPage() {
   const authorization = await getCurrentActor(undefined, {
@@ -35,12 +39,13 @@ export default async function NotificationSettingsPage() {
   if (!authorization.ok) {
     redirect("/login");
   }
+  const actor = authorization.actor;
 
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("users")
     .select("notification_frequency, email_notification_types")
-    .eq("id", authorization.actor.id)
+    .eq("id", actor.id)
     .maybeSingle<{ notification_frequency: string; email_notification_types: string[] | null }>();
 
   if (error) {
@@ -58,38 +63,49 @@ export default async function NotificationSettingsPage() {
     ? parseEmailNotificationTypes(data.email_notification_types)
     : DEFAULT_EMAIL_NOTIFICATION_TYPES;
 
+  const notifications = notificationsForAbilities({
+    canEditClients: hasPermission(actor.role, "client:edit"),
+    isAdmin: hasPermission(actor.role, "user:manage"),
+  });
+
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
-      <Stage className="mx-auto w-full max-w-2xl space-y-10">
+      <Stage className="w-full space-y-8">
         <Rise>
-          <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
-            Notification preferences
+          <h1 className="font-body text-[clamp(2rem,4vw,2.75rem)] leading-[1] font-semibold tracking-[-0.03em] text-ink">
+            Notifications
           </h1>
-          <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
-            Notifications are always recorded and always visible when you check the
-            bell. These settings only control how eagerly one interrupts you — and
-            which ones are also emailed to you, so something urgent doesn&apos;t sit
-            unread while you&apos;re away.
+          <p className="mt-5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-dim">
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-go" />
+            <span>
+              Everything arrives in the bell
+              {actor.email ? (
+                <>
+                  {" "}
+                  · emails go to <span className="text-ink">{actor.email}</span>
+                </>
+              ) : null}
+            </span>
           </p>
         </Rise>
 
-        {error ? (
+        <Group>
           <Rise>
-            <InlineAlert
-              variant="page"
-              message="Your notification preferences could not be loaded. Please refresh and try again."
-            />
+            {error ? (
+              <InlineAlert
+                variant="page"
+                message="Your notification preferences could not be loaded. Please refresh and try again."
+              />
+            ) : (
+              <NotificationPreferencesForm
+                initialFrequency={initialFrequency}
+                initialEmailTypes={initialEmailTypes}
+                notifications={notifications}
+                email={actor.email}
+              />
+            )}
           </Rise>
-        ) : (
-          <>
-            <Rise>
-              <NotificationFrequencyForm initialFrequency={initialFrequency} />
-            </Rise>
-            <Rise>
-              <EmailNotificationsForm initialTypes={initialEmailTypes} />
-            </Rise>
-          </>
-        )}
+        </Group>
       </Stage>
     </div>
   );

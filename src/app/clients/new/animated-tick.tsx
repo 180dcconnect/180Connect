@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
+import { motion, useReducedMotionConfig } from "motion/react";
 
 /**
  * The app's tick, drawn on — the same path and stroke the animated checkbox
@@ -14,7 +14,7 @@ export function AnimatedTick({
   className?: string;
   label?: string;
 }) {
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useReducedMotionConfig();
 
   return (
     <motion.svg

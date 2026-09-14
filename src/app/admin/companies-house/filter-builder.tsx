@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotionConfig } from "motion/react";
 import {
   Bookmark,
   BookmarkPlus,
@@ -166,7 +166,7 @@ export function CompaniesFilterBuilder({
   const [postcodeDraft, setPostcodeDraft] = useState("");
   const [selectedLocationZone, setSelectedLocationZone] = useState<CityRegionZone>("All");
   const [isPending, startTransition] = useTransition();
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useReducedMotionConfig();
 
   // Every filter change re-counts, debounced so typing does not fire a request
   // per keystroke. The ref guards against an older, slower response

@@ -82,7 +82,7 @@
 | total_expenditure | numeric |  | Yes | Total expenditure for the period | API | Pulled from financial filing |  |
 | income_band | enum |  | Yes | Banded income category | System | Computed from total_income | under_10k / 10k_100k / 100k_1m / over_1m |
 | filing_date | date |  | Yes | Date the accounts were filed | API | Pulled from Charity Commission | Populated from the bulk register extract's ar_received_date. The Charity Commission API publishes no accounts-submission date at any endpoint, so API-sourced periods leave this null. |
-| financial_source | enum |  | No | Which API provided this data | System | Set on ingestion | Values: charitybase / charity_commission / manual. 'manual' (20261002095000) marks a period entered by hand on Add a client — not a filed return. |
+| financial_source | enum |  | No | Which API provided this data | System | Set on ingestion | Values: charitybase / charity_commission / manual. 'manual' (20261002090000) marks a period entered by hand on Add a client — not a filed return. |
 | income_donations_legacies | numeric |  | Yes | Income from donations and legacies for the period | API | Charity Commission | Annual-return breakdown. Parts are not guaranteed to sum to total_income — smaller charities file totals only. Null = not published, never zero |
 | income_charitable_activities | numeric |  | Yes | Income from charitable activities | API | Charity Commission | " |
 | income_other_trading | numeric |  | Yes | Income from other trading activities | API | Charity Commission | " |
@@ -158,6 +158,9 @@
 | invite_accepted_at | timestamp |  | Yes | When the invited person first confirmed their email | System | Set by app.handle_auth_user_confirmed when email_confirmed_at goes non-null | Null while invite pending. Setting it moves the row out of the admin's pending-invites list |
 | onboarding_completed_at | timestamp |  | Yes | When the user finished the onboarding flow | System | Set when user completes onboarding | Null until completed |
 | onboarding_dismissed_at | timestamp |  | Yes | When the user dismissed the onboarding flow | System | Set when user dismisses onboarding | Null until dismissed |
+| notification_frequency | enum |  | No | How eagerly notifications get the user's attention | Human | Chosen by user in Settings → Notifications | immediate / daily / weekly. Default immediate. Daily and weekly send a digest email of unread notifications at 9am UK time (Mondays for weekly); client replies always interrupt immediately |
+| email_notification_types | text[] |  | No | Notification types the user also wants by email | Human | Ticked by user in Settings → Notifications | Default {client_reply_received}. Emailable today: client_reply_received, follow_up_due, outreach_send_failed. Empty array = in-app only |
+| accessibility_settings | jsonb |  | Yes | The user's accessibility preferences, so they follow the account across devices | Human | Saved from Settings → Accessibility | Keys: fontSize, contrast, lineSpacing, reducedMotion, underlineLinks, focusIndicator, statusColours, validated in src/lib/accessibility.ts. Null = never saved (the browser's cookies are adopted). Must be a JSON object when set |
 
 ## NOTES
 
@@ -238,10 +241,14 @@
 | id | uuid |  | No | Primary key | System | Auto-generated |  |
 | user_id | uuid | USERS | No | CAM these preferences belong to | System | Set on save | One row per user (unique) |
 | preferred_geographic_reach | enum[] |  | No | Subset of geographic_reach values the CAM wants prioritised | Human | Chosen by CAM in settings | Same enum as ORGANISATIONS.geographic_reach; empty array = no preference set |
-| preferred_cities | text[] |  |  |  |  |  |  |
+| preferred_cities | text[] |  | No | Places the CAM wants prioritised | Human | Picked by CAM from the Charity Commission local authority list in settings | Matched against ORGANISATIONS.city after normalising council names ("Sheffield City" → "sheffield"). Empty array = no preference set. Up to 200 places |
 | preferred_sectors | text[] |  | No | Sector values to prioritise | Human | Chosen by CAM in settings | Free text, matched against ORGANISATIONS.sector; empty array = no preference set |
-| preferred_income_bands | enum[] |  | No | Subset of income_band values to prioritise | Human | Chosen by CAM in settings | Same enum as FINANCIAL_PERIODS.income_band; empty array = no preference set |
-| prioritise_grant_recipients | boolean |  |  |  |  |  |  |
+| preferred_income_bands | enum[] |  | No | Subset of income_band values to prioritise | Human | Chosen by CAM in settings | Same enum as FINANCIAL_PERIODS.income_band. Legacy: kept in step with preferred_income_min/max (the bands the range overlaps); queue scoring uses the range when set |
+| preferred_income_min | bigint |  | Yes | Bottom of the preferred annual income range, in whole pounds | Human | Chosen by CAM on the size slider in settings | Null = from £0. Must be >= 0. Matched against the client's latest FINANCIAL_PERIODS.total_income |
+| preferred_income_max | bigint |  | Yes | Top of the preferred annual income range, in whole pounds | Human | Chosen by CAM on the size slider in settings | Null = no upper limit. Must be >= 0 and greater than preferred_income_min when both are set. Both null = no size preference |
+| prioritise_grant_recipients | boolean |  | No | Whether to favour organisations with recorded grant history (360Giving) | Human | Chosen by CAM in settings | Default false. Adds weight to clients with at least one grant award |
+| first_follow_up_days | integer |  | No | Days of silence before the first follow-up reminder | Human | Set by CAM in settings | Default 7. Allowed 1–60. Silence is counted from the latest email sent, reply received or status change. Triggers a follow_up_due notification and a Needs attention entry |
+| second_follow_up_days | integer |  | No | Days of silence before the second follow-up reminder | Human | Set by CAM in settings | Default 14. Allowed 1–90. Must be greater than first_follow_up_days (checked in the app). Also moves the client to No response via sweep_no_response_status |
 | created_at | timestamp |  | No | Row creation timestamp | System | Auto-generated |  |
 | updated_at | timestamp |  | No | Last edit timestamp | System | Updated on save |  |
 

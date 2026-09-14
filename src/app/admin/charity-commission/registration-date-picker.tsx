@@ -2,7 +2,7 @@
 
 import { useId, useMemo, useState } from "react";
 import { Calendar, ChevronDown, RotateCcw, X } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotionConfig } from "motion/react";
 import { EASE } from "@/components/brand/motion";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DateRangeCalendar } from "@/components/ui/date-range-calendar";
@@ -51,7 +51,7 @@ export function RegistrationDatePicker({
   disabled = false,
 }: RegistrationDatePickerProps) {
   const [open, setOpen] = useState(false);
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useReducedMotionConfig();
 
   // Draft state while popover is open
   const [draftFrom, setDraftFrom] = useState<string | null>(from);

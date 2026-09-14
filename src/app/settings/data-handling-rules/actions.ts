@@ -14,6 +14,7 @@ export type RuleRow = {
   source: string | null;
   field_path: string;
   action: "allow" | "deny";
+  rule_kind: "field_path" | "redact_personal_email" | "redact_phone_number";
   reason: string;
   is_active: boolean;
   created_at: string;
@@ -40,30 +41,32 @@ export type FilterActivity = {
   error?: string;
 };
 
+const NOT_AUTHORISED = "Only admins can change these settings.";
+
 /**
  * Turns a Postgres error into something an admin can act on.
  *
- * The RPCs raise plain messages that are already written for a person, so those
- * pass through. The constraint violations do not: a unique-violation surfaces as
- * `duplicate key value violates unique constraint "data_handling_rules_active_unique"`,
- * which tells the reader nothing about what to do differently.
+ * The people using this screen are not developers (AGENTS.md, "Who will maintain
+ * this app"), so every message says what happened in the screen's own words —
+ * "protection", not rule, path or constraint.
  */
 function friendlyError(error: { code?: string; message: string }): string {
   if (error.code === "23505") {
-    return (
-      "An active rule already covers that source and field path. " +
-      "Deactivate the existing rule before adding a different one for the same field."
-    );
+    return "That protection is already on. Refresh the page to see the latest list.";
   }
   if (error.code === "22P02") {
-    return "That source is not one the platform ingests from.";
+    return "That source is not one the platform imports from.";
   }
   if (error.code === "23514") {
-    return "That is not a valid action — a rule must either allow or deny.";
+    return "That combination is not allowed. Check the developer settings and try again.";
   }
-  // P0001 is a raise from inside our own RPCs, whose messages are already
-  // written to be read by a person ("Only admins can create data handling rules").
-  return error.message;
+  if (/not found/i.test(error.message)) {
+    return "That protection no longer exists. Refresh the page to see the latest list.";
+  }
+  if (/admin/i.test(error.message)) {
+    return NOT_AUTHORISED;
+  }
+  return "The change could not be saved. Refresh the page and try again.";
 }
 
 // ---------------------------------------------------------------------------
@@ -79,7 +82,7 @@ export async function loadRules(): Promise<{
     route: "/settings/data-handling-rules",
   });
   if (!authorization.ok) {
-    return { rules: [], version: 0, error: "Not authorised." };
+    return { rules: [], version: 0, error: NOT_AUTHORISED };
   }
 
   const supabase = await createClient();
@@ -88,7 +91,7 @@ export async function loadRules(): Promise<{
     supabase
       .from("data_handling_rules")
       .select(
-        "id, rule_version, source, field_path, action, reason, is_active, created_at, updated_at, created_by_user:users!created_by(full_name, email)",
+        "id, rule_version, source, field_path, action, rule_kind, reason, is_active, created_at, updated_at, created_by_user:users!created_by(full_name, email)",
       )
       .order("is_active", { ascending: false })
       .order("created_at", { ascending: false }),
@@ -103,7 +106,7 @@ export async function loadRules(): Promise<{
     await reportError(rulesResult.error, {
       operation: "admin.data_handling_rules.load",
     });
-    return { rules: [], version: 0, error: "Could not load rules." };
+    return { rules: [], version: 0, error: "The protections could not be loaded." };
   }
   if (versionResult.error) {
     await reportError(versionResult.error, {
@@ -120,10 +123,9 @@ export async function loadRules(): Promise<{
 /**
  * What the rules have actually done to stored data.
  *
- * The rules table says what the platform intends to exclude; this says what it
- * has excluded. Without it an admin cannot tell a rule that strips hundreds of
- * records a week from one whose field path has a typo in it and has never
- * matched anything.
+ * The rules list says what the platform intends to keep out; this says what it
+ * has kept out. Without it an admin cannot tell a protection that removes
+ * hundreds of records a week from one that has never matched anything.
  */
 export async function loadFilterActivity(): Promise<FilterActivity> {
   const empty: FilterActivity = {
@@ -136,7 +138,7 @@ export async function loadFilterActivity(): Promise<FilterActivity> {
   const authorization = await getCurrentActor("user:manage", {
     route: "/settings/data-handling-rules",
   });
-  if (!authorization.ok) return { ...empty, error: "Not authorised." };
+  if (!authorization.ok) return { ...empty, error: NOT_AUTHORISED };
 
   const supabase = await createClient();
 
@@ -149,8 +151,8 @@ export async function loadFilterActivity(): Promise<FilterActivity> {
     await reportError(coverageResult.error ?? summaryResult.error, {
       operation: "admin.data_handling_rules.load_activity",
     });
-    // The rules themselves still render — this panel is reporting, not control.
-    return { ...empty, error: "Could not load filtering activity." };
+    // The protections themselves still render — this panel is reporting, not control.
+    return { ...empty, error: "What has been removed so far could not be loaded. Refresh the page to try again." };
   }
 
   const coverage = (coverageResult.data ?? [])[0] as
@@ -179,28 +181,91 @@ export async function loadFilterActivity(): Promise<FilterActivity> {
   };
 }
 
+export type ObservedField = {
+  field_path: string;
+  records_seen: number;
+  records_sampled: number;
+};
+
+/**
+ * The field names a source has really sent, from its most recent stored records
+ * (`data_handling_observed_fields`). Loaded when an admin opens the picker for a
+ * source rather than on page load — it walks stored payloads and is the slowest
+ * read on the screen. Names and counts only; the RPC never returns values.
+ */
+export async function loadObservedFields(
+  source: string,
+): Promise<{ fields: ObservedField[]; error?: string }> {
+  const authorization = await getCurrentActor("user:manage", {
+    route: "/settings/data-handling-rules",
+  });
+  if (!authorization.ok) return { fields: [], error: NOT_AUTHORISED };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("data_handling_observed_fields", {
+    p_source: source,
+  });
+
+  if (error) {
+    await reportError(error, {
+      operation: "admin.data_handling_rules.observed_fields",
+    });
+    // PGRST202: the function is not in the database yet — its migration has not
+    // been deployed to this environment. Retrying cannot fix that, so say who can.
+    if (error.code === "PGRST202") {
+      return {
+        fields: [],
+        error:
+          "This part of the page needs a database update that has not been installed here yet. Ask a developer to deploy it; the rest of the page works as normal.",
+      };
+    }
+    return {
+      fields: [],
+      error: "The fields for this source could not be loaded. Try again in a moment.",
+    };
+  }
+
+  return {
+    fields: ((data ?? []) as Array<{
+      field_path: string;
+      records_seen: number;
+      records_sampled: number;
+    }>).map((row) => ({
+      field_path: row.field_path,
+      records_seen: Number(row.records_seen),
+      records_sampled: Number(row.records_sampled),
+    })),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Writes — call RPCs, which handle auth + audit internally
 // ---------------------------------------------------------------------------
+
+const RULE_KINDS = new Set(["field_path", "redact_personal_email", "redact_phone_number"]);
 
 export async function createRule(formData: FormData): Promise<ActionResult> {
   const authorization = await getCurrentActor("user:manage", {
     route: "/settings/data-handling-rules",
   });
   if (!authorization.ok) {
-    return { ok: false, error: "Not authorised." };
+    return { ok: false, error: NOT_AUTHORISED };
   }
 
   const source = formData.get("source") as string | null;
   const fieldPath = formData.get("field_path") as string | null;
   const action = formData.get("action") as string | null;
   const reason = formData.get("reason") as string | null;
+  const ruleKind = (formData.get("rule_kind") as string | null) || "field_path";
 
   if (!fieldPath?.trim()) {
-    return { ok: false, error: "Field path is required." };
+    return { ok: false, error: "Enter the field to protect." };
   }
   if (!reason?.trim()) {
-    return { ok: false, error: "Reason is required." };
+    return { ok: false, error: "Say why this data should be kept out." };
+  }
+  if (!RULE_KINDS.has(ruleKind)) {
+    return { ok: false, error: "That kind of protection is not recognised." };
   }
 
   const supabase = await createClient();
@@ -210,6 +275,7 @@ export async function createRule(formData: FormData): Promise<ActionResult> {
     p_field_path: fieldPath.trim(),
     p_action: action || "deny",
     p_reason: reason.trim(),
+    p_rule_kind: ruleKind,
   });
 
   if (error) {
@@ -219,7 +285,7 @@ export async function createRule(formData: FormData): Promise<ActionResult> {
     return { ok: false, error: friendlyError(error) };
   }
 
-  return { ok: true, message: "Rule created." };
+  return { ok: true, message: "Protection turned on. It applies from the next import." };
 }
 
 export async function toggleRuleActive(
@@ -231,7 +297,7 @@ export async function toggleRuleActive(
     route: "/settings/data-handling-rules",
   });
   if (!authorization.ok) {
-    return { ok: false, error: "Not authorised." };
+    return { ok: false, error: NOT_AUTHORISED };
   }
 
   const supabase = await createClient();
@@ -251,6 +317,8 @@ export async function toggleRuleActive(
 
   return {
     ok: true,
-    message: isActive ? "Rule reactivated." : "Rule deactivated.",
+    message: isActive
+      ? "Protection turned back on. It applies from the next import."
+      : "Protection turned off. From the next import this data will be saved again — you can turn it back on below.",
   };
 }

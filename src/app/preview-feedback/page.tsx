@@ -12,7 +12,7 @@ import {
   type RequestFeedbackButtonVariant,
   type RequestFeedbackButtonSize,
 } from "@/components/ui/request-feedback-button";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotionConfig } from "motion/react";
 import { X } from "lucide-react";
 
 const MOCK_SUBMISSIONS = [
@@ -76,7 +76,7 @@ export default function PreviewFeedbackPage() {
   const [promptRating, setPromptRating] = useState(0);
   const [promptComment, setPromptComment] = useState("");
   const [promptSubmitted, setPromptSubmitted] = useState(false);
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useReducedMotionConfig();
 
   const handlePromptSubmit = () => {
     if (promptRating === 0) return;

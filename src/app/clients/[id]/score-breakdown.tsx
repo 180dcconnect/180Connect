@@ -115,9 +115,8 @@ const CHECKS: {
     label: "Sector",
     hint: "Alignment with branch focus areas and cause priorities",
     reads: "The sector the organisation works in.",
-    raises:
-      "Health and wellbeing rates highest, then education and youth, then poverty and community work.",
-    lowers: "Arts, heritage and environmental work sit lower down the list.",
+    raises: "Working in a sector ranked near the top in score settings.",
+    lowers: "Working in a sector ranked near the bottom in score settings.",
     blank: "No sector recorded, so this check found nothing to go on.",
     subject: "Sector fit against the branch's priorities",
   },
@@ -130,7 +129,7 @@ const CHECKS: {
     raises: "Being inside a priority area.",
     lowers: "Being outside every priority area.",
     blank:
-      "Nobody has set the branch's priority areas yet, so this check is asleep for every client. It is not something wrong with this record.",
+      "No priority towns are set in score settings, so this check is neutral for every client. It is not something wrong with this record.",
     subject: "Location against the branch's priority regions",
   },
   {
@@ -138,9 +137,8 @@ const CHECKS: {
     label: "Size",
     hint: "Operating income scale from latest filed accounts",
     reads: "The income on their most recent set of published accounts.",
-    raises: "Income over £1m rates highest; £100k–£1m is solid.",
-    lowers:
-      "Under £10k rates lowest: a small organisation is a smaller opportunity.",
+    raises: "An income band scored highly in score settings.",
+    lowers: "An income band scored low in score settings.",
     blank:
       "No accounts with an income figure have been filed against this record.",
     subject: "Income size",

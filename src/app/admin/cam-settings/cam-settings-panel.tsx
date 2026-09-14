@@ -13,7 +13,7 @@ import {
 import {
   hasConfiguredPreferences,
   getGeographicReachLabels,
-  getIncomeBandLabels,
+  getIncomePreferenceLabels,
   getSanitizedSectors,
   type CamUser,
   type CamOutreachPreferences,
@@ -79,9 +79,7 @@ export function CamSettingsPanel({
   const geoLabels = getGeographicReachLabels(
     selectedPreferences?.preferred_geographic_reach,
   );
-  const incomeLabels = getIncomeBandLabels(
-    selectedPreferences?.preferred_income_bands,
-  );
+  const incomeLabels = getIncomePreferenceLabels(selectedPreferences);
   const sectorList = getSanitizedSectors(
     selectedPreferences?.preferred_sectors,
   );
@@ -242,7 +240,7 @@ export function CamSettingsPanel({
                 <div className="mb-4">
                   <h3 className="text-base font-bold text-foreground">Organisation size</h3>
                   <p className="text-xs text-foreground/55">
-                    Target annual income bands prioritized in their queue.
+                    Annual income range favoured in their queue.
                   </p>
                 </div>
                 <div className="flex-1">

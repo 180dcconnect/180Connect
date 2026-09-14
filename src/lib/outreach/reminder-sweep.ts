@@ -220,6 +220,18 @@ export async function runReminderSweep(now: Date = new Date()): Promise<Reminder
       continue;
     }
 
+    // The email half, for owners who opted in to follow-up emails. After the
+    // audit row, so a sweep that fails to record a reminder (and so repeats it
+    // next run) does not also repeat the email.
+    const { emailNotificationIfWanted } = await import("../notification-email-dispatch.ts");
+    await emailNotificationIfWanted(admin, {
+      recipientUserId: rec.ownerId,
+      notificationType: "follow_up_due",
+      subject: reminderNotificationTitle(rec.legalName),
+      text: `${reminderNotificationBody(rec)}\n\nOpen the client in 180Connect to follow up.`,
+      operation: "reminder_sweep.notify_email",
+    });
+
     notified += 1;
   }
 

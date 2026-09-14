@@ -13,7 +13,7 @@ import { GROUND } from "@/components/brand/tokens";
  */
 export default function PreviewSearchPage() {
   return (
-    <MotionConfig reducedMotion="user">
+    <MotionConfig>
       <main
         className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden p-6"
         style={{ backgroundColor: GROUND }}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion, useReducedMotionConfig } from "motion/react";
 
 import { EASE } from "@/components/brand/motion";
 
@@ -49,7 +49,7 @@ export function DisclosureSection({
   closedLabel?: string;
   children: ReactNode;
 }) {
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useReducedMotionConfig();
   const bodyId = `${id}-body`;
   // Clipping is only needed while the height animates. Once a row has finished
   // opening it stops clipping, so a dropdown inside it (the UK town list) can

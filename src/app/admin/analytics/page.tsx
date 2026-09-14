@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { StatCard } from "@/components/stat-card";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import ProgressMetricCard from "@/components/ui/progress-metric-card";
+import { AnalyticsHeader } from "../analytics-header";
 import {
   filterActiveSuppressed,
   type DashboardOrgRow,
@@ -29,7 +30,8 @@ import {
 
 /**
  * F210/F212 — the team-wide read of the analytics each CAM sees for themselves
- * on /analytics.
+ * on /analytics. One tab of the Analytics group — see
+ * `src/app/admin/analytics-group.ts`.
  *
  * Every panel is fed by its own independently-caught query, so a source that
  * fails or has no rows yet shows its own empty state instead of blanking the
@@ -154,14 +156,12 @@ export default async function AdminAnalyticsPage() {
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="mx-auto w-full max-w-6xl space-y-10">
         <Rise>
-          <header>
-            <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-              Whole team · admin only
+          <AnalyticsHeader current="/admin/analytics">
+            <p className="mt-3 text-sm leading-[1.7] text-dim">
+              Every team member&rsquo;s outreach performance, in one place — including
+              who may need support. Only admins can see this.
             </p>
-            <h1 className="mt-2 font-body text-[clamp(2rem,4vw,2.75rem)] font-semibold leading-[1] tracking-[-0.03em]">
-              Team analytics
-            </h1>
-          </header>
+          </AnalyticsHeader>
         </Rise>
 
         {loadFailed && (

@@ -7,7 +7,7 @@ import {
   useAnimate,
   useMotionValue,
   useMotionValueEvent,
-  useReducedMotion,
+  useReducedMotionConfig,
 } from "motion/react";
 import { Check, X, Loader2 } from "lucide-react";
 import { MessageSquareQuote } from "@/components/animate-ui/icons/message-square-quote";
@@ -199,7 +199,7 @@ export const RequestFeedbackButton = React.forwardRef<
   },
   ref
 ) {
-  const shouldReduceMotion = useReducedMotion();
+  const shouldReduceMotion = useReducedMotionConfig();
   const reactId = React.useId();
   const filterId = React.useMemo(
     () => `btn-feedback-dissolve-${reactId.replace(/[^a-zA-Z0-9-_]/g, "")}`,

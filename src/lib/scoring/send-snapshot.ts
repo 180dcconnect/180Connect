@@ -47,7 +47,7 @@ export function assembleScoreSnapshot(
   org: ScoreableOrganisation,
   config: ActiveScoutConfig,
 ): ScoreSnapshotPayload {
-  const factors = priorityFactorsFor(org);
+  const factors = priorityFactorsFor(org, config.rules?.geography.priorityTowns, config.rules);
   const score = calculatePriorityScore(factors, config.weights);
   return {
     sector: factors.sector,

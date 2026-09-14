@@ -35,7 +35,23 @@ describe("wantsEmailNotification (F179 AC1)", () => {
   });
 });
 
+describe("EMAIL_NOTIFICATION_TYPE_OPTIONS", () => {
+  it("offers exactly the types with an email wired", () => {
+    assert.deepEqual(
+      EMAIL_NOTIFICATION_TYPE_OPTIONS.map((option) => option.type).sort(),
+      ["client_reply_received", "follow_up_due", "outreach_send_failed"],
+    );
+  });
+});
+
 describe("parseEmailNotificationTypes (F179 AC1)", () => {
+  it("accepts the follow-up and send-failure types", () => {
+    assert.deepEqual(parseEmailNotificationTypes(["follow_up_due", "outreach_send_failed"]), [
+      "follow_up_due",
+      "outreach_send_failed",
+    ]);
+  });
+
   it("keeps only known types", () => {
     assert.deepEqual(
       parseEmailNotificationTypes(["client_reply_received", "made_up_type"]),

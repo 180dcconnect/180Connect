@@ -3,6 +3,9 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { hasPermission } from "@/lib/auth/permissions";
 import { logout } from "@/lib/auth/logout";
 import { ShellWash } from "./shell-wash";
+import { SkipLink } from "./skip-link";
+import { KeyboardShortcutsDialog } from "./keyboard-shortcuts-dialog";
+import { AccessibilityAccountSync } from "./accessibility-account-sync";
 import { SettingsSidebar, type SettingsNavSection } from "./settings-sidebar";
 
 /**
@@ -55,12 +58,16 @@ export async function SettingsShell({ children }: { children: React.ReactNode })
         { href: "/settings/score-settings", label: "Score settings" },
         { href: "/settings/data-handling-rules", label: "Data handling rules" },
         { href: "/settings/restricted-fields", label: "Restricted fields" },
+        { href: "/settings/sending-limits", label: "Outreach sending limit" },
       ],
     });
   }
 
   return (
     <>
+      <SkipLink />
+      <KeyboardShortcutsDialog />
+      <AccessibilityAccountSync userId={actor.id} />
       <ShellWash />
       <div className="flex min-h-screen">
         <SettingsSidebar
@@ -71,7 +78,9 @@ export async function SettingsShell({ children }: { children: React.ReactNode })
           roleLabel={actor.role}
           onLogout={logout}
         />
-        <main className="min-w-0 flex-1">{children}</main>
+        <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 outline-none">
+          {children}
+        </main>
       </div>
     </>
   );

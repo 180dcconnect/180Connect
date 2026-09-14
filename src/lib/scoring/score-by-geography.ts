@@ -35,6 +35,8 @@
 // sits BETWEEN non-priority and priority: an unknown location neither gains
 // nor loses against a confirmed one until the team decides otherwise.
 
+import { normalisePlaceName } from "../place-name.ts";
+
 export type GeographyScoreResult = {
   score: number;
   /** True when the client had no usable location (missing/blank). */
@@ -59,8 +61,10 @@ export type GeographyScoreResult = {
  * a lower, flat placeholder. Real relative values (and whether "priority
  * region" should have gradations, not just in/out) need the team's input.
  */
-const PRIORITY_REGION_SCORE = 0.8;
-const NON_PRIORITY_REGION_SCORE = 0.3;
+export const DEFAULT_GEOGRAPHY_SCORES = { inside: 0.8, outside: 0.3 } as const;
+
+/** Score for a client inside / outside the priority regions, 0-1 each. */
+export type GeographyScores = { inside: number; outside: number };
 
 /**
  * Neutral score shared by both "no signal" cases (AC3): a missing location,
@@ -72,6 +76,9 @@ const NEUTRAL_NO_SIGNAL_SCORE = 0.5;
 export function scoreByGeography(
   location: string | null | undefined,
   priorityRegions: readonly string[],
+  // The admin's in/out scores from score settings (src/lib/scoring/scout-config.ts);
+  // the placeholder scores above when none are given.
+  scores: GeographyScores = DEFAULT_GEOGRAPHY_SCORES,
 ): GeographyScoreResult {
   // Postgres text[] columns can hold NULL elements, and preferred_cities is
   // fed straight in — one bad row must not crash scoring for every client.
@@ -83,7 +90,9 @@ export function scoreByGeography(
       (region): region is string =>
         typeof region === "string" && region.trim().length > 0,
     )
-    .map((region) => region.trim().toLowerCase());
+    // Council names ("Sheffield City") and client cities ("Sheffield") compared
+    // in one spelling — see src/lib/place-name.ts.
+    .map((region) => normalisePlaceName(region));
 
   const trimmed = location?.trim();
 
@@ -109,10 +118,10 @@ export function scoreByGeography(
     };
   }
 
-  const matched = configuredRegions.includes(trimmed.toLowerCase());
+  const matched = configuredRegions.includes(normalisePlaceName(trimmed));
 
   return {
-    score: matched ? PRIORITY_REGION_SCORE : NON_PRIORITY_REGION_SCORE,
+    score: matched ? scores.inside : scores.outside,
     usedDefault: false,
     noPreferenceSet: false,
     matchedPriorityRegion: matched,

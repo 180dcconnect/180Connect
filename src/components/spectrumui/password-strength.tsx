@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useCallback, useId, useState } from "react"
-import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import { AnimatePresence, motion, useReducedMotionConfig } from "motion/react"
 import { Eye, EyeOff } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -109,7 +109,7 @@ export function PasswordStrengthInput({
   onBlur,
   className,
 }: PasswordStrengthInputProps) {
-  const shouldReduceMotion = useReducedMotion()
+  const shouldReduceMotion = useReducedMotionConfig()
   const [internalValue, setInternalValue] = useState(defaultValue)
   const [visible, setVisible] = useState(false)
 
@@ -365,7 +365,7 @@ export function PasswordStrengthMeter({
   rules?: PasswordRule[]
   className?: string
 }) {
-  const shouldReduceMotion = useReducedMotion()
+  const shouldReduceMotion = useReducedMotionConfig()
   const satisfied = rules.map((rule) => rule.test(value))
   const satisfiedCount = satisfied.filter(Boolean).length
   const score =

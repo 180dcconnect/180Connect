@@ -2,7 +2,7 @@
 
 import { useState, type ComponentType } from "react";
 import Link from "next/link";
-import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
+import { AnimatePresence, motion, useReducedMotionConfig, type Variants } from "motion/react";
 import {
   Activity,
   ArrowLeftRight,
@@ -113,7 +113,7 @@ export function AuditFeed({
   orgPreviews?: Record<string, OrganisationPreview>;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useReducedMotionConfig();
 
   // The cascade is indexed across the whole feed, not restarted per day, so two
   // short days in a row don't arrive faster than one long one.

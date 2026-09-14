@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotionConfig } from "motion/react";
 import { X } from "lucide-react";
 import { FaceRating } from "@/components/spectrumui/face-rating";
 import { submitFeedback, dismissFeedback } from "@/lib/feedback-actions";
@@ -27,7 +27,7 @@ export function FeedbackPrompt({ pageContext }: { pageContext?: string }) {
   const [visible, setVisible] = useState(true);
   const [submitted, setSubmitted] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useReducedMotionConfig();
   // `setTimeout` returns a number in the browser (and under react-native's
   // global types, which the vendored CherryBlossomQRCode component pulls in),
   // but NodeJS.Timeout when only node types are loaded. Derive the handle type

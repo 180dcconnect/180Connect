@@ -13,6 +13,8 @@ import {
 } from "../../lib/organisation-format.ts";
 import { deriveIncomeBand } from "../settings/outreach-preferences/constants.ts";
 import { nonEmptyTrimmed, safeValidate } from "../../lib/validation.ts";
+import { normalisePlaceName } from "../../lib/place-name.ts";
+import { incomeInRange, isIncomeRangeActive, type IncomeRange } from "../../lib/income-range.ts";
 
 export { formatLocation, formatOutreachStatus };
 
@@ -78,6 +80,8 @@ export type VisibleClient = ClientListRow & {
    * org_tags join. Used by filterByTags below. */
   tagIds: string[];
   income_band: string | null;
+  /** Latest filed total income in pounds, for the size preference's range. */
+  latest_income?: number | null;
   has_grants: boolean;
   /** F058/F059 — the persisted rule-engine score, or null when the client has
    * never been scored (no LATEST_SCORES row yet: newly imported before the
@@ -115,6 +119,26 @@ export function resolveClientIncomeBand(org: ClientListRow): string | null {
 }
 
 /**
+ * The latest filed total income, in pounds. Same rule as latestTotalIncome in
+ * src/lib/scoring/score-client.ts: the newest period that carries a figure, then
+ * the organisation's own total_income. Kept here rather than imported so this
+ * module stays free of the scoring layer's dependencies.
+ */
+export function resolveClientTotalIncome(org: ClientListRow): number | null {
+  if (org.financial_periods && org.financial_periods.length > 0) {
+    const withIncome = [...org.financial_periods]
+      .sort((a, b) => {
+        const dateA = a.period_end ? new Date(a.period_end).getTime() : 0;
+        const dateB = b.period_end ? new Date(b.period_end).getTime() : 0;
+        return dateB - dateA;
+      })
+      .find((period) => period.total_income !== null && period.total_income !== undefined);
+    if (withIncome) return withIncome.total_income!;
+  }
+  return org.total_income ?? null;
+}
+
+/**
  * The default list view (F051 AC4): actively suppressed charities (F251) never
  * appear here, regardless of import method or manual entry (F051 AC1). A pending
  * suppression request isn't suppressed yet, so it still shows, flagged.
@@ -137,6 +161,7 @@ export function visibleClients(
         : null,
       tagIds: (organisation.org_tags ?? []).map((row) => row.tag_id),
       income_band: resolveClientIncomeBand(organisation),
+      latest_income: resolveClientTotalIncome(organisation),
       has_grants: Boolean(
         organisation.has_grants || (organisation.grants && organisation.grants.length > 0),
       ),
@@ -573,8 +598,18 @@ export type OutreachQueuePreferences = {
   preferred_cities?: string[] | null;
   preferred_sectors?: string[] | null;
   preferred_income_bands?: string[] | null;
+  /** F198 — the size range in pounds. When either is set it replaces the bands. */
+  preferred_income_min?: number | null;
+  preferred_income_max?: number | null;
   prioritise_grant_recipients?: boolean | null;
 };
+
+function incomeRangeOf(preferences?: OutreachQueuePreferences | null): IncomeRange {
+  return {
+    min: preferences?.preferred_income_min ?? null,
+    max: preferences?.preferred_income_max ?? null,
+  };
+}
 
 /**
  * The South Yorkshire city set and the expansions below — "regional" reach means
@@ -771,15 +806,19 @@ function getGeographicPriorityScore(
   if (preferredReach.length === 0 && preferredCities.length === 0) return 0;
 
   let score = 0;
-  const clientCity = client.city?.toLowerCase().trim();
+  // Both sides go through normalisePlaceName: preferred places are now picked
+  // as council names ("Sheffield City", "City Of York") while client records
+  // hold a plain city ("Sheffield", "York").
+  const clientCity = client.city ? normalisePlaceName(client.city) : undefined;
+  const cities = preferredCities.map(normalisePlaceName);
 
   const wantsSouthYorkshire =
-    preferredCities.some((c) => c === "south yorkshire" || c === "south yorks") ||
+    cities.some((c) => c === "south yorkshire" || c === "south yorks") ||
     preferredReach.includes("regional");
   const wantsLocalSheffield =
-    preferredCities.some((c) => c === "sheffield") || preferredReach.includes("local");
+    cities.some((c) => c === "sheffield") || preferredReach.includes("local");
 
-  if (clientCity && preferredCities.includes(clientCity)) {
+  if (clientCity && cities.includes(clientCity)) {
     score += 10;
   }
 
@@ -823,12 +862,21 @@ export function prioritiseBySector(
 }
 
 /**
- * Calculates size (income band) priority score for a client against CAM preferences.
+ * Calculates size priority score for a client against CAM preferences.
+ *
+ * A saved income range (F198) is matched against the client's real filed
+ * income, so "£250k – £2m" means exactly that. The bands are only read for a
+ * preferences row with no range — one saved before ranges existed and not yet
+ * migrated. No filed income never matches.
  */
 export function getSizePriorityScore(
   client: VisibleClient,
   preferredBands: string[],
+  incomeRange?: IncomeRange,
 ): number {
+  if (incomeRange && isIncomeRangeActive(incomeRange)) {
+    return incomeInRange(client.latest_income, incomeRange) ? 10 : 0;
+  }
   if (preferredBands.length === 0) return 0;
   if (!client.income_band) return 0;
 
@@ -856,6 +904,8 @@ export function prioritiseBySize(
 ): VisibleClient[] {
   return prioritiseQueue(clients, {
     preferred_income_bands: preferences?.preferred_income_bands ?? null,
+    preferred_income_min: preferences?.preferred_income_min ?? null,
+    preferred_income_max: preferences?.preferred_income_max ?? null,
   });
 }
 
@@ -920,12 +970,14 @@ export function prioritiseQueue(
   const preferredSectors = (preferences.preferred_sectors ?? []).map((s) => s.toLowerCase().trim());
   const preferredBands = (preferences.preferred_income_bands ?? []).map((b) => b.toLowerCase().trim());
   const prioritiseGrants = Boolean(preferences.prioritise_grant_recipients);
+  const incomeRange = incomeRangeOf(preferences);
 
   if (
     preferredReach.length === 0 &&
     preferredCities.length === 0 &&
     preferredSectors.length === 0 &&
     preferredBands.length === 0 &&
+    !isIncomeRangeActive(incomeRange) &&
     !prioritiseGrants
   ) {
     return clients;
@@ -939,8 +991,8 @@ export function prioritiseQueue(
     const geoScoreB = getGeographicPriorityScore(b, preferredReach, preferredCities);
     const secScoreA = getSectorPriorityScore(a, preferredSectors);
     const secScoreB = getSectorPriorityScore(b, preferredSectors);
-    const sizeScoreA = getSizePriorityScore(a, preferredBands);
-    const sizeScoreB = getSizePriorityScore(b, preferredBands);
+    const sizeScoreA = getSizePriorityScore(a, preferredBands, incomeRange);
+    const sizeScoreB = getSizePriorityScore(b, preferredBands, incomeRange);
     const grantScoreA = getGrantPriorityScore(a, prioritiseGrants);
     const grantScoreB = getGrantPriorityScore(b, prioritiseGrants);
 
@@ -992,6 +1044,7 @@ export function hasActiveQueuePreferences(
     active(preferences.preferred_cities) ||
     active(preferences.preferred_sectors) ||
     active(preferences.preferred_income_bands) ||
+    isIncomeRangeActive(incomeRangeOf(preferences)) ||
     Boolean(preferences.prioritise_grant_recipients)
   );
 }

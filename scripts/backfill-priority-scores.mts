@@ -29,6 +29,7 @@ import {
   resolveSeedConfig,
 } from "../src/lib/seed/config.ts";
 import { sanitizeWeights } from "../src/lib/scoring/calculate-priority-score.ts";
+import { sanitizeScoringRules } from "../src/lib/scoring/scout-config.ts";
 import {
   PRIORITY_BAND_THRESHOLDS,
   computePriorityScore,
@@ -51,16 +52,22 @@ type OrgRow = {
  * would silently undo their change. Read once up front (pg, same reason as the
  * writes); falls back to the engine defaults if the row is missing/unreadable.
  */
-async function loadActiveWeights(client: Client) {
-  const { rows } = await client.query<{ weights: unknown }>(
+async function loadActiveConfig(client: Client) {
+  const { rows } = await client.query<{ config: Record<string, unknown> | null }>(
     `
-    select config -> 'weights' as weights
+    select config
     from public.model_versions
     where model_name = 'SCOUT' and is_active
     limit 1
     `,
   );
-  return sanitizeWeights(rows[0]?.weights);
+  const config = rows[0]?.config ?? null;
+  // The rules (sector ranking, priority towns, band scores) come from the same
+  // row as the weights, so a backfill replays the admin's score settings whole.
+  return {
+    weights: sanitizeWeights(config?.weights),
+    rules: sanitizeScoringRules(config),
+  };
 }
 
 async function main(): Promise<void> {
@@ -76,7 +83,7 @@ async function main(): Promise<void> {
   try {
     await client.query("begin");
 
-    const weights = await loadActiveWeights(client);
+    const { weights, rules } = await loadActiveConfig(client);
 
     const { rows } = await client.query<OrgRow>(
       `
@@ -124,8 +131,9 @@ async function main(): Promise<void> {
         // reproduce this exact number later (see persist-latest-score.ts).
         const { score, band, factors, weights: applied } = computePriorityScore(
           row,
-          undefined,
+          rules.geography.priorityTowns,
           weights,
+          rules,
         );
         scoredCount += 1;
         [
@@ -158,7 +166,9 @@ async function main(): Promise<void> {
     await client.query("commit");
 
     const byBand = { high: 0, medium: 0, low: 0 } as Record<string, number>;
-    for (const row of rows) byBand[computePriorityScore(row, undefined, weights).band] += 1;
+    for (const row of rows) {
+      byBand[computePriorityScore(row, rules.geography.priorityTowns, weights, rules).band] += 1;
+    }
 
     console.log(`[backfill:scores] scored ${scoredCount} organisations`);
     console.log(

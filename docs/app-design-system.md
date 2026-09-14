@@ -101,7 +101,7 @@ default fallback; `--font-mono` (Geist Mono) is for values, not prose.
 | Page title | `font-body text-[clamp(2rem,4vw,2.75rem)] font-semibold leading-[1] tracking-[-0.03em] text-ink` |
 | Section heading | `text-[18px] leading-[1.3] font-semibold tracking-[-0.01em] text-ink`, **sentence case** |
 | Section numeral | `font-body text-[34px] leading-none font-light tabular-nums text-faint`, zero-padded, in an 11-unit gutter |
-| Hint under a heading | `text-[13px] leading-[1.55] text-dim`, capped at `max-w-[54ch]` |
+| Hint under a heading | `text-[13px] leading-[1.55] text-dim` — no width cap (see [Width](#width)) |
 | Body | `text-sm leading-[1.65]` |
 | Metadata row | `text-[13.5px] text-dim` |
 | Register key | `font-mono text-[10.5px] font-medium tracking-[0.09em] text-faint uppercase` |
@@ -180,17 +180,36 @@ Two traps, both already paid for:
   clears the filter to `none` on animation complete for this reason.
 - Long lists use `entranceIndexed`, not `stagger`. A hundred rows at 0.04s apart
   is a four-second cascade.
+- **Read reduced motion with `useReducedMotionConfig`, never `useReducedMotion`.**
+  The in-app Motion setting (Settings → Accessibility) reaches Motion through
+  the single `MotionConfig` in `AccessibilityProvider`. `useReducedMotion` only
+  sees the OS setting and ignores it, and a nested
+  `<MotionConfig reducedMotion="user">` overrides it back to OS-only — don't add
+  either.
 
 ### Page shell
 
 ```jsx
 <div className="min-h-screen bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
-  <div className="mx-auto w-full max-w-[1400px] space-y-6">
+  <div className="w-full space-y-6">
 ```
 
 Content on the ground with white cards on it — not one box holding everything.
-`max-w-[1400px]`, `space-y-6` between sections on a record, `space-y-10` on the
-dashboard where sections are heavier.
+`space-y-6` between sections on a record, `space-y-10` on the dashboard where
+sections are heavier.
+
+### Width
+
+**Never use `max-w-*`.** Not on the page container, not on a card, not on a
+hint or a paragraph (`max-w-[54ch]`, `max-w-2xl`, `max-w-sm` included). Content
+fills the column the shell gives it; the page's side padding is the only
+thing that sets where it stops. A capped hint under a full-width card title
+leaves a ragged hole on the right, and a capped page on a wide screen floats a
+narrow strip of cards in a sea of ground. Existing `max-w` in older screens is
+drift, not precedent — remove it when you convert a screen.
+
+The one exception is something that genuinely floats — a dialog, popover or
+dropdown — whose width is the component's own, not the page's.
 
 Routes under `AppShell` render a `div`, not a `main` — the shell already renders
 the `main` they slot into.
@@ -242,6 +261,19 @@ put `.dark` on `<html>` and define token overrides under it.
 | Status marker | `Pill`, same file |
 | Code label | `Key`, same file |
 | Entrance | `Stage` / `Group` / `Rise` |
+| Checkbox | `FiledCheckbox` from `src/components/ui/filed-checkbox.tsx` |
+| Pick one of a few (settings) | `OptionGroup` from `src/app/settings/option-group.tsx` |
+
+**Checkboxes are always `FiledCheckbox`** — the animated animate-ui checkbox
+(the one on the Terms & Conditions step, where the tick draws itself in),
+checked in `--lead`. Never a native `<input type="checkbox">`, and never
+`accent-brand` or any `accent-*`: the native control ignores the tokens and
+looks different in every browser. It renders a `<button>`, so give it an `id`
+and a `<label htmlFor>`; wrapping it in a label alone is not enough.
+
+**Pick-one choices are real radios.** `OptionGroup` is a `fieldset` of native
+radios styled as cards — grouping, arrow keys and one tab stop come from the
+browser. Never a row of `<button role="radio">`.
 
 `origin-button`, `gooey-action-button`, `send-button`, `gooey-email-input` and
 the other gooey/animated variants are one-off brand pieces, not app defaults.

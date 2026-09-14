@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
+import { AnimatePresence, motion, useReducedMotionConfig, type Variants } from "motion/react";
 import { ArrowRight, AtSign, Check, Search } from "lucide-react";
 import {
   PIPELINE_STATUSES,
@@ -113,7 +113,7 @@ export function BulkActionsBar({
   canTag: boolean;
 }) {
   const router = useRouter();
-  const reducedMotion = useReducedMotion();
+  const reducedMotion = useReducedMotionConfig();
   const { ids, statusBlockedCount, selected, deselect, clear } = useBulkSelection();
   const [status, setStatus] = useState<PipelineStatus | typeof PLACEHOLDER>(PLACEHOLDER);
   const [comment, setComment] = useState("");

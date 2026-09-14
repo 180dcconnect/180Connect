@@ -2,7 +2,7 @@
 
 import { useState, type ComponentType } from "react";
 import Link from "next/link";
-import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
+import { AnimatePresence, motion, useReducedMotionConfig, type Variants } from "motion/react";
 import { ArrowRight, ChevronDown, CircleCheck, CircleDot, CircleX, ExternalLink, LoaderCircle, TriangleAlert } from "lucide-react";
 
 import { EASE, entranceIndexed } from "@/components/brand/motion";
@@ -108,7 +108,7 @@ export function ImportFeed({
   canInspect: boolean;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useReducedMotionConfig();
 
   // Indexed across the whole feed, not restarted per day, so two short days in a
   // row don't arrive faster than one long one.

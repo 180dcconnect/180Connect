@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion, useReducedMotionConfig } from "motion/react";
 
 /**
  * The draft as it streams in: subject, then the body word by word, each word
@@ -32,7 +32,7 @@ export function StreamingDraftText({
       over to the review editor. */
   onRevealComplete?: () => void;
 }) {
-  const reducedMotion = useReducedMotion();
+  const reducedMotion = useReducedMotionConfig();
   const tokens = useMemo(
     () => body.split(/(\s+)/).filter((token) => token.length > 0),
     [body],

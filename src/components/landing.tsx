@@ -319,7 +319,7 @@ export default function Landing({
   return (
     // "user" honours prefers-reduced-motion: transforms are dropped, opacity
     // fades survive, so the page still resolves rather than snapping in.
-    <MotionConfig reducedMotion="user">
+    <MotionConfig>
       <motion.main
         className="relative flex flex-1 flex-col overflow-hidden"
         style={{ "--t": introT, backgroundColor: GROUND } as React.CSSProperties}

@@ -32,7 +32,8 @@ import { buildAttachmentEmailContext } from "@/lib/attachments";
 import { lookupLiveNewsHook } from "@/lib/outreach/news-hook";
 import { resolveMissionText } from "@/lib/mission";
 
-export const maxDuration = 60;
+// No maxDuration export — see the stage-one route: the 300s project default
+// applies, and a distinct value would cost a Vercel function.
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });

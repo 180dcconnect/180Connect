@@ -79,11 +79,11 @@ type WebsiteContextResult =
  * generate-booklet.ts's own upstream timeout is 90s (PRD hard timeout for Client
  * Booklet generation). maxDuration must stay comfortably above that or the hosting
  * platform kills the request before the upstream timeout gets the chance to return
- * its own clear error — 120s here; confirm against the actual Vercel plan this
- * deploys to, since some tiers cap function duration below that regardless of what
- * this value asks for.
+ * its own clear error. There is deliberately no maxDuration export: the Vercel
+ * project default is 300s (Fluid compute), which clears that bar, and a
+ * route-specific value would put this route in its own function — the Hobby plan
+ * allows 12 per deployment.
  */
-export const maxDuration = 120;
 
 function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
   const status = reason === "unauthenticated" ? 401 : 403;

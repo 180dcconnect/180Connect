@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { getCurrentActor } from "@/lib/auth/actor";
+import { loadViewerState } from "@/lib/dashboard/viewer-state";
 import { hasPermission } from "@/lib/auth/permissions";
 import { logout } from "@/lib/auth/logout";
 import { ONBOARDING_STEPS, shouldShowGuide, type OnboardingUser } from "@/lib/onboarding";
@@ -115,15 +115,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   let onboarding: SidebarOnboarding | undefined = undefined;
 
   try {
-    const supabase = await createClient();
-    const [profile, completedSteps] = await Promise.all([
-      supabase
-        .from("users")
-        .select("role, invite_accepted_at, onboarding_completed_at, onboarding_dismissed_at")
-        .eq("id", actor.id)
-        .maybeSingle(),
-      supabase.from("user_onboarding_steps").select("step_key"),
-    ]);
+    const { profile, steps: completedSteps } = await loadViewerState(actor.id);
 
     const isEligible = shouldShowGuide(
       profile.data

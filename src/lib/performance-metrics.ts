@@ -308,6 +308,56 @@ export function performanceForPeriod(
   return { team, people, orgsScored };
 }
 
+/**
+ * The slice of a `PerformanceInput` the browser actually needs.
+ *
+ * The Performance section re-derives its tiles client-side when a period is
+ * picked, so the input is serialised into the page. `scores` has a row for every
+ * scored organisation and `sectorByOrg` an entry for every organisation — on
+ * staging that was ~450 KB of a 735 KB dashboard — yet on the client:
+ *
+ * - `performanceForPeriod` and `bucketCountsForPeriod` read only a score's
+ *   `scored_at` (the orgs-scored counts), and
+ * - `sectorPerformance` builds sectors only from organisations with a message,
+ *   reply or conversion in the input — but it averages the
+ *   score of *every* organisation in such a sector, contacted or not.
+ *
+ * So a score keeps its full row only when its organisation's sector has
+ * activity; every other score keeps its `scored_at` and nothing else (a null
+ * score is skipped by `sectorPerformance`). The sector map keeps the
+ * organisations those full rows and the activity refer to. Both functions
+ * return the same result for the trimmed input as for the original — the test
+ * pins that.
+ */
+export function performanceInputForClient(
+  input: PerformanceInput,
+  sectorByOrg: Map<string, string | null>,
+): { raw: PerformanceInput; sectorByOrg: Map<string, string | null> } {
+  const sectorOf = (organisationId: string) => sectorByOrg.get(organisationId) ?? UNKNOWN_SECTOR;
+
+  const active = new Set<string>();
+  for (const message of input.messages) active.add(message.organisation_id);
+  for (const reply of input.replies) active.add(reply.organisation_id);
+  for (const conversion of input.conversions) active.add(conversion.organisation_id);
+  const activeSectors = new Set([...active].map(sectorOf));
+
+  const kept = new Set(active);
+  const scores = input.scores.map((score) => {
+    if (score.priority_score !== null && activeSectors.has(sectorOf(score.organisation_id))) {
+      kept.add(score.organisation_id);
+      return score;
+    }
+    return { organisation_id: "", priority_band: null, priority_score: null, scored_at: score.scored_at };
+  });
+
+  const sectors = new Map<string, string | null>();
+  for (const id of kept) {
+    if (sectorByOrg.has(id)) sectors.set(id, sectorByOrg.get(id) ?? null);
+  }
+
+  return { raw: { ...input, scores }, sectorByOrg: sectors };
+}
+
 /** A named person's rollup for the picker's display, or undefined. */
 export function personFor(summary: PerformanceSummary, userId: string): PersonWeekly | undefined {
   return summary.people.get(userId);

@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  bucketCountsForPeriod,
   computePerformance,
+  createPeriodBuckets,
+  performanceForPeriod,
+  performanceInputForClient,
   pipelineTrendSeries,
   queueBands,
   sectorPerformance,
@@ -357,5 +361,55 @@ describe("queueBands", () => {
     const { bands, scored } = queueBands([]);
     assert.deepEqual(bands, { high: 0, medium: 0, low: 0 });
     assert.equal(scored, 0);
+  });
+});
+
+describe("performanceInputForClient", () => {
+  const input: PerformanceInput = {
+    messages: [message({ organisation_id: "org-1" })],
+    replies: [],
+    conversions: [],
+    scores: [
+      // Contacted, in Health.
+      { organisation_id: "org-1", priority_band: "high", priority_score: 80, scored_at: "2026-08-11T09:00:00Z" },
+      // Not contacted, but Health has activity — still counts toward its average.
+      { organisation_id: "org-2", priority_band: "low", priority_score: 20, scored_at: "2026-08-11T09:00:00Z" },
+      // No sector, and nothing unsectored has activity.
+      { organisation_id: "org-3", priority_band: "medium", priority_score: 50, scored_at: "2026-08-04T09:00:00Z" },
+      // A sector with no activity at all.
+      { organisation_id: "org-4", priority_band: "high", priority_score: 90, scored_at: "2026-08-11T09:00:00Z" },
+    ],
+    users: [],
+  };
+  const sectors = new Map<string, string | null>([
+    ["org-1", "Health"],
+    ["org-2", "Health"],
+    ["org-3", null],
+    ["org-4", "Education"],
+  ]);
+
+  it("keeps whole rows only for sectors with activity", () => {
+    const { raw } = performanceInputForClient(input, sectors);
+    assert.deepEqual(raw.scores.map((s) => s.organisation_id), ["org-1", "org-2", "", ""]);
+    assert.deepEqual(raw.scores.map((s) => s.scored_at), input.scores.map((s) => s.scored_at));
+  });
+
+  it("drops sector entries nothing on the client looks up", () => {
+    const { sectorByOrg } = performanceInputForClient(input, sectors);
+    assert.deepEqual([...sectorByOrg.keys()].sort(), ["org-1", "org-2"]);
+  });
+
+  it("gives the client the same period summary and sector rows as the full input", () => {
+    const { raw, sectorByOrg } = performanceInputForClient(input, sectors);
+    assert.deepEqual(
+      performanceForPeriod(raw, "2026-08-10", "2026-08-12"),
+      performanceForPeriod(input, "2026-08-10", "2026-08-12"),
+    );
+    assert.deepEqual(
+      sectorPerformance(raw, sectorByOrg, 90, NOW),
+      sectorPerformance(input, sectors, 90, NOW),
+    );
+    const buckets = createPeriodBuckets("2026-08-06", "2026-08-12");
+    assert.deepEqual(bucketCountsForPeriod(raw, buckets), bucketCountsForPeriod(input, buckets));
   });
 });

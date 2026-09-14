@@ -21,6 +21,7 @@ import {
 } from "@/lib/dashboard-metrics";
 import {
   computePerformance,
+  performanceInputForClient,
   pipelineTrendSeries,
   queueBands,
   sectorPerformance,
@@ -56,6 +57,7 @@ import {
 } from "@/lib/recent-updates";
 import { myWorkSummary, type MyWorkSummary } from "@/lib/dashboard/my-work";
 import { aiSpendSummary, type AiGenerationCostRow, type AiSpendSummary } from "@/lib/dashboard/ai-spend";
+import { loadViewerState } from "@/lib/dashboard/viewer-state";
 import ProgressMetricCard from "@/components/ui/progress-metric-card";
 import { TeamActivityFeed } from "@/components/team-activity-feed";
 import { RecentUpdatesFeed } from "@/components/recent-updates-feed";
@@ -195,8 +197,47 @@ export default async function DashboardPage({
     sectorByOrg: Map<string, string | null>;
   } | null = null;
 
+  // Every read on this page that does not need another read's result is started
+  // before the first one is awaited, so they all leave for the database together.
+  // The page used to await them in about fourteen rounds, one after another, and
+  // each round is a full trip between the function and the database — so the
+  // dashboard took as long as all of those trips laid end to end.
+  //
+  // PostgREST builders are lazy: a query runs only once something calls `then`
+  // on it. `start` does that straight away, so the query is in flight while the
+  // rest of this function carries on building.
+  const start = <T,>(query: PromiseLike<T>): Promise<T> => Promise.resolve(query);
+  const supabase = await createClient();
+
+  // The first-run guide and the feedback prompt read the same `users` row and
+  // step list AppShell reads for the sidebar; `loadViewerState` is cached per
+  // request, so all three share one read. Marked handled here because a branch
+  // below may never await it.
+  const viewerState = loadViewerState(actor.id);
+  viewerState.catch(() => {});
+
+  const followUpPreferences = canViewClients
+    ? start(
+        supabase
+          .from("outreach_preferences")
+          .select("first_follow_up_days, second_follow_up_days")
+          .eq("user_id", actor.id)
+          .maybeSingle(),
+      )
+    : null;
+
+  const overdueActionsRead = canViewClients
+    ? start(
+        supabase
+          .from("actions")
+          .select("organisation_id, title, due_date")
+          .eq("assignee_user_id", actor.id)
+          .eq("status", "open")
+          .not("due_date", "is", null),
+      )
+    : null;
+
   if (canViewClients) {
-    const supabase = await createClient();
     // F028: each recent-updates source is windowed and capped at the query
     // level; buildRecentUpdates re-filters by the same cutoff after merging,
     // so a note created before the window but edited inside it still shows.
@@ -212,31 +253,47 @@ export default async function DashboardPage({
     // past that — the 1794-row staging dataset already hit this, dropping the
     // two recently-claimed orgs and making recent-updates and needs-attention
     // appear empty. Paginate until the server returns fewer than a full page.
-    async function fetchAllOrganisations(): Promise<{
-      data: DashboardOrgRow[] | null;
-      error: { message: string } | null;
-    }> {
-      const all: DashboardOrgRow[] = [];
-      let from = 0;
+    // Every whole-table read pages the same way. `pagesPerRound` asks for that
+    // many pages at once: a table that runs to a few thousand rows
+    // (organisations, latest_scores) comes back in one round instead of one
+    // round per thousand rows. Overshooting the end costs one empty page.
+    async function fetchAllRows<T>(
+      buildPage: (
+        from: number,
+        to: number,
+      ) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+      pagesPerRound = 1,
+    ): Promise<{ data: T[] | null; error: { message: string } | null }> {
+      const all: T[] = [];
       const step = 1000;
-      while (true) {
-        const { data, error } = await        supabase
-          .from("organisations")
-          .select(
-            "id, legal_name, outreach_status, owner_id, updated_at, created_at, sector, organisation_type, city, country_code, website",
-          )
-          .order("created_at", { ascending: true })
-          .order("id", { ascending: true })
-          .range(from, from + step - 1)
-          .overrideTypes<DashboardOrgRow[], { merge: false }>();
-        if (error) return { data: null, error };
-        if (!data || data.length === 0) break;
-        all.push(...data);
-        if (data.length < step) break;
-        from += step;
+      for (let from = 0; ; from += step * pagesPerRound) {
+        const pages = await Promise.all(
+          Array.from({ length: pagesPerRound }, (_, page) =>
+            buildPage(from + page * step, from + (page + 1) * step - 1),
+          ),
+        );
+        for (const { data, error } of pages) {
+          if (error) return { data: null, error };
+          all.push(...(data ?? []));
+          if (!data || data.length < step) return { data: all, error: null };
+        }
       }
-      return { data: all, error: null };
     }
+
+    const fetchAllOrganisations = () =>
+      fetchAllRows<DashboardOrgRow>(
+        (from, to) =>
+          supabase
+            .from("organisations")
+            .select(
+              "id, legal_name, outreach_status, owner_id, updated_at, created_at, sector, organisation_type, city, country_code, website",
+            )
+            .order("created_at", { ascending: true })
+            .order("id", { ascending: true })
+            .range(from, to)
+            .overrideTypes<DashboardOrgRow[], { merge: false }>(),
+        4,
+      );
 
     // Every reply, for the turnaround summary — ordered so the pages are
     // stable across the loop, and typed through overrideTypes because the
@@ -252,52 +309,16 @@ export default async function DashboardPage({
           .overrideTypes<ReplyTrackingRow[], { merge: false }>(),
       );
 
-    async function fetchAllOpenSuppressions(): Promise<{
-      data: OpenSuppression[] | null;
-      error: { message: string } | null;
-    }> {
-      const all: OpenSuppression[] = [];
-      let from = 0;
-      const step = 1000;
-      while (true) {
-        const { data, error } = await supabase
+    const fetchAllOpenSuppressions = () =>
+      fetchAllRows<OpenSuppression>((from, to) =>
+        supabase
           .from("suppressions")
           .select("organisation_id, status")
           .in("status", ["pending", "active"])
           .order("organisation_id", { ascending: true })
-          .range(from, from + step - 1)
-          .overrideTypes<OpenSuppression[], { merge: false }>();
-        if (error) return { data: null, error };
-        if (!data || data.length === 0) break;
-        all.push(...data);
-        if (data.length < step) break;
-        from += step;
-      }
-      return { data: all, error: null };
-    }
-
-    // The Performance section reads four event/score tables over a window; the
-    // same PostgREST 1000-row cap applies to each, so every one paginates the
-    // same way the organisations fetch above does.
-    async function fetchAllRows<T>(
-      buildPage: (
-        from: number,
-        to: number,
-      ) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
-    ): Promise<{ data: T[] | null; error: { message: string } | null }> {
-      const all: T[] = [];
-      let from = 0;
-      const step = 1000;
-      while (true) {
-        const { data, error } = await buildPage(from, from + step - 1);
-        if (error) return { data: null, error };
-        if (!data || data.length === 0) break;
-        all.push(...data);
-        if (data.length < step) break;
-        from += step;
-      }
-      return { data: all, error: null };
-    }
+          .range(from, to)
+          .overrideTypes<OpenSuppression[], { merge: false }>(),
+      );
 
     // Live sending health — the Gmail transport plus the reply-sync and
     // scheduled-send cron jobs. Started here so it overlaps the mailbox reads
@@ -308,6 +329,139 @@ export default async function DashboardPage({
     // Only for an actor who can actually send: a viewer has no outreach to be
     // broken, and the check is a live Gmail round trip.
     const engineHealthPromise = canWrite ? getOutreachEngineHealth(supabase) : null;
+
+    const auditRead = start(
+      supabase
+        .from("audit_log")
+        .select("id, actor_user_id, action, detail, created_at, target_id")
+        .eq("target_table", "organisations")
+        .in("action", ["status_changed", "ownership_reassigned"])
+        .gte("created_at", updateCutoff)
+        .order("created_at", { ascending: false })
+        .limit(RECENT_UPDATES_SOURCE_FETCH_CAP),
+    );
+
+    // audit_log's actor_user_id and detail.from/detail.to are bare uuids
+    // (jsonb, not an FK PostgREST can embed), resolved in one batch — same
+    // approach as the client timeline page. Chained onto the audit read, so the
+    // lookup leaves the moment those rows land rather than after every other read.
+    const auditNames = auditRead.then(async ({ data }) => {
+      const referencedUserIds = new Set<string>();
+      for (const row of (data ?? []) as unknown as RecentAuditRow[]) {
+        if (row.actor_user_id) referencedUserIds.add(row.actor_user_id);
+        const detail =
+          row.detail && typeof row.detail === "object"
+            ? (row.detail as Record<string, unknown>)
+            : {};
+        if (typeof detail.from === "string") referencedUserIds.add(detail.from);
+        if (typeof detail.to === "string") referencedUserIds.add(detail.to);
+      }
+
+      const names = new Map<string, string | null>();
+      if (referencedUserIds.size > 0) {
+        const { data: referencedUsers } = await supabase
+          .from("users")
+          .select("id, full_name")
+          .in("id", Array.from(referencedUserIds));
+        for (const row of referencedUsers ?? []) {
+          names.set(row.id, row.full_name);
+        }
+      }
+      return names;
+    });
+
+    // Performance section — one 90-day window, five reads. Every table here
+    // is readable by every role (matrix §3.1, §3.4, §3.6), so this is not an
+    // admin-only view; the section itself decides who may pick which CAM.
+    // Same ISO-string discipline as updateCutoff above: postgrest-js
+    // interpolates filter values raw, so a Date would 400 every query.
+    const perfCutoff = trendWindowStart(new Date()).toISOString();
+
+    const performanceReads = Promise.all([
+      fetchAllRows<SentMessageRow>((from, to) =>
+        supabase
+          .from("outreach_messages")
+          .select("id, sent_at, sent_by_user_id, organisation_id")
+          .eq("send_status", "sent")
+          .gte("sent_at", perfCutoff)
+          .order("sent_at", { ascending: true })
+          .range(from, to)
+          .overrideTypes<SentMessageRow[], { merge: false }>(),
+      ),
+      fetchAllRows<ReplyEventRow>((from, to) =>
+        supabase
+          .from("reply_events")
+          .select("id, received_at, outreach_message_id, organisation_id")
+          .gte("received_at", perfCutoff)
+          .order("received_at", { ascending: true })
+          .range(from, to)
+          .overrideTypes<ReplyEventRow[], { merge: false }>(),
+      ),
+      fetchAllRows<ConvertedOutcomeRow>((from, to) =>
+        supabase
+          .from("outcomes")
+          .select("id, created_at, recorded_by_user_id, organisation_id")
+          .eq("outcome_type", "converted")
+          .gte("created_at", perfCutoff)
+          .order("created_at", { ascending: true })
+          .range(from, to)
+          .overrideTypes<ConvertedOutcomeRow[], { merge: false }>(),
+      ),
+      // The queue band distribution reads the whole table — a band added
+      // before the window still belongs to the queue.
+      fetchAllRows<LatestScoreRow>(
+        (from, to) =>
+          supabase
+            .from("latest_scores")
+            .select("organisation_id, priority_band, priority_score, scored_at")
+            .order("organisation_id", { ascending: true })
+            .range(from, to)
+            .overrideTypes<LatestScoreRow[], { merge: false }>(),
+        4,
+      ),
+      fetchAllRows<TeamUserRow>((from, to) =>
+        supabase
+          .from("users")
+          .select("id, full_name, role, email, last_seen_at, is_active")
+          .order("full_name", { ascending: true })
+          .range(from, to)
+          .overrideTypes<TeamUserRow[], { merge: false }>(),
+      ),
+    ]);
+
+    // F213 — month-to-date spend needs the current month plus the equal-length
+    // stretch before it, so the window reaches back two months and
+    // `aiSpendSummary` splits it. Every role can read AI_GENERATIONS (§3.4),
+    // but the budget is an admin concern, so these reads are admin-only
+    // rather than the tile being hidden client-side.
+    const adminReads =
+      actor.role === "admin"
+        ? (() => {
+            const aiWindowStart = (() => {
+              const now = new Date();
+              return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString();
+            })();
+            return Promise.all([
+              // F181's approval queues, counted once for both screens
+              // (src/lib/dashboard/admin-queue.ts) — the admin dashboard prints
+              // these same numbers on its duty-queue card.
+              fetchAdminQueueTally(supabase),
+              fetchAllRows<AiGenerationCostRow>((from, to) =>
+                supabase
+                  .from("ai_generations")
+                  .select("created_at, cost_usd, total_tokens, model")
+                  .gte("created_at", aiWindowStart)
+                  .order("created_at", { ascending: true })
+                  .range(from, to)
+                  .overrideTypes<AiGenerationCostRow[], { merge: false }>(),
+              ),
+              supabase
+                .from("booklet_generations")
+                .select("created_at, cost_usd, total_tokens, model, input_tokens, output_tokens")
+                .gte("created_at", aiWindowStart),
+            ]);
+          })()
+        : null;
 
     const [organisations, openSuppressions, replyTracking, rawActivity, rawUpdateNotes, rawUpdateMessages, rawUpdateReplies, rawUpdateAudit] =
       await Promise.all([
@@ -338,14 +492,7 @@ export default async function DashboardPage({
           .gte("received_at", updateCutoff)
           .order("received_at", { ascending: false })
           .limit(RECENT_UPDATES_SOURCE_FETCH_CAP),
-        supabase
-          .from("audit_log")
-          .select("id, actor_user_id, action, detail, created_at, target_id")
-          .eq("target_table", "organisations")
-          .in("action", ["status_changed", "ownership_reassigned"])
-          .gte("created_at", updateCutoff)
-          .order("created_at", { ascending: false })
-          .limit(RECENT_UPDATES_SOURCE_FETCH_CAP),
+        auditRead,
       ]);
 
     if (organisations.error) {
@@ -407,62 +554,8 @@ export default async function DashboardPage({
             .in("organisation_id", respondedMineOrgIds)
         : null;
 
-      // Performance section — one 90-day window, five reads. Every table here
-      // is readable by every role (matrix §3.1, §3.4, §3.6), so this is not an
-      // admin-only view; the section itself decides who may pick which CAM.
-      // Same ISO-string discipline as updateCutoff above: postgrest-js
-      // interpolates filter values raw, so a Date would 400 every query.
-      const perfCutoff = trendWindowStart(new Date()).toISOString();
-
-      const [perfMessages, perfReplies, perfConversions, perfScores, perfUsers] = await Promise.all([
-        fetchAllRows<SentMessageRow>((from, to) =>
-          supabase
-            .from("outreach_messages")
-            .select("id, sent_at, sent_by_user_id, organisation_id")
-            .eq("send_status", "sent")
-            .gte("sent_at", perfCutoff)
-            .order("sent_at", { ascending: true })
-            .range(from, to)
-            .overrideTypes<SentMessageRow[], { merge: false }>(),
-        ),
-        fetchAllRows<ReplyEventRow>((from, to) =>
-          supabase
-            .from("reply_events")
-            .select("id, received_at, outreach_message_id, organisation_id")
-            .gte("received_at", perfCutoff)
-            .order("received_at", { ascending: true })
-            .range(from, to)
-            .overrideTypes<ReplyEventRow[], { merge: false }>(),
-        ),
-        fetchAllRows<ConvertedOutcomeRow>((from, to) =>
-          supabase
-            .from("outcomes")
-            .select("id, created_at, recorded_by_user_id, organisation_id")
-            .eq("outcome_type", "converted")
-            .gte("created_at", perfCutoff)
-            .order("created_at", { ascending: true })
-            .range(from, to)
-            .overrideTypes<ConvertedOutcomeRow[], { merge: false }>(),
-        ),
-        // The queue band distribution reads the whole table — a band added
-        // before the window still belongs to the queue.
-        fetchAllRows<LatestScoreRow>((from, to) =>
-          supabase
-            .from("latest_scores")
-            .select("organisation_id, priority_band, priority_score, scored_at")
-            .order("organisation_id", { ascending: true })
-            .range(from, to)
-            .overrideTypes<LatestScoreRow[], { merge: false }>(),
-        ),
-        fetchAllRows<TeamUserRow>((from, to) =>
-          supabase
-            .from("users")
-            .select("id, full_name, role, email, last_seen_at, is_active")
-            .order("full_name", { ascending: true })
-            .range(from, to)
-            .overrideTypes<TeamUserRow[], { merge: false }>(),
-        ),
-      ]);
+      const [perfMessages, perfReplies, perfConversions, perfScores, perfUsers] =
+        await performanceReads;
 
       const perfErrors = [
         ["performance.messages", perfMessages.error],
@@ -500,8 +593,9 @@ export default async function DashboardPage({
           cams: perfUsers.data
             ?.filter((user) => user.role === "cam" || user.role === "admin")
             .sort((a, b) => (a.full_name ?? "").localeCompare(b.full_name ?? "")) ?? [],
-          raw: perfInput,
-          sectorByOrg,
+          // The section re-derives its tiles in the browser, so this crosses to
+          // the client — trimmed to what it reads there (see the helper).
+          ...performanceInputForClient(perfInput, sectorByOrg),
         };
       }
 
@@ -510,31 +604,8 @@ export default async function DashboardPage({
       // entries whose organisation has no name here.
       const orgNames = new Map(rows.map((row) => [row.id, row.legal_name]));
 
-      // audit_log's actor_user_id and detail.from/detail.to are bare uuids
-      // (jsonb, not an FK PostgREST can embed), resolved in one batch — same
-      // approach as the client timeline page.
       const updateAuditRows = (rawUpdateAudit.data ?? []) as unknown as RecentAuditRow[];
-      const referencedUserIds = new Set<string>();
-      for (const row of updateAuditRows) {
-        if (row.actor_user_id) referencedUserIds.add(row.actor_user_id);
-        const detail =
-          row.detail && typeof row.detail === "object"
-            ? (row.detail as Record<string, unknown>)
-            : {};
-        if (typeof detail.from === "string") referencedUserIds.add(detail.from);
-        if (typeof detail.to === "string") referencedUserIds.add(detail.to);
-      }
-
-      const updateNames = new Map<string, string | null>();
-      if (referencedUserIds.size > 0) {
-        const { data: referencedUsers } = await supabase
-          .from("users")
-          .select("id, full_name")
-          .in("id", Array.from(referencedUserIds));
-        for (const row of referencedUsers ?? []) {
-          updateNames.set(row.id, row.full_name);
-        }
-      }
+      const updateNames = await auditNames;
 
       // Hover-card preview maps.
       //
@@ -640,40 +711,14 @@ export default async function DashboardPage({
         orgPreviewMap,
       );
 
-      if (actor.role === "admin") {
-        // F213 — month-to-date spend needs the current month plus the equal-length
-        // stretch before it, so the window reaches back two months and
-        // `aiSpendSummary` splits it. Every role can read AI_GENERATIONS (§3.4),
-        // but the budget is an admin concern, so the read is scoped to this block
-        // rather than the tile being hidden client-side.
-        const aiWindowStart = (() => {
-          const now = new Date();
-          return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString();
-        })();
-
-        const [queue, aiCosts] = await Promise.all([
-          // F181's approval queues, counted once for both screens
-          // (src/lib/dashboard/admin-queue.ts) — the admin dashboard prints
-          // these same numbers on its duty-queue card.
-          fetchAdminQueueTally(supabase),
-          fetchAllRows<AiGenerationCostRow & { outreach_message_id: string | null }>((from, to) =>
-          supabase
-            .from("ai_generations")
-            .select("created_at, cost_usd, total_tokens, model, outreach_message_id")
-              .gte("created_at", aiWindowStart)
-              .order("created_at", { ascending: true })
-              .range(from, to)
-              .overrideTypes<(AiGenerationCostRow & { outreach_message_id: string | null })[], { merge: false }>(),
-          ),
-        ]);
+      if (adminReads) {
+        // Started with every other read above, so the booklet read no longer
+        // waits for the AI-cost read to finish first.
+        const [queue, aiCosts, { data: booklets }] = await adminReads;
 
         if (aiCosts.error) {
           await reportError(aiCosts.error, { operation: "dashboard.ai_spend" });
         } else {
-          const { data: booklets } = await supabase
-            .from("booklet_generations")
-            .select("created_at, cost_usd, total_tokens, model, input_tokens, output_tokens")
-            .gte("created_at", aiWindowStart);
           aiSpend = aiSpendSummary([
             ...(aiCosts.data ?? []).map((row) => ({
               ...row,
@@ -737,14 +782,8 @@ export default async function DashboardPage({
   // canViewClients the same as the rest of this data — a role that cannot see
   // a client profile has nothing to link an overdue-action badge to.
   let overdueActionCandidates: OverdueActionCandidate[] = [];
-  if (canViewClients) {
-    const supabase = await createClient();
-    const { data: overdueActionRows, error: overdueActionsError } = await supabase
-      .from("actions")
-      .select("organisation_id, title, due_date")
-      .eq("assignee_user_id", actor.id)
-      .eq("status", "open")
-      .not("due_date", "is", null);
+  if (overdueActionsRead) {
+    const { data: overdueActionRows, error: overdueActionsError } = await overdueActionsRead;
     if (overdueActionsError) {
       await reportError(overdueActionsError, { operation: "dashboard.overdue_actions" });
     }
@@ -763,14 +802,9 @@ export default async function DashboardPage({
     const myCandidates = rows
       .filter((row) => row.owner_id === actor.id && FOLLOW_UP_TRIGGER_STATUSES.has(row.outreach_status))
       .map((row) => ({ id: row.id, legal_name: row.legal_name, outreach_status: row.outreach_status }));
-    if (myCandidates.length > 0) {
-      const supabase = await createClient();
+    if (myCandidates.length > 0 && followUpPreferences) {
       const [preferences, activity] = await Promise.all([
-        supabase
-          .from("outreach_preferences")
-          .select("first_follow_up_days, second_follow_up_days")
-          .eq("user_id", actor.id)
-          .maybeSingle(),
+        followUpPreferences,
         supabase.rpc("get_clients_last_activity", {
           p_organisation_ids: myCandidates.map((row) => row.id),
         }),
@@ -849,15 +883,7 @@ export default async function DashboardPage({
   let ownsAnyClient = false;
 
   if (actor.role === "cam") {
-    const supabase = await createClient();
-    const [profile, completedSteps] = await Promise.all([
-      supabase
-        .from("users")
-        .select("role, invite_accepted_at, onboarding_completed_at, onboarding_dismissed_at")
-        .eq("id", actor.id)
-        .maybeSingle(),
-      supabase.from("user_onboarding_steps").select("step_key"),
-    ]);
+    const { profile, steps: completedSteps } = await viewerState;
 
     if (profile.error) {
       await reportError(profile.error, { operation: "dashboard.onboarding_profile" });
@@ -905,12 +931,7 @@ export default async function DashboardPage({
     showFeedback = true;
   } else {
     try {
-      const supabase = await createClient();
-      const { data: userProfile } = await supabase
-        .from("users")
-        .select("invite_accepted_at, feedback_snoozed_until")
-        .eq("id", actor.id)
-        .maybeSingle();
+      const { data: userProfile } = (await viewerState).profile;
 
       if (userProfile) {
         showFeedback = shouldPromptFeedback({

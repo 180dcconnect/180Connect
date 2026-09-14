@@ -18,7 +18,8 @@ import { loadModelRate } from "@/lib/ai/model-rate";
 import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
 import { resolveMissionText } from "@/lib/mission";
 
-export const maxDuration = 60;
+// No maxDuration export — see the stage-one route: the 300s project default
+// applies, and a distinct value would cost a Vercel function.
 
 /**
  * Token-streaming twin of the stage-one POST route beside it.

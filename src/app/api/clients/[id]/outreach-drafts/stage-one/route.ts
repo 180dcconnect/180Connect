@@ -22,7 +22,9 @@ import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
 import { buildAttachmentEmailContext } from "@/lib/attachments";
 import { resolveMissionText } from "@/lib/mission";
 
-export const maxDuration = 60;
+// No maxDuration export: the project default (300s) already covers generation,
+// and a route-specific value puts this route in its own Vercel function — the
+// Hobby plan allows 12 per deployment.
 
 // F111 — Regenerate Email Draft: a request with no draftId (or an omitted body) is
 // the first generation for this review session; a request that names an existing

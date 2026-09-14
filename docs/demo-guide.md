@@ -17,25 +17,29 @@ then run the demo (section 4).
 
 Open this link in Chrome or Safari **on a laptop** (not a phone):
 
-**Preview link:** `<PREVIEW LINK — Bashir to add>`
+**Preview link:** [http://180connect-git-dev-180connect.vercel.app](http://180connect-git-dev-180connect.vercel.app)
 
-This is the preview (test) copy of 180Connect. You'll see a banner at the top
-saying so — that is expected.
+This is the preview copy of 180Connect. You'll see a banner at the top saying so — that is expected.
 
 ---
 
+
+
 ## 2. Log in
 
-Do the whole demo as an **admin**. An admin can do everything a consultant
-(CAM) can do, plus the branch lead's tools, so one account shows it all.
+Do the whole demo as an **admin**. An admin can do everything a CAM can do, plus the branch lead's tools, so one account shows it all.
 
 You have two options.
 
 ### Option A — use the shared admin account (easiest)
 
-| Email | Password |
-| --- | --- |
+
+| Email                    | Password        |
+| ------------------------ | --------------- |
 | `bashir-admin@180dc.org` | `Avalanche101!` |
+
+
+
 
 ### Option B — use your own 180DC email
 
@@ -52,31 +56,33 @@ So to create an account for someone:
 1. Log in with the admin account (Option A).
 2. In the left sidebar, click **Team management**.
 3. Click **Invite a team member**, enter their **Full name**, **Email address**
-   and choose the **admin** role, then send the invite.
+  and choose the **admin** role, then send the invite.
 4. The invite email will **not** arrive. Instead, click **Copy invite link**
-   next to the pending invite.
+  next to the pending invite.
 5. Send that link to the person yourself (WhatsApp, Teams, etc.).
 6. They open the link and see *"Set your name and password to finish creating
-   your account."* Once they've done that, they can log in normally.
+  your account."* Once they've done that, they can log in normally.
 
 If someone forgets their password, the reset email won't arrive either — ask
 Bashir.
 
 ---
 
+
+
 ## 3. Know which clients you may email
 
-**Almost every client in the app is a real UK charity or organisation, with a
-real inbox.** If you send an email to one of them, they will really receive it
-from our branch mailbox.
+**Almost every client in the app is a real UK charity or Company, with a real inbox.** If you send an email to one of them, they will really receive it from our branch mailbox.
 
 Only send emails to these:
 
-| Client | Notes |
-| --- | --- |
-| **Ledge** | Test client. The email goes to a test inbox you won't have access to, so you won't see it arrive. |
-| **WakaMate** | Test client. Same — safe to send to, but you won't see the email. |
+
+| Client                                          | Notes                                                                                                       |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **Ledge**                                       | Test client. The email goes to a test inbox you won't have access to, so you won't see it arrive.           |
+| **WakaMate**                                    | Test client. Same — safe to send to, but you won't see the email.                                           |
 | **Your own client** (you create it in step 4.2) | **Recommended.** Use an email inbox you can open, so you can show the email arriving and send a reply back. |
+
 
 If you're ever unsure whether a client is real: **don't press send.** Showing
 the review screen is enough.
@@ -86,7 +92,9 @@ message that appears at the bottom of the screen, and nothing is sent.
 
 ---
 
-## 4. The demo, step by step
+
+
+## 4. The demo, step by step. (Bashir's Recommendation)
 
 You're logged in as an admin for the whole demo. Talking points are in
 *italics*. Emails sent in this demo are real — they really leave our branch
@@ -105,24 +113,18 @@ published by the Charity Commission as public data files. We keep our own
 complete copy of that register. It rebuilds itself automatically every month,
 so it's always current."*
 
-*"We keep that copy as a separate compressed file next to the app, not inside
-the database. The full register would take up about 570MB, and our database
-limit is 500MB. The register is public data we can rebuild any time — our
-emails and client replies are not — so we keep the database for what can't be
-replaced, and look charities up in the file when we need them."*
+*"We keep that copy as a separate compressed file next to the app in the codebase, not inside the database. The full register would take up about 570MB, and our database limit is 500MB. The register is public data we can rebuild any time — our emails and client replies are not — so we keep the database for what can't be replaced, and look clients up in the file when we need them."*
 
 *"Because the whole register is already here, choosing clients is instant."*
 Show the filters, then:
+
 - **Import** brings the charities that match the filters onto our client list.
 - **Save this selection** keeps a filter set to reuse (see **Saved filter sets**).
 - You can also look up **one charity by name** and import just that one.
 
 **Companies House tab.** Click it.
 
-*"Same idea for companies. The UK company register is about 5.2 million
-companies, published monthly. We keep the ~720,000 that could plausibly be a
-client — community interest companies, charitable companies and similar —
-in the same kind of file, and choose from it on screen."*
+*"Same idea for companies. The UK company register is about 5.2 million companies, published monthly. We keep the ~720,000 that could plausibly be a client — community interest companies, charitable companies that are active and similar — in the same kind of file, and choose from it on screen."*
 
 **Import status tab.** *"Every import is logged here — what came in, when, and
 whether anything went wrong."*
@@ -135,38 +137,78 @@ email later, so use **your own contact details**.
 1. **Name** — anything, e.g. *"Demo — [your name]"*.
 2. **Type** — choose one from the list.
 3. **Mission** — **fill this in properly** (a few sentences about what the
-   organisation does). The AI booklet and AI email in the next steps are
+  organisation does). The AI booklet and AI email in the next steps are
    written from it, so a good mission gives a much better result.
 4. **Contact email** — an inbox **you can open**. Notes:
-   - The app refuses addresses that look like a **personal** email (for
-     example a Gmail with a person's name in it). Use an address that doesn't
-     clearly show a name.
-   - If the app still thinks it looks personal, it stops and shows a box saying
-     the address *"is the organisation's shared inbox, not a named person's
-     address."* **Tick it and submit again.** Your name is recorded against
-     that confirmation.
+  - The app refuses addresses that look like a **personal** email (for
+   example a Gmail with a person's name in it). Use an address that doesn't
+   clearly show a name.
+  - If the app still thinks it looks personal, it stops and shows a box saying
+  the address *"is the organisation's shared inbox, not a named person's
+  address."* **Tick it and submit again.** Your name is recorded against
+  that confirmation.
 5. Fill in any other fields you like (**Sector**, **Where it works**, **Annual
-   income**, **Staff**, **Volunteers**).
+  income**, **Staff**, **Volunteers**).
 6. As admin, tick **"I confirm this organisation meets 180 Degrees Consulting
-   client criteria."**
+  client criteria."**
 7. Submit.
 
 *"If a consultant adds a client, it doesn't go straight onto the list — it goes
 to an admin to check first. That stops junk or duplicate clients creeping in."*
 
-### 4.3 Look around a real client record
+### 4.3 See a complete client record — Oxfam
 
-In the sidebar click **Clients**, search for a charity by name (pick one of the
-real charities from the list), and open it. Click through the tabs:
+**Oxfam** is one of the most complete records in the app, so it's the best one
+to show what a client looks like when we know a lot about them. It's a real
+charity — **look, but don't email it**.
 
-- **Overview** — who they are, what they do, their size, contact details.
-- **Outreach** — every email sent to them and every reply.
-- **Financials** — their income and spending over the years, from their filed
-  accounts.
-- **Activity** — a timeline of everything that has happened to this client and
-  who did it.
+1. In the left sidebar, click **Clients**.
+2. Type **Oxfam** into the search bar and open **OXFAM**.
 
-*"All of this came from public registers automatically. Nobody typed it in."*
+At the top of the page you'll see its name, pipeline status (*Not contacted*)
+and the tabs. Click through them in this order:
+
+**Overview tab**
+
+| What you'll see | What to say |
+| --- | --- |
+| Mission, sector (**Poverty Relief**), city (**Oxford**), website and contact email | *"Who they are and what they do — straight from the Charity Commission register."* |
+| **Financial scale & tier** | *"How big they are, so a consultant knows at a glance what kind of project fits."* |
+| **Operating geography** | *"Where they work — with a link to see it on Google Maps."* |
+| **Contactability** | *"Whether we actually have a way to reach them."* |
+| **Tags** | *"Our own labels, shared across the team."* |
+| **Data Sources** | *"Where every piece of this came from, so nobody has to wonder whether it's reliable."* |
+| **Client booklet** | Oxfam already has one — open it. *"Before anyone reaches out, the app prepares a briefing on the organisation: what they do, where they're under pressure, and where we could help."* You'll generate a fresh one for your own client in 4.4. |
+| **Find similar clients** | *"Finds other organisations like this one — useful for building a list of prospects."* |
+
+**Financials tab** — this is the part to spend time on.
+
+*"Oxfam has five years of filed accounts in here, 2021 to 2025, and 39 grants
+it has received. None of this was typed in — it's pulled from public filings."*
+
+| Section | What it shows |
+| --- | --- |
+| **Money and people** | Income, spending, staff and volunteers at a glance |
+| **Scale** | How big they are compared with other charities |
+| **Track record** | How their income and spending have moved year by year |
+| **Where the money goes** / **Where every £1 goes** | How much goes on their charitable work versus everything else |
+| **Who does the work** | Staff and volunteer numbers |
+| **Who funds them** / **Public money** | Grants they've received and how much of their money is public funding |
+| **Where they operate** | The areas they work in |
+
+*"Before a consultant ever writes to a charity, they can see how big it is,
+how healthy its finances are, and who already funds it. That's what makes the
+outreach relevant instead of generic."*
+
+**Outreach tab** — empty for Oxfam, because nobody has contacted them.
+*"This is where every email and reply would appear. It's empty because no one
+has reached out — which is exactly what stops two people emailing the same
+charity."*
+
+**Activity tab** — the timeline of everything that happens to a client (status
+changes, notes, emails, imports) and who did it. Oxfam's is quiet, because
+nobody has worked on it yet. You'll see a busy one on your own client after
+4.5–4.6.
 
 ### 4.4 Generate a client booklet
 
@@ -186,11 +228,11 @@ Still on **your own client**:
 
 1. Click the **Outreach** tab and start a new email.
 2. Use the AI option (**Draft with AI** / **Generate draft**) to write it. You
-   can pick the tone and length first.
+  can pick the tone and length first.
 3. Read it and edit anything you want. Point out **Attach flyer** — our
-   one-page 180DC flyer goes with it.
+  one-page 180DC flyer goes with it.
 4. Tick the box confirming you've reviewed the email, then click **Send
-   reviewed email**.
+  reviewed email**.
 
 *"The AI only drafts. A person always reviews, edits and approves. There's no
 way to send an email nobody looked at."*
@@ -206,12 +248,12 @@ admin decides."*
 ### 4.6 Reply from the client's side
 
 1. Open the inbox you used as your client's contact email (on your phone or
-   another tab).
+  another tab).
 2. You'll see the email from 180DC Sheffield. **Reply to it**, as if you were
-   the charity.
+  the charity.
 3. Come back to the app and click **Inbox** in the sidebar.
 4. **Give it 1–5 minutes.** Replies are collected from the mailbox every few
-   minutes. While you wait, carry on with 4.8 and come back.
+  minutes. While you wait, carry on with 4.8 and come back.
 5. The reply appears in your client's conversation.
 
 *"Replies come back into the app, attached to the right client — not into
@@ -222,14 +264,16 @@ the client's status changed to 'Responded' on its own."*
 
 In **Inbox**, open your client's conversation and show:
 
-| Button / area | What it does |
-| --- | --- |
-| **Reply to this message** | Reply in the same thread — **Draft with AI** works here too |
-| **Client notes** | Notes about this client, shared with the team. You can @mention a colleague |
-| **Open client record** | Jumps to the client's full page |
-| Status dropdown | Move the client along the pipeline (e.g. Responded → Converted) |
-| **More options** | Download the message, copy its text, or **Suppress client** — mark as *Do Not Contact* |
-| **Print thread**, **Mark as unread**, star, **Delete** | Everyday mailbox tools |
+
+| Button / area                                          | What it does                                                                           |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| **Reply to this message**                              | Reply in the same thread — **Draft with AI** works here too                            |
+| **Client notes**                                       | Notes about this client, shared with the team. You can @mention a colleague            |
+| **Open client record**                                 | Jumps to the client's full page                                                        |
+| Status dropdown                                        | Move the client along the pipeline (e.g. Responded → Converted)                        |
+| **More options**                                       | Download the message, copy its text, or **Suppress client** — mark as *Do Not Contact* |
+| **Print thread**, **Mark as unread**, star, **Delete** | Everyday mailbox tools                                                                 |
+
 
 *"Suppress client is the 'please don't contact us again' button. Once an admin
 confirms it, nobody at the branch can email that charity."*
@@ -243,20 +287,24 @@ Click **Dashboard** in the sidebar.
 - **Total Organisations** — size of the client pool.
 - **Performance** — conversion rate and conversions over time.
 - **Recent updates** and **Recent team activity** — what's been happening
-  across the branch.
+across the branch.
 - As admin, the things waiting on you: ownership requests, suppression
-  requests and suggested edits.
+requests and suggested edits.
+
+
 
 ### 4.9 Extras, if there's time
 
-| Where | What to say |
-| --- | --- |
-| **My actions** | *"Tasks assigned by the branch lead, with deadlines. Overdue ones are flagged."* |
-| **Analytics** | *"A consultant's own numbers — emails sent, replies, conversions."* |
-| **Team analytics** (admin) | *"The same numbers across the whole branch."* |
-| **Review queue** (admin) | *"New clients, suggested edits and requests waiting for an admin."* |
-| **Overview** (admin) | *"Every control in one place: ownership requests, Do Not Contact list, daily sending limits (250 emails a day for the branch mailbox), and handing over clients when someone leaves."* |
-| **Audit log** (admin) | *"Every email sent, every ownership or status change, every approval — who did it and when."* |
+
+| Where                      | What to say                                                                                                                                                                            |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **My actions**             | *"Tasks assigned by the branch lead, with deadlines. Overdue ones are flagged."*                                                                                                       |
+| **Analytics**              | *"A consultant's own numbers — emails sent, replies, conversions."*                                                                                                                    |
+| **Team analytics** (admin) | *"The same numbers across the whole branch."*                                                                                                                                          |
+| **Review queue** (admin)   | *"New clients, suggested edits and requests waiting for an admin."*                                                                                                                    |
+| **Overview** (admin)       | *"Every control in one place: ownership requests, Do Not Contact list, daily sending limits (250 emails a day for the branch mailbox), and handing over clients when someone leaves."* |
+| **Audit log** (admin)      | *"Every email sent, every ownership or status change, every approval — who did it and when."*                                                                                          |
+
 
 **To close:**
 *"Consultants only contact their own clients, every email is reviewed by a
@@ -266,37 +314,50 @@ outreach at scale, safely."*
 
 ---
 
+
+
 ## 5. Things to avoid
 
-| Avoid | Why |
-| --- | --- |
-| Emailing any client not listed in section 3 | It's a real organisation and it will receive the email |
-| Scrolling through the whole client list | Some charities appear twice in the test copy. Search by name instead |
-| Phones or tablets | The layout is built for laptops |
-| Light / dark mode | Still in progress |
-| Waiting in silence for a reply | It can take up to 5 minutes — move on and come back |
+
+| Avoid                                       | Why                                                                  |
+| ------------------------------------------- | -------------------------------------------------------------------- |
+| Emailing any client not listed in section 3 | It's a real organisation and it will receive the email               |
+| Scrolling through the whole client list     | Some charities appear twice in the test copy. Search by name instead |
+| Phones or tablets                           | The layout is built for laptops                                      |
+| Light / dark mode                           | Still in progress                                                    |
+| Waiting in silence for a reply              | It can take up to 5 minutes — move on and come back                  |
+
 
 ---
+
+
 
 ## 6. Questions you may be asked
 
-| Question | Answer |
-| --- | --- |
-| *Where does the data come from?* | The Charity Commission and Companies House public registers, refreshed monthly, plus clients added by hand. |
-| *Does the AI send emails?* | No. It drafts. A person reviews, edits and sends every email. |
-| *Whose email address do messages come from?* | One shared branch mailbox (clients.sheffield@180dc.org), so replies stay with the branch, not with one person. |
-| *Can consultants see people's personal emails?* | Personal-looking addresses from the registers are hidden, and the app won't accept one for a new client without a recorded confirmation. |
-| *What does it cost to run?* | It runs on the free tiers of its hosting and database services. |
-| *Could another branch use it?* | It's built for one branch today — one mailbox, one team. Another branch would need its own copy set up; that's a setup job, not a rebuild. |
+
+| Question                                        | Answer                                                                                                                                               |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| *Where does the data come from?*                | The Charity Commission and Companies House public registers, refreshed monthly, plus clients added by hand.                                          |
+| *Does the AI send emails?*                      | No. It drafts. A person reviews, edits and sends every email.                                                                                        |
+| *Whose email address do messages come from?*    | One shared branch mailbox ([clients.sheffield@180dc.org](mailto:clients.sheffield@180dc.org)), so replies stay with the branch, not with one person. |
+| *Can consultants see people's personal emails?* | Personal-looking addresses from the registers are hidden, and the app won't accept one for a new client without a recorded confirmation.             |
+| *What does it cost to run?*                     | It runs on the free tiers of its hosting and database services.                                                                                      |
+| *Could another branch use it?*                  | It's built for one branch today — one mailbox, one team. Another branch would need its own copy set up; that's a setup job, not a rebuild.           |
+
 
 ---
 
+
+
 ## 7. If something goes wrong
 
-| What you see | What to do |
-| --- | --- |
-| Sent to the login page | Log in again with the account from section 2 |
-| Can't find a client | Type its exact name into the **Clients** search |
-| The reply hasn't appeared | Wait up to 5 minutes and refresh the page |
+
+| What you see                              | What to do                                                     |
+| ----------------------------------------- | -------------------------------------------------------------- |
+| Sent to the login page                    | Log in again with the account from section 2                   |
+| Can't find a client                       | Type its exact name into the **Clients** search                |
+| The reply hasn't appeared                 | Wait up to 5 minutes and refresh the page                      |
 | An invite or password email never arrives | Expected — use **Copy invite link** (section 2), or ask Bashir |
-| A page shows an error | Go back to **Dashboard** and carry on; tell Bashir afterwards |
+| A page shows an error                     | Go back to **Dashboard** and carry on; tell Bashir afterwards  |
+
+

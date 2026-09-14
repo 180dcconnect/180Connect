@@ -40,6 +40,31 @@ begin
 end;
 $$;
 
+-- set_scout_config takes a jsonb argument, and every call site below builds
+-- that argument from tests.valid_config(). The config must be resolved BEFORE
+-- impersonating: while logged in, the session IS `authenticated`, which has no
+-- USAGE on schema `tests`, so `tests.valid_config()` inside the executed SQL
+-- dies with 42501 before the RPC is ever reached (same trap as tests.logout()
+-- in rls_policies.test.sql). This helper takes the already-built config, so
+-- callers evaluate valid_config() as themselves and only the RPC runs as the
+-- user under test.
+create or replace function tests.scout_sqlstate(p_user_id uuid, p_config jsonb)
+returns text language plpgsql as $$
+declare v_state text;
+begin
+  perform tests.login_as(p_user_id);
+  begin
+    perform public.set_scout_config(p_config);
+    v_state := null;
+  exception when others then
+    v_state := sqlstate;
+  end;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return v_state;
+end;
+$$;
+
 -- ---------------------------------------------------------------------------
 -- Fixtures
 -- ---------------------------------------------------------------------------
@@ -89,8 +114,7 @@ $$;
 -- ---------------------------------------------------------------------------
 
 select is(
-  tests.sqlstate_of('00000000-0000-4000-a000-000000000501',
-    'select public.set_scout_config(tests.valid_config())'),
+  tests.scout_sqlstate('00000000-0000-4000-a000-000000000501', tests.valid_config()),
   null,
   'an admin can save a complete scoring setup'
 );
@@ -123,29 +147,28 @@ select is(
 );
 
 select is(
-  tests.sqlstate_of('00000000-0000-4000-a000-000000000502',
-    'select public.set_scout_config(tests.valid_config())'),
+  tests.scout_sqlstate('00000000-0000-4000-a000-000000000502', tests.valid_config()),
   '42501',
   'a CAM cannot change the scoring setup'
 );
 
 select is(
-  tests.sqlstate_of('00000000-0000-4000-a000-000000000501',
-    $q$select public.set_scout_config(tests.valid_config() #- '{sectorScores,Education & Youth}' || '{"sectorScores":{"Made Up":0.5}}')$q$),
+  tests.scout_sqlstate('00000000-0000-4000-a000-000000000501',
+    tests.valid_config() #- '{sectorScores,Education & Youth}' || '{"sectorScores":{"Made Up":0.5}}'),
   '22023',
   'an unknown sector is refused'
 );
 
 select is(
-  tests.sqlstate_of('00000000-0000-4000-a000-000000000501',
-    $q$select public.set_scout_config(jsonb_set(tests.valid_config(), '{geography,priorityTowns}', '["  "]'))$q$),
+  tests.scout_sqlstate('00000000-0000-4000-a000-000000000501',
+    jsonb_set(tests.valid_config(), '{geography,priorityTowns}', '["  "]')),
   '22023',
   'a blank priority town is refused'
 );
 
 select is(
-  tests.sqlstate_of('00000000-0000-4000-a000-000000000501',
-    $q$select public.set_scout_config(jsonb_set(tests.valid_config(), '{sizeScores,over_1m}', '1.5'))$q$),
+  tests.scout_sqlstate('00000000-0000-4000-a000-000000000501',
+    jsonb_set(tests.valid_config(), '{sizeScores,over_1m}', '1.5')),
   '22023',
   'a size score above 1 is refused'
 );

@@ -35,6 +35,8 @@
 --   Reason        | Reset should align with UK calendar day, not UTC.
 --   Compatibility | Additive-behavioural only: same signatures, same return
 --                 | types, same errcode surface. One-hour difference in summer.
+--                 | Authorisation predicate untouched (F018 owner-or-admin-or-
+--                 | author-while-unowned still enforced inside the claim).
 --   Data migration| None.
 --   Security      | Both SECURITY DEFINER, search_path unchanged.
 --   Documentation | daily-send-limit.ts updated in same PR.
@@ -79,12 +81,21 @@ begin
       using errcode = 'P0002';
   end if;
 
-  if not (
+  -- Authorisation re-checked inside the SECURITY DEFINER body. F018: owning
+  -- the DRAFT is no longer enough — the author clause only holds while nobody
+  -- owns the client. On a client owned by another CAM only the owner or an
+  -- admin may send, matching app.can_contact_organisation().
+  -- coalesce: with an unowned client, `org_owner_id = v_actor` is NULL, and an
+  -- uncoalesced NULL would make `IF NOT (NULL)` silently ALLOW (three-valued
+  -- logic — test 10 of f018_contact_permission.test.sql exists because a draft
+  -- of this very migration let any active user send on unowned clients).
+  if not coalesce(
     app.is_admin()
     or v_message.org_owner_id = v_actor
-    or v_message.sent_by_user_id = v_actor
+    or (v_message.org_owner_id is null and v_message.sent_by_user_id = v_actor),
+    false
   ) then
-    raise exception 'only the client''s owner or an admin may send this draft'
+    raise exception 'this client is owned by another CAM; only its owner or an admin may send this draft'
       using errcode = '42501';
   end if;
 
@@ -136,10 +147,11 @@ end;
 $$;
 
 comment on function public.claim_outreach_send(uuid) is
-  'F123/F128: atomically claim a draft for sending. Returns true once per unsent '
+  'F123/F018/F128: atomically claim a draft for sending. Returns true once per unsent '
   'draft (false for everyone else until the claim goes stale or is released), '
-  'refuses non-owners with 42501, suppressed clients with P0001, and a reached '
-  'branch-wide daily send cap with P0003 — all before any provider call. '
+  'refuses anyone but the client''s owner, an admin, or the draft''s '
+  'author ON AN UNOWNED CLIENT with 42501, suppressed clients with P0001, and a '
+  'reached branch-wide daily send cap with P0003 — all before any provider call. '
   'Daily window resets at UK midnight (Europe/London, BST/GMT). Not audited — '
   'the audited transition is mark_outreach_sent.';
 

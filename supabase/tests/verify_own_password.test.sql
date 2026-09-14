@@ -24,21 +24,17 @@ begin
 end;
 $$;
 
-create or replace function tests.logout()
-returns void language plpgsql as $$
-begin
-  execute 'reset role';
-  perform set_config('request.jwt.claims', null, true);
-end;
-$$;
-
+-- No tests.logout() helper here on purpose: while impersonating, the session
+-- IS `authenticated`, which has no USAGE on schema `tests`, so it cannot call
+-- one (see rls_policies.test.sql). Dropping back is inlined at each call site.
 create or replace function tests.verify_as(p_user_id uuid, p_password text)
 returns boolean language plpgsql as $$
 declare v_result boolean;
 begin
   perform tests.login_as(p_user_id);
   v_result := public.verify_own_password(p_password);
-  perform tests.logout();
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
   return v_result;
 end;
 $$;
@@ -56,7 +52,8 @@ begin
   exception when others then
     v_state := sqlstate;
   end;
-  perform tests.logout();
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
   return v_state;
 end;
 $$;

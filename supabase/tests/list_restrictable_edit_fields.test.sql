@@ -23,21 +23,17 @@ begin
 end;
 $$;
 
-create or replace function tests.logout()
-returns void language plpgsql as $$
-begin
-  execute 'reset role';
-  perform set_config('request.jwt.claims', null, true);
-end;
-$$;
-
+-- No tests.logout() helper here on purpose: while impersonating, the session
+-- IS `authenticated`, which has no USAGE on schema `tests`, so it cannot call
+-- one (see rls_policies.test.sql). Dropping back is inlined at each call site.
 create or replace function tests.restrictable_as(p_user_id uuid)
 returns text[] language plpgsql as $$
 declare v_fields text[];
 begin
   perform tests.login_as(p_user_id);
   select array_agg(field_name) into v_fields from public.list_restrictable_edit_fields();
-  perform tests.logout();
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
   return v_fields;
 end;
 $$;
@@ -53,7 +49,8 @@ begin
   exception when others then
     v_state := sqlstate;
   end;
-  perform tests.logout();
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
   return v_state;
 end;
 $$;

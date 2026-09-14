@@ -23,14 +23,9 @@ begin
 end;
 $$;
 
-create or replace function tests.logout()
-returns void language plpgsql as $$
-begin
-  execute 'reset role';
-  perform set_config('request.jwt.claims', null, true);
-end;
-$$;
-
+-- No tests.logout() helper here on purpose: while impersonating, the session
+-- IS `authenticated`, which has no USAGE on schema `tests`, so it cannot call
+-- one (see rls_policies.test.sql). Dropping back is inlined at each call site.
 create or replace function tests.observed_paths(p_user_id uuid, p_source text)
 returns text[] language plpgsql as $$
 declare v_paths text[];
@@ -38,7 +33,8 @@ begin
   perform tests.login_as(p_user_id);
   select array_agg(field_path order by field_path) into v_paths
     from public.data_handling_observed_fields(p_source);
-  perform tests.logout();
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
   return v_paths;
 end;
 $$;
@@ -51,7 +47,8 @@ begin
   select records_seen into v_seen
     from public.data_handling_observed_fields(p_source)
    where field_path = p_path;
-  perform tests.logout();
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
   return v_seen;
 end;
 $$;
@@ -67,7 +64,8 @@ begin
   exception when others then
     v_state := sqlstate;
   end;
-  perform tests.logout();
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
   return v_state;
 end;
 $$;

@@ -183,9 +183,10 @@ mind:
 - **One reply-sync pipeline** covers the whole branch. A 30-second Supabase
   Edge Function check ([gmail-reply-check.md](gmail-reply-check.md)) triggers
   the sync (`src/app/api/cron/gmail-replies/route.ts`) when a new message
-  lands; a five-minute full sweep is the safety net. Gmail push
-  ([gmail-push-setup.md](gmail-push-setup.md)) is built but unused — it needs
-  IAM grants in the OAuth client's Google Cloud project.
+  lands; a five-minute full sweep is the safety net. Gmail push notifications
+  were tried and removed: they need IAM grants in the OAuth client's Google
+  Cloud project, and their two routes pushed the deployment past Vercel
+  Hobby's 12-function limit.
 - **Attribution lives in our database, not in the headers.** Every message looks
   identical from outside, so `outreach_messages.sent_by_user_id` is the only
   record of who sent what. It is deliberately never rewritten by a handover.

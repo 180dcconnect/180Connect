@@ -62,11 +62,10 @@ send before anyone means to go live.
 5. Verify: one test send from prod to an internal address; schedule one ~6 min
    out and watch `outreach_messages.send_status` move `scheduled` → `sent`.
 
-6. Push reply sync: create the `gmail-replies-production` subscription, set
-   `GMAIL_PUBSUB_TOPIC` / `GMAIL_PUSH_AUDIENCE` / `GMAIL_PUSH_SERVICE_ACCOUNT`
-   on Production, and start the watch — steps 2–4 of
-   [gmail-push-setup.md](../gmail-push-setup.md). Skipped, replies still arrive
-   on the five-minute poll.
+6. Fast reply sync: set the `gmail-reply-check` function secrets and the
+   `supabase_project_url` vault secret on the production Supabase project —
+   [gmail-reply-check.md](../gmail-reply-check.md). Skipped, replies still
+   arrive on the five-minute poll.
 
 **Who decides.** `DECISION` — PM signs off that production may send live client
 outreach before the keys go in.

@@ -7,9 +7,9 @@ import { createClient } from "@/lib/supabase/browser";
 /**
  * Makes a captured reply appear in an open inbox without a reload.
  *
- * Push reply sync (src/lib/gmail/push.ts) gets a reply into reply_events within
- * seconds, but the mailbox is a server render: without this, the CAM still saw
- * it only on their next navigation. Same shape as TimelineRealtimeRefresher —
+ * The gmail-reply-check Edge Function gets a reply into reply_events within
+ * about half a minute, but the mailbox is a server render: without this, the
+ * CAM still saw it only on their next navigation. Same shape as TimelineRealtimeRefresher —
  * a coalesced router.refresh() rather than folding payloads into client state,
  * and a hidden tab is marked stale instead of re-rendered.
  *
